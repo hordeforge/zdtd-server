@@ -1,0 +1,17 @@
+# Build artifacts
+zig-out/
+.zig-cache/
+*.o
+*.a
+
+# Generated / test worlds (large; may embed game-derived world data)
+worlds/
+
+# Full client id dump (game-derived data; kept local, not redistributed)
+assets/fixtures/assignids_v314.txt
+
+# Editor / agent scratch
+.claude.bak/
+
+# Agent runtime state (locks, session)
+.claude/

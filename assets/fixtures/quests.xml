@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- zdtd fixture: subset of stock quest shape for offline tests -->
+<quests max_quest_tier="2" quests_per_tier="3" starter_quest="quest_whiteRiverCitizen1">
+
+<quest id="quest_whiteRiverCitizen1">
+  <property name="group_name_key" value="quest_WhiteRiverCitizen"/>
+  <property name="name_key" value="quest_WhiteRiverCitizen1"/>
+  <property name="category_key" value="quest"/>
+  <property name="completiontype" value="TurnIn"/>
+  <objective type="Goto" id="trader" value="5" phase="1"/>
+  <objective type="InteractWithNPC" phase="2"/>
+  <reward type="Exp" value="500"/>
+</quest>
+
+<quest id="tier1_clear">
+  <property name="name_key" value="quest_tier1_clear"/>
+  <property name="difficulty_tier" value="1"/>
+  <property name="category_key" value="quest"/>
+  <property name="completiontype" value="TurnIn"/>
+  <objective type="RandomPOIGoto" phase="1"/>
+  <objective type="ClearSleepers" phase="3"/>
+  <objective type="ReturnToNPC" phase="4"/>
+  <reward type="Exp" value="1000"/>
+</quest>
+
+<quest id="tier1_fetch">
+  <property name="name_key" value="quest_tier1_fetch"/>
+  <property name="difficulty_tier" value="1"/>
+  <property name="completiontype" value="TurnIn"/>
+  <objective type="FetchFromContainer">
+    <property name="item_count" value="1"/>
+  </objective>
+  <objective type="ReturnToNPC" phase="4"/>
+  <reward type="Exp" value="400"/>
+</quest>
+
+<quest id="clear_the_noise">
+  <property name="name_key" value="Clear the noise"/>
+  <property name="completiontype" value="Auto"/>
+  <objective type="ClearSleepers" phase="1"/>
+  <reward type="Exp" value="500"/>
+</quest>
+
+<quest_list id="trader_jen_quests">
+  <quest id="tier1_clear"/>
+  <quest id="tier1_fetch"/>
+</quest_list>
+
+</quests>

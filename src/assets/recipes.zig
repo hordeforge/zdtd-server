@@ -1,0 +1,252 @@
+//! recipes.xml loader: craft outputs + ingredients for server craft queue.
+
+const std = @import("std");
+const xml = @import("xml_util.zig");
+const linux = std.os.linux;
+
+pub const max_recipes: usize = 1024;
+pub const max_ingredients: usize = 8;
+
+pub const Ingredient = struct {
+    name: []const u8 = "",
+    count: u16 = 1,
+};
+
+pub const RecipeDef = struct {
+    name: []const u8 = "",
+    count: u16 = 1,
+    craft_time: f32 = 1,
+    always_unlocked: bool = false,
+    craft_area: []const u8 = "",
+    ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
+    ingredient_n: u8 = 0,
+};
+
+pub const RecipeTable = struct {
+    defs: []const RecipeDef = &.{},
+    arena_ptr: ?*std.heap.ArenaAllocator = null,
+    source: enum { builtin, xml } = .builtin,
+
+    pub fn deinit(self: *RecipeTable) void {
+        if (self.arena_ptr) |ap| {
+            const child = ap.child_allocator;
+            ap.deinit();
+            child.destroy(ap);
+            self.arena_ptr = null;
+        }
+        self.* = builtin();
+    }
+
+    pub fn builtin() RecipeTable {
+        return .{ .defs = &builtin_defs, .source = .builtin };
+    }
+
+    pub fn byName(self: *const RecipeTable, name: []const u8) ?RecipeDef {
+        for (self.defs) |d| {
+            if (std.mem.eql(u8, d.name, name)) return d;
+        }
+        return null;
+    }
+
+    /// Names with always_unlocked (for PDF unlockedRecipeList).
+    pub fn appendAlwaysUnlocked(self: *const RecipeTable, out: [][]const u8) usize {
+        var n: usize = 0;
+        for (self.defs) |d| {
+            if (!d.always_unlocked) continue;
+            if (n >= out.len) break;
+            out[n] = d.name;
+            n += 1;
+        }
+        return n;
+    }
+};
+
+/// Minimal offline craft set (wood frame-ish).
+pub const builtin_defs = [_]RecipeDef{
+    blk: {
+        var d: RecipeDef = .{
+            .name = "resourceWood",
+            .count = 1,
+            .craft_time = 1,
+            .always_unlocked = true,
+            .ingredient_n = 1,
+        };
+        d.ingredients[0] = .{ .name = "resourceWood", .count = 1 };
+        break :blk d;
+    },
+    blk: {
+        var d: RecipeDef = .{
+            .name = "resourceCobblestones",
+            .count = 1,
+            .craft_time = 1,
+            .always_unlocked = true,
+            .ingredient_n = 1,
+        };
+        d.ingredients[0] = .{ .name = "resourceRockSmall", .count = 1 };
+        break :blk d;
+    },
+};
+
+fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var path_z: [2048]u8 = undefined;
+    if (path.len >= path_z.len) return error.PathTooLong;
+    @memcpy(path_z[0..path.len], path);
+    path_z[path.len] = 0;
+    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
+    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
+    const fd: i32 = @intCast(rc);
+    defer _ = linux.close(fd);
+    const end = linux.lseek(fd, 0, linux.SEEK.END);
+    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
+    const size: usize = @intCast(end);
+    _ = linux.lseek(fd, 0, linux.SEEK.SET);
+    const buf = try allocator.alloc(u8, size);
+    errdefer allocator.free(buf);
+    var off: usize = 0;
+    while (off < size) {
+        const n = linux.read(fd, buf[off..].ptr, size - off);
+        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
+        if (n == 0) break;
+        off += @intCast(n);
+    }
+    return buf[0..off];
+}
+
+pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable {
+    const raw = try readFileAll(allocator, path);
+    defer allocator.free(raw);
+    const clean = try xml.stripComments(allocator, raw);
+    defer allocator.free(clean);
+
+    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer {
+        arena_holder.deinit();
+        allocator.destroy(arena_holder);
+    }
+    const arena = arena_holder.allocator();
+
+    var list: std.ArrayList(RecipeDef) = .empty;
+    defer list.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < clean.len and list.items.len < max_recipes) {
+        const tag = std.mem.indexOfPos(u8, clean, i, "<recipe") orelse break;
+        const name = xml.attr(clean, tag, "name") orelse {
+            i = tag + 7;
+            continue;
+        };
+        // Skip wildcard forge scrap stubs without ingredients when body empty.
+        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        var body: []const u8 = "";
+        var next_i = gt + 1;
+        if (gt > tag and clean[gt - 1] == '/') {
+            // self-closing
+        } else {
+            const close = std.mem.indexOfPos(u8, clean, gt, "</recipe>") orelse break;
+            body = clean[gt + 1 .. close];
+            next_i = close + 9;
+        }
+
+        var def: RecipeDef = .{
+            .name = try arena.dupe(u8, name),
+            .count = xml.parseU16(xml.attr(clean, tag, "count") orelse "1") orelse 1,
+            .craft_time = xml.parseF32(xml.attr(clean, tag, "craft_time") orelse "1") orelse 1,
+            .always_unlocked = false,
+            .craft_area = "",
+        };
+        if (xml.attr(clean, tag, "always_unlocked")) |au| {
+            def.always_unlocked = std.mem.eql(u8, au, "true") or std.mem.eql(u8, au, "True");
+        }
+        if (xml.attr(clean, tag, "craft_area")) |ca| {
+            def.craft_area = try arena.dupe(u8, ca);
+        }
+
+        var ii: usize = 0;
+        while (ii < body.len and def.ingredient_n < max_ingredients) {
+            const itag = std.mem.indexOfPos(u8, body, ii, "<ingredient") orelse break;
+            const iname = xml.attr(body, itag, "name") orelse {
+                ii = itag + 11;
+                continue;
+            };
+            const icount = xml.parseU16(xml.attr(body, itag, "count") orelse "1") orelse 1;
+            def.ingredients[def.ingredient_n] = .{
+                .name = try arena.dupe(u8, iname),
+                .count = icount,
+            };
+            def.ingredient_n += 1;
+            ii = itag + 11;
+        }
+
+        // Keep recipes with ingredients; also keep always_unlocked zero-ingredient (scrap stubs).
+        if (def.ingredient_n > 0 or def.always_unlocked) {
+            try list.append(allocator, def);
+        }
+        i = next_i;
+    }
+
+    const defs = try arena.alloc(RecipeDef, list.items.len);
+    @memcpy(defs, list.items);
+    return .{
+        .defs = defs,
+        .arena_ptr = arena_holder,
+        .source = .xml,
+    };
+}
+
+pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?RecipeTable {
+    var path_buf: [2048]u8 = undefined;
+    if (config_dir) |cd| {
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/recipes.xml", .{cd});
+        return loadFromPath(allocator, p) catch null;
+    }
+    if (game_dir) |gd| {
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/recipes.xml", .{gd});
+        return loadFromPath(allocator, p) catch null;
+    }
+    return null;
+}
+
+/// Consume ingredients from ECS inventory by stock item name via name→ecs id callback.
+pub const NameToEcs = *const fn (ctx: ?*anyopaque, name: []const u8) u16;
+
+pub fn canCraft(
+    recipe: RecipeDef,
+    inv: *const @import("../ecs/components.zig").Inventory,
+    name_to_ecs: NameToEcs,
+    ctx: ?*anyopaque,
+) bool {
+    var need: [max_ingredients]struct { id: u16, count: u16 } = undefined;
+    var n: usize = 0;
+    var i: u8 = 0;
+    while (i < recipe.ingredient_n) : (i += 1) {
+        const ing = recipe.ingredients[i];
+        const id = name_to_ecs(ctx, ing.name);
+        if (id == 0) return false;
+        need[n] = .{ .id = id, .count = ing.count };
+        n += 1;
+    }
+    var j: usize = 0;
+    while (j < n) : (j += 1) {
+        if (inv.countItem(need[j].id) < need[j].count) return false;
+    }
+    return true;
+}
+
+test "builtin recipes" {
+    const t = RecipeTable.builtin();
+    try std.testing.expect(t.byName("resourceWood") != null);
+    var names: [32][]const u8 = undefined;
+    const n = t.appendAlwaysUnlocked(&names);
+    try std.testing.expect(n >= 1);
+}
+
+test "load stock recipes when present" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    try std.testing.expect(t.defs.len > 50);
+    // forge clay recipe has ingredients
+    const clay = t.byName("resourceClayLump");
+    try std.testing.expect(clay != null);
+}
