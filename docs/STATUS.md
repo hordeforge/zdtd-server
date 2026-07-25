@@ -40,7 +40,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
 | Loadgen join + walk + dynamite | **PASS** | flat + Navezgane; 2-bot mixed 100% passRate, walks>0, ExplosionInitiate; pw21 2-bot wander 100% alongside live stock client (walks=495, zero client WRN) |
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
-| Automated in-client playtest | **PASS 11/11** | pw38 real stock client, no human, ZERO NRE/WRN/underrun: spawn/look/move/inventory/ground/dig(server-confirmed)/stats/place/craft_open/quests/buffs all PASS. One-command: `ZDTD_PLAYTEST=1 restart_pair.sh <world>`; connect-mod PlayTestDriver logs structured [zdtd-playtest] PASS/FAIL |
+| Automated in-client playtest | **PASS (legacy 11/11)**; suite **Phase A landed** | Historical pw38: 11/11. New home: sibling `7dtd-playtest` (smoke+core, dig/place wait-confirm, JSONL + orchestrator exit codes). Connect is join-only. Run: `make -C ../7dtd-playtest playtest-core`. Design: docs/CLIENT_PLAYTEST.md |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop, clean)** | join → in-game (overlay fixed, 0 NRE) → move/dig/build → fight (XML speeds/damage) → death → respawn → loot → craft (InvTx + workstation TE) → trade (XML stock) → persist (player v2 + TE + block meta) → rejoin; pop bounded; bots + stock client concurrent; 11/11 automated playtest. Cosmetic-only remaining: deco trees suppressed (version-mismatched AssignIds; re-enable on block-table negotiation), Weather biome array, GameStats HUD day counter |
 
@@ -107,6 +107,7 @@ zdtd     → Zig dedi, client wire only, no mods
 |---|---|---|
 | Stock ECD EntitySpawn (zombie hashes) | `stock_entity.zig` | zombieBoe default class; join + interest |
 | Stock ECD EntitySpawn (item-drop) | `stock_entity.zig` | `class_item` itemClass branch: belongsPlayerId/clientEntityId/itemStack + trailing sbyte; byte-offset round-trip test |
+| Stock ECD EntitySpawn (player / falling-tree / junk-drone) | `stock_entity.zig` | player branch (holdingItem, teamNumber, entityName, skinTexture, PlayerProfile v5), fallingTree (Vector3i + Vector3), junk-drone tail (belongsPlayerId + orderState, outside the networkWrite guard); unimplemented classes error instead of emitting a short body; 9 tests |
 | Client HUD Zom (EnemyCount) | n/a | **Always 0 on MP client**: stock `GameStateManager` sets EnemyCount only when `bServer`; ephemeral, not in `GameStats.Write` / `NetPackageGameStats`. Gate spawn health on **Ent** (World.Entities.Count), not Zom. |
 | EntitySpeeds / AliveFlags fan-out | `packages.zig`, `game.zig` | |
 | EntityTeleport (PosAndRot body) | `packages.zig` | |

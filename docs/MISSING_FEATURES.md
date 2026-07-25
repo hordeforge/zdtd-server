@@ -116,7 +116,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Entity lifecycle
 | Package | Priority |
 |---|---|
-| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; zombie/NPC + **item-drop** (`class_item`, itemClass branch: belongsPlayerId/clientEntityId/itemStack) done + tested; falling-block/tree and player branches still deferred). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../7dtd-research/docs/protocol-packages.md` 5.1 |
+| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; only the fallingBlock/fallingBlocks branches remain, and those now return `error.UnsupportedFallingBlockClass` rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../7dtd-research/docs/protocol-packages.md` 5.1 |
 | `NetPackageEntitySpawnResponse` | P1 (builder shipped; place/throw only: never on join: client ProcessPackage calls ItemValue.ItemClass on empty item → NRE) |
 | `NetPackageEntityTeleport` | P1 |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | P1 |

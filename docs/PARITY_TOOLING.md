@@ -77,4 +77,5 @@ already in-repo: `NetPackageVoiceChat` removed; `NetPackagePartyActions` and
    points at the exact fields), update `wire/*.zig`, add/adjust a golden test.
 4. `parity_diff.py --coverage` to confirm no new unhandled dir=1 package.
 5. Refresh `assets/fixtures/parity_v3x.json` to the new baseline.
-6. `ZDTD_PLAYTEST=1 restart_pair.sh <world>` for the live in-client gate.
+6. `make -C ../7dtd-playtest playtest-core` for the live in-client gate
+   (or `ZDTD_PLAYTEST_SUITE=smoke,core` with connect's pair launch).

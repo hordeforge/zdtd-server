@@ -16,6 +16,16 @@ blobs. Prefer leaving a gap open over shipping a fake.
 
 ## Open now (read this first)
 
+### Playtest suite (real client)
+
+- [x] Phase A: `7dtd-playtest` mod + orchestrator; connect join-only; dig/place wait-confirm ([docs/CLIENT_PLAYTEST.md](docs/CLIENT_PLAYTEST.md))
+- [x] Scenario catalog v0.2: demo/benchmark/full suites (~30 live, ~50 deferred SKIP); `SCENARIOS.md`
+- [x] Demo green on **stock dedi** Navezgane: pass=24 fail=0 skip=7 (`make playtest-demo`)
+- [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
+- [ ] Phase B cont.: melee/loot/death after spawn; economy give+craft
+- [ ] Phase C: persist multi-phase rejoin in orchestrator
+- [ ] Optional: run demo against zdtd (`make playtest-zdtd`) and update STATUS gate line
+
 ### Parity polish (client-visible)
 
 - [ ] Deco trees: re-enable when AssignIds match target client (V3.0.1 b4 dump or negotiate); currently suppressed (NRE on mismatch)

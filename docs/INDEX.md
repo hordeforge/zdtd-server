@@ -22,6 +22,7 @@ wins**. Refresh inventory docs when closing work.
 |---|---|
 | [PACKAGES.md](PACKAGES.md) | Full 190-package catalog |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff + C2S coverage tooling |
+| [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
 | [WIRE_CHUNK.md](WIRE_CHUNK.md) | Chunk wire path |
 | [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) | Workstation TE wire |
 | [INVENTORY.md](INVENTORY.md) | Inventory wire |
