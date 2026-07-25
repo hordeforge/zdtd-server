@@ -2,9 +2,10 @@
 //!
 //! ECD is header + entityClass switch + networkWrite tail (see
 //! ../../7dtd-research/docs/protocol-packages.md 5.1). Implemented branches:
-//! zombie/NPC/animal (empty middle), itemClass, fallingTree, and player
-//! (male/female). The fallingBlock/fallingBlocks branches are NOT implemented;
-//! passing those classes returns an error rather than a short, corrupt body.
+//! zombie/NPC/animal (empty middle), itemClass, fallingBlock, fallingBlocks,
+//! fallingTree, and player (male/female), plus the junk-drone tail. A class whose
+//! branch needs data the caller did not supply returns an error rather than a
+//! short, corrupt body.
 
 const std = @import("std");
 const binary = @import("binary.zig");
@@ -66,6 +67,10 @@ pub const SpawnOpts = struct {
     falling_tree: ?FallingTreeInfo = null,
     /// Junk-drone order state (junkDrone tail only; paired with belongs_player_id).
     drone_order_state: i32 = 0,
+    /// Required when entity_class == class_falling_block.
+    falling_block: ?FallingBlockInfo = null,
+    /// Required when entity_class == class_falling_blocks.
+    falling_blocks: ?FallingBlocksInfo = null,
 };
 
 /// EntityCreationData player branch: holdingItem, teamNumber, entityName,
@@ -118,6 +123,30 @@ pub const class_falling_blocks: i32 = unityStringHash("fallingBlocks");
 /// Junk drone (EntityClass.junkDroneClass): adds belongsPlayerId + orderState to
 /// the ECD tail, outside the networkWrite guard.
 pub const class_junk_drone: i32 = unityStringHash("entityJunkDrone");
+
+/// One falling block: packed BlockValue plus its texture word.
+/// `TextureFullArray.Write` emits exactly one i64 (loop bound 1 in the IL).
+pub const FallingBlock = struct {
+    raw_data: u32,
+    texture: i64 = 0,
+    /// Only used by the multi-block (fallingBlocks) branch.
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+};
+
+/// fallingBlock (single) branch payload.
+pub const FallingBlockInfo = struct { block: FallingBlock };
+
+/// fallingBlocks (multi) branch payload.
+///
+/// Wire shape is `count:i32`, then `count x rawData:u32`, then `count x
+/// Vector3i`, then `count x i64`. Only ONE count is written even though three
+/// arrays follow: the reader sizes `blockPositions` and `textureFullArrays` from
+/// the same value (`EntityCreationData.read` allocates all three with it and never
+/// reads a second length). The three arrays are therefore required to be the same
+/// length, which this API enforces by construction.
+pub const FallingBlocksInfo = struct { blocks: []const FallingBlock };
 
 pub fn writePlayerProfile(w: *binary.Writer, p: PlayerProfile) !void {
     try w.writeI32(player_profile_version);
@@ -201,9 +230,23 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
         } else {
             try w.writeBool(false);
         }
-    } else if (opts.entity_class == class_falling_block or opts.entity_class == class_falling_blocks) {
-        // BlockValue array + blockPositions + TextureFullArray: not implemented.
-        return error.UnsupportedFallingBlockClass;
+    } else if (opts.entity_class == class_falling_block) {
+        // fallingBlock branch: blockValues[0].rawData, then textureFullArrays[0].
+        const fb = opts.falling_block orelse return error.MissingFallingBlockData;
+        try w.writeU32(fb.block.raw_data);
+        try w.writeI64(fb.block.texture);
+    } else if (opts.entity_class == class_falling_blocks) {
+        // fallingBlocks branch: one count, then three same-length arrays.
+        const fbs = opts.falling_blocks orelse return error.MissingFallingBlocksData;
+        const n: i32 = @intCast(fbs.blocks.len);
+        try w.writeI32(n);
+        for (fbs.blocks) |b| try w.writeU32(b.raw_data);
+        for (fbs.blocks) |b| {
+            try w.writeI32(b.x);
+            try w.writeI32(b.y);
+            try w.writeI32(b.z);
+        }
+        for (fbs.blocks) |b| try w.writeI64(b.texture);
     } else if (opts.item_drop != null) {
         // guard: item payload supplied but the class will not emit the branch
         return error.ItemDropRequiresItemClass;
@@ -395,12 +438,53 @@ test "junk drone appends belongsPlayerId + orderState after the networkWrite tai
     try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, drone[drone.len - 4 ..][0..4], .little));
 }
 
-test "unimplemented falling-block classes error instead of writing a short body" {
+test "fallingBlock branch emits rawData + one texture i64" {
     var buf: [512]u8 = undefined;
-    try std.testing.expectError(error.UnsupportedFallingBlockClass, buildEntitySpawnStock(&buf, .{
+    const body = try buildEntitySpawnStock(&buf, .{
+        .entity_id = 800,
+        .entity_class = class_falling_block,
+        .x = 0, .y = 64, .z = 0,
+        .falling_block = .{ .block = .{ .raw_data = 0xDEADBEEF, .texture = 0x1122334455667788 } },
+    });
+    // branch starts right after spawnerSource (offset 72)
+    try std.testing.expectEqual(@as(u32, 0xDEADBEEF), std.mem.readInt(u32, body[73..77], .little));
+    try std.testing.expectEqual(@as(i64, 0x1122334455667788), std.mem.readInt(i64, body[77..85], .little));
+}
+
+test "fallingBlocks branch writes one count for all three arrays" {
+    var buf: [512]u8 = undefined;
+    const blocks = [_]FallingBlock{
+        .{ .raw_data = 1, .texture = 10, .x = 1, .y = 2, .z = 3 },
+        .{ .raw_data = 2, .texture = 20, .x = 4, .y = 5, .z = 6 },
+    };
+    const body = try buildEntitySpawnStock(&buf, .{
+        .entity_id = 801,
+        .entity_class = class_falling_blocks,
+        .x = 0, .y = 64, .z = 0,
+        .falling_blocks = .{ .blocks = blocks[0..] },
+    });
+    var o: usize = 73;
+    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, body[o..][0..4], .little)); // single count
+    o += 4;
+    // rawData x2
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, body[o..][0..4], .little));
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, body[o + 4 ..][0..4], .little));
+    o += 8;
+    // positions x2 (3x i32 each), no second count in between
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[o..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 6), std.mem.readInt(i32, body[o + 20 ..][0..4], .little));
+    o += 24;
+    // textures x2
+    try std.testing.expectEqual(@as(i64, 10), std.mem.readInt(i64, body[o..][0..8], .little));
+    try std.testing.expectEqual(@as(i64, 20), std.mem.readInt(i64, body[o + 8 ..][0..8], .little));
+}
+
+test "falling-block classes without payload error instead of writing a short body" {
+    var buf: [512]u8 = undefined;
+    try std.testing.expectError(error.MissingFallingBlockData, buildEntitySpawnStock(&buf, .{
         .entity_id = 1, .entity_class = class_falling_block, .x = 0, .y = 0, .z = 0,
     }));
-    try std.testing.expectError(error.UnsupportedFallingBlockClass, buildEntitySpawnStock(&buf, .{
+    try std.testing.expectError(error.MissingFallingBlocksData, buildEntitySpawnStock(&buf, .{
         .entity_id = 2, .entity_class = class_falling_blocks, .x = 0, .y = 0, .z = 0,
     }));
 }

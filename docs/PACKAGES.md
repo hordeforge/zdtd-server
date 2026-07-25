@@ -73,7 +73,7 @@ Direction: ToServer=client→server (server MUST handle), ToClient=server→clie
 | NetPackageEntitySetPartActive | ? |  |  | `ReadInt32;ReadBoolean;ReadString;` |
 | NetPackageEntitySetSkillLevelClient | ToClient |  |  | `ReadInt32;ReadString;ReadInt32;` |
 | NetPackageEntitySetSkillLevelServer | ToServer | handled |  | `` |
-| NetPackageEntitySpawn | ToClient |  | sent (zombie, item-drop, falling-tree, player, junk-drone) | `NetPackageEntityTargeted.read;EntityCreationData.read;` (ECD = header + entityClass switch + networkWrite tail; item-drop itemClass branch done) |
+| NetPackageEntitySpawn | ToClient |  | sent (all ECD class branches) | `NetPackageEntityTargeted.read;EntityCreationData.read;` (ECD = header + entityClass switch + networkWrite tail; item-drop itemClass branch done) |
 | NetPackageEntitySpawnResponse | ? |  |  | `ReadBoolean;ItemValue.Read;` |
 | NetPackageEntitySpeeds | ? | handled | sent | `NetPackageEntityTargeted.read;ReadByte;ReadSingle;ReadSingle` |
 | NetPackageEntityStatChanged | ? |  | sent | `NetPackageEntityTargeted.read;ReadInt32;ReadByte;ReadSingle;` |
