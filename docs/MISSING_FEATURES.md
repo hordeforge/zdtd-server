@@ -4,7 +4,7 @@
 **Not in scope:** mods, Harmony, 7dtd-apm, EAC-on clients, shipping TFP assets.  
 **Baseline:** core loop playable (2026-07-23 STATUS); this file tracks residual
 depth and scale, not join blockers.  
-**Stock reference:** V3.0.1 RE under `../7dtd-research/docs/` (~194 NetPackage types).  
+**Stock reference:** V3.1.0 RE under `../7dtd-research/docs/` (~194 NetPackage types).  
 **Conflict rule:** [STATUS.md](STATUS.md) wins if a row here lags a shipped gate.
 
 Each gap below is mapped to its now-available RE spec in [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md).
@@ -56,7 +56,7 @@ electrical gaps, vehicle physics, blood-moon FX.
 | ConnectRequest/Accept (game ordinals) | HAVE | property ids match game LiteNet |
 | Reliable ordered channel | PARTIAL | window/retransmit + ACK-pumped multi-frag; ordered hold buffer deferred |
 | Unreliable / sequenced channels | PARTIAL | unreliable send; sequenced first-cut channel 1 |
-| MTU / fragmentation | HAVE | large chunks via sendReliable resume + pump_fn (14–37 KB POI) |
+| MTU / fragmentation | HAVE | large chunks via sendReliable resume + pump_fn (14-37 KB POI) |
 | C2S deflate envelope | HAVE | `frame.zig` inflates stock compressed batches (zlib/raw/gzip) |
 | LiteNet Merged packets | HAVE | unpack `[prop][u16 len][subpacket]*` |
 | Connect reject / full server | PARTIAL | peer slot limit; password reject `[0,0]` |
@@ -226,7 +226,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   (`CreateWireDataFromPowerItem`/`SendWireData`, asm.il:842993) is client visual;
   zdtd does not persist per-TE wire lists, only rebroadcasts the raw package.
 - *AssignIds version skew*: the bundled `assignids_v314.txt` is V3.1.4 while the
-  target client is V3.0.1(b4). If block ids differ, registry lookup silently
+  target client is V3.1.0(b14). If block ids differ, registry lookup silently
   no-ops (blocks place normally, just not power-registered). Supply a V3.0.1
   assignids dump for exact id parity. Registry also needs `blocks.xml` loaded.
 - *Power accounting*: watts feed only the existing `resolve()` demand>gen
@@ -632,7 +632,7 @@ Do not plan these as product features of zdtd:
 
 ### P2: Multiplayer CPU (M11)
 Dirty bitsets, serialize-once interest, persistent thread pool, O(1) NetId map,
-32–128 bot apm gate. See IMPLEMENTATION_PLAN M11 + TODO near-term scale.
+32-128 bot apm gate. See IMPLEMENTATION_PLAN M11 + TODO near-term scale.
 
 ### P3: Ops and polish
 Full telnet surface, Steam browser, party PlatformUserId, gamestages, buffs
@@ -674,7 +674,7 @@ Honest gaps (no data path in zdtd, not faked):
 ## Blood-moon festivities client FX packages
 
 Ground-truth audit of every FX package name associated with the blood-moon edge
-in stock V3.0.1(b4) (decompiled Assembly-CSharp.dll). Wire formats cited to the
+in stock V3.1.0(b14) (decompiled Assembly-CSharp.dll). Wire formats cited to the
 IL class/method they came from.
 
 ### Landed (real, IL-grounded)
@@ -767,6 +767,13 @@ HONEST GAPS (Unity client-side in stock, no server representation / no assets):
 | [MAPS.md](MAPS.md) | Map load limits |
 | [ASSETS.md](ASSETS.md) | Config load pattern |
 | [SYSTEMS.md](SYSTEMS.md) | What systems exist today |
-| [zig-clone.md](zig-clone.md) | M0–M6 architecture |
+| [zig-clone.md](zig-clone.md) | M0-M6 architecture |
 | [../../7dtd-research/docs/inventories/netpackages.md](../../7dtd-research/docs/inventories/netpackages.md) | Full package census |
 | [../../7dtd-research/docs/protocol.md](../../7dtd-research/docs/protocol.md) | Wire facts |
+
+## V3.1.0 wire note (2026-08-02)
+
+`NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
+payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md` §6.12
+and `experimental-delta.md`. zdtd TE encode/decode must match or TE sync breaks.
+

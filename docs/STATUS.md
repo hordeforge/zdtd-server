@@ -1,7 +1,7 @@
 # Status: stock-client join and play path
 
 **Date pin:** 2026-07-23  
-**Game line:** V 3.x Mono (connected client **V3.0.1 b4**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
+**Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
 **Unit tests:** `zig build test` → **189/189** (binary direct; `--listen=-` may false-fail)  
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
@@ -86,7 +86,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Spawn/stream ring for light+mesh | `server/game.zig` | join r≤4 (9×9), stream r≤4 + 4 adds/tick; light sameValue 0 |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
-| **TTS block paint (types)** | `world/tts.zig`, `prefabs.zig` | v≥5 raw u32; skip children; rot 0–3 |
+| **TTS block paint (types)** | `world/tts.zig`, `prefabs.zig` | v≥5 raw u32; skip children; rot 0-3 |
 | Seed chest AssignIds | `stock_deco.zig` | cntWoodenChestClosed **18671** |
 
 ### Inventory / containers / loot
@@ -174,9 +174,9 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 
 | Priority | Gap | Proper approach |
 |---|---|---|
-| P1 | Deco trees / AssignIds client pin | Bundled dump is V3.1.4; target client V3.0.1 b4. Re-enable deco when ids match (negotiate or dump V3.0.1); trees suppressed to avoid NRE |
+| P1 | Deco trees / AssignIds client pin | Bundled dump is V3.1.4; target client V3.1.0 b14. Re-enable deco when ids match (negotiate or dump V3.0.1); trees suppressed to avoid NRE |
 | P1 | Weather biome array + GameStats HUD day | Stock fixed per-biome layout + day counter; cosmetic HUD, not a join blocker |
-| P1 | M11 multiplayer CPU | Dirty bits + serialize-once interest; persistent thread pool; 32–128 bot apm gate |
+| P1 | M11 multiplayer CPU | Dirty bits + serialize-once interest; persistent thread pool; 32-128 bot apm gate |
 | P2 | Quest / EAI / power depth | See MISSING honest-gap sections (objective types, A* path, generator fuel, trigger actuation) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
@@ -215,7 +215,7 @@ Full map: [INDEX.md](INDEX.md).
 |---|---|
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
 | [MISSING_FEATURES.md](MISSING_FEATURES.md) | Gap inventory (honest PARTIAL sections) |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7–M16 phases (post-playable stack) |
+| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [PACKAGES.md](PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |
 | [PLANET_SCALE.md](PLANET_SCALE.md) | Shard plan (parked until M11) |
