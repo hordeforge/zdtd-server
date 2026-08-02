@@ -8,9 +8,9 @@ zdtd inventory is **SoA component data** on player (and loot bag) entities, driv
 
 | Range | Role |
 |---|---|
-| 0–9 | Toolbelt (holding index must be here) |
-| 10–41 | Bag |
-| 42–46 | Equipment (armor / accessories; reserved) |
+| 0-9 | Toolbelt (holding index must be here) |
+| 10-41 | Bag |
+| 42-46 | Equipment (armor / accessories; reserved) |
 
 `holding = 0xFFFF` means empty hands.
 
@@ -40,7 +40,7 @@ Stack limits: tools/weapons 1, ammo 150, food/med 50, default 60000.
 | take | container slot |: | qty |: |
 | put | player slot |: | qty |: |
 | place | slot | y (i16 bits) | z (i16 bits) | x (i32) |
-| equip | from slot | equip index 0–4 |: |: |
+| equip | from slot | equip index 0-4 |: |: |
 
 `use` on food (2) / medicine (4) removes 1 and heals.  
 `place` maps wood(7)→block 4, cobblePlaceable(10)→block 5.  
@@ -55,7 +55,7 @@ Stack limits: tools/weapons 1, ammo 150, food/med 50, default 60000.
 | `NetPackageItemDrop` | C→S | **stock**: ItemStack + drop/motion vectors + lifetime + entityId + clientInstanceId + relative bool → loot bag |
 | `NetPackageBag` | **both** | entityId i32, u16 blob_len, `Bag.Write`. C→S applies bag; S→C on inv sync and loot spawn. |
 | `NetPackageDropItemsContainer` | C→S | droppedBy i32, entity class string, Vector3, item stacks → multi-item loot bag |
-| `NetPackageTileEntity` | **both** | Stock **composite + TEFeatureStorage** payload (network mode) for world chests; ZTE1 still accepted as bridge. |
+| `NetPackageTileEntity` | **both** | V3.1.0 outer: handle + pos + **teBlockId:i32** + **len:i32** + composite/storage payload; ZTE1 still accepted as bridge. |
 
 | `NetPackageInventoryTransactionRequest` | C→S | zdtd: op u8, a u16, b u16, qty u16, entity_id i32 |
 | `NetPackageInventoryTransactionResponse` | S→C | zdtd head: ok u8, dropped_entity i32 + stock inventory body |

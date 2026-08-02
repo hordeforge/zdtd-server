@@ -1,7 +1,8 @@
-//! Stock V3.0.1 NetPackageTileEntity payload for composite storage (network modes).
+//! Stock V3.1.0 NetPackageTileEntity payload for composite storage (network modes).
 //!
 //! Outer package (already without PackageId):
-//!   handle:u8 | worldPos Vector3i | u16 payload_len | payload
+//!   handle:u8 | worldPos Vector3i | teBlockId:i32 | payloadLen:i32 | payload
+//!   (V3.0.1 was: handle | worldPos | u16 payload_len | payload)
 //!
 //! Network payload (StreamMode ToClient/FromServer):
 //!   TileEntity: chunkPos Vector3i only
@@ -51,6 +52,27 @@ fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
     };
 }
 
+
+fn writeOuterTeHeader(w: *binary.Writer, handle: u8, world_x: i32, world_y: i32, world_z: i32, te_block_id: i32, pay_len: usize) !void {
+    try w.writeByte(handle);
+    try w.writeI32(world_x);
+    try w.writeI32(world_y);
+    try w.writeI32(world_z);
+    try w.writeI32(te_block_id);
+    try w.writeI32(@intCast(pay_len));
+}
+
+fn readOuterTeHeader(r: *binary.Reader, out_handle: *u8, out_x: *i32, out_y: *i32, out_z: *i32, out_block_id: *i32) binary.ReadError!usize {
+    out_handle.* = try r.readByte();
+    out_x.* = try r.readI32();
+    out_y.* = try r.readI32();
+    out_z.* = try r.readI32();
+    out_block_id.* = try r.readI32();
+    const pay_len_i = try r.readI32();
+    if (pay_len_i < 0) return error.InvalidString;
+    return @intCast(pay_len_i);
+}
+
 const Marker = struct {
     pos: usize,
 };
@@ -86,11 +108,7 @@ pub fn buildStorageTeBody(
     const pay = try writeCompositeStoragePayload(&payload, world_x, world_y, world_z, block_id, cont, resolve, ctx);
 
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(handle);
-    try w.writeI32(world_x);
-    try w.writeI32(world_y);
-    try w.writeI32(world_z);
-    try w.writeU16(@intCast(pay.len));
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, block_id, pay.len);
     try w.writeBytes(pay);
     return w.written();
 }
@@ -196,11 +214,7 @@ pub const ParsedTe = struct {
 pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedTe = .{};
-    out.handle = try r.readByte();
-    out.world_x = try r.readI32();
-    out.world_y = try r.readI32();
-    out.world_z = try r.readI32();
-    const pay_len = try r.readU16();
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
     if (r.remaining() < pay_len) return error.EndOfStream;
     var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
 
@@ -211,7 +225,9 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
 
     // outer size marker (we ignore absolute length, stream continues)
     _ = try pr.readU32();
-    out.block_id = try pr.readI32();
+    const payload_block_id = try pr.readI32();
+    // Outer teBlockId is authoritative on V3.1.0; payload still carries blockId.
+    if (out.block_id == 0) out.block_id = payload_block_id;
     const owner_tag = try pr.readByte();
     if (owner_tag != 0) {
         // skip owner: bool already 1, then another byte + 2 strings in ToStream
@@ -360,6 +376,7 @@ pub fn buildWorkstationTeBody(
     world_x: i32,
     world_y: i32,
     world_z: i32,
+    te_block_id: i32,
     ws: WorkstationSlots,
 ) ![]u8 {
     var payload: [4096]u8 = undefined;
@@ -384,11 +401,7 @@ pub fn buildWorkstationTeBody(
     const pay = pw.written();
 
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(handle);
-    try w.writeI32(world_x);
-    try w.writeI32(world_y);
-    try w.writeI32(world_z);
-    try w.writeU16(@intCast(pay.len));
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pay.len);
     try w.writeBytes(pay);
     return w.written();
 }
@@ -398,6 +411,7 @@ pub const ParsedWorkstation = struct {
     world_x: i32 = 0,
     world_y: i32 = 0,
     world_z: i32 = 0,
+    block_id: i32 = 0,
     fuel: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
     fuel_n: usize = 0,
     input: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
@@ -476,11 +490,7 @@ fn readQueueItem(r: *binary.Reader) binary.ReadError!QueueItem {
 pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstation {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedWorkstation = .{};
-    out.handle = try r.readByte();
-    out.world_x = try r.readI32();
-    out.world_y = try r.readI32();
-    out.world_z = try r.readI32();
-    const pay_len = try r.readU16();
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
     if (r.remaining() < pay_len) return error.EndOfStream;
     var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
     _ = try pr.readI32();
@@ -550,7 +560,7 @@ test "workstation te body roundtrip" {
     const input = [_]stock_inv.StockSlot{
         .{ .type_id = stock_inv.items_start_here + 7, .count = 12, .quality = 0 },
     };
-    const body = try buildWorkstationTeBody(&buf, 255, 10, 70, 20, .{
+    const body = try buildWorkstationTeBody(&buf, 255, 10, 70, 20, 0, .{
         .fuel = fuel[0..],
         .input = input[0..],
         .is_burning = true,

@@ -775,5 +775,8 @@ HONEST GAPS (Unity client-side in stock, no server representation / no assets):
 
 `NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
 payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md` §6.12
-and `experimental-delta.md`. zdtd TE encode/decode must match or TE sync breaks.
+and `experimental-delta.md`.
+
+**Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
+`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 197/197.
 

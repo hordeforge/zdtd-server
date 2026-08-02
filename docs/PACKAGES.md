@@ -172,7 +172,7 @@ Direction: ToServer=client→server (server MUST handle), ToClient=server→clie
 | NetPackageSleeperWakeup | ToClient |  |  | `ReadInt32;` |
 | NetPackageSoundAtPosition | ? |  |  | `SU.ReadVector3;ReadString;ReadByte;ReadInt32;ReadInt32;` |
 | NetPackageTeleportPlayer | ? |  |  | `ReadSingle;ReadSingle;ReadSingle;ReadBoolean;ReadSingle;Read` |
-| NetPackageTileEntity | ? | handled | sent | `ReadByte;SU.ReadVector3i;ReadUInt16;get_BaseStream;SU.Stream` |
+| NetPackageTileEntity | ? | handled | sent | V3.1.0: handle:u8, pos:Vector3i, teBlockId:i32, len:i32, payload |
 | NetPackageTraderData | ToServer | handled | sent | `ReadBoolean;ReadInt32;SU.ReadVector3i;ReadBoolean;TraderData` |
 | NetPackageTurretSpawn | ? | handled |  | `ReadInt32;SU.ReadVector3;SU.ReadVector3;ItemValue.Read;ReadI` |
 | NetPackageTurretSync | ToClient |  |  | `ReadInt32;ReadInt32;ReadBoolean;ItemValue.Read;` |

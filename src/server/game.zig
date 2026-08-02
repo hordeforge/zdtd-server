@@ -3723,12 +3723,14 @@ pub const Game = struct {
             const in_ = self.wsGroupToStock(input[0..], w.input[0..]);
             const tn_ = self.wsGroupToStock(tools[0..], w.tools[0..]);
             const on_ = self.wsGroupToStock(output[0..], w.output[0..]);
+            const te_block_id: i32 = @intCast(self.blockIdAtWorld(w.x, w.y, w.z));
             const body = stock_te.buildWorkstationTeBody(
                 self.body_buf[8192..16384],
                 255,
                 w.x,
                 w.y,
                 w.z,
+                te_block_id,
                 .{
                     .fuel = fuel[0..fn_],
                     .input = input[0..in_],
