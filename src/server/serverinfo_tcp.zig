@@ -17,7 +17,7 @@ pub const ServerInfo = struct {
     info_port: u16 = 27015,
     max_players: i32 = 8,
     current_players: i32 = 0,
-    server_version: []const u8 = "V.3.1.4",
+    server_version: []const u8 = "V 3.1.0",
     world_size: i32 = 6144,
     eac_enabled: bool = false,
 };

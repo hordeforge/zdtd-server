@@ -1,8 +1,8 @@
 # Status: stock-client join and play path
 
-**Date pin:** 2026-07-23  
+**Date pin:** 2026-08-03  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **189/189** (binary direct; `--listen=-` may false-fail)  
+**Unit tests:** `zig build test` → **197/197** (binary direct; `--listen=-` may false-fail)  
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -23,9 +23,9 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Client mesh (CGO) | **PASS** | pw14 `Chunks:90 CGO:25` stable |
 | POI/construction block textures | **PASS** | upper24 block-id channel now emitted (`stock_chunk.zig`); houses render as textured cubes, not grey terrain clay; large chunks send via ACK-pumped `sendReliable` (0 failed sends, CGO 0→25) |
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
-| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md); 189/189 tests |
+| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md); 197/197 tests |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
-| Unit tests | **PASS** | 189/189 (binary direct; `--listen=-` may false-fail) |
+| Unit tests | **PASS** | 197/197 (binary direct; `--listen=-` may false-fail) |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | pw25: admin kill player → hp=0 EntityStatChanged → client "Respawning: Died" → back in-game; dead players keep entity (destroy() desynced later net-id lookups) |
@@ -40,7 +40,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
 | Loadgen join + walk + dynamite | **PASS** | flat + Navezgane; 2-bot mixed 100% passRate, walks>0, ExplosionInitiate; pw21 2-bot wander 100% alongside live stock client (walks=495, zero client WRN) |
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
-| Automated in-client playtest | **PASS (legacy 11/11)**; suite **Phase A landed** | Historical pw38: 11/11. New home: sibling `7dtd-playtest` (smoke+core, dig/place wait-confirm, JSONL + orchestrator exit codes). Connect is join-only. Run: `make -C ../7dtd-playtest playtest-core`. Design: docs/CLIENT_PLAYTEST.md |
+| Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin: PackageIds `minor=10 build=14`, GSI `ServerVersion=V 3.1.0`. `make -C ../7dtd-playtest playtest-zdtd` → **pass=73 fail=10 skip=0** (Chunks:85 CGO:41). Failures: kill/loot/respawn/economy depth (see `server/logs/playtest_zdtd_demo_20260803c.log`). Design: docs/CLIENT_PLAYTEST.md |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop, clean)** | join → in-game (overlay fixed, 0 NRE) → move/dig/build → fight (XML speeds/damage) → death → respawn → loot → craft (InvTx + workstation TE) → trade (XML stock) → persist (player v2 + TE + block meta) → rejoin; pop bounded; bots + stock client concurrent; 11/11 automated playtest. Cosmetic-only remaining: deco trees suppressed (version-mismatched AssignIds; re-enable on block-table negotiation), Weather biome array, GameStats HUD day counter |
 

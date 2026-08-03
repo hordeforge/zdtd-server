@@ -260,8 +260,8 @@ pub fn idOf(name: []const u8) ?u16 {
 pub const VersionInfo = struct {
     release_type: u8 = 1,
     major: i32 = 3,
-    minor: i32 = 1,
-    build: i32 = 4,
+    minor: i32 = 10,
+    build: i32 = 14,
 
     pub fn write(self: VersionInfo, w: *binary.Writer) !void {
         try w.writeByte(self.release_type);
@@ -1189,8 +1189,8 @@ test "package ids body" {
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 1), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 4), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 14), try r.readI32());
     try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
 }
 

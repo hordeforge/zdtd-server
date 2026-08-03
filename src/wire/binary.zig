@@ -209,11 +209,11 @@ pub fn read7BitEncodedInt(r: *Reader) ReadError!u32 {
 test "string roundtrip" {
     var buf: [64]u8 = undefined;
     var w: Writer = .{ .buf = &buf };
-    try w.writeString("V 3.0.1");
+    try w.writeString("V 3.1.0");
     var r: Reader = .{ .data = w.written() };
     var sbuf: [32]u8 = undefined;
     const s = try r.readString(&sbuf);
-    try std.testing.expectEqualStrings("V 3.0.1", s);
+    try std.testing.expectEqualStrings("V 3.1.0", s);
 }
 
 test "le ints" {

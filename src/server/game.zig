@@ -475,7 +475,7 @@ pub const Game = struct {
                 .info_port = port,
                 .max_players = max_clients,
                 .current_players = 0,
-                .server_version = "V.3.1.4",
+                .server_version = "V 3.1.0",
                 .world_size = 6144,
                 .eac_enabled = false,
             }) catch |err| {
@@ -1021,7 +1021,7 @@ pub const Game = struct {
         } else if (eqAny(verb, &.{"ban"})) {
             self.consoleKickBan(it.next(), &out, true);
         } else if (eqAny(verb, &.{"version"})) {
-            out.line("zdtd 0.1.0 (V3.0.1 wire)");
+            out.line("zdtd 0.1.0 (V3.1.0 wire)");
         } else if (eqAny(verb, &.{ "dm", "cm", "settempunit", "debugmenu" })) {
             out.line("ok (client-side toggle)");
         } else {
@@ -1983,7 +1983,7 @@ pub const Game = struct {
             .info_port = self.info_port,
             .max_players = 8,
             .current_players = @intCast(self.countJoined()),
-            .server_version = "V.3.1.4",
+            .server_version = "V 3.1.0",
             .world_size = 6144,
             .eac_enabled = false,
         };
@@ -4590,8 +4590,8 @@ pub const Game = struct {
         try w.writeString("");
         try w.writeByte(0);
         try w.writeString("");
-        try w.writeString("V 3.0.1");
-        try w.writeString("V 3.0.1");
+        try w.writeString("V 3.1.0");
+        try w.writeString("V 3.1.0");
         try w.writeU64(0);
         var frame_buf: [256]u8 = undefined;
         const framed = try packages.framed(&frame_buf, "NetPackagePlayerLogin", w.written());

@@ -7,7 +7,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
 | [docs/MISSING_FEATURES.md](docs/MISSING_FEATURES.md) | Gap inventory |
-| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7–M16 phases |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
 **Gates (2026-07-23):** 189/189 unit · 11/11 automated stock-client playtest (0 NRE/WRN/underrun) · 33/33 C2S · core loop clean-playable. Open work is **depth + scale**, not join.
@@ -24,7 +24,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [ ] Phase B cont.: melee/loot/death after spawn; economy give+craft
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [ ] Optional: run demo against zdtd (`make playtest-zdtd`) and update STATUS gate line
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: 73 pass / 10 fail; version pin V3.1.0
 
 ### Parity polish (client-visible)
 
@@ -55,7 +55,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 
 ### Parked
 
-- [ ] Planet-scale M2+ gateway/shards (DEM M1 proven; after M11) — [PLANET_SCALE.md](docs/PLANET_SCALE.md)
+- [ ] Planet-scale M2+ gateway/shards (DEM M1 proven; after M11) - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
 - [ ] SpacetimeDB: **rejected** (SCALE_ARCHITECTURE.md)
 - [ ] Steam browser / full telnet parity / RWG (P3 ops)
 
@@ -74,7 +74,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **Stock EAI prioritized task graphs**: replaced the ad-hoc `switch (ai.state)` in `AiCtx.work` (`src/ecs/systems.zig`) with a faithful port of `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874). Each zombie runs an ordered comptime task table (`zombie_tasks`) of `{priority, MutexBits, executeDelay, continuous}` cells with Start/Update/CanExecute/Continue hooks; every tick the best task is (re)selected by priority + mutex overlap (`(a.mutex & b.mutex)==0` = compatible) and projected back onto the coarse `ZombieAi.state` so all downstream replication (EntitySpeeds/AliveFlags, block-damage, despawn) is unchanged. Two real tasks: ApproachAndAttackTarget (chase+melee, mutex 0b11, delay 0.1, non-continuous; asm.il:421798) and Wander (mutex 0b01, continuous; asm.il:438104). Chase preempts wander on sensing a player; wander resumes on target loss via the mutex-release path. Director-seeded aggro (`alert && target_id>=0`) survives as long as the target entity exists. New `TaskId` enum + one `active_task` byte on `ZombieAi` (reuses `decision_cd` as the re-eval timer). +3 tests (189 total). Gaps documented (MISSING_FEATURES 5.2.1): greedy path kept (no A\*), only 2 of stock's task types real, no data-driven per-class `AITask` XML, sensing collapsed to nearest-player, timing/chaseTimeMax approximated.
 - [x] **Electrical block placement parity**: placing a stock electrical block (`generatorbank`, `solarbank`, `batterybank`, `electricwirerelay`, `autoTurret`, plates/traps, …) now registers a `PowerGrid` node at the block world position and removes it on break (`electric.addNodeAt`/`removeAt`, idempotent + wire-compacting). Node kind from block `Class` in stock `blocks.xml` (`src/ecs/powerblocks.zig`); watts are real block props (`MaxPower` sources, `RequiredPower` consumers, parsed in `maxdamage.loadFromBlocksXml`). Real `NetPackageWireActions` bodies drive wiring: SetParent (op 0) `connectByPos(child,parent[0])`, RemoveParent (op 1) `removeParentAt(child)`, SendWires (op 2) no-op; grounded in asm.il:842779/842922/843021. `NetPackageWireToolActions` = peer visual rebroadcast only. Legacy custom wire op kept for demo. Gaps (documented, not faked): generator fuel ramp, battery SoC, trigger/timer/toggle actuation, undirected RemoveParent, AssignIds V3.1.4↔V3.0.1 skew (silent no-op on mismatch). +5 tests (180 total).
 - [x] **POI/construction blocks rendered as untextured grey clay** (whole houses smooth marching-cubes terrain material): chunk block-layer only wrote the low 8 bits of each id (`stock_chunk.zig` hardcoded `upper24=false`), so every id ≥ 256 truncated to `id & 0xFF` → a wrong (usually terrain) block. Fix: emit the 3072 B/cell interleaved `m_Upper24Bits` array (`id>>8,>>16,>>24`) whenever a layer has any id ≥ 256, matching decompiled `ChunkBlockLayer.Read`. Terrain ids (<256) unaffected, that is why floor looked fine but houses didn't. Live: CGO 0→25, house textures correct.
-- [x] **Large POI chunks failed to send** (side effect of the above: upper24 grew chunks to 14–37 KB → many fragments overflowed the 64-slot reliable window → holed chunk disk → CGO 0). Fix: `Peer.sendReliable` now resumes the same fragment stream and pumps ACKs mid-message via a `pump_fn` callback (`Game.pumpAcks`) instead of restarting; `body_buf` 256→512 KB. Live: 0 failed chunk sends.
+- [x] **Large POI chunks failed to send** (side effect of the above: upper24 grew chunks to 14-37 KB → many fragments overflowed the 64-slot reliable window → holed chunk disk → CGO 0). Fix: `Peer.sendReliable` now resumes the same fragment stream and pumps ACKs mid-message via a `pump_fn` callback (`Game.pumpAcks`) instead of restarting; `body_buf` 256→512 KB. Live: 0 failed chunk sends.
 - [x] **serverconfig.xml gameplay options fully wired** (`config.zig` → `initWithOptions` + runtime systems, all clamped + tested, docs/GAME_OPTIONS.md). Config-only: GameDifficulty (zombie hp), BloodMoonFrequency/Range/EnemyCount, PlayerKillingMode (PvP gate), DayNightLength/DayLightLength (clock/night), MaxSpawnedZombies, ZombieMove/Night/Feral/BMMove + EnemyDifficulty → `World.zombie_speed_scale`, LootAbundance (roll count scale). New backing systems built so the rest apply too: **MaxSpawnedAnimals** (daytime animal spawner + cap), **XPMultiplier** (`Game.awardXp` server ledger on kill), **BlockDamagePlayer** (scales dig damage in SetBlock), **BlockDamageAI/AIBM** (`tickZombieBlockDamage`: zombies chew cover), **AirDropFrequency** (`tickAirDrop`: scheduled supply crate), **DropOnDeath** (loot bag on player death per mode), **LandClaim** (keystone placement → `land_claims`; non-owner SetBlock denied inside `LandClaimSize`; own-claim durability ×`LandClaimOnline/OfflineDurabilityModifier`). Also: serverconfig with a missing world folder falls back to flat instead of crashing (`main.dirExists`).
 - [x] "Starting game..." wedge: WorldInfo fixedSizeCC=true (authored worlds are fixed-size CC; overlay gate CGO>=viewDist²-10 unless fixed-size → 0). pw24 fully in-game with HUD. Connect mod SpawnStateHeartbeat logs all overlay gates.
 - [x] Admin persistent session + replies; restart_pair.sh harness script
@@ -126,7 +126,7 @@ Open scale/parity items: see **Open now** at top.
 
 ---
 
-## P0 (blocks real play) — CLOSED
+## P0 (blocks real play) - CLOSED
 
 All items below shipped. Kept as historical checklist.
 
@@ -431,7 +431,7 @@ disjoint writes*, not "everything lock-free."
 ### Far-term / only with evidence
 
 - [ ] **Multi-world or region shards** (separate processes or large regions)
-  only if single-process 128–256 peers still fail budgets after serialize-once.
+  only if single-process 128-256 peers still fail budgets after serialize-once.
   Cross-shard entity migrate is a product decision, not a default.
 - [ ] **Lock-free queues** at net edges (C2S parsed packets in, S2C frames out)
   if contention shows; keep sim apply single-threaded.
