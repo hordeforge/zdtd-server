@@ -42,7 +42,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
 | Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=75 fail=8** (kill/spawn/respawn PASS). Residual: dig pad, block damage, loot pickup VFX, craft/trader economy. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
-| Full playable stock dedi | **PASS (core loop, clean)** | join → in-game (overlay fixed, 0 NRE) → move/dig/build → fight (XML speeds/damage) → death → respawn → loot → craft (InvTx + workstation TE) → trade (XML stock) → persist (player v2 + TE + block meta) → rejoin; pop bounded; bots + stock client concurrent; 11/11 automated playtest. Cosmetic-only remaining: deco trees suppressed (version-mismatched AssignIds; re-enable on block-table negotiation), Weather biome array, GameStats HUD day counter |
+| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo **75/83** (2026-08-03f): dig pad, block damage, loot pickup VFX, craft/trader residual. Cosmetic: deco trees suppressed (AssignIds), Weather biome array, GameStats day. Not a clean full-stock parity claim. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
 product notes stay in this file + linked docs.

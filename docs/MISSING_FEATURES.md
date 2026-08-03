@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** 189/189 · stock join: green (0 NRE) · core play loop: **yes** (11/11 automated playtest) · full stock parity: **partial** (gaps below)
+**Tests:** 197/197 · stock join: green (0 NRE) · core play loop: **yes** (11/11 automated playtest) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|

@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-07-23):** 189/189 unit · 11/11 automated stock-client playtest (0 NRE/WRN/underrun) · 33/33 C2S · core loop clean-playable. Open work is **depth + scale**, not join.
+**Gates (2026-08-03):** **197/197** unit · stock join green · playtest-zdtd demo **pass=75 fail=8** · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ---
 
@@ -24,7 +24,27 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: 73 pass / 10 fail; version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **75 pass / 8 fail** (kill/spawn/respawn PASS); version pin V3.1.0
+
+
+### Residual playtest fails (demo, 2026-08-03f) - product depth
+
+Latest: `server/logs/playtest_zdtd_demo_20260803f.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+
+| Case | Symptom | Likely owner |
+|---|---|---|
+| `core/dig_confirm` | no solid under feet | spawn height / dig pad sample |
+| `core/place_confirm` | no source under feet | same pad |
+| `core/block_damage_melee` | type 20304 dmg stuck 0 | SetBlock damage / hardness |
+| `combat/explosion_client` | no block change from attack | ExplosionInitiate dig path |
+| `economy/eat_food_consume` | no food item | client bag give / starter food |
+| `economy/loot_bag_pickup` | EntityItem not removed after collect | EntityCollect + EntityRemove S2C (partial fix shipped) |
+| `economy/craft_consume_output` | wood/club 0 | give/craft InvTx depth |
+| `economy/trader_buy` | coins 0, buyOk=False | wallet + trader buy C2S |
+
+Closed this campaign (were FAIL): `zombie_death_loot`, `zombie_removed_after_kill`, `player_respawn`, kill/spawn admin fixtures, V3.1.0 version pin.
+
+### Residual non-demo (still open)
 
 ### Parity polish (client-visible)
 
