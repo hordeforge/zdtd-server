@@ -28,7 +28,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Unit tests | **PASS** | 197/197 (binary direct; `--listen=-` may false-fail) |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
-| Player death → respawn | **PASS** | pw25: admin kill player → hp=0 EntityStatChanged → client "Respawning: Died" → back in-game; dead players keep entity (destroy() desynced later net-id lookups) |
+| Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
 | Player persist v2 | **PASS** | players.zsv v2 (quality/meta + journal); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
@@ -40,7 +40,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
 | Loadgen join + walk + dynamite | **PASS** | flat + Navezgane; 2-bot mixed 100% passRate, walks>0, ExplosionInitiate; pw21 2-bot wander 100% alongside live stock client (walks=495, zero client WRN) |
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
-| Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin: PackageIds `minor=10 build=14`, GSI `ServerVersion=V 3.1.0`. `make -C ../7dtd-playtest playtest-zdtd` → **pass=73 fail=10 skip=0** (Chunks:85 CGO:41). Failures: kill/loot/respawn/economy depth (see `server/logs/playtest_zdtd_demo_20260803c.log`). Design: docs/CLIENT_PLAYTEST.md |
+| Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=75 fail=8** (kill/spawn/respawn PASS). Residual: dig pad, block damage, loot pickup VFX, craft/trader economy. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop, clean)** | join → in-game (overlay fixed, 0 NRE) → move/dig/build → fight (XML speeds/damage) → death → respawn → loot → craft (InvTx + workstation TE) → trade (XML stock) → persist (player v2 + TE + block meta) → rejoin; pop bounded; bots + stock client concurrent; 11/11 automated playtest. Cosmetic-only remaining: deco trees suppressed (version-mismatched AssignIds; re-enable on block-table negotiation), Weather biome array, GameStats HUD day counter |
 

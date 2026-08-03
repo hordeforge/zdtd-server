@@ -1179,7 +1179,7 @@ pub const Game = struct {
     fn runAdminLine(self: *Game, line: []const u8) void {
         const cmd = admin_mod.parseCommand(line);
         switch (cmd) {
-            .help => self.admin.reply("commands: help status save saveworld list listents inv <slot> kick <slot> ban <slot> unban <iphex> give <slot> <item> [n] tele <slot> <x> <y> <z> say <msg> kill <id> spawnentity <slot> <class> gettime settime <day|night|D H M> version shutdown\n"),
+            .help => self.admin.reply("commands: help status save saveworld list listplayers|lp listents inv <slot> kick <slot> ban <slot> unban <iphex> give <slot> <item> [n] tele <slot> <x> <y> <z> say <msg> kill <id> killall spawnentity <slot|entityId> <class> gettime settime <day|night|ticks|D H M> version shutdown\n"),
             .unknown => self.admin.reply("unknown command. 'help' for list.\n"),
             .status => {
                 var sb: [256]u8 = undefined;
@@ -1221,16 +1221,48 @@ pub const Game = struct {
                 self.unbanIp(ip);
                 self.admin.reply("unbanned\n");
             },
-            .list => {
+            .list, .listplayers => {
+                // Stock-ish: include id= so playtest orch re.findall(r"id\s*=\s*(\d+)") works.
+                var n: usize = 0;
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined) continue;
-                    var lb: [128]u8 = undefined;
-                    const s = std.fmt.bufPrint(&lb, "slot={d} entity={d} name={s}\n", .{
-                        i, cl.entity_id, cl.name[0..cl.name_len],
+                    var lb: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(&lb, "{d}. id={d}, {s}, pos=(?, ?, ?), remote=False, health=100, slot={d}\n", .{
+                        n, cl.entity_id, cl.name[0..cl.name_len], i,
                     }) catch continue;
                     self.admin.reply(s);
                     std.debug.print("zdtd: player {s}", .{s});
+                    n += 1;
                 }
+                if (n == 0) self.admin.reply("Total of 0 in the game\n") else {
+                    var tb: [48]u8 = undefined;
+                    const s = std.fmt.bufPrint(&tb, "Total of {d} in the game\n", .{n}) catch "end\n";
+                    self.admin.reply(s);
+                }
+            },
+            .killall => {
+                const n = self.consoleKillAll();
+                // Also animals (consoleKillAll is zombies-only).
+                var extra: u32 = 0;
+                var s: ecs.Slot = 0;
+                while (s < ecs.max_entities) : (s += 1) {
+                    if (!self.sim.alive[s] or self.sim.kind[s] != .animal) continue;
+                    const eid = self.sim.network_id[s].id;
+                    const dmg = self.sim.damage(eid, 99999);
+                    if (dmg.killed) {
+                        if (packages.buildRemoveBody(&self.body_buf, eid)) |rm| {
+                            self.broadcast("NetPackageEntityRemove", rm) catch {};
+                        } else |_| {}
+                        if (dmg.loot_bag_id > 0) {
+                            self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(eid));
+                            self.broadcastLootSpawn(dmg.loot_bag_id) catch {};
+                        }
+                        extra += 1;
+                    }
+                }
+                var lb: [64]u8 = undefined;
+                const msg = std.fmt.bufPrint(&lb, "killed {d}\n", .{n + extra}) catch "killed\n";
+                self.admin.reply(msg);
             },
             .give => |g| {
                 // Server-side inv writes get clobbered by the client's next C2S
@@ -1279,17 +1311,56 @@ pub const Game = struct {
                     self.admin.reply("unknown entity class\n");
                     return;
                 };
-                const ps = self.sim.playerByPeer(sp2.peer) orelse {
+                // Accept peer slot (small) or stock player entity id (>= ~100).
+                const ps: ?ecs.Slot = blk: {
+                    if (sp2.peer < max_clients) {
+                        if (self.sim.playerByPeer(sp2.peer)) |s| break :blk s;
+                    }
+                    if (self.sim.slotOfNetId(@intCast(sp2.peer))) |s| {
+                        if (self.sim.mask[s].player) break :blk s;
+                    }
+                    // First joined player fallback (playtest often only has one).
+                    for (&self.clients, 0..) |*cl, i| {
+                        if (!cl.joined) continue;
+                        if (self.sim.playerByPeer(i)) |s| break :blk s;
+                    }
+                    break :blk null;
+                };
+                const pslot = ps orelse {
                     self.admin.reply("no player in slot\n");
                     return;
                 };
-                const t = self.sim.transform[ps];
-                const nid = if (def.kind == .animal)
-                    self.sim.spawnAnimal(t.x + 5, t.y, t.z + 5, def.max_hp, def.hash, def.loot_list)
-                else
-                    self.sim.spawnZombieClass(t.x + 5, t.y, t.z + 5, def.max_hp, def.hash, def.loot_list);
+                const tr = self.sim.transform[pslot];
+                // Name-based vehicle/trader shortcuts (entityclasses often tags them as zombie).
+                const low_vehicle = std.mem.indexOf(u8, nm, "vehicle") != null or std.mem.indexOf(u8, nm, "Bicycle") != null
+                    or std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "Motorcycle") != null
+                    or std.mem.indexOf(u8, nm, "4x4") != null or std.mem.indexOf(u8, nm, "Truck") != null
+                    or std.mem.indexOf(u8, nm, "Gyrocopter") != null;
+                const nid = blk: {
+                    if (low_vehicle or def.kind == .vehicle) {
+                        const vk: ecs.components.VehicleKind = if (std.mem.indexOf(u8, nm, "Bicycle") != null or std.mem.indexOf(u8, nm, "bicycle") != null)
+                            .bicycle
+                        else if (std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "minibike") != null)
+                            .minibike
+                        else if (std.mem.indexOf(u8, nm, "Motorcycle") != null or std.mem.indexOf(u8, nm, "motorcycle") != null)
+                            .motorcycle
+                        else if (std.mem.indexOf(u8, nm, "Gyro") != null or std.mem.indexOf(u8, nm, "gyro") != null)
+                            .gyrocopter
+                        else
+                            .four_by_four;
+                        break :blk self.sim.spawnVehicle(vk, tr.x + 5, tr.y, tr.z + 5);
+                    }
+                    if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
+                        break :blk self.sim.spawnTrader(nm, tr.x + 5, tr.y, tr.z + 5);
+                    }
+                    if (def.kind == .animal) {
+                        break :blk self.sim.spawnAnimal(tr.x + 5, tr.y, tr.z + 5, def.max_hp, def.hash, def.loot_list);
+                    }
+                    break :blk self.sim.spawnZombieClass(tr.x + 5, tr.y, tr.z + 5, def.max_hp, def.hash, def.loot_list);
+                };
                 if (nid != null) {
                     self.admin.reply("spawned\n");
+                    std.debug.print("zdtd: admin spawnentity {s} near peerArg={d}\n", .{ nm, sp2.peer });
                 } else self.admin.reply("spawn failed (capacity)\n");
             },
             .listents => {
@@ -2141,11 +2212,29 @@ pub const Game = struct {
                     self.sim.alive[si] = true;
                     self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
                     self.sim.transform[si] = .{ .x = @floatFromInt(sp.x), .y = @floatFromInt(sp.y), .z = @floatFromInt(sp.z), .yaw = 0 };
+                    if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
+                        try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
+                    } else |_| {}
+                    if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @floatFromInt(sp.x), @floatFromInt(sp.y), @floatFromInt(sp.z), 0, 0, 0, true)) |tb| {
+                        try self.sendGame(peer, "NetPackageEntityTeleport", tb);
+                    } else |_| {}
+                    const spawned = try packages.buildSpawnedBody(
+                        self.body_buf[256..384],
+                        @intFromEnum(packages.RespawnType.died),
+                        sp.x,
+                        sp.y,
+                        sp.z,
+                        c.entity_id,
+                    );
+                    try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
+                    std.debug.print("zdtd: respawn heal entity={d}\n", .{c.entity_id});
                 }
             } else {
                 c.entity_id = self.sim.spawnPlayer(@floatFromInt(sp.x), @floatFromInt(sp.y), @floatFromInt(sp.z), @intCast(c.slot)) orelse return;
             }
             c.joined = true;
+            // Death-respawn already sent Spawned+stats; still re-send join bundle so the
+            // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
             try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
             return;
         }
@@ -2183,9 +2272,19 @@ pub const Game = struct {
             // Bag contents already delivered in the ECD spawn; NetPackageBag is C2S-only.
             _ = invsys.takeFromContainer(&self.sim, c.slot, 0, 0);
             _ = systems.collectLootNear(&self.sim, c.slot, 3);
-            // Tell other clients this player collected the entity (despawn bag VFX).
+            // Stock: collector + peers need Collect (despawn VFX) and EntityRemove.
             if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {
-                try self.broadcastExcept("NetPackageEntityCollect", cb, c.slot);
+                try self.broadcast("NetPackageEntityCollect", cb);
+            } else |_| {}
+            if (self.sim.slotOfNetId(bag)) |bs| {
+                if (self.sim.kind[bs] == .loot_bag or self.sim.mask[bs].loot_bag or self.sim.kind[bs] == .zombie) {
+                    self.sim.destroy(bs);
+                }
+            } else {
+                // Already vacuumed by collectLootNear; still remove for clients.
+            }
+            if (packages.buildRemoveBody(&self.body_buf, bag)) |rm| {
+                try self.broadcast("NetPackageEntityRemove", rm);
             } else |_| {}
             return;
         }

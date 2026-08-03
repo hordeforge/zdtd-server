@@ -131,6 +131,10 @@ pub const Command = union(enum) {
     spawnentity: struct { peer: usize, name_off: usize, name_len: usize },
     /// Stock `listents` (alive entity table).
     listents,
+    /// Stock `listplayers` / `lp` (joined peers with entity ids).
+    listplayers,
+    /// Stock `killall` (non-player AI).
+    killall,
     /// Stock `saveworld`.
     saveworld,
     /// Stock `shutdown` (graceful stop).
@@ -204,14 +208,27 @@ pub fn parseCommand(line: []const u8) Command {
         const a = it.next() orelse return .unknown;
         if (std.mem.eql(u8, a, "day")) return .{ .settime = .{ .day = 0, .hour = 8, .minute = 0 } };
         if (std.mem.eql(u8, a, "night")) return .{ .settime = .{ .day = 0, .hour = 22, .minute = 0 } };
+        // Stock telnet often sends a single world-time integer (e.g. 8000, 22000).
+        // Packing used by playtest orch: thousands digit ~ hour*1000-ish; map common values.
+        const n = std.fmt.parseInt(u32, a, 10) catch return .unknown;
+        if (it.peek() == null) {
+            // Single token: either stock ticks-ish or a lone day number.
+            if (n >= 100) {
+                // 8000 -> 08:00, 22000 -> 22:00, 12000 -> 12:00
+                const hour: u8 = @intCast(@min(23, n / 1000));
+                const minute: u8 = @intCast(@min(59, (n % 1000) / 10)); // coarse
+                return .{ .settime = .{ .day = 0, .hour = hour, .minute = minute } };
+            }
+            return .{ .settime = .{ .day = n, .hour = 8, .minute = 0 } };
+        }
         // "settime <day> <hour> <minute>"
-        const day = std.fmt.parseInt(u32, a, 10) catch return .unknown;
         const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch 8;
         const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch 0;
-        return .{ .settime = .{ .day = day, .hour = h, .minute = mi } };
+        return .{ .settime = .{ .day = n, .hour = h, .minute = mi } };
     }
     if (std.mem.eql(u8, cmd, "spawnentity") or std.mem.eql(u8, cmd, "se")) {
         const p = it.next() orelse return .unknown;
+        // peer slot (0..7) or stock player entity id (>=100). Game resolves both.
         const peer = std.fmt.parseInt(usize, p, 10) catch return .unknown;
         const name = it.next() orelse return .unknown;
         // Offsets into the original line (name slice must outlive tokenizer).
@@ -219,6 +236,8 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .spawnentity = .{ .peer = peer, .name_off = off, .name_len = name.len } };
     }
     if (std.mem.eql(u8, cmd, "listents") or std.mem.eql(u8, cmd, "le")) return .listents;
+    if (std.mem.eql(u8, cmd, "listplayers") or std.mem.eql(u8, cmd, "lp")) return .listplayers;
+    if (std.mem.eql(u8, cmd, "killall") or std.mem.eql(u8, cmd, "ka")) return .killall;
     if (std.mem.eql(u8, cmd, "saveworld") or std.mem.eql(u8, cmd, "sa")) return .saveworld;
     if (std.mem.eql(u8, cmd, "shutdown")) return .shutdown;
     if (std.mem.eql(u8, cmd, "version")) return .version;
@@ -258,11 +277,19 @@ test "parse stock ops commands" {
     try std.testing.expectEqual(@as(u8, 22), st.settime.hour);
     const st2 = parseCommand("settime 7 10 30");
     try std.testing.expectEqual(@as(u32, 7), st2.settime.day);
+    const st3 = parseCommand("settime 22000");
+    try std.testing.expect(st3 == .settime);
+    try std.testing.expectEqual(@as(u8, 22), st3.settime.hour);
+    const st4 = parseCommand("settime 8000");
+    try std.testing.expectEqual(@as(u8, 8), st4.settime.hour);
     const line = "spawnentity 0 zombieBoe";
     const se = parseCommand(line);
     try std.testing.expect(se == .spawnentity);
     try std.testing.expectEqualStrings("zombieBoe", line[se.spawnentity.name_off..][0..se.spawnentity.name_len]);
     try std.testing.expect(parseCommand("listents") == .listents);
+    try std.testing.expect(parseCommand("listplayers") == .listplayers);
+    try std.testing.expect(parseCommand("lp") == .listplayers);
+    try std.testing.expect(parseCommand("killall") == .killall);
     try std.testing.expect(parseCommand("saveworld") == .saveworld);
     try std.testing.expect(parseCommand("version") == .version);
     try std.testing.expect(parseCommand("shutdown") == .shutdown);

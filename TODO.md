@@ -22,7 +22,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Scenario catalog v0.2: demo/benchmark/full suites (~30 live, ~50 deferred SKIP); `SCENARIOS.md`
 - [x] Demo green on **stock dedi** Navezgane: pass=24 fail=0 skip=7 (`make playtest-demo`)
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
-- [ ] Phase B cont.: melee/loot/death after spawn; economy give+craft
+- [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
 - [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: 73 pass / 10 fail; version pin V3.1.0
 
