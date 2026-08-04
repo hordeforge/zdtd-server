@@ -343,6 +343,9 @@ pub const Game = struct {
 
     /// Initialize into an existing allocation (must be heap for live server size).
     pub fn initWithOptions(self: *Game, allocator: std.mem.Allocator, world_dir: []const u8, port: u16, opts: InitOptions) !void {
+        // Stock uses ServerPort+2 for LiteNet. Values above this range wrap to
+        // an unrelated privileged or ephemeral port.
+        if (port > std.math.maxInt(u16) - 2) return error.InvalidPort;
         const max_pl: u16 = blk: {
             const n = if (opts.max_players == 0) @as(u16, 8) else opts.max_players;
             break :blk @min(n, @as(u16, max_clients));
@@ -2805,22 +2808,8 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
             const p = packages.parsePosAndRotBody(body) catch return;
             if (p.entity_id == c.entity_id) {
-                // Void rescue only. Aggressive surface snap (y < surface-2) desynced
-                // client mesh vs server height, broke jump_motor and late place suites.
-                // Deep fall / true void still teleports to DTM surface + 0.9.
-                const gx: i32 = @intFromFloat(@floor(p.x));
-                const gz: i32 = @intFromFloat(@floor(p.z));
-                const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
-                const surface: f32 = @floatFromInt(h_u16);
-                const min_y = surface + 0.9;
-                const deep_void = p.y < -1.0 or p.y < surface - 24.0;
-                if (deep_void) {
-                    const ny = min_y;
-                    self.sim.setPos(p.entity_id, p.x, ny, p.z, 0);
-                    if (packages.buildEntityTeleportBody(&self.body_buf, p.entity_id, p.x, ny, p.z, 0, 0, 0, true)) |tb| {
-                        try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-                    } else |_| {}
-                    std.debug.print("zdtd: void rescue entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ p.entity_id, p.y, surface, ny });
+                // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
+                if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, true)) |ny| {
                     systems.questTickGoto(&self.sim, c.slot, p.x, ny, p.z);
                     systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
                     return;
@@ -2828,8 +2817,6 @@ pub const Game = struct {
                 self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
                 systems.questTickGoto(&self.sim, c.slot, p.x, p.y, p.z);
                 systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
-                // Proximity vacuum without wire leaves ghost EntityItems on clients.
-                // Collect only on explicit NetPackageEntityCollect (stock path).
             }
             return;
         }
@@ -3131,6 +3118,9 @@ pub const Game = struct {
                 self.sim.transform[idx].x += @as(f32, @floatFromInt(dx)) * 0.03125;
                 self.sim.transform[idx].y += @as(f32, @floatFromInt(dy)) * 0.03125;
                 self.sim.transform[idx].z += @as(f32, @floatFromInt(dz)) * 0.03125;
+                const tr = self.sim.transform[idx];
+                // RelPos can walk Y into void without absolute PosAndRot; re-snap.
+                _ = try self.rescueDeepVoid(peer, eid, tr.x, tr.y, tr.z, true);
             }
             return;
         }
@@ -3153,6 +3143,10 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
             const p = packages.parsePosAndRotBody(body) catch return;
             if (p.entity_id != c.entity_id) return;
+            if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, false)) |_| {
+                // Snapped; do not fan-out void coords.
+                return;
+            }
             self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
             try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
             return;
@@ -3475,8 +3469,13 @@ pub const Game = struct {
             };
             if (n == 0) return;
             const editor = self.sim.playerByPeer(c.slot) orelse return;
-            const ep = self.sim.transform[editor];
             const editor_ent = self.sim.network_id[editor].id;
+            // If RelPos walked us into void, snap before reach so seed places work.
+            {
+                const tr0 = self.sim.transform[editor];
+                _ = try self.rescueDeepVoid(peer, editor_ent, tr0.x, tr0.y, tr0.z, true);
+            }
+            const ep = self.sim.transform[editor];
             var i: usize = 0;
             while (i < n) : (i += 1) {
                 const b = changes[i];
@@ -3929,6 +3928,25 @@ pub const Game = struct {
             peer.resendPending(&self.net.sock) catch {};
             self.pollNetOnce();
         }
+    }
+
+    /// If feet Y is deep void / far below DTM surface, snap to surface+0.9 and
+    /// optionally teleport the peer. Returns new Y when snapped, else null.
+    fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32, do_teleport: bool) !?f32 {
+        const gx: i32 = @intFromFloat(@floor(x));
+        const gz: i32 = @intFromFloat(@floor(z));
+        const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
+        const surface: f32 = @floatFromInt(h_u16);
+        const min_y = surface + 0.9;
+        if (!(y < -1.0 or y < surface - 24.0)) return null;
+        self.sim.setPos(entity_id, x, min_y, z, 0);
+        if (do_teleport) {
+            if (packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, min_y, z, 0, 0, 0, true)) |tb| {
+                try self.sendGame(peer, "NetPackageEntityTeleport", tb);
+            } else |_| {}
+        }
+        std.debug.print("zdtd: void rescue entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ entity_id, y, surface, min_y });
+        return min_y;
     }
 
     /// Align spawn to DTM height and ensure a solid under the feet block so
