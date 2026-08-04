@@ -24,22 +24,24 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **75 pass / 8 fail** (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **77 pass / 6 fail** (kill/spawn/respawn PASS); version pin V3.1.0
 
 
-### Residual playtest fails (demo, 2026-08-03k) - product depth
+### Residual playtest fails (demo, 2026-08-04c) - product depth
 
-Latest: `server/logs/playtest_zdtd_demo_20260803k.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Latest: `server/logs/playtest_zdtd_demo_20260804c.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Score: **pass=77 fail=6**.
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `combat/explosion_client` | soft hay dmg stuck 0 (no close-in) | melee raycast / aim |
-| `economy/bag_add_item` | bag 45/45 full | slot waste / junk occupancy (starter works) |
-| `economy/craft_consume_output` | wood0=35 no consume | craft queue / recipe unlock |
-| `economy/trader_buy` | coins=10250 no spend | client-local buy; stock trader C2S |
-| `world/block_sample_ring` | solid=0 intermittent | player float / sample Y |
+| `smoke/cgo_ready` | cgo=35 need=39 | stream radius bumped 7..9 after run; re-measure |
+| `core/block_damage_melee` | hay 20304 dmg 0 (seed Y negative) | SetBlock damage / client seed |
+| `combat/explosion_client` | same soft-block dmg | same path |
+| `economy/eat_food_consume` | no food item | client give food |
+| `economy/trader_buy` | coins 0 / buyOk=False | wallet / buy C2S |
+| `power/place_generator` | not placed | placement Y/pad |
 
-Closed this campaign: dig/place/melee dmg, loot pickup, eat_food, death loot, respawn, kill/spawn fixtures, V3.1.0 pin.
+Closed this campaign: dig/place, loot pickup, craft consume, death loot, respawn, kill/spawn fixtures, weather underrun, V3.1.0 pin.
 
 Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect Despawned, ECD v36+stress, PDF **bLoaded=true** + playerMale profile (ToPlayer applies bag), starter coins, orch zdtd fresh-save.
 
@@ -128,7 +130,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] Agent prompt `docs/PROMPTS/audit-hardcoded-data.md` expanded (Bucket A/B, stock Config gap list, builtins, absolute paths, ids/enums)
 - [x] **Config XML overrides**: `--config-overrides DIR` (repeatable, filename order); xpath set/remove/append subset; `paths`+`xml_patch`+`io_fs` (`std.Io`, no raw syscalls); AGENTS rule 24
 - [x] **Power from blocks.xml**: MaxFuel/OutputPerFuel/OutputPerCharge/OutputPerStack parsed in maxdamage; powerblocks.Resolved.applyToNode; place path applies props; electric tick fuel/SoC/timers; removed default_gen_fuel/battery_cap consts
-- [x] WORLDGEN on-the-fly stream design + TODO W0–W7
+- [x] WORLDGEN on-the-fly stream design + TODO W0-W7
 - [x] Lock pos-key + stale timeout; solar day gate; persistent parallel pool (Io mutex/cond)
 
 ### Recent (2026-07-23)
