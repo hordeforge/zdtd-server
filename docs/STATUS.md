@@ -44,6 +44,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Automated in-client playtest | **PASS join + demo green (2026-08-04p)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=83 fail=0** (`server/logs/playtest_zdtd_demo_20260804p.log`). Strict `eat_food_consume`: InstantAction stack drop + Food rise (no force-dec); `generator_fuel` hard TE. Server ItemActionEat: InvTx + PlayerInventory stack-loss Paths A/B/C + PreferenceTracker skip. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
+| Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C from biomes.xml defaults; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees (AssignIds). Not full-stock parity. |
 

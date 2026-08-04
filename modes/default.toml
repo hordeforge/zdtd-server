@@ -1,0 +1,13 @@
+# default gamemode pack (ADR 0010 step 3).
+# Data-only InitOptions overrides. No script VM.
+# Load: --mode default  or  zdtd.toml [mode] name = "default"
+# See docs/GAME_OPTIONS.md.
+
+name = "default"
+
+# Gameplay (stock serverconfig names; optional overrides)
+max_spawned_zombies = 64
+blood_moon_frequency = 7
+
+# Static plugin host (src/plugin/); sample_hello when true
+enable_sample_plugin = true

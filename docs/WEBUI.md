@@ -81,7 +81,7 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 
 | Control | Default |
 |---|---|
-| Bind | `127.0.0.1` only (`--webui-bind 0.0.0.0` explicit opt-in) |
+| Bind | IPv4 loopback only; remote access requires a TLS reverse proxy |
 | Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret) |
 | CSRF | SameSite cookie + form field = HMAC session token (secret accepted for API tools) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
@@ -107,7 +107,7 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/console` | Command form + last N log lines | ops log ring |
 | `POST /api/cmd` | Run one admin command | queue → admin parser |
 | `GET /api/apm.json` | Machine-readable apm (loadgen/tools) | snapshot |
-| `GET /login` | Sign-in form (200); bad `?token=` → 401 | config secret |
+| `GET /login` | Sign-in form (200) | static HTML |
 | `POST /login` | Form body `token=` → session cookie | config secret |
 | `POST /logout` | Clear session cookie (CSRF required) | session |
 | `GET /static/*` | htmx.min.js, alpine, app.css | embed or files |
@@ -206,7 +206,7 @@ Drain ≤ K cmds per tick (e.g. 4) so one operator cannot stall sim.
 - [x] `src/server/webui.zig` (minimal HTTP/1.1, non-blocking poll from Game.step)
 - [x] CLI: `--webui-port 0` (off), `--webui-bind 127.0.0.1`, `--webui-secret`
 - [x] GAME_OPTIONS + INDEX; design in this file
-- [x] HTTP: `GET /healthz` (no auth), `GET /` (Bearer / X-Zdtd-Secret / `?token=`)
+- [x] HTTP: `GET /healthz` (no auth), `GET /` (Bearer / X-Zdtd-Secret / session cookie)
 - [x] Disabled by default (port 0); secret required when enabled
 
 **Exit:** curl with secret shows hello; without → 401; off → nothing listens; `make check` green.
@@ -291,7 +291,7 @@ HTTP stack preference (in order):
 | Key | Default | Notes |
 |---|---|---|
 | `--webui-port` | `0` (disabled) | e.g. `8080` |
-| `--webui-bind` | `127.0.0.1` | WAN requires explicit bind + secret |
+| `--webui-bind` | `127.0.0.1` | IPv4 loopback only; put TLS termination in front for remote access |
 | `--webui-secret` | empty → refuse start if port≠0 | or env `ZDTD_WEBUI_SECRET` |
 | serverconfig (optional later) | `WebUiPort`, `WebUiBind` | document in GAME_OPTIONS |
 

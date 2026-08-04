@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-04p):** unit ItemActionEat scenarios green · stock join green · playtest-zdtd demo **pass=83 fail=0** (strict eat + hard generator_fuel) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-04):** **346/346** unit · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804p) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ### Freeze (core playable)
 
@@ -53,17 +53,19 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Parity polish (client-visible)
 
-- [ ] Deco trees: re-enable when AssignIds match target client (V3.0.1 b4 dump or negotiate); currently suppressed (NRE on mismatch)
+- [ ] Deco trees: re-enable when DecoObject wire matches V3.1.0 `DecoManager.Read` (empty firstPackage only; object payloads NRE)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
 - [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)
-- [ ] EAI: more task types (BreakBlock, ApproachSpot, …); see MISSING §5.2.1
+- [x] EAI BreakBlock task (path_blocked → hold chase for block damage)
+- [x] EAI ApproachSpot task (`has_spot` / spot_x,z; below chase, above wander)
+- [ ] EAI: more task types (DestroyArea, Territorial, …); see MISSING §5.2.1
 - [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
 - [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
 - [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
-- [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan); full trigger TE wire still open
-- [ ] Power: full trigger TE wire
+- [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan)
+- [x] Power: full trigger TE wire (pressure plate / tripwire gate + `activateTriggerAt` on player step; pulse opens BFS)
 - [ ] Optional: workstation RecipeQueue C2S depth beyond InvTx + TE sim
 - [ ] Optional: Encryption* RSA+AES (platform AntiCheat only; not required for ServerPassword)
 - [x] Hardcode audit: run `docs/PROMPTS/audit-hardcoded-data.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
@@ -83,7 +85,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Phase / ownership / bounds reject counters (`phase_rejects`, `ownership_rejects`, `bounds_rejects` in apm + webui)
 - [x] Per-package phase matrix (`src/server/phase_gate.zig`; connecting|joined|playing; aggregate `phase_rejects`)
 - [x] Movement envelope first cut (`src/server/movement.zig`; soft 20 m/s clamp + `movement_rejects`; observe counts only)
-- [ ] Inv cause ledger / evidence JSONL (see P4 section below)
+- [x] Inv cause ledger first cut (`ecs/inv_ledger.zig` ring + apm `inv_ledger_events`); evidence JSONL still open
 
 ### Parked
 
@@ -97,9 +99,10 @@ Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plug
 
 - [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
 - [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
-- [ ] Hardcode audit residual P1 (A10–A12 AI/vehicle floors; B13 tick %N; A08/A22 deco pin labels)
+- [x] Hardcode A10–A12 / B13 (class AI floors, vehicle held drive, named tick periods)
+- [ ] Hardcode residual: A08/A22 deco pin labels (trees still suppressed empty firstPackage)
 - [x] Native static plugin host skeleton (ADR 0005) + `sample_hello` (`src/plugin/`; no dynlib/Wasm)
-- [ ] Gamemode = config pack + static plugin (`modes/` + `plugins/`)
+- [x] Gamemode = config pack + static plugin flag (`modes/default.toml` + `mode.zig`; `--mode` / `[mode] name`; sample_plugin only)
 - [ ] **Wasm guest mods** (sandboxed): same hooks, fuel/memory caps, command queue only; no stock Mods/ promise
 - [ ] Dynlib native plugins only if still needed after static + Wasm
 
@@ -137,6 +140,8 @@ Do not adopt third-party ECS cores.
 Core loop and parity landings. Do not re-open without new evidence.
 
 ### Recent (2026-08-04)
+- [x] **ECS/SoA review prompt** `docs/PROMPTS/review-ecs-soa.md`; phase_gate + movement envelope; plugin host + query/command
+- [x] **EAI BreakBlock**; eat soften near-max; wood→frameShapes place; deco empty firstPackage (no Read NRE)
 - [x] **WebUI WU2**: POST `/api/cmd` + console UI + CSRF; expanded Snapshot (entity census, all apm counters, p99/max, policy knobs)
 - [x] **zdtd.toml**: minimal TOML loader + example; stream/authority/feature → InitOptions; sanitize radii
 - [x] **A05 terrain ids**: `World.terrain_ids` + `resolveTerrainIds` after AssignIds merge
@@ -402,8 +407,9 @@ From **mr_ecs** (high value for dedi):
 
 - [ ] **Generation-counted handles** (if/when slot reuse bites) - net id stays
   stable for wire; internal slot gen prevents stale AI/target pointers  
-- [ ] **Fixed capacities + soft warnings** - entity/stream/cmd caps; warn past ~80%
-  (apm counter), fail closed at hard cap  
+- [x] **Fixed capacities + soft warnings** - entity + cmd buffer warn once past ~80%
+  (`warn_ratio`); hard cap still fail-closed / drop  
+- [ ] Soft warnings for stream queues (same pattern)
 - [ ] **Chunk-style parallel for** - iterate contiguous SoA ranges / interest cells
   with optional `std.Io` or pool; same as extending `forRanges`  
 - [ ] **Cmd profiling zones** - name deferred batches in apm/tracy-style sections  
@@ -681,7 +687,7 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 
 - [ ] **Per-peer movement ledger** - samples, last correction, grace windows  
 - [ ] **Combat ledger** - last swing/shot times, reload, target ids  
-- [ ] **Inv ledger** - cause-tagged deltas (fold into invtx path)  
+- [x] **Inv ledger** - cause-tagged ring (`ecs/inv_ledger.zig`; InvTx/craft/loot/give)
 - [ ] **Evidence JSONL** - schema version, time, peer/entity pseudonym, detector
   id, severity, observed vs bound, action; no raw packets, no secrets, no IP by
   default (hash/pseudonym); optional hash chain later  

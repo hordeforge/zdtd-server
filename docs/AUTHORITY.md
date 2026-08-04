@@ -33,7 +33,8 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 
 | Gate | Where | Notes |
 |---|---|---|
-| **Join phase** | `game.handlePackage` | Unjoined peers: only login/config packages; play C2S dropped. |
+| **Join phase matrix** | `phase_gate.zig` via `handlePackage` | Phases: `connecting` / `joined` / `playing` (`joined`+`entered`). Pre-play: join-SM allowlist only; play C2S dropped + `phase_rejects`. Always Hard. |
+| **Movement envelope** | `movement.zig` on PosAndRot / RelPosAndRot | Soft max 20 m/s horizontal over server dt. **correct**: clamp + soft S2C PosAndRot snap; **observe**: count `movement_rejects` only. Reset on spawn/teleport. |
 | **C2S bounds** | SetBlock / Explosion / TE / DamageEntity | Reach ~96 blocks; damage strength cap 200; fatal damage vs NPC only. |
 | **Ownership** | Bag / InvTx / player entity id | No cross-player inv writes; editor must be local player slot. |
 | **Player inv (interim)** | PlayerInventory / player Bag C2S | **Client-trusting apply** into ECS (ADR 0007). No S2C PlayerInventory echo. Admin `give` = loot bag drop. |
@@ -46,15 +47,16 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 
 ```text
 UDP → LiteNet → deframe
-  → join-phase allowlist
+  → phase matrix (phase_gate; connecting|joined|playing)
   → typed parse (no blind blob apply)
-  → Hard checks (reach, ownership, caps)
+  → Hard checks (reach, ownership, caps, movement envelope)
   → sim apply (ecs / world store)
   → interest replicate result
 ```
 
-Future P4 pieces (matrix counters, movement envelope, inv cause ledger,
-evidence JSONL) plug into this path without a second world.
+Inv cause ledger (first cut): `World.inv_ledger` fixed ring (`ecs/inv_ledger.zig`),
+causes loot|craft|give|place|eat|drop|tx|unknown; apm `inv_ledger_events`.
+Evidence JSONL and enforce ladder still open; no second world.
 
 ## Related
 

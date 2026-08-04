@@ -1,12 +1,26 @@
 # Native plugin API (design)
 
-**Status:** design / proposed (see [ADR 0005](adr/0005-native-plugin-api.md))  
+**Status:** skeleton shipped (static host only; see [ADR 0005](adr/0005-native-plugin-api.md))  
 **Not:** stock `IModApi`, Harmony, or `Mods/` XML.  
 **Related:** [ADR 0003](adr/0003-no-stock-mod-host.md), [ADR 0004](adr/0004-server-authoritative-c2s.md),
 [ADR 0010](adr/0010-data-config-zig-plugins.md) (data/config/Zig layers; **Wasm guest**
-as future sandboxed mod API behind this host), TODO P4 (authority), plugin
-implementation gated on playability polish, mach notes in
-[ADR 0006](adr/0006-steal-from-mach.md).
+as future sandboxed mod API behind this host), TODO P4 (authority),
+mach notes in [ADR 0006](adr/0006-steal-from-mach.md).
+
+## Implementation status (2026-08-04)
+
+| Piece | State |
+|---|---|
+| `src/plugin/api.zig` | `Host`, `PluginVTable`, `PLUGIN_API_VERSION=1` |
+| `src/plugin/host.zig` | Fixed table (8), register / enable / onTick / playerJoin / shutdown |
+| `src/plugin/sample_hello.zig` | In-tree sample: logs once on enable; null tick/join |
+| Game wire-up | `createWithOptions` → `enableStaticDefaults`; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
+| InitOptions | `enable_sample_plugin` (default true; mode pack / future flags may set) |
+| Gamemode pack | `modes/*.toml` data-only + `enable_sample_plugin` (ADR 0010 step 3 first cut) |
+| Dynlib / Wasm | **not** implemented |
+| C2S deny hooks / SimCommand from plugins | deferred (ECS `World.commands` is the drain seam) |
+
+Hot path: null hooks are a null check only; sample has no `on_tick`.
 
 ## Goals
 

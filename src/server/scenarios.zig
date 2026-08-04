@@ -609,6 +609,48 @@ test "scenario vehicle enter drive and turret kills with power" {
     );
 }
 
+test "scenario pressure plate trigger pulse powers wired load" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_trig");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trig", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // gen -> plate (trigger gate) -> load. Idle plate blocks the load.
+    const gen = g.sim.power.addNodeAt(.generator, 100, 70, 100, 100).?;
+    const plate = g.sim.power.addNodeAt(.consumer, 102, 70, 100, 1).?;
+    const load = g.sim.power.addNodeAt(.consumer, 104, 70, 100, 20).?;
+    const pi = g.sim.power.indexOfId(plate).?;
+    g.sim.power.nodes[pi].is_trigger = true;
+    try std.testing.expect(g.sim.power.connect(gen, plate));
+    try std.testing.expect(g.sim.power.connect(plate, load));
+    g.sim.power.resolve();
+    try std.testing.expect(g.sim.power.nodes[pi].powered);
+    try std.testing.expect(!g.sim.power.nodes[g.sim.power.indexOfId(load).?].powered);
+
+    // Player steps on plate cell via PosAndRot (noteAcceptedMove -> activateTriggerAt).
+    const pos = try packages.buildPosAndRotBody(&g.body_buf, c.entity_id, 102.5, 70.1, 100.5, 0, 0, 0, true);
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntityPosAndRot", pos));
+    try std.testing.expect(g.sim.power.nodes[pi].pulse_left > 0);
+    try std.testing.expect(g.sim.power.nodes[g.sim.power.indexOfId(load).?].powered);
+
+    // Pulse expires over ticks.
+    var t: u32 = 0;
+    while (t < 20) : (t += 1) try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.power.nodes[pi].pulse_left);
+    try std.testing.expect(!g.sim.power.nodes[g.sim.power.indexOfId(load).?].powered);
+
+    std.debug.print("PASS trigger: plate pulse then expire load_off\n", .{});
+}
+
 test "scenario inventory move drop place equip" {
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_sc_inv");

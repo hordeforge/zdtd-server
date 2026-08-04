@@ -65,6 +65,8 @@ wins**. Refresh inventory docs when closing work.
 | [PROMPTS/review-zig-idiomatic.md](PROMPTS/review-zig-idiomatic.md) | Zig 0.16 idioms, comptime, hot-path no-alloc, std.Io, Zig Zen |
 | [PROMPTS/review-abstractions.md](PROMPTS/review-abstractions.md) | When to build/keep/delete abstractions; layer fit; YAGNI scorecard |
 | [PROMPTS/review-simd.md](PROMPTS/review-simd.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
+| [PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md) | ECS ownership vs world/session; SoA columns; systems vs stranded game.zig |
+| [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http vs residual linux TCP |
 
 ## Scale (parked until M11)
 

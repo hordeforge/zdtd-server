@@ -213,6 +213,9 @@ pub const IoMutex = struct {
 
     pub fn unlock(self: *IoMutex) void {
         if (builtin.single_threaded) return;
+        // Same ensureStarted as lock: unlock must not touch undefined Threaded.io
+        // if a caller mismatched the pair (or raced first lock init).
+        global_pool.ensureStarted();
         self.inner.unlock(global_pool.io());
     }
 };
@@ -292,4 +295,34 @@ test "forRanges force serial covers all" {
     };
     forRanges(64, Ctx{ .hits = hits[0..] }, Ctx.work);
     for (hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
+}
+
+test "forRanges nested reentry stays serial and covers all" {
+    // Nested forRanges while outer holds in_run must not clobber jobs/outstanding.
+    // Separate arrays so outer workers (disjoint ranges) never race nested writes.
+    if (builtin.single_threaded) return;
+    var outer_hits: [64]u8 = .{0} ** 64;
+    var nested_hits: [64]u8 = .{0} ** 64;
+    const Outer = struct {
+        outer: []u8,
+        nested: []u8,
+        fn work(ctx: @This(), begin: usize, end: usize) void {
+            const Inner = struct {
+                nested: []u8,
+                fn work(ic: @This(), b: usize, e: usize) void {
+                    var i = b;
+                    while (i < e) : (i += 1) ic.nested[i] = 1;
+                }
+            };
+            // Only rank-0 range nests (once); serial path covers full nested[].
+            if (begin == 0) {
+                forRanges(64, Inner{ .nested = ctx.nested }, Inner.work);
+            }
+            var i = begin;
+            while (i < end) : (i += 1) ctx.outer[i] = 1;
+        }
+    };
+    forRanges(64, Outer{ .outer = outer_hits[0..], .nested = nested_hits[0..] }, Outer.work);
+    for (outer_hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
+    for (nested_hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
 }

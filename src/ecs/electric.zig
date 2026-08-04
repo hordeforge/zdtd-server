@@ -5,6 +5,8 @@ const std = @import("std");
 
 pub const max_nodes: usize = 256;
 pub const max_wires: usize = 512;
+/// Pressure plate / tripwire pulse duration (seconds). ~10 ticks at 20 TPS.
+pub const default_trigger_pulse_s: f32 = 0.5;
 
 pub const NodeKind = enum(u8) {
     generator = 0,
@@ -37,6 +39,10 @@ pub const PowerNode = struct {
     timer_period: f32 = 0,
     /// Solar (no MaxFuel): only contributes when daylight is true.
     solar: bool = false,
+    /// PressurePlate / TripWire / MotionSensor / Trigger: step actuation.
+    is_trigger: bool = false,
+    /// Seconds of active trigger pulse remaining (0 = idle).
+    pulse_left: f32 = 0,
 };
 
 pub const Wire = struct {
@@ -104,6 +110,21 @@ pub const PowerGrid = struct {
         if (period_s <= 0) return false;
         self.nodes[i].timer_period = period_s;
         self.nodes[i].timer_left = period_s;
+        return true;
+    }
+
+    /// Actuate a pressure plate / tripwire at world position. Fail closed: requires an
+    /// `is_trigger` node that is already powered (wired to a live generator). Starts a
+    /// pulse so BFS floods past the gate for `default_trigger_pulse_s`.
+    /// Returns false if no trigger, unpowered, or missing node.
+    pub fn activateTriggerAt(self: *PowerGrid, x: i32, y: i32, z: i32) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (!self.nodes[i].is_trigger) return false;
+        // Ensure connectivity is current before the powered gate.
+        self.resolve();
+        if (!self.nodes[i].powered) return false;
+        self.nodes[i].pulse_left = default_trigger_pulse_s;
+        self.resolve();
         return true;
     }
 
@@ -210,6 +231,17 @@ pub const PowerGrid = struct {
                         }
                     }
                 }
+            }
+        }
+        // 5) Trigger pulses: count down; expire clears signal path (re-resolve).
+        i = 0;
+        while (i < self.node_n) : (i += 1) {
+            var n = &self.nodes[i];
+            if (n.pulse_left <= 0) continue;
+            n.pulse_left -= dt;
+            if (n.pulse_left <= 0) {
+                n.pulse_left = 0;
+                dirty = true;
             }
         }
         if (dirty) self.resolveDay(daylight);
@@ -372,13 +404,18 @@ pub const PowerGrid = struct {
         while (qh < qt) {
             const u: u16 = @intCast(queue[qh]);
             qh += 1;
+            // Trigger gates: only flood past the plate while a pulse is active.
+            // The trigger node itself stays powered (visited when enqueued).
+            if (self.nodes[u].is_trigger and self.nodes[u].pulse_left <= 0) continue;
             var w: usize = 0;
             while (w < self.wire_n) : (w += 1) {
                 const other: u16 = if (wire_ai[w] == u) wire_bi[w] else if (wire_bi[w] == u) wire_ai[w] else continue;
                 if (other == no_node) continue;
                 const oi: usize = other;
                 if (visited[oi]) continue;
-                if (!self.nodes[oi].on and self.nodes[oi].kind != .relay) continue;
+                // Relays always pass; triggers can be reached (to become powered);
+                // other nodes need .on.
+                if (!self.nodes[oi].on and self.nodes[oi].kind != .relay and !self.nodes[oi].is_trigger) continue;
                 visited[oi] = true;
                 queue[qt] = oi;
                 qt += 1;
@@ -678,4 +715,40 @@ test "solar generator day gate" {
     try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
     _ = g.tick(1.0, true);
     try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "trigger gate powers children only while pulsing" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const plate = g.addNodeAt(.consumer, 2, 70, 0, 1).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    const pi = g.indexOfId(plate).?;
+    g.nodes[pi].is_trigger = true;
+    try std.testing.expect(g.connect(gen, plate));
+    try std.testing.expect(g.connect(plate, load));
+    g.resolve();
+    // Idle plate is powered but does not pass power to the load.
+    try std.testing.expect(g.nodes[pi].powered);
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    // Step on plate: pulse opens the gate.
+    try std.testing.expect(g.activateTriggerAt(2, 70, 0));
+    try std.testing.expect(g.nodes[pi].pulse_left > 0);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    // After pulse expires, load drops.
+    _ = g.tick(default_trigger_pulse_s + 0.1, true);
+    try std.testing.expectEqual(@as(f32, 0), g.nodes[pi].pulse_left);
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "activateTriggerAt fails closed without trigger or power" {
+    var g: PowerGrid = .{};
+    // No node.
+    try std.testing.expect(!g.activateTriggerAt(1, 2, 3));
+    // Plain consumer is not a trigger.
+    _ = g.addNodeAt(.consumer, 1, 70, 1, 10).?;
+    try std.testing.expect(!g.activateTriggerAt(1, 70, 1));
+    // Trigger present but not wired to a generator: unpowered.
+    const plate = g.addNodeAt(.consumer, 4, 70, 4, 1).?;
+    g.nodes[g.indexOfId(plate).?].is_trigger = true;
+    try std.testing.expect(!g.activateTriggerAt(4, 70, 4));
 }

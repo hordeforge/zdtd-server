@@ -18,9 +18,17 @@ pub const Resolved = struct {
     output_per_charge: f32 = 0,
     /// OutputPerStack (sub-cell scale).
     output_per_stack: f32 = 0,
+    /// PressurePlate / TripWire / MotionSensor / Trigger: step-actuated gate.
+    is_trigger: bool = false,
 
     /// Fill PowerNode capacity/burn/energy from stock props. watts already on node.
     pub fn applyToNode(self: Resolved, node: *electric.PowerNode) void {
+        node.is_trigger = self.is_trigger;
+        if (self.is_trigger) {
+            // Idle gate: BFS reaches the plate when wired, but does not flood past
+            // until activateTriggerAt sets pulse_left.
+            node.on = true;
+        }
         switch (self.kind) {
             .generator => {
                 if (self.max_fuel > 0) {
@@ -90,6 +98,14 @@ pub fn kindFromClass(cls: []const u8) ?electric.NodeKind {
     return null;
 }
 
+/// Step-actuated trigger TE classes (pressure plate / tripwire / motion / generic Trigger).
+pub fn classIsTrigger(cls: []const u8) bool {
+    return std.mem.eql(u8, cls, "PressurePlate") or
+        std.mem.eql(u8, cls, "TripWire") or
+        std.mem.eql(u8, cls, "MotionSensor") or
+        std.mem.eql(u8, cls, "Trigger");
+}
+
 /// Resolved id → power props, built once at load from maxdamage Table.
 pub const Registry = struct {
     ids: [max_power_entries]u16 = undefined,
@@ -99,6 +115,7 @@ pub const Registry = struct {
     output_per_fuel: [max_power_entries]f32 = undefined,
     output_per_charge: [max_power_entries]f32 = undefined,
     output_per_stack: [max_power_entries]f32 = undefined,
+    is_trigger: [max_power_entries]bool = undefined,
     n: usize = 0,
 
     fn push(
@@ -110,6 +127,7 @@ pub const Registry = struct {
         opf: f32,
         opc: f32,
         ops: f32,
+        is_trigger: bool,
     ) void {
         if (r.n >= max_power_entries) return;
         r.ids[r.n] = id;
@@ -119,6 +137,7 @@ pub const Registry = struct {
         r.output_per_fuel[r.n] = opf;
         r.output_per_charge[r.n] = opc;
         r.output_per_stack[r.n] = ops;
+        r.is_trigger[r.n] = is_trigger;
         r.n += 1;
     }
 
@@ -156,6 +175,7 @@ pub const Registry = struct {
                 std.mem.swap(f32, &r.output_per_fuel[j], &r.output_per_fuel[j - 1]);
                 std.mem.swap(f32, &r.output_per_charge[j], &r.output_per_charge[j - 1]);
                 std.mem.swap(f32, &r.output_per_stack[j], &r.output_per_stack[j - 1]);
+                std.mem.swap(bool, &r.is_trigger[j], &r.is_trigger[j - 1]);
             }
         }
     }
@@ -176,7 +196,7 @@ pub const Registry = struct {
                     continue;
                 };
                 const p = propsFromTable(table, name);
-                r.push(id, kind, p[0], p[1], p[2], p[3], p[4]);
+                r.push(id, kind, p[0], p[1], p[2], p[3], p[4], classIsTrigger(cls));
             }
             if (r.n > 0) {
                 r.sortById();
@@ -184,24 +204,24 @@ pub const Registry = struct {
             }
         }
         // Offline fallback: resolve known names if Class map empty.
-        const fallback = [_]struct { []const u8, electric.NodeKind }{
-            .{ "generatorbank", .generator },
-            .{ "solarbank", .generator },
-            .{ "batterybank", .battery },
-            .{ "electricwirerelay", .relay },
-            .{ "electricfencepost", .relay },
-            .{ "electrictimerrelay", .relay },
-            .{ "switch", .consumer },
-            .{ "pressureplate", .consumer },
-            .{ "autoTurret", .consumer },
-            .{ "dartTrap", .consumer },
-            .{ "bladeTrap", .consumer },
+        const fallback = [_]struct { []const u8, electric.NodeKind, bool }{
+            .{ "generatorbank", .generator, false },
+            .{ "solarbank", .generator, false },
+            .{ "batterybank", .battery, false },
+            .{ "electricwirerelay", .relay, false },
+            .{ "electricfencepost", .relay, false },
+            .{ "electrictimerrelay", .relay, false },
+            .{ "switch", .consumer, false },
+            .{ "pressureplate", .consumer, true },
+            .{ "autoTurret", .consumer, false },
+            .{ "dartTrap", .consumer, false },
+            .{ "bladeTrap", .consumer, false },
         };
         for (fallback) |e| {
             if (r.n >= max_power_entries) break;
             if (table.idByName(e[0])) |id| {
                 const p = propsFromTable(table, e[0]);
-                r.push(id, e[1], p[0], p[1], p[2], p[3], p[4]);
+                r.push(id, e[1], p[0], p[1], p[2], p[3], p[4], e[2]);
             }
         }
         r.sortById();
@@ -219,6 +239,7 @@ pub const Registry = struct {
                     .output_per_fuel = self.output_per_fuel[i],
                     .output_per_charge = self.output_per_charge[i],
                     .output_per_stack = self.output_per_stack[i],
+                    .is_trigger = self.is_trigger[i],
                 };
             }
         }
@@ -306,4 +327,26 @@ test "kindFromClass mapping" {
     try std.testing.expectEqual(electric.NodeKind.relay, kindFromClass("ElectricWire").?);
     try std.testing.expectEqual(electric.NodeKind.consumer, kindFromClass("RangedTrap").?);
     try std.testing.expectEqual(@as(?electric.NodeKind, null), kindFromClass("Light"));
+}
+
+test "classIsTrigger and registry is_trigger on pressure plate" {
+    try std.testing.expect(classIsTrigger("PressurePlate"));
+    try std.testing.expect(classIsTrigger("TripWire"));
+    try std.testing.expect(!classIsTrigger("RangedTrap"));
+    var stub: StubTable = .{
+        .rows = &[_]StubTable.Row{
+            .{ .name = "pressureplate", .id = 19200, .watts = 1, .class = "PressurePlate" },
+            .{ .name = "autoTurret", .id = 19208, .watts = 15, .class = "RangedTrap" },
+        },
+    };
+    try stub.power_class_by_name.put(std.testing.allocator, "pressureplate", "PressurePlate");
+    try stub.power_class_by_name.put(std.testing.allocator, "autoTurret", "RangedTrap");
+    defer stub.power_class_by_name.deinit(std.testing.allocator);
+    const reg = Registry.build(&stub);
+    const plate = reg.lookup(19200).?;
+    try std.testing.expect(plate.is_trigger);
+    var node: electric.PowerNode = .{ .kind = .consumer, .watts = plate.watts };
+    plate.applyToNode(&node);
+    try std.testing.expect(node.is_trigger);
+    try std.testing.expect(!reg.lookup(19208).?.is_trigger);
 }

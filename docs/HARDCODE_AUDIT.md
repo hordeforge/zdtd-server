@@ -9,19 +9,19 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
 | **A** (stock data) | ~12 | 2 | ~6 | P0 deco version pin + terrain module pins residual |
-| **B** (zdtd policy) | ~16 | 0 | ~4 | Caps on Game fields; full `zdtd.toml` not implemented |
+| **B** (zdtd policy) | ~12 | 0 | ~2 | Stream/authority/feature via `zdtd.toml` + InitOptions; residual open consts (locks, AI bands, caps) |
 | **OK** | 22+ | — | — | Wire / RE / physics / offline pins |
 
 | Spot-check | Result |
 |---|---|
 | `default_gen_fuel` / `default_battery_cap` | **Gone** (power via maxdamage → `powerblocks.Resolved`) |
 | `coin_item_id_default = 6` | **Fixed**: trade requires non-zero `ecsIdByName("casinoCoin")` |
-| `max_streamed_chunks` / interest / edit caps | **On Game/InitOptions fields** (defaults preserved); no file loader yet |
+| `max_streamed_chunks` / interest / edit caps | **On Game/InitOptions** + loaded from `zdtd.toml` (`src/server/zdtd_config.zig`; see `zdtd.toml.example`) |
 | bare `assignids.*` on production paths | **Reduced**: IdCtx pins only if dump empty; place fails closed when dump loaded |
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation:** `zig build test` → **All 239 tests passed.**
+**Validation (this audit pass):** unit suite is **325** tests (`zig build test`). Count drifts; see [STATUS.md](STATUS.md).
 
 ---
 
@@ -57,8 +57,8 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A07 | biome_layers defaults | P1 | Open P2 | Pre-XML defaults; XML path resolves |
 | A08 | stock_deco pins | P0 | **Partial** | Live deco uses idByName; module pins for labels/offline |
 | A09 | maxDamageForBlock | P1 | **Fixed** | |
-| A10 | class_table scrap | P1 | Open | Overwritten on entity load; scrap offline |
-| A11 | AI attack/chase floors | P1 | Open | Defaults when class fields 0 |
+| A10 | class_table scrap | P1 | **Fixed** | Offline loot_list = EntityLootContainerRegular; spawn uses class loot_list; Game.setClassDef from entityclasses |
+| A11 | AI attack/chase floors | P1 | **Fixed** | class_table speeds/damage from XML; module consts only when field 0 |
 | A12 | vehicle speed switch | P1 | Open | Fallback when max_speed 0 |
 | A13 | recipe unlock extras | P2 | Open | |
 | A14 | quest builtins | P2 | Warn if game-dir | |
@@ -87,28 +87,32 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 
 | ID | Concern | Sev | Status |
 |---|---|---|---|
-| B01–B07 | stream/interest/edit/claimed/stale | P1 | **Fields on Game** (no zdtd.toml file yet) |
+| B01–B07 | stream/interest/edit/claimed/stale | P1 | **Done:** Game fields + `[stream]` / `[authority]` in `zdtd.toml` |
 | B08–B12 | lock stale/channels, join gap, wallet, craft cap | P2 | Open consts |
 | B13 | tick throttles % N | P1 | Partial: stream/motion periods on Game; save/worldtime still bare |
 | B14–B21 | AI bands, caps, buffers | P2–P3 | Open |
-| B22 | CLI + file for caps | P1 | Open (InitOptions only; no toml) |
+| B22 | CLI + file for caps | P1 | **Done:** file via `zdtd_config`; no per-cap CLI flags (InitOptions from toml) |
 | B23–B24 | port offset, APM | P3 | Open |
 
-### Draft `zdtd.toml` (remaining B; not implemented)
+### `zdtd.toml` (core shipped; residual keys still draft)
 
-Precedence when added:
+Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../zdtd.toml.example).
+Operator docs: [GAME_OPTIONS.md](GAME_OPTIONS.md). Precedence:
 
 ```text
-CLI  >  <world>/zdtd.toml  >  CWD zdtd.toml  >  serverconfig.xml (stock keys)
-     >  code defaults (InitOptions / default_* == today's values)
+CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
+     >  --serverconfig keys  >  code defaults (InitOptions / default_*)
 ```
+
+Parsed today: `[stream]`, `[authority]`, `[feature]`. Keys under `[sim]`, `[net]`,
+`[ai]`, `[caps]`, `[apm]` in the draft below are residual (unknown-key warn if present).
 
 ```toml
 [stream]
 max_streamed_chunks = 169
 chunk_adds_per_stream_tick = 8
-stream_radius_min = 6
-stream_radius_max = 8
+stream_radius_min = 7
+stream_radius_max = 9
 
 [authority]
 interest_range_blocks = 160.0
@@ -191,7 +195,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 
 ### P1
 
-1. **A10–A12** class_table scrap, AI combat floors, vehicle speed switch residuals.
+1. ~~**A10–A11**~~ **Done.** **A12** vehicle speed switch residuals remain.
 2. **B13 residual** world-time / save / sleeper `% N` not all Game fields.
 3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature). AI bands / wallets / tick %N still open.
 4. **A07** biome default stack pins before XML (acceptable offline).
@@ -203,7 +207,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 1. ~~World init terrain ids (A05).~~
 2. ~~`zdtd.toml` loader for B01–B07 + feature.~~
 3. Extend toml for AI bands / wallets / tick throttles (B08–B14).
-4. AI floors / vehicle speeds from entityclasses + vehicles.xml only (A11/A12).
+4. ~~A11 AI floors.~~ A12 vehicle speeds from vehicles.xml only.
 5. Drop recipe unlock extras when `source==xml` (A13).
 
 ---
@@ -213,7 +217,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 | Doc | Role |
 |---|---|
 | [ASSETS.md](ASSETS.md) | Loader contracts |
-| [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig + future zdtd.toml |
+| [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig + zdtd.toml |
 | [STATUS.md](STATUS.md) | Play surface |
 | [../TODO.md](../TODO.md) | Backlog |
 | [PROMPTS/audit-hardcoded-data.md](PROMPTS/audit-hardcoded-data.md) | Audit prompt |

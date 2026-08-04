@@ -23,3 +23,7 @@ peer_stale_ms = 3000
 
 [feature]
 wire_chunks = true
+
+# Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
+# [mode]
+# name = "default"

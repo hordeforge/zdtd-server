@@ -15,9 +15,12 @@ pub const full_ai_dist_sq: f32 = 64.0 * 64.0;
 pub const mid_ai_dist_sq: f32 = 225.0;
 pub const sense_dist_sq: f32 = 48.0 * 48.0;
 pub const attack_range_sq: f32 = 2.0 * 2.0;
+/// Offline / class_table field==0 floors only. Prefer EntityClass from entityclasses
+/// (MoveSpeedAggro, MoveSpeed, HandItem→items DamageEntity) when non-zero.
 pub const attack_damage: f32 = 8.0;
 pub const chase_speed: f32 = 2.2;
 pub const wander_speed: f32 = 0.8;
+/// No entityclasses field; always this cadence (stock melee interval approx).
 pub const attack_cooldown_s: f32 = 1.2;
 /// Replan grid A* at most this often while chasing (keeps 20 TPS budget).
 const path_replan_interval_s: f32 = 0.35;
@@ -468,6 +471,13 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
                 w.inventory[ps] = inventory_before;
                 continue;
             }
+            // Ledger after full transfer succeeds (no partial loot credit).
+            for (w.inventory[i].slots) |slot| {
+                if (slot.count == 0) continue;
+                const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
+                const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
+                w.inv_ledger.record(p, slot.item_id, d, .loot);
+            }
         }
         w.destroy(i);
         n += 1;
@@ -567,24 +577,32 @@ pub fn traderRestock(w: *World) void {
 // coarse ZombieAi.state enum so downstream replication (game.zig EntitySpeeds/
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
-// Only two real tasks are registered (ApproachAndAttackTarget, Wander); the
-// engine supports more table rows but the rest of stock's EAI catalog
-// (BreakBlock, DestroyArea, Territorial, Look, Dodge, Leap, RangedAttack, ...)
-// is an honest gap (docs/MISSING_FEATURES.md). Because the two tasks share
-// MutexBit 0 they are mutually exclusive, so collapsing the executing set to a
-// single TaskId (ZombieAi.active_task) is exact for this set; adding a
-// continuous non-conflicting task later (e.g. Look) would need a task bitset.
+// Four real tasks: BreakBlock, ApproachAndAttackTarget, ApproachSpot, Wander.
+// Rest of stock EAI (DestroyArea, Territorial, Look, Dodge, Leap, RangedAttack,
+// ...) remains a gap (docs/MISSING_FEATURES.md). BreakBlock uses mutex 0 so
+// isBestTask allows it while Approach executes when path_blocked; movement
+// tasks still share bit 0. Collapsing executingTasks to one TaskId stays exact
+// for this set.
 
 /// Comptime task table. Priority ascending == array order == stock XML AITask
 /// order == EAIManager::ParseTasks insertion order (asm.il:430620). Values
-/// mirror EAIApproachAndAttackTarget::Init (MutexBits=3, executeDelay=0.1,
-/// non-continuous; asm.il:421798) and EAIWander::Init (MutexBits=1, continuous
-/// default; asm.il:438104,424579).
+/// mirror EAIBreakBlock (asm.il:425121; light chew when path stuck),
+/// EAIApproachAndAttackTarget::Init (MutexBits=3, executeDelay=0.1,
+/// non-continuous; asm.il:421798), EAIApproachSpot (asm.il:424093; below chase,
+/// above wander), and EAIWander::Init (MutexBits=1, continuous default;
+/// asm.il:438104,424579).
 const Task = struct { id: c.TaskId, priority: u8, mutex: u8, execute_delay: f32, continuous: bool };
 const zombie_tasks = [_]Task{
+    // mutex 0: compatible with approach so table order can switch when stuck.
+    .{ .id = .break_block, .priority = 1, .mutex = 0b00, .execute_delay = 0.2, .continuous = false },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
+    // continuous so approach_attack can preempt via isBestTask continuous yield.
+    .{ .id = .approach_spot, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     .{ .id = .wander, .priority = 2, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
 };
+
+/// Arrive radius (m) for EAIApproachSpot; clears has_spot.
+const spot_arrive: f32 = 0.75;
 
 /// EAITaskList.executeDelayScale base (asm.il:437541, IL_0028 ldc.r4 0.85).
 /// The stock GameRandom jitter blended on top is dropped (simplification).
@@ -620,9 +638,15 @@ fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2:
     return ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null;
 }
 
+/// EAIApproachSpot::CanExecute (asm.il:424093): director/AI set a spot to walk to.
+fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
+    return ai.has_spot;
+}
+
 /// EAIWander::CanExecute (asm.il:438161) does NOT test for a target; here it is
 /// the pure fallback: wander whenever no player is sensed. It yields to chase
-/// only through priority + MutexBits, never through this gate.
+/// only through priority + MutexBits, never through this gate. Spot also wins
+/// over wander via table order when has_spot (same priority/mutex).
 fn wanderCanExecute(np_id: i32, np_d2: f32) bool {
     return !(np_id >= 0 and np_d2 < sense_dist_sq);
 }
@@ -634,6 +658,9 @@ const AiCtx = struct {
     /// Fixed-point damage accumulators, one per entity slot (atomic adds).
     dmg_fp: []u32,
     hits: *std.atomic.Value(u32),
+    /// Snapshotted before forRanges so workers never reread a field the
+    /// director (or another tick phase) may rewrite on the main thread.
+    zombie_speed_scale: f32,
 
     fn work(ctx: AiCtx, begin: usize, end: usize) void {
         var i: usize = begin;
@@ -665,10 +692,10 @@ const AiCtx = struct {
             const np = nearestPlayerSnap(ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z);
             ai.active_scale = if (np.id >= 0) lodScale(np.d2) else 0.1;
 
-            // Per-class speeds from entityclasses when set (XML MoveSpeed ~0.08
-            // shamble -> sim scale x10; MoveSpeedAggro max ~1.35 -> x1.6).
+            // A11: class_table from entityclasses (0 field → module floor only).
+            // MoveSpeed ~0.08 shamble → x10; MoveSpeedAggro max ~1.35 → x1.6.
             const ct = ctx.w.class_table[ctx.w.class_id[s].id];
-            const sscale = ctx.w.zombie_speed_scale;
+            const sscale = ctx.zombie_speed_scale;
             const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else wander_speed) * sscale;
             const cspd: f32 = (if (ct.chase_speed > 0) ct.chase_speed * 1.6 else chase_speed) * sscale;
 
@@ -703,11 +730,14 @@ const AiCtx = struct {
             // Steps 3/4: run the winning task's Update and project it onto the
             // coarse ZombieAi.state enum for downstream replication parity.
             switch (ai.active_task) {
+                .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
+                .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
                 .none => {
                     if (ai.state != .sleep) ai.state = .idle;
                     ai.alert = false;
+                    ai.path_blocked = false;
                 },
             }
 
@@ -723,10 +753,60 @@ const AiCtx = struct {
 /// Dispatch to a task's CanExecute gate (Continue() == CanExecute for both).
 fn canExecute(w: *const World, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     return switch (id) {
+        .break_block => breakBlockCanExecute(ai, np.id, np.d2),
         .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
+        .approach_spot => approachSpotCanExecute(ai),
         .wander => wanderCanExecute(np.id, np.d2),
         .none => false,
     };
+}
+
+/// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
+/// and a solid cell directly toward the goal (set by chaseAlongPath).
+fn breakBlockCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    if (!ai.path_blocked) return false;
+    if (!(np_id >= 0 and np_d2 < sense_dist_sq)) return false;
+    // Melee range: approach owns the bite; do not stick on break.
+    if (np_d2 <= attack_range_sq) return false;
+    return true;
+}
+
+/// Hold chase projection so Game.tickZombieBlockDamage keeps chewing the cover
+/// block. Throttled A* replan clears path_blocked when a detour opens.
+fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) void {
+    ai.alert = true;
+    if (np.id >= 0) {
+        ai.target_id = np.id;
+        ai.path_goal_x = np.px;
+        ai.path_goal_z = np.pz;
+    }
+    ai.state = .chase;
+    ai.has_path = true;
+    if (w.solid_fn == null) {
+        ai.path_blocked = false;
+        return;
+    }
+    // Replan on the same cadence as chase so destroyed cover resumes approach.
+    if (ai.path_replan_cd > 0) {
+        ai.path_replan_cd -= dt;
+        return;
+    }
+    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
+    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
+    const gxi: i32 = @intFromFloat(@floor(ai.path_goal_x));
+    const gzi: i32 = @intFromFloat(@floor(ai.path_goal_z));
+    var p: path_mod.Path = .{};
+    path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
+    const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
+    if (p.next()) |wp| {
+        ai.path_wp_x = wp.x;
+        ai.path_wp_z = wp.z;
+        ai.path_wp_valid = true;
+    } else {
+        ai.path_wp_valid = false;
+    }
+    ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
+    ai.path_replan_cd = path_replan_interval_s;
 }
 
 /// EAIBase::Start hook. Only Wander has meaningful state to seed: it picks a
@@ -764,6 +844,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
         ai.state = .attack;
         ai.path_wp_valid = false;
         if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
+            // A11: HandItem DamageEntity on class_table; module const if 0.
             const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else attack_damage;
             const add: u32 = @intFromFloat(adm * @as(f32, @floatFromInt(dmg_scale)));
             _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
@@ -784,8 +865,10 @@ fn pathSolidCb(ctx: ?*anyopaque, x: i32, z: i32) bool {
 
 /// Replan A* on a throttle, then step toward the next waypoint (or goal).
 /// When no solid_fn is wired, degenerates to straight-line stepToward.
+/// Sets path_blocked when replan yields no detour and the cell toward goal is solid.
 fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: f32, dt: f32) void {
     if (w.solid_fn == null) {
+        ai.path_blocked = false;
         stepToward(w, s, gx, gz, speed, dt);
         return;
     }
@@ -798,6 +881,8 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
     if (need_replan) {
         var p: path_mod.Path = .{};
         path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
+        // Greedy fallback may fill waypoints along a wall without reaching the goal.
+        const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
         if (p.next()) |wp| {
             ai.path_wp_x = wp.x;
             ai.path_wp_z = wp.z;
@@ -805,6 +890,8 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
         } else {
             ai.path_wp_valid = false;
         }
+        // BreakBlock when no path to goal (sealed / infinite wall); clear when A* reaches.
+        ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
         ai.path_replan_cd = path_replan_interval_s;
     }
     if (ai.path_wp_valid) {
@@ -822,6 +909,31 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
     }
 }
 
+/// EAIApproachSpot::Update: path/step toward director spot; clear has_spot on arrive.
+fn approachSpotUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
+    if (!ai.has_spot) {
+        ai.state = .idle;
+        return;
+    }
+    ai.state = .chase;
+    ai.alert = true;
+    ai.target_id = -1;
+    ai.path_goal_x = ai.spot_x;
+    ai.path_goal_z = ai.spot_z;
+    ai.has_path = true;
+    const dx = ai.spot_x - w.transform[s].x;
+    const dz = ai.spot_z - w.transform[s].z;
+    if (dx * dx + dz * dz <= spot_arrive * spot_arrive) {
+        ai.has_spot = false;
+        ai.has_path = false;
+        ai.path_wp_valid = false;
+        ai.path_blocked = false;
+        ai.state = .idle;
+        return;
+    }
+    chaseAlongPath(w, s, ai, ai.spot_x, ai.spot_z, cspd * ai.active_scale, dt);
+}
+
 /// EAIWander::Update: drift toward the Start-picked destination.
 fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.state = .wander;
@@ -829,6 +941,7 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.target_id = -1;
     ai.has_path = false;
     ai.path_wp_valid = false;
+    ai.path_blocked = false;
     stepToward(w, s, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
 }
 
@@ -843,6 +956,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
         .players = snaps[0..pn],
         .dmg_fp = dmg_fp[0..],
         .hits = &hits_a,
+        .zombie_speed_scale = w.zombie_speed_scale,
     };
     parallel.forRanges(max_entities, ctx, AiCtx.work);
     _ = applyDeferredDamage(w, dmg_fp[0..]);
@@ -1120,6 +1234,7 @@ pub fn tickAll(w: *World, dt: f32) struct {
     loot_n: u8,
     despawned_ids: [8]i32,
     despawned_n: u8,
+    commands_applied: u32,
 } {
     const dr = systemDirector(w, dt);
     const hits = systemZombieAi(w, dt);
@@ -1130,6 +1245,8 @@ pub fn tickAll(w: *World, dt: f32) struct {
     const tk = systemTurrets(w, dt);
     var de_ids: [8]i32 = .{0} ** 8;
     const de_n = systemDespawnFar(w, de_ids[0..]);
+    // Deferred ops from systems/plugins: apply after sim mutations settle.
+    const cmd = w.drainCommands();
     return .{
         .ai_hits = hits,
         .director_spawned = dr.spawned,
@@ -1141,6 +1258,7 @@ pub fn tickAll(w: *World, dt: f32) struct {
         .loot_n = tk.loot_n,
         .despawned_ids = de_ids,
         .despawned_n = de_n,
+        .commands_applied = cmd.applied,
     };
 }
 
@@ -1201,18 +1319,26 @@ test "driver seat tracks clamped vehicle y+1" {
 }
 
 test "isBestTask: approach preempts wander, wander cannot preempt approach" {
-    const approach = zombie_tasks[0];
-    const wander = zombie_tasks[1];
+    const brk = zombie_tasks[0];
+    const approach = zombie_tasks[1];
+    const spot = zombie_tasks[2];
+    const wander = zombie_tasks[3];
     // Approach (priority 1, mutex 0b11) is best while Wander (continuous,
     // priority 2) executes: higher-priority continuous never blocks.
     try std.testing.expect(isBestTask(approach, .wander));
+    try std.testing.expect(isBestTask(approach, .approach_spot));
     // Wander is NOT best while Approach executes: priority 1 <= 2 and
     // MutexBits overlap (0b11 & 0b01 == 0b01 != 0) makes them incompatible.
     try std.testing.expect(!isBestTask(wander, .approach_attack));
+    try std.testing.expect(!isBestTask(spot, .approach_attack));
+    // BreakBlock mutex 0 is compatible with approach (overlap == 0).
+    try std.testing.expect(isBestTask(brk, .approach_attack));
+    try std.testing.expect(isBestTask(approach, .break_block));
     // No executing task, or self as the executor, is always best.
     try std.testing.expect(isBestTask(approach, .none));
     try std.testing.expect(isBestTask(wander, .none));
     try std.testing.expect(isBestTask(wander, .wander));
+    try std.testing.expect(isBestTask(spot, .approach_spot));
 }
 
 test "system zombie chases" {
@@ -1293,6 +1419,82 @@ test "system zombie falls back to wander when target removed (mutex release)" {
     try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
     try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
     try std.testing.expect(!w.zombie_ai[zs].alert);
+}
+
+test "class_table attack/chase floors only when field is zero" {
+    var w: World = .{};
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20;
+    w.class_table[1].chase_speed = 1.0; // XML-scale; sim uses *1.6
+    w.class_table[1].wander_speed = 0.2;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Melee used class attack_damage (20), not module floor 8.
+    try std.testing.expect(w.health[ps].hp <= hp0 - 15);
+    // Class chase applied (non-zero table field).
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+test "spawn zombie loot_list comes from class_table not scrap" {
+    var w: World = .{};
+    defer w.deinit();
+    try std.testing.expectEqualStrings("EntityLootContainerRegular", w.class_table[1].loot_list);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expectEqualStrings("EntityLootContainerRegular", w.class_id[zs].loot_list);
+    w.class_table[1].loot_list = "EntityLootContainerStrong";
+    const z2 = w.spawnZombieClass(1, 70, 1, 40, 1, w.class_table[1].loot_list).?;
+    const zs2 = w.slotOfNetId(z2).?;
+    try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[zs2].loot_list);
+}
+
+test "system zombie break_block when path fully blocked" {
+    // Impassable wall sealing zombie from player; A* fails → path_blocked → BreakBlock.
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, z: i32) bool {
+            _ = z;
+            return x == 2;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.solid_fn = Wall.solid;
+    w.solid_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].path_blocked);
+    try std.testing.expectEqual(c.TaskId.break_block, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.chase, w.zombie_ai[zs].state);
+    try std.testing.expect(w.zombie_ai[zs].alert);
+}
+
+test "system zombie approaches spot and clears on arrive" {
+    // No player → active_scale 0.1; short spot so arrive fits the budget.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].has_spot = true;
+    w.zombie_ai[zs].spot_x = 2.5;
+    w.zombie_ai[zs].spot_z = 0;
+    const x0 = w.transform[zs].x;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.approach_spot, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.transform[zs].x > x0 + 0.2);
+    // ~2.5 m at chase*0.1 ≈ 0.22 m/s → clear within ~20 s.
+    t = 0;
+    while (t < 25.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].has_spot);
+    try std.testing.expect(w.transform[zs].x > 1.5);
 }
 
 test "quest kill complete on journal component" {

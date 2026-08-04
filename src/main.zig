@@ -10,6 +10,7 @@ const apm = @import("apm/root.zig");
 const world_store = @import("world/store.zig");
 const server_config = @import("server/config.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
+const mode_mod = @import("server/mode.zig");
 const io_fs = @import("util/io_fs.zig");
 const version = @import("version.zig");
 
@@ -25,25 +26,28 @@ const help_text =
     \\  --game-dir DIR        install root (Data/Worlds + Data/Config)
     \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
     \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
+    \\  --mode NAME           gamemode pack modes/<NAME>.toml (data-only; see docs/GAME_OPTIONS.md)
     \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
-    \\  --webui-bind ADDR     webui bind (default 127.0.0.1; 0.0.0.0 needs firewall)
+    \\  --webui-bind ADDR     webui bind (loopback only: 127.0.0.1 or ::1; default 127.0.0.1)
     \\  --webui-secret STR    shared secret (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
-    \\  --quests PATH         explicit quests.xml
-    \\  --config-dir DIR      stock Data/Config dir (XML assets)
-    \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order)
+    \\  --quests PATH         explicit quests.xml (file must exist)
+    \\  --config-dir DIR      stock Data/Config dir (XML assets; dir must exist)
+    \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order; dir must exist)
     \\  --worldgen-seed U64   procedural terrain (on-the-fly; conflicts with --map)
     \\  --ticks N             run N ticks then save and exit (0 = run forever)
     \\  --once                run one tick then save and exit (conflicts with --ticks)
-    \\  -V, --version         print product and stock wire versions and exit
+    \\  -V, -v, --version     print product and stock wire versions and exit
     \\  -h, --help            show this help
     \\
     \\Value forms: --flag VALUE or --flag=VALUE
     \\Precedence: CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
-    \\            --serverconfig keys > code defaults. See docs/GAME_OPTIONS.md.
+    \\            mode pack (if --mode or [mode] name) > --serverconfig keys > code defaults.
+    \\            See docs/GAME_OPTIONS.md.
     \\
     \\Examples:
     \\  zdtd --port 27002 --world worlds/zdtd_default
+    \\  zdtd --mode default --port 27002
     \\  zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
     \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
     \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
@@ -81,17 +85,42 @@ fn printStdout(comptime fmt: []const u8, fmt_args: anytype) void {
 }
 
 /// Resolve a value for `--flag` or `--flag=value`. Rejects empty values in
-/// both forms (`--flag=` and `--flag ""`).
+/// both forms (`--flag=` and `--flag ""`). Also rejects bare next-tokens that
+/// look like another option (`--port --world`) so the real mistake is clear.
 fn flagValue(it: *std.process.Args.Iterator, flag: []const u8, inline_val: ?[]const u8) []const u8 {
     const v = inline_val orelse it.next() orelse
         usageError("option '{s}' requires a value", .{flag});
     if (v.len == 0) usageError("option '{s}' requires a value", .{flag});
+    // Space-separated form only: `--flag --other` is almost always a missing value.
+    // Inline `--flag=--other` is allowed (paths/secrets can start with '-').
+    if (inline_val == null and looksLikeOption(v)) {
+        usageError("option '{s}' requires a value (got '{s}')", .{ flag, v });
+    }
     return v;
 }
 
+/// True if `s` looks like a CLI option token rather than a flag value.
+fn looksLikeOption(s: []const u8) bool {
+    if (s.len < 2 or s[0] != '-') return false;
+    // Single '-' alone is unusual as a path; treat as option-like.
+    if (s.len == 1) return true;
+    // Negative integers are valid for signed types; none of our flags take them
+    // via flagValue alone before flagInt, but keep digit forms as values.
+    if (s[1] >= '0' and s[1] <= '9') return false;
+    return true;
+}
+
 fn flagInt(comptime T: type, flag: []const u8, s: []const u8, base: u8) T {
-    return std.fmt.parseInt(T, s, base) catch
-        usageError("invalid value '{s}' for option '{s}' (expected integer)", .{ s, flag });
+    return std.fmt.parseInt(T, s, base) catch |err| switch (err) {
+        error.Overflow => usageError(
+            "value '{s}' for option '{s}' is out of range for {s}",
+            .{ s, flag, @typeName(T) },
+        ),
+        error.InvalidCharacter => usageError(
+            "invalid value '{s}' for option '{s}' (expected integer)",
+            .{ s, flag },
+        ),
+    };
 }
 
 /// Split `--name` / `--name=value` into (name, optional value).
@@ -103,11 +132,12 @@ fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
 }
 
 const known_flags = [_][]const u8{
-    "--port",             "--world",         "--map",        "--game-dir",
-    "--world-name",       "--serverconfig",  "--admin-port", "--webui-port",
-    "--webui-bind",       "--webui-secret",  "--quests",     "--config-dir",
-    "--config-overrides", "--worldgen-seed", "--ticks",      "--once",
-    "--version",          "--help",
+    "--port",       "--world",            "--map",           "--game-dir",
+    "--world-name", "--serverconfig",     "--mode",          "--admin-port",
+    "--webui-port", "--webui-bind",       "--webui-secret",  "--quests",
+    "--config-dir", "--config-overrides", "--worldgen-seed", "--ticks",
+    "--once",       "--version",          "--help",          "-V",
+    "-v",           "-h",
 };
 
 /// Levenshtein distance, capped by buffer size (flags are short).
@@ -180,6 +210,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var once = false;
     var ticks_cli = false;
     var worldgen_seed: ?u64 = null;
+    var mode_name_cli: ?[]const u8 = null;
     var map_path_buf: [1024]u8 = undefined;
     var cfg_owned: ?server_config.Config = null;
     defer if (cfg_owned) |*c| c.deinit();
@@ -214,6 +245,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
             world_name_cli = true;
         } else if (std.mem.eql(u8, name, "--serverconfig")) {
             serverconfig_path = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--mode")) {
+            mode_name_cli = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--admin-port")) {
             admin_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
             admin_port_cli = true;
@@ -235,7 +268,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             if (ticks_cli) usageError("options '--ticks' and '--once' cannot be used together", .{});
             once = true;
             max_ticks = 1;
-        } else if (std.mem.eql(u8, name, "--version") or std.mem.eql(u8, name, "-V")) {
+        } else if (std.mem.eql(u8, name, "--version") or std.mem.eql(u8, name, "-V") or std.mem.eql(u8, name, "-v")) {
             if (inline_val != null) usageError("option '{s}' does not take a value", .{name});
             printStdout("zdtd {s} (stock wire {s})\n", .{ version.product, version.stock_wire });
             return;
@@ -258,6 +291,34 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
     if (world_name_cli and map_dir == null and game_dir == null) {
         usageError("option '--world-name' requires '--game-dir' (or use '--map' directly)", .{});
+    }
+
+    // Fail closed on operator-supplied paths before Game.create (clearer than
+    // a late FileNotFound from deep inside asset/map load).
+    if (game_dir) |gd| {
+        if (!io_fs.dirExistsSimple(gd)) {
+            fatal("game install not found: '{s}' (check --game-dir)", .{gd});
+        }
+    }
+    if (map_dir) |md| {
+        if (!io_fs.dirExistsSimple(md)) {
+            fatal("map directory not found: '{s}' (check --map)", .{md});
+        }
+    }
+    if (config_dir) |cd| {
+        if (!io_fs.dirExistsSimple(cd)) {
+            fatal("config directory not found: '{s}' (check --config-dir)", .{cd});
+        }
+    }
+    if (quests_path) |qp| {
+        if (!io_fs.fileExistsSimple(qp)) {
+            fatal("quests file not found: '{s}' (check --quests)", .{qp});
+        }
+    }
+    for (config_overrides.items) |od| {
+        if (!io_fs.dirExistsSimple(od)) {
+            fatal("config-overrides directory not found: '{s}'", .{od});
+        }
     }
 
     if (serverconfig_path) |scp| {
@@ -332,13 +393,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         usageError("--webui-port requires --webui-secret or non-empty env ZDTD_WEBUI_SECRET", .{});
     }
     if (webui_port != 0 and !isLoopbackBind(webui_bind)) {
-        std.debug.print(
-            "zdtd: warning: webui bind {s} is not loopback; firewall and a strong secret required\n",
-            .{webui_bind},
-        );
+        usageError("--webui-bind must be loopback (127.0.0.1 or ::1); use a TLS reverse proxy for remote access", .{});
     }
 
-    // InitOptions: serverconfig defaults, then zdtd.toml (world > CWD), CLI-resolved fields last.
+    // InitOptions: serverconfig → optional mode pack → zdtd.toml stream/authority.
+    // CLI-resolved fields (paths, ports, seed) are already set on the struct.
     var init_opts: game_mod.InitOptions = .{
         .map_dir = map_dir,
         .game_dir = game_dir,
@@ -396,21 +455,46 @@ pub fn main(init: std.process.Init.Minimal) !void {
         toml_owned = zdtd_config.loadFromPath(gpa, tp) catch |err| {
             fatal("cannot load zdtd.toml '{s}': {s}", .{ tp, @errorName(err) });
         };
+        std.debug.print("zdtd: loaded {s}\n", .{tp});
+    }
+
+    // Mode pack: --mode NAME wins over zdtd.toml [mode] name. Optional.
+    const mode_name: ?[]const u8 = blk: {
+        if (mode_name_cli) |m| break :blk m;
         if (toml_owned) |*tf| {
-            zdtd_config.applyToInitOptions(tf, &init_opts);
-            if (tf.authority.mode) |mode_s| {
-                if (server_config.AuthorityMode.parse(mode_s)) |am| {
-                    init_opts.authority_mode = am;
-                } else {
-                    std.debug.print(
-                        "zdtd: zdtd.toml authority.mode '{s}' unknown (use observe|permissive|correct); keeping {s}\n",
-                        .{ mode_s, @tagName(init_opts.authority_mode) },
-                    );
-                }
-            }
-            zdtd_config.sanitizeInitOptions(&init_opts);
-            std.debug.print("zdtd: loaded {s}\n", .{tp});
+            if (tf.mode.name) |n| break :blk n;
         }
+        break :blk null;
+    };
+    var mode_owned: ?mode_mod.Pack = null;
+    defer if (mode_owned) |*mp| mp.deinit();
+    if (mode_name) |mn| {
+        if (!mode_mod.isValidModeName(mn)) {
+            // Bad token shape is a usage error (exit 2), not a missing file.
+            usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+        }
+        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| {
+            fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) });
+        };
+        if (mode_owned) |*mp| {
+            mode_mod.applyToInitOptions(mp, &init_opts);
+            std.debug.print("zdtd: mode={s}\n", .{mp.name});
+        }
+    }
+
+    if (toml_owned) |*tf| {
+        zdtd_config.applyToInitOptions(tf, &init_opts);
+        if (tf.authority.mode) |mode_s| {
+            if (server_config.AuthorityMode.parse(mode_s)) |am| {
+                init_opts.authority_mode = am;
+            } else {
+                std.debug.print(
+                    "zdtd: zdtd.toml authority.mode '{s}' unknown (use observe|permissive|correct); keeping {s}\n",
+                    .{ mode_s, @tagName(init_opts.authority_mode) },
+                );
+            }
+        }
+        zdtd_config.sanitizeInitOptions(&init_opts);
     }
 
     const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| {
@@ -558,6 +642,7 @@ test {
     _ = @import("ecs/root.zig");
     _ = @import("world/root.zig");
     _ = @import("server/root.zig");
+    _ = @import("plugin/root.zig");
 }
 
 test "splitFlag bare and equals forms" {
@@ -578,9 +663,18 @@ test "typo suggestion finds nearest flag" {
     try std.testing.expectEqualStrings("--port", suggestFlag("--prot").?);
     try std.testing.expectEqualStrings("--ticks", suggestFlag("--tick").?);
     try std.testing.expectEqualStrings("--world", suggestFlag("-world").?);
+    try std.testing.expectEqualStrings("-v", suggestFlag("-v").?);
     try std.testing.expect(suggestFlag("--zzzzzzzz") == null);
     try std.testing.expectEqual(@as(usize, 0), editDistance("--map", "--map"));
     try std.testing.expectEqual(@as(usize, 2), editDistance("ab", "ba"));
+}
+
+test "looksLikeOption rejects next-flag tokens as values" {
+    try std.testing.expect(looksLikeOption("--world"));
+    try std.testing.expect(looksLikeOption("-h"));
+    try std.testing.expect(!looksLikeOption("27002"));
+    try std.testing.expect(!looksLikeOption("-1")); // numeric, not an option form we treat specially
+    try std.testing.expect(!looksLikeOption("worlds/zdtd_default"));
 }
 
 test "explicit world name overrides serverconfig game name" {

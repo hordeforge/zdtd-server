@@ -6,12 +6,21 @@ const c = @import("components.zig");
 const electric = @import("electric.zig");
 const quest = @import("quest.zig");
 const director = @import("aidirector.zig");
+const command = @import("command.zig");
+const inv_ledger = @import("inv_ledger.zig");
 
 pub const max_entities = ent.max_entities;
+/// Soft capacity warning threshold (fraction of max_entities).
+pub const warn_ratio: f32 = 0.8;
+const entity_warn_at: usize = @intFromFloat(@as(f32, @floatFromInt(max_entities)) * warn_ratio);
+pub const InvLedger = inv_ledger.Ledger;
+pub const InvCause = inv_ledger.Cause;
 pub const Slot = ent.Slot;
 pub const NetId = ent.NetId;
 pub const Kind = c.Kind;
 pub const Mask = c.Mask;
+pub const CommandBuffer = command.Buffer;
+pub const CommandOp = command.Op;
 
 pub const EntityClass = struct {
     name: []const u8 = "zombie",
@@ -58,6 +67,10 @@ pub const World = struct {
     peer_to_player: [max_entities]Slot = .{no_player_slot} ** max_entities,
 
     next_net_id: i32 = 100,
+    /// Live entity slots (spawnBase ++, destroy --). Soft-warn path only.
+    entity_count: u16 = 0,
+    /// Once: soft warning when entity_count crosses entity_warn_at.
+    entity_cap_warned: bool = false,
     /// O(1) NetId → Slot (0xFFFF = empty).
     net_to_slot: std.AutoHashMap(i32, Slot) = undefined,
     net_map_init: bool = false,
@@ -65,6 +78,10 @@ pub const World = struct {
     catalog: quest.Catalog = quest.Catalog.builtin(),
     power: electric.PowerGrid = .{},
     director: director.Director = .{},
+    /// Deferred ops drained once per tick (end of tickAll / Game.step). Cap 64.
+    commands: CommandBuffer = .{},
+    /// P4 inv cause ring (last N mutations). Hot path: fixed, no heap.
+    inv_ledger: InvLedger = .{},
     /// Zombie chase/wander speed multiplier from ZombieMove* serverconfig, set by
     /// the director each tick per day/night/blood-moon state (1.0 = sim default).
     zombie_speed_scale: f32 = 1.0,
@@ -94,6 +111,8 @@ pub const World = struct {
     is_armor_ctx: ?*anyopaque = null,
     is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
 
+    // A10: offline defaults use stock loot container name (not item "scrap").
+    // Game.setClassDef overwrites from entityclasses when game-dir loads.
     class_table: [16]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
         .{ .name = "zombie", .max_hp = 40, .kind = .zombie, .hash = 948863590, .loot_list = "EntityLootContainerRegular" },
@@ -169,6 +188,7 @@ pub const World = struct {
         self.alive[slot] = false;
         self.mask[slot] = .{};
         self.dirty[slot] = .{};
+        if (self.entity_count > 0) self.entity_count -= 1;
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or
@@ -215,6 +235,14 @@ pub const World = struct {
         const nid = self.next_net_id;
         self.next_net_id += 1;
         self.alive[s] = true;
+        self.entity_count +%= 1;
+        if (!self.entity_cap_warned and self.entity_count >= entity_warn_at) {
+            self.entity_cap_warned = true;
+            std.debug.print(
+                "zdtd: entity slots near capacity n={d}/{d} (warn>={d})\n",
+                .{ self.entity_count, max_entities, entity_warn_at },
+            );
+        }
         self.mask[s] = .{
             .transform = true,
             .health = true,
@@ -396,7 +424,7 @@ pub const World = struct {
 
     pub const DamageResult = struct {
         killed: bool = false,
-        /// DroppedLootContainer net id when a zombie drops scrap; -1 if none.
+        /// DroppedLootContainer net id when a zombie drops a loot bag; -1 if none.
         loot_bag_id: i32 = -1,
         /// entityclasses LootListOnDeath name (valid for bag fill after kill).
         loot_list: []const u8 = "",
@@ -475,6 +503,16 @@ pub const World = struct {
         return n;
     }
 
+    /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.
+    pub fn pushCommand(self: *World, op: CommandOp) bool {
+        return self.commands.push(op);
+    }
+
+    /// Apply and clear the tick command buffer.
+    pub fn drainCommands(self: *World) command.DrainResult {
+        return self.commands.drain(self);
+    }
+
     pub fn netId(self: *const World, slot: Slot) NetId {
         return self.network_id[slot].id;
     }
@@ -547,4 +585,22 @@ test "player peer index follows replacement and destroy" {
     w.destroy(second);
     try std.testing.expect(w.playerByPeer(4) == null);
     try std.testing.expectEqual(first, w.playerByPeer(3).?);
+}
+
+test "entity_count tracks spawn destroy and soft warn flag" {
+    var w: World = .{};
+    defer w.deinit();
+    try std.testing.expectEqual(@as(u16, 0), w.entity_count);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    try std.testing.expectEqual(@as(u16, 1), w.entity_count);
+    const zs = w.slotOfNetId(z).?;
+    w.destroy(zs);
+    try std.testing.expectEqual(@as(u16, 0), w.entity_count);
+    // Fill to soft threshold without allocating beyond max.
+    var n: usize = 0;
+    while (n < entity_warn_at) : (n += 1) {
+        _ = w.spawnZombie(@floatFromInt(n), 70, 0, 40) orelse break;
+    }
+    try std.testing.expect(w.entity_count >= entity_warn_at);
+    try std.testing.expect(w.entity_cap_warned);
 }

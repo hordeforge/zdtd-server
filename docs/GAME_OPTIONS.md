@@ -12,9 +12,10 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 
 | Source | Role |
 |---|---|
-| CLI (`--port`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
+| CLI (`--port`, `--mode`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
-| `<world>/zdtd.toml` then CWD `zdtd.toml` | zdtd stream/authority/feature tunables; first existing file wins; **fatal** if present but unreadable |
+| `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature + optional `[mode] name`; first existing file wins; **fatal** if present but unreadable |
+| Mode pack `modes/<name>.toml` | When `--mode` or `[mode] name` is set: data-only InitOptions overrides (after serverconfig, before stream keys) |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
 
@@ -61,8 +62,8 @@ Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 | Flag / env | Default | Notes |
 |---|---|---|
 | `--webui-port` | 0 | HTTP ops UI; 0 = off. Requires a secret. Design: [WEBUI.md](WEBUI.md) |
-| `--webui-bind` | `127.0.0.1` | Loopback default; non-loopback logs a warning (firewall required) |
-| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / `?token=`; visible in `ps` (prefer env) |
+| `--webui-bind` | `127.0.0.1` | IPv4 loopback only; use a TLS reverse proxy for remote access |
+| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / login form; visible in `ps` (prefer env) |
 | `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty |
 
 `/healthz` is unauthenticated liveness. Dashboard + `POST /api/cmd` (admin verbs) need secret; CSRF field required for cookie-only sessions.
@@ -78,6 +79,22 @@ Template: [`zdtd.toml.example`](../zdtd.toml.example). Loaded from
 | `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, period ticks, … | Chunk stream caps (clamped to compile cap 169) |
 | `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
 | `[feature]` | `wire_chunks` | Stream NetPackageChunk (default true) |
+| `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
+
+### Gamemode packs (`modes/`)
+
+ADR 0010: a **mode** is a data-only config pack plus optional static plugin flag.
+No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
+`src/server/mode.zig`.
+
+| Key | Effect on `InitOptions` |
+|---|---|
+| `max_spawned_zombies` | Director alive-zombie cap |
+| `blood_moon_frequency` (alias `bloodmoon_frequency`) | Blood moon every N days |
+| `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
+
+Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
+be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the

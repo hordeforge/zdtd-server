@@ -193,10 +193,28 @@ pub const Command = union(enum) {
     unknown,
 };
 
+/// One-line usage for a known verb (admin `bad_args` replies). Null if unknown.
+pub fn usageFor(verb: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, verb, "kick")) return "kick <slot>";
+    if (std.mem.eql(u8, verb, "ban")) return "ban <slot>";
+    if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
+    if (std.mem.eql(u8, verb, "give")) return "give <slot> <item> [count]";
+    if (std.mem.eql(u8, verb, "tele")) return "tele <slot> <x> <y> <z>";
+    if (std.mem.eql(u8, verb, "say")) return "say <msg>";
+    if (std.mem.eql(u8, verb, "kill")) return "kill <entityId>";
+    if (std.mem.eql(u8, verb, "inv")) return "inv <slot>";
+    if (std.mem.eql(u8, verb, "settime") or std.mem.eql(u8, verb, "st"))
+        return "settime <day|night|ticks|D H M>";
+    if (std.mem.eql(u8, verb, "spawnentity") or std.mem.eql(u8, verb, "se"))
+        return "spawnentity <slot|entityId> <class>";
+    return null;
+}
+
 pub fn parseCommand(line: []const u8) Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const cmd = it.next() orelse return .unknown;
-    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "?")) return .help;
+    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "?") or std.mem.eql(u8, cmd, "commands"))
+        return .help;
     if (std.mem.eql(u8, cmd, "status")) return .status;
     if (std.mem.eql(u8, cmd, "save")) return .save;
     if (std.mem.eql(u8, cmd, "kick")) {
@@ -364,4 +382,11 @@ test "bad args carry the verb; unknown verbs stay unknown" {
     try std.testing.expectEqualStrings("kick", c.bad_args);
     try std.testing.expect(parseCommand("frobnicate 1") == .unknown);
     try std.testing.expect(parseCommand("kick") == .bad_args);
+}
+
+test "commands alias is help; usageFor covers common verbs" {
+    try std.testing.expect(parseCommand("commands") == .help);
+    try std.testing.expectEqualStrings("kick <slot>", usageFor("kick").?);
+    try std.testing.expectEqualStrings("give <slot> <item> [count]", usageFor("give").?);
+    try std.testing.expect(usageFor("frobnicate") == null);
 }

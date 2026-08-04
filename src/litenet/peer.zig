@@ -2,9 +2,8 @@
 //! Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing.
 
 const std = @import("std");
-const linux = std.os.linux;
 const packet = @import("packet.zig");
-const udp = @import("linux_udp.zig");
+const udp = @import("udp_socket.zig");
 const clock = @import("../util/clock.zig");
 
 /// Max assembled user message. Mixed-surface stock chunks + texture planes can exceed 128 KiB.
@@ -114,9 +113,8 @@ pub const Capture = struct {
 };
 
 pub const Peer = struct {
-    addr: linux.sockaddr.storage = undefined,
-    addr_len: linux.socklen_t = 0,
-    /// Cached hashAddr(addr) (set in setAddr); key for per-datagram peer lookup.
+    addr: udp.IpAddress = .{ .ip4 = .loopback(0) },
+    /// Cached hashIp(addr); key for per-datagram peer lookup.
     addr_key: u64 = 0,
     remote_id: i32 = 0,
     local_id: i32 = 0,
@@ -161,29 +159,13 @@ pub const Peer = struct {
     extra_q: [8]struct { off: u32, len: u32 } = undefined,
     extra_n: u8 = 0,
 
-    pub fn setAddr(self: *Peer, addr: *const linux.sockaddr.storage, addr_len: linux.socklen_t) void {
-        const src: [*]const u8 = @ptrCast(addr);
-        const dst: [*]u8 = @ptrCast(&self.addr);
-        @memcpy(dst[0..addr_len], src[0..addr_len]);
-        self.addr_len = addr_len;
-        self.addr_key = hashAddr(addr, addr_len);
-    }
-
-    /// FNV-1a over the first ≤28 sockaddr bytes; cached in `addr_key` so the
-    /// per-datagram peer lookup compares one u64 instead of re-hashing.
-    pub fn hashAddr(addr: *const linux.sockaddr.storage, len: linux.socklen_t) u64 {
-        const bytes: [*]const u8 = @ptrCast(addr);
-        var h: u64 = 1469598103934665603;
-        var i: linux.socklen_t = 0;
-        while (i < len and i < 28) : (i += 1) {
-            h ^= bytes[i];
-            h *%= 1099511628211;
-        }
-        return h;
+    pub fn setAddr(self: *Peer, addr: *const udp.IpAddress) void {
+        self.addr = addr.*;
+        self.addr_key = udp.hashIp(addr);
     }
 
     pub fn sendRaw(self: *Peer, sock: *udp.Socket, raw: []const u8) !void {
-        try sock.sendTo(raw, &self.addr, self.addr_len);
+        try sock.sendTo(raw, &self.addr);
     }
 
     fn allocPending(self: *Peer, sock: *udp.Socket) !*Pending {
@@ -362,7 +344,10 @@ pub const Peer = struct {
         return @intCast(relSeq(@as(i32, self.local_seq) - @as(i32, self.local_window_start)));
     }
 
-    fn pushExtra(self: *Peer, user: []const u8) void {
+    /// Copy a user payload into the peer extra queue (survives the recv buffer
+    /// being overwritten). Used by Merged multipacket handling and by
+    /// Server.drainControl so mid-send ACK drains do not drop game packages.
+    pub fn pushExtra(self: *Peer, user: []const u8) void {
         if (self.extra_n >= self.extra_q.len) return;
         if (self.extra_used + user.len > self.extra_buf.len) return;
         const off: u32 = @intCast(self.extra_used);
@@ -575,4 +560,74 @@ test "processAck advances local window when bits set" {
     try std.testing.expect(!peer.pending[0].used);
     try std.testing.expect(!peer.pending[1].used);
     try std.testing.expect(!peer.pending[2].used);
+}
+
+test "pushExtra copies payload for later popExtra (mid-send mailbox)" {
+    // drainControl relies on a durable copy: the recv buffer is reused.
+    var peer: Peer = .{};
+    var scratch: [8]u8 = .{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    peer.pushExtra(scratch[0..4]);
+    // Overwrite source; queued bytes must be independent.
+    @memset(&scratch, 0xFF);
+    const got = peer.popExtra() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, got);
+    try std.testing.expect(peer.popExtra() == null);
+}
+
+// Lives here (not fuzz.zig) for access to the private takeFragment/processAck
+// state machines; src/fuzz.zig pulls this file in so `zig build fuzz` runs it
+// coverage-guided.
+const peer_state_corpus = [_][]const u8{
+    "",
+    &.{ 0, 1, 0, 1, 0, 0, 8 },
+    &.{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
+    &.{ 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+};
+
+test "fuzz fragment reassembly and ack window state" {
+    try std.testing.fuzz({}, fuzzPeerState, .{ .corpus = &peer_state_corpus });
+}
+
+fn fuzzPeerState(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var peer: Peer = .{};
+    peer.alive = true;
+
+    // Interleave fragment parts across a few frag ids so restarts, duplicate
+    // parts, out-of-range part indices, and total mismatches all get hit.
+    var payload: [64]u8 = undefined;
+    @memset(&payload, 0xAA);
+    var steps: usize = 0;
+    while (steps < 16) : (steps += 1) {
+        const info: packet.ChanneledInfo = .{
+            .seq = smith.value(u16),
+            .channel_id = 2,
+            .fragmented = true,
+            .frag_id = smith.value(u16) & 0x3,
+            .frag_part = smith.value(u16),
+            .frag_total = smith.value(u16),
+            .user = payload[0..smith.index(payload.len + 1)],
+        };
+        if (peer.takeFragment(info)) |full| {
+            try std.testing.expect(full.len <= max_payload);
+        }
+        if (peer.asm_active) {
+            try std.testing.expect(peer.asm_total <= max_frag_parts);
+            try std.testing.expect(peer.asm_got < peer.asm_total);
+        }
+    }
+
+    // Arbitrary ack bytes over a consistent in-flight window must leave the
+    // window well-formed: start never passes local_seq.
+    const outstanding: u16 = @intCast(smith.index(packet.window_size + 1));
+    peer.local_window_start = 0;
+    peer.local_seq = outstanding;
+    var i: u16 = 0;
+    while (i < outstanding) : (i += 1) {
+        peer.pending[i] = .{ .used = true, .seq = i, .len = 8 };
+    }
+    var raw: [64]u8 = undefined;
+    const rlen = smith.slice(&raw);
+    peer.processAck(raw[0..rlen]);
+    try std.testing.expect(peer.local_window_start <= outstanding);
 }

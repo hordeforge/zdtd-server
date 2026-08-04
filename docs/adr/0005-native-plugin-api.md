@@ -1,6 +1,6 @@
 # ADR 0005: Native plugin API (not stock mods)
 
-- **Status:** proposed
+- **Status:** accepted (skeleton shipped: static host + sample_hello; dynlib/Wasm later)
 - **Date:** 2026-07-22
 
 ## Context

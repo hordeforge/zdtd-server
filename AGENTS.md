@@ -153,11 +153,12 @@ The operating principles behind every rule below. When in doubt, these decide.
     interfaces** (`std.Io` vtable) and thin helpers on top (`util/io_fs.zig`) are
     the idiomatic layer. Do **not** open-code `std.os.linux.*`, raw `std.posix`
     file loops, or `std.c` for ordinary FS. Ordinary FS is `util/io_fs` /
-    `std.Io` only. LiteNet/UDP batch and admin/GSI TCP sockets remain **legacy**
-    `std.os.linux` until a deliberate net migration. Shelling out remains
-    forbidden when an in-process API exists (workspace Native APIs rule). Follow
-    [Zig Zen](https://ziglang.org/documentation/master/#Zen) when choosing among
-    correct options.
+    `std.Io` only. LiteNet UDP is `litenet/udp_socket.zig` (`std.Io.net`);
+    admin/GSI/webui TCP remain **legacy** `std.os.linux` until migrated (see
+    `docs/STD_ABSTRACTIONS.md`; webui should use `std.http.Server`). Shelling
+    out remains forbidden when an in-process API exists (workspace Native APIs
+    rule). Follow [Zig Zen](https://ziglang.org/documentation/master/#Zen) when
+    choosing among correct options.
 
 ## Commands
 
@@ -204,7 +205,7 @@ src/server/*           admin TCP, GSI, config, multi-system scenarios
 src/ecs/*              SoA world, systems, inventory, quests, interest
 src/world/*            chunks, TTS, prefabs, sleepers, containers, DTM, biomes
 src/wire/*             package bodies (stock_*), binary LE, frames
-src/litenet/*          LiteNet framing, peers, linux UDP
+src/litenet/*          LiteNet framing, peers, std.Io.net UDP
 src/assets/*           blocks/items/recipes/loot/quests/entities XML tables
 src/apm/*              counters, section timers, dumps (not 7dtd-apm)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
@@ -218,7 +219,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 |---|---|---|
 | Stock package body layout | `wire/stock_*.zig`, `packages.zig` | `game.zig` open-coded writes |
 | Block/world mutation | `world/*`, `ecs` | LiteNet / package id tables |
-| Syscalls / sockets | `litenet/linux_udp.zig`, GSI/admin TCP | package builders, ECS systems |
+| Syscalls / sockets | `litenet/udp_socket.zig` (Io.net); GSI/admin/webui TCP still legacy | package builders, ECS systems |
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
 | Metrics | `apm/*` via `Game.harness` | 7dtd-apm bridge |
 
@@ -265,7 +266,7 @@ the rest is dedi-rewrite specific.
 | Functions / methods | `camelCase` | `buildPlayerIdBody`, `setBlockWorld`, `sendJoinBundle` |
 | Variables / fields / params | `snake_case` | `entity_id`, `world_dir`, `body_buf`, `view_radius` |
 | Types | `PascalCase` | `Game`, `World`, `PackageName`, `StockSlot` |
-| Files | `snake_case.zig` | `stock_quest.zig`, `linux_udp.zig` |
+| Files | `snake_case.zig` | `stock_quest.zig`, `udp_socket.zig` |
 | Constants | `snake_case` module `const` | `max_streamed_chunks`, `pending_cap` |
 | Stock type / package names | Match TFP strings | `NetPackagePlayerId`, `PackageName` cases |
 
@@ -306,7 +307,8 @@ mapping captures, bit masks, buffer caps, and RE version pins are named module
 - Review prompts: [`docs/PROMPTS/review-zig-idiomatic.md`](docs/PROMPTS/review-zig-idiomatic.md)
   (language/hot path), [`docs/PROMPTS/review-abstractions.md`](docs/PROMPTS/review-abstractions.md)
   (when to build or delete helpers/layers),
-  [`docs/PROMPTS/review-simd.md`](docs/PROMPTS/review-simd.md) (SIMD on dense loops).
+  [`docs/PROMPTS/review-simd.md`](docs/PROMPTS/review-simd.md) (SIMD on dense loops),
+  [`docs/PROMPTS/review-ecs-soa.md`](docs/PROMPTS/review-ecs-soa.md) (ECS ownership + SoA).
 
 ### Tick path (20 TPS / 50 ms)
 
@@ -350,9 +352,9 @@ Init, map load, and admin commands may take longer; amortize into caches.
   `posix`/`std.c` file loops, `/tmp` for large caches (use project or `~/.cache`).
 - **Layering:** app → `io_fs` (optional) → `std.Io` → (std internals). Do not
   skip to the bottom from game/assets/world code.
-- **UDP/LiteNet:** keep the existing batched socket path until a deliberate
-  migration; do not invent a second raw-syscall net stack. New net features
-  prefer std abstractions where they fit.
+- **UDP/LiteNet:** `litenet/udp_socket.zig` via `std.Io.net`. Admin/GSI/webui
+  TCP still legacy; migrate via `docs/STD_ABSTRACTIONS.md` (`std.http.Server`
+  for webui). Do not invent a second raw-syscall net stack.
 
 ### Zig Zen (tie-break)
 

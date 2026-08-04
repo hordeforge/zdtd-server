@@ -32,6 +32,10 @@ pub const CounterId = enum(u16) {
     ownership_rejects,
     /// C2S dropped by reach / range / damage-cap bounds.
     bounds_rejects,
+    /// C2S movement over envelope (clamp or observe count).
+    movement_rejects,
+    /// P4 inv cause ledger appends (observe / evidence).
+    inv_ledger_events,
     _,
 };
 

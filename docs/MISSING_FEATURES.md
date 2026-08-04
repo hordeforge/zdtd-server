@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** 306/306 · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
+**Tests:** **325** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -214,10 +214,12 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   `ShouldAutoTurnOff`, no ramp.
 - *Battery charge state*: `PowerItemTypes.BatteryBank` state-of-charge /
   charge-discharge is not modeled; `.battery` is a passive passthrough node.
-- *Trigger/timer/toggle actuation*: PressurePlate, MotionSensor, TripWire,
-  TimerRelay, Switch, ConsumerToggle have trigger-propagation and on/off
-  scheduling in stock; zdtd registers them as plain consumers/relays with only a
-  powered state. No signal propagation, no timed toggling.
+- *Trigger/timer/toggle actuation*: PARTIAL. PressurePlate / TripWire /
+  MotionSensor / Trigger are `is_trigger` gates: BFS powers the plate when
+  wired, but does not flood past until `activateTriggerAt` (player step via
+  `noteAcceptedMove`) sets `pulse_left` for `default_trigger_pulse_s`. Timer
+  nodes still use `armTimer` periodic toggle. Gaps: Switch / ConsumerToggle
+  interact C2S, stock TE ClientTriggerData wire, multi-parent directed edges.
 - *RemoveParent precision*: stock removes exactly the child→parent edge
   (`PowerItem.RemoveSelfFromParent`, asm.il:843033). zdtd wires are undirected,
   so `removeParentAt` drops all edges incident to the node. Matches the common
@@ -343,20 +345,23 @@ Honest gaps:
   store); falls back to straight `stepToward` without a solid hook. Caps
   expansions (~96) and replan interval (~0.35 s) for the 20 TPS budget. No
   navmesh, no vertical climb/jump, no stock pathCounter/relocateTicks fidelity.
-- **Only 2 task types are real.** The engine takes more table rows, but
-  EAIBreakBlock (asm.il:425121), EAIDestroyArea, EAIApproachSpot (:424093),
+- **Four task types are real.** ApproachAndAttackTarget, ApproachSpot
+  (`has_spot`/`spot_x`/`spot_z`, priority below chase, above wander; clears on
+  arrive), Wander, and EAIBreakBlock (asm.il:425121): when chase A* finds no
+  detour, `path_blocked` selects BreakBlock (mutex 0, holds `.chase` so
+  `Game.tickZombieBlockDamage` chews cover). Still missing: EAIDestroyArea,
   EAIApproachDistraction (:423700, noiseSeekDist), EAITerritorial (:437973),
-  and Look/Dodge/Leap/RangedAttack/RunAway are unimplemented. (There is no
-  EAISeekSmell class in stock; do not add one.)
+  and Look/Dodge/Leap/RangedAttack/RunAway. (There is no EAISeekSmell class in
+  stock; do not add one.)
 - **No data-driven per-class task graphs.** Stock builds the list from
   `entityclasses.xml` `AITask-N`/`AITarget-N` strings via
   `EAIManager::ParseTasks`/`CreateInstance` (asm.il:430620). No such XML is on
   hand, so priority/MutexBits/executeDelay/continuous are hardcoded in the
   comptime `zombie_tasks` table to mirror the stock zombie ordering.
 - **Single-task executing set.** `executingTasks` is collapsed to one
-  `active_task` TaskId. Exact for these two mutex-conflicting tasks (at most one
-  runs), but a continuous non-conflicting task (e.g. EAILook, which coexists
-  with movement) would require a task bitset.
+  `active_task` TaskId. Exact for the current table (BreakBlock mutex 0 can
+  switch with Approach via table order; movement tasks still exclusive), but a
+  continuous non-conflicting task (e.g. EAILook) would need a task bitset.
 - **Sensing collapsed.** The stock `targetTasks` list
   (EAISetNearestEntityAsTarget / corpse / SetAsTargetIfHurt sorter,
   asm.il:430171) is folded into the existing single-nearest-player sense
@@ -597,9 +602,9 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 
 | Item | Status |
 |---|---|
-| Unit / scenario tests | HAVE (189) |
-| Loadgen join bots | PARTIAL (works for intermediate wire) |
-| Stock client join + stand | **PASS** (11/11 automated in-client playtest, live) |
+| Unit / scenario tests | HAVE (**325** total; see STATUS for pass/fail pin) |
+| Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
+| Stock client join + stand | **PASS** (playtest-zdtd **pass=83 fail=0** pin; see STATUS) |
 | Golden wire size checks | PARTIAL (some packages) |
 | Capture regression suite vs stock | MISSING |
 | Multi-version client matrix | MISSING |
@@ -628,7 +633,7 @@ Do not plan these as product features of zdtd:
 2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
-5. Power: full trigger TE wire (fuel/SoC/timer + solar day gate + InvTx gas-can FuelValue refuel shipped).  
+5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
 6. Workstation RecipeQueue C2S depth (lock contention shipped).
 
 ### P2: Multiplayer CPU (M11)

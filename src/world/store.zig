@@ -770,7 +770,8 @@ pub const World = struct {
                             "zdtd: chunk ({d},{d}) save failed: {s}\n",
                             .{ ctx.chunks[i].pos.x, ctx.chunks[i].pos.z, @errorName(err) },
                         );
-                        _ = ctx.failed.store(1, .monotonic);
+                        // release pairs with post-join acquire load below.
+                        _ = ctx.failed.store(1, .release);
                         continue;
                     };
                     ctx.chunks[i].dirty = false;
@@ -779,7 +780,9 @@ pub const World = struct {
         };
         var failed: std.atomic.Value(u8) = .init(0);
         parallel.forRanges(chunks.len, SaveCtx{ .world = self, .chunks = chunks, .failed = &failed }, SaveCtx.work);
-        if (failed.load(.monotonic) != 0) return error.SaveFailed;
+        // forRanges join already synchronizes workers; acquire still documents
+        // the happens-before for the failed flag itself.
+        if (failed.load(.acquire) != 0) return error.SaveFailed;
     }
 };
 

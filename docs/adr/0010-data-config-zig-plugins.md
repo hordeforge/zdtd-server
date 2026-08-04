@@ -12,7 +12,7 @@ problem. Diagnosis of what "hardcoded" usually means in zdtd:
 | # | What it is | Wrong fix | Right fix |
 |---|---|---|---|
 | 1 | **Stock content** (block HP, MaxFuel, recipes, biome weather, item stacks, AssignIds) | Lua tables; hand-copied Zig catalogs | Load XML/AssignIds (`--game-dir`); names + `idByName` |
-| 2 | **zdtd policy** (stream radius, interest range, tick throttles, wallets, feature flags) | More `const` in `game.zig`; Lua config DSL | `serverconfig.xml` + CLI + future **`zdtd.toml`** |
+| 2 | **zdtd policy** (stream radius, interest range, tick throttles, wallets, feature flags) | More `const` in `game.zig`; Lua config DSL | `serverconfig.xml` + CLI + **`zdtd.toml`** (`src/server/zdtd_config.zig`) |
 | 3 | **Sim rules** (combat, AI phases, join SM, package builders) | Rewrite systems in a VM | Keep **Zig systems**; **data-driven parameters** (ranges, rates, tables); expose hooks via **native plugin API** |
 
 A scripting VM (e.g. LuaJIT) as the core game logic would fight the 20 TPS

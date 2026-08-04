@@ -6,8 +6,10 @@ zdtd’s game sim is a single **SoA entity-component-system**.
 src/ecs/
   entity.zig       Slot / max_entities / NetId
   components.zig   plain data types + Mask
-  world.zig        SoA columns + shared resources + spawn helpers
+  world.zig        SoA columns + shared resources + spawn helpers + commands
   systems.zig      all mutations and tickAll (AI/turrets threaded)
+  query.zig        forEachAlive / forEachWith / forEachKind (no alloc)
+  command.zig      fixed tick command buffer (cap 64; drain in tickAll)
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
   path.zig         greedy path helper (no navmesh yet)
@@ -18,6 +20,11 @@ src/ecs/
   root.zig         package exports
 src/util/parallel.zig   range-split thread helper
 ```
+
+## Review
+
+Agent scorecard for "is this state ECS SoA, a resource, world/*, or session?":
+[PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md).
 
 ## Model
 
@@ -48,9 +55,34 @@ trader_stock                     // traders (inventory on the entity)
 3. `systemVehicles`: driver transform stick  
 4. `systemPower`: resolve electricity graph  
 5. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
+6. `systemDespawnFar`: cull far zombies  
+7. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 `vehicleEnter` / `vehicleControl` / `vehicleExit`.
+
+### Queries (`query.zig`)
+
+```zig
+ecs.forEachKind(w, .zombie, ctx, f);           // kind filter
+ecs.forEachWith(w, .{ .player = true, .inventory = true }, ctx, f);
+ecs.forEachAlive(w, ctx, f);
+// f: fn (@TypeOf(ctx), *World, Slot) void
+```
+
+No heap; dense `0..max_entities` scan with mask/kind predicates.
+
+### Tick command buffer (`command.zig`)
+
+```zig
+_ = w.pushCommand(.{ .spawn_zombie = .{ .x, .y, .z, .hp } });
+_ = w.pushCommand(.{ .despawn = .{ .net_id } });
+_ = w.pushCommand(.{ .damage = .{ .net_id, .amount } });
+// drained once at end of tickAll (also World.drainCommands)
+```
+
+Full buffer drops new ops (`dropped` counter). Systems and (later) plugins enqueue;
+core applies serially so parallel AI never races spawn/destroy.
 
 ### Threading notes
 

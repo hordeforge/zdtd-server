@@ -1039,7 +1039,8 @@ pub fn buildChunkPayload(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) !
     return w.written();
 }
 
-/// Default S→C: stock package envelope around intermediate height-plane payload.
+/// Test/loadgen helper: stock NetPackageChunk envelope around a height-plane
+/// payload. Production client stream uses `stock_chunk.buildNetPackageChunkNew`.
 pub fn buildChunkBody(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) ![]u8 {
     return buildChunkBodyStockEnvelope(buf, cx, cz, heights, true);
 }

@@ -42,7 +42,7 @@ pub const ClassId = struct {
     id: u16 = 0,
     /// Unity Mono name hash for ECD EntitySpawn (0 = use table/default).
     hash: i32 = 0,
-    /// Loot container name from entityclasses LootListOnDeath (empty = default scrap).
+    /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     loot_list: []const u8 = "",
 };
 
@@ -56,10 +56,9 @@ pub const AiState = enum(u8) {
 };
 
 /// Currently-executing EAITask (stock EAITaskList.executingTasks collapsed to a
-/// single cell: the two real zombie tasks are mutex-exclusive so at most one
-/// runs at a time). `.none` = no task selected (fresh/sleeping). See
-/// zombie_tasks in systems.zig for the ported priority/mutex table.
-pub const TaskId = enum(u8) { none, approach_attack, wander };
+/// single cell). Mutex-conflicting movement tasks share one slot; BreakBlock uses
+/// mutex 0 so it can preempt approach when path_blocked. See zombie_tasks.
+pub const TaskId = enum(u8) { none, break_block, approach_attack, approach_spot, wander };
 
 pub const ZombieAi = struct {
     state: AiState = .idle,
@@ -71,6 +70,10 @@ pub const ZombieAi = struct {
     attack_cd: f32 = 0,
     wander_tx: f32 = 0,
     wander_tz: f32 = 0,
+    /// Director/AI Investigate-style spot (EAIApproachSpot). Cleared on arrive.
+    spot_x: f32 = 0,
+    spot_z: f32 = 0,
+    has_spot: bool = false,
     alert: bool = false,
     active_scale: f32 = 1,
     path_goal_x: f32 = 0,
@@ -82,6 +85,9 @@ pub const ZombieAi = struct {
     path_wp_x: i32 = 0,
     path_wp_z: i32 = 0,
     path_wp_valid: bool = false,
+    /// True when chase replan found no detour and the cell toward the goal is solid.
+    /// Feeds EAIBreakBlock CanExecute; Game.tickZombieBlockDamage still keys on chase/attack.
+    path_blocked: bool = false,
     /// Per-entity xorshift state for wander decisions (0 = unseeded; first
     /// decision seeds from net id so streams differ per entity).
     wander_rng: u32 = 0,

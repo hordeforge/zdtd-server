@@ -1,10 +1,9 @@
 //! UDP LiteNetLib-compatible server (accept + reliable user data).
 
 const std = @import("std");
-const linux = std.os.linux;
 const packet = @import("packet.zig");
 const peer_mod = @import("peer.zig");
-const udp = @import("linux_udp.zig");
+const udp = @import("udp_socket.zig");
 
 pub const max_peers = 64;
 
@@ -17,9 +16,7 @@ pub const Server = struct {
     server_password: []const u8 = "",
 
     pub fn listen(self: *Server, port: u16) !void {
-        self.sock = try udp.Socket.open();
-        errdefer self.sock.close();
-        self.port = try self.sock.bindAny(port);
+        self.port = try self.sock.openAndBind(port);
     }
 
     pub fn deinit(self: *Server) void {
@@ -39,9 +36,8 @@ pub const Server = struct {
             if (p.popExtra()) |u| return .{ .data = .{ .peer = p, .payload = u } };
         }
 
-        var src: linux.sockaddr.storage = undefined;
-        var src_len: linux.socklen_t = undefined;
-        const n = self.sock.recvFrom(buf, &src, &src_len) catch |err| switch (err) {
+        var src: udp.IpAddress = undefined;
+        const n = self.sock.recvFrom(buf, &src) catch |err| switch (err) {
             error.WouldBlock => return .none,
             else => return err,
         };
@@ -52,7 +48,7 @@ pub const Server = struct {
         if (prop == .connect_request) {
             const req = packet.parseConnectRequest(raw) orelse return .none;
             // Retransmitted ConnectRequest from an already-accepted peer: only re-send Accept.
-            if (self.findPeer(&src, src_len)) |existing| {
+            if (self.findPeer(&src)) |existing| {
                 existing.connect_time = req.connection_time;
                 existing.conn_num = req.connection_number;
                 existing.remote_id = req.peer_id;
@@ -70,18 +66,18 @@ pub const Server = struct {
                     req.connection_number,
                     &packet.reject_invalid_password,
                 );
-                self.sock.sendTo(rej, &src, src_len) catch {};
+                self.sock.sendTo(rej, &src) catch {};
                 std.debug.print("zdtd: connect rejected (bad password) remote_peer_id={d}\n", .{req.peer_id});
                 return .none;
             }
-            const p = try self.allocPeer(&src, src_len, req);
+            const p = try self.allocPeer(&src, req);
             var accept_buf: [32]u8 = undefined;
             const accept = try packet.writeConnectAccept(&accept_buf, req.connection_time, req.connection_number, p.local_id);
             try p.sendRaw(&self.sock, accept);
             return .{ .connected = p };
         }
 
-        const p = self.findPeer(&src, src_len) orelse {
+        const p = self.findPeer(&src) orelse {
             // Unknown source (should not happen after accept).
             return .none;
         };
@@ -93,37 +89,40 @@ pub const Server = struct {
     }
 
     /// Drain inbound acks/pings without delivering game payloads (used mid-send).
-    /// Also re-queues game payloads into a tiny one-shot mailbox so login/challenge
-    /// bytes are not lost while joining.
+    /// Game user payloads are copied into the peer extra queue so a later
+    /// poll() delivers them; never drop login/challenge bytes while joining.
     pub fn drainControl(self: *Server, buf: []u8, max_n: u32) void {
         var i: u32 = 0;
         while (i < max_n) : (i += 1) {
-            var src: linux.sockaddr.storage = undefined;
-            var src_len: linux.socklen_t = undefined;
-            const n = self.sock.recvFrom(buf, &src, &src_len) catch break;
+            var src: udp.IpAddress = undefined;
+            const n = self.sock.recvFrom(buf, &src) catch break;
             if (n == 0) break;
             const raw = buf[0..n];
             const prop = packet.propertyOf(raw[0]);
             if (prop == .connect_request) continue;
-            const p = self.findPeer(&src, src_len) orelse continue;
-            _ = p.handlePacket(&self.sock, raw) catch {};
+            const p = self.findPeer(&src) orelse continue;
+            // handlePacket applies ACKs (frees reliable window) and may return a
+            // user slice into `buf`; copy it before the next recv overwrites.
+            if (p.handlePacket(&self.sock, raw) catch null) |user| {
+                p.pushExtra(user);
+            }
         }
     }
 
-    fn findPeer(self: *Server, addr: *const linux.sockaddr.storage, len: linux.socklen_t) ?*peer_mod.Peer {
-        const key = peer_mod.Peer.hashAddr(addr, len);
+    fn findPeer(self: *Server, addr: *const udp.IpAddress) ?*peer_mod.Peer {
+        const key = udp.hashIp(addr);
         for (&self.peers) |*p| {
             if (p.alive and p.addr_key == key) return p;
         }
         return null;
     }
 
-    fn allocPeer(self: *Server, addr: *const linux.sockaddr.storage, len: linux.socklen_t, req: packet.ConnectRequest) !*peer_mod.Peer {
+    fn allocPeer(self: *Server, addr: *const udp.IpAddress, req: packet.ConnectRequest) !*peer_mod.Peer {
         // Prefer a free slot; always fully reset reliable state on new accept.
         for (&self.peers) |*p| {
             if (p.alive) continue;
             p.* = .{};
-            p.setAddr(addr, len);
+            p.setAddr(addr);
             p.remote_id = req.peer_id;
             p.local_id = self.next_local_id;
             self.next_local_id += 1;
@@ -136,7 +135,7 @@ pub const Server = struct {
         for (&self.peers) |*p| {
             if (!p.authenticated) {
                 p.* = .{};
-                p.setAddr(addr, len);
+                p.setAddr(addr);
                 p.remote_id = req.peer_id;
                 p.local_id = self.next_local_id;
                 self.next_local_id += 1;

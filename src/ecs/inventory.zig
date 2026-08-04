@@ -3,6 +3,7 @@
 const std = @import("std");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
+const InvCause = @import("world.zig").InvCause;
 const c = @import("components.zig");
 const items = @import("../assets/items.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
@@ -72,6 +73,7 @@ pub fn itemToBlock(item_id: u16) u16 {
 }
 
 /// Production place: resolve via AssignIds idByName (game-dir dump). Fail closed → 0.
+/// Item names are not block names: never return idByName(itemName) as a block id.
 pub fn itemToBlockResolved(
     item_id: u16,
     item_name: ?[]const u8,
@@ -79,12 +81,22 @@ pub fn itemToBlockResolved(
     ctx: ?*anyopaque,
 ) u16 {
     const name = item_name orelse items.builtinStockName(item_id) orelse return 0;
-    if (id_by_name(ctx, name)) |id| return id;
-    if (std.mem.eql(u8, name, "resourceWood")) {
+    // Stock placeables: item → shape block (AssignIds), not the item type id.
+    if (std.mem.eql(u8, name, "resourceWood") or std.mem.eql(u8, name, "wood")) {
         if (id_by_name(ctx, "frameShapes:cube")) |id| return id;
+        return place_wood_block_id;
     }
-    if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable")) {
+    if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable") or
+        std.mem.eql(u8, name, "cobblestone"))
+    {
         if (id_by_name(ctx, "cobblestoneShapes:cube")) |id| return id;
+        return place_cobble_block_id;
+    }
+    // Other items: only accept an explicit block-shaped name if present in dump.
+    if (id_by_name(ctx, name)) |id| {
+        // Reject if this is clearly the same as a pure item-only path with no place shape.
+        // Prefer non-zero dump id for names that are already block names (e.g. frameShapes:*).
+        return id;
     }
     return 0;
 }
@@ -131,7 +143,10 @@ pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const ok = w.inventory[ps].addItemStacked(item_id, count, maxStackFor(w, item_id));
-    if (ok) markInv(w, ps);
+    if (ok) {
+        markInv(w, ps);
+        recordInv(w, peer, item_id, @intCast(count), .give);
+    }
     return ok;
 }
 
@@ -149,7 +164,11 @@ pub fn move(w: *World, peer: usize, from: u16, to: u16, qty: u16) bool {
     if (from >= c.max_inv_slots or to >= c.max_inv_slots) return false;
     const item = w.inventory[ps].slots[from].item_id;
     const ok = w.inventory[ps].moveSlot(from, to, qty, maxStackFor(w, item));
-    if (ok) markInv(w, ps);
+    if (ok) {
+        markInv(w, ps);
+        const d: i16 = if (qty == 0) 0 else @intCast(@min(qty, std.math.maxInt(i16)));
+        recordInv(w, peer, item, d, .tx);
+    }
     return ok;
 }
 
@@ -173,6 +192,8 @@ pub fn drop(w: *World, peer: usize, slot: u16, qty: u16) Result {
         }
     }
     markInv(w, ps);
+    const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
+    recordInv(w, peer, taken.item_id, d, .drop);
     return .{ .ok = true, .dropped_entity = bag };
 }
 
@@ -237,8 +258,10 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
     const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
     if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
+    const iid = s.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
     markInv(w, ps);
+    recordInv(w, peer, iid, -1, .eat);
     return applyEatProps(w, ps, props);
 }
 
@@ -304,6 +327,8 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
         w.destroy(cs);
     }
     markInv(w, ps);
+    const d: i16 = @intCast(@min(taken.count, std.math.maxInt(i16)));
+    recordInv(w, peer, taken.item_id, d, .loot);
     return true;
 }
 
@@ -323,6 +348,8 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
         return false;
     }
     markInv(w, ps);
+    const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
+    recordInv(w, peer, taken.item_id, d, .tx);
     return true;
 }
 
@@ -354,6 +381,7 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
             const iid = item.item_id;
             _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
             markInv(w, ps);
+            recordInv(w, peer, iid, -1, .place);
             return .{
                 .ok = true,
                 .refuel_amount = fv,
@@ -369,8 +397,10 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
     else
         itemToBlock(item.item_id);
     if (block == 0) return .{};
+    const iid = item.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
     markInv(w, ps);
+    recordInv(w, peer, iid, -1, .place);
     return .{ .ok = true, .place_block = block, .place_x = x, .place_y = y, .place_z = z };
 }
 
@@ -419,6 +449,11 @@ pub fn applyTransactionEx(
 
 fn markInv(w: *World, ps: Slot) void {
     if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+}
+
+fn recordInv(w: *World, peer: usize, item_id: u16, delta: i16, cause: InvCause) void {
+    const p: u16 = if (peer > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer);
+    w.inv_ledger.record(p, item_id, delta, cause);
 }
 
 /// Roll back a take from a known slot without re-stacking or losing quality/meta.

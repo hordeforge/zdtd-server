@@ -82,6 +82,7 @@ pub const Snapshot = struct {
     phase_rejects: u64 = 0,
     ownership_rejects: u64 = 0,
     bounds_rejects: u64 = 0,
+    movement_rejects: u64 = 0,
     // Latency
     tick_mean_ns: u64 = 0,
     tick_p50_ns: u64 = 0,
@@ -124,8 +125,6 @@ pub const Server = struct {
     /// HMAC session material for cookie/CSRF (never the raw secret).
     session_token: [session_token_hex_len]u8 = undefined,
     client_fd: i32 = -1,
-    /// Remote IPv4 of the current client (host order); for auth-failure logs.
-    client_ip: u32 = 0,
     /// Polls since accept; a client that never completes a request would hold
     /// the single slot forever (half-open TCP reads EAGAIN, never EOF).
     client_polls: u32 = 0,
@@ -175,6 +174,7 @@ pub const Server = struct {
         if (!secretCharsetOk(cfg.secret)) return error.SecretInvalid;
 
         const addr_host = try parseIpv4(cfg.bind_host);
+        if (!isLoopbackIpv4(addr_host)) return error.LoopbackRequired;
         const sock_rc = linux.socket(linux.AF.INET, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
         if (linux.errno(sock_rc) != .SUCCESS) return error.Socket;
         const fd: i32 = @intCast(sock_rc);
@@ -282,9 +282,6 @@ pub const Server = struct {
         const fl = linux.fcntl(cfd, linux.F.GETFL, 0);
         _ = linux.fcntl(cfd, linux.F.SETFL, fl | 0o4000);
         self.client_fd = cfd;
-        // AF_INET listener: sockaddr_in, addr (network order) at offset 4.
-        const abytes: *const [16]u8 = @ptrCast(&addr);
-        self.client_ip = std.mem.readInt(u32, abytes[4..8], .big);
         self.client_polls = 0;
         self.recv_len = 0;
     }
@@ -377,16 +374,6 @@ pub const Server = struct {
         // Login routes are unauthenticated; wrong method → 405.
         if (std.mem.eql(u8, path, "/login")) {
             if (std.mem.eql(u8, method, "GET")) {
-                if (queryToken(target)) |tok| {
-                    if (constantTimeEql(tok, self.secret())) {
-                        self.set_cookie = true;
-                        self.respondRedirect("/");
-                        return;
-                    }
-                    std.debug.print("zdtd: webui login rejected (bad token) ip_tag={x:0>8}\n", .{ipLogTag(self.client_ip)});
-                    self.respond(401, "text/html; charset=utf-8", loginHintHtml(true));
-                    return;
-                }
                 // Sign-in form is a normal page (200); failed auth attempts stay 401.
                 self.respond(200, "text/html; charset=utf-8", loginHintHtml(false));
                 return;
@@ -405,7 +392,7 @@ pub const Server = struct {
                         return;
                     }
                 }
-                std.debug.print("zdtd: webui login rejected (bad token) ip_tag={x:0>8}\n", .{ipLogTag(self.client_ip)});
+                std.debug.print("zdtd: webui login rejected (bad token)\n", .{});
                 self.respond(401, "text/html; charset=utf-8", loginHintHtml(true));
                 return;
             }
@@ -417,7 +404,7 @@ pub const Server = struct {
             // Log only presented-but-wrong header credentials; a missing cookie on a
             // browser page load is normal traffic, not an auth event.
             if (headerValue(head, "Authorization") != null or headerValue(head, "X-Zdtd-Secret") != null)
-                std.debug.print("zdtd: webui auth rejected (bad credential) ip_tag={x:0>8}\n", .{ipLogTag(self.client_ip)});
+                std.debug.print("zdtd: webui auth rejected (bad credential)\n", .{});
             // Machine clients on /api/* get plain 401; browsers get the HTML form.
             if (std.mem.startsWith(u8, path, "/api/")) {
                 self.respond(401, "text/plain; charset=utf-8", "unauthorized\n");
@@ -801,15 +788,6 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
     return w.buffered();
 }
 
-fn queryToken(target: []const u8) ?[]const u8 {
-    const q = std.mem.indexOfScalar(u8, target, '?') orelse return null;
-    var it = std.mem.splitScalar(u8, target[q + 1 ..], '&');
-    while (it.next()) |pair| {
-        if (std.mem.startsWith(u8, pair, "token=")) return pair["token=".len..];
-    }
-    return null;
-}
-
 /// HMAC-SHA256(secret, fresh process nonce) → first 16 bytes as hex (32 chars).
 /// Cookie and CSRF use this so the shared secret is not stored in browser storage/HTML,
 /// and old cookies stop working whenever the listener restarts.
@@ -826,12 +804,8 @@ fn fillSessionToken(secret: []const u8, nonce: []const u8, out: *[session_token_
     }
 }
 
-/// Pseudonym for stdout only (project policy: no raw IP in logs). Same hash as
-/// game.zig ipLogTag so webui and join-log tags correlate for one address.
-fn ipLogTag(ip: u32) u32 {
-    var b: [4]u8 = undefined;
-    std.mem.writeInt(u32, &b, ip, .little);
-    return @truncate(std.hash.Wyhash.hash(0x7a647464, &b));
+fn isLoopbackIpv4(ip: u32) bool {
+    return ip & 0xff000000 == 0x7f000000;
 }
 
 fn requestAuthorized(head: []const u8, secret: []const u8, session_token: []const u8) bool {
@@ -910,16 +884,18 @@ fn loginHintHtml(bad_token: bool) []const u8 {
         \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         \\<title>Sign in · zdtd</title>
         \\<style>body{font-family:system-ui,sans-serif;margin:2rem;max-width:36rem;line-height:1.5;color:#e8e8e8;background:#1a1a1a}
-        \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff}
-        \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #555;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
+        \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff;text-decoration:underline}
+        \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
         \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#7eb8ff;color:#0a0c10;font-weight:600;cursor:pointer}
         \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}
-        \\.err{color:#ff8a8a;margin:0.75rem 0}</style></head>
+        \\.err{color:#ff8a8a;margin:0.75rem 0}
+        \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText;forced-color-adjust:none}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:Mark}}
+        \\</style></head>
         \\<body><main><h1>zdtd webui</h1>
         \\<p id="login-err" class="err" role="alert">Sign-in failed. The shared secret was not accepted.</p>
         \\<form method="post" action="/login">
         \\<label for="login-token">Shared secret</label>
-        \\<input type="password" name="token" id="login-token" required autocomplete="current-password" spellcheck="false" aria-describedby="login-err login-help" autofocus>
+        \\<input type="password" name="token" id="login-token" required autocomplete="current-password" spellcheck="false" aria-invalid="true" aria-describedby="login-err login-help" autofocus>
         \\<button type="submit">Sign in</button>
         \\</form>
         \\<p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
@@ -931,10 +907,12 @@ fn loginHintHtml(bad_token: bool) []const u8 {
     \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     \\<title>Sign in · zdtd</title>
     \\<style>body{font-family:system-ui,sans-serif;margin:2rem;max-width:36rem;line-height:1.5;color:#e8e8e8;background:#1a1a1a}
-    \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff}
-    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #555;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
+    \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff;text-decoration:underline}
+    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
     \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#7eb8ff;color:#0a0c10;font-weight:600;cursor:pointer}
-    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}</style></head>
+    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}
+    \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText;forced-color-adjust:none}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
+    \\</style></head>
     \\<body><main><h1>zdtd webui</h1>
     \\<p>Sign in with the webui shared secret to set a session cookie.</p>
     \\<form method="post" action="/login">
@@ -960,8 +938,8 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\header{{padding:1rem 1.25rem;border-bottom:1px solid #2a3144;display:flex;gap:1rem;align-items:baseline;flex-wrap:wrap}}
         \\header h1{{font-size:1.15rem;margin:0;font-weight:600}}header .meta{{color:var(--muted);font-size:0.9rem}}
         \\.refresh-ctrl{{margin-left:auto;display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-size:0.9rem;cursor:pointer;min-height:44px}}
-        \\.refresh-ctrl input{{width:1.1rem;height:1.1rem;accent-color:var(--acc)}}
-        \\.logout-form{{margin:0}}.logout-form button{{min-height:44px;padding:0.45rem 0.75rem;border:1px solid #46506a;border-radius:6px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}}
+        \\.refresh-ctrl input{{width:1.25rem;height:1.25rem;min-width:1.25rem;min-height:1.25rem;accent-color:var(--acc)}}
+        \\.logout-form{{margin:0}}.logout-form button{{min-height:44px;padding:0.45rem 0.75rem;border:1px solid #6a738c;border-radius:6px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}}
         \\main{{padding:1rem 1.25rem;display:grid;gap:1rem;max-width:56rem;width:100%;margin-inline:auto}}
         \\section{{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid #2a3144}}
         \\section h2{{margin:0 0 0.6rem;font-size:0.95rem;color:var(--acc);font-weight:600;text-transform:uppercase;letter-spacing:0.04em}}
@@ -971,9 +949,9 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
         \\.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.5rem,1fr));gap:0.5rem}}
         \\.stat{{background:#141824;border-radius:6px;padding:0.5rem 0.65rem}}.stat b{{display:block;font-size:1.1rem}}.stat span{{color:var(--muted);font-size:0.75rem}}
-        \\footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:0.8rem}}
+        \\footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:0.8rem}}footer a{{color:var(--acc);text-decoration:underline}}
         \\.cmd-row{{display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;align-items:center}}
-        \\.cmd-row input[type=text]{{flex:1;min-width:12rem;min-height:44px;background:#141824;border:1px solid #2a3144;color:var(--fg);padding:0.45rem 0.6rem;border-radius:6px;font-family:ui-monospace,monospace}}
+        \\.cmd-row input[type=text]{{flex:1;min-width:12rem;min-height:44px;background:#141824;border:1px solid #6a738c;color:var(--fg);padding:0.45rem 0.6rem;border-radius:6px;font-family:ui-monospace,monospace}}
         \\.cmd-row button{{background:var(--acc);color:#0a0c10;border:0;border-radius:6px;padding:0.55rem 0.9rem;min-height:44px;min-width:4.5rem;font-weight:600;cursor:pointer}}.cmd-row button:disabled{{opacity:0.65;cursor:wait}}
         \\button:hover{{border-color:var(--acc)}}a:focus-visible,button:focus-visible,input:focus-visible{{outline:3px solid var(--warn);outline-offset:3px}}
         \\pre.cmd-out,pre.cmd-log{{margin:0.5rem 0 0;background:#0e1018;border-radius:6px;padding:0.6rem 0.75rem;font-size:0.85rem;overflow:auto;max-height:14rem;white-space:pre-wrap;word-break:break-word}}
@@ -981,7 +959,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\#players{{overflow-x:auto}}#players table{{min-width:30rem}}
         \\@media(max-width:36rem){{main{{padding:0.75rem}}header,footer{{padding-left:0.75rem;padding-right:0.75rem}}section{{padding:0.75rem}}.cmd-row{{display:grid;grid-template-columns:minmax(0,1fr) auto}}.cmd-row input[type=text]{{min-width:0}}.refresh-ctrl{{margin-left:0}}}}
         \\@media(prefers-reduced-motion:reduce){{.skip-link{{transition:none}}}}
-        \\@media(forced-colors:active){{:root{{--bg:Canvas;--card:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:Mark}}body,section,.stat,pre.cmd-out,pre.cmd-log{{background:Canvas;color:CanvasText;border-color:CanvasText}}.cmd-row input[type=text],.cmd-row button{{border:1px solid ButtonText;forced-color-adjust:none}}a:focus-visible,button:focus-visible,input:focus-visible,.skip-link:focus{{outline:3px solid Highlight;outline-offset:3px}}}}
+        \\@media(forced-colors:active){{:root{{--bg:Canvas;--card:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:Mark}}body,section,.stat,pre.cmd-out,pre.cmd-log{{background:Canvas;color:CanvasText;border-color:CanvasText}}.cmd-row input[type=text],.cmd-row button,.logout-form button{{border:1px solid ButtonText;forced-color-adjust:none}}a:focus-visible,button:focus-visible,input:focus-visible,.skip-link:focus{{outline:3px solid Highlight;outline-offset:3px}}}}
         \\</style></head>
         \\<body>
         \\<a class="skip-link" href="#main-content">Skip to dashboard</a>
@@ -991,9 +969,9 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="{s}"><button type="submit">Sign out</button></form>
         \\</header>
         \\<main id="main-content" tabindex="-1">
-        \\<section aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">loading…</p></div></section>
-        \\<section aria-labelledby="apm-heading"><h2 id="apm-heading">APM / counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
-        \\<section aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
+        \\<section aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" aria-labelledby="status-heading" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">loading…</p></div></section>
+        \\<section aria-labelledby="apm-heading"><h2 id="apm-heading">APM / counters</h2><div id="apm" aria-labelledby="apm-heading" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
+        \\<section aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" aria-labelledby="players-heading" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
         \\<section aria-labelledby="console-heading">
         \\<h2 id="console-heading">Console</h2>
         \\<p id="cmd-help" class="meta" style="margin:0 0 0.4rem;color:var(--muted);font-size:0.85rem">Use the same commands as the admin console, such as help, status, give, kick, and settime.</p>
@@ -1007,7 +985,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\<div id="console-log" role="region" aria-label="Recent commands" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
         \\</section>
         \\</main>
-        \\<footer><span id="refresh-state">Auto-refresh on</span> · <a href="/api/apm.json" style="color:var(--acc)">/api/apm.json</a> · <a href="/healthz" style="color:var(--acc)">/healthz</a></footer>
+        \\<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">/api/apm.json</a> · <a href="/healthz">/healthz</a></footer>
         \\<script>
         \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;const swap=()=>{{el.setAttribute('aria-busy','true');return fetch(u,{{credentials:'same-origin'}}).then(r=>r.ok?r.text():Promise.reject()).then(t=>{{el.innerHTML=t;el.removeAttribute('data-load-error');}}).catch(()=>{{if(!el.children.length||el.getAttribute('data-load-error'))el.innerHTML='<p class="err" role="alert">Unable to refresh. Retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>el.removeAttribute('aria-busy'));}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
         \\const polls=Array.from(document.querySelectorAll('[hx-get]'));polls.forEach(hxPoll);
@@ -1015,7 +993,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\function applyRefresh(){{const on=autoEl.checked;polls.forEach(el=>{{if(on)el._hxStart();else{{el._hxStop();if(!el.children.length)el._hxOnce();}}}});if(refreshState)refreshState.textContent=on?'Auto-refresh on':'Auto-refresh paused';}}
         \\if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches){{autoEl.checked=false;}}
         \\autoEl.addEventListener('change',applyRefresh);applyRefresh();
-        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});const response=await r.text();out.innerHTML=response;if(!r.ok)out.setAttribute('role','alert');else out.setAttribute('role','status');const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{button.disabled=false;button.textContent='Run';}}}});
+        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{button.disabled=false;button.textContent='Run';}}}});
         \\</script>
         \\</body></html>
     , .{ version.product, version.stock_wire, csrf_token, csrf_token });
@@ -1119,7 +1097,7 @@ fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
         if (!p.used) continue;
         any = true;
         const nm = p.name[0..p.name_len];
-        const st: []const u8 = if (p.entered) "entered" else if (p.joined) "joined" else "...";
+        const st: []const u8 = if (p.entered) "entered" else if (p.joined) "joined" else "connecting";
         // Names are client-supplied (PlayerLogin); never interpolate raw into HTML.
         try w.print("<tr><td class=\"num\">{d}</td><td>", .{p.slot});
         try htmlEscape(&w, nm);
@@ -1204,6 +1182,7 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<div class="stat"><b class="num">{d}</b><span>phase reject</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>ownership reject</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>bounds reject</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>movement reject</span></div>
         \\</div>
     , .{
         s.join_ok,
@@ -1220,6 +1199,7 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.phase_rejects,
         s.ownership_rejects,
         s.bounds_rejects,
+        s.movement_rejects,
     });
     return w.buffered();
 }
@@ -1304,9 +1284,15 @@ test "parseIpv4 loopback and any" {
     try std.testing.expectEqual(@as(u32, 0), try parseIpv4("0.0.0.0"));
 }
 
-test "pathOnly and queryToken" {
+test "pathOnly strips query without treating it as credentials" {
     try std.testing.expectEqualStrings("/foo", pathOnly("/foo?token=x"));
-    try std.testing.expectEqualStrings("s3", queryToken("/login?token=s3").?);
+}
+
+test "webui IPv4 binding is loopback only" {
+    try std.testing.expect(isLoopbackIpv4(try parseIpv4("127.0.0.1")));
+    try std.testing.expect(isLoopbackIpv4(try parseIpv4("127.2.3.4")));
+    try std.testing.expect(!isLoopbackIpv4(try parseIpv4("0.0.0.0")));
+    try std.testing.expect(!isLoopbackIpv4(try parseIpv4("192.168.1.2")));
 }
 
 test "isGetOnlyPath known dashboard routes" {
@@ -1470,7 +1456,6 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
 
     const path = pathOnly(head);
     try std.testing.expect(path.len <= @max(head.len, 1));
-    _ = queryToken(head);
     _ = contentLength(head);
     _ = isFormContentType(headerValue(head, "Content-Type"));
     if (headerValue(head, "Cookie")) |ck| {
@@ -1510,6 +1495,11 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.indexOf(u8, html, "aria-label=\"Recent commands\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "forced-colors:active") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "prefers-reduced-motion") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "border:1px solid #6a738c") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "text-decoration:underline") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "aria-labelledby=\"status-heading\"") != null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
     try std.testing.expect(std.mem.indexOf(u8, html, "s3cr3t") == null);
     try std.testing.expect(std.mem.indexOf(u8, html, sess[0..]) != null);
@@ -1523,7 +1513,10 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.indexOf(u8, ok, "role=\"alert\"") == null);
     const bad = loginHintHtml(true);
     try std.testing.expect(std.mem.indexOf(u8, bad, "role=\"alert\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bad, "aria-invalid=\"true\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bad, "Sign-in failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ok, "aria-invalid") == null);
+    try std.testing.expect(std.mem.indexOf(u8, ok, "forced-colors:active") != null);
 }
 
 test "renderStatus uses h3 for subsections under shell Status h2" {

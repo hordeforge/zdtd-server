@@ -1,11 +1,19 @@
 # Chunk wire formats (zdtd)
 
-Stock `Chunk.write` is ~601 IL (64 layers, channels, TE, …). Until capture-golden
-stock bytes land, zdtd speaks two **documented intermediate** layouts.
+**Production S→C** for the stock client is the network-mode encoder in
+`src/wire/stock_chunk.zig` (`buildNetPackageChunkNew`), not the height-plane
+helpers. Those helpers remain for unit tests and loadgen-style payloads.
 
+Stock `Chunk.write` is ~601 IL (64 layers, channels, TE, …). Full bit-diff
+goldens against a stock dedi capture are still open; the live path already uses
+the stock envelope + block-layer layout the client `Read`s.
 
 **API note:** in-memory `heightWorld` / `heightAt` return **u16** for headroom; stock wire and `.zch` still store **u8[256]** (clamp on write).
-## Layout A: height plane (inner payload)
+
+## Layout A: height plane (test / loadgen helper)
+
+Used by `packages.buildChunkPayload` / `buildChunkBody` only (not the stock
+client stream path).
 
 ```text
 cx:i32 LE | cz:i32 LE | ydim:i32 (=256) | heights:u8[256]
@@ -13,51 +21,31 @@ size = 268
 heights[lx + lz*16] = surface Y
 ```
 
-## Layout D: stock NetPackageChunk envelope (default S→C)
+## Layout D: stock NetPackageChunk envelope around Layout A
 
-Matches V3.0.1 `NetPackageChunk.write` when `bOverwriteExisting`:
+Test helper envelope (`buildChunkBodyStockEnvelope`). Production client stream
+uses `stock_chunk` instead of a bare height-plane payload.
 
 ```text
 overwrite:bool (=1)
 cx:i16 | cy:i16 (=0) | cz:i16
 dataLen:i32
-payload: Layout A (or future stock Chunk.write blob)
+payload: Layout A
 size = 11 + 268 = 279
 ```
 
-Package name: `NetPackageChunk`. Bots may send/parse bare Layout A; server always sends D.
+Package name: `NetPackageChunk`.
 
 ## ChunkRemove
 
 Stock body: `chunkKey:i64` = `WorldChunkCache.MakeChunkKey(cx, cz)`  
 `((cz & 0xFFFFFF) << 24) | (cx & 0xFFFFFF)`.
 
-## Layout B: column tops (ZCHC)
+## Layout B / C (removed)
 
-```text
-'Z''C''H''C' | cx:i32 | cz:i32 | ydim:i32 | heights:u8[256] | top_block:u16[256]
-size = 4+12+256+512 = 784
-```
-
-`top_block` is the block id at surface height per column.
-
-## Layout C: layered skeleton (ZCHL) stock-inspired
-
-Approximates stock layer loop without full channel/TE parity:
-
-```text
-'Z''C''H''L' | cx:i32 | cy:i32(=0) | cz:i32 | ticks:u64
-for layer in 0..63:
-  present:u8
-  if present:
-    blocks:u16[1024]   // 16×16×4, index = x + z*16 + (y&3)*256
-                       // y = layer*4 + (y&3)
-heights:u8[256]
-terrain:u16[256]       // surface y * 256 packing (stock-ish)
-```
-
-Empty air layers set `present=0` (common for sky). Encoder builds this from
-`Chunk.blockAt` / heights. Decoder optional for custom clients.
+Former intermediate encoders **ZCHC** (column tops) and **ZCHL** (layered
+skeleton) were deleted. Do not reintroduce parallel wire shapes; production is
+`stock_chunk` on the net path and **ZCH3** on disk.
 
 ## Disk (world overlay)
 
@@ -92,7 +80,8 @@ and `Chunk.read`s during package.read. Continuous stream uses the same builder.
 Client mesh needs full neighbor rings (`RegenerateNextChunk`). Only **inner**
 chunks (stream radius minus ~2) become displayed GOs. With stream r=4, max CGO
 ≈25; spawn overlay with `fixedSizeCC=false` needs viewDist²−10 (often 39+).
-Join/stream disk: **r 6..8**, hole-free, enough adds/tick.
+Join/stream defaults: **r 7..9** (`default_chunk_stream_radius_*` in `game.zig`;
+CGO needs r≥6 at viewDist 7), hole-free, enough adds/tick.
 
 ## WorldInfo + terrain textures (not in chunk body)
 

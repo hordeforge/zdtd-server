@@ -11,6 +11,7 @@ const stock_te = @import("wire/stock_te.zig");
 const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
 const admin = @import("server/admin.zig");
+const mode_pack = @import("server/mode.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const serverinfo = @import("server/serverinfo_tcp.zig");
 const xml_util = @import("assets/xml_util.zig");
@@ -395,6 +396,40 @@ const toml_corpus = [_][]const u8{
     "[ authority ]\nmode=\n",
     "=\n[]\nx",
 };
+
+test {
+    // Stateful peer fuzz targets (fragment reassembly, ack window) live in
+    // peer.zig for private-fn access; reference pulls them into this build.
+    _ = @import("litenet/peer.zig");
+}
+
+const mode_corpus = [_][]const u8{
+    "",
+    mode_pack.default_pack_toml,
+    "name = \"x\"\nmax_spawned_zombies = 64\n",
+    "[gameplay]\nblood_moon_frequency = 300\n",
+    "max_spawned_zombies = -1\n",
+    "bloodmoon_frequency = 99999999999999999999\n",
+    "enable_sample_plugin = maybe\n",
+    "name = \"unterminated\n[",
+    "[section\n",
+    "name=\n=\n# c\n",
+    "[plugin]\nenable_sample_plugin = true # trailing\n",
+};
+
+test "fuzz mode pack TOML parser" {
+    try std.testing.fuzz({}, fuzzModePack, .{ .corpus = &mode_corpus });
+}
+
+fn fuzzModePack(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var p = mode_pack.parse(std.testing.allocator, storage[0..len]) catch return;
+    defer p.deinit();
+    // Name is either the "default" literal or an arena dupe from the input.
+    try std.testing.expect(p.name.len <= @max(len, "default".len));
+}
 
 test "fuzz zdtd.toml config parser" {
     try std.testing.fuzz({}, fuzzTomlConfig, .{ .corpus = &toml_corpus });

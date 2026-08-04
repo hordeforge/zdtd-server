@@ -29,10 +29,16 @@ pub const Feature = struct {
     wire_chunks: ?bool = null,
 };
 
+/// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
+pub const Mode = struct {
+    name: ?[]const u8 = null,
+};
+
 pub const File = struct {
     stream: Stream = .{},
     authority: Authority = .{},
     feature: Feature = .{},
+    mode: Mode = .{},
     /// Arena owning any string slices from parse.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
@@ -135,6 +141,12 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
     } else if (std.mem.eql(u8, section, "feature")) {
         if (std.mem.eql(u8, key, "wire_chunks")) {
             f.feature.wire_chunks = try parseBool(val);
+        } else {
+            warnUnknownKey(section, key);
+        }
+    } else if (std.mem.eql(u8, section, "mode")) {
+        if (std.mem.eql(u8, key, "name")) {
+            f.mode.name = try a.dupe(u8, stripQuotes(val));
         } else {
             warnUnknownKey(section, key);
         }
@@ -258,6 +270,8 @@ test "parse stream and authority" {
         \\mode = "observe"
         \\[feature]
         \\wire_chunks = false
+        \\[mode]
+        \\name = "default"
     ;
     var f = try parse(std.testing.allocator, src);
     defer f.deinit();
@@ -267,6 +281,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
     try std.testing.expectEqual(false, f.feature.wire_chunks.?);
+    try std.testing.expectEqualStrings("default", f.mode.name.?);
 }
 
 test "loadFromPath rejects oversized file" {
