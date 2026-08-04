@@ -191,6 +191,19 @@ pub const ItemTable = struct {
         for (self.defs) |d| {
             if (d.stock_type == stock_type and d.id != 0) return d.id;
         }
+        // Parallel stock_types/stock_names arrays (full XML order).
+        for (self.stock_types, 0..) |st, i| {
+            if (st != stock_type) continue;
+            const name = if (i < self.stock_names.len) self.stock_names[i] else "";
+            if (name.len > 0) {
+                const eid = self.ecsIdByName(name);
+                if (eid != 0) return eid;
+                for (self.defs) |d| {
+                    if (d.id != 0 and std.mem.eql(u8, d.name, name)) return d.id;
+                }
+            }
+            break;
+        }
         // Alias builtins via computed stockTypeFor
         var id: u16 = 1;
         while (id <= 12) : (id += 1) {

@@ -46,8 +46,11 @@ const workstations_mod = @import("../world/workstations.zig");
 const stock_te = @import("../wire/stock_te.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
+const phase_gate = @import("phase_gate.zig");
+const movement = @import("movement.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
+const plugin_mod = @import("../plugin/root.zig");
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
@@ -133,6 +136,8 @@ pub const InitOptions = struct {
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
+    /// Register in-tree sample_hello static plugin (logs once on enable).
+    enable_sample_plugin: bool = true,
 };
 
 // Compile-time array bound for Client.streamed / deco_streamed (must cover max config).
@@ -215,6 +220,14 @@ const Client = struct {
     /// Game payload arrived before challenge echo (stock/loadgen can race). Replay after auth.
     preauth_buf: [512]u8 = undefined,
     preauth_len: usize = 0,
+    /// Last movement-envelope sample (horizontal speed gate).
+    move_valid: bool = false,
+    move_x: f32 = 0,
+    move_y: f32 = 0,
+    move_z: f32 = 0,
+    move_tick: u64 = 0,
+    /// Running total of eatable units last seen (cross-package stack-loss).
+    last_eatable_units: u32 = 0,
 };
 
 pub const Game = struct {
@@ -223,6 +236,8 @@ pub const Game = struct {
     world: world_store.World,
     /// Entity-component-system sim world.
     sim: ecs.World = .{},
+    /// Static native plugin host (ADR 0005 skeleton; no dynlib).
+    plugins: plugin_mod.PluginHost = .{},
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},
     tick_n: u64 = 0,
@@ -326,7 +341,7 @@ pub const Game = struct {
     bloodmoon_sent: bool = false,
     /// Empty = open. Non-empty = LiteNet Connect key; mismatched keys are rejected.
     password: []const u8 = "",
-    /// Stream / authority tunables (InitOptions; future zdtd.toml). Defaults match historical consts.
+    /// Stream / authority tunables (InitOptions; filled from zdtd.toml via `zdtd_config.applyToInitOptions`).
     max_streamed_chunks: usize = default_max_streamed_chunks,
     chunk_stream_radius_min: i32 = default_chunk_stream_radius_min,
     chunk_stream_radius_max: i32 = default_chunk_stream_radius_max,
@@ -403,6 +418,7 @@ pub const Game = struct {
             .max_edit_range = opts.max_edit_range,
             .interest_range = opts.interest_range,
             .peer_stale_ms = opts.peer_stale_ms,
+            .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
         self.sim.director.difficulty = opts.game_difficulty;
@@ -541,6 +557,15 @@ pub const Game = struct {
         if (assets_items.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |it| {
             self.items.deinit();
             self.items = it;
+            std.debug.print("zdtd: items source={s} defs={d} stock_names={d}\n", .{
+                @tagName(self.items.source), self.items.defs.len, self.items.stock_names.len,
+            });
+            if (self.items.byStockName("foodCanChili")) |st| {
+                const eid = self.items.ecsIdFromStockType(st);
+                std.debug.print("zdtd: foodCanChili stock={d} ecs={d} isEat={}\n", .{
+                    st, eid, self.items.isEat(eid),
+                });
+            }
         }
         if (assets_signs.tryLoad(allocator, opts.game_dir) catch null) |sc| {
             self.signs.deinit();
@@ -944,12 +969,80 @@ pub const Game = struct {
             }
         }
         self.sim.power.resolve();
+
+        // Static plugins after world/assets are ready (sample_hello logs once).
+        self.plugins.enableStaticDefaults();
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
     /// join-phase Hard drops but is the flag for future soft-only paths.
     fn authorityCorrects(self: *const Game) bool {
         return self.authority_mode == .correct;
+    }
+
+    fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+        c.move_valid = true;
+        c.move_x = x;
+        c.move_y = y;
+        c.move_z = z;
+        c.move_tick = self.tick_n;
+    }
+
+    fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
+        if (peer_slot >= max_clients) return;
+        const c = &self.clients[peer_slot];
+        c.move_valid = false;
+        c.move_x = x;
+        c.move_y = y;
+        c.move_z = z;
+        c.move_tick = self.tick_n;
+    }
+
+    /// Horizontal speed envelope. Observe: count only, still apply client pos.
+    /// Correct: clamp to last good + max delta; soft snap S2C when clamped.
+    fn applyMovementEnvelope(
+        self: *Game,
+        c: *Client,
+        peer: *ln_peer.Peer,
+        entity_id: i32,
+        x: f32,
+        y: f32,
+        z: f32,
+    ) struct { x: f32, y: f32, z: f32, applied: bool } {
+        if (!c.move_valid) {
+            return .{ .x = x, .y = y, .z = z, .applied = true };
+        }
+        const tick_s: f32 = @as(f32, @floatFromInt(protocol.tick_ns)) / 1_000_000_000.0;
+        const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
+        const clamp = movement.clampHorizontal(
+            c.move_x,
+            c.move_z,
+            x,
+            z,
+            dt,
+            movement.max_horizontal_speed_mps,
+        );
+        if (!clamp.clamped) {
+            return .{ .x = x, .y = y, .z = z, .applied = true };
+        }
+        self.harness.counters.inc(.movement_rejects);
+        if (!self.authorityCorrects()) {
+            return .{ .x = x, .y = y, .z = z, .applied = true };
+        }
+        if (packages.buildPosAndRotBody(
+            self.body_buf[0..64],
+            entity_id,
+            clamp.x,
+            y,
+            clamp.z,
+            0,
+            0,
+            0,
+            true,
+        )) |sb| {
+            self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};
+        } else |_| {}
+        return .{ .x = clamp.x, .y = y, .z = clamp.z, .applied = true };
     }
 
     /// Terrain resting height for vehicle physics: top solid block + 1 (an
@@ -1227,6 +1320,7 @@ pub const Game = struct {
         self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.land_claims_n = 0;
+        self.plugins.shutdown();
         self.sim.deinit();
         self.blocks.deinit();
         self.items.deinit();
@@ -1593,6 +1687,7 @@ pub const Game = struct {
         s.phase_rejects = self.harness.counters.get(.phase_rejects);
         s.ownership_rejects = self.harness.counters.get(.ownership_rejects);
         s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
+        s.movement_rejects = self.harness.counters.get(.movement_rejects);
         const th = self.harness.prof.histOf(.tick_total);
         s.tick_mean_ns = th.meanNs();
         s.tick_p50_ns = th.percentileNs(50);
@@ -1799,6 +1894,9 @@ pub const Game = struct {
             return;
         }
         self.sim.transform[ps] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
+        if (self.sim.mask[ps].player) {
+            self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), x, y, z);
+        }
         const entity_id = self.sim.netId(ps);
         const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, y, z, 0, 0, 0, true) catch return;
         self.broadcast("NetPackageEntityTeleport", body) catch {};
@@ -2070,6 +2168,7 @@ pub const Game = struct {
             .tele => |t| {
                 if (self.sim.playerByPeer(t.peer)) |ps| {
                     self.sim.transform[ps] = .{ .x = t.x, .y = t.y, .z = t.z, .yaw = 0 };
+                    self.resetMoveEnvelopePeer(t.peer, t.x, t.y, t.z);
                     const entity_id = self.sim.netId(ps);
                     const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, t.x, t.y, t.z, 0, 0, 0, true) catch {
                         self.adminReply("teleport encode failed\n");
@@ -2802,14 +2901,6 @@ pub const Game = struct {
         return std.mem.readInt(u32, bytes[4..8], .big);
     }
 
-    /// Pseudonym for stdout only. Ban/rate-limit still use the real `peerIpKey`.
-    /// Project policy: no raw IP in logs by default (see TODO evidence redaction).
-    fn ipLogTag(ip: u32) u32 {
-        var b: [4]u8 = undefined;
-        std.mem.writeInt(u32, &b, ip, .little);
-        return @truncate(std.hash.Wyhash.hash(0x7a647464, &b));
-    }
-
     /// Stock ~500ms/IP; return true if join should be rejected.
     fn joinRateLimited(self: *Game, ip: u32) bool {
         if (ip == 0) return false;
@@ -2882,14 +2973,14 @@ pub const Game = struct {
         peer.pump_ctx = self;
         const ip = peerIpKey(peer);
         if (self.isBanned(ip)) {
-            std.debug.print("zdtd: ban reject ip_tag={x:0>8} local_id={d}\n", .{ ipLogTag(ip), peer.local_id });
+            std.debug.print("zdtd: ban reject local_id={d}\n", .{peer.local_id});
             self.harness.counters.inc(.join_fail);
             peer.alive = false;
             c.* = .{};
             return;
         }
         if (self.joinRateLimited(ip)) {
-            std.debug.print("zdtd: join rate-limit ip_tag={x:0>8} local_id={d}\n", .{ ipLogTag(ip), peer.local_id });
+            std.debug.print("zdtd: join rate-limit local_id={d}\n", .{peer.local_id});
             self.harness.counters.inc(.join_fail);
             peer.alive = false;
             c.* = .{};
@@ -3021,13 +3112,12 @@ pub const Game = struct {
         }
         const sp = self.world.primarySpawn();
 
-        // Join-phase gate: pre-login peers may only speak the login/config
-        // handshake. World/entity/inv mutations from an unjoined peer are dropped
-        // in Correct mode (default). Observe logs and still drops (phase is Hard).
-        if (!c.joined) {
-            const pre_login_ok = std.mem.eql(u8, name, "NetPackagePlayerLogin") or std.mem.eql(u8, name, "NetPackageRequestToEnterGame") or std.mem.eql(u8, name, "NetPackageRequestToSpawnPlayer") or std.mem.eql(u8, name, "NetPackageAuthConfirmation") or std.mem.eql(u8, name, "NetPackageSignDataRequest") or std.mem.eql(u8, name, "NetPackageWorldInitInfoRequest") or std.mem.eql(u8, name, "NetPackageDynamicClientArrive") or std.mem.eql(u8, name, "NetPackagePlayerDisconnect");
-            if (!pre_login_ok) {
-                // Phase gate is always Hard (never apply play C2S pre-join).
+        // Phase gate: connecting/joined (pre-enter) only join-SM packages.
+        // Playing (entered) allows all names; typed handlers still validate.
+        // Phase is always Hard (never apply play C2S pre-enter).
+        {
+            const phase = phase_gate.phaseOf(c.joined, c.entered);
+            if (!phase_gate.allowed(phase, name)) {
                 self.harness.counters.inc(.phase_rejects);
                 return;
             }
@@ -3192,15 +3282,19 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
             const p = packages.parsePosAndRotBody(body) catch return;
             if (p.entity_id == c.entity_id) {
+                const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
+                if (!env.applied) return;
                 // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
-                if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, true)) |ny| {
-                    systems.questTickGoto(&self.sim, c.slot, p.x, ny, p.z);
-                    systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
+                if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
+                    self.noteAcceptedMove(c, env.x, ny, env.z);
+                    systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
+                    systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
                     return;
                 }
-                self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
-                systems.questTickGoto(&self.sim, c.slot, p.x, p.y, p.z);
-                systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
+                self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
+                self.noteAcceptedMove(c, env.x, env.y, env.z);
+                systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
+                systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
             }
             return;
         }
@@ -3274,9 +3368,11 @@ pub const Game = struct {
             if (!self.sim.mask[ps].inventory) return;
             var before: [64]struct { id: u16, n: u32 } = undefined;
             var bn: usize = 0;
+            var before_total: u32 = 0;
             for (self.sim.inventory[ps].slots) |sl| {
                 if (sl.count == 0 or sl.item_id == 0) continue;
                 if (!self.items.isEat(sl.item_id)) continue;
+                before_total += sl.count;
                 var found = false;
                 for (before[0..bn]) |*e| {
                     if (e.id == sl.item_id) {
@@ -3290,11 +3386,41 @@ pub const Game = struct {
                     bn += 1;
                 }
             }
-            packages.stock_inv.applyPlayerInventoryBody(body, &self.sim.inventory[ps], reverseItemType, self) catch return;
-            // Apply eat effects for each unit of consumable lost (cap 4 per push).
+            const baseline_total = if (before_total > 0) before_total else c.last_eatable_units;
+            // Apply may partially mutate toolbelt then fail on bag/equip/prefs.
+            // Keep stack-loss detect even on error (toolbelt is first on the wire).
+            packages.stock_inv.applyPlayerInventoryBody(body, &self.sim.inventory[ps], reverseItemType, self) catch |err| {
+                std.debug.print("zdtd: PlayerInventory apply err={s} body={d} peer={d}\n", .{ @errorName(err), body.len, c.slot });
+            };
+            var after_total: u32 = 0;
+            var first_eat_id: u16 = 0;
+            for (self.sim.inventory[ps].slots) |sl| {
+                if (sl.count == 0 or sl.item_id == 0) continue;
+                if (!self.items.isEat(sl.item_id)) continue;
+                after_total += sl.count;
+                if (first_eat_id == 0) first_eat_id = sl.item_id;
+            }
+            const body_eat = packages.stock_inv.countEatableInPlayerInventoryBody(
+                body,
+                reverseItemType,
+                self,
+                struct {
+                    fn isEat(ctx: ?*anyopaque, item_id: u16) bool {
+                        const g: *Game = @ptrCast(@alignCast(ctx.?));
+                        return g.items.isEat(item_id);
+                    }
+                }.isEat,
+            );
+            // Prefer body-side count when reverse left ECS empty but wire had food.
+            if (after_total == 0 and body_eat.total > 0) {
+                after_total = body_eat.total;
+            }
+            if (first_eat_id == 0) first_eat_id = body_eat.first_id;
+
             if (self.sim.mask[ps].health and c.entity_id > 0) {
                 var ate_any = false;
                 var units_left: u32 = 4;
+                // Path A: per-id loss within this package.
                 for (before[0..bn]) |e| {
                     if (units_left == 0) break;
                     var after_n: u32 = 0;
@@ -3313,11 +3439,60 @@ pub const Game = struct {
                         units_left -= 1;
                     }
                 }
+                // Path B: aggregate drop vs last_eatable / baseline.
+                if (!ate_any and baseline_total > after_total and units_left > 0) {
+                    var lost = baseline_total - after_total;
+                    if (lost > units_left) lost = units_left;
+                    var eid: u16 = first_eat_id;
+                    if (eid == 0 and bn > 0) eid = before[0].id;
+                    if (eid == 0) {
+                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
+                    }
+                    if (eid == 0) {
+                        if (self.items.byStockName("foodCanBeef")) |st| eid = self.items.ecsIdFromStockType(st);
+                    }
+                    if (eid == 0) eid = 2;
+                    var u: u32 = 0;
+                    while (u < lost) : (u += 1) {
+                        const props = eatProps(@ptrCast(self), eid);
+                        const r = invsys.applyEatProps(&self.sim, ps, props);
+                        if (!r.ate) break;
+                        ate_any = true;
+                        units_left -= 1;
+                    }
+                }
+                // Path C: body reported fewer eatables than last_eatable (seed via body).
+                if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
+                    var lost = c.last_eatable_units - body_eat.total;
+                    if (lost > units_left) lost = units_left;
+                    var eid: u16 = body_eat.first_id;
+                    if (eid == 0) {
+                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
+                    }
+                    if (eid == 0) eid = 2;
+                    var u: u32 = 0;
+                    while (u < lost) : (u += 1) {
+                        const props = eatProps(@ptrCast(self), eid);
+                        const r = invsys.applyEatProps(&self.sim, ps, props);
+                        if (!r.ate) break;
+                        ate_any = true;
+                        units_left -= 1;
+                    }
+                }
                 if (ate_any) {
                     const h = self.sim.health[ps];
+                    std.debug.print("zdtd: ItemActionEat stack-loss food={d:.1} before={d} after={d} last={d} body_eat={d}\n", .{
+                        h.food, before_total, after_total, c.last_eatable_units, body_eat.total,
+                    });
                     try self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max);
+                } else if (before_total != after_total or body_eat.total != c.last_eatable_units) {
+                    std.debug.print("zdtd: PI eatable before={d} after={d} last={d} body={d} body_eat={d}\n", .{
+                        before_total, after_total, c.last_eatable_units, body.len, body_eat.total,
+                    });
                 }
             }
+            // Track max of ECS and body so seed push sticks even if reverse drops.
+            c.last_eatable_units = @max(after_total, body_eat.total);
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageHoldingItem")) {
@@ -3582,12 +3757,21 @@ pub const Game = struct {
             const dy = std.mem.readInt(i16, body[13..15], .little);
             const dz = std.mem.readInt(i16, body[15..17], .little);
             if (self.sim.slotOfNetId(eid)) |idx| {
-                self.sim.transform[idx].x += @as(f32, @floatFromInt(dx)) * 0.03125;
-                self.sim.transform[idx].y += @as(f32, @floatFromInt(dy)) * 0.03125;
-                self.sim.transform[idx].z += @as(f32, @floatFromInt(dz)) * 0.03125;
-                const tr = self.sim.transform[idx];
+                const scale: f32 = 0.03125;
+                const nx = self.sim.transform[idx].x + @as(f32, @floatFromInt(dx)) * scale;
+                const ny = self.sim.transform[idx].y + @as(f32, @floatFromInt(dy)) * scale;
+                const nz = self.sim.transform[idx].z + @as(f32, @floatFromInt(dz)) * scale;
+                const env = self.applyMovementEnvelope(c, peer, eid, nx, ny, nz);
+                if (!env.applied) return;
+                self.sim.transform[idx].x = env.x;
+                self.sim.transform[idx].y = env.y;
+                self.sim.transform[idx].z = env.z;
                 // RelPos can walk Y into void without absolute PosAndRot; re-snap.
-                _ = try self.rescueDeepVoid(peer, eid, tr.x, tr.y, tr.z, true);
+                if (try self.rescueDeepVoid(peer, eid, env.x, env.y, env.z, true)) |ry| {
+                    self.noteAcceptedMove(c, env.x, ry, env.z);
+                } else {
+                    self.noteAcceptedMove(c, env.x, env.y, env.z);
+                }
             }
             return;
         }
@@ -3619,11 +3803,13 @@ pub const Game = struct {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
             }
-            if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, false)) |_| {
+            if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, false)) |ny| {
                 // Snapped; do not fan-out void coords.
+                self.noteAcceptedMove(c, p.x, ny, p.z);
                 return;
             }
             self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
+            self.noteAcceptedMove(c, p.x, p.y, p.z);
             try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
             return;
         }
@@ -4532,6 +4718,15 @@ pub const Game = struct {
         // First join: bLoaded=true so ToPlayer applies bag. Death re-bundle: false.
         const first_join = !c.entered;
         c.entered = true;
+        // Spawn/respawn resets movement envelope (teleport budget).
+        c.move_valid = false;
+        c.move_x = @floatFromInt(sx2);
+        c.move_y = @as(f32, @floatFromInt(sy2)) + 0.08;
+        c.move_z = @floatFromInt(sz2);
+        c.move_tick = self.tick_n;
+        if (first_join) {
+            self.plugins.playerJoin(@intCast(c.slot), eid);
+        }
         const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).
         _ = systems.questAcceptStarter(&self.sim, c.slot);
@@ -6032,6 +6227,7 @@ pub const Game = struct {
         defer sc.end();
         self.tick_n += 1;
         self.harness.counters.inc(.ticks);
+        self.plugins.setTick(self.tick_n);
 
         {
             const sn = apm.profiler.scope(&self.harness.prof, .net_poll);
@@ -6146,6 +6342,8 @@ pub const Game = struct {
             }
             if (self.tick_n % 5 == 0) try self.broadcastVehiclePositions();
             if (self.tick_n % 10 == 0) try self.broadcastTurretSync();
+            // Null on_tick hooks are a branch only (sample_hello is enable-only).
+            self.plugins.onTick();
         }
 
         try self.replicate();

@@ -643,9 +643,9 @@ pub fn applyPlayerInventoryBody(
             _ = try r.readBool(); // touched
             const has_prefs = try r.readBool();
             if (has_prefs) {
-                // PreferenceTracker needs PooledBinaryReader; skip unknown blob by failing soft.
-                // Client rarely sends prefs; if present, stop applying further fields.
-                return;
+                // PreferenceTracker.Write: playerId:i32 + optional toolbelt/equip/bag stacks.
+                // Skip fully so equipment/drag sections after bag still parse.
+                try skipPreferenceTracker(&r);
             }
         }
     }
@@ -676,6 +676,71 @@ pub fn applyPlayerInventoryBody(
         var drag_slots: [1]StockSlot = .{.{}};
         _ = try readItemStackList(&r, drag_slots[0..]);
         // ECS has no drag slot; ignore contents but parse for stream correctness.
+    }
+}
+
+/// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
+/// equipment ItemValue array, bag stacks (each gated by a bool).
+/// Best-effort count of eatable units in a PlayerInventory body (toolbelt+bag).
+pub fn countEatableInPlayerInventoryBody(
+    body: []const u8,
+    reverse: ?ReverseResolver,
+    ctx: ?*anyopaque,
+    is_eat: *const fn (ctx: ?*anyopaque, item_id: u16) bool,
+) struct { total: u32, first_id: u16 } {
+    var r: binary.Reader = .{ .data = body };
+    var total: u32 = 0;
+    var first_id: u16 = 0;
+    const has_tb = r.readBool() catch return .{ .total = 0, .first_id = 0 };
+    if (has_tb) {
+        var slots: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
+        const n = readItemStackList(&r, slots[0..]) catch 0;
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const s = slots[i];
+            if (s.type_id == 0 or s.count == 0) continue;
+            const eid: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
+            if (eid == 0) continue;
+            if (!is_eat(ctx, eid)) continue;
+            total += s.count;
+            if (first_id == 0) first_id = eid;
+        }
+    }
+    const has_bag = r.readBool() catch return .{ .total = total, .first_id = first_id };
+    if (has_bag) {
+        _ = r.readByte() catch return .{ .total = total, .first_id = first_id };
+        const bag_n = r.readU16() catch return .{ .total = total, .first_id = first_id };
+        var i: usize = 0;
+        while (i < bag_n) : (i += 1) {
+            const s = readItemStack(&r) catch break;
+            if (s.type_id == 0 or s.count == 0) continue;
+            const eid: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
+            if (eid == 0) continue;
+            if (!is_eat(ctx, eid)) continue;
+            total += s.count;
+            if (first_id == 0) first_id = eid;
+        }
+    }
+    return .{ .total = total, .first_id = first_id };
+}
+
+fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
+    _ = try r.readI32(); // PlayerID
+    if (try r.readBool()) {
+        var tmp: [64]StockSlot = [_]StockSlot{.{}} ** 64;
+        _ = try readItemStackList(r, tmp[0..]);
+    }
+    if (try r.readBool()) {
+        const n = try r.readU16();
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const present = try r.readBool();
+            if (present) _ = try readItemValue(r);
+        }
+    }
+    if (try r.readBool()) {
+        var tmp: [64]StockSlot = [_]StockSlot{.{}} ** 64;
+        _ = try readItemStackList(r, tmp[0..]);
     }
 }
 
