@@ -11,6 +11,7 @@ const world_store = @import("world/store.zig");
 const server_config = @import("server/config.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const mode_mod = @import("server/mode.zig");
+const webui_mod = @import("server/webui.zig");
 const io_fs = @import("util/io_fs.zig");
 const version = @import("version.zig");
 
@@ -29,8 +30,8 @@ const help_text =
     \\  --mode NAME           gamemode pack modes/<NAME>.toml (data-only; see docs/GAME_OPTIONS.md)
     \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
-    \\  --webui-bind ADDR     webui bind (loopback only: 127.0.0.1 or ::1; default 127.0.0.1)
-    \\  --webui-secret STR    shared secret (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
+    \\  --webui-bind ADDR     webui bind (loopback IPv4 only: 127.0.0.1; default 127.0.0.1)
+    \\  --webui-secret STR    shared secret, min 8 chars (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
     \\  --quests PATH         explicit quests.xml (file must exist)
     \\  --config-dir DIR      stock Data/Config dir (XML assets; dir must exist)
     \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order; dir must exist)
@@ -177,10 +178,9 @@ fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 
 }
 
 fn isLoopbackBind(host: []const u8) bool {
+    // IPv4 only (webui parseIpv4 / tcp_listen listen are IPv4).
     return std.mem.eql(u8, host, "127.0.0.1") or
-        std.mem.eql(u8, host, "localhost") or
-        std.mem.eql(u8, host, "::1") or
-        std.mem.eql(u8, host, "[::1]");
+        std.mem.eql(u8, host, "localhost");
 }
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -340,7 +340,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // ServerPort may also come from serverconfig.xml, so validate the effective
     // value after applying precedence as well as at CLI parse time.
     if (port > std.math.maxInt(u16) - 2) {
-        usageError("effective ServerPort must be between 0 and 65533 (LiteNet uses port+2)", .{});
+        // File-sourced value: runtime config error (exit 1), not a CLI usage typo.
+        if (port_cli) {
+            usageError("value for '--port' must be between 0 and 65533 (LiteNet uses port+2)", .{});
+        }
+        fatal("effective ServerPort {d} out of range 0..65533 (LiteNet uses port+2)", .{port});
     }
 
     // Resolve --game-dir + --world-name → map path when --map not set.
@@ -392,8 +396,15 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (webui_port != 0 and webui_secret.len == 0) {
         usageError("--webui-port requires --webui-secret or non-empty env ZDTD_WEBUI_SECRET", .{});
     }
+    // Fail fast with a clear message (game.webui also enforces; keep operator UX here).
+    if (webui_port != 0 and webui_secret.len < webui_mod.min_secret) {
+        usageError(
+            "webui secret must be at least {d} characters (got {d}); use a longer ZDTD_WEBUI_SECRET",
+            .{ webui_mod.min_secret, webui_secret.len },
+        );
+    }
     if (webui_port != 0 and !isLoopbackBind(webui_bind)) {
-        usageError("--webui-bind must be loopback (127.0.0.1 or ::1); use a TLS reverse proxy for remote access", .{});
+        usageError("--webui-bind must be loopback IPv4 (127.0.0.1); use a TLS reverse proxy for remote access", .{});
     }
 
     // InitOptions: serverconfig → optional mode pack → zdtd.toml stream/authority.
@@ -494,7 +505,21 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 );
             }
         }
-        zdtd_config.sanitizeInitOptions(&init_opts);
+    }
+    // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
+    zdtd_config.sanitizeInitOptions(&init_opts);
+
+    if (init_opts.authority_mode == .observe) {
+        std.debug.print(
+            "zdtd: warning: authority mode is observe (illegal C2S logged only; prefer correct for play)\n",
+            .{},
+        );
+    }
+    if (admin_port != 0) {
+        std.debug.print(
+            "zdtd: warning: AdminPort {d} opens unauthenticated console on 127.0.0.1 (not for shared hosts)\n",
+            .{admin_port},
+        );
     }
 
     const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| {
@@ -507,12 +532,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     // Effective config summary (password / webui secret never printed).
     std.debug.print(
-        "zdtd: config port={d} max_players={d} view_radius={d} admin_port={d} password={s} authority={s} wire_chunks={s}\n",
+        "zdtd: config port={d} max_players={d} view_radius={d} admin_port={d} webui_port={d} password={s} authority={s} wire_chunks={s}\n",
         .{
             port,
             g.max_players,
             g.view_radius,
             admin_port,
+            webui_port,
             if (init_opts.password.len > 0) "set" else "open",
             @tagName(init_opts.authority_mode),
             if (g.wire_chunks) "on" else "off",

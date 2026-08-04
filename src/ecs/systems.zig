@@ -577,32 +577,42 @@ pub fn traderRestock(w: *World) void {
 // coarse ZombieAi.state enum so downstream replication (game.zig EntitySpeeds/
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
-// Four real tasks: BreakBlock, ApproachAndAttackTarget, ApproachSpot, Wander.
-// Rest of stock EAI (DestroyArea, Territorial, Look, Dodge, Leap, RangedAttack,
-// ...) remains a gap (docs/MISSING_FEATURES.md). BreakBlock uses mutex 0 so
-// isBestTask allows it while Approach executes when path_blocked; movement
+// Six real tasks: BreakBlock, DestroyArea, ApproachAndAttackTarget, Territorial,
+// ApproachSpot, Wander. Rest of stock EAI (Look, Dodge, Leap, RangedAttack, ...)
+// remains a gap (docs/MISSING_FEATURES.md). BreakBlock/DestroyArea use mutex 0
+// so isBestTask allows them while Approach executes when path_blocked; movement
 // tasks still share bit 0. Collapsing executingTasks to one TaskId stays exact
 // for this set.
-
+//
 /// Comptime task table. Priority ascending == array order == stock XML AITask
 /// order == EAIManager::ParseTasks insertion order (asm.il:430620). Values
 /// mirror EAIBreakBlock (asm.il:425121; light chew when path stuck),
+/// EAIDestroyArea (chew cover while chase / path stuck),
 /// EAIApproachAndAttackTarget::Init (MutexBits=3, executeDelay=0.1,
-/// non-continuous; asm.il:421798), EAIApproachSpot (asm.il:424093; below chase,
-/// above wander), and EAIWander::Init (MutexBits=1, continuous default;
-/// asm.il:438104,424579).
+/// non-continuous; asm.il:421798), EAITerritorial (return home when far),
+/// EAIApproachSpot (asm.il:424093; below chase, above wander), and
+/// EAIWander::Init (MutexBits=1, continuous default; asm.il:438104,424579).
 const Task = struct { id: c.TaskId, priority: u8, mutex: u8, execute_delay: f32, continuous: bool };
 const zombie_tasks = [_]Task{
     // mutex 0: compatible with approach so table order can switch when stuck.
     .{ .id = .break_block, .priority = 1, .mutex = 0b00, .execute_delay = 0.2, .continuous = false },
+    .{ .id = .destroy_area, .priority = 1, .mutex = 0b00, .execute_delay = 0.25, .continuous = false },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
     // continuous so approach_attack can preempt via isBestTask continuous yield.
+    .{ .id = .territorial, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     .{ .id = .approach_spot, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     .{ .id = .wander, .priority = 2, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
 };
 
 /// Arrive radius (m) for EAIApproachSpot; clears has_spot.
 const spot_arrive: f32 = 0.75;
+
+/// EAITerritorial leash radius (m). Beyond this, walk back to home.
+const territorial_radius: f32 = 32.0;
+const territorial_radius_sq: f32 = territorial_radius * territorial_radius;
+
+/// Sparse random gate for DestroyArea while chasing (wander_rng % N == 1).
+const destroy_area_rng_mod: u32 = 16;
 
 /// EAITaskList.executeDelayScale base (asm.il:437541, IL_0028 ldc.r4 0.85).
 /// The stock GameRandom jitter blended on top is dropped (simplification).
@@ -694,7 +704,9 @@ const AiCtx = struct {
 
             // A11: class_table from entityclasses (0 field → module floor only).
             // MoveSpeed ~0.08 shamble → x10; MoveSpeedAggro max ~1.35 → x1.6.
-            const ct = ctx.w.class_table[ctx.w.class_id[s].id];
+            // Pointer, not copy: EntityClass is ~56 bytes and only three scalar
+            // fields are read here (per alive zombie, every tick).
+            const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
             const sscale = ctx.zombie_speed_scale;
             const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else wander_speed) * sscale;
             const cspd: f32 = (if (ct.chase_speed > 0) ct.chase_speed * 1.6 else chase_speed) * sscale;
@@ -703,7 +715,7 @@ const AiCtx = struct {
             // executing task when it is no longer best or its Continue() fails.
             if (ai.active_task != .none) {
                 const t = taskById(ai.active_task).?;
-                if (!(isBestTask(t, ai.active_task) and canExecute(ctx.w, ai.active_task, ai, np))) {
+                if (!(isBestTask(t, ai.active_task) and canExecute(ctx.w, s, ai.active_task, ai, np))) {
                     ai.decision_cd = t.execute_delay * execute_delay_scale;
                     ai.active_task = .none;
                 }
@@ -717,7 +729,7 @@ const AiCtx = struct {
             if (ai.decision_cd <= 0) {
                 var chosen: c.TaskId = .none;
                 for (zombie_tasks) |t| {
-                    if (isBestTask(t, ai.active_task) and canExecute(ctx.w, t.id, ai, np)) {
+                    if (isBestTask(t, ai.active_task) and canExecute(ctx.w, s, t.id, ai, np)) {
                         chosen = t.id;
                         break;
                     }
@@ -731,7 +743,9 @@ const AiCtx = struct {
             // coarse ZombieAi.state enum for downstream replication parity.
             switch (ai.active_task) {
                 .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
+                .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
+                .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
                 .none => {
@@ -751,10 +765,12 @@ const AiCtx = struct {
 };
 
 /// Dispatch to a task's CanExecute gate (Continue() == CanExecute for both).
-fn canExecute(w: *const World, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
+fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     return switch (id) {
         .break_block => breakBlockCanExecute(ai, np.id, np.d2),
+        .destroy_area => destroyAreaCanExecute(ai, np.id, np.d2),
         .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
+        .territorial => territorialCanExecute(w, s, ai, np.id, np.d2),
         .approach_spot => approachSpotCanExecute(ai),
         .wander => wanderCanExecute(np.id, np.d2),
         .none => false,
@@ -807,6 +823,63 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
     }
     ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
     ai.path_replan_cd = path_replan_interval_s;
+}
+
+/// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
+/// random while chasing (same block-damage feed as BreakBlock).
+fn destroyAreaCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    const chasing = (np_id >= 0 and np_d2 < sense_dist_sq) or (ai.alert and ai.target_id >= 0);
+    if (!chasing) return false;
+    if (np_id >= 0 and np_d2 <= attack_range_sq) return false;
+    if (ai.path_blocked) return true;
+    // Random chew while chase: only when rng already seeded and hits the gate.
+    if (ai.wander_rng != 0 and (ai.wander_rng % destroy_area_rng_mod) == 1) return true;
+    return false;
+}
+
+/// Same hold as BreakBlock: keep path_blocked and chase state so block damage runs.
+fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) void {
+    // Arm chew once; breakBlockUpdate owns path_blocked after replan (do not re-force).
+    if (!ai.path_blocked) ai.path_blocked = true;
+    breakBlockUpdate(w, s, ai, np, dt);
+    // Path open: advance rng so random CanExecute gate is not sticky forever.
+    if (!ai.path_blocked and ai.wander_rng != 0) ai.wander_rng +%= 1;
+}
+
+/// EAITerritorial::CanExecute: has home and outside leash; yields to sensed player.
+fn territorialCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    if (!ai.has_home) return false;
+    // Sensed player: approach owns movement; do not leash mid-fight.
+    if (np_id >= 0 and np_d2 < sense_dist_sq) return false;
+    if (!w.mask[s].transform) return false;
+    const dx = w.transform[s].x - ai.home_x;
+    const dz = w.transform[s].z - ai.home_z;
+    return dx * dx + dz * dz > territorial_radius_sq;
+}
+
+/// Walk back to home when outside the leash. Projects .wander (not chase) so
+/// replication/despawn treat the zombie as non-aggro.
+fn territorialUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
+    if (!ai.has_home) {
+        ai.state = .idle;
+        return;
+    }
+    ai.alert = false;
+    ai.target_id = -1;
+    const dx = w.transform[s].x - ai.home_x;
+    const dz = w.transform[s].z - ai.home_z;
+    if (dx * dx + dz * dz <= spot_arrive * spot_arrive) {
+        ai.has_path = false;
+        ai.path_wp_valid = false;
+        ai.path_blocked = false;
+        ai.state = .idle;
+        return;
+    }
+    ai.state = .wander;
+    ai.path_goal_x = ai.home_x;
+    ai.path_goal_z = ai.home_z;
+    ai.has_path = true;
+    chaseAlongPath(w, s, ai, ai.home_x, ai.home_z, cspd * ai.active_scale, dt);
 }
 
 /// EAIBase::Start hook. Only Wander has meaningful state to seed: it picks a
@@ -1107,9 +1180,13 @@ const TurretCtx = struct {
             var best_id: i32 = -1;
             var best_slot: ?Slot = null;
             var best_d: f32 = t.range * t.range;
+            // Hoisted: workers only write other slots' transforms, so the
+            // compiler cannot prove these loads invariant across the loop.
+            const tx = ctx.w.transform[s].x;
+            const tz = ctx.w.transform[s].z;
             for (ctx.zombies) |j| {
-                const dx = ctx.w.transform[j].x - ctx.w.transform[s].x;
-                const dz = ctx.w.transform[j].z - ctx.w.transform[s].z;
+                const dx = ctx.w.transform[j].x - tx;
+                const dz = ctx.w.transform[j].z - tz;
                 const d = dx * dx + dz * dz;
                 if (d < best_d) {
                     best_d = d;
@@ -1119,8 +1196,8 @@ const TurretCtx = struct {
             }
             t.target_id = best_id;
             const zi = best_slot orelse continue;
-            const dx = ctx.w.transform[zi].x - ctx.w.transform[s].x;
-            const dz = ctx.w.transform[zi].z - ctx.w.transform[s].z;
+            const dx = ctx.w.transform[zi].x - tx;
+            const dz = ctx.w.transform[zi].z - tz;
             ctx.w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
             if (t.fire_cd <= 0) {
                 t.fire_cd = t.fire_interval;
@@ -1223,43 +1300,9 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     return n;
 }
 
-pub fn tickAll(w: *World, dt: f32) struct {
-    ai_hits: u32,
-    director_spawned: u32,
-    world_time: u64,
-    turret_kills: u32,
-    killed_ids: [16]i32,
-    killed_n: u8,
-    loot_bag_ids: [16]i32,
-    loot_n: u8,
-    despawned_ids: [8]i32,
-    despawned_n: u8,
-    commands_applied: u32,
-} {
-    const dr = systemDirector(w, dt);
-    const hits = systemZombieAi(w, dt);
-    systemVehicles(w, dt);
-    // Power resolves once per tick in Game.step (power.tick with real daylight);
-    // an extra resolve here doubled the grid BFS and forced daylight=true, so
-    // turrets read solar as powered at night. Turrets use last tick's resolve.
-    const tk = systemTurrets(w, dt);
-    var de_ids: [8]i32 = .{0} ** 8;
-    const de_n = systemDespawnFar(w, de_ids[0..]);
-    // Deferred ops from systems/plugins: apply after sim mutations settle.
-    const cmd = w.drainCommands();
-    return .{
-        .ai_hits = hits,
-        .director_spawned = dr.spawned,
-        .world_time = dr.world_time,
-        .turret_kills = tk.kills,
-        .killed_ids = tk.killed_ids,
-        .killed_n = tk.killed_n,
-        .loot_bag_ids = tk.loot_bag_ids,
-        .loot_n = tk.loot_n,
-        .despawned_ids = de_ids,
-        .despawned_n = de_n,
-        .commands_applied = cmd.applied,
-    };
+/// Thin wrapper over schedule.run (explicit phases). Prefer schedule for new code.
+pub fn tickAll(w: *World, dt: f32) @import("schedule.zig").TickResult {
+    return @import("schedule.zig").run(w, dt);
 }
 
 fn testGround(_: ?*anyopaque, _: i32, _: i32) f32 {
@@ -1319,18 +1362,21 @@ test "driver seat tracks clamped vehicle y+1" {
 }
 
 test "isBestTask: approach preempts wander, wander cannot preempt approach" {
-    const brk = zombie_tasks[0];
-    const approach = zombie_tasks[1];
-    const spot = zombie_tasks[2];
-    const wander = zombie_tasks[3];
+    const brk = taskById(.break_block).?;
+    const approach = taskById(.approach_attack).?;
+    const spot = taskById(.approach_spot).?;
+    const wander = taskById(.wander).?;
+    const territorial = taskById(.territorial).?;
     // Approach (priority 1, mutex 0b11) is best while Wander (continuous,
     // priority 2) executes: higher-priority continuous never blocks.
     try std.testing.expect(isBestTask(approach, .wander));
     try std.testing.expect(isBestTask(approach, .approach_spot));
+    try std.testing.expect(isBestTask(approach, .territorial));
     // Wander is NOT best while Approach executes: priority 1 <= 2 and
     // MutexBits overlap (0b11 & 0b01 == 0b01 != 0) makes them incompatible.
     try std.testing.expect(!isBestTask(wander, .approach_attack));
     try std.testing.expect(!isBestTask(spot, .approach_attack));
+    try std.testing.expect(!isBestTask(territorial, .approach_attack));
     // BreakBlock mutex 0 is compatible with approach (overlap == 0).
     try std.testing.expect(isBestTask(brk, .approach_attack));
     try std.testing.expect(isBestTask(approach, .break_block));
@@ -1339,6 +1385,7 @@ test "isBestTask: approach preempts wander, wander cannot preempt approach" {
     try std.testing.expect(isBestTask(wander, .none));
     try std.testing.expect(isBestTask(wander, .wander));
     try std.testing.expect(isBestTask(spot, .approach_spot));
+    try std.testing.expect(isBestTask(territorial, .territorial));
 }
 
 test "system zombie chases" {
@@ -1495,6 +1542,53 @@ test "system zombie approaches spot and clears on arrive" {
     while (t < 25.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.zombie_ai[zs].has_spot);
     try std.testing.expect(w.transform[zs].x > 1.5);
+}
+
+test "system zombie destroy_area when rng gate hits while chase" {
+    // wander_rng % 16 == 1 arms DestroyArea at least once while player is sensed.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(5, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].wander_rng = 1;
+    var saw_destroy = false;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].active_task == .destroy_area) saw_destroy = true;
+    }
+    try std.testing.expect(saw_destroy);
+    // May end in chase or attack once in range; alert must latch.
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    try std.testing.expect(w.zombie_ai[zs].state == .chase or w.zombie_ai[zs].state == .attack);
+}
+
+test "system zombie territorial walks home when far" {
+    // Spawn home at origin; drag entity past leash with no player.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(w.zombie_ai[zs].has_home);
+    w.transform[zs].x = 40;
+    w.transform[zs].z = 0;
+    const x0 = w.transform[zs].x;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.territorial, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.transform[zs].x < x0 - 0.2);
+    // Keep walking until inside leash (active_scale 0.1 without player).
+    t = 0;
+    while (t < 80.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        const dx = w.transform[zs].x - w.zombie_ai[zs].home_x;
+        const dz = w.transform[zs].z - w.zombie_ai[zs].home_z;
+        if (dx * dx + dz * dz <= territorial_radius_sq) break;
+    }
+    const dx = w.transform[zs].x - w.zombie_ai[zs].home_x;
+    const dz = w.transform[zs].z - w.zombie_ai[zs].home_z;
+    try std.testing.expect(dx * dx + dz * dz <= territorial_radius_sq);
 }
 
 test "quest kill complete on journal component" {

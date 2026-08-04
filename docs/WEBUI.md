@@ -53,7 +53,7 @@ parallel JSON-RPC + REST + GraphQL stacks.
     v
   zdtd  --webui-port 8080  (default 127.0.0.1 only)
     |
-    +-- webui HTTP listener  (std.Io / std.http when suitable; not on tick)
+    +-- webui HTTP listener  (std.Io / std.http when suitable; polled from Game.step)
     |     auth middleware
     |     router → handlers
     |     static files
@@ -103,14 +103,16 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun | snapshot |
 | `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
 | `GET /partials/apm` | Counters + section p50/p99 | apm harness |
-| `GET /partials/world` | World name, seed/mode, stream caps (read-only) | Game opts |
+| `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
 | `GET /partials/console` | Command form + last N log lines | ops log ring |
 | `POST /api/cmd` | Run one admin command | queue → admin parser |
 | `GET /api/apm.json` | Machine-readable apm (loadgen/tools) | snapshot |
 | `GET /login` | Sign-in form (200) | static HTML |
 | `POST /login` | Form body `token=` → session cookie | config secret |
 | `POST /logout` | Clear session cookie (CSRF required) | session |
-| `GET /static/*` | htmx.min.js, alpine, app.css | embed or files |
+| `GET /healthz` | Unauthenticated process liveness | static |
+| `GET /readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
+| `GET /static/*` | htmx.min.js, alpine, app.css (not implemented; assets inline) | embed or files |
 
 Status notes: wrong method on a known path returns **405** with `Allow` (not
 404). Unknown paths return **404** for any method. Unauthenticated `/api/*`
@@ -122,7 +124,6 @@ Optional later:
 |---|---|
 | `/partials/bans` | ban list CRUD |
 | `/partials/config` | effective serverconfig (restart badges) |
-| `/healthz` | unauthenticated liveness (no secrets) for k8s |
 
 ## UI sketch (dashboard)
 
@@ -206,7 +207,7 @@ Drain ≤ K cmds per tick (e.g. 4) so one operator cannot stall sim.
 - [x] `src/server/webui.zig` (minimal HTTP/1.1, non-blocking poll from Game.step)
 - [x] CLI: `--webui-port 0` (off), `--webui-bind 127.0.0.1`, `--webui-secret`
 - [x] GAME_OPTIONS + INDEX; design in this file
-- [x] HTTP: `GET /healthz` (no auth), `GET /` (Bearer / X-Zdtd-Secret / session cookie)
+- [x] HTTP: `GET /healthz` liveness and `GET /readyz` readiness (no auth), `GET /` (Bearer / X-Zdtd-Secret / session cookie)
 - [x] Disabled by default (port 0); secret required when enabled
 
 **Exit:** curl with secret shows hello; without → 401; off → nothing listens; `make check` green.
@@ -216,6 +217,7 @@ zig-out/bin/zdtd --port 27002 --world worlds/zdtd_default \
   --webui-port 8080 --webui-secret change-me --once
 curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/
 curl -sS http://127.0.0.1:8080/healthz
+curl -sS http://127.0.0.1:8080/readyz
 ```
 
 ### WU1 — Read-only dashboard
@@ -242,7 +244,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 - [x] Shared command parse path (admin TCP + web POST via `setAdminHandler` → `runAdminLine`)
 - [x] `POST /api/cmd` form `line`+`csrf`; same-request HTML reply
 - [x] Console section + `/partials/console` audit ring (24 lines in-memory)
-- [x] CSRF + session cookie (cookie-only needs csrf=secret)
+- [x] CSRF + session cookie (cookie-only needs csrf=session token (secret also accepted for API tools))
 - [ ] Ops audit log **file** (ring only for now)
 
 **Exit:** give/kick/settime from browser matches admin TCP semantics.
@@ -292,7 +294,7 @@ HTTP stack preference (in order):
 |---|---|---|
 | `--webui-port` | `0` (disabled) | e.g. `8080` |
 | `--webui-bind` | `127.0.0.1` | IPv4 loopback only; put TLS termination in front for remote access |
-| `--webui-secret` | empty → refuse start if port≠0 | or env `ZDTD_WEBUI_SECRET` |
+| `--webui-secret` | empty → refuse start if port≠0 | or env `ZDTD_WEBUI_SECRET` (min 8 chars) |
 | serverconfig (optional later) | `WebUiPort`, `WebUiBind` | document in GAME_OPTIONS |
 
 Precedence: CLI > env > serverconfig > defaults.

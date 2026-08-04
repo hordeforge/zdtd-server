@@ -1,16 +1,20 @@
 //! Operator web UI HTTP listener (WU0–WU2: dashboard + console cmds).
 //! Loopback by default; shared secret required when enabled.
 //! Cookie/CSRF use an HMAC session token (shared secret stays off the wire cookie/HTML).
+//! TCP: util/tcp_listen (std.Io.net). HTTP parse/respond: std.http.Server.
 //! Polled from Game.step (non-blocking). Snapshot filled on main thread.
 //! POST /api/cmd runs via admin_fn on the poll thread (same path as admin TCP).
 //! Design: docs/WEBUI.md
 
 const std = @import("std");
-const linux = std.os.linux;
+const http = std.http;
+const tcp = @import("../util/tcp_listen.zig");
 const version = @import("../version.zig");
 
 pub const max_req: usize = 8192;
 pub const max_secret: usize = 128;
+/// Minimum shared-secret length when webui is enabled (trivial secrets rejected).
+pub const min_secret: usize = 8;
 /// Hex length of HMAC-derived session token (cookie + CSRF; not the shared secret).
 pub const session_token_hex_len: usize = 32;
 pub const max_players_snap: usize = 16;
@@ -83,6 +87,7 @@ pub const Snapshot = struct {
     ownership_rejects: u64 = 0,
     bounds_rejects: u64 = 0,
     movement_rejects: u64 = 0,
+    decode_rejects: u64 = 0,
     // Latency
     tick_mean_ns: u64 = 0,
     tick_p50_ns: u64 = 0,
@@ -117,14 +122,14 @@ pub const Snapshot = struct {
 pub const AdminFn = *const fn (ctx: *anyopaque, line: []const u8, out: []u8) usize;
 
 pub const Server = struct {
-    fd: i32 = -1,
+    listener: tcp.Listener = .{},
     port: u16 = 0,
     bind_addr: u32 = 0x7f000001,
     secret_buf: [max_secret]u8 = undefined,
     secret_len: usize = 0,
     /// HMAC session material for cookie/CSRF (never the raw secret).
     session_token: [session_token_hex_len]u8 = undefined,
-    client_fd: i32 = -1,
+    client_fd: tcp.Handle = -1,
     /// Polls since accept; a client that never completes a request would hold
     /// the single slot forever (half-open TCP reads EAGAIN, never EOF).
     client_polls: u32 = 0,
@@ -148,7 +153,7 @@ pub const Server = struct {
     audit_lines: [max_audit][max_audit_line]u8 = undefined,
 
     pub fn enabled(self: *const Server) bool {
-        return self.fd >= 0;
+        return self.listener.enabled();
     }
 
     pub fn setAdminHandler(self: *Server, ctx: *anyopaque, f: AdminFn) void {
@@ -168,6 +173,7 @@ pub const Server = struct {
     pub fn listen(self: *Server, cfg: Config) !void {
         if (cfg.port == 0) return;
         if (cfg.secret.len == 0) return error.SecretRequired;
+        if (cfg.secret.len < min_secret) return error.SecretTooShort;
         if (cfg.secret.len > max_secret) return error.SecretTooLong;
         // Secret may appear in Authorization / login query; reject control chars and
         // separators so operators cannot accidentally enable CR/LF header injection.
@@ -175,21 +181,7 @@ pub const Server = struct {
 
         const addr_host = try parseIpv4(cfg.bind_host);
         if (!isLoopbackIpv4(addr_host)) return error.LoopbackRequired;
-        const sock_rc = linux.socket(linux.AF.INET, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
-        if (linux.errno(sock_rc) != .SUCCESS) return error.Socket;
-        const fd: i32 = @intCast(sock_rc);
-        errdefer _ = linux.close(fd);
-        var yes: c_int = 1;
-        _ = linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, @ptrCast(&yes), @sizeOf(c_int));
-        var addr = linux.sockaddr.in{
-            .family = linux.AF.INET,
-            .port = std.mem.nativeToBig(u16, cfg.port),
-            .addr = std.mem.nativeToBig(u32, addr_host),
-        };
-        const br = linux.bind(fd, @ptrCast(&addr), @sizeOf(linux.sockaddr.in));
-        if (linux.errno(br) != .SUCCESS) return error.Bind;
-        const lc = linux.listen(fd, 8);
-        if (linux.errno(lc) != .SUCCESS) return error.Listen;
+        try self.listener.listen(addr_host, cfg.port, 8);
 
         @memcpy(self.secret_buf[0..cfg.secret.len], cfg.secret);
         self.secret_len = cfg.secret.len;
@@ -199,19 +191,17 @@ pub const Server = struct {
         defer threaded.deinit();
         threaded.io().random(&nonce);
         fillSessionToken(cfg.secret, &nonce, &self.session_token);
-        self.fd = fd;
-        self.port = cfg.port;
+        self.port = self.listener.port;
         self.bind_addr = addr_host;
         self.client_fd = -1;
         self.recv_len = 0;
     }
 
     pub fn deinit(self: *Server) void {
-        if (self.client_fd >= 0) _ = linux.close(self.client_fd);
+        if (self.client_fd >= 0) tcp.closeFd(self.client_fd);
         self.client_fd = -1;
         self.recv_len = 0;
-        if (self.fd >= 0) _ = linux.close(self.fd);
-        self.fd = -1;
+        self.listener.deinit();
         self.port = 0;
         if (self.secret_len > 0) @memset(self.secret_buf[0..self.secret_len], 0);
         self.secret_len = 0;
@@ -235,7 +225,7 @@ pub const Server = struct {
     pub const max_client_polls: u32 = 800;
 
     pub fn poll(self: *Server) void {
-        if (self.fd < 0) return;
+        if (!self.listener.enabled()) return;
         self.acceptOne();
         if (self.client_fd < 0) return;
         self.client_polls += 1;
@@ -274,20 +264,14 @@ pub const Server = struct {
 
     fn acceptOne(self: *Server) void {
         if (self.client_fd >= 0) return;
-        var addr: linux.sockaddr.storage = undefined;
-        var alen: linux.socklen_t = @sizeOf(linux.sockaddr.storage);
-        const cfd_r = linux.accept(self.fd, @ptrCast(&addr), &alen);
-        if (linux.errno(cfd_r) != .SUCCESS) return;
-        const cfd: i32 = @intCast(cfd_r);
-        const fl = linux.fcntl(cfd, linux.F.GETFL, 0);
-        _ = linux.fcntl(cfd, linux.F.SETFL, fl | 0o4000);
+        const cfd = self.listener.accept() catch return orelse return;
         self.client_fd = cfd;
         self.client_polls = 0;
         self.recv_len = 0;
     }
 
     fn closeClient(self: *Server) void {
-        if (self.client_fd >= 0) _ = linux.close(self.client_fd);
+        if (self.client_fd >= 0) tcp.closeFd(self.client_fd);
         self.client_fd = -1;
         self.client_polls = 0;
         self.recv_len = 0;
@@ -298,221 +282,230 @@ pub const Server = struct {
         const fd = self.client_fd;
         if (fd < 0) return;
         if (self.recv_len >= max_req) {
-            self.respond(413, "text/plain; charset=utf-8", "request too large\n");
             self.closeClient();
             return;
         }
         const dst = self.recv_buf[self.recv_len..];
-        const n = linux.read(fd, dst.ptr, dst.len);
-        const errn = linux.errno(n);
-        if (errn == .AGAIN) return;
-        if (errn != .SUCCESS or n == 0) {
+        const n = tcp.read(fd, dst) catch |err| switch (err) {
+            error.WouldBlock => return,
+            else => {
+                self.closeClient();
+                return;
+            },
+        };
+        if (n == 0) {
             self.closeClient();
             return;
         }
-        self.recv_len += @intCast(n);
+        self.recv_len += n;
+
+        // Wait until headers are complete before handing off to std.http.Server.
         const head_end = std.mem.indexOf(u8, self.recv_buf[0..self.recv_len], "\r\n\r\n") orelse {
-            if (self.recv_len >= max_req) {
-                self.respond(413, "text/plain; charset=utf-8", "request too large\n");
-                self.closeClient();
-            }
+            if (self.recv_len >= max_req) self.closeClient();
             return;
         };
-        const head = self.recv_buf[0..head_end];
-        const body_start = head_end + 4;
-        if (headerValue(head, "Transfer-Encoding") != null) {
-            self.respond(400, "text/plain; charset=utf-8", "unsupported transfer encoding\n");
+        // Pre-check Content-Length so we accumulate a full body (non-blocking poll).
+        const clen = peekContentLength(self.recv_buf[0 .. head_end + 4]) catch {
+            self.rawRespond(400, "text/plain; charset=utf-8", "invalid content length\n");
+            self.closeClient();
+            return;
+        };
+        const need = head_end + 4 + clen;
+        if (need > max_req) {
+            self.rawRespond(413, "text/plain; charset=utf-8", "request too large\n");
             self.closeClient();
             return;
         }
-        const clen = validatedContentLength(head) catch {
-            self.respond(400, "text/plain; charset=utf-8", "invalid content length\n");
-            self.closeClient();
-            return;
-        } orelse 0;
-        if (clen > max_req - body_start) {
-            self.respond(413, "text/plain; charset=utf-8", "request too large\n");
-            self.closeClient();
-            return;
-        }
-        if (self.recv_len < body_start + clen) return; // need more body
-        const body = self.recv_buf[body_start .. body_start + clen];
-        self.serveRequest(head, body) catch |err| {
+        if (self.recv_len < need) return;
+
+        self.serveHttp() catch |err| {
             std.debug.print("zdtd: webui request failed: {s}\n", .{@errorName(err)});
-            self.respond(500, "text/plain; charset=utf-8", "internal error\n");
+            self.rawRespond(500, "text/plain; charset=utf-8", "internal error\n");
         };
         self.closeClient();
     }
 
-    fn serveRequest(self: *Server, head: []const u8, body: []u8) !void {
-        const line_end = std.mem.indexOf(u8, head, "\r\n") orelse {
-            self.respond(400, "text/plain; charset=utf-8", "bad request\n");
-            return;
-        };
-        const req_line = head[0..line_end];
-        var it = std.mem.tokenizeScalar(u8, req_line, ' ');
-        const method = it.next() orelse {
-            self.respond(400, "text/plain; charset=utf-8", "bad request\n");
-            return;
-        };
-        const target = it.next() orelse {
-            self.respond(400, "text/plain; charset=utf-8", "bad request\n");
-            return;
-        };
-        const path = pathOnly(target);
+    /// Parse and respond with `std.http.Server` over the buffered request bytes.
+    fn serveHttp(self: *Server) !void {
+        var in_r: std.Io.Reader = .fixed(self.recv_buf[0..self.recv_len]);
+        var out_buf: [49152]u8 = undefined;
+        var out_w: std.Io.Writer = .fixed(&out_buf);
+        var http_srv = http.Server.init(&in_r, &out_w);
+        var req = try http_srv.receiveHead();
 
-        // Liveness: no auth; wrong method → 405 (not 401).
+        const path = pathOnly(req.head.target);
+        const method = req.head.method;
+
         if (std.mem.eql(u8, path, "/healthz")) {
-            if (!std.mem.eql(u8, method, "GET")) {
-                self.respondMethodNotAllowed("GET");
+            if (method != .GET) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "GET" },
+                });
                 return;
             }
-            self.respond(200, "text/plain; charset=utf-8", "ok\n");
+            try self.httpRespond(&req, .ok, "text/plain; charset=utf-8", "ok\n", &.{});
             return;
         }
 
-        // Login routes are unauthenticated; wrong method → 405.
-        if (std.mem.eql(u8, path, "/login")) {
-            if (std.mem.eql(u8, method, "GET")) {
-                // Sign-in form is a normal page (200); failed auth attempts stay 401.
-                self.respond(200, "text/html; charset=utf-8", loginHintHtml(false));
+        if (std.mem.eql(u8, path, "/readyz")) {
+            if (method != .GET) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "GET" },
+                });
                 return;
             }
-            if (std.mem.eql(u8, method, "POST")) {
-                // Form login: secret travels in the POST body, not the URL (query strings
-                // land in browser history and front-proxy access logs).
-                if (!isFormContentType(headerValue(head, "Content-Type"))) {
-                    self.respond(415, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n");
+            if (readinessStatus(&self.snap) == 503) {
+                try self.httpRespond(&req, .service_unavailable, "text/plain; charset=utf-8", "not ready\n", &.{});
+            } else {
+                try self.httpRespond(&req, .ok, "text/plain; charset=utf-8", "ready\n", &.{});
+            }
+            return;
+        }
+
+        // Body remains in recv_buf after receiveHead advanced the fixed reader.
+        if (req.head.transfer_encoding != .none) {
+            try self.httpRespond(&req, .bad_request, "text/plain; charset=utf-8", "unsupported transfer encoding\n", &.{});
+            return;
+        }
+        const body = self.recv_buf[in_r.seek..in_r.end];
+
+        if (std.mem.eql(u8, path, "/login")) {
+            if (method == .GET) {
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", loginHintHtml(false), &.{});
+                return;
+            }
+            if (method == .POST) {
+                if (!isFormContentType(req.head.content_type)) {
+                    try self.httpRespond(&req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
                     return;
                 }
                 if (formField(body, "token")) |tok| {
                     if (constantTimeEql(tok, self.secret())) {
                         self.set_cookie = true;
-                        self.respondRedirect("/");
+                        try self.httpRedirect(&req, "/");
                         return;
                     }
                 }
                 std.debug.print("zdtd: webui login rejected (bad token)\n", .{});
-                self.respond(401, "text/html; charset=utf-8", loginHintHtml(true));
+                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", loginHintHtml(true), &.{});
                 return;
             }
-            self.respondMethodNotAllowed("GET, POST");
+            try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                .{ .name = "Allow", .value = "GET, POST" },
+            });
             return;
         }
 
-        if (!requestAuthorized(head, self.secret(), self.sessionTok())) {
-            // Log only presented-but-wrong header credentials; a missing cookie on a
-            // browser page load is normal traffic, not an auth event.
-            if (headerValue(head, "Authorization") != null or headerValue(head, "X-Zdtd-Secret") != null)
+        if (!requestAuthorizedHttp(&req, self.secret(), self.sessionTok())) {
+            if (headerFromReq(&req, "Authorization") != null or headerFromReq(&req, "X-Zdtd-Secret") != null)
                 std.debug.print("zdtd: webui auth rejected (bad credential)\n", .{});
-            // Machine clients on /api/* get plain 401; browsers get the HTML form.
             if (std.mem.startsWith(u8, path, "/api/")) {
-                self.respond(401, "text/plain; charset=utf-8", "unauthorized\n");
+                try self.httpRespond(&req, .unauthorized, "text/plain; charset=utf-8", "unauthorized\n", &.{});
             } else {
-                self.respond(401, "text/html; charset=utf-8", loginHintHtml(false));
+                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", loginHintHtml(false), &.{});
             }
             return;
         }
 
-        // POST-only routes: report 405 (with Allow) for wrong methods, not 404.
         if (std.mem.eql(u8, path, "/logout")) {
-            if (!std.mem.eql(u8, method, "POST")) {
-                self.respondMethodNotAllowed("POST");
+            if (method != .POST) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "POST" },
+                });
                 return;
             }
-            if (!isFormContentType(headerValue(head, "Content-Type"))) {
-                self.respond(415, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n");
+            if (!isFormContentType(req.head.content_type)) {
+                try self.httpRespond(&req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
                 return;
             }
             const csrf = formField(body, "csrf") orelse {
-                self.respond(403, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n");
+                try self.httpRespond(&req, .forbidden, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n", &.{});
                 return;
             };
             if (!constantTimeEql(csrf, self.sessionTok())) {
-                self.respond(403, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n");
+                try self.httpRespond(&req, .forbidden, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n", &.{});
                 return;
             }
-            self.respondLogout();
+            try self.httpLogout(&req);
             return;
         }
 
         var body_buf: [12288]u8 = undefined;
 
         if (std.mem.eql(u8, path, "/api/cmd")) {
-            if (!std.mem.eql(u8, method, "POST")) {
-                self.respondMethodNotAllowed("POST");
+            if (method != .POST) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "POST" },
+                });
                 return;
             }
-            try self.handleCmdPost(head, body, &body_buf);
+            try self.handleCmdPost(&req, body, &body_buf);
             return;
         }
 
-        // GET-only authenticated routes.
         if (isGetOnlyPath(path)) {
-            if (!std.mem.eql(u8, method, "GET")) {
-                self.respondMethodNotAllowed("GET");
+            if (method != .GET) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "GET" },
+                });
                 return;
             }
             if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
-                // CSRF token is session material, not the shared secret.
-                self.respond(200, "text/html; charset=utf-8", try renderShell(&body_buf, self.sessionTok()));
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderShell(&body_buf, self.sessionTok()), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/status")) {
-                self.respond(200, "text/html; charset=utf-8", try renderStatus(&body_buf, &self.snap));
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderStatus(&body_buf, &self.snap), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/players")) {
-                self.respond(200, "text/html; charset=utf-8", try renderPlayers(&body_buf, &self.snap));
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderPlayers(&body_buf, &self.snap), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/apm")) {
-                self.respond(200, "text/html; charset=utf-8", try renderApm(&body_buf, &self.snap));
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderApm(&body_buf, &self.snap), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/console")) {
-                self.respond(200, "text/html; charset=utf-8", try renderConsoleLog(&body_buf, self));
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderConsoleLog(&body_buf, self), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/api/apm.json")) {
-                self.respond(200, "application/json; charset=utf-8", try renderApmJson(&body_buf, &self.snap));
+                try self.httpRespond(&req, .ok, "application/json; charset=utf-8", try renderApmJson(&body_buf, &self.snap), &.{});
                 return;
             }
         }
 
-        // Unknown path: 404 for any method (not 405).
-        self.respond(404, "text/plain; charset=utf-8", "not found\n");
+        try self.httpRespond(&req, .not_found, "text/plain; charset=utf-8", "not found\n", &.{});
     }
 
-    fn handleCmdPost(self: *Server, head: []const u8, body: []u8, html_buf: []u8) !void {
-        if (!isFormContentType(headerValue(head, "Content-Type"))) {
-            self.respond(415, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n");
+    fn handleCmdPost(self: *Server, req: *http.Server.Request, body: []u8, html_buf: []u8) !void {
+        if (!isFormContentType(req.head.content_type)) {
+            try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
             return;
         }
 
-        // CSRF: form field csrf=session token (preferred) or raw secret; or auth header.
         const csrf = formField(body, "csrf") orelse formField(body, "token");
-        const has_valid_auth_header = requestHeaderAuthorized(head, self.secret());
+        const has_valid_auth_header = requestHeaderAuthorizedHttp(req, self.secret());
         if (csrf) |c| {
             const sess_ok = constantTimeEql(c, self.sessionTok());
             const secret_ok = constantTimeEql(c, self.secret());
             if (!sess_ok and !secret_ok) {
-                self.respond(403, "text/html; charset=utf-8", "<pre class=\"err\">csrf rejected</pre>\n");
+                try self.httpRespond(req, .forbidden, "text/html; charset=utf-8", "<pre class=\"err\">csrf rejected</pre>\n", &.{});
                 return;
             }
         } else if (!has_valid_auth_header) {
-            // Cookie-only session must send csrf field.
-            self.respond(403, "text/html; charset=utf-8", "<pre class=\"err\">csrf required</pre>\n");
+            try self.httpRespond(req, .forbidden, "text/html; charset=utf-8", "<pre class=\"err\">csrf required</pre>\n", &.{});
             return;
         }
 
         const raw_line = formField(body, "line") orelse formField(body, "cmd") orelse {
-            self.respond(400, "text/html; charset=utf-8", "<pre class=\"err\">missing line</pre>\n");
+            try self.httpRespond(req, .bad_request, "text/html; charset=utf-8", "<pre class=\"err\">missing line</pre>\n", &.{});
             return;
         };
         const line = std.mem.trim(u8, raw_line, " \t\r\n");
         if (line.len == 0 or line.len > max_cmd_line) {
-            self.respond(400, "text/html; charset=utf-8", "<pre class=\"err\">bad line</pre>\n");
+            try self.httpRespond(req, .bad_request, "text/html; charset=utf-8", "<pre class=\"err\">bad line</pre>\n", &.{});
             return;
         }
 
@@ -520,22 +513,20 @@ pub const Server = struct {
         var reply_len: usize = 0;
         if (self.admin_fn) |f| {
             const ctx = self.admin_ctx orelse {
-                // Handler registered without context is a server misconfig, not success.
-                self.respond(503, "text/html; charset=utf-8", "<pre class=\"err\">admin handler unavailable</pre>\n");
+                try self.httpRespond(req, .service_unavailable, "text/html; charset=utf-8", "<pre class=\"err\">admin handler unavailable</pre>\n", &.{});
                 return;
             };
             reply_len = f(ctx, line, &reply_buf);
         } else {
-            // Fallback: queue for next tick (no same-request text).
             if (!self.enqueueCmd(line)) {
-                self.respond(503, "text/html; charset=utf-8", "<pre class=\"err\">busy</pre>\n");
+                try self.httpRespond(req, .service_unavailable, "text/html; charset=utf-8", "<pre class=\"err\">busy</pre>\n", &.{});
                 return;
             }
             var w: std.Io.Writer = .fixed(html_buf);
             try w.writeAll("<pre class=\"ok\">queued: ");
             try htmlEscape(&w, line);
             try w.writeAll("</pre>\n");
-            self.respond(200, "text/html; charset=utf-8", w.buffered());
+            try self.httpRespond(req, .ok, "text/html; charset=utf-8", w.buffered(), &.{});
             self.pushAudit(line);
             return;
         }
@@ -550,66 +541,158 @@ pub const Server = struct {
         }
 
         const html = try renderCmdReply(html_buf, line, reply);
-        self.respond(200, "text/html; charset=utf-8", html);
+        try self.httpRespond(req, .ok, "text/html; charset=utf-8", html, &.{});
     }
 
-    fn respondRedirect(self: *Server, loc: []const u8) void {
-        const fd = self.client_fd;
-        if (fd < 0) return;
-        var hbuf: [896]u8 = undefined;
-        const h = if (self.set_cookie)
-            std.fmt.bufPrint(&hbuf, "HTTP/1.1 302 Found\r\nLocation: {s}\r\nSet-Cookie: zdtd_webui={s}; Path=/; HttpOnly; SameSite=Strict\r\nContent-Length: 0\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n", .{ loc, self.sessionTok() }) catch return
-        else
-            std.fmt.bufPrint(&hbuf, "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n", .{loc}) catch return;
-        writeAll(fd, h);
+    fn httpRespond(
+        self: *Server,
+        req: *http.Server.Request,
+        status: http.Status,
+        content_type: []const u8,
+        body: []const u8,
+        extra: []const http.Header,
+    ) !void {
+        var hdrs: [12]http.Header = undefined;
+        var n: usize = 0;
+        hdrs[n] = .{ .name = "Content-Type", .value = content_type };
+        n += 1;
+        hdrs[n] = .{ .name = "Cache-Control", .value = "no-store" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
+        n += 1;
+        hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
+        n += 1;
+        hdrs[n] = .{ .name = "Connection", .value = "close" };
+        n += 1;
+        var cookie_val: [80]u8 = undefined;
+        if (self.set_cookie) {
+            const cv = std.fmt.bufPrint(&cookie_val, "zdtd_webui={s}; Path=/; HttpOnly; SameSite=Strict", .{self.sessionTok()}) catch return error.Overflow;
+            hdrs[n] = .{ .name = "Set-Cookie", .value = cv };
+            n += 1;
+        }
+        for (extra) |h| {
+            if (n >= hdrs.len) break;
+            hdrs[n] = h;
+            n += 1;
+        }
+        try req.respond(body, .{
+            .status = status,
+            .keep_alive = false,
+            .extra_headers = hdrs[0..n],
+        });
+        self.flushHttpOut(req);
     }
 
-    fn respondLogout(self: *Server) void {
-        const fd = self.client_fd;
-        if (fd < 0) return;
-        const h = "HTTP/1.1 303 See Other\r\nLocation: /login\r\nSet-Cookie: zdtd_webui=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n";
-        writeAll(fd, h);
+    fn httpRedirect(self: *Server, req: *http.Server.Request, loc: []const u8) !void {
+        var hdrs: [8]http.Header = undefined;
+        var n: usize = 0;
+        hdrs[n] = .{ .name = "Location", .value = loc };
+        n += 1;
+        hdrs[n] = .{ .name = "Connection", .value = "close" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
+        n += 1;
+        hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
+        n += 1;
+        var cookie_val: [80]u8 = undefined;
+        if (self.set_cookie) {
+            const cv = std.fmt.bufPrint(&cookie_val, "zdtd_webui={s}; Path=/; HttpOnly; SameSite=Strict", .{self.sessionTok()}) catch return error.Overflow;
+            hdrs[n] = .{ .name = "Set-Cookie", .value = cv };
+            n += 1;
+        }
+        try req.respond("", .{
+            .status = .found,
+            .keep_alive = false,
+            .extra_headers = hdrs[0..n],
+        });
+        self.flushHttpOut(req);
     }
 
-    fn respondMethodNotAllowed(self: *Server, allow: []const u8) void {
+    fn httpLogout(self: *Server, req: *http.Server.Request) !void {
+        try req.respond("", .{
+            .status = .see_other,
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Location", .value = "/login" },
+                .{ .name = "Set-Cookie", .value = "zdtd_webui=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" },
+                .{ .name = "Connection", .value = "close" },
+                .{ .name = "Cache-Control", .value = "no-store" },
+                .{ .name = "X-Content-Type-Options", .value = "nosniff" },
+                .{ .name = "X-Frame-Options", .value = "DENY" },
+                .{ .name = "Referrer-Policy", .value = "no-referrer" },
+            },
+        });
+        self.flushHttpOut(req);
+    }
+
+    fn flushHttpOut(self: *Server, req: *http.Server.Request) void {
         const fd = self.client_fd;
         if (fd < 0) return;
-        const body = "method not allowed\n";
-        var hdr: [896]u8 = undefined;
+        const out = req.server.out.buffered();
+        if (out.len > 0) tcp.writeAll(fd, out);
+    }
+
+    /// Fallback when http.Server is not yet set up (buffer overflow before parse).
+    fn rawRespond(self: *Server, status: u16, content_type: []const u8, body: []const u8) void {
+        const fd = self.client_fd;
+        if (fd < 0) return;
+        var hdr: [256]u8 = undefined;
         const h = std.fmt.bufPrint(
             &hdr,
-            "HTTP/1.1 405 Method Not Allowed\r\nAllow: {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n",
-            .{ allow, body.len },
+            "HTTP/1.1 {d} err\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+            .{ status, content_type, body.len },
         ) catch return;
-        writeAll(fd, h);
-        writeAll(fd, body);
-    }
-
-    fn respond(self: *Server, status: u16, content_type: []const u8, body: []const u8) void {
-        const fd = self.client_fd;
-        if (fd < 0) return;
-        const reason: []const u8 = switch (status) {
-            200 => "OK",
-            400 => "Bad Request",
-            401 => "Unauthorized",
-            403 => "Forbidden",
-            404 => "Not Found",
-            405 => "Method Not Allowed",
-            413 => "Payload Too Large",
-            415 => "Unsupported Media Type",
-            500 => "Internal Server Error",
-            503 => "Service Unavailable",
-            else => "Error",
-        };
-        var hdr: [896]u8 = undefined;
-        const h = if (self.set_cookie)
-            std.fmt.bufPrint(&hdr, "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nSet-Cookie: zdtd_webui={s}; Path=/; HttpOnly; SameSite=Strict\r\n\r\n", .{ status, reason, content_type, body.len, self.sessionTok() }) catch return
-        else
-            std.fmt.bufPrint(&hdr, "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n\r\n", .{ status, reason, content_type, body.len }) catch return;
-        writeAll(fd, h);
-        writeAll(fd, body);
+        tcp.writeAll(fd, h);
+        tcp.writeAll(fd, body);
     }
 };
+
+fn peekContentLength(head_with_crlf: []const u8) !usize {
+    // head includes trailing \r\n\r\n
+    if (std.mem.indexOf(u8, head_with_crlf, "Transfer-Encoding:") != null or
+        std.mem.indexOf(u8, head_with_crlf, "transfer-encoding:") != null)
+        return error.UnsupportedTransferEncoding;
+    // Line-based parse: a "content-length" substring inside a header value or
+    // the request target must not set framing; duplicates are ambiguous (400).
+    return (try validatedContentLength(head_with_crlf)) orelse 0;
+}
+
+fn headerFromReq(req: *const http.Server.Request, name: []const u8) ?[]const u8 {
+    var it = req.iterateHeaders();
+    while (it.next()) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, name)) return h.value;
+    }
+    return null;
+}
+
+fn requestAuthorizedHttp(req: *const http.Server.Request, secret: []const u8, session_token: []const u8) bool {
+    if (secret.len == 0) return false;
+    if (requestHeaderAuthorizedHttp(req, secret)) return true;
+    if (headerFromReq(req, "Cookie")) |ck| {
+        if (cookieValue(ck, "zdtd_webui")) |cv| {
+            if (constantTimeEql(cv, session_token)) return true;
+        }
+    }
+    return false;
+}
+
+fn requestHeaderAuthorizedHttp(req: *const http.Server.Request, secret: []const u8) bool {
+    if (secret.len == 0) return false;
+    if (headerFromReq(req, "Authorization")) |auth| {
+        const t = std.mem.trim(u8, auth, " \t");
+        if (std.mem.startsWith(u8, t, "Bearer ")) {
+            if (constantTimeEql(std.mem.trim(u8, t["Bearer ".len..], " \t"), secret)) return true;
+        }
+    }
+    if (headerFromReq(req, "X-Zdtd-Secret")) |v| {
+        if (constantTimeEql(std.mem.trim(u8, v, " \t"), secret)) return true;
+    }
+    return false;
+}
 
 fn isGetOnlyPath(path: []const u8) bool {
     return std.mem.eql(u8, path, "/") or
@@ -621,13 +704,8 @@ fn isGetOnlyPath(path: []const u8) bool {
         std.mem.eql(u8, path, "/api/apm.json");
 }
 
-fn writeAll(fd: i32, data: []const u8) void {
-    var off: usize = 0;
-    while (off < data.len) {
-        const n = linux.write(fd, data[off..].ptr, data.len - off);
-        if (linux.errno(n) != .SUCCESS or n == 0) return;
-        off += @intCast(n);
-    }
+fn readinessStatus(s: *const Snapshot) u16 {
+    return if (s.tick_n == 0) 503 else 200;
 }
 
 fn parseIpv4(host: []const u8) !u32 {
@@ -930,7 +1008,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
     return std.fmt.bufPrint(buf,
         \\<!DOCTYPE html>
         \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        \\<title>zdtd webui</title>
+        \\<title>Server dashboard · zdtd</title>
         \\<style>
         \\:root{{--bg:#12141a;--card:#1c2030;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--ok:#82d68b;--warn:#f0b64f;--err:#ff8585}}
         \\*{{box-sizing:border-box}}body{{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.45}}
@@ -969,9 +1047,9 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="{s}"><button type="submit">Sign out</button></form>
         \\</header>
         \\<main id="main-content" tabindex="-1">
-        \\<section aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" aria-labelledby="status-heading" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">loading…</p></div></section>
-        \\<section aria-labelledby="apm-heading"><h2 id="apm-heading">APM / counters</h2><div id="apm" aria-labelledby="apm-heading" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
-        \\<section aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" aria-labelledby="players-heading" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"></div></section>
+        \\<section aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
+        \\<section aria-labelledby="apm-heading"><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+        \\<section aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
         \\<section aria-labelledby="console-heading">
         \\<h2 id="console-heading">Console</h2>
         \\<p id="cmd-help" class="meta" style="margin:0 0 0.4rem;color:var(--muted);font-size:0.85rem">Use the same commands as the admin console, such as help, status, give, kick, and settime.</p>
@@ -985,15 +1063,14 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\<div id="console-log" role="region" aria-label="Recent commands" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
         \\</section>
         \\</main>
-        \\<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">/api/apm.json</a> · <a href="/healthz">/healthz</a></footer>
+        \\<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">Performance JSON</a> · <a href="/healthz">Liveness check</a> · <a href="/readyz">Readiness check</a></footer>
         \\<script>
-        \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;const swap=()=>{{el.setAttribute('aria-busy','true');return fetch(u,{{credentials:'same-origin'}}).then(r=>r.ok?r.text():Promise.reject()).then(t=>{{el.innerHTML=t;el.removeAttribute('data-load-error');}}).catch(()=>{{if(!el.children.length||el.getAttribute('data-load-error'))el.innerHTML='<p class="err" role="alert">Unable to refresh. Retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>el.removeAttribute('aria-busy'));}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
+        \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;let inFlight=false;const swap=()=>{{if(inFlight)return Promise.resolve();inFlight=true;el.setAttribute('aria-busy','true');return fetch(u,{{credentials:'same-origin'}}).then(r=>{{if(r.status===401){{window.location.assign('/login');return null;}}return r.ok?r.text():Promise.reject();}}).then(t=>{{if(t===null)return;el.innerHTML=t;el.removeAttribute('data-load-error');}}).catch(()=>{{el.innerHTML='<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>{{inFlight=false;el.removeAttribute('aria-busy');}});}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
         \\const polls=Array.from(document.querySelectorAll('[hx-get]'));polls.forEach(hxPoll);
         \\const autoEl=document.getElementById('auto-refresh');const refreshState=document.getElementById('refresh-state');
         \\function applyRefresh(){{const on=autoEl.checked;polls.forEach(el=>{{if(on)el._hxStart();else{{el._hxStop();if(!el.children.length)el._hxOnce();}}}});if(refreshState)refreshState.textContent=on?'Auto-refresh on':'Auto-refresh paused';}}
-        \\if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches){{autoEl.checked=false;}}
         \\autoEl.addEventListener('change',applyRefresh);applyRefresh();
-        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{button.disabled=false;button.textContent='Run';}}}});
+        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const input=document.getElementById('cmd-line');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();if(!line){{input.setCustomValidity('Enter a command.');input.reportValidity();return;}}input.setCustomValidity('');const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});if(r.status===401){{window.location.assign('/login');return;}}const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{button.disabled=false;button.textContent='Run';}}}});
         \\</script>
         \\</body></html>
     , .{ version.product, version.stock_wire, csrf_token, csrf_token });
@@ -1105,7 +1182,7 @@ fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
             \\</td><td class="num">{d}</td><td class="num">{d:.0},{d:.0},{d:.0}</td><td>{s}</td></tr>
         , .{ p.entity_id, p.x, p.y, p.z, st });
     }
-    if (!any) try w.writeAll("<tr><td colspan=\"5\" style=\"color:var(--muted)\">no players</td></tr>");
+    if (!any) try w.writeAll("<tr><td colspan=\"5\" style=\"color:var(--muted)\">No players are connected.</td></tr>");
     try w.writeAll("</tbody></table>");
     return w.buffered();
 }
@@ -1183,6 +1260,7 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<div class="stat"><b class="num">{d}</b><span>ownership reject</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>bounds reject</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>movement reject</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>decode reject</span></div>
         \\</div>
     , .{
         s.join_ok,
@@ -1200,6 +1278,7 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.ownership_rejects,
         s.bounds_rejects,
         s.movement_rejects,
+        s.decode_rejects,
     });
     return w.buffered();
 }
@@ -1265,6 +1344,15 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.stream_mean_ns,
     });
     try w.print(
+        \\,"net_p99_ns":{d},"sim_p99_ns":{d},"repl_p99_ns":{d},"stream_p99_ns":{d},"save_mean_ns":{d}
+    , .{
+        s.net_p99_ns,
+        s.sim_p99_ns,
+        s.repl_p99_ns,
+        s.stream_p99_ns,
+        s.save_mean_ns,
+    });
+    try w.print(
         \\,"join_ok":{d},"join_fail":{d},"pkg_enc":{d},"pkg_bc":{d},"info_port":{d},"auth":"{s}","password":"{s}"}}
         \\
     , .{
@@ -1304,6 +1392,13 @@ test "isGetOnlyPath known dashboard routes" {
     try std.testing.expect(!isGetOnlyPath("/nope"));
 }
 
+test "readiness waits for first live snapshot" {
+    var s: Snapshot = .{};
+    try std.testing.expectEqual(@as(u16, 503), readinessStatus(&s));
+    s.tick_n = 1;
+    try std.testing.expectEqual(@as(u16, 200), readinessStatus(&s));
+}
+
 test "requestAuthorized cookie and bearer" {
     const nonce = [_]u8{0x5a} ** 32;
     var sess: [session_token_hex_len]u8 = undefined;
@@ -1322,23 +1417,27 @@ test "requestAuthorized cookie and bearer" {
     try std.testing.expect(!requestAuthorized(h4, "s3cr3t", &sess));
 }
 
+/// Test helper: load a complete HTTP/1.1 request into recv_buf and run std.http path.
+fn testServeHttp(s: *Server, request: []const u8) !void {
+    if (request.len > s.recv_buf.len) return error.Overflow;
+    @memcpy(s.recv_buf[0..request.len], request);
+    s.recv_len = request.len;
+    s.client_fd = -1; // no socket write; response stays in Writer buffer
+    try s.serveHttp();
+}
+
 test "POST /login sets session cookie only on valid token" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
     const nonce = [_]u8{0x5a} ** 32;
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
-    const head = "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded";
-    var good = "token=s3cr3t".*;
-    try s.serveRequest(head, good[0..]);
+    try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(s.set_cookie);
     s.set_cookie = false;
-    var bad = "token=wrong".*;
-    try s.serveRequest(head, bad[0..]);
+    try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 11\r\n\r\ntoken=wrong");
     try std.testing.expect(!s.set_cookie);
-    // Wrong content type must not reach the token check.
-    var json = "token=s3cr3t".*;
-    try s.serveRequest("POST /login HTTP/1.1\r\nContent-Type: application/json", json[0..]);
+    try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(!s.set_cookie);
 }
 
@@ -1389,6 +1488,12 @@ test "listen refuses empty secret" {
     try std.testing.expectError(error.SecretRequired, s.listen(.{ .port = 1, .secret = "" }));
 }
 
+test "listen refuses short secret" {
+    var s: Server = .{};
+    defer s.deinit();
+    try std.testing.expectError(error.SecretTooShort, s.listen(.{ .port = 1, .secret = "short" }));
+}
+
 test "listen refuses header-injectable secret" {
     var s: Server = .{};
     defer s.deinit();
@@ -1408,6 +1513,8 @@ test "render status fits buffer" {
     try std.testing.expect(std.mem.indexOf(u8, apm, "tick mean") != null);
     const js = try renderApmJson(&buf, &s);
     try std.testing.expect(std.mem.indexOf(u8, js, "\"tick\":42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, js, "\"net_p99_ns\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, js, "\"save_mean_ns\":") != null);
 }
 
 test "renderPlayers html-escapes client names" {
@@ -1500,6 +1607,10 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.indexOf(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "aria-labelledby=\"status-heading\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "Loading performance data") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "r.status===401") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "let inFlight=false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "prefers-reduced-motion: reduce').matches") == null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
     try std.testing.expect(std.mem.indexOf(u8, html, "s3cr3t") == null);
     try std.testing.expect(std.mem.indexOf(u8, html, sess[0..]) != null);

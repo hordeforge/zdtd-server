@@ -438,7 +438,12 @@ pub const Game = struct {
         self.sim.director.clock.setDayNightLength(opts.day_night_length);
         self.sim.director.clock.setDayLightLength(opts.day_light_length);
         errdefer {
+            // Network half first so fail-closed webui (after net/admin listen)
+            // does not leak FDs in tests/library createWithOptions paths.
+            self.webui.deinit();
+            self.admin.deinit();
             self.info_tcp.stop();
+            self.net.deinit();
             self.sim.deinit();
             self.blocks.deinit();
             self.items.deinit();
@@ -893,28 +898,32 @@ pub const Game = struct {
                 std.debug.print("zdtd: warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ opts.admin_port, err });
             };
             if (self.admin.port != 0) {
-                std.debug.print("zdtd: admin console 127.0.0.1:{d}\n", .{self.admin.port});
+                // Loopback only; no password on this console (give/kick/shutdown).
+                std.debug.print(
+                    "zdtd: admin console 127.0.0.1:{d} (unauthenticated; loopback only)\n",
+                    .{self.admin.port},
+                );
             }
         }
         if (opts.webui_port != 0) {
+            // Fail closed: operator requested webui; a silent disabled UI is a misconfig incident.
             self.webui.listen(.{
                 .port = opts.webui_port,
                 .bind_host = opts.webui_bind,
                 .secret = opts.webui_secret,
             }) catch |err| {
-                std.debug.print("zdtd: warning: webui on {s}:{d} failed: {}\n", .{
+                std.debug.print("zdtd: webui on {s}:{d} failed: {s}\n", .{
                     opts.webui_bind,
                     opts.webui_port,
-                    err,
+                    @errorName(err),
                 });
+                return err;
             };
-            if (self.webui.enabled()) {
-                self.webui.setAdminHandler(self, Game.webuiAdminThunk);
-                std.debug.print("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
-                    opts.webui_bind,
-                    self.webui.port,
-                });
-            }
+            self.webui.setAdminHandler(self, Game.webuiAdminThunk);
+            std.debug.print("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
+                opts.webui_bind,
+                self.webui.port,
+            });
         }
         if (opts.world_name) |wn| self.world_name = wn;
 
@@ -1119,6 +1128,15 @@ pub const Game = struct {
         return invsys.maxStackBuiltin(item_id);
     }
 
+    /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
+    fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
+        for (&inv.slots) |*s| {
+            if (s.count == 0 or s.item_id == 0) continue;
+            const max = itemStackFor(self, s.item_id);
+            if (max > 0 and s.count > max) s.count = max;
+        }
+    }
+
     /// ECS armor hook: stock/builtin name starts with "armor".
     fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -1185,20 +1203,6 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackageEntityStatChanged", body);
             } else |_| {}
         }
-    }
-
-    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const t = world_store.World.worldToChunk(wx, wz);
-        const ch = g.world.getOrCreate(t.pos) catch return 64;
-        return ch.heightAt(t.lx, t.lz);
-    }
-
-    fn decoTreeIds(self: *Game) struct { oak: u32, dead: u32, ok: bool } {
-        const oak = self.maxdamage.idByName("treeOakSml01") orelse 0;
-        const dead = self.maxdamage.idByName("treeDeadTree02") orelse 0;
-        if (oak == 0 or dead == 0) return .{ .oak = 0, .dead = 0, .ok = false };
-        return .{ .oak = oak, .dead = dead, .ok = true };
     }
 
     fn clientHasDeco(c: *const Client, key: i64) bool {
@@ -1668,6 +1672,7 @@ pub const Game = struct {
         s.ownership_rejects = self.harness.counters.get(.ownership_rejects);
         s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
         s.movement_rejects = self.harness.counters.get(.movement_rejects);
+        s.decode_rejects = self.harness.counters.get(.decode_rejects);
         const th = self.harness.prof.histOf(.tick_total);
         s.tick_mean_ns = th.meanNs();
         s.tick_p50_ns = th.percentileNs(50);
@@ -2013,7 +2018,7 @@ pub const Game = struct {
         switch (cmd) {
             .help => self.adminReply(
                 \\commands:
-                \\  status  list  listplayers|lp  listents|le  inv <slot>  version
+                \\  status  guardstats  list  listplayers|lp  listents|le  inv <slot>  version
                 \\  gettime|gt  settime|st <day|night|ticks|D H M>
                 \\  give <slot> <item> [count]  tele <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
@@ -2039,6 +2044,17 @@ pub const Game = struct {
                     self.countJoined(),
                     self.sim.countKind(.zombie),
                     self.world.chunks.count(),
+                }) catch return;
+                self.adminReply(s);
+            },
+            .guardstats => {
+                var sb: [256]u8 = undefined;
+                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d}\n", .{
+                    self.harness.counters.get(.phase_rejects),
+                    self.harness.counters.get(.ownership_rejects),
+                    self.harness.counters.get(.bounds_rejects),
+                    self.harness.counters.get(.movement_rejects),
+                    self.harness.counters.get(.decode_rejects),
                 }) catch return;
                 self.adminReply(s);
             },
@@ -2587,13 +2603,6 @@ pub const Game = struct {
         if (self.land_claims_n >= max_land_claims) return;
         self.land_claims[self.land_claims_n] = .{ .x = x, .y = y, .z = z, .owner_entity = owner_entity };
         self.land_claims_n += 1;
-    }
-
-    /// Mark an owner's claims online/offline (durability modifier switches).
-    fn setClaimsOnline(self: *Game, owner_entity: i32, online: bool) void {
-        for (self.land_claims[0..self.land_claims_n]) |*claim| {
-            if (claim.owner_entity == owner_entity) claim.owner_online = online;
-        }
     }
 
     /// Process pending UDP events (acks free window; data delivered to onData).
@@ -3277,22 +3286,27 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
-            const p = packages.parsePosAndRotBody(body) catch return;
-            if (p.entity_id == c.entity_id) {
-                const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
-                if (!env.applied) return;
-                // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
-                if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
-                    self.noteAcceptedMove(c, env.x, ny, env.z);
-                    systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
-                    systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
-                    return;
-                }
-                self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
-                self.noteAcceptedMove(c, env.x, env.y, env.z);
-                systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
-                systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
+            const p = packages.parsePosAndRotBody(body) catch {
+                self.harness.counters.inc(.decode_rejects);
+                return;
+            };
+            if (p.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
             }
+            const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
+            if (!env.applied) return;
+            // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
+            if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
+                self.noteAcceptedMove(c, env.x, ny, env.z);
+                systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
+                systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
+                return;
+            }
+            self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
+            self.noteAcceptedMove(c, env.x, env.y, env.z);
+            systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
+            systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
             return;
         }
         // Client animation spam is noisy and fills the reliable window if we log/reply.
@@ -3389,6 +3403,7 @@ pub const Game = struct {
             packages.stock_inv.applyPlayerInventoryBody(body, &self.sim.inventory[ps], reverseItemType, self) catch |err| {
                 std.debug.print("zdtd: PlayerInventory apply err={s} body={d} peer={d}\n", .{ @errorName(err), body.len, c.slot });
             };
+            self.clampInventoryStacks(&self.sim.inventory[ps]);
             var after_total: u32 = 0;
             var first_eat_id: u16 = 0;
             for (self.sim.inventory[ps].slots) |sl| {
@@ -3557,11 +3572,16 @@ pub const Game = struct {
                 const ps = self.sim.playerByPeer(c.slot) orelse return;
                 if (!self.sim.mask[ps].inventory) return;
                 _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[ps], reverseItemType, self, true) catch return;
+                self.clampInventoryStacks(&self.sim.inventory[ps]);
             } else if (self.sim.slotOfNetId(entity_id)) |si| {
                 // Ownership: never let a peer write another player's inventory.
-                if (self.sim.mask[si].player) return;
+                if (self.sim.mask[si].player) {
+                    self.harness.counters.inc(.ownership_rejects);
+                    return;
+                }
                 if (self.sim.mask[si].inventory) {
                     _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return;
+                    self.clampInventoryStacks(&self.sim.inventory[si]);
                 }
             } else return;
             try self.sendHoldingEcho(peer, c);
@@ -3759,9 +3779,15 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageEntityRelPosAndRot")) {
-            if (body.len < 20 or c.entity_id <= 0) return;
+            if (body.len < 20 or c.entity_id <= 0) {
+                if (body.len < 20) self.harness.counters.inc(.decode_rejects);
+                return;
+            }
             const eid = std.mem.readInt(i32, body[0..4], .little);
-            if (eid != c.entity_id) return;
+            if (eid != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             const dx = std.mem.readInt(i16, body[11..13], .little);
             const dy = std.mem.readInt(i16, body[13..15], .little);
             const dz = std.mem.readInt(i16, body[15..17], .little);
@@ -3770,6 +3796,10 @@ pub const Game = struct {
                 const nx = self.sim.transform[idx].x + @as(f32, @floatFromInt(dx)) * scale;
                 const ny = self.sim.transform[idx].y + @as(f32, @floatFromInt(dy)) * scale;
                 const nz = self.sim.transform[idx].z + @as(f32, @floatFromInt(dz)) * scale;
+                if (!std.math.isFinite(nx) or !std.math.isFinite(ny) or !std.math.isFinite(nz)) {
+                    self.harness.counters.inc(.decode_rejects);
+                    return;
+                }
                 const env = self.applyMovementEnvelope(c, peer, eid, nx, ny, nz);
                 if (!env.applied) return;
                 self.sim.transform[idx].x = env.x;
@@ -3785,7 +3815,10 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageEntityAliveFlags")) {
-            const f = packages.parseAliveFlagsBody(body) catch return;
+            const f = packages.parseAliveFlagsBody(body) catch {
+                self.harness.counters.inc(.decode_rejects);
+                return;
+            };
             if (f.entity_id != c.entity_id) {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
@@ -3797,7 +3830,10 @@ pub const Game = struct {
         }
         // Stock C2S player motion speeds; rebroadcast to other clients.
         if (std.mem.eql(u8, name, "NetPackageEntitySpeeds")) {
-            const s = packages.parseEntitySpeedsBody(body) catch return;
+            const s = packages.parseEntitySpeedsBody(body) catch {
+                self.harness.counters.inc(.decode_rejects);
+                return;
+            };
             if (s.entity_id != c.entity_id) {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
@@ -3807,7 +3843,10 @@ pub const Game = struct {
         }
         // Stock hard teleport (same wire as PosAndRot). Apply + fan-out.
         if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
-            const p = packages.parsePosAndRotBody(body) catch return;
+            const p = packages.parsePosAndRotBody(body) catch {
+                self.harness.counters.inc(.decode_rejects);
+                return;
+            };
             if (p.entity_id != c.entity_id) {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
@@ -4550,29 +4589,6 @@ pub const Game = struct {
         try self.sendGame(peer, "NetPackageTraderData", body);
     }
 
-    fn sendVehicleAndTurretJoin(self: *Game, peer: *ln_peer.Peer) !void {
-        var i: ecs.Slot = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (self.sim.alive[i] and self.sim.mask[i].vehicle) {
-                var o: usize = 0;
-                std.mem.writeInt(i32, self.body_buf[o..][0..4], self.sim.network_id[i].id, .little);
-                o += 4;
-                self.body_buf[o] = @intFromEnum(self.sim.vehicle[i].kind);
-                o += 1;
-                inline for (.{ self.sim.transform[i].x, self.sim.transform[i].y, self.sim.transform[i].z, self.sim.transform[i].yaw, self.sim.vehicle[i].speed, self.sim.vehicle[i].fuel }) |f| {
-                    std.mem.writeInt(u32, self.body_buf[o..][0..4], @as(u32, @bitCast(f)), .little);
-                    o += 4;
-                }
-                std.mem.writeInt(i32, self.body_buf[o..][0..4], self.sim.vehicle[i].driver_net_id, .little);
-                o += 4;
-                try self.sendGame(peer, "NetPackageVehicleSpawn", self.body_buf[0..o]);
-                break;
-            }
-        }
-        // TurretSync stock layout is entityId+targetId+isOn+ItemValue: not our SoA blob.
-        // Do not send a non-stock body (crashes NCSimple_Deserializer on client).
-    }
-
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         const t = packages.parseTraderTrade(body) catch return;
         const coin = self.items.ecsIdByName("casinoCoin");
@@ -5248,12 +5264,6 @@ pub const Game = struct {
     fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
         if (recipe_index >= self.recipes.defs.len) return false;
         return self.tryCraftRecipe(peer_slot, self.recipes.defs[recipe_index], times);
-    }
-
-    /// Craft by stock recipe name (e.g. meleeWpnClubT0WoodenClub).
-    fn tryCraftByName(self: *Game, peer_slot: usize, recipe_name: []const u8, times: u16) bool {
-        const recipe = self.recipes.byName(recipe_name) orelse return false;
-        return self.tryCraftRecipe(peer_slot, recipe, times);
     }
 
     fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
