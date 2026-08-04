@@ -1,8 +1,8 @@
 # Status: stock-client join and play path
 
-**Date pin:** 2026-08-03  
+**Date pin:** 2026-08-04  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **197/197** (binary direct; `--listen=-` may false-fail)  
+**Unit tests:** `zig build test` → **199+** (binary direct; `--listen=-` may false-fail)  
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -18,14 +18,15 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 
 | Gate | State | Evidence |
 |---|---|---|
-| Stock client join (zdtd-connect auto) | **PASS** | pw24 fully in-game (overlay closed, HUD live, Day 2); WorldInfo `fixedSizeCC=true` closes "Starting game" gate (CGO threshold 0 for fixed-size; false demanded viewDist²-10=39 > our ring 25) |
+| Stock client join (zdtd-connect auto) | **PASS** | 2026-08-04: `fixedSizeCC=false` + stream r≥6; spawn hb `cgo=68/39` (viewDist 7), terrainReady, xuiReady; overlay gate clear |
 | NullReference on join | **PASS** | 0 NRE; ChunkCalc alive (no CalcDominantBiome OOB) |
-| Client mesh (CGO) | **PASS** | pw14 `Chunks:90 CGO:25` stable |
-| POI/construction block textures | **PASS** | upper24 block-id channel now emitted (`stock_chunk.zig`); houses render as textured cubes, not grey terrain clay; large chunks send via ACK-pumped `sendReliable` (0 failed sends, CGO 0→25) |
+| Client mesh (CGO) | **PASS** | CGO 68 ≥ 39; Chunks:192; stream r 6..8, 8 adds/tick, max_streamed=169 |
+| Terrain floor textures (MicroSplat) | **PASS** | `fixedSizeCC=false` → FromRaw loads splat*.png (not Dummy); surface id 8=terrBurntForestGround; grey clay was null splat controls |
+| POI/construction block textures | **PASS** | u32 rawData + upper24 when bits 8..31 set; TTS paint+density; non-terrain density ≥0; filler skipped on paint |
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
-| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md); 197/197 tests |
+| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md); 239/239 tests |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
-| Unit tests | **PASS** | 197/197 (binary direct; `--listen=-` may false-fail) |
+| Unit tests | **PASS** | 239/239 (binary direct; `--listen=-` may false-fail) |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
@@ -42,7 +43,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
 | Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=75 fail=8** (kill/spawn/respawn PASS). Residual: dig pad, block damage, loot pickup VFX, craft/trader economy. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
-| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo **75/83** (2026-08-03f): dig pad, block damage, loot pickup VFX, craft/trader residual. Cosmetic: deco trees suppressed (AssignIds), Weather biome array, GameStats day. Not a clean full-stock parity claim. |
+| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C from biomes.xml defaults; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees (AssignIds). Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
 product notes stay in this file + linked docs.
@@ -73,21 +74,25 @@ zdtd     → Zig dedi, client wire only, no mods
 | PlayerLogin / LoginAnswer / enter / spawn | `server/game.zig` | EnterMultiplayer respawn type |
 | PlayerId PDF (ECD + inv/equip/empty journal) | `wire/packages.zig`, `stock_inv.zig` | Spawn at real coords |
 | ConfigFile LoadLocal list | `game.zig` | Stock xmlsToLoad names |
-| WorldTime, deco first package | `stock_deco.zig` | DistantDecoTree AssignIds |
+| WorldTime, deco first package | `stock_deco.zig` | DistantDecoTree via `idByName` (skip if dump miss) |
 
 ### World / terrain
 
 | Item | Location | Notes |
 |---|---|---|
 | DTM height load (Navezgane etc.) | `world/dtm.zig` | center origin |
-| Full columns lazy dirt/stone/bedrock | `world/store.zig` | from surface height |
-| `.zch2` chunk persist | `world/store.zig` | heights + optional blocks |
-| Stock `NetPackageChunk` write path | `wire/stock_chunk.zig` | network Chunk.write; mixed density + interleaved BiomeIntensity |
-| Spawn/stream ring for light+mesh | `server/game.zig` | join r≤4 (9×9), stream r≤4 + 4 adds/tick; light sameValue 0 |
+| Full columns biome layers + AssignIds terrain ids | `world/store.zig`, `assets/biome_layers.zig` | biomes.xml first `<layers>`; dirt=5 stone=1 bedrock=4 water=240 |
+| `.zch3` chunk persist (u32 rawData) | `world/store.zig` | ZCH2 u16 dropped on load (regen from DTM+TTS) |
+| Stock `NetPackageChunk` write path | `wire/stock_chunk.zig` | full rawData upper24; density repair rules; TTS dens; topsoil broken all-1s; light 0xFF |
+| Spawn/stream ring for light+mesh | `server/game.zig` | join/stream r 6..8, 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
-| **TTS block paint (types)** | `world/tts.zig`, `prefabs.zig` | v≥5 raw u32; skip children; rot 0-3 |
-| Seed chest AssignIds | `stock_deco.zig` | cntWoodenChestClosed **18671** |
+| **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | skip terrainFiller; rotation bits kept |
+| AssignIds pins + dump merge | `assets/assignids_comptime.zig`, `maxdamage.zig` | cwd + /proc/self/exe paths |
+| Catalog loaders (XML) | `assets/*` | blocks ids=dump only; biomes colors; painting; spawning; buffs+passives; progression attrs/perks; vehicles; storage pairs; traders groups |
+| Shared I/O | `util/linux_fs`, `assets/paths` | no copy-paste readFileAll / tryLoad |
+| Seed chest AssignIds | `stock_deco.zig` | cntWoodenChestClosed from dump |
+| Place item→block | `ecs/inventory` + Game.place_fn | name→AssignIds (wood→frameShapes:cube) |
 
 ### Inventory / containers / loot
 
@@ -174,9 +179,10 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 
 | Priority | Gap | Proper approach |
 |---|---|---|
-| P1 | Deco trees / AssignIds client pin | Bundled dump is V3.1.4; target client V3.1.0 b14. Re-enable deco when ids match (negotiate or dump V3.0.1); trees suppressed to avoid NRE |
-| P1 | Weather biome array + GameStats HUD day | Stock fixed per-biome layout + day counter; cosmetic HUD, not a join blocker |
-| P1 | M11 multiplayer CPU | Dirty bits + serialize-once interest; persistent thread pool; 32-128 bot apm gate |
+| P1 | Deco trees | Re-enabled when dump has treeOakSml01/treeDeadTree02 via idByName; empty firstPackage if miss |
+| P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
+| P2 | Weather storm SM | Defaults from biomes.xml on join+WorldTime throttle; storm/bloodMoon group SM not simulated |
+| P1 | M11 multiplayer CPU | Serialize-once interest + named chunk caps shipped; pool shipped; 32-128 bot apm gate open |
 | P2 | Quest / EAI / power depth | See MISSING honest-gap sections (objective types, A* path, generator fuel, trigger actuation) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |

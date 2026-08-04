@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-03):** **197/197** unit · stock join green · playtest-zdtd demo **pass=75 fail=8** · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-03):** **239/239** unit · stock join green · playtest-zdtd demo **pass=78 fail=5** (was 75/8) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ---
 
@@ -27,48 +27,53 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **75 pass / 8 fail** (kill/spawn/respawn PASS); version pin V3.1.0
 
 
-### Residual playtest fails (demo, 2026-08-03f) - product depth
+### Residual playtest fails (demo, 2026-08-03k) - product depth
 
-Latest: `server/logs/playtest_zdtd_demo_20260803f.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Latest: `server/logs/playtest_zdtd_demo_20260803k.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `core/dig_confirm` | no solid under feet | spawn height / dig pad sample |
-| `core/place_confirm` | no source under feet | same pad |
-| `core/block_damage_melee` | type 20304 dmg stuck 0 | SetBlock damage / hardness |
-| `combat/explosion_client` | no block change from attack | ExplosionInitiate dig path |
-| `economy/eat_food_consume` | no food item | client bag give / starter food |
-| `economy/loot_bag_pickup` | EntityItem not removed after collect | EntityCollect + EntityRemove S2C (partial fix shipped) |
-| `economy/craft_consume_output` | wood/club 0 | give/craft InvTx depth |
-| `economy/trader_buy` | coins 0, buyOk=False | wallet + trader buy C2S |
+| `combat/explosion_client` | soft hay dmg stuck 0 (no close-in) | melee raycast / aim |
+| `economy/bag_add_item` | bag 45/45 full | slot waste / junk occupancy (starter works) |
+| `economy/craft_consume_output` | wood0=35 no consume | craft queue / recipe unlock |
+| `economy/trader_buy` | coins=10250 no spend | client-local buy; stock trader C2S |
+| `world/block_sample_ring` | solid=0 intermittent | player float / sample Y |
 
-Closed this campaign (were FAIL): `zombie_death_loot`, `zombie_removed_after_kill`, `player_respawn`, kill/spawn admin fixtures, V3.1.0 version pin.
+Closed this campaign: dig/place/melee dmg, loot pickup, eat_food, death loot, respawn, kill/spawn fixtures, V3.1.0 pin.
+
+Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect Despawned, ECD v36+stress, PDF **bLoaded=true** + playerMale profile (ToPlayer applies bag), starter coins, orch zdtd fresh-save.
 
 ### Residual non-demo (still open)
 
 ### Parity polish (client-visible)
 
 - [ ] Deco trees: re-enable when AssignIds match target client (V3.0.1 b4 dump or negotiate); currently suppressed (NRE on mismatch)
-- [ ] Weather biome array S2C (fixed per-biome layout)
-- [ ] GameStats HUD day counter
-- [ ] Quest objective-type coverage beyond kill/goto/fetch/trader (Craft, StayWithin, Rally markers, …); see MISSING §6.1
-- [ ] EAI: more task types and/or grid A* (greedy path remains); see MISSING §5.2.1
-- [ ] Power: generator fuel ramp, battery SoC, trigger/timer actuation
-- [ ] Lock contention beyond first-cut holder deny
+- [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
+- [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
+- [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
+- [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)
+- [ ] EAI: more task types (BreakBlock, ApproachSpot, …); see MISSING §5.2.1
+- [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
+- [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
+- [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
+- [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan); full trigger TE wire still open
+- [ ] Power: full trigger TE wire
 - [ ] Optional: workstation RecipeQueue C2S depth beyond InvTx + TE sim
 - [ ] Optional: Encryption* RSA+AES (platform AntiCheat only; not required for ServerPassword)
+- [x] Hardcode audit: run `docs/PROMPTS/audit-hardcoded-data.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
 
 ### M11 multiplayer CPU (1.0 scale gate)
 
-- [ ] Dirty bitsets + serialize-once interest (biggest win)
-- [ ] Persistent thread pool (replace spawn/join per `forRanges`)
-- [ ] O(1) NetId → slot map
-- [ ] Chunk stream pipeline caps + workers as needed
+- [x] Dirty bitsets + serialize-once interest (entity-outer encode once, framed fan-out; clear pos/rot/spawn/flags after pass; `ecs/interest.zig` needsPosSend)
+- [x] Persistent thread pool (`util/parallel.zig` Io mutex/cond workers; no spawn/join per `forRanges`)
+- [x] O(1) NetId → slot map (`World.net_to_slot`; already shipped)
+- [x] Chunk stream named caps (`max_streamed_chunks`, `chunk_stream_radius_{min,max}`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`); workers still open
+- [ ] Chunk stream workers (async load/encode) as needed
 - [ ] 32-bot then 128-bot loadgen + apm budgets (criterion 7)
 
 ### P4 authority spine (formalize existing gates)
 
-- [ ] Policy/mode config + AUTHORITY.md short doc
+- [x] Policy/mode config + AUTHORITY.md short doc (`ZdtdAuthorityMode`, docs/AUTHORITY.md)
 - [ ] Protocol phase × package matrix counters
 - [ ] Entity ownership Hard reject centralization
 - [ ] Movement envelope / inv cause ledger / evidence JSONL (see P4 section below)
@@ -77,7 +82,29 @@ Closed this campaign (were FAIL): `zombie_death_loot`, `zombie_removed_after_kil
 
 - [ ] Planet-scale M2+ gateway/shards (DEM M1 proven; after M11) - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
 - [ ] SpacetimeDB: **rejected** (SCALE_ARCHITECTURE.md)
-- [ ] Steam browser / full telnet parity / RWG (P3 ops)
+- [ ] Steam browser / full telnet parity (P3 ops)
+
+### Procedural worldgen (parked; **on-the-fly stream**, not static bake)
+
+Design hub: [docs/WORLDGEN.md](docs/WORLDGEN.md). **Not** stock RWG C# host and
+**not** "generate whole map then run." Minecraft-style: listen → players move →
+`getOrCreate` miss → gen that chunk from seed → stock wire → cache. Density
+terrain + optional WFC tiles for settlements. Baked Navezgane/Pregen stay
+alternate backends. Unpark after core demo depth + M11 unless prioritized.
+
+- [x] **W0** `World` terrain source `proc`; empty world dir join; demand gen in `getOrCreate` + existing stream ring (proof: explore forever without prebake)
+- [x] **W1** OpenSimplex2 + fBm/ridged + domain warp in Zig; determinism tests
+- [ ] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged
+- [ ] **W2b** Async gen workers + prefetch ring + apm; tick never blocks on bulk gen
+- [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names
+- [ ] **W4** Caves (cheese/spaghetti/noodle) + aquifers
+- [ ] **W5** Deterministic POI placement (cell hash, cross-chunk), `.tts` stamp on first touch
+- [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1
+- [ ] **W6** DEM + procedural blend (detail on GLO-30 base; feather edges; still per-chunk stream)
+- [ ] **W7** Far-terrain LOD sampling (ties [PLANET_SCALE.md](docs/PLANET_SCALE.md))
+- [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS still open
+- [ ] Persist: player edits win over regen (`.zch3` / blockmeta); pure regen after cache drop
+- [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-research` only; zdtd tables, no DLL
 
 ### P3 ECS ergonomics / scale brainstorm
 
@@ -90,13 +117,30 @@ Do not adopt third-party ECS cores.
 
 Core loop and parity landings. Do not re-open without new evidence.
 
+### Recent (2026-08-04)
+- [x] **P4.0 authority spine**: `ZdtdAuthorityMode` observe|correct (default correct) in config → Game; `docs/AUTHORITY.md` formalizes join phase, C2S bounds, ownership, interest no self-echo
+- [x] **EAI grid A\***: `path.aStarToward` (Manhattan, capped expand) + `World.solid_fn` body-height probe from block store; chase replans ~0.35s; unit tests around wall; greedy fallback
+- [x] **M11.2 serialize-once interest**: entity-outer encode/frame once, fan-out framed PosAndRot (+ zombie Speeds/AliveFlags); dirty clear via `interest.clearAfterReplicate`; named chunk stream caps
+- [x] **W0/W1 worldgen foundation**: `TerrainSource` + `world/noise.zig` (OpenSimplex2-family + fBm/ridged/warp) + `world/worldgen.zig`; `getOrCreate` proc path; `--worldgen-seed`
+- [x] **Weather from biomes.xml**: `biome_layers.Table` parses default weather group ranges → wire params; join + WorldTime throttle send `NetPackageWeather`; deleted hardcoded `defaultWeatherBiomes`
+- [x] **Quest Craft/StayWithin**: `QuestKind`/`PhaseKind` + systems hooks; quests.xml classifiers; nav markers exhaust kinds
+- [x] Craft InvTx path + `questOnCraft` after successful recipe; stay tick on player move
+- [x] Agent prompt `docs/PROMPTS/audit-hardcoded-data.md` expanded (Bucket A/B, stock Config gap list, builtins, absolute paths, ids/enums)
+- [x] **Config XML overrides**: `--config-overrides DIR` (repeatable, filename order); xpath set/remove/append subset; `paths`+`xml_patch`+`io_fs` (`std.Io`, no raw syscalls); AGENTS rule 24
+- [x] **Power from blocks.xml**: MaxFuel/OutputPerFuel/OutputPerCharge/OutputPerStack parsed in maxdamage; powerblocks.Resolved.applyToNode; place path applies props; electric tick fuel/SoC/timers; removed default_gen_fuel/battery_cap consts
+- [x] WORLDGEN on-the-fly stream design + TODO W0–W7
+- [x] Lock pos-key + stale timeout; solar day gate; persistent parallel pool (Io mutex/cond)
+
 ### Recent (2026-07-23)
 - [x] **Stock EAI prioritized task graphs**: replaced the ad-hoc `switch (ai.state)` in `AiCtx.work` (`src/ecs/systems.zig`) with a faithful port of `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874). Each zombie runs an ordered comptime task table (`zombie_tasks`) of `{priority, MutexBits, executeDelay, continuous}` cells with Start/Update/CanExecute/Continue hooks; every tick the best task is (re)selected by priority + mutex overlap (`(a.mutex & b.mutex)==0` = compatible) and projected back onto the coarse `ZombieAi.state` so all downstream replication (EntitySpeeds/AliveFlags, block-damage, despawn) is unchanged. Two real tasks: ApproachAndAttackTarget (chase+melee, mutex 0b11, delay 0.1, non-continuous; asm.il:421798) and Wander (mutex 0b01, continuous; asm.il:438104). Chase preempts wander on sensing a player; wander resumes on target loss via the mutex-release path. Director-seeded aggro (`alert && target_id>=0`) survives as long as the target entity exists. New `TaskId` enum + one `active_task` byte on `ZombieAi` (reuses `decision_cd` as the re-eval timer). +3 tests (189 total). Gaps documented (MISSING_FEATURES 5.2.1): greedy path kept (no A\*), only 2 of stock's task types real, no data-driven per-class `AITask` XML, sensing collapsed to nearest-player, timing/chaseTimeMax approximated.
 - [x] **Electrical block placement parity**: placing a stock electrical block (`generatorbank`, `solarbank`, `batterybank`, `electricwirerelay`, `autoTurret`, plates/traps, …) now registers a `PowerGrid` node at the block world position and removes it on break (`electric.addNodeAt`/`removeAt`, idempotent + wire-compacting). Node kind from block `Class` in stock `blocks.xml` (`src/ecs/powerblocks.zig`); watts are real block props (`MaxPower` sources, `RequiredPower` consumers, parsed in `maxdamage.loadFromBlocksXml`). Real `NetPackageWireActions` bodies drive wiring: SetParent (op 0) `connectByPos(child,parent[0])`, RemoveParent (op 1) `removeParentAt(child)`, SendWires (op 2) no-op; grounded in asm.il:842779/842922/843021. `NetPackageWireToolActions` = peer visual rebroadcast only. Legacy custom wire op kept for demo. Gaps (documented, not faked): generator fuel ramp, battery SoC, trigger/timer/toggle actuation, undirected RemoveParent, AssignIds V3.1.4↔V3.0.1 skew (silent no-op on mismatch). +5 tests (180 total).
 - [x] **POI/construction blocks rendered as untextured grey clay** (whole houses smooth marching-cubes terrain material): chunk block-layer only wrote the low 8 bits of each id (`stock_chunk.zig` hardcoded `upper24=false`), so every id ≥ 256 truncated to `id & 0xFF` → a wrong (usually terrain) block. Fix: emit the 3072 B/cell interleaved `m_Upper24Bits` array (`id>>8,>>16,>>24`) whenever a layer has any id ≥ 256, matching decompiled `ChunkBlockLayer.Read`. Terrain ids (<256) unaffected, that is why floor looked fine but houses didn't. Live: CGO 0→25, house textures correct.
 - [x] **Large POI chunks failed to send** (side effect of the above: upper24 grew chunks to 14-37 KB → many fragments overflowed the 64-slot reliable window → holed chunk disk → CGO 0). Fix: `Peer.sendReliable` now resumes the same fragment stream and pumps ACKs mid-message via a `pump_fn` callback (`Game.pumpAcks`) instead of restarting; `body_buf` 256→512 KB. Live: 0 failed chunk sends.
 - [x] **serverconfig.xml gameplay options fully wired** (`config.zig` → `initWithOptions` + runtime systems, all clamped + tested, docs/GAME_OPTIONS.md). Config-only: GameDifficulty (zombie hp), BloodMoonFrequency/Range/EnemyCount, PlayerKillingMode (PvP gate), DayNightLength/DayLightLength (clock/night), MaxSpawnedZombies, ZombieMove/Night/Feral/BMMove + EnemyDifficulty → `World.zombie_speed_scale`, LootAbundance (roll count scale). New backing systems built so the rest apply too: **MaxSpawnedAnimals** (daytime animal spawner + cap), **XPMultiplier** (`Game.awardXp` server ledger on kill), **BlockDamagePlayer** (scales dig damage in SetBlock), **BlockDamageAI/AIBM** (`tickZombieBlockDamage`: zombies chew cover), **AirDropFrequency** (`tickAirDrop`: scheduled supply crate), **DropOnDeath** (loot bag on player death per mode), **LandClaim** (keystone placement → `land_claims`; non-owner SetBlock denied inside `LandClaimSize`; own-claim durability ×`LandClaimOnline/OfflineDurabilityModifier`). Also: serverconfig with a missing world folder falls back to flat instead of crashing (`main.dirExists`).
-- [x] "Starting game..." wedge: WorldInfo fixedSizeCC=true (authored worlds are fixed-size CC; overlay gate CGO>=viewDist²-10 unless fixed-size → 0). pw24 fully in-game with HUD. Connect mod SpawnStateHeartbeat logs all overlay gates.
+- [x] "Starting game..." / grey floor tradeoff (2026-08-04): `fixedSizeCC=true` closes overlay (CGO thr=0) but installs ChunkProviderDummy → no splat load → grey MicroSplat floor. **Correct:** `fixedSizeCC=false` + stream r≥6 (meshable core clears viewDist²−10; r=4 max CGO≈25). Docs: STATUS, WIRE_CHUNK, research protocol-packages §4.2 + chunk-providers §4.5.
+- [x] Terrain AssignIds + biomes.xml layers; TTS full rawData/density; density repair rules; skip terrainFiller paint; LiteNet frag window for large textured chunks.
+- [x] **Asset catalogs from game-dir (2026-08-04):** AGENTS rule 13 + `docs/ASSETS.md`; blocks ids AssignIds-only (no sequential XML); itemToBlock name→frameShapes/cobble; biomes.xml ColorTable; power Class= scan; painting/spawning/buffs/progression loaders; traders full group expand; deco re-enable via idByName; shared `io_fs`/`paths` (DRY).
+- [x] **Deferred catalogs (2026-08-04):** vehicles.xml → spawn HP/max_speed; buffs passive_effect; progression attrs/perks + XP curve level-up; storage Closed/Open pairs from DowngradeBlock; TE type named constants; director night/day/animal groups from spawning.xml.
 - [x] Admin persistent session + replies; restart_pair.sh harness script
 - [x] Player death flow: sim keeps dead player entity (destroy() broke all later net-id lookups: give/kill "missed"); DamageEntity/deferred-damage skip EntityRemove for players; admin kill player → hp=0 EntityStatChanged so client death screen runs; RequestToSpawnPlayer heal-when-dead already handles respawn; pw25 live: kill → "Respawning: Died" → back in-game
 - [x] Live-spawn replication: replicate() sends stock ECD EntitySpawn for dirty.spawn zombies/animals in range (director hordes + sleeper wakes were invisible: only PosAndRot went out)
@@ -407,17 +451,18 @@ disjoint writes*, not "everything lock-free."
 
 ### Near-term (unblocks real multiplayer CPU)
 
-- [ ] **Persistent thread pool**  
+- [x] **Persistent thread pool**  
   Replace spawn/join-per-`forRanges` with a long-lived pool (`util/parallel` or
   sibling). Same range API; lower tail latency on AI/turrets/save.
 
-- [ ] **Dirty-bit interest + serialize-once**  
-  Spatial hash / cell interest; gather dirty transforms once; queue shared
-  bytes per observer. Goal: replicate cost ~ O(dirty × interest), not O(players²).
+- [x] **Dirty-bit interest + serialize-once**  
+  Entity-outer loop: encode PosAndRot (+ zombie Speeds/AliveFlags) once, frame
+  once, `sendFramedDroppable` fan-out. Dirty pos/rot/spawn/flags clear after pass.
+  Heartbeat via `interest.needsPosSend` / `pos_heartbeat_period_ticks`.
 
 - [ ] **Chunk stream pipeline**  
   Decode/paint/encode stages with bounded queues: load/TTS on workers, main
-  thread only commits store + enqueues S2C. Named caps on pending per peer.
+  thread only commits store + enqueues S2C. Named caps shipped; workers open.
 
 - [ ] **Sharded world store**  
   Per-chunk or per-region mutex / ticket; block edits only on owned shard.
@@ -472,10 +517,10 @@ disjoint writes*, not "everything lock-free."
 ### Suggested order of attack
 
 ```text
-1. apm sections on tick + replicate + chunk stream (baseline)
-2. persistent pool (cheap win on current parallel systems)
-3. dirty bits + serialize-once interest (biggest multiplayer win)
-4. chunk stream workers + caps
+1. apm sections on tick + replicate + chunk stream (baseline)     [shipped]
+2. persistent pool (cheap win on current parallel systems)        [shipped]
+3. dirty bits + serialize-once interest (biggest multiplayer win) [shipped]
+4. chunk stream named caps [shipped]; workers still open
 5. sharded store / path jobs as maps and entity counts grow
 6. only then consider process sharding
 ```
@@ -571,8 +616,9 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 
 **P4.0 - Spine (do first)**
 
-- [ ] **Policy + mode config** - `observe` default; per-family correct flags;
-  document in `docs/` (short AUTHORITY.md) pointing at server-guard POLICY  
+- [x] **Policy + mode config** - `ZdtdAuthorityMode` observe|correct (default
+  **correct**); `docs/AUTHORITY.md` formalizes existing gates  
+
 - [ ] **Protocol allow matrix** - package name/id × join phase; illegal → drop +
   counter; reconnect/resume paths named  
 - [ ] **Entity ownership** - C2S entity id must belong to connection (or

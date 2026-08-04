@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** 197/197 · stock join: green (0 NRE) · core play loop: **yes** (11/11 automated playtest) · full stock parity: **partial** (gaps below)
+**Tests:** 239/239 · stock join: green (0 NRE) · core play loop: **yes** (11/11 automated playtest) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -33,7 +33,7 @@ This document is deliberately exhaustive. Status labels:
 | Prefab TTS | types + density/TE/water/texture planes | part_* skip policy | name remap if tables diverge | houses from real TTS |
 | Block world | columns + SetBlock + .zch2 + land claim | multi/meta depth | stability, falling | dig/build/persist |
 | Inventory / TE / loot | PDF, TE, workstation sim, loot ECD bag, InvTx | lock contention depth | RecipeQueue C2S beyond TE | chest/craft/loot work |
-| Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task | greedy path, AI depth | full A*, more EAI tasks | fight/loot visible |
+| Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task, grid A* | AI task depth | navmesh, more EAI tasks | fight/loot visible |
 | Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders | biomes.xml, vehicles.xml | gamestages, buffs | tables load |
@@ -239,7 +239,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
 | `NetPackageChat` (vs SimpleChat) | P1 |
 | `NetPackageGameMessage` / tips | P2 |
 | `NetPackageConfigFile` / id mapping blocks-items | HAVE (LoadLocal list) |
-| `NetPackageGameStats` | PARTIAL (HUD day counter residual) |
+| `NetPackageGameStats` | HAVE (full bPersistent blob; HUD day = WorldTime) |
 | Console cmd client/server | P2 |
 | XUi remote windows | P3 |
 
@@ -267,7 +267,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
-| RWG (runtime world gen) | MISSING | load baked only (WORLDGEN.md design) |
+| RWG / procedural gen | MISSING | baked maps only today; design WORLDGEN.md = **on-the-fly** per-chunk stream gen (MC density + WFC tiles; not static full bake; not stock RWG host) |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + .zch2 |
 | Density / stability / shape / paint | PARTIAL | density channel; stability/falling MISSING |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
@@ -299,7 +299,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Animals / special infected / bosses | PARTIAL (animals spawner + cap; bosses MISSING) |
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
-| Pathfinding (grid A* / navmesh) | PARTIAL (BFS helper + greedy; full A* MISSING) |
+| Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy; no navmesh / vertical) |
 | MoveHelper physics / collision | MISSING |
 | Gravity / swimming / climbing | PARTIAL (void rescue teleport; vehicle gravity) |
 | Line of sight / hearing / smell | MISSING |
@@ -338,10 +338,11 @@ the target is lost (mutex release), exactly reproducing stock's emergent order.
 
 Honest gaps:
 
-- **No navmesh / A\* pathing.** Approach keeps the existing greedy
-  `stepToward` + `path_goal` straight-line chase (see "path greedy, full A\*"
-  in the Entity sim row). Stock drives real partial paths
-  (pathCounter/relocateTicks).
+- **Grid A\* (no navmesh).** Approach replans via `path.aStarToward` on a
+  coarse XZ grid when `World.solid_fn` is set (body-height solid from the block
+  store); falls back to straight `stepToward` without a solid hook. Caps
+  expansions (~96) and replan interval (~0.35 s) for the 20 TPS budget. No
+  navmesh, no vertical climb/jump, no stock pathCounter/relocateTicks fidelity.
 - **Only 2 task types are real.** The engine takes more table rows, but
   EAIBreakBlock (asm.il:425121), EAIDestroyArea, EAIApproachSpot (:424093),
   EAIApproachDistraction (:423700, noiseSeekDist), EAITerritorial (:437973),
@@ -518,18 +519,18 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | blocks.xml | HAVE (`maxdamage` MaxPower/RequiredPower, ids) |
 | items.xml / item_modifiers | HAVE (`assets/items.zig`; modifiers partial) |
 | entityclasses / entitygroups | HAVE (`assets/entities.zig`, `entitygroups.zig`) |
-| biomes.xml / biomes.png | PARTIAL (biomes.png dominant paint; biomes.xml no) |
-| traders.xml | HAVE (`assets/traders.zig`) |
-| vehicles.xml | MISSING |
-| gamestages / spawning | MISSING |
-| buffs / progression | MISSING |
+| biomes.xml / biomes.png | HAVE (colors + layers + biomes.png) |
+| traders.xml | HAVE (groups + expand) |
+| vehicles.xml | PARTIAL (load + spawn HP/speed) |
+| gamestages / spawning | PARTIAL (spawning.xml → director groups; gamestages no) |
+| buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | MISSING |
-| materials / physicsbodies | MISSING |
+| materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
 | sounds / music (server triggers) | MISSING |
 | nav_objects.xml | MISSING |
 | worldglobal / weathersurvival | MISSING |
-| shapes / painting | MISSING |
+| shapes / painting | PARTIAL (painting.xml atlas; shapes via AssignIds/TTS) |
 
 Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve (see ASSETS.md).
 
@@ -624,11 +625,11 @@ Do not plan these as product features of zdtd:
 
 ### P1: Depth the client still notices
 1. Deco/AssignIds pin (V3.0.1 dump or negotiate) so trees can return.  
-2. Weather biome array + GameStats HUD day.  
+2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
 3. Path A* (or better than greedy) + more EAI task types.  
-4. Quest objective-type coverage (Craft/StayWithin/Rally markers).  
-5. Power fuel / battery SoC / trigger actuation.  
-6. Lock contention + workstation RecipeQueue C2S depth.
+4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
+5. Power: full trigger TE wire (fuel/SoC/timer + solar day gate + InvTx gas-can FuelValue refuel shipped).  
+6. Workstation RecipeQueue C2S depth (lock contention shipped).
 
 ### P2: Multiplayer CPU (M11)
 Dirty bitsets, serialize-once interest, persistent thread pool, O(1) NetId map,
@@ -778,5 +779,5 @@ payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md`
 and `experimental-delta.md`.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
-`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 197/197.
+`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 239/239.
 
