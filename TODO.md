@@ -10,7 +10,11 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-04):** **307/307** unit · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804j) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-04p):** unit ItemActionEat scenarios green · stock join green · playtest-zdtd demo **pass=83 fail=0** (strict eat + hard generator_fuel) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+
+### Freeze (core playable)
+
+Core join/CGO/demo **83/83**, strict eat, hard generator_fuel, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat parity, or animator human soak reopens work.
 
 ---
 
@@ -24,22 +28,22 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [x] Phase C: persist multi-phase rejoin in orchestrator (`7dtd-playtest` suite `persist`: setup → saveworld → restart → rejoin)
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **83 pass / 0 fail** (20260804j) (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-04p: **83 pass / 0 fail** strict eat + hard generator_fuel; version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
 
 Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
-Score: **pass=83 fail=0** (20260804j). CGO PASS. Residual soft: generator_fuel soft-pass without TE; playtest eat may force-dec after 2s if InstantAction no-ops.
+Score: **pass=83 fail=0** (20260804p). CGO PASS. Strict eat (no force-dec) + generator_fuel hard TE closed.
 
 | Case | Symptom | Likely owner |
 |---|---|---|
 | `power/*` place suite | intermittent type=0 when client floats | **mitigated 2026-08-04:** void rescue surface-8; SetBlock reach clamps vertical dy to ±12 so mesh float does not fail horizontal place |
 | `combat/zombie_target_has_health` | intermittent no EntityAlive | **mitigated 2026-08-04:** admin spawnentity surface Y + clear known_entities so ECD re-sends |
 
-Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** + **ranged_shot** (04i: force stack dec + SetHeldMeta). Peak score **83/83** (20260804j).
+Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** strict (04p: InstantAction + Food rise, no force-dec) + **ranged_shot**; **generator_fuel** hard TE. Peak score **83/83** (20260804p).
 
-**Server ItemActionEat (2026-08-04):** `useEx` / InvTx `Op.use` + PlayerInventory stack-loss detect; items.xml `$foodAmountAdd`/`foodHealthAmount`/`$waterAmountAdd` + Action0 Class=Eat; S2C `EntityStatChanged` food/water/hp. Scenario `ItemActionEat via InvTx` PASS.
+**Server ItemActionEat (2026-08-04p):** `useEx` / InvTx `Op.use` + PlayerInventory stack-loss Paths A/B/C (`last_eatable_units`, body-side count); PreferenceTracker skip so bag parse does not abort; high-id XML `is_eat`/food props; S2C `EntityStatChanged`. Playtest strict eat PASS food0=50.0 food=50.6 stackDrop+foodRise.
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
@@ -77,8 +81,9 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 - [x] Policy/mode config + AUTHORITY.md short doc (`ZdtdAuthorityMode`, docs/AUTHORITY.md)
 - [x] Phase / ownership / bounds reject counters (`phase_rejects`, `ownership_rejects`, `bounds_rejects` in apm + webui)
-- [ ] Per-package phase matrix table (full name×phase grid; counters are aggregate)
-- [ ] Movement envelope / inv cause ledger / evidence JSONL (see P4 section below)
+- [x] Per-package phase matrix (`src/server/phase_gate.zig`; connecting|joined|playing; aggregate `phase_rejects`)
+- [x] Movement envelope first cut (`src/server/movement.zig`; soft 20 m/s clamp + `movement_rejects`; observe counts only)
+- [ ] Inv cause ledger / evidence JSONL (see P4 section below)
 
 ### Parked
 
@@ -93,7 +98,7 @@ Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plug
 - [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
 - [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
 - [ ] Hardcode audit residual P1 (A10–A12 AI/vehicle floors; B13 tick %N; A08/A22 deco pin labels)
-- [ ] Native static plugin host (ADR 0005) + one in-tree sample plugin
+- [x] Native static plugin host skeleton (ADR 0005) + `sample_hello` (`src/plugin/`; no dynlib/Wasm)
 - [ ] Gamemode = config pack + static plugin (`modes/` + `plugins/`)
 - [ ] **Wasm guest mods** (sandboxed): same hooks, fuel/memory caps, command queue only; no stock Mods/ promise
 - [ ] Dynlib native plugins only if still needed after static + Wasm
@@ -387,14 +392,14 @@ From **knoedel / Bevy shape** (already listed, kept):
 
 - [ ] **Typed resources** - `Res`/`ResMut` helpers over `World` fields  
 - [ ] **System locals** - named tick/join scratch; no hidden statics  
-- [ ] **Query helpers** - SoA mask `forEach` / comptime With-Without; no archetypes  
+- [x] **Query helpers** - SoA mask `forEachAlive` / `forEachWith` / `forEachKind` (`src/ecs/query.zig`)  
 - [ ] **Explicit schedules** - ordered phases only; parallel *inside* phase  
 - [ ] **Jobs helper** - batch onto persistent pool + wait-group  
 
 From **mr_ecs** (high value for dedi):
 
-- [ ] **Tick command buffer** - reserve/spawn/despawn/add-mask/damage as deferred
-  ops; `Exec` at phase boundaries so parallel AI never mutates structure  
+- [x] **Tick command buffer** - spawn_zombie/despawn/damage deferred; cap 64; drain end of `tickAll` (`src/ecs/command.zig`)  
+
 - [ ] **Generation-counted handles** (if/when slot reuse bites) - net id stays
   stable for wire; internal slot gen prevents stale AI/target pointers  
 - [ ] **Fixed capacities + soft warnings** - entity/stream/cmd caps; warn past ~80%
@@ -640,8 +645,9 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 - [x] **Policy + mode config** - `ZdtdAuthorityMode` observe|correct (default
   **correct**); `docs/AUTHORITY.md` formalizes existing gates  
 
-- [ ] **Protocol allow matrix** - package name/id × join phase; illegal → drop +
-  counter; reconnect/resume paths named  
+- [x] **Protocol allow matrix** - `phase_gate.zig` name × phase (connecting|
+  joined|playing); illegal → drop + `phase_rejects`; reconnect still handshake
+  allowlist (resume paths later)
 - [ ] **Entity ownership** - C2S entity id must belong to connection (or
   documented delegated set: driven vehicle, owned turret); else Hard reject  
 - [ ] **Decode validation** - NaN/Inf, coord range, stack size, string/enum
@@ -653,9 +659,9 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 
 **P4.1 - Hard invariants (Correct mode)**
 
-- [ ] **Movement envelope** - accepted pos + max speed/accel over server dt +
-  latency slack; debt/credit cap; reset on teleport/spawn/vehicle enter;
-  excess → clamp to last good + Strong record (Correct: rubber-band)  
+- [x] **Movement envelope (first cut)** - last accepted xz + soft 20 m/s over
+  server dt; Correct clamp + soft PosAndRot snap; Observe count only; reset on
+  spawn/teleport. Still open: accel, latency slack, debt/credit, vehicle enter
 - [ ] **Block / TE reach** - interaction distance + loaded chunk; claim/lock
   already partial; locked TE without grant → reject  
 - [ ] **Inventory conservation** - every delta needs a cause (loot, craft,

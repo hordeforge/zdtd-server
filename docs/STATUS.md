@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-04  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **307/307** (binary direct; `--listen=-` may false-fail)  
+**Unit tests:** `zig build test` → **325** total (use `zig build test` only; do not run the cached test binary with Zig's `--listen=-` IPC by hand)  
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -20,13 +20,13 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 |---|---|---|
 | Stock client join (zdtd-connect auto) | **PASS** | 2026-08-04: `fixedSizeCC=false` + stream r≥6; spawn hb `cgo=68/39` (viewDist 7), terrainReady, xuiReady; overlay gate clear |
 | NullReference on join | **PASS** | 0 NRE; ChunkCalc alive (no CalcDominantBiome OOB) |
-| Client mesh (CGO) | **PASS** | CGO 68 ≥ 39; Chunks:192; stream r 6..8, 8 adds/tick, max_streamed=169 |
+| Client mesh (CGO) | **PASS** | CGO 68 ≥ 39; Chunks:192; defaults stream r 7..9 (CGO needs r≥6 at viewDist 7), 8 adds/tick, max_streamed=169 |
 | Terrain floor textures (MicroSplat) | **PASS** | `fixedSizeCC=false` → FromRaw loads splat*.png (not Dummy); surface id 8=terrBurntForestGround; grey clay was null splat controls |
 | POI/construction block textures | **PASS** | u32 rawData + upper24 when bits 8..31 set; TTS paint+density; non-terrain density ≥0; filler skipped on paint |
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
 | Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md) |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
-| Unit tests | **PASS** | 307/307 (binary direct; `--listen=-` may false-fail) |
+| Unit tests | **PARTIAL** | 323/325 pass as of 2026-08-04 (`zig build test`); 2 scenario fails (inventory place wood block id). Re-run before treating green. |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
@@ -41,7 +41,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
 | Loadgen join + walk + dynamite | **PASS** | flat + Navezgane; 2-bot mixed 100% passRate, walks>0, ExplosionInitiate; pw21 2-bot wander 100% alongside live stock client (walks=495, zero client WRN) |
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
-| Automated in-client playtest | **PASS join + demo partial (2026-08-03)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=83 fail=0** (20260804j). Server ItemActionEat: InvTx use (scenario) + PlayerInventory stack-loss detect (stock client); playtest eat asserts stack count (food0=food=50 after soften). Unit tests **307/307**. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
+| Automated in-client playtest | **PASS join + demo green (2026-08-04p)** | V3.1.0 pin + admin fixture parity. Latest `playtest-zdtd` → **pass=83 fail=0** (`server/logs/playtest_zdtd_demo_20260804p.log`). Strict `eat_food_consume`: InstantAction stack drop + Food rise (no force-dec); `generator_fuel` hard TE. Server ItemActionEat: InvTx + PlayerInventory stack-loss Paths A/B/C + PreferenceTracker skip. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
@@ -86,7 +86,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Full columns biome layers + AssignIds terrain ids | `world/store.zig`, `assets/biome_layers.zig` | biomes.xml first `<layers>`; dirt=5 stone=1 bedrock=4 water=240 |
 | ZCH3 chunk persist (`.zch` files, u32 rawData) | `world/store.zig` | ZCH2 u16 blocks are dropped on load (regen from DTM+TTS); heights remain |
 | Stock `NetPackageChunk` write path | `wire/stock_chunk.zig` | full rawData upper24; density repair rules; TTS dens; topsoil broken all-1s; light 0xFF |
-| Spawn/stream ring for light+mesh | `server/game.zig` | join/stream r 6..8, 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
+| Spawn/stream ring for light+mesh | `server/game.zig` | defaults r 7..9 (`default_chunk_stream_radius_*`), 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
 | **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | skip terrainFiller; rotation bits kept |
@@ -125,6 +125,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | AI director hordes / sleepers (sim) | `ecs/` | not full POI volumes |
 | Zombie move speeds from XML | `assets/entities.zig`, `ecs/systems.zig` | MoveSpeedAggro/MoveSpeed via extends chain → class_table → AI; consts fallback |
 | Zombie attack damage from XML | `assets/{entities,items}.zig` | HandItem → items.xml Action0 DamageEntity → class_table.attack_damage; const fallback |
+| EAI BreakBlock task | `ecs/systems.zig` | path_blocked → BreakBlock; block chew via tickZombieBlockDamage |
 
 ### Quests / traders / chat
 
