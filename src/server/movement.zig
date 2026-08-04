@@ -41,7 +41,10 @@ pub fn clampHorizontal(
     const dx = new_x - last_x;
     const dz = new_z - last_z;
     const dist = horizontalDistance(dx, dz);
-    if (!(dist > max_dist) or !(max_dist > 0) or !std.math.isFinite(dist)) {
+    if (!std.math.isFinite(dist) or !std.math.isFinite(max_dist) or !(max_dist > 0)) {
+        return .{ .x = last_x, .z = last_z, .clamped = true };
+    }
+    if (!(dist > max_dist)) {
         return .{ .x = new_x, .z = new_z, .clamped = false };
     }
     const s = max_dist / dist;
@@ -81,14 +84,39 @@ test "clampHorizontal diagonal" {
     try std.testing.expect(@abs(dist - 10.0) < 0.02);
 }
 
+test "clampHorizontal rejects non-finite input and invalid limits" {
+    const inf = std.math.inf(f32);
+    const nan = std.math.nan(f32);
+
+    for ([_]struct { x: f32, z: f32, speed: f32 }{
+        .{ .x = inf, .z = 0, .speed = max_horizontal_speed_mps },
+        .{ .x = nan, .z = 0, .speed = max_horizontal_speed_mps },
+        .{ .x = 10, .z = 0, .speed = inf },
+        .{ .x = 10, .z = 0, .speed = nan },
+        .{ .x = 10, .z = 0, .speed = 0 },
+    }) |input| {
+        const r = clampHorizontal(3, 4, input.x, input.z, 1.0, input.speed);
+        try std.testing.expect(r.clamped);
+        try std.testing.expectEqual(@as(f32, 3), r.x);
+        try std.testing.expectEqual(@as(f32, 4), r.z);
+    }
+}
+
 test "dtFromTicks" {
     const tick_s: f32 = 1.0 / 20.0;
     try std.testing.expect(@abs(dtFromTicks(0, 20, tick_s) - 1.0) < 0.001);
-    try std.testing.expect(dtFromTicks(5, 5, tick_s) >= min_dt_s);
-    try std.testing.expect(dtFromTicks(0, 10_000, tick_s) <= max_dt_s);
+    try std.testing.expectEqual(min_dt_s, dtFromTicks(5, 5, tick_s));
+    try std.testing.expectEqual(min_dt_s, dtFromTicks(10, 5, tick_s)); // reverse/zero span
+    try std.testing.expectEqual(max_dt_s, dtFromTicks(0, 10_000, tick_s));
 }
 
 test "horizontalSpeedMps" {
     const s = horizontalSpeedMps(20, 0, 1.0);
     try std.testing.expect(@abs(s - 20.0) < 0.01);
+    // Non-positive / non-finite dt floors to min_dt_s (no div-by-zero, no inf).
+    const s_zero = horizontalSpeedMps(1, 0, 0);
+    try std.testing.expect(@abs(s_zero - (1.0 / min_dt_s)) < 0.01);
+    const s_neg = horizontalSpeedMps(1, 0, -1);
+    try std.testing.expect(@abs(s_neg - (1.0 / min_dt_s)) < 0.01);
+    try std.testing.expect(std.math.isFinite(horizontalSpeedMps(1, 0, std.math.nan(f32))));
 }

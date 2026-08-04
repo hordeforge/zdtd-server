@@ -1,8 +1,8 @@
 # Status: stock-client join and play path
 
-**Date pin:** 2026-08-04  
+**Date pin:** 2026-08-05  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **325** total (use `zig build test` only; do not run the cached test binary with Zig's `--listen=-` IPC by hand)  
+**Unit tests:** `zig build test` → **434** total (use `zig build test` only; do not run the cached test binary with Zig's `--listen=-` IPC by hand)  
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -26,12 +26,12 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
 | Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md) |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
-| Unit tests | **PARTIAL** | 323/325 pass as of 2026-08-04 (`zig build test`); 2 scenario fails (inventory place wood block id). Re-run before treating green. |
+| Unit tests | **PASS** | 434/434 as of 2026-08-05 (`zig build test` / direct test binary). Inventory place wood + craft scenarios green (`PASS inventory`, `PASS craft+explosion+lock`). |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
-| Player persist v2 | **PASS** | players.zsv v2 (quality/meta + journal); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
+| Player persist v2 | **PASS** | players.zsv v2 (quality/meta + journal); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | traders.xml traderAlways direct items + items.xml EconomicValue prices (assets/traders.zig; group rolls deferred) |
@@ -41,12 +41,14 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
 | Loadgen join + walk + dynamite | **PASS** | flat + Navezgane; 2-bot mixed 100% passRate, walks>0, ExplosionInitiate; pw21 2-bot wander 100% alongside live stock client (walks=495, zero client WRN) |
 | EntityRemove reason byte | **PASS** | body=entityId:i32+reason:u8; pw14 admin `kill 100/101/102` no NCSimple underrun; Items:2 loot bags |
-| Automated in-client playtest | **PASS join + demo green (2026-08-04q)** | V3.1.0 pin. Latest `playtest-zdtd` → **pass=83 fail=0** (`server/logs/playtest_zdtd_demo_20260804q.log`). Strict eat: stackDrop + Food **≥+5** (04q food0=50.0 food=55.1; not full chili +15). `generator_fuel` hard **Power/Generator TE present** (often PoweredRangedTrap; not fuel SoC). Join hang: no WorldInitInfo after enter. Residual: full MinEvents eat amount, IsSpawned lag, deco empty S2C. See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
-| WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
+| Automated in-client playtest | **PASS join + demo green (2026-08-04q)** | V3.1.0 pin. Latest `playtest-zdtd` → **pass=83 fail=0** (`server/logs/playtest_zdtd_demo_20260804q.log`). Strict eat: stackDrop + Food **≥+5** (04q food0=50.0 food=55.1; not full chili +15). `generator_fuel` hard **Power/Generator TE present** (often PoweredRangedTrap; not fuel SoC). Join hang: no WorldInitInfo after enter. Residual: full MinEvents eat amount, IsSpawned lag, deco empty S2C (DecoManager.Read NRE). See [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md). |
+| WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; `tcp_listen` + `std.http.Server`; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
+| Authority spine (P4.0) | **PASS (first cut)** | `phase_gate` matrix; movement envelope; reject counters in apm/webui; `ZdtdAuthorityMode`; inv ledger ring |
+| Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm/dynlib parked ADR 0010 p2 |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
-| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C from biomes.xml defaults; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees (AssignIds). Not full-stock parity. |
+| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C from biomes.xml defaults; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
 product notes stay in this file + linked docs.
@@ -155,7 +157,7 @@ zdtd     → Zig dedi, client wire only, no mods
 ### Other systems (simplified but wired)
 
 Vehicles, power grid, turrets, signs (shells), setblock multi parse, admin TCP
-stub: see `SYSTEMS.md`, `ECS.md`.
+console: see `SYSTEMS.md`, `ECS.md`.
 
 ---
 
@@ -179,16 +181,18 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 
 | Priority | Gap | Proper approach |
 |---|---|---|
-| P1 | Deco trees | Re-enabled when dump has treeOakSml01/treeDeadTree02 via idByName; empty firstPackage if miss |
+| P1 | Deco trees | Blocked on DecoManager.Read NRE RE; empty firstPackage only until object wire matches V3.1.0 |
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
 | P2 | Weather storm SM | Defaults from biomes.xml on join+WorldTime throttle; storm/bloodMoon group SM not simulated |
-| P1 | M11 multiplayer CPU | Serialize-once interest + named chunk caps shipped; pool shipped; 32-128 bot apm gate open |
-| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (objective types, A* path, generator fuel, trigger actuation) |
+| P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
+| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
-| P2 | Full telnet admin parity | Beyond admin TCP command set already shipped |
-| P3 | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
-| Parked | Planet-scale M2+ | DEM M1 proven; gateway/shards after in-process M11 (PLANET_SCALE.md) |
+| Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
+| Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
+| Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
+| Parked | Wasm / dynlib plugins | ADR 0010 phase 2; static host shipped |
+| Multi-ms | Worldgen W2–W7 | W0/W1 shipped; density/climate/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
 maxdamage merge), stock Chunk.write + upper24, players.zsv v2, TE/blockmeta persist,

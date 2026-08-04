@@ -77,16 +77,23 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     const ca = try g.attachJoinedClient(&cap_a);
     _ = try g.attachJoinedClient(&cap_b);
 
+    var dmg_body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+
+    // A forged target id outside the attacker's interest range must not mutate it.
+    const far_zid = g.sim.spawnZombie(10_000, 70, 10_000, 50).?;
+    const far_body = try packages.buildDamageBody(&dmg_body, far_zid, 0, 3, 100, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageDamageEntity", far_body));
+    try std.testing.expect(g.sim.slotOfNetId(far_zid) != null);
+
     const zid = g.sim.spawnZombie(260, 70, 260, 50).?;
     try std.testing.expect(g.sim.slotOfNetId(zid) != null);
 
-    var dmg_body: [256]u8 = undefined;
     const dbody = try packages.buildDamageBody(&dmg_body, zid, 0, 3, 100, true, ca.entity_id);
     const head = try packages.parseDamageHead(dbody);
     try std.testing.expectEqual(zid, head.entity_id);
     try std.testing.expect(head.fatal);
 
-    var frame_buf: [512]u8 = undefined;
     const framed = try packages.framed(&frame_buf, "NetPackageDamageEntity", dbody);
     cap_a.clear();
     cap_b.clear();
@@ -463,7 +470,7 @@ test "scenario quest accept kill complete and trader buy" {
 
     var k: u32 = 0;
     while (k < 3) : (k += 1) {
-        const zid = g.sim.spawnZombie(0, 70, 0, 10).?;
+        const zid = g.sim.spawnZombie(260, 70, 260, 10).?;
         var dmg_body: [256]u8 = undefined;
         const dbody = try packages.buildDamageBody(&dmg_body, zid, 0, 3, 100, true, c.entity_id);
         var frame_buf: [512]u8 = undefined;
@@ -1056,6 +1063,54 @@ test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp"
     const st_id = packages.idOf("NetPackageEntityStatChanged").?;
     try std.testing.expect(cap.findPkgId(st_id) != null);
     std.debug.print("PASS ItemActionEat PlayerInventory: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
+}
+
+test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_speedhack");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_speedhack", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+
+    // Seed last-good position so envelope has a baseline.
+    var pos_body: [64]u8 = undefined;
+    const seed = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 100, 71, 100, 0, 0, 0, true);
+    var frame_buf: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", seed));
+
+    // Advance server tick so dt is non-zero (min_dt still applies; huge delta still clamps).
+    g.tick_n += 20;
+
+    const before = g.harness.counters.get(.movement_rejects);
+    // 500 m horizontal in ~1 s >> 20 m/s soft cap.
+    const hack = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 600, 71, 100, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", hack));
+
+    const after = g.harness.counters.get(.movement_rejects);
+    try std.testing.expect(after > before);
+
+    // Correct mode clamps: seed was 100, soft cap 20 m/s × ~1s → stay near 120, not 600.
+    if (g.sim.slotOfNetId(c.entity_id)) |idx| {
+        const x = g.sim.transform[idx].x;
+        try std.testing.expect(x < 200);
+        try std.testing.expect(x >= 100);
+        try std.testing.expect(x <= 100 + 20 + 0.5);
+    } else return error.MissingEntity;
+
+    std.debug.print(
+        "PASS speedhack: movement_rejects {d}->{d}; clamped x={d:.1}\n",
+        .{ before, after, g.sim.transform[g.sim.slotOfNetId(c.entity_id).?].x },
+    );
 }
 
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {

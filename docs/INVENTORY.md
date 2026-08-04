@@ -8,7 +8,8 @@ via C2S `NetPackagePlayerInventory` / player `NetPackageBag` (overwrite ECS).
 No S2C PlayerInventory echo (stock rejects that direction). Join PDF +
 `players.zsv` still seed/restore from server. Full server-authoritative inv is
 the target (ADR 0004) with exception [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
-See [AUTHORITY.md](AUTHORITY.md).
+See [AUTHORITY.md](AUTHORITY.md). ECS `item_id` is a table handle, not a second
+stock catalog ([ADR 0015](adr/0015-ecs-item-id-vs-stock-type.md)).
 
 ## Slot layout
 
@@ -31,7 +32,13 @@ Inventory {
 }
 ```
 
-Stack limits: tools/weapons 1, ammo 150, food/med 50, default 60000.
+**Stack limits (source of truth):** production uses items.xml `Stacknumber` via
+`World.stack_fn` / `ItemTable.stackFor`. Deposits on World-aware paths go through
+`World.depositItem` / `World.maxStack` (craft, trade, loot fill, vacuum, starter
+kit). Offline / no-ItemTable: `components.maxStackOffline` (mirrors
+`assets/items.builtin_defs`). C2S PlayerInventory/Bag also clamp to stack caps
+(AUTHORITY.md). Prefer `depositItem` over bare `Inventory.addItem` when a World
+is available.
 
 ## Ops (`inventory.Op`)
 
@@ -50,7 +57,7 @@ Stack limits: tools/weapons 1, ammo 150, food/med 50, default 60000.
 | equip | from slot | equip index 0-4 |: |: |
 
 `use` on food (2) / medicine (4) removes 1 and heals.  
-`place` maps wood(7)→block 4, cobblePlaceable(10)→block 5.  
+`place` maps wood(7)→`frameShapes:cube`, cobblePlaceable(10)→`cobblestoneShapes:cube` (AssignIds-resolved).  
 `equip` moves armor(11) into equipment slots; each piece grants 10% damage mitigation (cap 50%).
 
 ## Wire packages
@@ -85,7 +92,7 @@ NameIdMapping blob (version 1 + id/name pairs) for client remapping.
 
 ### Bag.Write
 
-version 1, slot count u16 (99 padded), stacks, locked=false, touched=true, prefs=false.
+version 1, slot count u16 (45 padded, `bag_slots`), stacks, locked=false, touched=true, prefs=false.
 
 ### Equipment
 
@@ -93,8 +100,9 @@ version 1, slot count u16 (99 padded), stacks, locked=false, touched=true, prefs
 
 ## Join
 
-Starter kit: stone axe (8), food×5 (2), wood×20 (7). Full inventory + holding sent in join bundle.
-`players.zsv` restores inventory by player name.
+Starter kit: stone axe (8), food×5 (2), wood×20 (7), casinoCoin×50 (6). Full inventory + holding sent in join bundle.
+`players.zsv` restores inventory by **login name** (persist key; no platform id
+yet; [ADR 0017](adr/0017-player-identity-login-name.md)).
 
 ## Admin
 
@@ -110,7 +118,7 @@ slot writes would be overwritten by the next PlayerInventory C2S.
 | id | name | notes |
 |---:|---|---|
 | 1 | scrap | loot |
-| 2 | food | use → heal 10 |
+| 2 | food | use → food +15, heal 7 |
 | 3 | ammo | |
 | 4 | medicine | use → heal 25 |
 | 7 | wood | place → wood block |
@@ -123,11 +131,11 @@ slot writes would be overwritten by the next PlayerInventory C2S.
 
 `src/world/containers.zig` stores chests by world `(x,y,z)`. `src/wire/stock_te.zig` encodes
 `NetPackageTileEntity` as composite + single `TEFeatureStorage` module (stable hash
-`TEFeatureStorage`). Placing block id ≥ 20 creates an empty 8-slot container.
+`TEFeatureStorage`). Placing a storage block (blocks.xml LootList/CompositeTileEntity, or a `stock_deco` chest pin) creates an empty 8-slot container.
 
 ## Remaining gaps
 
-- **Server-authoritative inv** (ADR 0004 target): craft/TE/loot grant without client clobber; cause ledger (P4).
+- **Server-authoritative inv** (ADR 0004 target): craft/TE/loot grant without client clobber (cause ledger shipped: `src/ecs/inv_ledger.zig`).
 - Expand ECS bag to stock 45 and equip width if persist/UI need full depth.
 - Multi-feature composite TEs (lockable, sign) and persistency stream mode.
 - Matching stock **block ids** so the client already has a composite TE at that cell (needs stock chunks + blocks.xml).

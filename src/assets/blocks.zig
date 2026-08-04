@@ -150,16 +150,29 @@ pub fn tryLoad(
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "blocks.xml", game_dir, config_dir) orelse return null;
     if (paths.override_dirs.len == 0) {
-        return loadFromPath(allocator, base, id_by_name, ctx) catch null;
+        return loadLogged(allocator, base, id_by_name, ctx);
     }
     const merged = try paths.readConfigXml(allocator, "blocks.xml", game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
     io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/blocks.xml";
     {
-        io_fs.writeFile(allocator, cp, merged) catch return loadFromPath(allocator, base, id_by_name, ctx) catch null;
+        io_fs.writeFile(allocator, cp, merged) catch |err| {
+            std.debug.print("zdtd: write config cache {s} failed: {s}; using base path\n", .{ cp, @errorName(err) });
+            return loadLogged(allocator, base, id_by_name, ctx);
+        };
     }
-    return loadFromPath(allocator, cp, id_by_name, ctx) catch null;
+    return loadLogged(allocator, cp, id_by_name, ctx);
+}
+
+fn loadLogged(allocator: std.mem.Allocator, path: []const u8, id_by_name: IdByNameFn, ctx: ?*anyopaque) ?BlockTable {
+    return loadFromPath(allocator, path, id_by_name, ctx) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print("zdtd: load blocks.xml failed: {s} ({s})\n", .{ @errorName(err), path }),
+        }
+        return null;
+    };
 }
 
 test "builtin block table" {

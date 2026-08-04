@@ -9,7 +9,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0002](0002-native-soa-not-third-party-ecs.md) | Native SoA ECS, not third-party ECS core | accepted |
 | [0003](0003-no-stock-mod-host.md) | No stock Harmony / IModApi host | accepted |
 | [0004](0004-server-authoritative-c2s.md) | Server-authoritative C2S apply | accepted |
-| [0005](0005-native-plugin-api.md) | Native plugin API (not stock mods) | proposed |
+| [0005](0005-native-plugin-api.md) | Native plugin API (not stock mods) | accepted |
 | [0006](0006-steal-from-mach.md) | Steal patterns from Mach (not the engine) | accepted |
 | [0007](0007-player-inventory-c2s-trust.md) | Player inventory C2S trust (interim) | accepted |
 | [0008](0008-serialize-once-interest.md) | Serialize-once interest fan-out | accepted |
@@ -19,10 +19,16 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0012](0012-single-threaded-tick.md) | Single-threaded 20 TPS tick + bounded parallel helpers | accepted |
 | [0013](0013-clean-room-litenet.md) | Clean-room LiteNet stack (no stock LiteNetLib runtime) | accepted |
 | [0014](0014-missing-beats-fake.md) | Missing beats fake (stock wire/content fidelity) | accepted |
+| [0015](0015-ecs-item-id-vs-stock-type.md) | ECS item_id vs stock absolute type (mapping, not dual space) | accepted |
+| [0016](0016-fixedsizecc-false-stream-cgo.md) | fixedSizeCC=false + stream radius for CGO / terrain | accepted |
+| [0017](0017-player-identity-login-name.md) | Player persist identity is login name | accepted |
+| [0018](0018-webui-ops-dashboard.md) | Operator WebUI WU0–WU2 shape | accepted |
+| [0019](0019-validation-triad.md) | Validation triad: loadgen + stock client + zdtd apm | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),
 [HARDCODE_AUDIT.md](../HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
 [WIRE_CHUNK.md](../WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
+[WEBUI.md](../WEBUI.md), [STD_ABSTRACTIONS.md](../STD_ABSTRACTIONS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0005),
 [INDEX.md](../INDEX.md).

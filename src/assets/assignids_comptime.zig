@@ -96,3 +96,11 @@ test "assignids pins match bundled dump" {
         try std.testing.expect(found);
     }
 }
+
+// ecs/inventory keeps offline place pins without importing assets (one-way deps).
+// Keep those fixture constants equal to this pin table.
+test "ecs offline place pins match assignids" {
+    const inv = @import("../ecs/inventory.zig");
+    try std.testing.expectEqual(frame_shapes_cube, inv.place_wood_block_id);
+    try std.testing.expectEqual(cobblestone_shapes_cube, inv.place_cobble_block_id);
+}

@@ -1,4 +1,4 @@
-//! Stable native plugin types (ADR 0005). Static link only; no dynlib/Wasm.
+//! Experimental native plugin types (ADR 0005). Static link only; no dynlib/Wasm.
 
 const std = @import("std");
 
@@ -41,7 +41,20 @@ pub const PluginVTable = struct {
     on_shutdown: ?*const fn (*const Host) void = null,
 };
 
-test "host log default does not allocate" {
-    var h: Host = .{};
-    h.log(.info, "ping");
+test "host log dispatches level and message to log_fn" {
+    const Cap = struct {
+        var level: ?LogLevel = null;
+        var msg: ?[]const u8 = null;
+        fn capture(l: LogLevel, m: []const u8) void {
+            level = l;
+            msg = m;
+        }
+    };
+    Cap.level = null;
+    Cap.msg = null;
+    var h: Host = .{ .log_fn = Cap.capture };
+    try std.testing.expectEqual(@as(u32, PLUGIN_API_VERSION), h.version);
+    h.log(.warn, "ping");
+    try std.testing.expectEqual(LogLevel.warn, Cap.level.?);
+    try std.testing.expectEqualStrings("ping", Cap.msg.?);
 }

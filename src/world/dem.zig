@@ -229,7 +229,13 @@ pub const Fetcher = struct {
         const key = try tileKey(&kbuf, lat, lon);
         const n = try self.fetchRange(key, 0, cog_header_len, out);
         // Cache is optional: fetch already succeeded; disk full/permission must not fail.
-        io_fs.writeFile(self.allocator, cpath, out[0..n]) catch {};
+        // Still log so repeated HTTP range fetches are explainable.
+        io_fs.writeFile(self.allocator, cpath, out[0..n]) catch |err| {
+            std.debug.print(
+                "zdtd: dem header cache write failed: {s} ({s})\n",
+                .{ @errorName(err), cpath },
+            );
+        };
         return n;
     }
 

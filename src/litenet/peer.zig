@@ -139,6 +139,11 @@ pub const Peer = struct {
     ack_bits: [ack_bitmap_bytes]u8 = .{0} ** ack_bitmap_bytes,
     must_ack: bool = false,
     pending: [pending_cap]Pending = [_]Pending{.{}} ** pending_cap,
+    /// Earliest time the next resendPending window scan is worth doing. The
+    /// WindowFull retry loops call resendPending thousands of times per stall;
+    /// without this gate each call walks all 64 pending slots (86 KiB stride)
+    /// even though nothing can be due until resend_ns has elapsed.
+    next_resend_check_ns: u64 = 0,
     last_recv_ns: u64 = 0,
     next_frag_id: u16 = 1,
     /// Inbound fragment reassembly (one message at a time).
@@ -281,6 +286,13 @@ pub const Peer = struct {
 
     pub fn resendPending(self: *Peer, sock: *udp.Socket) !void {
         const now = clock.monoNs();
+        if (now < self.next_resend_check_ns) {
+            if (self.must_ack) try self.flushAcks(sock);
+            return;
+        }
+        // Re-scan at 1/8 of the resend interval: a due packet is delayed by at
+        // most resend_ns/8 while the common nothing-due call becomes O(1).
+        self.next_resend_check_ns = now + resend_ns / 8;
         var seq = self.local_window_start;
         while (seq != self.local_seq) : (seq = @intCast((@as(u32, seq) + 1) % packet.max_sequence)) {
             const p = &self.pending[seq % pending_cap];

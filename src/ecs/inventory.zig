@@ -5,8 +5,10 @@ const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const InvCause = @import("world.zig").InvCause;
 const c = @import("components.zig");
-const items = @import("../assets/items.zig");
-const assignids = @import("../assets/assignids_comptime.zig");
+
+// Offline catalog lives here so ecs stays free of assets imports (assets may
+// import pure ecs types one-way). Mirrors assets/items.builtin_* for fixture /
+// no-ItemTable runs. Production wires World.stack_fn / place_fn / is_armor_fn.
 
 pub const Op = enum(u8) {
     list = 0,
@@ -47,25 +49,42 @@ pub const Result = struct {
 };
 
 fn maxStackFor(w: *const World, item_id: u16) u16 {
-    if (w.stack_fn) |f| return f(w.stack_ctx, item_id);
-    return maxStackBuiltin(item_id);
+    return w.maxStack(item_id);
 }
 
-/// Offline stack caps (no ItemTable). Production wires `World.stack_fn` → items.stackFor.
+/// Offline stack caps (no ItemTable). Delegates to `components.maxStackOffline`.
+/// Production wires `World.stack_fn` → items.stackFor.
 pub fn maxStackBuiltin(item_id: u16) u16 {
-    for (items.builtin_defs) |d| {
-        if (d.id == item_id) return if (d.stack == 0) 1 else d.stack;
-    }
-    return 60000;
+    return c.maxStackOffline(item_id);
 }
 
 /// Offline place map: ECS item id → block id. Tests / no AssignIds only.
 /// Production uses `itemToBlockResolved` via World.place_fn.
-pub const place_wood_block_id: u16 = assignids.frame_shapes_cube;
-pub const place_cobble_block_id: u16 = assignids.cobblestone_shapes_cube;
+/// Pins match assets/assignids_comptime (frame_shapes_cube / cobblestone_shapes_cube).
+pub const place_wood_block_id: u16 = 16107;
+pub const place_cobble_block_id: u16 = 4787;
+
+/// Offline ECS id → stock items.xml name (same map as assets/items.builtinStockName).
+fn offlineStockName(item_id: u16) ?[]const u8 {
+    return switch (item_id) {
+        1 => "resourceScrapIron",
+        2 => "foodCanBeef",
+        3 => "ammo9mmBulletBall",
+        4 => "medicalFirstAidBandage",
+        5 => "meleeToolRepairT0StoneAxe",
+        6 => "casinoCoin",
+        7 => "resourceWood",
+        8 => "meleeToolRepairT0StoneAxe",
+        9 => "meleeWpnClubT0WoodenClub",
+        10 => "resourceCobblestones",
+        11 => "armorPrimitiveHelmet",
+        12 => "questItem",
+        else => null,
+    };
+}
 
 pub fn itemToBlock(item_id: u16) u16 {
-    const name = items.builtinStockName(item_id) orelse return 0;
+    const name = offlineStockName(item_id) orelse return 0;
     if (std.mem.eql(u8, name, "resourceWood")) return place_wood_block_id;
     if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable"))
         return place_cobble_block_id;
@@ -80,7 +99,7 @@ pub fn itemToBlockResolved(
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
     ctx: ?*anyopaque,
 ) u16 {
-    const name = item_name orelse items.builtinStockName(item_id) orelse return 0;
+    const name = item_name orelse offlineStockName(item_id) orelse return 0;
     // Stock placeables: item → shape block (AssignIds), not the item type id.
     if (std.mem.eql(u8, name, "resourceWood") or std.mem.eql(u8, name, "wood")) {
         if (id_by_name(ctx, "frameShapes:cube")) |id| return id;
@@ -102,18 +121,16 @@ pub fn itemToBlockResolved(
 }
 
 pub fn builtinStockNameFallback(item_id: u16) ?[]const u8 {
-    return items.builtinStockName(item_id);
+    return offlineStockName(item_id);
 }
 
 /// Offline armor pin (ECS id 11 / armor* names). Production uses World.is_armor_fn.
 pub fn isArmorOffline(item_id: u16) bool {
-    if (items.builtinStockName(item_id)) |n| {
+    if (offlineStockName(item_id)) |n| {
         if (std.mem.startsWith(u8, n, "armor")) return true;
     }
-    for (items.builtin_defs) |d| {
-        if (d.id == item_id and std.mem.startsWith(u8, d.name, "armor")) return true;
-    }
-    return false;
+    // Short builtin name for id 11 is "armorScrap" in assets/items.builtin_defs.
+    return item_id == 11;
 }
 
 pub fn isArmor(item_id: u16) bool {
@@ -163,6 +180,13 @@ pub fn move(w: *World, peer: usize, from: u16, to: u16, qty: u16) bool {
     if (!w.mask[ps].inventory) return false;
     if (from >= c.max_inv_slots or to >= c.max_inv_slots) return false;
     const item = w.inventory[ps].slots[from].item_id;
+    // Equipment slots are not storage: capacity, quest counts and trade costs
+    // all scan slots[0..inv_equip_start], so anything parked past it is invisible.
+    if (to >= c.inv_equip_start and !itemIsArmor(w, item)) return false;
+    // Swap path moves the destination item into `from` too: gate it the same
+    // way, or a swap out of an equip slot parks a non-armor item there.
+    const dst = w.inventory[ps].slots[to];
+    if (from >= c.inv_equip_start and dst.count > 0 and !itemIsArmor(w, dst.item_id)) return false;
     const ok = w.inventory[ps].moveSlot(from, to, qty, maxStackFor(w, item));
     if (ok) {
         markInv(w, ps);
@@ -477,7 +501,7 @@ test "move and drop and use" {
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
-    try std.testing.expect(give(&w, 0, 2, 3)); // food
+    try std.testing.expect(give(&w, 0, 2, 3)); // food (stacks on starter kit if present)
     const ps = w.playerByPeer(0).?;
     var food_slot: u16 = 0;
     for (w.inventory[ps].slots, 0..) |s, i| {
@@ -486,18 +510,49 @@ test "move and drop and use" {
             break;
         }
     }
+    const count_before_use = w.inventory[ps].slots[food_slot].count;
+    try std.testing.expect(count_before_use >= 3);
     w.health[ps].hp = 50;
     w.health[ps].food = 40;
     w.health[ps].food_max = 100;
     try std.testing.expect(use(&w, 0, food_slot));
-    try std.testing.expect(w.health[ps].hp >= 56.9); // +7 foodHealth
-    try std.testing.expect(w.health[ps].food >= 54.9); // +15 foodAmount
-    try std.testing.expect(setHolding(&w, 0, 0));
-    const r = drop(&w, 0, 0, 1);
+    // Builtin item 2: +7 foodHealth, +15 foodAmount; consume exactly 1.
+    try std.testing.expectEqual(@as(f32, 57), w.health[ps].hp);
+    try std.testing.expectEqual(@as(f32, 55), w.health[ps].food);
+    try std.testing.expectEqual(count_before_use - 1, w.inventory[ps].slots[food_slot].count);
+    // Move 1 into a free slot, then drop from there (exercises move + drop path).
+    var dest: u16 = 0;
+    var found_dest = false;
+    for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |s, i| {
+        if (s.count == 0) {
+            dest = @intCast(i);
+            found_dest = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_dest);
+    const count_after_use = w.inventory[ps].slots[food_slot].count;
+    try std.testing.expect(move(&w, 0, food_slot, dest, 1));
+    try std.testing.expectEqual(count_after_use - 1, w.inventory[ps].slots[food_slot].count);
+    try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[dest].count);
+    try std.testing.expectEqual(@as(u16, 2), w.inventory[ps].slots[dest].item_id);
+    try std.testing.expect(setHolding(&w, 0, dest));
+    const r = drop(&w, 0, dest, 1);
     try std.testing.expect(r.ok);
     try std.testing.expect(r.dropped_entity > 0);
+    try std.testing.expectEqual(@as(u16, 0), w.inventory[ps].slots[dest].count);
+    var food_after_drop: u16 = 0;
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
+        if (s.item_id == 2) food_after_drop += s.count;
+    }
     try std.testing.expect(openContainer(&w, 0, r.dropped_entity));
     try std.testing.expect(takeFromContainer(&w, 0, 0, 0));
+    // Take-back restores the dropped unit into bag storage.
+    var food_after_take: u16 = 0;
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
+        if (s.item_id == 2) food_after_take += s.count;
+    }
+    try std.testing.expectEqual(food_after_drop + 1, food_after_take);
 }
 
 test "open container refuses another player's inventory" {

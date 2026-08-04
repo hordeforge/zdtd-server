@@ -539,7 +539,7 @@ with built zdtd; dig/place must **confirm** via `GetBlock` wait.
 The playtest **system** is done for Phase A when:
 
 1. `7dtd-connect` contains **no** gameplay driver.
-2. `ZDTD_PLAYTEST_SUITE=core make playtest` (or uv CLI) returns exit 0 on a
+2. `ZDTD_PLAYTEST_SUITE=core make -C 7dtd-playtest playtest` (or uv CLI) returns exit 0 on a
    known-good zdtd, and exit 1 if dig echo is broken (mutation test: break
    SetBlock S2C temporarily and confirm fail).
 3. Every core case either waits on a real predicate or is labeled setup-only.

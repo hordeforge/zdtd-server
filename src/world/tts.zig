@@ -60,7 +60,7 @@ pub const TtsBlocks = struct {
     }
 
     pub fn blockCount(self: *const TtsBlocks) usize {
-        return @intCast(self.sx * self.sy * self.sz);
+        return self.types.len;
     }
 
     /// Prefab.offsetToCoord
@@ -84,39 +84,8 @@ fn skipSimpleBitStream(data: []const u8, pos: usize) !usize {
     return end;
 }
 
-/// Skip sparse texture channel (v>=10): bit stream then either Read(br,1) or i64 per set bit.
-/// TextureFullArray.Read(br,1) size unknown exactly; consume remaining until TE header fails soft.
-/// Practical approach: after bit stream, for each GetNextOffset>=0 read i64 (v<19 path) or
-/// call TextureFullArray.Read: monodis shows v>=19 uses TextureFullArray.Read(br,1).
-/// We approximate: for each positive offset, skip 8 bytes (i64) which matches v<19 path and
-/// is a lower bound; if that overruns before TE, clamp.
-fn skipSparseI64Channel(data: []const u8, pos_in: usize) !usize {
-    var pos = try skipSimpleBitStream(data, pos_in);
-    // Without bit decode we cannot know count. Heuristic: remaining until we see a plausible
-    // TE header (i16 count small) is unsafe. Instead decode bits for offsets only.
-    // Bitstream: each 1-bit yields an offset; 0-bits skip. GetNextOffset returns -1 at end.
-    // Re-read the bitstream bytes we just skipped.
-    if (pos_in + 4 > data.len) return error.ShortTts;
-    const n = std.mem.readInt(i32, data[pos_in..][0..4], .little);
-    const bits = data[pos_in + 4 ..][0..@intCast(n)];
-    // Walk bits: for each 1, skip i64 at pos
-    var bit_i: usize = 0;
-    const total_bits = bits.len * 8;
-    while (bit_i < total_bits) : (bit_i += 1) {
-        const byte = bits[bit_i / 8];
-        const bit: u3 = @intCast(bit_i % 8);
-        if ((byte >> bit) & 1 == 0) continue;
-        // set bit → read one i64 texture payload
-        if (pos + 8 > data.len) return pos;
-        pos += 8;
-    }
-    return pos;
-}
-
-/// Load block type plane from a stock .tts path (version >= 5 raw u32 path).
-pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
-    const data = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(data);
+/// Parse stock .tts bytes (version >= 5 raw u32 path). Caller owns returned planes.
+pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
     if (data.len < 14) return error.ShortTts;
     if (!std.mem.eql(u8, data[0..4], "tts\x00")) return error.BadMagic;
     const version = std.mem.readInt(u32, data[4..8], .little);
@@ -145,7 +114,14 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
     var pos: usize = need;
     var density: []u8 = &.{};
     var damage: []u16 = &.{};
+    var textures: []u64 = &.{};
     var tile_entities: []TeEntry = &.{};
+    // Free planes allocated mid-parse if a later step fails (OOM / TE list error).
+    errdefer {
+        if (density.len != 0) allocator.free(density);
+        if (damage.len != 0) allocator.free(damage);
+        if (textures.len != 0) allocator.free(textures);
+    }
 
     // Density: sbyte[count]: always present for our supported versions after blocks.
     // (IL sets density during block loop for air; also bulk channel in some paths.)
@@ -169,7 +145,6 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
     // Texture sparse (version >= 10): SimpleBitStream + one i64 textureFull per
     // set bit (bit index = cell offset). Decode into a dense per-cell array so
     // paint-driven shape blocks get their face material on the wire (else grey).
-    var textures: []u64 = &.{};
     if (version >= 10 and pos + 4 <= data.len) {
         const n = std.mem.readInt(i32, data[pos..][0..4], .little);
         if (n >= 0 and pos + 4 + @as(usize, @intCast(n)) <= data.len) {
@@ -193,6 +168,7 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
     }
 
     // Water sparse (version >= 17): SimpleBitStream + WaterValue (u16 mass) per set bit.
+    // Bit index = cell offset (same as texture channel); ignore padding bits past `count`.
     if (version >= 17 and pos + 4 <= data.len) {
         var prefer_te = false;
         if (pos + 5 <= data.len) {
@@ -207,7 +183,13 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
                 const n = std.mem.readInt(i32, data[bit_start_pos..][0..4], .little);
                 const bits = data[bit_start_pos + 4 ..][0..@intCast(n)];
                 var set_bits: usize = 0;
-                for (bits) |byte| set_bits += @popCount(byte);
+                var bit_i: usize = 0;
+                const total_bits = bits.len * 8;
+                while (bit_i < total_bits and bit_i < count) : (bit_i += 1) {
+                    const byte = bits[bit_i / 8];
+                    const bit: u3 = @intCast(bit_i % 8);
+                    if ((byte >> bit) & 1 != 0) set_bits += 1;
+                }
                 // WaterValue.Read = u16 mass
                 const need_w = set_bits * 2;
                 if (pos + need_w <= data.len) pos += need_w;
@@ -277,6 +259,13 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
         .tile_entities = tile_entities,
         .allocator = allocator,
     };
+}
+
+/// Load block type plane from a stock .tts path (version >= 5 raw u32 path).
+pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
+    const data = try io_fs.readFileAll(allocator, path);
+    defer allocator.free(data);
+    return parseBlocks(allocator, data);
 }
 
 /// Rotate local XZ for prefab rotation 0..3 (matches common stock stamp: origin corner fixed).

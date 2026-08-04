@@ -73,15 +73,8 @@ fn parseI32Prefix(s: []const u8) ?i32 {
     return if (neg) -v else v;
 }
 
-/// Parse `<Water pos="x, y, z"/>` entries.
-pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !Sources {
-    var path_buf: [1024]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}/water_info.xml", .{world_dir});
-    const xml = io_fs.readFileAll(allocator, path) catch {
-        return .{ .points = try allocator.alloc(WaterPoint, 0), .allocator = allocator };
-    };
-    defer allocator.free(xml);
-
+/// Parse `<Water pos="x, y, z"/>` entries from water_info.xml bytes.
+pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8) !Sources {
     var count: usize = 0;
     var search: usize = 0;
     while (search < xml.len) {
@@ -115,6 +108,25 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !So
     }
     pts = try allocator.realloc(pts, n);
     return .{ .points = pts, .allocator = allocator };
+}
+
+/// Load water_info.xml from a world directory (`pos="x, y, z"` entries).
+pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !Sources {
+    var path_buf: [1024]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/water_info.xml", .{world_dir});
+    // Missing file is normal for flat/proc worlds; other I/O errors must not look like "no water".
+    const xml = io_fs.readFileAll(allocator, path) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print(
+                "zdtd: water_info.xml read failed: {s} ({s})\n",
+                .{ @errorName(err), path },
+            ),
+        }
+        return .{ .points = try allocator.alloc(WaterPoint, 0), .allocator = allocator };
+    };
+    defer allocator.free(xml);
+    return parseXml(allocator, xml);
 }
 
 test "parse water pos" {

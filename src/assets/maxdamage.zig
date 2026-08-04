@@ -133,8 +133,8 @@ pub const Table = struct {
         return ap.allocator();
     }
 
-    fn arenaAlloc(self: *Table, allocator: std.mem.Allocator) std.mem.Allocator {
-        return self.ensureArena(allocator) catch allocator;
+    fn arenaAlloc(self: *Table, allocator: std.mem.Allocator) !std.mem.Allocator {
+        return self.ensureArena(allocator);
     }
 
     fn markStorageIfKnown(self: *Table, arena: std.mem.Allocator, id: u16, name: []const u8) !void {
@@ -146,9 +146,12 @@ pub const Table = struct {
     /// Merge AssignIds→name from a .blocks.nim into by_id using by_name MaxDamage.
     /// Prefab nim local ids may not match runtime AssignIds; still useful when they do.
     pub fn mergeNim(self: *Table, allocator: std.mem.Allocator, nim_path: []const u8) !void {
-        var nim = blocks_nim.loadFromPath(allocator, nim_path) catch return;
+        var nim = blocks_nim.loadFromPath(allocator, nim_path) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => return err,
+        };
         defer nim.deinit();
-        const arena = self.arenaAlloc(allocator);
+        const arena = try self.arenaAlloc(allocator);
         for (nim.names, 0..) |name, id| {
             if (name.len == 0) continue;
             // Prefab nim ids are local; only fill MaxDamage when they happen to match.
@@ -161,7 +164,19 @@ pub const Table = struct {
 
     /// Merge AssignIds dump: lines `id\tname` or `id name` (client ZDTD_DUMP_BLOCK_IDS).
     pub fn mergeAssignIdsDump(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
-        const raw = io_fs.readFileAll(allocator, path) catch return;
+        // Missing dump is optional (bundled/fixture probe); other I/O must not be silent.
+        const raw = io_fs.readFileAll(allocator, path) catch |err| {
+            switch (err) {
+                error.FileNotFound => return,
+                else => {
+                    std.debug.print(
+                        "zdtd: assignids dump {s} failed: {s}\n",
+                        .{ path, @errorName(err) },
+                    );
+                    return;
+                },
+            }
+        };
         defer allocator.free(raw);
         const arena = try self.ensureArena(allocator);
         var it = std.mem.splitScalar(u8, raw, '\n');
@@ -203,7 +218,7 @@ pub const Table = struct {
         defer allocator.free(raw);
         const clean = try xml.stripComments(allocator, raw);
         defer allocator.free(clean);
-        const arena = self.arenaAlloc(allocator);
+        const arena = try self.arenaAlloc(allocator);
         var i: usize = 0;
         while (i < clean.len) {
             const mi = std.mem.indexOfPos(u8, clean, i, "<material ") orelse break;
@@ -224,13 +239,13 @@ pub const Table = struct {
                     try self.material_max.put(arena, kn, hp);
                 }
             }
-            i = body_end + 1;
+            i = body_end;
         }
     }
 
     /// After materials + blocks Material refs + AssignIds: fill by_id for material-only blocks.
     pub fn resolveMaterialMaxDamage(self: *Table, allocator: std.mem.Allocator) !void {
-        const arena = self.arenaAlloc(allocator);
+        const arena = try self.arenaAlloc(allocator);
         var it = self.block_material.iterator();
         while (it.next()) |e| {
             const bname = e.key_ptr.*;
@@ -258,7 +273,7 @@ pub const Table = struct {
                     if (std.fs.path.dirname(out_dir)) |root| {
                         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
                         if (std.fmt.bufPrint(&path_buf, "{s}/src/assets/{s}", .{ root, bundled_assignids_name })) |p| {
-                            // Best-effort bundled dump; missing path is fine.
+                            // Best-effort bundled dump; missing path is fine (logged inside on real I/O errors).
                             self.mergeAssignIdsDump(allocator, p) catch {};
                             if (self.id_by_name.count() > 0) return;
                         } else |_| {}
@@ -358,7 +373,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "OutputPerStack")) |ops| {
             if (xml.parseF32(ops)) |v| try power_output_per_stack_by_name.put(arena, kn, v);
         }
-        i = body_end + 1;
+        i = body_end;
     }
 
     return .{

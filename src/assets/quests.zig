@@ -163,11 +163,10 @@ fn pickPrimaryKind(body: []const u8) struct { kind: quest.QuestKind, target: u16
         const oid = xml.attr(body, oi, "id");
         const val_s = xml.attr(body, oi, "value");
         const count_s = xml.attr(body, oi, "count");
-        const tag_end = std.mem.indexOfPos(u8, body, oi, ">") orelse break;
         var local_target: u16 = 1;
         if (val_s) |v| local_target = xml.parseU16(v) orelse 1;
         if (count_s) |c| local_target = xml.parseU16(c) orelse local_target;
-        const slice_end = @min(body.len, tag_end + 400);
+        const slice_end = objectiveElementEnd(body, oi);
         if (xml.propertyValue(body[oi..slice_end], "item_count")) |ic| {
             local_target = xml.parseU16(ic) orelse local_target;
         }
@@ -406,6 +405,10 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
             i = qi + 7;
             continue;
         }
+        if (std.mem.startsWith(u8, clean[qi..], "<quest_list")) {
+            i = qi + 11;
+            continue;
+        }
         if (try parseQuestDef(arena, qi, clean, next_id)) |def| {
             try defs_tmp.append(allocator, def);
             next_id +%= 1;
@@ -512,9 +515,21 @@ pub fn tryLoad(
 ) !?quest.Catalog {
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
+    // Parse/I/O failures must not look like "quests absent" (callers catch null).
+    const loadLogged = struct {
+        fn call(alloc: std.mem.Allocator, p: []const u8) !?quest.Catalog {
+            return loadFromPath(alloc, p) catch |err| {
+                std.debug.print(
+                    "zdtd: load quests.xml failed: {s} ({s})\n",
+                    .{ @errorName(err), p },
+                );
+                return null;
+            };
+        }
+    }.call;
     if (quests_path) |p| {
         if (!fileExists(p)) return error.OpenFailed;
-        if (paths.override_dirs.len == 0) return try loadFromPath(allocator, p);
+        if (paths.override_dirs.len == 0) return try loadLogged(allocator, p);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
@@ -524,7 +539,7 @@ pub fn tryLoad(
         {
             try io_fs.writeFile(allocator, cp, merged);
         }
-        return try loadFromPath(allocator, cp);
+        return try loadLogged(allocator, cp);
     }
     if (paths.override_dirs.len > 0) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
@@ -534,20 +549,20 @@ pub fn tryLoad(
             {
                 try io_fs.writeFile(allocator, cp, merged);
             }
-            return try loadFromPath(allocator, cp);
+            return try loadLogged(allocator, cp);
         }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);
-        if (fileExists(p)) return try loadFromPath(allocator, p);
+        if (fileExists(p)) return try loadLogged(allocator, p);
     }
     if (game_dir) |gd| {
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/quests.xml", .{gd});
-        if (fileExists(p)) return try loadFromPath(allocator, p);
+        if (fileExists(p)) return try loadLogged(allocator, p);
     }
     if (map_dir) |md| {
         if (configPathFromMapDir(md, &path_buf)) |p| {
-            if (fileExists(p)) return try loadFromPath(allocator, p);
+            if (fileExists(p)) return try loadLogged(allocator, p);
         }
     }
     return null;

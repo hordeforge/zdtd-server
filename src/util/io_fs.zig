@@ -1,8 +1,39 @@
 //! Thin wrappers around Zig 0.16 `std.Io` for one-shot FS ops.
 //! Ordinary file/dir work goes through here or `std.Io` directly, never
 //! `std.os.linux` / raw posix in application code.
+//!
+//! DST: `injectWriteFailures` forces the next N `writeFile` calls to fail so
+//! crash/full-disk paths can be replayed from a seed without real I/O faults.
 
 const std = @import("std");
+
+/// Remaining synthetic write failures for DST fault injection (0 = off).
+var write_fail_remaining: std.atomic.Value(u32) = .init(0);
+
+/// Force the next `n` `writeFile` / `writeFileSimple` calls to return
+/// `error.DiskQuota` without touching the OS. Pair with a fixed sim seed so
+/// the failure lands on the same save step every replay.
+pub fn injectWriteFailures(n: u32) void {
+    write_fail_remaining.store(n, .release);
+}
+
+/// Outstanding synthetic write failures (for tests / harness asserts).
+pub fn pendingWriteFailures() u32 {
+    return write_fail_remaining.load(.acquire);
+}
+
+fn consumeWriteFault() bool {
+    // CAS loop: only one caller consumes each injected fault.
+    while (true) {
+        const cur = write_fail_remaining.load(.acquire);
+        if (cur == 0) return false;
+        if (write_fail_remaining.cmpxchgWeak(cur, cur - 1, .acq_rel, .acquire)) |_| {
+            continue;
+        } else {
+            return true;
+        }
+    }
+}
 
 /// `std.Io.Threaded` bookkeeping only. Always page_allocator so concurrent
 /// callers (parallel chunk save, overlapping FS helpers) never share a
@@ -31,6 +62,7 @@ pub fn mkdirPathSimple(rel: []const u8) void {
 
 pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []const u8) !void {
     _ = allocator;
+    if (consumeWriteFault()) return error.DiskQuota;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -41,6 +73,10 @@ pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []con
     // the previous contents (players/chunks/containers all come through here).
     var tmp_buf: [512 + 4]u8 = undefined;
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{rel_path}) catch return error.NameTooLong;
+    errdefer std.Io.Dir.cwd().deleteFile(io, tmp_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => std.debug.print("zdtd: cleanup temp '{s}' failed: {s}\n", .{ tmp_path, @errorName(err) }),
+    };
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = data });
     try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
 }
@@ -171,4 +207,16 @@ test "write read roundtrip under cache dir" {
     try std.testing.expectEqualStrings("hello", into);
     deleteFile(a, p);
     try std.testing.expect(!fileExists(a, p));
+}
+
+test "injectWriteFailures fails then recovers" {
+    defer injectWriteFailures(0);
+    injectWriteFailures(2);
+    try std.testing.expectEqual(@as(u32, 2), pendingWriteFailures());
+    try std.testing.expectError(error.DiskQuota, writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "x"));
+    try std.testing.expectEqual(@as(u32, 1), pendingWriteFailures());
+    try std.testing.expectError(error.DiskQuota, writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "x"));
+    try std.testing.expectEqual(@as(u32, 0), pendingWriteFailures());
+    try writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "ok");
+    deleteFileSimple(".zdtd_cfg_cache/io_fs_fault.txt");
 }

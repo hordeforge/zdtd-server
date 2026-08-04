@@ -38,7 +38,17 @@ pub fn readConfigXml(
 ) !?[]u8 {
     var path_buf: [2048]u8 = undefined;
     const path = resolveConfigXml(&path_buf, file_name, game_dir, config_dir) orelse return null;
-    const base = io_fs.readFileAll(allocator, path) catch return null;
+    // Missing base is "catalog absent"; permission/corrupt/OOM must not look the same.
+    const base = io_fs.readFileAll(allocator, path) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print(
+                "zdtd: read config {s} failed: {s} ({s})\n",
+                .{ file_name, @errorName(err), path },
+            ),
+        }
+        return null;
+    };
     errdefer allocator.free(base);
     if (override_dirs.len == 0) return base;
     const merged = xml_patch.applyOverrideDirs(allocator, base, file_name, override_dirs) catch |err| {

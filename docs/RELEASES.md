@@ -16,7 +16,8 @@ zdtd uses Semantic Versioning for the operator-facing server contract:
   patch bump.
 - The Zig module facades under `src/*/root.zig` are development interfaces until
   1.0. Symbols described as proposed, experimental, or internal are not stable.
-  The plugin API is a proposal and is not shipped.
+  The static plugin host skeleton is shipped but experimental. There is no
+  supported out-of-tree plugin packaging or stable dynamic ABI yet.
 
 The product version and stock wire version are separate. `src/version.zig`
 contains both. `build.zig.zon` repeats the product version because Zig package
@@ -61,6 +62,10 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
 5. Build the release from the tag and smoke-test `zdtd --version` plus startup
    against a copy of a previous-version world. Never replace an existing tag or
    artifact; publish a new patch version for a bad release.
+6. After releasing, bump `src/version.zig` and `build.zig.zon` on the development
+   branch before landing any further change. The release check rejects a commit
+   that reuses a product version already tagged on another commit.
 
 The release check rejects malformed SemVer, mismatched or multiple version tags,
-undated release notes, and tagged builds made from a dirty worktree.
+undated release notes, tagged builds made from a dirty worktree, and reuse of a
+tagged product version by a different commit.

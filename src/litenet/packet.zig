@@ -120,16 +120,25 @@ pub fn writeNetString(buf: []u8, s: []const u8) ![]u8 {
 
 /// Connect-key equality for ServerPassword (stock ConnectionRequestCheck).
 /// Missing/malformed key only matches an empty server password.
-/// Content compare is constant-time when lengths match (reduces online guessing leaks).
+/// Content compare is constant-time; length is mixed into the accumulator so a
+/// pure length mismatch does not short-circuit the content loop when both sides
+/// are non-empty (still bounded by the longer slice).
 pub fn connectKeyMatches(data: []const u8, server_password: []const u8) bool {
     const key = readNetString(data) orelse return server_password.len == 0;
     return constantTimeEql(key, server_password);
 }
 
 fn constantTimeEql(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
-    var diff: u8 = 0;
-    for (a, b) |x, y| diff |= x ^ y;
+    // Length mismatch still fails, but always walk max(len) so remote timing
+    // primarily reflects payload size, not an early length branch.
+    var diff: u8 = if (a.len == b.len) 0 else 1;
+    const n = @max(a.len, b.len);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const x: u8 = if (i < a.len) a[i] else 0;
+        const y: u8 = if (i < b.len) b[i] else 0;
+        diff |= x ^ y;
+    }
     return diff == 0;
 }
 
@@ -248,11 +257,19 @@ pub fn channeledUserData(raw: []const u8) ?struct { seq: u16, channel_id: u8, us
     return .{ .seq = info.seq, .channel_id = info.channel_id, .user = info.user };
 }
 
-test "connect accept size" {
+test "connect accept encodes every stock field" {
     var buf: [32]u8 = undefined;
-    const a = try writeConnectAccept(&buf, 12345, 0, 1);
+    const a = try writeConnectAccept(&buf, 12345, 2, 17);
     try std.testing.expectEqual(@as(usize, 15), a.len);
     try std.testing.expectEqual(Property.connect_accept, propertyOf(a[0]));
+    try std.testing.expectEqual(@as(u8, 2), connectionNumberOf(a[0]));
+    try std.testing.expectEqual(@as(i64, 12345), std.mem.readInt(i64, a[1..][0..8], .little));
+    try std.testing.expectEqual(@as(u8, 2), a[9]);
+    try std.testing.expectEqual(@as(u8, 0), a[10]);
+    try std.testing.expectEqual(@as(i32, 17), std.mem.readInt(i32, a[11..][0..4], .little));
+
+    var short: [connect_accept_size - 1]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeConnectAccept(&short, 0, 0, 0));
 }
 
 test "unassigned property ordinal does not trap" {
@@ -342,11 +359,54 @@ test "fragmented channeled header" {
     const info = parseChanneled(p).?;
     try std.testing.expect(info.fragmented);
     try std.testing.expectEqual(@as(u16, 9), info.seq);
+    try std.testing.expectEqual(@as(u8, 2), info.channel_id);
+    try std.testing.expectEqual(@as(u8, 0), connectionNumberOf(p[0]));
     try std.testing.expectEqual(@as(u16, 3), info.frag_id);
     try std.testing.expectEqual(@as(u16, 1), info.frag_part);
     try std.testing.expectEqual(@as(u16, 4), info.frag_total);
     try std.testing.expectEqualStrings(part, info.user);
     try std.testing.expect(channeledUserData(p) == null);
+}
+
+test "packet writers reject one-byte-short buffers" {
+    var channeled: [channeled_header_size + 2]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeChanneled(channeled[0 .. channeled.len - 1], 1, 0, 0, "ab"));
+
+    var fragment: [fragmented_header_total + 2]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeChanneledFragment(
+        fragment[0 .. fragment.len - 1],
+        1,
+        0,
+        0,
+        1,
+        0,
+        1,
+        "ab",
+    ));
+
+    var disconnect: [disconnect_header_size + reject_rate_limit.len]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeDisconnect(
+        disconnect[0 .. disconnect.len - 1],
+        1,
+        0,
+        &reject_rate_limit,
+    ));
+}
+
+test "ack encodes header, fixed bitmap, and zero padding" {
+    const bitmap_bytes: usize = (window_size - 1) / 8 + 2;
+    var buf: [channeled_header_size + bitmap_bytes]u8 = undefined;
+    const ack = try writeAck(&buf, 3, 2, 32767, &.{ 0x81, 0x42 });
+
+    try std.testing.expectEqual(Property.ack, propertyOf(ack[0]));
+    try std.testing.expectEqual(@as(u8, 2), connectionNumberOf(ack[0]));
+    try std.testing.expectEqual(@as(u16, 32767), std.mem.readInt(u16, ack[1..][0..2], .little));
+    try std.testing.expectEqual(@as(u8, 3), ack[3]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x81, 0x42 }, ack[4..6]);
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** (bitmap_bytes - 2)), ack[6..]);
+
+    var short: [channeled_header_size + bitmap_bytes - 1]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeAck(&short, 0, 0, 0, &.{}));
 }
 
 test "channeled parser rejects truncated headers and wrong property" {

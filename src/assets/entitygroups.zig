@@ -47,16 +47,30 @@ pub const GroupTable = struct {
     }
 
     /// Deterministic pick by seed; returns entity class name or null.
+    /// Weights are compared in fixed-point milli-units so the pick path does
+    /// not depend on f32 accumulation order (DST / cross-machine replay).
     pub fn pick(self: *const GroupTable, group_name: []const u8, seed: u32) ?[]const u8 {
         const g = self.byName(group_name) orelse return null;
         if (g.entry_n == 0 or g.weight_sum <= 0) return null;
         const s = seed *% 1103515245 +% 12345;
-        const r = @as(f32, @floatFromInt(s % 10000)) / 10000.0 * g.weight_sum;
-        var acc: f32 = 0;
+        // milli-weight: round(weight * 1000). Integer walk; r in [0, sum).
+        var sum_mw: u64 = 0;
         var i: u8 = 0;
         while (i < g.entry_n) : (i += 1) {
-            acc += g.entries[i].weight;
-            if (r <= acc) return g.entries[i].name;
+            const w = g.entries[i].weight;
+            if (w <= 0) continue;
+            sum_mw += @as(u64, @intFromFloat(@round(w * 1000.0)));
+        }
+        if (sum_mw == 0) return null;
+        // Match prior scale: (s % 10000) / 10000 * sum, via integer multiply.
+        const r_mw: u64 = (@as(u64, s % 10000) * sum_mw) / 10000;
+        var acc_mw: u64 = 0;
+        i = 0;
+        while (i < g.entry_n) : (i += 1) {
+            const w = g.entries[i].weight;
+            if (w <= 0) continue;
+            acc_mw += @as(u64, @intFromFloat(@round(w * 1000.0)));
+            if (r_mw < acc_mw) return g.entries[i].name;
         }
         return g.entries[g.entry_n - 1].name;
     }
@@ -154,6 +168,23 @@ test "builtin group pick" {
     const t = GroupTable.builtin();
     const n = t.pick("ZombiesAll", 1);
     try std.testing.expect(n != null);
+}
+
+test "group pick same seed is stable" {
+    const t = GroupTable.builtin();
+    const a = t.pick("ZombiesAll", 42).?;
+    const b = t.pick("ZombiesAll", 42).?;
+    try std.testing.expectEqualStrings(a, b);
+    // Different seeds should not all collapse to one class on a 2-entry group.
+    var saw_diff = false;
+    var seed: u32 = 1;
+    while (seed < 64) : (seed += 1) {
+        if (!std.mem.eql(u8, t.pick("ZombiesAll", seed).?, a)) {
+            saw_diff = true;
+            break;
+        }
+    }
+    try std.testing.expect(saw_diff);
 }
 
 test "load stock entitygroups when present" {

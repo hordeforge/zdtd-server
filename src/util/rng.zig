@@ -6,7 +6,7 @@
 
 const std = @import("std");
 
-/// xorshift32 state. Zero is invalid as a stream; seedWithNetId forces non-zero.
+/// xorshift32 state. Zero is invalid as a stream; initFromNetId forces non-zero.
 pub const XorShift32 = struct {
     state: u32 = 0,
 
@@ -15,9 +15,19 @@ pub const XorShift32 = struct {
         return .{ .state = if (seed == 0) 1 else seed };
     }
 
+    /// Fold a 64-bit run seed into the stream (DST harness / worldgen seed).
+    pub fn initFromU64(seed: u64) XorShift32 {
+        // SplitMix64 finalizer so high and low halves both affect the state.
+        var z = seed +% 0x9E3779B97F4A7C15;
+        z = (z ^ (z >> 30)) *% 0xBF58476D1CE4E5B9;
+        z = (z ^ (z >> 27)) *% 0x94D049BB133111EB;
+        z = z ^ (z >> 31);
+        return init(@truncate(z));
+    }
+
     /// Seed from a net entity id (wander streams differ per entity).
     pub fn initFromNetId(net_id: i32) XorShift32 {
-        return init(@bitCast(net_id | 1));
+        return init(if (net_id == 0) 1 else @bitCast(net_id));
     }
 
     /// Advance and return the new state (classic xorshift32).
@@ -70,4 +80,13 @@ test "zero seed is rewritten" {
     var r = XorShift32.init(0);
     try std.testing.expect(r.state != 0);
     _ = r.next();
+}
+
+test "initFromU64 same seed same stream" {
+    var a = XorShift32.initFromU64(0xDEAD_BEEF_CAFE_BABE);
+    var b = XorShift32.initFromU64(0xDEAD_BEEF_CAFE_BABE);
+    try std.testing.expectEqual(a.next(), b.next());
+    var c = XorShift32.initFromU64(1);
+    var d = XorShift32.initFromU64(2);
+    try std.testing.expect(c.next() != d.next());
 }

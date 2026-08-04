@@ -135,7 +135,9 @@ const Pool = struct {
         // Own the dispatch slot for the whole call (serial or parallel). Nested
         // forRanges from a worker, or a second thread, must not touch
         // jobs/outstanding or start a second parallel wave.
-        if (self.in_run.swap(true, .acquire)) {
+        // acq_rel: publish prior writes to the serial nested path; acquire the
+        // outer wave's ownership when winning the swap.
+        if (self.in_run.swap(true, .acq_rel)) {
             work(ctx, 0, total);
             return;
         }

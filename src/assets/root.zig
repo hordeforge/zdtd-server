@@ -2,8 +2,9 @@
 //!
 //! Dependency direction: may import util and pure ecs types (QuestKind,
 //! InvSlot, Kind) for catalog → sim mapping. Must not import world, server,
-//! or wire. Wire body builders belong in wire/ (SignData batch encode lives
-//! in wire/stock_sign.zig).
+//! or wire. ecs must not import this package (keeps assets→ecs one-way).
+//! Wire body builders belong in wire/ (SignData batch encode lives in
+//! wire/stock_sign.zig).
 
 pub const xml_util = @import("xml_util.zig");
 pub const unity_hash = @import("unity_hash.zig");

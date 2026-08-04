@@ -25,6 +25,7 @@ wins**. Refresh inventory docs when closing work.
 | [PACKAGES.md](PACKAGES.md) | Full 190-package catalog |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff + C2S coverage tooling |
 | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
+| [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md) | V3.1.0 playtest run log |
 | [WIRE_CHUNK.md](WIRE_CHUNK.md) | Chunk wire path |
 | [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) | Workstation TE wire |
 | [INVENTORY.md](INVENTORY.md) | Inventory wire |
@@ -46,7 +47,7 @@ wins**. Refresh inventory docs when closing work.
 | [SYSTEMS.md](SYSTEMS.md) | Systems overview |
 | [AUTHORITY.md](AUTHORITY.md) | Join phase, C2S validation, interest, mode |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
-| [PLUGIN_API.md](PLUGIN_API.md) | Native plugin design (proposed) |
+| [PLUGIN_API.md](PLUGIN_API.md) | Native plugin design (ADR 0005 accepted; skeleton shipped) |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 
 ## Ops / UI
@@ -66,7 +67,7 @@ wins**. Refresh inventory docs when closing work.
 | [PROMPTS/review-abstractions.md](PROMPTS/review-abstractions.md) | When to build/keep/delete abstractions; layer fit; YAGNI scorecard |
 | [PROMPTS/review-simd.md](PROMPTS/review-simd.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
 | [PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md) | ECS ownership vs world/session; SoA columns; systems vs stranded game.zig |
-| [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http vs residual linux TCP |
+| [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http + thin posix residuals |
 
 ## Scale (parked until M11)
 

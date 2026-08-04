@@ -11,8 +11,8 @@ mach notes in [ADR 0006](adr/0006-steal-from-mach.md).
 
 | Piece | State |
 |---|---|
-| `src/plugin/api.zig` | `Host`, `PluginVTable`, `PLUGIN_API_VERSION=1` |
-| `src/plugin/host.zig` | Fixed table (8), register / enable / onTick / playerJoin / shutdown |
+| `src/plugin/api.zig` | `Host`, `PluginVTable`, `LogLevel`, `PLUGIN_API_VERSION=1` |
+| `src/plugin/host.zig` | Fixed table (8), register / enableStaticDefaults / enableAll / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample: logs once on enable; null tick/join |
 | Game wire-up | `createWithOptions` → `enableStaticDefaults`; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
 | InitOptions | `enable_sample_plugin` (default true; mode pack / future flags may set) |
@@ -21,6 +21,12 @@ mach notes in [ADR 0006](adr/0006-steal-from-mach.md).
 | C2S deny hooks / SimCommand from plugins | deferred (ECS `World.commands` is the drain seam) |
 
 Hot path: null hooks are a null check only; sample has no `on_tick`.
+
+Shipped v1 vtable hooks (`src/plugin/api.zig`): `on_enable(Host)`,
+`on_tick(Host)` (late in `step`, after sim/replicate),
+`on_player_join(Host, peer_slot: u16, entity_id: i32)` (first join only),
+`on_shutdown(Host)`. Everything else in this doc (SimView/PeerView, hook
+catalog, SimCommand, priorities) is **target design**, not implemented.
 
 ## Goals
 
@@ -53,25 +59,28 @@ Hot path: null hooks are a null check only; sample has no `on_tick`.
 process start
   → load config (which static plugins / dynlib paths)
   → Game.create / world + assets init
-  → plugin.onInit(Host)           // register hooks, commands
+  → plugin.on_enable(Host)        // register hooks, commands
   → listen
   loop step():
       net poll → C2S hooks → apply
       sim phases → phase hooks
       replicate → observe hooks
       tick end → onTickEnd / frame scrub
-  → plugin.onShutdown
+  → plugin.on_shutdown
   → Game.deinit
 ```
 
-Static plugins: comptime or link-time table in `build.zig` / `src/plugin/registry.zig`.  
-Dynamic native: optional `zdtd_plugin_v1` entry points (only after static is proven).  
+Static plugins: runtime `PluginHost.register` into the fixed table in
+`src/plugin/host.zig`; sample gated by `enable_sample_plugin`.
+Dynamic native: optional `zdtd_plugin_v1` entry points (only after static is proven).
 **Wasm guests (later):** same hooks and `SimCommand` queue; engine runs modules with
 fuel + memory limits; no raw `*Game`, no package byte injection (ADR 0010).
 Implement Wasm **after** the native hook table works with at least one in-tree
 Zig plugin.
 
 ## Host surface (narrow)
+
+Target surface; v1 `Host` (`src/plugin/api.zig`) ships `version`, `tick`, `log` only.
 
 ```text
 Host
@@ -99,9 +108,10 @@ No access to LiteNet peer maps, body_buf, or package id tables except through
 `sendStock(name, body)` where `body` was built by **core** builders the plugin
 called (e.g. `host.buildChat(buf, …)`).
 
-## Hook catalog
+## Hook catalog (target; none of these named hooks are implemented)
 
-Priorities: lower runs first. Core reserved bands: `0..99` internal, `100..999`
+Shipped v1 hooks are only the four vtable fields listed under implementation
+status. Priorities: lower runs first. Core reserved bands: `0..99` internal, `100..999`
 first-party, `1000+` third-party default.
 
 ### Connection / join
@@ -196,12 +206,14 @@ never races plugin writes.
 ### v1 Static
 
 ```zig
-// src/plugin/api.zig : stable types
-// src/plugin/registry.zig
-// plugins/example_chatfilter.zig : in-tree sample
+// src/plugin/api.zig : experimental types
+// src/plugin/host.zig : fixed registry table
+// src/plugin/sample_hello.zig : in-tree sample
 ```
 
-`build.zig` option: `-Dplugins=example,guard` or always link empty registry.
+Plugins are compiled in and registered at runtime via `PluginHost.register`
+(`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
+InitOption, not a build option. Public facade: `src/plugin/root.zig`.
 
 ### v2 Dynamic (optional)
 

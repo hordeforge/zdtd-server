@@ -6,10 +6,16 @@ zdtd’s game sim is a single **SoA entity-component-system**.
 src/ecs/
   entity.zig       Slot / max_entities / NetId
   components.zig   plain data types + Mask
-  world.zig        SoA columns + shared resources + spawn helpers + commands
-  systems.zig      all mutations and tickAll (AI/turrets threaded)
-  query.zig        forEachAlive / forEachWith / forEachKind (no alloc)
-  command.zig      fixed tick command buffer (cap 64; drain in tickAll)
+  world.zig        SoA columns + resources + spawn + locals + observers
+  systems.zig      mutations; tickAll → schedule.run
+  schedule.zig     Phase enum + ordered run (director…commands)
+  locals.zig       TickLocals scratch (cleared beginTick)
+  jobs.zig         thin forSlotRange over util/parallel
+  query.zig        forEach* / each packed / forEachParallelKind
+  command.zig      fixed tick command buffer (cap 64; drain in schedule)
+  observers.zig    on_spawn / on_death listeners (cap 4)
+  sim_view.zig     narrow inv/transform mut surface
+  res.zig          Res/ResMut resource accessors
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
   path.zig         greedy path helper (no navmesh yet)
@@ -48,12 +54,13 @@ turret                           // turrets
 trader_stock                     // traders (inventory on the entity)
 ```
 
-### Tick order (`systems.tickAll`)
+### Tick order (`schedule.run` / `systems.tickAll`)
 
+0. `World.beginTick`: clear `TickLocals`  
 1. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
 2. `systemZombieAi`: multi-threaded over slots; deferred player damage  
 3. `systemVehicles`: driver transform stick  
-4. `systemPower`: resolve electricity graph  
+4. Power: resolve stays in `Game.step` (daylight); not doubled here  
 5. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
 6. `systemDespawnFar`: cull far zombies  
 7. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)

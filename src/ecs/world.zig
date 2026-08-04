@@ -8,6 +8,8 @@ const quest = @import("quest.zig");
 const director = @import("aidirector.zig");
 const command = @import("command.zig");
 const inv_ledger = @import("inv_ledger.zig");
+const locals_mod = @import("locals.zig");
+const observers_mod = @import("observers.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -21,6 +23,8 @@ pub const Kind = c.Kind;
 pub const Mask = c.Mask;
 pub const CommandBuffer = command.Buffer;
 pub const CommandOp = command.Op;
+pub const TickLocals = locals_mod.TickLocals;
+pub const ObserverRegistry = observers_mod.Registry;
 
 pub const EntityClass = struct {
     name: []const u8 = "zombie",
@@ -69,17 +73,36 @@ pub const World = struct {
     next_net_id: i32 = 100,
     /// Live entity slots (spawnBase ++, destroy --). Soft-warn path only.
     entity_count: u16 = 0,
+    /// Per-slot reincarnation counter (generation-counted handles).
+    slot_gen: [max_entities]u32 = .{0} ** max_entities,
+    /// Per-kind live counts (spawnBase ++, destroy --). O(1) countKind for apm.
+    kind_count: [@typeInfo(Kind).@"enum".fields.len]u16 = .{0} ** @typeInfo(Kind).@"enum".fields.len,
     /// Once: soft warning when entity_count crosses entity_warn_at.
     entity_cap_warned: bool = false,
+    /// Slots freed since the last beginTick. allocSlot avoids these so a slot
+    /// is never recycled within one tick: per-client known_entities is keyed
+    /// by slot and only reconciled against alive[] once per tick, so same-tick
+    /// reuse (destroy then spawnLootBag) would suppress the EntitySpawn.
+    freed_this_tick: [max_entities]bool = .{false} ** max_entities,
+    /// True when any destroy() ran since beginTick. Replicate skips the
+    /// known_entities reconcile when no slots were freed this tick.
+    any_freed_this_tick: bool = false,
     /// O(1) NetId → Slot (0xFFFF = empty).
     net_to_slot: std.AutoHashMap(i32, Slot) = undefined,
     net_map_init: bool = false,
+    /// Set when a net_to_slot insert failed (OOM): the map may be missing
+    /// entries, so slotOfNetId must fall back to the SoA scan on miss.
+    net_map_degraded: bool = false,
 
     catalog: quest.Catalog = quest.Catalog.builtin(),
     power: electric.PowerGrid = .{},
     director: director.Director = .{},
     /// Deferred ops drained once per tick (end of tickAll / Game.step). Cap 64.
     commands: CommandBuffer = .{},
+    /// Named tick scratch (interest ids, despawn lists). Cleared in beginTick.
+    locals: TickLocals = .{},
+    /// on_spawn / on_death listeners (cap 4). No heap.
+    observers: ObserverRegistry = .{},
     /// P4 inv cause ring (last N mutations). Hot path: fixed, no heap.
     inv_ledger: InvLedger = .{},
     /// Zombie chase/wander speed multiplier from ZombieMove* serverconfig, set by
@@ -124,6 +147,19 @@ pub const World = struct {
         .{ .name = "animal", .max_hp = 30, .kind = .animal },
     } ++ [_]EntityClass{.{}} ** 8,
 
+    /// Catalog stack cap: `stack_fn` (items.xml Stacknumber) or offline builtins.
+    /// Single source for deposit paths; do not hardcode 60000 at call sites.
+    pub fn maxStack(self: *const World, item_id: u16) u16 {
+        if (self.stack_fn) |f| return f(self.stack_ctx, item_id);
+        return c.maxStackOffline(item_id);
+    }
+
+    /// Deposit into an entity inventory slot respecting catalog stack caps.
+    pub fn depositItem(self: *World, s: Slot, item_id: u16, count: u16) bool {
+        if (!self.mask[s].inventory) return false;
+        return self.inventory[s].addItemStacked(item_id, count, self.maxStack(item_id));
+    }
+
     pub fn ensureNetMap(self: *World, allocator: std.mem.Allocator) !void {
         if (self.net_map_init) return;
         self.net_to_slot = std.AutoHashMap(i32, Slot).init(allocator);
@@ -152,9 +188,15 @@ pub const World = struct {
             {
                 return slot;
             }
+            // In-range index is maintained by spawnPlayer/destroy and is
+            // authoritative: a miss means no player for this peer. The full
+            // scan below is reserved for out-of-range synthetic peer ids;
+            // running it on every miss cost O(max_entities) per call on the
+            // per-tick packet/quest paths.
+            return null;
         }
         // Preserve the standalone ECS API for callers using an out-of-range
-        // synthetic peer id, and recover if a derived index is ever stale.
+        // synthetic peer id.
         var i: Slot = 0;
         while (i < max_entities) : (i += 1) {
             if (self.alive[i] and self.mask[i].player and self.player[i].peer_slot == @as(i32, @intCast(peer_slot))) {
@@ -167,6 +209,11 @@ pub const World = struct {
     fn allocSlot(self: *World) ?Slot {
         var i: Slot = 0;
         while (i < max_entities) : (i += 1) {
+            if (!self.alive[i] and !self.freed_this_tick[i]) return i;
+        }
+        // At capacity: fall back to just-freed slots rather than failing the spawn.
+        i = 0;
+        while (i < max_entities) : (i += 1) {
             if (!self.alive[i]) return i;
         }
         return null;
@@ -174,6 +221,16 @@ pub const World = struct {
 
     pub fn destroy(self: *World, slot: Slot) void {
         if (slot >= max_entities or !self.alive[slot]) return;
+        const death_id: NetId = if (self.mask[slot].network_id) self.network_id[slot].id else 0;
+        // Capture kind before mask clear for kind_count.
+        const had_kind = self.mask[slot].kind;
+        const kind_val = self.kind[slot];
+        // Mark dead before notifying: a listener that cascades into destroy()
+        // on this same slot would otherwise recurse without bound.
+        self.alive[slot] = false;
+        self.freed_this_tick[slot] = true;
+        self.any_freed_this_tick = true;
+        self.observers.fireDeath(self, slot, death_id);
         if (self.mask[slot].player) {
             const peer_slot = self.player[slot].peer_slot;
             if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len)) and
@@ -185,10 +242,31 @@ pub const World = struct {
         if (self.mask[slot].network_id and self.net_map_init) {
             _ = self.net_to_slot.remove(self.network_id[slot].id);
         }
+        // Turrets own a consumer power node; drop it or it draws load forever.
+        // By id: two turrets can share a cell, and removeAt would take the wrong one.
+        if (self.mask[slot].turret) _ = self.power.removeById(self.turret[slot].power_node);
         self.alive[slot] = false;
+        self.freed_this_tick[slot] = true;
         self.mask[slot] = .{};
         self.dirty[slot] = .{};
         if (self.entity_count > 0) self.entity_count -= 1;
+        if (had_kind) {
+            const ki = @intFromEnum(kind_val);
+            if (self.kind_count[ki] > 0) self.kind_count[ki] -= 1;
+        }
+    }
+
+    /// Clear tick locals at the start of each sim frame (schedule / tickAll).
+    pub fn beginTick(self: *World) void {
+        @memset(&self.freed_this_tick, false);
+        // any_freed_this_tick stays set until replicate reconciles known_entities:
+        // net poll / admin may destroy before beginTick, sim after it.
+        self.locals.clear();
+    }
+
+    fn notifySpawn(self: *World, slot: Slot) void {
+        if (!self.alive[slot] or !self.mask[slot].network_id) return;
+        self.observers.fireSpawn(self, slot, self.network_id[slot].id);
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or
@@ -204,9 +282,26 @@ pub const World = struct {
         return false;
     }
 
+    /// True when handle still points at the same reincarnation of this slot.
+    pub fn handleAlive(self: *const World, h: ent.EntityHandle) bool {
+        if (h.slot >= max_entities or !self.alive[h.slot]) return false;
+        if (!self.mask[h.slot].network_id) return false;
+        return self.network_id[h.slot].gen == h.gen;
+    }
+
+    pub fn handleOfSlot(self: *const World, slot: Slot) ent.EntityHandle {
+        if (slot >= max_entities or !self.alive[slot] or !self.mask[slot].network_id)
+            return .invalid();
+        return .{ .slot = slot, .gen = self.network_id[slot].gen };
+    }
+
     pub fn slotOfNetId(self: *const World, id: NetId) ?Slot {
         if (self.net_map_init) {
             if (self.net_to_slot.get(id)) |slot| return slot;
+            // A healthy map is authoritative: a miss means the id is gone.
+            // Stale-target lookups are the common case on the per-tick AI
+            // path, and the full scan below made every miss O(max_entities).
+            if (!self.net_map_degraded) return null;
         }
         // The SoA columns are authoritative. The map is a derived index and
         // may miss after a failed insertion, so preserve correctness with the
@@ -223,6 +318,7 @@ pub const World = struct {
         // Pre-sized at init; insert failure only if map allocator is exhausted.
         // Fall back: slotOfNetId still walks SoA when map misses.
         self.net_to_slot.put(id, slot) catch {
+            self.net_map_degraded = true;
             std.debug.print(
                 "zdtd: net_to_slot put failed id={d} slot={d} (OOM? using linear lookup)\n",
                 .{ id, slot },
@@ -236,6 +332,7 @@ pub const World = struct {
         self.next_net_id += 1;
         self.alive[s] = true;
         self.entity_count +%= 1;
+        self.kind_count[@intFromEnum(kind)] +%= 1;
         if (!self.entity_cap_warned and self.entity_count >= entity_warn_at) {
             self.entity_cap_warned = true;
             std.debug.print(
@@ -254,7 +351,8 @@ pub const World = struct {
         };
         self.transform[s] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
         self.health[s] = .{ .hp = hp, .max_hp = hp };
-        self.network_id[s] = .{ .id = nid };
+        self.slot_gen[s] +%= 1;
+        self.network_id[s] = .{ .id = nid, .gen = self.slot_gen[s] };
         self.kind[s] = kind;
         self.flags[s] = .{ .bits = 8 };
         self.dirty[s] = .{ .spawn = true, .pos = true };
@@ -292,6 +390,39 @@ pub const World = struct {
         return id;
     }
 
+    /// Lookup class_table index by name (first match). Null if missing.
+    pub fn findClassByName(self: *const World, class_name: []const u8) ?u16 {
+        var i: u16 = 0;
+        while (i < self.class_table.len) : (i += 1) {
+            if (self.class_table[i].name.len == 0) continue;
+            if (std.mem.eql(u8, self.class_table[i].name, class_name)) return i;
+        }
+        return null;
+    }
+
+    /// Prefab spawn: fill zombie from class_table[class_id] (hp/hash/loot).
+    pub fn spawnZombieFromClassId(self: *World, class_id: u16, x: f32, y: f32, z: f32) ?NetId {
+        if (class_id >= self.class_table.len) return null;
+        const ct = self.class_table[class_id];
+        if (ct.kind != .zombie) return null;
+        const hp = if (ct.max_hp > 0) ct.max_hp else 40;
+        const id = self.spawnZombie(x, y, z, hp) orelse return null;
+        if (self.slotOfNetId(id)) |s| {
+            self.class_id[s] = .{
+                .id = class_id,
+                .hash = ct.hash,
+                .loot_list = ct.loot_list,
+            };
+        }
+        return id;
+    }
+
+    /// Prefab spawn by entityclasses name (class_table scan).
+    pub fn spawnZombieFromClass(self: *World, class_name: []const u8, x: f32, y: f32, z: f32) ?NetId {
+        const idx = self.findClassByName(class_name) orelse return null;
+        return self.spawnZombieFromClassId(idx, x, y, z);
+    }
+
     pub fn spawnAnimal(self: *World, x: f32, y: f32, z: f32, hp: f32, class_hash: i32, loot_list: []const u8) ?NetId {
         const s = self.spawnBase(.animal, x, y, z, hp) orelse return null;
         self.mask[s].zombie_ai = true; // reuse wander/flee AI
@@ -302,6 +433,7 @@ pub const World = struct {
         };
         self.class_id[s].hash = class_hash;
         self.class_id[s].loot_list = loot_list;
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -347,7 +479,8 @@ pub const World = struct {
             .{ 7, 20 }, // resourceWood
             .{ 6, 50 }, // casinoCoin
         };
-        for (starter) |it| _ = self.inventory[s].addItem(it[0], it[1]);
+        for (starter) |it| _ = self.depositItem(s, it[0], it[1]);
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -358,7 +491,11 @@ pub const World = struct {
             .state = .wander,
             .wander_tx = x,
             .wander_tz = z,
+            .home_x = x,
+            .home_z = z,
+            .has_home = true,
         };
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -378,7 +515,8 @@ pub const World = struct {
         self.mask[s].inventory = true;
         self.loot_bag[s] = .{};
         self.inventory[s] = .{};
-        _ = self.inventory[s].addItem(item_id, count);
+        _ = self.depositItem(s, item_id, count);
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -387,6 +525,7 @@ pub const World = struct {
         self.mask[s].trader = true;
         self.mask[s].trader_stock = true;
         self.trader_stock[s] = .{ .name = name };
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -404,12 +543,13 @@ pub const World = struct {
             .fuel = if (kind == .bicycle) 0 else 100,
             .max_speed = max_speed,
         };
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
         const s = self.spawnBase(.turret, x, y, z, 150) orelse return null;
-        const nid = self.power.addNode(.consumer, @intFromFloat(x), @intFromFloat(y), @intFromFloat(z), 25) orelse {
+        const nid = self.power.addNode(.consumer, @intFromFloat(@floor(x)), @intFromFloat(@floor(y)), @intFromFloat(@floor(z)), 25) orelse {
             self.destroy(s);
             return null;
         };
@@ -419,6 +559,7 @@ pub const World = struct {
         self.mask[s].turret = true;
         self.turret[s] = .{ .power_node = nid };
         self.power.resolve();
+        self.notifySpawn(s);
         return self.network_id[s].id;
     }
 
@@ -478,7 +619,7 @@ pub const World = struct {
         if (self.slotOfNetId(id)) |s| {
             var i: usize = 1;
             while (i < stacks.len) : (i += 1) {
-                _ = self.inventory[s].addItem(stacks[i].item_id, stacks[i].count);
+                _ = self.depositItem(s, stacks[i].item_id, stacks[i].count);
             }
         }
         return id;
@@ -495,12 +636,7 @@ pub const World = struct {
     }
 
     pub fn countKind(self: *const World, kind: Kind) u32 {
-        var n: u32 = 0;
-        var i: Slot = 0;
-        while (i < max_entities) : (i += 1) {
-            if (self.alive[i] and self.mask[i].kind and self.kind[i] == kind) n += 1;
-        }
-        return n;
+        return self.kind_count[@intFromEnum(kind)];
     }
 
     /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.
@@ -508,7 +644,7 @@ pub const World = struct {
         return self.commands.push(op);
     }
 
-    /// Apply and clear the tick command buffer.
+    /// Apply and clear the ops queued at entry; ops pushed during drain stay for the next tick.
     pub fn drainCommands(self: *World) command.DrainResult {
         return self.commands.drain(self);
     }
@@ -568,6 +704,10 @@ test "net id lookup falls back to authoritative columns when index misses" {
     const id = w.spawnZombie(1, 2, 3, 40).?;
     const expected = w.slotOfNetId(id).?;
     try std.testing.expect(w.net_to_slot.remove(id));
+    // Healthy map: a miss is authoritative (no per-miss full scan).
+    try std.testing.expectEqual(null, w.slotOfNetId(id));
+    // Degraded map (failed insert): the SoA scan recovers the entry.
+    w.net_map_degraded = true;
     try std.testing.expectEqual(expected, w.slotOfNetId(id).?);
 }
 
@@ -591,11 +731,15 @@ test "entity_count tracks spawn destroy and soft warn flag" {
     var w: World = .{};
     defer w.deinit();
     try std.testing.expectEqual(@as(u16, 0), w.entity_count);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
     const z = w.spawnZombie(0, 70, 0, 40).?;
     try std.testing.expectEqual(@as(u16, 1), w.entity_count);
+    try std.testing.expectEqual(@as(u32, 1), w.countKind(.zombie));
     const zs = w.slotOfNetId(z).?;
     w.destroy(zs);
     try std.testing.expectEqual(@as(u16, 0), w.entity_count);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
+    try std.testing.expect(w.any_freed_this_tick);
     // Fill to soft threshold without allocating beyond max.
     var n: usize = 0;
     while (n < entity_warn_at) : (n += 1) {
@@ -603,4 +747,42 @@ test "entity_count tracks spawn destroy and soft warn flag" {
     }
     try std.testing.expect(w.entity_count >= entity_warn_at);
     try std.testing.expect(w.entity_cap_warned);
+    try std.testing.expectEqual(@as(u32, w.entity_count), w.countKind(.zombie));
+}
+
+test "spawnZombieFromClass fills from class_table" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    w.class_table[1].max_hp = 55;
+    w.class_table[1].hash = 12345;
+    w.class_table[1].loot_list = "EntityLootContainerStrong";
+    const id = w.spawnZombieFromClass("zombie", 3, 70, 4).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(@as(f32, 55), w.health[s].max_hp);
+    try std.testing.expectEqual(@as(i32, 12345), w.class_id[s].hash);
+    try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[s].loot_list);
+    try std.testing.expect(w.spawnZombieFromClass("nope", 0, 0, 0) == null);
+}
+
+test "beginTick clears locals" {
+    var w: World = .{};
+    w.locals.interest_n = 9;
+    w.beginTick();
+    try std.testing.expectEqual(@as(u8, 0), w.locals.interest_n);
+}
+
+test "generation-counted handle invalidates after destroy" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const id = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(id).?;
+    const h = w.handleOfSlot(s);
+    try std.testing.expect(w.handleAlive(h));
+    w.destroy(s);
+    try std.testing.expect(!w.handleAlive(h));
+    // Reuse slot: new gen must not match old handle.
+    _ = w.spawnZombie(1, 70, 1, 40);
+    try std.testing.expect(!w.handleAlive(h));
 }

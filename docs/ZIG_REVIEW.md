@@ -39,7 +39,7 @@
 | `src/ecs/world.zig` registerNet | bare `catch {}` | Comment: map OOM, SoA fallback | P1 |
 | `src/server/game.zig` pollNetOnce | bare catch on peer handlers | Comment: one bad peer must not stop poll | P1 |
 | Tick broadcast/save `catch {}` | Many best-effort drops | Comments on init/shutdown; rest intentional drop | P1→debt |
-| LiteNet / admin TCP / APM clock | `std.os.linux` sockets/time | **Legacy OK** (not expanded) | debt |
+| LiteNet / admin TCP / clock | `std.Io.net` / `tcp_listen` / thin posix clock | **Done** (see STD_ABSTRACTIONS) | - |
 
 ## Hot-path memory
 
@@ -66,10 +66,10 @@
 | `world/*` asset/map load | Migrated off raw linux |
 | `assets/*` | Migrated (assignids, maxdamage readlink) |
 | `server/game.zig` player/blockmeta persist | Migrated |
-| `litenet/*` UDP batch | **Legacy OK** until deliberate net migration |
-| `server/admin.zig`, `serverinfo_tcp.zig` | TCP still raw linux (admin path; migrate later) |
-| `apm/clock.zig` | clock_gettime via linux (metrics; low risk) |
-| `game.zig` test peer sockaddr | Uses `std.os.linux.sockaddr` for LiteNet attach tests |
+| `litenet/udp_socket` | **Done** via `std.Io.net` |
+| `server/admin.zig`, GSI, webui | **Done** via `util/tcp_listen` |
+| `util/clock` / apm timing | `posix.system.clock_gettime` (vDSO; intentional) |
+| `game.zig` test peer attach | LiteNet peer tests use net address types |
 | `linux_fs` module | **Absent** (removed / never present) |
 
 ## Ordered fix plan (remaining)

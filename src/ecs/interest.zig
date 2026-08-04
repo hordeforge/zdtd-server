@@ -15,20 +15,26 @@ pub const default_radius_cells: i32 = 3;
 /// motion_replicate_period in game.zig; effective interval is LCM).
 pub const pos_heartbeat_period_ticks: u64 = 5;
 
-fn cellOf(x: f32, z: f32) struct { cx: i32, cz: i32 } {
+pub fn cellOf(x: f32, z: f32) struct { cx: i32, cz: i32 } {
+    // Floor the division, not the coordinate: truncating first puts every
+    // position in (-cell_size, 0) into cell 0 and skews range around the origin.
     return .{
-        .cx = @divFloor(@as(i32, @intFromFloat(x)), @as(i32, @intFromFloat(cell_size))),
-        .cz = @divFloor(@as(i32, @intFromFloat(z)), @as(i32, @intFromFloat(cell_size))),
+        .cx = @intFromFloat(@floor(x / cell_size)),
+        .cz = @intFromFloat(@floor(z / cell_size)),
     };
+}
+
+/// Range test on precomputed cells: hot entity × client loops resolve each
+/// side's cell once per pass instead of redoing the float math per pair.
+pub fn cellsInRange(acx: i32, acz: i32, bcx: i32, bcz: i32, radius_cells: i32) bool {
+    return @abs(acx - bcx) <= radius_cells and @abs(acz - bcz) <= radius_cells;
 }
 
 /// Returns true if entity slot `e` is in interest range of player at (px,pz).
 pub fn inRange(px: f32, pz: f32, ex: f32, ez: f32, radius_cells: i32) bool {
     const a = cellOf(px, pz);
     const b = cellOf(ex, ez);
-    const dx = a.cx - b.cx;
-    const dz = a.cz - b.cz;
-    return @abs(dx) <= radius_cells and @abs(dz) <= radius_cells;
+    return cellsInRange(a.cx, a.cz, b.cx, b.cz, radius_cells);
 }
 
 /// Whether this entity should emit PosAndRot this motion pass.
@@ -61,6 +67,24 @@ pub fn markNearbyDirty(w: *World, px: f32, pz: f32, radius_cells: i32) void {
 test "interest cell range" {
     try std.testing.expect(inRange(0, 0, 10, 10, 1));
     try std.testing.expect(!inRange(0, 0, 200, 0, 1));
+    // Floor division (not trunc-to-zero): positions in (-cell_size, 0) must not
+    // collapse into cell 0 with positive-side neighbors.
+    const neg = cellOf(-1, -1);
+    try std.testing.expectEqual(@as(i32, -1), neg.cx);
+    try std.testing.expectEqual(@as(i32, -1), neg.cz);
+    const pos = cellOf(0, 0);
+    try std.testing.expectEqual(@as(i32, 0), pos.cx);
+    try std.testing.expectEqual(@as(i32, 0), pos.cz);
+    // Exact cell boundary: cell_size maps to next cell.
+    const edge = cellOf(cell_size, cell_size);
+    try std.testing.expectEqual(@as(i32, 1), edge.cx);
+    try std.testing.expectEqual(@as(i32, 1), edge.cz);
+    // Radius 0: same cell only.
+    try std.testing.expect(cellsInRange(0, 0, 0, 0, 0));
+    try std.testing.expect(!cellsInRange(0, 0, 1, 0, 0));
+    // Cross-origin interest: cell -1 and 0 are adjacent (radius 1).
+    try std.testing.expect(inRange(-1, 0, 1, 0, 1));
+    try std.testing.expect(!inRange(-1, 0, cell_size + 1, 0, 1));
 }
 
 test "needsPosSend dirty and heartbeat" {

@@ -544,6 +544,26 @@ test "builtin items" {
     try std.testing.expectEqualStrings("meleeToolRepairT0StoneAxe", builtinStockName(8).?);
 }
 
+// ecs/inventory keeps a leaf offline mirror (no assets import). Drift here breaks
+// fixture place/stack/armor when stack_fn/place_fn are unset.
+test "ecs offline inventory catalog mirrors builtins" {
+    const inv = @import("../ecs/inventory.zig");
+    for (builtin_defs) |d| {
+        const want_stack: u16 = if (d.stack == 0) 1 else d.stack;
+        try std.testing.expectEqual(want_stack, inv.maxStackBuiltin(d.id));
+    }
+    var id: u16 = 1;
+    while (id <= 12) : (id += 1) {
+        const a = builtinStockName(id);
+        const b = inv.builtinStockNameFallback(id);
+        if (a == null and b == null) continue;
+        try std.testing.expect(a != null and b != null);
+        try std.testing.expectEqualStrings(a.?, b.?);
+    }
+    try std.testing.expect(inv.isArmorOffline(11));
+    try std.testing.expect(!inv.isArmorOffline(7));
+}
+
 test "stock type first item is ItemsStartHere+1" {
     try std.testing.expectEqual(@as(i32, 65537), stock_first_item_type);
 }

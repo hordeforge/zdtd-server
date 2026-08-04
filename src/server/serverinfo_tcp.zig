@@ -5,8 +5,8 @@
 //! So `Port` in this text must be ServerPort (info TCP), not the LiteNet bind port.
 
 const std = @import("std");
-const linux = std.os.linux;
 const version = @import("../version.zig");
+const tcp = @import("../util/tcp_listen.zig");
 
 pub const ServerInfo = struct {
     /// Advertised display / world names.
@@ -69,24 +69,29 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
     );
 }
 
+/// 5 ASCII digits + CRLF length prefix (stock AcceptTcpClient framing).
+fn lengthHeader(n: usize) [7]u8 {
+    return .{
+        @intCast('0' + (n / 10000) % 10),
+        @intCast('0' + (n / 1000) % 10),
+        @intCast('0' + (n / 100) % 10),
+        @intCast('0' + (n / 10) % 10),
+        @intCast('0' + n % 10),
+        '\r',
+        '\n',
+    };
+}
+
 /// Format length as 5 ASCII digits + CRLF + body (stock AcceptTcpClient).
 pub fn writeResponse(stream_write: *const fn (ctx: ?*anyopaque, data: []const u8) anyerror!void, ctx: ?*anyopaque, body: []const u8) !void {
     if (body.len > 99999) return error.Overflow;
-    var hdr: [7]u8 = undefined;
-    const n = body.len;
-    hdr[0] = @intCast('0' + (n / 10000) % 10);
-    hdr[1] = @intCast('0' + (n / 1000) % 10);
-    hdr[2] = @intCast('0' + (n / 100) % 10);
-    hdr[3] = @intCast('0' + (n / 10) % 10);
-    hdr[4] = @intCast('0' + (n / 1) % 10);
-    hdr[5] = '\r';
-    hdr[6] = '\n';
+    const hdr = lengthHeader(body.len);
     try stream_write(ctx, hdr[0..]);
     try stream_write(ctx, body);
 }
 
 pub const Provider = struct {
-    listen_fd: i32 = -1,
+    listener: tcp.Listener = .{},
     info: ServerInfo = .{},
     text_buf: [4096]u8 = undefined,
     text_len: usize = 0,
@@ -94,33 +99,12 @@ pub const Provider = struct {
     pub fn start(self: *Provider, info: ServerInfo) !void {
         self.info = info;
         try self.rebuildText();
-
-        const sock_rc = linux.socket(linux.AF.INET, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
-        if (linux.errno(sock_rc) != .SUCCESS) return error.SocketFailed;
-        const fd: i32 = @intCast(sock_rc);
-        errdefer _ = linux.close(fd);
-
-        var yes: c_int = 1;
-        _ = linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, @ptrCast(&yes), @sizeOf(c_int));
-
-        var addr = linux.sockaddr.in{
-            .family = linux.AF.INET,
-            .port = std.mem.nativeToBig(u16, info.info_port),
-            .addr = 0, // INADDR_ANY
-        };
-        const br = linux.bind(fd, @ptrCast(&addr), @sizeOf(linux.sockaddr.in));
-        if (linux.errno(br) != .SUCCESS) return error.BindFailed;
-        const lc = linux.listen(fd, 8);
-        if (linux.errno(lc) != .SUCCESS) return error.ListenFailed;
-
-        self.listen_fd = fd;
+        // INADDR_ANY: stock GSI is reachable on all interfaces.
+        try self.listener.listen(0, info.info_port, 8);
     }
 
     pub fn stop(self: *Provider) void {
-        if (self.listen_fd >= 0) {
-            _ = linux.close(self.listen_fd);
-            self.listen_fd = -1;
-        }
+        self.listener.deinit();
     }
 
     pub fn setPlayers(self: *Provider, current: i32) void {
@@ -136,26 +120,14 @@ pub const Provider = struct {
 
     /// Non-blocking: accept one client and write info response.
     pub fn poll(self: *Provider) void {
-        if (self.listen_fd < 0) return;
-        var addr: linux.sockaddr.storage = undefined;
-        var alen: linux.socklen_t = @sizeOf(linux.sockaddr.storage);
-        const cfd_r = linux.accept(self.listen_fd, @ptrCast(&addr), &alen);
-        if (linux.errno(cfd_r) != .SUCCESS) return;
-        const client: i32 = @intCast(cfd_r);
-        defer _ = linux.close(client);
+        if (!self.listener.enabled()) return;
+        const client = self.listener.accept() catch return orelse return;
+        defer tcp.closeFd(client);
 
-        var hdr: [7]u8 = undefined;
-        const n = self.text_len;
-        hdr[0] = @intCast('0' + (n / 10000) % 10);
-        hdr[1] = @intCast('0' + (n / 1000) % 10);
-        hdr[2] = @intCast('0' + (n / 100) % 10);
-        hdr[3] = @intCast('0' + (n / 10) % 10);
-        hdr[4] = @intCast('0' + (n / 1) % 10);
-        hdr[5] = '\r';
-        hdr[6] = '\n';
-        _ = linux.write(client, &hdr, hdr.len);
+        const hdr = lengthHeader(self.text_len);
+        tcp.writeAll(client, hdr[0..]);
         if (self.text_len > 0) {
-            _ = linux.write(client, self.text_buf[0..self.text_len].ptr, self.text_len);
+            tcp.writeAll(client, self.text_buf[0..self.text_len]);
         }
     }
 };

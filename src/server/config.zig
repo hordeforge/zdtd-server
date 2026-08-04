@@ -4,6 +4,10 @@ const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 
+/// Stock serverconfig files are small. Bound operator input before parsing so a
+/// mistaken path cannot consume unbounded memory during startup.
+const max_serverconfig_bytes: usize = 1024 * 1024;
+
 /// C2S validation strictness. Default correct hard-rejects illegal claims.
 pub const AuthorityMode = enum {
     /// Counters / log only; still server-owned state (phase gates stay hard).
@@ -86,9 +90,105 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
-pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
+/// Property names zdtd applies (subset of stock ServerSettings). Stock extras are
+/// ignored without warning; near-miss typos of these names get a stderr hint.
+const known_serverconfig_names = [_][]const u8{
+    "ServerPort",
+    "ServerMaxPlayerCount",
+    "GameName",
+    "GameWorld",
+    "ServerPassword",
+    "AdminPort",
+    "ViewRadius",
+    "GameDifficulty",
+    "BloodMoonFrequency",
+    "BloodMoonEnemyCount",
+    "PlayerKillingMode",
+    "DayNightLength",
+    "DayLightLength",
+    "MaxSpawnedZombies",
+    "BloodMoonRange",
+    "ZombieMove",
+    "ZombieMoveNight",
+    "ZombieFeralMove",
+    "ZombieBMMove",
+    "EnemyDifficulty",
+    "LootAbundance",
+    "XPMultiplier",
+    "BlockDamagePlayer",
+    "BlockDamageAI",
+    "BlockDamageAIBM",
+    "MaxSpawnedAnimals",
+    "AirDropFrequency",
+    "DropOnDeath",
+    "LandClaimSize",
+    "LandClaimOnlineDurabilityModifier",
+    "LandClaimOfflineDurabilityModifier",
+    "ZdtdAuthorityMode",
+};
+
+fn editDistanceCap(a: []const u8, b: []const u8, cap: usize) usize {
+    // Small names only; return cap+1 when either side is long.
+    if (a.len > 48 or b.len > 48) return cap + 1;
+    var prev: [49]usize = undefined;
+    var cur: [49]usize = undefined;
+    for (0..b.len + 1) |j| prev[j] = j;
+    for (0..a.len) |i| {
+        cur[0] = i + 1;
+        for (0..b.len) |j| {
+            const cost: usize = if (a[i] == b[j]) 0 else 1;
+            cur[j + 1] = @min(prev[j] + cost, @min(cur[j] + 1, prev[j + 1] + 1));
+        }
+        @memcpy(prev[0 .. b.len + 1], cur[0 .. b.len + 1]);
+    }
+    return prev[b.len];
+}
+
+/// Warn when a property name looks like a typo of a key we actually apply.
+/// Full stock serverconfig has many unused keys; those stay silent.
+fn warnNearMissPropertyNames(hay: []const u8) void {
+    var i: usize = 0;
+    while (i < hay.len) {
+        const pi = std.mem.indexOfPos(u8, hay, i, "<property") orelse break;
+        const n = xml.attr(hay, pi, "name") orelse {
+            i = pi + 9;
+            continue;
+        };
+        var known = false;
+        for (known_serverconfig_names) |kn| {
+            if (std.mem.eql(u8, n, kn)) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            var best: ?[]const u8 = null;
+            var best_d: usize = 3;
+            for (known_serverconfig_names) |kn| {
+                const d = editDistanceCap(n, kn, 2);
+                if (d > 0 and d < best_d) {
+                    best_d = d;
+                    best = kn;
+                }
+            }
+            if (best) |sug| {
+                std.debug.print(
+                    "zdtd: serverconfig property '{s}' is not applied (did you mean '{s}'?)\n",
+                    .{ n, sug },
+                );
+            }
+        }
+        i = pi + 9;
+    }
+}
+
+/// Parse serverconfig.xml bytes (subset of stock ServerSettings).
+pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
+    if (std.mem.indexOf(u8, raw, "<ServerSettings") == null or
+        std.mem.indexOf(u8, raw, "</ServerSettings>") == null)
+    {
+        return error.BadServerConfig;
+    }
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
     arena_holder.* = std.heap.ArenaAllocator.init(allocator);
     errdefer {
@@ -157,7 +257,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
             std.debug.print("zdtd: serverconfig ZdtdAuthorityMode '{s}' unknown (use observe|permissive|correct); keeping correct\n", .{v});
         }
     }
+    warnNearMissPropertyNames(raw);
     return cfg;
+}
+
+pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
+    const read_buf = try allocator.alloc(u8, max_serverconfig_bytes + 1);
+    defer allocator.free(read_buf);
+    const raw = try io_fs.readFileInto(allocator, path, read_buf);
+    if (raw.len > max_serverconfig_bytes) return error.ServerConfigTooLarge;
+    return parse(allocator, raw);
 }
 
 fn clampU8(v: ?u16, lo: u16, hi: u16, dflt: u8) u8 {
@@ -290,4 +399,34 @@ test "parse authority mode permissive alias and land claim odd" {
     try std.testing.expectEqual(AuthorityMode.observe, cfg.authority_mode);
     try std.testing.expectEqual(@as(u16, 39), cfg.land_claim_size);
     try std.testing.expectEqual(@as(u16, 12), cfg.max_players);
+}
+
+test "near-miss property names still load known keys" {
+    // Typo ServerPasssword is ignored for values; ServerPort still applies.
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="ServerPort" value="27099"/>
+        \\  <property name="ServerPasssword" value="nope"/>
+        \\  <property name="SomeStockOnlyKey" value="1"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFileSimple(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 27099), cfg.port);
+    try std.testing.expectEqual(@as(usize, 0), cfg.password.len);
+}
+
+test "parse rejects missing ServerSettings root" {
+    try std.testing.expectError(error.BadServerConfig, parse(std.testing.allocator, ""));
+    try std.testing.expectError(
+        error.BadServerConfig,
+        parse(std.testing.allocator, "<property name=\"ServerPort\" value=\"27002\"/>"),
+    );
 }

@@ -31,6 +31,8 @@ pub const Health = struct {
 
 pub const NetworkId = struct {
     id: i32 = 0,
+    /// Slot reincarnation counter (generation-counted handle helper).
+    gen: u32 = 0,
 };
 
 pub const Player = struct {
@@ -56,9 +58,18 @@ pub const AiState = enum(u8) {
 };
 
 /// Currently-executing EAITask (stock EAITaskList.executingTasks collapsed to a
-/// single cell). Mutex-conflicting movement tasks share one slot; BreakBlock uses
-/// mutex 0 so it can preempt approach when path_blocked. See zombie_tasks.
-pub const TaskId = enum(u8) { none, break_block, approach_attack, approach_spot, wander };
+/// single cell). Mutex-conflicting movement tasks share one slot; BreakBlock /
+/// DestroyArea use mutex 0 so they can preempt approach when path_blocked.
+/// See zombie_tasks.
+pub const TaskId = enum(u8) {
+    none,
+    break_block,
+    destroy_area,
+    approach_attack,
+    territorial,
+    approach_spot,
+    wander,
+};
 
 pub const ZombieAi = struct {
     state: AiState = .idle,
@@ -74,6 +85,10 @@ pub const ZombieAi = struct {
     spot_x: f32 = 0,
     spot_z: f32 = 0,
     has_spot: bool = false,
+    /// EAITerritorial home (spawn pos). When has_home and far, walk back.
+    home_x: f32 = 0,
+    home_z: f32 = 0,
+    has_home: bool = false,
     alert: bool = false,
     active_scale: f32 = 1,
     path_goal_x: f32 = 0,
@@ -86,7 +101,7 @@ pub const ZombieAi = struct {
     path_wp_z: i32 = 0,
     path_wp_valid: bool = false,
     /// True when chase replan found no detour and the cell toward the goal is solid.
-    /// Feeds EAIBreakBlock CanExecute; Game.tickZombieBlockDamage still keys on chase/attack.
+    /// Feeds EAIBreakBlock / DestroyArea; Game.tickZombieBlockDamage keys on chase/attack.
     path_blocked: bool = false,
     /// Per-entity xorshift state for wander decisions (0 = unseeded; first
     /// decision seeds from net id so streams differ per entity).
@@ -139,6 +154,16 @@ pub const inv_equip_count: usize = 5;
 pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 47
 pub const inv_no_holding: u16 = 0xFFFF;
 
+// Layout invariants: bag contiguous after toolbelt; equip starts after bag.
+// Stock wire sizes live in wire/stock_inv.zig; must stay ≥ these ECS widths.
+comptime {
+    if (inv_bag_start != inv_toolbelt) @compileError("inv_bag_start must equal inv_toolbelt");
+    if (inv_bag_start + inv_bag_count != inv_equip_start)
+        @compileError("bag range must be contiguous before equip");
+    if (max_inv_slots != inv_equip_start + inv_equip_count)
+        @compileError("max_inv_slots must equal equip end");
+}
+
 pub const QuestProgress = struct {
     def_id: u16 = 0,
     /// Stock Quest.QuestCode (distinct from catalog def_id when possible).
@@ -190,6 +215,28 @@ pub const InvSlot = struct {
     meta: u16 = 0, // durability / seed / etc.
 };
 
+/// Offline stack caps when `World.stack_fn` is null. Must match
+/// `assets/items.builtin_defs` (stack 0 → 1). Production wires `stack_fn` from
+/// items.xml Stacknumber; never invent parallel caps for production deposits.
+pub fn maxStackOffline(item_id: u16) u16 {
+    return switch (item_id) {
+        0 => 1,
+        1 => 60000,
+        2 => 50,
+        3 => 150,
+        4 => 10,
+        5 => 1,
+        6 => 60000,
+        7 => 60000,
+        8 => 1,
+        9 => 1,
+        10 => 50,
+        11 => 1,
+        12 => 20,
+        else => 60000,
+    };
+}
+
 pub const Inventory = struct {
     slots: [max_inv_slots]InvSlot = [_]InvSlot{.{}} ** max_inv_slots,
     /// Held toolbelt index 0..inv_toolbelt-1, or inv_no_holding.
@@ -216,9 +263,11 @@ pub const Inventory = struct {
         return true;
     }
 
-    /// Prefer toolbelt then bag for stacking/placement. Respects max_stack.
+    /// Deposit with offline default cap only (no catalog). Prefer
+    /// `World.depositItem` / `addItemStacked(..., World.maxStack)` when a World
+    /// is available so items.xml Stacknumber is honored.
     pub fn addItem(self: *Inventory, item_id: u16, count: u16) bool {
-        return self.addItemStacked(item_id, count, 60000);
+        return self.addItemStacked(item_id, count, maxStackOffline(item_id));
     }
 
     /// Deposit with default quality=1 / meta=0 (admin give, craft output, loot fill).

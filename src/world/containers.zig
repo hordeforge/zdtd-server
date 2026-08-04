@@ -67,9 +67,14 @@ pub const ContainerStore = struct {
     }
 
     pub fn get(self: *ContainerStore, pos: PosKey) ?*Container {
+        // Stop after visiting every used slot: Container is ~1.5 KiB, so a
+        // full 256-slot sweep strides ~390 KiB of cache per lookup.
+        var seen: usize = 0;
         var i: usize = 0;
-        while (i < max_containers) : (i += 1) {
-            if (self.used[i] and PosKey.eql(self.items[i].pos, pos)) return &self.items[i];
+        while (i < max_containers and seen < self.n) : (i += 1) {
+            if (!self.used[i]) continue;
+            seen += 1;
+            if (PosKey.eql(self.items[i].pos, pos)) return &self.items[i];
         }
         return null;
     }
@@ -93,9 +98,12 @@ pub const ContainerStore = struct {
     }
 
     pub fn getByGuid(self: *ContainerStore, guid: *const [16]u8) ?*Container {
+        var seen: usize = 0;
         var i: usize = 0;
-        while (i < max_containers) : (i += 1) {
-            if (self.used[i] and std.mem.eql(u8, &self.items[i].inv_guid, guid)) return &self.items[i];
+        while (i < max_containers and seen < self.n) : (i += 1) {
+            if (!self.used[i]) continue;
+            seen += 1;
+            if (std.mem.eql(u8, &self.items[i].inv_guid, guid)) return &self.items[i];
         }
         return null;
     }
@@ -115,6 +123,9 @@ pub const ContainerStore = struct {
     /// Persist file: magic "ZCT1" | u16 count | per container:
     /// pos xyz i32*3 | block_id i32 | slot_count u16 | touched u8 | player u8 |
     /// slot_count * (item_id u16 | count u16 | quality u8 | meta u16).
+    ///
+    /// Records are sorted by world pos so bytes are independent of sparse slot
+    /// assignment order (needed for DST fault injection / mid-save replay).
     pub fn save(self: *const ContainerStore, dir: []const u8) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
@@ -122,11 +133,29 @@ pub const ContainerStore = struct {
         var o: usize = 0;
         @memcpy(buf[0..4], "ZCT1");
         o = 6; // count patched below
-        var count: u16 = 0;
+
+        // Collect used indices, sort by (x,y,z). Stack-only: max_containers is fixed.
+        var idxs: [max_containers]u16 = undefined;
+        var n_idx: usize = 0;
         var i: usize = 0;
         while (i < max_containers) : (i += 1) {
             if (!self.used[i]) continue;
-            const c = &self.items[i];
+            idxs[n_idx] = @intCast(i);
+            n_idx += 1;
+        }
+        std.mem.sort(u16, idxs[0..n_idx], self, struct {
+            fn less(store: *const ContainerStore, a: u16, b: u16) bool {
+                const pa = store.items[a].pos;
+                const pb = store.items[b].pos;
+                if (pa.x != pb.x) return pa.x < pb.x;
+                if (pa.y != pb.y) return pa.y < pb.y;
+                return pa.z < pb.z;
+            }
+        }.less);
+
+        var count: u16 = 0;
+        for (idxs[0..n_idx]) |ii| {
+            const c = &self.items[ii];
             if (o + 20 + @as(usize, c.slot_count) * 7 > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
@@ -151,13 +180,9 @@ pub const ContainerStore = struct {
         try io_fs.writeFileSimple(p, buf[0..o]);
     }
 
-    pub fn load(self: *ContainerStore, dir: []const u8) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
-        const data = io_fs.readFileAll(std.heap.page_allocator, p) catch return error.OpenFailed;
-        defer std.heap.page_allocator.free(data);
-        const buf = data;
-        const len = data.len;
+    /// Decode a ZCT1 buffer (magic | count | records). Used by load and fuzz.
+    pub fn loadFromSlice(self: *ContainerStore, buf: []const u8) !void {
+        const len = buf.len;
         if (len < 6 or !std.mem.eql(u8, buf[0..4], "ZCT1")) return error.ReadFailed;
         const count = std.mem.readInt(u16, buf[4..6], .little);
         var o: usize = 6;
@@ -195,6 +220,19 @@ pub const ContainerStore = struct {
             }
         }
     }
+
+    pub fn load(self: *ContainerStore, dir: []const u8) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
+        // Only a missing file means "fresh world"; any other read failure must
+        // surface so the caller can log it before the next save clobbers data.
+        const data = io_fs.readFileAll(std.heap.page_allocator, p) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return error.ReadFailed,
+        };
+        defer std.heap.page_allocator.free(data);
+        return self.loadFromSlice(data);
+    }
 };
 
 test "container store save load roundtrip" {
@@ -210,6 +248,22 @@ test "container store save load roundtrip" {
     try std.testing.expectEqual(@as(u8, 2), c2.slots[0].quality);
     try std.testing.expect(c2.touched);
     io_fs.deleteFileSimple("./containers.zct");
+}
+
+test "container save order is pos-sorted not slot-order" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    // Reverse-insert so sparse slot indices disagree with world-pos order.
+    var s: ContainerStore = .{};
+    _ = s.getOrCreate(.{ .x = 9, .y = 70, .z = 0 }, 8, 1).?;
+    _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
+    try s.save(".zdtd_cfg_cache");
+    const data = try io_fs.readFileAll(std.testing.allocator, ".zdtd_cfg_cache/containers.zct");
+    defer std.testing.allocator.free(data);
+    try std.testing.expect(data.len >= 6 + 40);
+    // First record pos.x must be 1 (sorted), not 9 (slot-0 insert).
+    const first_x = std.mem.readInt(i32, data[6..10], .little);
+    try std.testing.expectEqual(@as(i32, 1), first_x);
+    io_fs.deleteFileSimple(".zdtd_cfg_cache/containers.zct");
 }
 
 test "container get or create" {

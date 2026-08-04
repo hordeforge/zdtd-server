@@ -1,6 +1,6 @@
 //! Stock V3.0.1 `Chunk.write(PooledBinaryWriter, bNetwork=true)` encoder.
 //! Used as NetPackageChunk payload so the stock client can Chunk.read without
-//! client-side generation. See research/docs/save-region.md and Chunk IL dumps.
+//! client-side generation. See ../../../7dtd-research/docs/save-region.md and Chunk IL dumps.
 
 const std = @import("std");
 const binary = @import("binary.zig");

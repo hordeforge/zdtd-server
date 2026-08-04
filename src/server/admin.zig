@@ -1,17 +1,18 @@
 //! Minimal TCP admin console (telnet-like): one command line per connection.
+//! Listen/accept via `util/tcp_listen` (std.Io.net); no std.os.linux.
 
 const std = @import("std");
-const linux = std.os.linux;
+const tcp = @import("../util/tcp_listen.zig");
 
 pub const max_cmd: usize = 256;
 
 pub const max_sessions: usize = 4;
 
 pub const Server = struct {
-    fd: i32 = -1,
+    listener: tcp.Listener = .{},
     port: u16 = 0,
     /// Persistent telnet-style sessions (-1 = free slot).
-    sessions: [max_sessions]i32 = .{-1} ** max_sessions,
+    sessions: [max_sessions]tcp.Handle = .{-1} ** max_sessions,
     recv_bufs: [max_sessions][max_cmd]u8 = undefined,
     recv_lens: [max_sessions]usize = .{0} ** max_sessions,
     /// Session whose line is currently being handled (reply target).
@@ -19,49 +20,23 @@ pub const Server = struct {
 
     pub fn listen(self: *Server, port: u16) !void {
         if (port == 0) return;
-        const sock_rc = linux.socket(linux.AF.INET, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
-        if (linux.errno(sock_rc) != .SUCCESS) return error.Socket;
-        const fd: i32 = @intCast(sock_rc);
-        var yes: c_int = 1;
-        _ = linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, @ptrCast(&yes), @sizeOf(c_int));
-        // Loopback only: admin has no auth (give/kick/shutdown). Do not bind 0.0.0.0.
-        var addr = linux.sockaddr.in{
-            .family = linux.AF.INET,
-            .port = std.mem.nativeToBig(u16, port),
-            .addr = std.mem.nativeToBig(u32, 0x7f000001), // 127.0.0.1
-        };
-        const rc = linux.bind(fd, @ptrCast(&addr), @sizeOf(linux.sockaddr.in));
-        if (linux.errno(rc) != .SUCCESS) {
-            _ = linux.close(fd);
-            return error.Bind;
-        }
-        const lc = linux.listen(fd, 4);
-        if (linux.errno(lc) != .SUCCESS) {
-            _ = linux.close(fd);
-            return error.Listen;
-        }
-        self.fd = fd;
-        self.port = port;
+        // Loopback only: admin has no auth (give/kick/shutdown).
+        try self.listener.listen(0x7f000001, port, 4);
+        self.port = self.listener.port;
     }
 
     pub fn deinit(self: *Server) void {
         for (&self.sessions) |*s| {
-            if (s.* >= 0) _ = linux.close(s.*);
+            if (s.* >= 0) tcp.closeFd(s.*);
             s.* = -1;
         }
         self.recv_lens = .{0} ** max_sessions;
-        if (self.fd >= 0) _ = linux.close(self.fd);
-        self.fd = -1;
+        self.listener.deinit();
+        self.port = 0;
     }
 
     fn acceptNew(self: *Server) void {
-        var addr: linux.sockaddr.storage = undefined;
-        var alen: linux.socklen_t = @sizeOf(linux.sockaddr.storage);
-        const cfd_r = linux.accept(self.fd, @ptrCast(&addr), &alen);
-        if (linux.errno(cfd_r) != .SUCCESS) return;
-        const cfd: i32 = @intCast(cfd_r);
-        const fl = linux.fcntl(cfd, linux.F.GETFL, 0);
-        _ = linux.fcntl(cfd, linux.F.SETFL, fl | 0o4000); // O_NONBLOCK
+        const cfd = self.listener.accept() catch return orelse return;
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) {
                 s.* = cfd;
@@ -72,7 +47,7 @@ pub const Server = struct {
             }
         }
         // all slots busy: evict oldest (slot 0)
-        _ = linux.close(self.sessions[0]);
+        tcp.closeFd(self.sessions[0]);
         self.sessions[0] = cfd;
         self.recv_lens[0] = 0;
         self.active = 0;
@@ -83,13 +58,13 @@ pub const Server = struct {
     /// Sessions stay open across commands (telnet-style); replies go to the
     /// session that sent the line.
     pub fn pollLine(self: *Server, buf: []u8) ?[]const u8 {
-        if (self.fd < 0) return null;
+        if (!self.listener.enabled()) return null;
         self.acceptNew();
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) continue;
             const pending = self.recv_lens[i];
             if (pending == max_cmd) {
-                _ = linux.close(s.*);
+                tcp.closeFd(s.*);
                 s.* = -1;
                 self.recv_lens[i] = 0;
                 continue;
@@ -97,16 +72,22 @@ pub const Server = struct {
             var total = pending;
             if (std.mem.indexOfScalar(u8, self.recv_bufs[i][0..pending], '\n') == null) {
                 const dst = self.recv_bufs[i][pending..];
-                const n = linux.read(s.*, dst.ptr, dst.len);
-                const errn = linux.errno(n);
-                if (errn == .AGAIN) continue;
-                if (errn != .SUCCESS or n == 0) {
-                    _ = linux.close(s.*);
+                const n = tcp.read(s.*, dst) catch |err| switch (err) {
+                    error.WouldBlock => continue,
+                    else => {
+                        tcp.closeFd(s.*);
+                        s.* = -1;
+                        self.recv_lens[i] = 0;
+                        continue;
+                    },
+                };
+                if (n == 0) {
+                    tcp.closeFd(s.*);
                     s.* = -1;
                     self.recv_lens[i] = 0;
                     continue;
                 }
-                total += @intCast(n);
+                total += n;
             }
             const newline = std.mem.indexOfScalar(u8, self.recv_bufs[i][0..total], '\n') orelse {
                 self.recv_lens[i] = total;
@@ -115,7 +96,7 @@ pub const Server = struct {
             var end = newline;
             if (end > 0 and self.recv_bufs[i][end - 1] == '\r') end -= 1;
             if (end > buf.len) {
-                _ = linux.close(s.*);
+                tcp.closeFd(s.*);
                 s.* = -1;
                 self.recv_lens[i] = 0;
                 continue;
@@ -136,7 +117,7 @@ pub const Server = struct {
     pub fn closeActive(self: *Server) void {
         const fd = self.sessions[self.active];
         if (fd < 0) return;
-        _ = linux.close(fd);
+        tcp.closeFd(fd);
         self.sessions[self.active] = -1;
         self.recv_lens[self.active] = 0;
     }
@@ -145,18 +126,17 @@ pub const Server = struct {
     pub fn reply(self: *Server, text: []const u8) void {
         const fd = self.sessions[self.active];
         if (fd < 0) return;
-        var sent: usize = 0;
-        while (sent < text.len) {
-            const n = linux.write(fd, text[sent..].ptr, text.len - sent);
-            if (linux.errno(n) != .SUCCESS or n == 0) return;
-            sent += @intCast(n);
-        }
+        tcp.writeAll(fd, text);
     }
 };
 
 pub const Command = union(enum) {
     help,
     status,
+    /// Dump C2S authority reject counters (phase/ownership/bounds/movement/decode).
+    guardstats,
+    /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
+    apm,
     save,
     kick: usize,
     /// Ban by connected peer slot (records IP when available in Game).
@@ -188,6 +168,9 @@ pub const Command = union(enum) {
     shutdown,
     /// Stock `version`.
     version,
+    /// Erase a player record from players.zsv by login name (operator right-to-erasure).
+    /// Name is a slice into the original command line (must outlive the Command).
+    wipeplayer: []const u8,
     /// Known verb, missing or malformed arguments (slice of the input line).
     bad_args: []const u8,
     unknown,
@@ -198,8 +181,9 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "kick")) return "kick <slot>";
     if (std.mem.eql(u8, verb, "ban")) return "ban <slot>";
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
-    if (std.mem.eql(u8, verb, "give")) return "give <slot> <item> [count]";
-    if (std.mem.eql(u8, verb, "tele")) return "tele <slot> <x> <y> <z>";
+    if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemId> [count]";
+    if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp"))
+        return "tele|tp <slot> <x> <y> <z>";
     if (std.mem.eql(u8, verb, "say")) return "say <msg>";
     if (std.mem.eql(u8, verb, "kill")) return "kill <entityId>";
     if (std.mem.eql(u8, verb, "inv")) return "inv <slot>";
@@ -207,6 +191,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
         return "settime <day|night|ticks|D H M>";
     if (std.mem.eql(u8, verb, "spawnentity") or std.mem.eql(u8, verb, "se"))
         return "spawnentity <slot|entityId> <class>";
+    if (std.mem.eql(u8, verb, "wipeplayer")) return "wipeplayer <name>";
     return null;
 }
 
@@ -214,40 +199,48 @@ pub fn parseCommand(line: []const u8) Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const cmd = it.next() orelse return .unknown;
     if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "?") or std.mem.eql(u8, cmd, "commands"))
-        return .help;
-    if (std.mem.eql(u8, cmd, "status")) return .status;
-    if (std.mem.eql(u8, cmd, "save")) return .save;
+        return if (it.next() == null) .help else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "guardstats") or std.mem.eql(u8, cmd, "gs")) return if (it.next() == null) .guardstats else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "kick")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .kick = peer };
     }
     if (std.mem.eql(u8, cmd, "ban")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .ban = peer };
     }
     if (std.mem.eql(u8, cmd, "unban")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const ip = std.fmt.parseInt(u32, p, 16) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .unban = ip };
     }
-    if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "players")) return .list;
+    if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "players")) return if (it.next() == null) .list else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "give")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const i = it.next() orelse return .{ .bad_args = cmd };
         const c = it.next() orelse "1";
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .give = .{
             .peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd },
             .item = std.fmt.parseInt(u16, i, 10) catch return .{ .bad_args = cmd },
             .count = std.fmt.parseInt(u16, c, 10) catch return .{ .bad_args = cmd },
         } };
     }
-    if (std.mem.eql(u8, cmd, "tele")) {
+    // `tp` matches in-game console / WEBUI docs; same args as `tele`.
+    if (std.mem.eql(u8, cmd, "tele") or std.mem.eql(u8, cmd, "tp")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const xs = it.next() orelse return .{ .bad_args = cmd };
         const ys = it.next() orelse return .{ .bad_args = cmd };
         const zs = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         const x = std.fmt.parseFloat(f32, xs) catch return .{ .bad_args = cmd };
         const y = std.fmt.parseFloat(f32, ys) catch return .{ .bad_args = cmd };
         const z = std.fmt.parseFloat(f32, zs) catch return .{ .bad_args = cmd };
@@ -260,34 +253,37 @@ pub fn parseCommand(line: []const u8) Command {
         } };
     }
     if (std.mem.eql(u8, cmd, "say")) {
-        const rest = std.mem.trimStart(u8, line["say".len..], " ");
+        // it.rest() so leading whitespace before the verb cannot shift the slice.
+        const rest = std.mem.trim(u8, it.rest(), " ");
         if (rest.len == 0) return .{ .bad_args = cmd };
         return .{ .say = rest };
     }
     if (std.mem.eql(u8, cmd, "kill")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const id = std.fmt.parseInt(i32, p, 10) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .kill = id };
     }
     if (std.mem.eql(u8, cmd, "inv")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .inv = peer };
     }
-    if (std.mem.eql(u8, cmd, "gettime") or std.mem.eql(u8, cmd, "gt")) return .gettime;
+    if (std.mem.eql(u8, cmd, "gettime") or std.mem.eql(u8, cmd, "gt")) return if (it.next() == null) .gettime else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "settime") or std.mem.eql(u8, cmd, "st")) {
         const a = it.next() orelse return .{ .bad_args = cmd };
-        if (std.mem.eql(u8, a, "day")) return .{ .settime = .{ .day = 0, .hour = 8, .minute = 0 } };
-        if (std.mem.eql(u8, a, "night")) return .{ .settime = .{ .day = 0, .hour = 22, .minute = 0 } };
+        if (std.mem.eql(u8, a, "day")) return if (it.next() == null) .{ .settime = .{ .day = 0, .hour = 8, .minute = 0 } } else .{ .bad_args = cmd };
+        if (std.mem.eql(u8, a, "night")) return if (it.next() == null) .{ .settime = .{ .day = 0, .hour = 22, .minute = 0 } } else .{ .bad_args = cmd };
         // Stock telnet often sends a single world-time integer (e.g. 8000, 22000).
         // Packing used by playtest orch: thousands digit ~ hour*1000-ish; map common values.
         const n = std.fmt.parseInt(u32, a, 10) catch return .{ .bad_args = cmd };
         if (it.peek() == null) {
             // Single token: either stock ticks-ish or a lone day number.
             if (n >= 100) {
-                // 8000 -> 08:00, 22000 -> 22:00, 12000 -> 12:00
+                // Stock world time: 1000 ticks per hour (8000 -> 08:00, 22500 -> 22:30).
                 const hour: u8 = @intCast(@min(23, n / 1000));
-                const minute: u8 = @intCast(@min(59, (n % 1000) / 10)); // coarse
+                const minute: u8 = @intCast((n % 1000) * 60 / 1000);
                 return .{ .settime = .{ .day = 0, .hour = hour, .minute = minute } };
             }
             return .{ .settime = .{ .day = n, .hour = 8, .minute = 0 } };
@@ -296,6 +292,7 @@ pub fn parseCommand(line: []const u8) Command {
         const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch return .{ .bad_args = cmd };
         const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch return .{ .bad_args = cmd };
         if (h > 23 or mi > 59) return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .settime = .{ .day = n, .hour = h, .minute = mi } };
     }
     if (std.mem.eql(u8, cmd, "spawnentity") or std.mem.eql(u8, cmd, "se")) {
@@ -303,16 +300,23 @@ pub fn parseCommand(line: []const u8) Command {
         // peer slot (0..7) or stock player entity id (>=100). Game resolves both.
         const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
         const name = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
         // Offsets into the original line (name slice must outlive tokenizer).
         const off = @intFromPtr(name.ptr) - @intFromPtr(line.ptr);
         return .{ .spawnentity = .{ .peer = peer, .name_off = off, .name_len = name.len } };
     }
-    if (std.mem.eql(u8, cmd, "listents") or std.mem.eql(u8, cmd, "le")) return .listents;
-    if (std.mem.eql(u8, cmd, "listplayers") or std.mem.eql(u8, cmd, "lp")) return .listplayers;
-    if (std.mem.eql(u8, cmd, "killall") or std.mem.eql(u8, cmd, "ka")) return .killall;
-    if (std.mem.eql(u8, cmd, "saveworld") or std.mem.eql(u8, cmd, "sa")) return .saveworld;
-    if (std.mem.eql(u8, cmd, "shutdown")) return .shutdown;
-    if (std.mem.eql(u8, cmd, "version")) return .version;
+    if (std.mem.eql(u8, cmd, "listents") or std.mem.eql(u8, cmd, "le")) return if (it.next() == null) .listents else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "listplayers") or std.mem.eql(u8, cmd, "lp")) return if (it.next() == null) .listplayers else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "killall") or std.mem.eql(u8, cmd, "ka")) return if (it.next() == null) .killall else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "saveworld") or std.mem.eql(u8, cmd, "sa")) return if (it.next() == null) .saveworld else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "shutdown")) return if (it.next() == null) .shutdown else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "version")) return if (it.next() == null) .version else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "wipeplayer")) {
+        const name = it.next() orelse return .{ .bad_args = cmd };
+        if (name.len == 0 or name.len > 32) return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .wipeplayer = name };
+    }
     return .unknown;
 }
 
@@ -330,6 +334,16 @@ test "parse ban kick list" {
     try std.testing.expect(parseCommand("unban 7f000001") == .unban);
 }
 
+test "parse tp alias for tele" {
+    const c = parseCommand("tp 0 10 70 -5");
+    try std.testing.expect(c == .tele);
+    try std.testing.expectEqual(@as(usize, 0), c.tele.peer);
+    try std.testing.expectEqual(@as(f32, 10), c.tele.x);
+    try std.testing.expectEqual(@as(f32, 70), c.tele.y);
+    try std.testing.expectEqual(@as(f32, -5), c.tele.z);
+    try std.testing.expectEqualStrings("tele|tp <slot> <x> <y> <z>", usageFor("tp").?);
+}
+
 test "parse kill" {
     const c = parseCommand("kill 100");
     try std.testing.expect(c == .kill);
@@ -340,6 +354,16 @@ test "parse inv" {
     const c = parseCommand("inv 0");
     try std.testing.expect(c == .inv);
     try std.testing.expectEqual(@as(usize, 0), c.inv);
+}
+
+test "parse guardstats" {
+    try std.testing.expect(parseCommand("guardstats") == .guardstats);
+    try std.testing.expect(parseCommand("gs") == .guardstats);
+}
+
+test "parse apm" {
+    try std.testing.expect(parseCommand("apm") == .apm);
+    try std.testing.expect(parseCommand("metrics") == .apm);
 }
 
 test "parse stock ops commands" {
@@ -367,6 +391,20 @@ test "parse stock ops commands" {
     try std.testing.expect(parseCommand("shutdown") == .shutdown);
 }
 
+test "say keeps message intact despite leading whitespace" {
+    const c = parseCommand("  say hello world");
+    try std.testing.expect(c == .say);
+    try std.testing.expectEqualStrings("hello world", c.say);
+    try std.testing.expect(parseCommand("say") == .bad_args);
+}
+
+test "settime ticks map to stock minutes" {
+    const st = parseCommand("settime 22500");
+    try std.testing.expect(st == .settime);
+    try std.testing.expectEqual(@as(u8, 22), st.settime.hour);
+    try std.testing.expectEqual(@as(u8, 30), st.settime.minute);
+}
+
 test "parse rejects malformed numeric arguments" {
     try std.testing.expect(parseCommand("give 0 2 many") == .bad_args);
     try std.testing.expect(parseCommand("tele 0 nan 70 10") == .bad_args);
@@ -374,6 +412,16 @@ test "parse rejects malformed numeric arguments" {
     try std.testing.expect(parseCommand("settime 7 noon 30") == .bad_args);
     try std.testing.expect(parseCommand("settime 7 24 00") == .bad_args);
     try std.testing.expect(parseCommand("settime 7 23 60") == .bad_args);
+}
+
+test "parse rejects trailing arguments for fixed-arity commands" {
+    try std.testing.expect(parseCommand("status now") == .bad_args);
+    try std.testing.expect(parseCommand("kick 1 extra") == .bad_args);
+    try std.testing.expect(parseCommand("give 0 2 5 extra") == .bad_args);
+    try std.testing.expect(parseCommand("tp 0 10 70 10 extra") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 10 30 extra") == .bad_args);
+    try std.testing.expect(parseCommand("spawnentity 0 zombieBoe extra") == .bad_args);
+    try std.testing.expect(parseCommand("wipeplayer Alice extra") == .bad_args);
 }
 
 test "bad args carry the verb; unknown verbs stay unknown" {
@@ -387,6 +435,14 @@ test "bad args carry the verb; unknown verbs stay unknown" {
 test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expect(parseCommand("commands") == .help);
     try std.testing.expectEqualStrings("kick <slot>", usageFor("kick").?);
-    try std.testing.expectEqualStrings("give <slot> <item> [count]", usageFor("give").?);
+    try std.testing.expectEqualStrings("give <slot> <itemId> [count]", usageFor("give").?);
+    try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
     try std.testing.expect(usageFor("frobnicate") == null);
+}
+
+test "parse wipeplayer" {
+    const c = parseCommand("wipeplayer Alice");
+    try std.testing.expect(c == .wipeplayer);
+    try std.testing.expectEqualStrings("Alice", c.wipeplayer);
+    try std.testing.expect(parseCommand("wipeplayer") == .bad_args);
 }

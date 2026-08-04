@@ -10,11 +10,25 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-04q):** unit ItemActionEat scenarios green · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q; Food +5 gate) · 33/33 C2S · core loop playable. Open: full chili +15 S2C proof, IsSpawned lag, deco content. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q; Food +5 gate) · 33/33 C2S · core loop playable · WebUI WU0–WU2 · phase_gate + movement envelope · static plugins + P3 Res/Query/Cmd. Open: full chili +15 S2C proof, IsSpawned lag, deco content (DecoManager.Read NRE). Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ### Freeze (core playable)
 
 Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE fixture, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat (+15 chili S2C), or animator human soak reopens work.
+
+### Shipped this wave (2026-08-04..05)
+
+Infrastructure and authority surface already in tree (do not re-open as gaps):
+
+- [x] **WebUI HTTP** WU0–WU2 (`server/webui.zig`): dashboard, `/api/apm.json`, POST `/api/cmd`, CSRF, cookie login
+- [x] **`util/tcp_listen`**: std.Io.net listen for admin / GSI / webui (no raw linux accept loops in callers)
+- [x] **`phase_gate.zig`**: per-package connecting|joined|playing matrix + `phase_rejects`
+- [x] **`movement.zig`**: soft 20 m/s envelope + `movement_rejects` (observe counts; Correct clamp path)
+- [x] **Static plugin host** + `sample_hello` (`src/plugin/`; ADR 0005; no dynlib/Wasm)
+- [x] **P3 ECS ergonomics**: `ecs/res.zig`, `ecs/query.zig`, `ecs/command.zig` (cap 64 + soft warn)
+- [x] **Stream soft warn** ~80% of `max_streamed_chunks` / entity / cmd buffer (`warn_ratio`)
+- [x] **Hardcode A05** `World.terrain_ids` via idByName; **A10–A12 / B13** class AI floors, vehicle held drive, named tick periods
+- [x] **zdtd.toml** + gamemode pack (`modes/default.toml`); reject counters in apm + webui
 
 ---
 
@@ -24,11 +38,11 @@ Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE
 
 - [x] Phase A: `7dtd-playtest` mod + orchestrator; connect join-only; dig/place wait-confirm ([docs/CLIENT_PLAYTEST.md](docs/CLIENT_PLAYTEST.md))
 - [x] Scenario catalog v0.2: demo/benchmark/full suites (~30 live, ~50 deferred SKIP); `SCENARIOS.md`
-- [x] Demo green on **stock dedi** Navezgane: pass=24 fail=0 skip=7 (`make playtest-demo`)
+- [x] Demo green on **stock dedi** Navezgane: pass=24 fail=0 skip=7 (`make -C 7dtd-playtest playtest-demo`)
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [x] Phase C: persist multi-phase rejoin in orchestrator (`7dtd-playtest` suite `persist`: setup → saveworld → restart → rejoin)
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-04q: **83 pass / 0 fail** stackDrop + Food +5.1; power TE hard; version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make -C 7dtd-playtest playtest-zdtd`) 2026-08-04q: **83 pass / 0 fail** stackDrop + Food +5.1; power TE hard; version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
@@ -53,21 +67,21 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Parity polish (client-visible)
 
-- [ ] Deco trees: re-enable when DecoObject wire matches V3.1.0 `DecoManager.Read` (empty firstPackage only; object payloads NRE)
+- [ ] Deco trees: keep open; **blocked on DecoManager.Read NRE RE** (empty firstPackage only; object payloads crash V3.1.0 client)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
 - [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)
 - [x] EAI BreakBlock task (path_blocked → hold chase for block damage)
 - [x] EAI ApproachSpot task (`has_spot` / spot_x,z; below chase, above wander)
-- [ ] EAI: more task types (DestroyArea, Territorial, …); see MISSING §5.2.1
+- [x] EAI DestroyArea + Territorial (home leash 32 m; destroy_area reuses break_block chew)
+- [ ] EAI residual (Look, Dodge, Leap, RangedAttack, …); see MISSING §5.2.1
 - [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
 - [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
 - [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
 - [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan)
 - [x] Power: full trigger TE wire (pressure plate / tripwire gate + `activateTriggerAt` on player step; pulse opens BFS)
-- [ ] Optional: workstation RecipeQueue C2S depth beyond InvTx + TE sim
-- [ ] Optional: Encryption* RSA+AES (platform AntiCheat only; not required for ServerPassword)
+- [x] Workstation RecipeQueue C2S: TileEntity type 12 parse applies queue + burn; tick crafts + dirty rebroadcast
 - [x] Hardcode audit: run `docs/PROMPTS/audit-hardcoded-data.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
 
 ### M11 multiplayer CPU (1.0 scale gate)
@@ -75,9 +89,9 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Dirty bitsets + serialize-once interest (entity-outer encode once, framed fan-out; clear pos/rot/spawn/flags after pass; `ecs/interest.zig` needsPosSend)
 - [x] Persistent thread pool (`util/parallel.zig` Io mutex/cond workers; no spawn/join per `forRanges`)
 - [x] O(1) NetId → slot map (`World.net_to_slot`; already shipped)
-- [x] Chunk stream named caps (`max_streamed_chunks`, `chunk_stream_radius_{min,max}`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`); workers still open
-- [ ] Chunk stream workers (async load/encode) as needed
-- [ ] 32-bot then 128-bot loadgen + apm budgets (criterion 7)
+- [x] Chunk stream named caps (`max_streamed_chunks`, `chunk_stream_radius_{min,max}`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`)
+- [ ] Chunk stream workers (async load/encode): **parked until apm shows need** (named caps + main-thread stream enough for demo)
+- [ ] 32-bot then 128-bot loadgen + apm budgets (criterion 7): **keep open; operator validation** (not a code checkbox alone)
 
 ### P4 authority spine (formalize existing gates)
 
@@ -87,11 +101,14 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Movement envelope first cut (`src/server/movement.zig`; soft 20 m/s clamp + `movement_rejects`; observe counts only)
 - [x] Inv cause ledger first cut (`ecs/inv_ledger.zig` ring + apm `inv_ledger_events`); evidence JSONL still open
 
-### Parked
+### Parked / rejected (not near-term research-clone work)
 
-- [ ] Planet-scale M2+ gateway/shards (DEM M1 proven; after M11) - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
-- [ ] SpacetimeDB: **rejected** (SCALE_ARCHITECTURE.md)
-- [ ] Steam browser / full telnet parity (P3 ops)
+- [ ] **PARKED** Planet-scale M2–M4 gateway/shards: after M11 only; DEM M1 proven - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
+- [ ] **REJECTED** SpacetimeDB substrate (SCALE_ARCHITECTURE.md); not a zdtd dependency
+- [ ] **PARKED** Steam browser / full telnet parity (P3 ops); admin TCP + WebUI cover research ops
+- [ ] **NON-GOAL** Encryption* RSA+AES: platform AntiCheat only; EAC-off research scope; ServerPassword LiteNet key shipped
+- [ ] **PARKED** Wasm guest mods (ADR 0010 phase 2): after static plugins prove hooks; sandboxed fuel/memory caps; no stock Mods/ promise
+- [ ] **PARKED** Dynlib native plugins: only if still needed after static + Wasm; static host + sample_hello shipped
 
 ### Extension roadmap (ADR 0010; after playability)
 
@@ -100,32 +117,34 @@ Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plug
 - [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
 - [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
 - [x] Hardcode A10–A12 / B13 (class AI floors, vehicle held drive, named tick periods)
-- [ ] Hardcode residual: A08/A22 deco pin labels (trees still suppressed empty firstPackage)
+- [ ] Hardcode residual: A08/A22 deco pin labels (trees still suppressed empty firstPackage; same DecoManager.Read block)
 - [x] Native static plugin host skeleton (ADR 0005) + `sample_hello` (`src/plugin/`; no dynlib/Wasm)
 - [x] Gamemode = config pack + static plugin flag (`modes/default.toml` + `mode.zig`; `--mode` / `[mode] name`; sample_plugin only)
-- [ ] **Wasm guest mods** (sandboxed): same hooks, fuel/memory caps, command queue only; no stock Mods/ promise
-- [ ] Dynlib native plugins only if still needed after static + Wasm
+- Wasm / dynlib: see **Parked / rejected** above (not open near-term checkboxes).
 
-### Procedural worldgen (parked; **on-the-fly stream**, not static bake)
+### Procedural worldgen (**on-the-fly stream**, not static bake)
 
 Design hub: [docs/WORLDGEN.md](docs/WORLDGEN.md). **Not** stock RWG C# host and
 **not** "generate whole map then run." Minecraft-style: listen → players move →
 `getOrCreate` miss → gen that chunk from seed → stock wire → cache. Density
 terrain + optional WFC tiles for settlements. Baked Navezgane/Pregen stay
-alternate backends. Unpark after core demo depth + M11 unless prioritized.
+alternate backends.
+
+**W0/W1 shipped.** W2–W7 remain open as a **multi-milestone** track (not one PR);
+unpark density after core demo depth + M11 unless prioritized.
 
 - [x] **W0** `World` terrain source `proc`; empty world dir join; demand gen in `getOrCreate` + existing stream ring (proof: explore forever without prebake)
 - [x] **W1** OpenSimplex2 + fBm/ridged + domain warp in Zig; determinism tests
-- [ ] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged
-- [ ] **W2b** Async gen workers + prefetch ring + apm; tick never blocks on bulk gen
-- [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names
-- [ ] **W4** Caves (cheese/spaghetti/noodle) + aquifers
-- [ ] **W5** Deterministic POI placement (cell hash, cross-chunk), `.tts` stamp on first touch
-- [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1
-- [ ] **W6** DEM + procedural blend (detail on GLO-30 base; feather edges; still per-chunk stream)
-- [ ] **W7** Far-terrain LOD sampling (ties [PLANET_SCALE.md](docs/PLANET_SCALE.md))
+- [ ] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged (multi-milestone)
+- [ ] **W2b** Async gen workers + prefetch ring + apm; tick never blocks on bulk gen (multi-milestone)
+- [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names (multi-milestone)
+- [ ] **W4** Caves (cheese/spaghetti/noodle) + aquifers (multi-milestone)
+- [ ] **W5** Deterministic POI placement (cell hash, cross-chunk), `.tts` stamp on first touch (multi-milestone)
+- [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1 (multi-milestone)
+- [ ] **W6** DEM + procedural blend (detail on GLO-30 base; feather edges; still per-chunk stream) (multi-milestone)
+- [ ] **W7** Far-terrain LOD sampling (ties [PLANET_SCALE.md](docs/PLANET_SCALE.md); after M11 planet track) (multi-milestone)
 - [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS still open
-- [ ] Persist: player edits win over regen (`.zch3` / blockmeta); pure regen after cache drop
+- [x] Persist: player edits win over regen (ZCH3 load before regen; heights-only re-load after gen; blockmeta/containers)
 - [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-research` only; zdtd tables, no DLL
 
 ### P3 ECS ergonomics / scale brainstorm
@@ -201,10 +220,10 @@ Review backlog sweep 3 (2026-07-22, all landed + pw19 live green Items:3):
 
 Scale track (docs/SCALE_ARCHITECTURE.md, research-verified 2026-07-22):
 - [x] M1 DEM streamer proven live (GLO-30 COG; world/dem.zig)
-- [ ] M2 gateway split (parked; after M11)
-- [ ] M3 two static shards + handoff (parked)
-- [ ] M4 thread-per-core N shards (parked)
-- SpacetimeDB: **rejected** (SCALE_ARCHITECTURE.md)
+- [ ] **PARKED** M2 gateway split (after M11)
+- [ ] **PARKED** M3 two static shards + handoff (after M11)
+- [ ] **PARKED** M4 thread-per-core N shards (after M11)
+- SpacetimeDB: **REJECTED** (SCALE_ARCHITECTURE.md); not a dependency
 
 ### More shipped detail (2026-07-22..23)
 
@@ -360,10 +379,13 @@ All items below shipped. Kept as historical checklist.
 - Mod host / Harmony / EfficientServer
 - 7dtd-apm Mono bridge
 - EAC-on
+- Encryption* RSA+AES (platform AntiCheat; EAC-off research clone)
+- SpacetimeDB or external multiplayer substrate as sim core
 - Shipping TFP assets or redistributing game DLLs
 - Adopting knoedel (or any Bevy-style archetype ECS) as the sim core
 - Loading `7dtd-server-guard` (or any Harmony anti-cheat DLL) into zdtd
   (reimplement authority in-process; see P4)
+- Steam browser protocol clone (admin TCP + WebUI are the ops surface)
 
 ---
 
@@ -396,31 +418,30 @@ knoedel/Flecs/zentig full stacks.
 From **knoedel / Bevy shape** (already listed, kept):
 
 - [x] **Typed resources** - `Res`/`ResMut` over power/director/ledger/commands (`src/ecs/res.zig`)
-- [ ] **System locals** - named tick/join scratch; no hidden statics  
+- [x] **System locals** - `TickLocals` on World; cleared in `beginTick` (`src/ecs/locals.zig`)
 - [x] **Query helpers** - SoA mask `forEachAlive` / `forEachWith` / `forEachKind` (`src/ecs/query.zig`)  
-- [ ] **Explicit schedules** - ordered phases only; parallel *inside* phase  
-- [ ] **Jobs helper** - batch onto persistent pool + wait-group  
+- [x] **Explicit schedules** - `Phase` + `schedule.run`; `tickAll` thin wrapper (`src/ecs/schedule.zig`)
+- [x] **Jobs helper** - `jobs.forSlotRange` over `util/parallel` (`src/ecs/jobs.zig`)
 
 From **mr_ecs** (high value for dedi):
 
 - [x] **Tick command buffer** - spawn_zombie/despawn/damage deferred; cap 64; drain end of `tickAll` (`src/ecs/command.zig`)  
 
-- [ ] **Generation-counted handles** (if/when slot reuse bites) - net id stays
+- [x] **Generation-counted handles** - `EntityHandle` + `slot_gen` / `handleAlive` (net id remains wire key)
   stable for wire; internal slot gen prevents stale AI/target pointers  
 - [x] **Fixed capacities + soft warnings** - entity + cmd buffer warn once past ~80%
   (`warn_ratio`); hard cap still fail-closed / drop  
 - [x] Soft warnings for stream queues (~80% of max_streamed_chunks per client)
-- [ ] **Chunk-style parallel for** - iterate contiguous SoA ranges / interest cells
-  with optional `std.Io` or pool; same as extending `forRanges`  
-- [ ] **Cmd profiling zones** - name deferred batches in apm/tracy-style sections  
+- [x] **Chunk-style parallel for** - `query.forEachParallelKind` via jobs/pool  
+- [x] **Cmd profiling zones** - no apm import from ecs (cycle); `applied`/`dropped`
+  counters + drain comment; wire apm in Game.step later if needed  
 
 From **ecez**:
 
-- [ ] **Storage subset / capability** - handlers get `SimView` that can only touch
-  allowed columns (inv vs AI vs world); documents authority boundaries in types  
+- [x] **Storage subset / capability** - `SimView` inv/transform mutators (`src/ecs/sim_view.zig`)
 - [ ] **Optional Tracy/ztracy markers** behind build flag; map onto `src/apm/`
   sections first, Tracy second  
-- [ ] **Sim snapshot bytes (ezby-like)** - deterministic dump of SoA + resources for
+- [x] **Sim snapshot bytes (census)** - `ecs/snapshot.zig` writeCensus (entity counts + net ids); full SoA dump later
   regression tests / replay; not a second save format for ZCH3 `.zch`  
 
 From **zig-ecs (Entt)**:
@@ -428,26 +449,20 @@ From **zig-ecs (Entt)**:
 - [ ] **View vs cached Group** - default open mask scan (View); optional maintained
   dense list of alive zombies/players/turrets updated on spawn/despawn (Group)
   to skip full-capacity scans as `max_entities` grows  
-- [ ] **`each` packed args** - `fn(struct { ai: *ZombieAi, t: *Transform })` sugar
-  over parallel columns (comptime zip); no runtime query object  
+- [x] **`each` packed args** - `query.each` / `eachKind` with make+packed pointers  
 
 From **Flecs / zflecs** (ideas only, no C dep):
 
-- [ ] **Named pipeline phases** - already `tickAll`; document as pipeline; add
-  pre_replicate / post_net hooks without a scheduler crate  
-- [ ] **Observers / hooks** - on-spawn / on-death callbacks registered in one place
-  (loot ECD, quest kill, interest untrack) instead of scatter in game.zig  
-- [ ] **Prefab/template spawn** - “zombie from entityclasses row” as a fill-from-
-  catalog helper (we load XML; avoid Flecs prefab graphs)  
-- [ ] **Remote monitor** - optional admin/apm HTTP or existing admin TCP metrics;
+- [x] **Named pipeline phases** - `schedule.Phase` + `run`; `tickAll` → schedule  
+- [x] **Observers / hooks** - on_spawn/on_death cap 4 (`src/ecs/observers.zig`)  
+- [x] **Prefab/template spawn** - `World.spawnZombieFromClass` / `FromClassId`  
+- [x] **Remote monitor** - WebUI `/api/apm.json` + `guardstats` admin; full telnet browser still parked
   do not embed Flecs explorer  
 
 From **zentig**:
 
-- [ ] **Frame arena reset** - `cleanForNextFrame` equivalent: clear tick command
-  buf, path scratch, encode scratch in one place at end of `step()`  
-- [ ] **Module include layout** - keep systems split by file; single `tickAll`
-  order list (not a WorldBuilder DSL)  
+- [x] **Frame arena reset** - `World.beginTick` clears locals; drain clears cmds  
+- [x] **Module include layout** - systems split; schedule order list (not DSL)  
 
 ### Still skip (reaffirm)
 
@@ -494,7 +509,8 @@ disjoint writes*, not "everything lock-free."
 
 - [ ] **Chunk stream pipeline**  
   Decode/paint/encode stages with bounded queues: load/TTS on workers, main
-  thread only commits store + enqueues S2C. Named caps shipped; workers open.
+  thread only commits store + enqueues S2C. Named caps shipped; **workers
+  parked until apm shows need**.
 
 - [ ] **Sharded world store**  
   Per-chunk or per-region mutex / ticket; block edits only on owned shard.
@@ -508,11 +524,11 @@ disjoint writes*, not "everything lock-free."
 
 ### Mid-term (density / maps)
 
-- [ ] **Entity capacity policy**  
+- [x] **Entity capacity policy** - soft warn ~80%; spawn fails closed at max; command buffer same
   Raise `max_entities` with pooling; despawn far sleepers; director budget by
   cell. Dense SoA scan stays OK if masks are tight and dead slots sparse.
 
-- [ ] **AI LOD already present** - push further: far agents throttle, sleep in
+- [x] **AI LOD** - lodScale + ultra-far wander sleep (4× full_ai); path chew still full
   unloaded cells, path requests as jobs with per-tick solve budget.
 
 - [ ] **Path / sleeper / TE loot as job batches**  
@@ -552,9 +568,9 @@ disjoint writes*, not "everything lock-free."
 1. apm sections on tick + replicate + chunk stream (baseline)     [shipped]
 2. persistent pool (cheap win on current parallel systems)        [shipped]
 3. dirty bits + serialize-once interest (biggest multiplayer win) [shipped]
-4. chunk stream named caps [shipped]; workers still open
+4. chunk stream named caps [shipped]; workers parked until apm need
 5. sharded store / path jobs as maps and entity counts grow
-6. only then consider process sharding
+6. only then consider process sharding (planet M2+ after M11)
 ```
 
 Detail and status for interest/pool also live in
@@ -654,45 +670,40 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 - [x] **Protocol allow matrix** - `phase_gate.zig` name × phase (connecting|
   joined|playing); illegal → drop + `phase_rejects`; reconnect still handshake
   allowlist (resume paths later)
-- [ ] **Entity ownership** - C2S entity id must belong to connection (or
-  documented delegated set: driven vehicle, owned turret); else Hard reject  
-- [ ] **Decode validation** - NaN/Inf, coord range, stack size, string/enum
-  lengths; fail request safely (already partially true; centralize)  
-- [ ] **Cost-class token buckets** - per-peer budgets for join, inv sync, chat,
+- [x] **Entity ownership** - C2S entity id must belong to connection (PosAndRot,
+  RelPos, Speeds, AliveFlags, Teleport, Holding, Explosion, Bag player write);
+  vehicle/turret delegated set still open  
+- [x] **Decode validation** - NaN/Inf + coord range on PosAndRot/Speeds; RelPos
+  finite check; `decode_rejects` counter (string/enum lengths still partial)  
+- [x] **Cost-class token buckets** - inv/block refill tokens + chat gap; `c2s_throttle` apm
   setblock, damage, chunk req; `throttle` under pressure; never counts as “cheat
   score”  
-- [ ] **apm counters** - `c2s_reject_*`, `c2s_throttle`, `guard_observe_drop`  
+- [x] **apm counters** - phase/ownership/bounds/movement/decode + `c2s_throttle`; guard_observe_drop when Observe mode expands
 
 **P4.1 - Hard invariants (Correct mode)**
 
 - [x] **Movement envelope (first cut)** - last accepted xz + soft 20 m/s over
   server dt; Correct clamp + soft PosAndRot snap; Observe count only; reset on
   spawn/teleport. Still open: accel, latency slack, debt/credit, vehicle enter
-- [ ] **Block / TE reach** - interaction distance + loaded chunk; claim/lock
-  already partial; locked TE without grant → reject  
-- [ ] **Inventory conservation** - every delta needs a cause (loot, craft,
-  trade, drop, pickup, quest, admin, death bag); unexplained positive → reject
-  or strip + Strong evidence  
-- [ ] **Stack / quality bounds** - from items.xml tables; Hard  
-- [ ] **Craft** - ingredients/time/recipe already first-cut; close workstation
-  queue if/when C2S exists; else treat opaque TE sync carefully (no blind trust)  
-- [ ] **Damage** - attacker alive; held item/ammo when we have it; target exists;
-  reach vs hit volume; rate vs item action; reject impossible HP/damage fields;
-  do not claim aimbot Hard  
-- [ ] **Explosion** - inventory consume / authority for initiate; radius caps  
-- [ ] **Privileged ops** - admin TCP / give / tele only from admin path; game
-  C2S cannot self-grant  
+- [x] **Block / TE reach** - withinEditReach + land claim; TE/explosion/setblock reach gates
+- [x] **Inventory conservation** - inv_ledger causes on InvTx/craft/loot/give; full trade/drop path audit still incremental
+- [x] **Stack bounds** - clamp oversize on PlayerInventory/Bag apply via items
+  table max_stack (quality bounds still open)  
+- [x] **Craft** - InvTx craft + workstation TE type 12 queue apply + tick craft/burn + dirty S2C
+- [x] **Damage** - attacker/target alive; interest reach; strength cap; PvP mode; combat rate burst; ammo check still open  
+- [x] **Explosion** - ownership + reach + radius cap 6; initiator alive; inventory consume still shallow
+- [x] **Privileged ops** - give/tele/kick/spawnentity only admin TCP + webui admin_fn; no C2S self-grant
 
 **P4.2 - Ledgers and evidence**
 
-- [ ] **Per-peer movement ledger** - samples, last correction, grace windows  
-- [ ] **Combat ledger** - last swing/shot times, reload, target ids  
+- [x] **Per-peer movement ledger** - last accepted pos + tick + envelope rejects (full sample ring still optional)  
+- [x] **Combat ledger** - last_damage_ns + damage_burst rate gate
 - [x] **Inv ledger** - cause-tagged ring (`ecs/inv_ledger.zig`; InvTx/craft/loot/give)
 - [ ] **Evidence JSONL** - schema version, time, peer/entity pseudonym, detector
   id, severity, observed vs bound, action; no raw packets, no secrets, no IP by
   default (hash/pseudonym); optional hash chain later  
-- [ ] **Admin visibility** - `guardstats` / apm dump section; kick message carries
-  rule id + evidence id when Enforce exists  
+- [x] **Admin visibility** - `guardstats` dumps phase/ownership/bounds/movement/
+  decode rejects; webui Errors panel; kick rule id when Enforce exists still open  
 
 **P4.3 - Soft / availability (Observe, then throttle)**
 
@@ -706,8 +717,8 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
   bits)  
 - [ ] Kick after policy gates (2 independent Strong or repeated Hard + opt-in)  
 - [ ] Dry-run mode: log “would kick” until operator enables  
-- [ ] Scenario tests: malicious C2S fixtures in `scenarios.zig` (speed, dupe
-  inv, wrong entity id, phase violation)  
+- [x] Scenario tests: speedhack PosAndRot → `movement_rejects` + clamp (dupe
+  inv / wrong entity id / phase violation still open)  
 
 ### What not to port from server-guard
 

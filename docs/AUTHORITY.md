@@ -24,7 +24,7 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 | Mode | Behavior |
 |---|---|
 | **correct** | Hard invariants reject/clamp (reach, phase, ownership, damage caps). Production default. |
-| **observe** | Same Hard drops for join phase and reach today; reserved for soft signals (ledgers, evidence) that only count without changing gameplay. |
+| **observe** | Same Hard drops for join phase, reach, ownership, and damage caps. **Soft path today:** movement envelope counts `movement_rejects` but still applies client pos (no clamp, no S2C snap). Other soft-only signals (ledgers, evidence) reserved. |
 
 `permissive` is accepted as an alias of `observe`. No auto-kick / ban ladder yet
 (Enforce is later P4).
@@ -35,8 +35,11 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 |---|---|---|
 | **Join phase matrix** | `phase_gate.zig` via `handlePackage` | Phases: `connecting` / `joined` / `playing` (`joined`+`entered`). Pre-play: join-SM allowlist only; play C2S dropped + `phase_rejects`. Always Hard. |
 | **Movement envelope** | `movement.zig` on PosAndRot / RelPosAndRot | Soft max 20 m/s horizontal over server dt. **correct**: clamp + soft S2C PosAndRot snap; **observe**: count `movement_rejects` only. Reset on spawn/teleport. |
+| **Decode validation** | PosAndRot / Speeds / RelPos | Reject NaN/Inf and out-of-range world coords at parse; `decode_rejects`. |
 | **C2S bounds** | SetBlock / Explosion / TE / DamageEntity | Reach ~96 blocks; damage strength cap 200; fatal damage vs NPC only. |
-| **Ownership** | Bag / InvTx / player entity id | No cross-player inv writes; editor must be local player slot. |
+| **Ownership** | Bag / InvTx / player entity id / motion pkgs | No cross-player inv writes; entity_id must match peer; `ownership_rejects`. |
+| **Stack bounds** | PlayerInventory / Bag apply | Clamp slot count to items.xml `Stacknumber` (fail closed omit excess). |
+| **Admin** | `guardstats` | Dumps phase/ownership/bounds/movement/decode reject counters. |
 | **Player inv (interim)** | PlayerInventory / player Bag C2S | **Client-trusting apply** into ECS (ADR 0007). No S2C PlayerInventory echo. Admin `give` = loot bag drop. |
 | **Interest / no self-echo** | `replicate` / scenarios | Motion and entity updates go to observers; sender does not get own PosAndRot echo. Serialize-once: ADR 0008. |
 | **Rate / lock** | join IP throttle; lock channels | ~500 ms join gap (loopback exempt); TE lock holder deny + stale release. |

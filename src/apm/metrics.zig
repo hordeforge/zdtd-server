@@ -34,8 +34,16 @@ pub const CounterId = enum(u16) {
     bounds_rejects,
     /// C2S movement over envelope (clamp or observe count).
     movement_rejects,
+    /// C2S dropped by decode validation (NaN/Inf, coord range).
+    decode_rejects,
     /// P4 inv cause ledger appends (observe / evidence).
     inv_ledger_events,
+    /// Privileged commands accepted from admin TCP or the web UI.
+    admin_commands,
+    /// Player console commands received, including permission denials.
+    player_console_commands,
+    /// C2S dropped by per-peer token bucket (inv/block/chat rate).
+    c2s_throttle,
     _,
 };
 
@@ -46,7 +54,7 @@ pub const Counters = struct {
 
     pub fn add(self: *Counters, id: CounterId, n: u64) void {
         const i: usize = @intFromEnum(id);
-        if (i < counters_len) self.values[i] +%= n;
+        if (i < counters_len) self.values[i] = std.math.add(u64, self.values[i], n) catch std.math.maxInt(u64);
     }
 
     pub fn inc(self: *Counters, id: CounterId) void {
@@ -72,11 +80,11 @@ pub const LatencyHist = struct {
     max_ns: u64 = 0,
 
     pub fn observe(self: *LatencyHist, ns: u64) void {
-        self.count +%= 1;
-        self.sum_ns +%= ns;
+        self.count = std.math.add(u64, self.count, 1) catch std.math.maxInt(u64);
+        self.sum_ns = std.math.add(u64, self.sum_ns, ns) catch std.math.maxInt(u64);
         if (ns > self.max_ns) self.max_ns = ns;
         const b: u6 = if (ns == 0) 0 else @intCast(@min(63, 63 - @clz(ns)));
-        self.buckets[b] +%= 1;
+        self.buckets[b] = std.math.add(u64, self.buckets[b], 1) catch std.math.maxInt(u64);
     }
 
     pub fn meanNs(self: *const LatencyHist) u64 {
@@ -90,7 +98,7 @@ pub const LatencyHist = struct {
         const target: u64 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.count)) * p / 100.0));
         var acc: u64 = 0;
         for (self.buckets, 0..) |c, i| {
-            acc +%= c;
+            acc = std.math.add(u64, acc, c) catch std.math.maxInt(u64);
             if (acc >= target) {
                 // bucket mid estimate
                 const lo: u64 = if (i == 0) 0 else (@as(u64, 1) << @intCast(i));
@@ -115,6 +123,13 @@ test "counter inc" {
     c.add(.net_bytes_out, 100);
     try std.testing.expectEqual(@as(u64, 1), c.get(.ticks));
     try std.testing.expectEqual(@as(u64, 100), c.get(.net_bytes_out));
+}
+
+test "counters saturate instead of wrapping" {
+    var c: Counters = .{};
+    c.add(.ticks, std.math.maxInt(u64));
+    c.inc(.ticks);
+    try std.testing.expectEqual(std.math.maxInt(u64), c.get(.ticks));
 }
 
 test "hist percentile" {

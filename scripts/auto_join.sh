@@ -24,6 +24,11 @@ if [[ ! -d "$GAME" ]]; then
   echo "auto_join: game install not found (set GAME_DIR): $GAME" >&2
   exit 2
 fi
+# ServerPort 0..65533 (LiteNet uses port+2); reject non-integers early.
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((10#$PORT > 65533)); then
+  echo "auto_join: PORT must be an integer 0..65533 (got '$PORT')" >&2
+  exit 2
+fi
 
 mkdir -p "$WORLD"
 cd "$ROOT"
@@ -31,7 +36,17 @@ cd "$ROOT"
 : >"$WORLD/server.log"
 ./zig-out/bin/zdtd --port "$PORT" --game-dir "$GAME" --world "$WORLD" >"$WORLD/server.log" 2>&1 &
 SPID=$!
-cleanup() { kill "$SPID" 2>/dev/null || true; wait "$SPID" 2>/dev/null || true; }
+cleanup() {
+  if [[ -n "${SPID:-}" ]] && kill -0 "$SPID" 2>/dev/null; then
+    kill -TERM "$SPID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$SPID" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL "$SPID" 2>/dev/null || true
+  fi
+  wait "$SPID" 2>/dev/null || true
+}
 trap cleanup EXIT
 # Wait until config line is printed (socket bind is past that point), or die early.
 ready=0
@@ -51,6 +66,6 @@ if [[ "$ready" -ne 1 ]]; then
   exit 1
 fi
 # LiteNet = ServerPort+2
-"$LOADGEN" --join --host 127.0.0.1 --port $((PORT + 2)) --count 1 --actions 5 --timeout 30000 --no-spawn-zombies | tee "$WORLD/loadgen.log"
+"$LOADGEN" --join --host 127.0.0.1 --port $((10#$PORT + 2)) --count 1 --actions 5 --timeout 30000 --no-spawn-zombies | tee "$WORLD/loadgen.log"
 rg -q "PASS joined" "$WORLD/loadgen.log"
 echo "auto_join OK"

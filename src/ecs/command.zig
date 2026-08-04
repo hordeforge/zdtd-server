@@ -57,11 +57,18 @@ pub const Buffer = struct {
         return self.n;
     }
 
-    /// Apply all queued ops then clear. Safe to call with empty buffer.
+    /// Apply the ops queued at entry, then clear them; ops pushed during
+    /// drain stay for the next tick. Safe to call with empty buffer.
+    /// Profiling: ecs must not import apm (cycle). Callers may time around
+    /// drain via apm sections; `applied` / Buffer.dropped counters suffice.
     pub fn drain(self: *Buffer, w: *World) DrainResult {
         var r: DrainResult = .{ .dropped_before = self.dropped };
+        // Snapshot the count: ops applied below can push (spawn observers →
+        // pushCommand). Those stay deferred to the next tick instead of
+        // running in this pass or being wiped by the clear.
+        const count = self.n;
         var i: usize = 0;
-        while (i < self.n) : (i += 1) {
+        while (i < count) : (i += 1) {
             switch (self.ops[i]) {
                 .spawn_zombie => |z| {
                     if (w.spawnZombie(z.x, z.y, z.z, z.hp) != null) {
@@ -85,7 +92,9 @@ pub const Buffer = struct {
                 },
             }
         }
-        self.n = 0;
+        const leftover = self.n - count;
+        if (leftover > 0) std.mem.copyForwards(Op, self.ops[0..leftover], self.ops[count..self.n]);
+        self.n = leftover;
         return r;
     }
 };

@@ -15,6 +15,7 @@ pub const LatencyHist = metrics.LatencyHist;
 pub const Profiler = profiler.Profiler;
 pub const Section = profiler.Section;
 pub const Snapshot = report.Snapshot;
+pub const OpsGauges = report.OpsGauges;
 
 /// Process-wide handle used by tick/net once the server loop exists.
 pub const Harness = struct {

@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** **325** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
+**Tests:** **434** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -602,7 +602,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 
 | Item | Status |
 |---|---|
-| Unit / scenario tests | HAVE (**325** total; see STATUS for pass/fail pin) |
+| Unit / scenario tests | HAVE (**434** total; see STATUS for pass/fail pin) |
 | Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
 | Stock client join + stand | **PASS** (playtest-zdtd **pass=83 fail=0** pin; see STATUS) |
 | Golden wire size checks | PARTIAL (some packages) |

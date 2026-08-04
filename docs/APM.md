@@ -35,6 +35,10 @@ tick loop
 `reliable_window_drops`, `persistence_errors`, `stale_peers_reaped`,
 `stream_errors`, `tick_overruns`, `encode_errors`, …
 
+Privileged admin and player-console activity is counted by `admin_commands`
+and `player_console_commands`. Command audit logs contain the source and verb
+only, keeping free-form arguments such as chat text and coordinates out of logs.
+
 Extend the enum as features land. Prefer append-only ids for stable JSON keys.
 
 ### Sections (`Section`)
@@ -52,9 +56,15 @@ Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
 
 ## Output
 
-- **Text:** printed when a bounded `--ticks N` or `--once` run exits
+- **Text:** printed when a bounded `--ticks N` or `--once` run exits; also via
+  admin TCP / WebUI console command `apm` (alias `metrics`)
 - **JSON line:** `{"type":"zdtd_apm",...}` is emitted once per minute during
-  unbounded runs and is also available through the report API
+  unbounded runs and is also available through the report API. When emitted from
+  the live loop it includes an `"ops"` object with instantaneous gauges
+  (`tick`, `joined`, `entered`, `peers_alive`, `zombies`, `chunks`) so scrapers
+  get load and counters in one event.
+- **Admin `status`:** one-line load + key error counters (overruns, encode/send
+  errors, window drops, persist errors). `guardstats` remains authority rejects.
 
 Signal-triggered dumps remain future work.
 
@@ -64,6 +74,7 @@ Signal-triggered dumps remain future work.
 |---|---|
 | M0 | Counters + section hist + text/JSON report API (done) |
 | M1 | Wire net/join/error counters + periodic JSON dump (done) |
+| M1b | Ops gauges in JSON; admin `apm` dump; rate-limited encode/send/phase logs (done) |
 | M3+ | Per-player / per-interest byte budgets |
 | Later | Optional HTTP `/metrics` or unix socket; never depend on 7dtd-apm |
 

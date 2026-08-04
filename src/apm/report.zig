@@ -5,10 +5,22 @@ const metrics = @import("metrics.zig");
 const profiler = @import("profiler.zig");
 const clock = @import("clock.zig");
 
+/// Instantaneous load gauges (not cumulative). Filled by the game before dump.
+pub const OpsGauges = struct {
+    tick: u64 = 0,
+    joined: u32 = 0,
+    entered: u32 = 0,
+    peers_alive: u32 = 0,
+    zombies: u32 = 0,
+    chunks: u32 = 0,
+};
+
 pub const Snapshot = struct {
     counters: metrics.Counters = .{},
     profiler: profiler.Profiler = .{},
     wall_ns: u64 = 0,
+    /// When set, writeJsonLine embeds an `"ops"` object for scrapers.
+    ops: ?OpsGauges = null,
 
     pub fn captureWall(self: *Snapshot) void {
         self.wall_ns = clock.monoNs();
@@ -66,7 +78,16 @@ pub fn writeJsonLine(s: *const Snapshot, w: *std.Io.Writer) !void {
             }
         }
     }
-    try w.print("}}}}\n", .{});
+    try w.print("}}", .{});
+    // Ops gauges live in the same line so log scrapers get one parseable event
+    // (cumulative counters alone cannot answer "how many players are online now?").
+    if (s.ops) |ops| {
+        try w.print(
+            ",\"ops\":{{\"tick\":{d},\"joined\":{d},\"entered\":{d},\"peers_alive\":{d},\"zombies\":{d},\"chunks\":{d}}}",
+            .{ ops.tick, ops.joined, ops.entered, ops.peers_alive, ops.zombies, ops.chunks },
+        );
+    }
+    try w.print("}}\n", .{});
 }
 
 test "report text non-empty" {
@@ -78,5 +99,25 @@ test "report text non-empty" {
     var buf: [1024]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try writeText(&s, &w);
-    try std.testing.expect(w.buffered().len > 20);
+    const text = w.buffered();
+    try std.testing.expect(text.len > 20);
+    // Structure: header, counters with ticks=1, and a tick_total section row.
+    try std.testing.expect(std.mem.indexOf(u8, text, "zdtd-apm snapshot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "ticks=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "tick_total") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "sections") != null);
+}
+
+test "report json includes ops when set" {
+    var s: Snapshot = .{};
+    s.counters.inc(.ticks);
+    s.ops = .{ .tick = 42, .joined = 2, .entered = 1, .peers_alive = 2, .zombies = 5, .chunks = 16 };
+    s.captureWall();
+    var buf: [2048]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try writeJsonLine(&s, &w);
+    const line = w.buffered();
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"type\":\"zdtd_apm\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"ops\":{\"tick\":42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"joined\":2") != null);
 }

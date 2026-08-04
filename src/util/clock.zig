@@ -1,13 +1,14 @@
-//! Monotonic nanoseconds and best-effort sleep via Zig 0.16 `std.Io`.
+//! Monotonic nanoseconds and best-effort sleep.
 //!
 //! Leaf timing primitive: used by net resend, tick pacing, and APM sections.
 //! Lives in util so litenet/server do not depend on the metrics package (apm).
 //!
-//! Production uses `Io.Clock.awake` (Linux CLOCK_MONOTONIC). Deterministic
-//! simulation enables a virtual clock so monoNs/sleepNs are fully seed-driven.
+//! Production reads CLOCK_MONOTONIC via `std.posix.system` (vDSO on Linux).
+//! monoNs is on the per-packet hot path: do not construct `Io.Threaded` here.
+//! Deterministic simulation enables a virtual clock (seed-driven, no wall time).
 
 const std = @import("std");
-const Io = std.Io;
+const posix = std.posix;
 
 /// Virtual clock state. When `active`, monoNs/sleepNs never touch the OS.
 /// Atomic so enable/disable from a test harness is race-free vs readers.
@@ -26,7 +27,7 @@ pub fn enableVirtual(start_ns: u64) void {
     virtual_active.store(true, .release);
 }
 
-/// Restore real Io.Clock.awake.
+/// Restore real CLOCK_MONOTONIC.
 pub fn disableVirtual() void {
     virtual_active.store(false, .release);
 }
@@ -43,19 +44,12 @@ pub fn advanceNs(delta_ns: u64) void {
     _ = virtual_ns.fetchAdd(delta_ns, .acq_rel);
 }
 
-fn threadedIo() Io.Threaded {
-    return Io.Threaded.init(std.heap.page_allocator, .{});
-}
-
-/// Monotonic nanoseconds since an arbitrary epoch (Io.Clock.awake),
-/// or the virtual clock value when enableVirtual is active.
+/// Monotonic nanoseconds since an arbitrary epoch, or virtual clock value.
 pub fn monoNs() u64 {
     if (virtual_active.load(.acquire)) return virtual_ns.load(.acquire);
-    var threaded = threadedIo();
-    defer threaded.deinit();
-    const ts = Io.Clock.awake.now(threaded.io());
-    if (ts.nanoseconds <= 0) return 0;
-    return @intCast(ts.nanoseconds);
+    var ts: posix.timespec = undefined;
+    if (posix.system.clock_gettime(posix.CLOCK.MONOTONIC, &ts) != 0) return 0;
+    return @as(u64, @intCast(ts.sec)) *% 1_000_000_000 +% @as(u64, @intCast(ts.nsec));
 }
 
 /// Best-effort sleep for `ns` nanoseconds. Under virtual clock, advances time
@@ -66,13 +60,16 @@ pub fn sleepNs(ns: u64) void {
         return;
     }
     if (ns == 0) return;
-    var threaded = threadedIo();
-    defer threaded.deinit();
-    const dur: Io.Clock.Duration = .{
-        .raw = .{ .nanoseconds = @intCast(ns) },
-        .clock = .awake,
+    var req = posix.timespec{
+        .sec = @intCast(ns / 1_000_000_000),
+        .nsec = @intCast(ns % 1_000_000_000),
     };
-    dur.sleep(threaded.io()) catch {};
+    var rem: posix.timespec = undefined;
+    while (true) {
+        const rc = posix.system.nanosleep(&req, &rem);
+        if (posix.errno(rc) != .INTR) return;
+        req = rem;
+    }
 }
 
 test "monoNs advances" {

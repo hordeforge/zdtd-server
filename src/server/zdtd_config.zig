@@ -56,8 +56,9 @@ pub const File = struct {
 const max_toml_bytes: usize = 256 * 1024;
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !File {
-    const data = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(data);
+    const read_buf = try allocator.alloc(u8, max_toml_bytes + 1);
+    defer allocator.free(read_buf);
+    const data = try io_fs.readFileInto(allocator, path, read_buf);
     if (data.len > max_toml_bytes) return error.TomlTooLarge;
     return try parse(allocator, data);
 }
@@ -83,26 +84,38 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
 
     var lines = std.mem.splitScalar(u8, src, '\n');
     while (lines.next()) |raw| {
-        var line = std.mem.trim(u8, raw, " \t\r");
+        var line = std.mem.trim(u8, try stripComment(raw), " \t\r");
         if (line.len == 0) continue;
-        if (line[0] == '#') continue;
         if (line[0] == '[') {
             const end = std.mem.indexOfScalar(u8, line, ']') orelse return error.BadToml;
+            if (std.mem.trim(u8, line[end + 1 ..], " \t").len != 0) return error.BadToml;
             section = try a.dupe(u8, std.mem.trim(u8, line[1..end], " \t"));
+            if (section.len == 0) return error.BadToml;
             continue;
         }
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse {
-            std.debug.print("zdtd: zdtd.toml malformed line (no '='); ignored: '{s}'\n", .{line});
-            continue;
-        };
+        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.BadToml;
         const key = std.mem.trim(u8, line[0..eq], " \t");
-        var val = std.mem.trim(u8, line[eq + 1 ..], " \t");
-        if (std.mem.indexOfScalar(u8, val, '#')) |h| {
-            val = std.mem.trim(u8, val[0..h], " \t");
-        }
+        if (key.len == 0) return error.BadToml;
+        const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
+        if (val.len == 0) return error.BadToml;
         try applyKV(&f, a, section, key, val);
     }
     return f;
+}
+
+fn stripComment(line: []const u8) ![]const u8 {
+    var quote: ?u8 = null;
+    for (line, 0..) |c, i| {
+        if (quote) |q| {
+            if (c == q) quote = null;
+        } else if (c == '"' or c == '\'') {
+            quote = c;
+        } else if (c == '#') {
+            return line[0..i];
+        }
+    }
+    if (quote != null) return error.BadToml;
+    return line;
 }
 
 fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8, val: []const u8) !void {
@@ -122,7 +135,7 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
         } else if (std.mem.eql(u8, key, "spawn_area_radius_max")) {
             f.stream.spawn_area_radius_max = try parseI32(val);
         } else {
-            warnUnknownKey(section, key);
+            return unknownKey(section, key);
         }
     } else if (std.mem.eql(u8, section, "authority")) {
         if (std.mem.eql(u8, key, "interest_range_blocks") or std.mem.eql(u8, key, "interest_range")) {
@@ -134,31 +147,40 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
         } else if (std.mem.eql(u8, key, "peer_stale_ms")) {
             f.authority.peer_stale_ms = try parseU64(val);
         } else if (std.mem.eql(u8, key, "mode")) {
-            f.authority.mode = try a.dupe(u8, stripQuotes(val));
+            const mode = stripQuotes(val);
+            if (!std.ascii.eqlIgnoreCase(mode, "observe") and
+                !std.ascii.eqlIgnoreCase(mode, "permissive") and
+                !std.ascii.eqlIgnoreCase(mode, "correct"))
+            {
+                return error.InvalidAuthorityMode;
+            }
+            f.authority.mode = try a.dupe(u8, mode);
         } else {
-            warnUnknownKey(section, key);
+            return unknownKey(section, key);
         }
     } else if (std.mem.eql(u8, section, "feature")) {
         if (std.mem.eql(u8, key, "wire_chunks")) {
             f.feature.wire_chunks = try parseBool(val);
         } else {
-            warnUnknownKey(section, key);
+            return unknownKey(section, key);
         }
     } else if (std.mem.eql(u8, section, "mode")) {
         if (std.mem.eql(u8, key, "name")) {
             f.mode.name = try a.dupe(u8, stripQuotes(val));
         } else {
-            warnUnknownKey(section, key);
+            return unknownKey(section, key);
         }
     } else if (section.len == 0) {
-        std.debug.print("zdtd: zdtd.toml key '{s}' outside any [section]; ignored\n", .{key});
+        std.debug.print("zdtd: zdtd.toml key '{s}' must be inside a known section\n", .{key});
+        return error.UnknownTomlKey;
     } else {
-        warnUnknownKey(section, key);
+        return unknownKey(section, key);
     }
 }
 
-fn warnUnknownKey(section: []const u8, key: []const u8) void {
-    std.debug.print("zdtd: zdtd.toml unknown key [{s}].{s}; ignored\n", .{ section, key });
+fn unknownKey(section: []const u8, key: []const u8) error{UnknownTomlKey} {
+    std.debug.print("zdtd: zdtd.toml unknown key [{s}].{s}\n", .{ section, key });
+    return error.UnknownTomlKey;
 }
 
 fn stripQuotes(v: []const u8) []const u8 {
@@ -207,11 +229,22 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.feature.wire_chunks) |v| opts.wire_chunks = v;
 }
 
-/// Clamp / repair InitOptions after toml apply. Logs adjustments; never panics.
+/// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
+pub const max_streamed_chunks_cap: usize = 169;
+
+/// Clamp / repair InitOptions after config merge. Logs adjustments; never panics.
+/// Safe to call even when no zdtd.toml was loaded (no-op on already-valid defaults).
 pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.max_streamed_chunks == 0) {
         std.debug.print("zdtd: max_streamed_chunks=0 invalid; using 1\n", .{});
         opts.max_streamed_chunks = 1;
+    }
+    if (opts.max_streamed_chunks > max_streamed_chunks_cap) {
+        std.debug.print(
+            "zdtd: max_streamed_chunks={d} exceeds compile cap {d}; clamping\n",
+            .{ opts.max_streamed_chunks, max_streamed_chunks_cap },
+        );
+        opts.max_streamed_chunks = max_streamed_chunks_cap;
     }
     if (opts.chunk_stream_radius_min < 1) {
         std.debug.print("zdtd: stream_radius_min={d} invalid; using 1\n", .{opts.chunk_stream_radius_min});
@@ -296,15 +329,41 @@ test "loadFromPath rejects oversized file" {
     try std.testing.expectError(error.TomlTooLarge, loadFromPath(std.testing.allocator, path));
 }
 
-test "parse ignores unknown keys" {
+test "parse rejects unknown keys" {
     const src =
         \\[stream]
         \\nope = 1
         \\max_streamed_chunks = 10
     ;
-    var f = try parse(std.testing.allocator, src);
+    try std.testing.expectError(error.UnknownTomlKey, parse(std.testing.allocator, src));
+}
+
+test "parse rejects malformed assignments" {
+    const src =
+        \\[stream]
+        \\max_streamed_chunks 10
+    ;
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, src));
+}
+
+test "parse rejects invalid authority mode" {
+    try std.testing.expectError(
+        error.InvalidAuthorityMode,
+        parse(std.testing.allocator, "[authority]\nmode = \"corect\"\n"),
+    );
+}
+
+test "parse preserves hashes in quoted values and rejects malformed sections" {
+    var f = try parse(std.testing.allocator,
+        \\[mode]
+        \\name = "pve#night" # trailing comment
+    );
     defer f.deinit();
-    try std.testing.expectEqual(@as(usize, 10), f.stream.max_streamed_chunks.?);
+    try std.testing.expectEqualStrings("pve#night", f.mode.name.?);
+
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[stream] trailing\n"));
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[]\n"));
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[mode]\nname = \"unterminated\n"));
 }
 
 test "sanitizeInitOptions repairs bad radii" {
@@ -352,4 +411,23 @@ test "sanitizeInitOptions rejects non-finite ranges" {
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(@as(f32, 1), o.max_edit_range);
     try std.testing.expectEqual(@as(f32, 1), o.interest_range);
+}
+
+test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        spawn_area_radius_max: i32 = 8,
+        max_claimed_damage: i32 = 200,
+        max_edit_range: f32 = 96,
+        interest_range: f32 = 160,
+        peer_stale_ms: u64 = 3000,
+    };
+    var o: Opts = .{ .max_streamed_chunks = 999 };
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(max_streamed_chunks_cap, o.max_streamed_chunks);
 }

@@ -2,8 +2,9 @@
 //!
 //! Dependency direction: top of the stack. May import all other src packages.
 //! New join/tick/C2S behavior lands in `game.zig` (or extracted helpers beside
-//! it); keep stock package bodies in `wire/`, sim rules in `ecs/`, map IO in
-//! `world/`.
+//! it: `phase_gate`, `movement`, `c2s_text`); keep stock package bodies in
+//! `wire/` (via packages facade), sim rules in `ecs/`, map IO in `world/`.
+//! Mono clock is `util/clock` (not apm/clock).
 
 pub const game = @import("game.zig");
 pub const config = @import("config.zig");
@@ -15,9 +16,11 @@ pub const serverinfo_tcp = @import("serverinfo_tcp.zig");
 pub const scenarios = @import("scenarios.zig");
 pub const phase_gate = @import("phase_gate.zig");
 pub const movement = @import("movement.zig");
+pub const c2s_text = @import("c2s_text.zig");
 
 pub const Game = game.Game;
-pub const AuthorityMode = game.AuthorityMode;
+/// Canonical definition lives in config (serverconfig / InitOptions parse).
+pub const AuthorityMode = config.AuthorityMode;
 
 test {
     _ = game;
@@ -30,4 +33,5 @@ test {
     _ = scenarios;
     _ = phase_gate;
     _ = movement;
+    _ = c2s_text;
 }

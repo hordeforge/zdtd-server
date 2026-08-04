@@ -31,9 +31,18 @@ after restart (TTS re-stamp then block overlay without paint channels).
    that cell; paint writers re-apply via `setBlockTexDens`. Dirty chunks that
    have allocated texture/density planes persist those planes so cleared digs
    remain clear after restart.
-5. **Sibling stores** stay separate: `players.zsv` (ZPV2), `containers.zct`
-   (ZCT1), `blockmeta.zbm` (ZBM1). Do not fold them into one mega-format until a
-   migration plan exists.
+5. **Sibling stores** stay separate under `--world`. Do not fold them into one
+   mega-format until a migration plan exists. Magic bumps only on
+   non-extensible layout change. Layouts (source of truth for implementers):
+
+| File | Magic | Layout (LE) |
+|---|---|---|
+| `c_X_Z.zch` | **ZCH3** | See decision §2 (flagged channels) |
+| `players.zsv` | **ZPV2** | `n:u32` then records: `name_len:u8 \| name \| x,y,z:f32 \| coins:u32 \| inv_n:u8 \| inv_n×(item:u16,count:u16,quality:u8,meta:u16) \| jn:u8 \| jn×(def_id:u16,quest_code:i32,flags:u8,progress:u16,phase:u8)`. Merge-write keeps offline names. Key = login name ([ADR 0017](0017-player-identity-login-name.md)). |
+| `containers.zct` | **ZCT1** | `count:u16` then: `pos xyz:i32×3 \| block_id:i32 \| slot_count:u16 \| touched:u8 \| player:u8 \| slot_count×(item,count,quality,meta)` |
+| `blockmeta.zbm` | **ZBM1** | `raw_n:u16 \| raw_n×(key:u64, raw:u32) \| hp_n:u16 \| hp_n×(key:u64, hp:u16)` |
+
+Slot `item_id` fields are ECS handles (see [ADR 0015](0015-ecs-item-id-vs-stock-type.md)).
 
 ## Consequences
 

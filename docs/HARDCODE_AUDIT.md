@@ -21,7 +21,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation (this audit pass):** unit suite is **325** tests (`zig build test`). Count drifts; see [STATUS.md](STATUS.md).
+**Validation (this audit pass):** unit suite is **392** tests (`zig build test`). Count drifts; see [STATUS.md](STATUS.md).
 
 ---
 
@@ -63,7 +63,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A13 | recipe unlock extras | P2 | Open | |
 | A14 | quest builtins | P2 | Warn if game-dir | |
 | A15 | builtin leakage | P1 | **Fixed** (warn) | |
-| A16 | dual ECS/stock ids | P2 | Doc only | |
+| A16 | dual ECS/stock ids | P2 | **ADR 0015** | ECS handle + stock map; not parallel production catalog |
 | A17 | name→6/7 builtin | P3 | **Fixed** gated | |
 | A18 | stock_chunk pins | P2 | Open | |
 | A19 | trader_wallet 5000 | P2 | Open → B | |

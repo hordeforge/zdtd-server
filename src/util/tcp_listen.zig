@@ -121,6 +121,7 @@ pub fn writeAll(fd: Handle, data: []const u8) void {
             waited_ms += slice_ms;
             continue;
         }
+        if (errn == .INTR) continue;
         if (errn != .SUCCESS or rc == 0) return;
         off += @intCast(rc);
     }
@@ -128,8 +129,8 @@ pub fn writeAll(fd: Handle, data: []const u8) void {
 
 test "Listener loopback accept empty" {
     var L: Listener = .{};
-    // High port unlikely to collide in CI; skip if bind fails.
-    L.listen(0x7f000001, 19876, 4) catch return;
+    // High port unlikely to collide in CI; SkipZigTest (not silent pass) if bind fails.
+    L.listen(0x7f000001, 19876, 4) catch return error.SkipZigTest;
     defer L.deinit();
     try std.testing.expect(L.enabled());
     try std.testing.expectEqual(@as(u16, 19876), L.port);

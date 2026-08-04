@@ -5,6 +5,8 @@ const std = @import("std");
 
 pub const max_nodes: usize = 256;
 pub const max_wires: usize = 512;
+/// Sanity ceiling for a wire-supplied node rating; stock generators are ~1 kW.
+pub const max_node_watts: f32 = 100_000;
 /// Pressure plate / tripwire pulse duration (seconds). ~10 ticks at 20 TPS.
 pub const default_trigger_pulse_s: f32 = 0.5;
 
@@ -49,6 +51,20 @@ pub const Wire = struct {
     a: u16 = 0,
     b: u16 = 0,
 };
+
+/// Binary search a sorted (id << 16 | node_index) table for `id`.
+/// Returns the node index, or maxInt(u16) when the id is absent.
+fn findNodeIdx(sorted: []const u32, id: u16) u16 {
+    var lo: usize = 0;
+    var hi: usize = sorted.len;
+    const key = @as(u32, id) << 16;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (sorted[mid] < key) lo = mid + 1 else hi = mid;
+    }
+    if (lo < sorted.len and (sorted[lo] >> 16) == id) return @truncate(sorted[lo]);
+    return std.math.maxInt(u16);
+}
 
 pub const PowerGrid = struct {
     nodes: [max_nodes]PowerNode = [_]PowerNode{.{}} ** max_nodes,
@@ -131,7 +147,7 @@ pub const PowerGrid = struct {
     /// Advance fuel burn, battery charge/discharge, and trigger timers. Call after resolve intent.
     /// `dt` in seconds. `daylight` gates solar generators (no MaxFuel). Returns true if state changed.
     pub fn tick(self: *PowerGrid, dt: f32, daylight: bool) bool {
-        if (dt <= 0) return false;
+        if (dt <= 0 or self.node_n == 0) return false;
         var dirty = false;
         // 1) Burn generator fuel when capacity>0 (MaxFuel from XML). Solar: on only in daylight.
         var i: usize = 0;
@@ -169,7 +185,7 @@ pub const PowerGrid = struct {
         var load_now: f32 = 0;
         i = 0;
         while (i < self.node_n) : (i += 1) {
-            const n = self.nodes[i];
+            const n = &self.nodes[i];
             if (n.kind == .generator and n.on and n.powered) gen_now += n.watts;
             if (n.kind == .consumer and n.powered) load_now += n.watts;
         }
@@ -315,6 +331,17 @@ pub const PowerGrid = struct {
         return true;
     }
 
+    /// Delete a node by identity and every wire incident to it. Positions are not
+    /// unique (addNode does not dedupe), so owners that hold an id must remove by
+    /// id or they unplug whichever node happens to share the cell.
+    pub fn removeById(self: *PowerGrid, id: u16) bool {
+        const idx = self.indexOfId(id) orelse return false;
+        self.removeWiresForId(id);
+        self.nodes[idx] = self.nodes[self.node_n - 1];
+        self.node_n -= 1;
+        return true;
+    }
+
     /// Connect two nodes identified by their world positions. Returns false if
     /// either position has no node.
     pub fn connectByPos(self: *PowerGrid, ax: i32, ay: i32, az: i32, bx: i32, by: i32, bz: i32) bool {
@@ -375,16 +402,50 @@ pub const PowerGrid = struct {
         var qh: usize = 0;
         var qt: usize = 0;
 
-        // Resolve wire endpoints to node indices once up front; indexOfId is a
-        // linear scan, and doing it inside the BFS made the flood
-        // O(nodes x wires x nodes) per tick.
+        // Resolve wire endpoints to node indices once up front via a sorted
+        // (id << 16 | index) table: indexOfId is a linear scan, and per-endpoint
+        // lookups made this O(wires x nodes) per tick.
         const no_node: u16 = std.math.maxInt(u16);
+        var id_idx: [max_nodes]u32 = undefined;
+        var k: usize = 0;
+        while (k < self.node_n) : (k += 1) {
+            id_idx[k] = (@as(u32, self.nodes[k].id) << 16) | @as(u32, @intCast(k));
+        }
+        const sorted = id_idx[0..self.node_n];
+        std.sort.pdq(u32, sorted, {}, std.sort.asc(u32));
         var wire_ai: [max_wires]u16 = undefined;
         var wire_bi: [max_wires]u16 = undefined;
         var wi: usize = 0;
         while (wi < self.wire_n) : (wi += 1) {
-            wire_ai[wi] = if (self.indexOfId(self.wires[wi].a)) |v| @intCast(v) else no_node;
-            wire_bi[wi] = if (self.indexOfId(self.wires[wi].b)) |v| @intCast(v) else no_node;
+            wire_ai[wi] = findNodeIdx(sorted, self.wires[wi].a);
+            wire_bi[wi] = findNodeIdx(sorted, self.wires[wi].b);
+        }
+
+        // Adjacency (CSR) so the BFS visits only incident edges instead of
+        // rescanning every wire per dequeued node (was O(nodes x wires)).
+        var deg: [max_nodes]u16 = .{0} ** max_nodes;
+        wi = 0;
+        while (wi < self.wire_n) : (wi += 1) {
+            if (wire_ai[wi] == no_node or wire_bi[wi] == no_node) continue;
+            deg[wire_ai[wi]] += 1;
+            deg[wire_bi[wi]] += 1;
+        }
+        var adj_start: [max_nodes + 1]u16 = undefined;
+        adj_start[0] = 0;
+        k = 0;
+        while (k < self.node_n) : (k += 1) adj_start[k + 1] = adj_start[k] + deg[k];
+        var cursor: [max_nodes]u16 = undefined;
+        @memcpy(cursor[0..self.node_n], adj_start[0..self.node_n]);
+        var adj: [2 * max_wires]u16 = undefined;
+        wi = 0;
+        while (wi < self.wire_n) : (wi += 1) {
+            const a = wire_ai[wi];
+            const b = wire_bi[wi];
+            if (a == no_node or b == no_node) continue;
+            adj[cursor[a]] = b;
+            cursor[a] += 1;
+            adj[cursor[b]] = a;
+            cursor[b] += 1;
         }
 
         i = 0;
@@ -407,10 +468,7 @@ pub const PowerGrid = struct {
             // Trigger gates: only flood past the plate while a pulse is active.
             // The trigger node itself stays powered (visited when enqueued).
             if (self.nodes[u].is_trigger and self.nodes[u].pulse_left <= 0) continue;
-            var w: usize = 0;
-            while (w < self.wire_n) : (w += 1) {
-                const other: u16 = if (wire_ai[w] == u) wire_bi[w] else if (wire_bi[w] == u) wire_ai[w] else continue;
-                if (other == no_node) continue;
+            for (adj[adj_start[u]..adj_start[u + 1]]) |other| {
                 const oi: usize = other;
                 if (visited[oi]) continue;
                 // Relays always pass; triggers can be reached (to become powered);
@@ -489,7 +547,12 @@ pub const PowerGrid = struct {
             const z = std.mem.readInt(i32, body[10..14], .little);
             const wbits = std.mem.readInt(u32, body[14..18], .little);
             const watts: f32 = @bitCast(wbits);
-            _ = self.addNode(kind, x, y, z, watts);
+            // total_gen/total_load accumulate across resolve() and are never
+            // re-derived, so one NaN from the wire poisons every powered check.
+            if (!std.math.isFinite(watts) or watts < 0 or watts > max_node_watts) return false;
+            // addNodeAt, not addNode: repeated requests must not stack duplicate
+            // nodes on one cell until max_nodes is exhausted.
+            _ = self.addNodeAt(kind, x, y, z, watts);
             self.resolve();
             return true;
         }
@@ -555,10 +618,11 @@ test "overload drops consumers" {
     _ = g.connect(gen, a);
     _ = g.connect(gen, b);
     g.resolve();
-    // One of the consumers should be unpowered
-    const pa = g.nodes[g.indexOfId(a).?].powered;
-    const pb = g.nodes[g.indexOfId(b).?].powered;
-    try std.testing.expect(!(pa and pb));
+    // Load shed walks nodes from the end: higher index (b) drops first so demand fits gen.
+    try std.testing.expect(g.nodes[g.indexOfId(a).?].powered);
+    try std.testing.expect(!g.nodes[g.indexOfId(b).?].powered);
+    try std.testing.expectEqual(@as(f32, 30), g.total_gen);
+    try std.testing.expectEqual(@as(f32, 20), g.total_load);
 }
 
 test "wire action connect" {

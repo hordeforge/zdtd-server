@@ -23,6 +23,12 @@ Startup prints a one-line effective summary (`password=set|open`, never secrets)
 `AdminPort` binds **127.0.0.1 only** (no auth on the console).
 `ServerMaxPlayerCount` is applied to GSI ads and soft join capacity (capped at 64).
 Out-of-range serverconfig values are clamped with a stderr warning (not silent).
+Unknown stock properties are ignored (stock configs have many keys zdtd does not
+apply). Near-miss typos of applied keys (edit distance ≤2) print a stderr hint.
+`zdtd.toml` / mode-pack stream knobs are sanitized after merge even when no
+toml file is present. Invalid authority modes and mode-file name mismatches
+abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
+256 KiB zdtd.toml, 64 KiB mode pack). Webui listen failures abort startup.
 
 ## Applied to the sim
 
@@ -63,16 +69,17 @@ Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 |---|---|---|
 | `--webui-port` | 0 | HTTP ops UI; 0 = off. Requires a secret. Design: [WEBUI.md](WEBUI.md) |
 | `--webui-bind` | `127.0.0.1` | IPv4 loopback only; use a TLS reverse proxy for remote access |
-| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / login form; visible in `ps` (prefer env) |
-| `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty |
+| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / login form; min 8 chars; visible in `ps` (prefer env) |
+| `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty; min 8 chars |
 
-`/healthz` is unauthenticated liveness. Dashboard + `POST /api/cmd` (admin verbs) need secret; CSRF field required for cookie-only sessions.
+`GET`/`HEAD` `/healthz` is unauthenticated liveness. `GET`/`HEAD` `/readyz` is unauthenticated readiness and returns 503 until the first live tick snapshot. Dashboard + `POST /api/cmd` (admin verbs) need secret; CSRF field required for cookie-only sessions. `Accept: text/plain` on `/api/cmd` returns a plain body instead of an HTML fragment.
 
 ### zdtd.toml (operator tunables)
 
 Template: [`zdtd.toml.example`](../zdtd.toml.example). Loaded from
 `<world>/zdtd.toml` if present, else CWD `zdtd.toml`. Parser:
-`src/server/zdtd_config.zig`. Unknown keys warn and are ignored.
+`src/server/zdtd_config.zig`. Unknown keys and malformed assignments abort
+startup so misspelled operator settings cannot silently use defaults.
 
 | Section | Keys (subset) | Effect |
 |---|---|---|
@@ -95,6 +102,8 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 
 Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
 be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.
+Unknown keys, unknown sections, and malformed assignments are also fatal so a
+misspelled mode setting cannot silently fall back to a default.
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the
@@ -105,8 +114,24 @@ Notes:
   under EAC-off); the multiplier governs the server total used for gamestage-type
   logic.
 
+## Player data (operators)
+
+Self-hosted only: zdtd does not phone home. Player-related data stays on the
+operator host under the world directory and on the wire between client and server.
+
+| Store / surface | Contents | Retention / control |
+|---|---|---|
+| `<world>/players.zsv` | Login name, last position, coins, inventory stacks, quest journal | Kept until `wipeplayer <name>` or the operator deletes the file/world |
+| In-memory ban table | IPv4 keys from admin `ban` | Process lifetime only (not written to disk) |
+| Admin TCP / WebUI | Player names, slots, inventory dump (`inv`) for ops | Loopback admin (no auth); WebUI requires secret, default off |
+| Process logs | Join/slot/entity ids, name **lengths**, reject reasons | Never full login names or WebUI/server passwords |
+
+Admin: `wipeplayer <name>` kicks any online session with that name and removes
+matching records from `players.zsv`. Counts are logged; the name is not.
+
 ## Missing world folder
 
-A serverconfig `GameName`/`GameWorld` that resolves to a non-existent world dir
-does not abort startup: `io_fs.dirExistsSimple` detects the missing directory and
-the server falls back to a flat world with a warning.
+A configured `GameName`/`GameWorld` that resolves to a non-existent world dir
+aborts startup. This prevents a misspelled or stale map setting from silently
+starting a new flat world. Omit the configured stock world to intentionally use
+the default flat world.

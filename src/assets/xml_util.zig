@@ -24,7 +24,18 @@ pub fn stripComments(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 
 /// First `name="value"` after `start` within `hay` (stops at `>`).
 pub fn attr(hay: []const u8, start: usize, name: []const u8) ?[]const u8 {
-    const end = std.mem.indexOfPos(u8, hay, start, ">") orelse hay.len;
+    var end = start;
+    var tag_quote: ?u8 = null;
+    while (end < hay.len) : (end += 1) {
+        const c = hay[end];
+        if (tag_quote) |q| {
+            if (c == q) tag_quote = null;
+        } else if (c == '"' or c == '\'') {
+            tag_quote = c;
+        } else if (c == '>') {
+            break;
+        }
+    }
     const window = hay[start..end];
     var i: usize = 0;
     while (i < window.len) {
@@ -149,4 +160,9 @@ test "attr accepts XML whitespace and quote forms without suffix matches" {
     try std.testing.expectEqualStrings("ServerPort", attr(s, 0, "name").?);
     try std.testing.expectEqualStrings("27002", attr(s, 0, "value").?);
     try std.testing.expect(attr(s, 0, "prob") == null);
+}
+
+test "attr permits greater-than inside a quoted value" {
+    const s = "<property name=\"ServerPassword\" value=\"left>right\"/>";
+    try std.testing.expectEqualStrings("left>right", attr(s, 0, "value").?);
 }

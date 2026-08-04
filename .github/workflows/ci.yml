@@ -7,12 +7,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least-privilege token: cache restore/save uses the Actions cache service and
+# does not require repository Actions write access.
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a tag build (release artifacts); cancel redundant PR/main runs.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   validate:
@@ -25,19 +28,31 @@ jobs:
         with:
           persist-credentials: false
 
-      # lint-wire.sh (make lint / make check) requires rg; not on ubuntu-24.04 images.
-      - name: Install ripgrep
+      # make lint requires these tools; do not rely on runner image contents.
+      - name: Install lint tools
         run: |
-          if command -v rg >/dev/null 2>&1; then
-            rg --version
-          else
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends ripgrep
+          set -euo pipefail
+          missing=()
+          command -v rg >/dev/null 2>&1 || missing+=(ripgrep)
+          command -v shellcheck >/dev/null 2>&1 || missing+=(shellcheck)
+          if ((${#missing[@]})); then
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends "${missing[@]}"
           fi
+          rg --version
+          shellcheck --version
 
       - name: Read toolchain pin
         id: pin
-        run: echo "zig=$(tr -d '[:space:]' < .zigversion)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          zig="$(tr -d '[:space:]' < .zigversion)"
+          if [[ -z "$zig" ]]; then
+            echo "ci: .zigversion is empty" >&2
+            exit 1
+          fi
+          echo "zig=$zig" >> "$GITHUB_OUTPUT"
 
       - name: Install Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -47,6 +62,19 @@ jobs:
 
       - name: Verify workflow toolchain pin
         run: test "$(zig version)" = "$(tr -d '[:space:]' < .zigversion)"
+
+      # Zig's cache is content-addressed, so restoring a stale entry is safe;
+      # keying on github.sha keeps a rolling cache (always save, restore latest
+      # for the same compiler) instead of never hitting after any source change.
+      - name: Cache Zig build artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            .zig-cache
+            ~/.cache/zig
+          key: zig-cache-${{ runner.os }}-${{ steps.pin.outputs.zig }}-${{ github.sha }}
+          restore-keys: |
+            zig-cache-${{ runner.os }}-${{ steps.pin.outputs.zig }}-
 
       - name: Run validation gate
         run: make check
@@ -66,4 +94,5 @@ jobs:
             zig-out/bin/zdtd
             zig-out/bin/zdtd.sha256
           if-no-files-found: error
-          retention-days: 14
+          # Keep tag artifacts longer for operators fetching a release build.
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 14 }}

@@ -64,7 +64,13 @@ test "phase allow deny" {
     try std.testing.expect(!allowed(.connecting, "NetPackageEntityPosAndRot"));
     try std.testing.expect(!allowed(.joined, "NetPackageSetBlock"));
     try std.testing.expect(!allowed(.joined, "NetPackageEntityPosAndRot"));
+    // Play-world C2S must stay gated until join bundle (playing).
+    try std.testing.expect(!allowed(.connecting, "NetPackageDamageEntity"));
+    try std.testing.expect(!allowed(.connecting, "NetPackagePlayerInventory"));
+    try std.testing.expect(!allowed(.joined, "NetPackageDamageEntity"));
+    try std.testing.expect(!allowed(.joined, "NetPackageTELockRequest"));
     try std.testing.expect(allowed(.playing, "NetPackageEntityPosAndRot"));
     try std.testing.expect(allowed(.playing, "NetPackageSetBlock"));
+    try std.testing.expect(allowed(.playing, "NetPackageDamageEntity"));
     try std.testing.expect(allowed(.playing, "NetPackageUnknownFuture"));
 }

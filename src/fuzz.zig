@@ -1,6 +1,6 @@
 //! Coverage-guided fuzz targets for remote wire parsing boundaries and
 //! other untrusted-input surfaces (admin lines, map XML, COG headers,
-//! config XML patches, quest catalogs, GSI text builders).
+//! config XML patches, quest catalogs, GSI text builders, save formats).
 
 const std = @import("std");
 const packet = @import("litenet/packet.zig");
@@ -11,14 +11,22 @@ const stock_te = @import("wire/stock_te.zig");
 const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
 const admin = @import("server/admin.zig");
+const components = @import("ecs/components.zig");
 const mode_pack = @import("server/mode.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
+const serverconfig = @import("server/config.zig");
 const serverinfo = @import("server/serverinfo_tcp.zig");
 const xml_util = @import("assets/xml_util.zig");
 const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
+const water = @import("world/water.zig");
+const containers = @import("world/containers.zig");
+const biomes = @import("world/biomes.zig");
+const prefabs = @import("world/prefabs.zig");
+const tts = @import("world/tts.zig");
+const store = @import("world/store.zig");
 
 const packet_corpus = [_][]const u8{
     "",
@@ -194,7 +202,16 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     var cmd_buf: [256]u8 = undefined;
     const cmd = packages.parseConsoleCmd(input, &cmd_buf);
     try std.testing.expect(cmd.len <= cmd_buf.len);
-    _ = stock_te.parseStorageTeBody(input) catch null;
+    if (stock_te.parseStorageTeBody(input)) |te| {
+        try std.testing.expect(te.item_count <= te.items.len);
+        // Apply chain: client-declared grid geometry must stay within the
+        // fixed container slot array and never shrink addressable slots.
+        var cont: containers.Container = .{};
+        const before = cont.slot_count;
+        stock_te.applyParsedToContainer(&te, &cont, null, null);
+        try std.testing.expect(cont.slot_count <= containers.max_container_slots);
+        try std.testing.expect(cont.slot_count >= before);
+    } else |_| {}
     _ = stock_te.parseWorkstationTeBody(input) catch null;
 }
 
@@ -214,6 +231,12 @@ const inv_corpus = [_][]const u8{
     &.{ 0xff, 0xff },
     // nested mod explosion attempt: count=1, ver=9, flags, type, … mod_n=255
     &.{ 1, 0, 9, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff },
+    // player inventory body: toolbelt present (0 stacks), no bag, no equipment
+    &.{ 1, 0, 0, 0, 0 },
+    // bag present: ver=1, count=0, no locks, touched, no prefs
+    &.{ 0, 1, 1, 0, 0, 0, 1, 0, 0 },
+    // bag with huge claimed stack count, truncated
+    &.{ 0, 1, 0, 0xff, 0xff },
 };
 
 test "fuzz inventory item stack decoders" {
@@ -234,8 +257,15 @@ fn fuzzInventoryDecoders(_: void, smith: *std.testing.Smith) !void {
     var r: binary.Reader = .{ .data = input };
     _ = stock_inv.readItemStack(&r) catch null;
     r = .{ .data = input };
+    _ = stock_inv.readItemValue(&r) catch null;
+    r = .{ .data = input };
     var slots: [16]stock_inv.StockSlot = undefined;
     _ = stock_inv.readItemStackList(&r, &slots) catch null;
+
+    // Full C2S inventory apply: toolbelt/bag/equipment/locks/prefs sections
+    // parsed from an untrusted body must never write outside the fixed slots.
+    var inv: components.Inventory = .{};
+    stock_inv.applyPlayerInventoryBody(input, &inv, null, null) catch {};
 }
 
 const binary_corpus = [_][]const u8{
@@ -292,7 +322,7 @@ fn fuzzSharedQuest(_: void, smith: *std.testing.Smith) !void {
     const len: usize = smith.slice(&storage);
     const input = storage[0..len];
     if (stock_quest.parseSharedQuestHead(input)) |head| {
-        try std.testing.expect(head.quest_id.len <= head.quest_id_storage.len);
+        try std.testing.expect(head.quest_id_len <= head.quest_id_storage.len);
         try std.testing.expect(@intFromEnum(head.event) <= 3);
     } else |_| {}
 }
@@ -489,6 +519,7 @@ fn fuzzAssetXml(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(el.body.len <= input.len);
         i = el.next_i;
     }
+    _ = xml_util.parseU8(input);
     _ = xml_util.parseU16(input);
     _ = xml_util.parseU32(input);
     _ = xml_util.parseF32(input);
@@ -502,7 +533,17 @@ const cog_corpus = [_][]const u8{
     "II*\x00\x08\x00\x00\x00\x00\x00",
     // IFD with huge entry count (bounds check)
     "II*\x00\x08\x00\x00\x00\xff\xff" ++ ("\x00" ** 64),
+    // zlib header only (decodeTile: truncated stream must reject, not hang)
+    "\x78\x9c",
+    // valid short zlib stream (decompresses to less than a full tile)
+    &frame_zlib_hello,
+    // zlib header followed by garbage
+    "\x78\x9c" ++ ("\xff" ** 32),
 };
+
+// decodeTile output is tile_px^2 f32 (4 MiB); keep it off the fuzz stack and
+// out of the per-iteration allocator churn.
+var cog_tile_out: [dem.tile_px * dem.tile_px]f32 = undefined;
 
 test "fuzz DEM COG TIFF header parser" {
     try std.testing.fuzz({}, fuzzCogHeader, .{ .corpus = &cog_corpus });
@@ -515,6 +556,9 @@ fn fuzzCogHeader(_: void, smith: *std.testing.Smith) !void {
     if (dem.parseCogHeader(storage[0..len])) |info| {
         try std.testing.expect(info.tile_n <= info.tile_offsets.len);
     } else |_| {}
+    // Tile blobs are remote CDN range reads: zlib decode + float predictor
+    // must reject truncated/garbage streams without hanging or overrunning.
+    _ = dem.decodeTile(std.testing.allocator, storage[0..len], &cog_tile_out) catch {};
     // S3 key formatting must not panic on extreme lat/lon.
     var key_buf: [256]u8 = undefined;
     const lat = smith.value(i32);
@@ -691,5 +735,280 @@ fn fuzzGsiText(_: void, smith: *std.testing.Smith) !void {
     while (i < text.len) : (i += 1) {
         if (text[i] == '\n') try std.testing.expect(i > 0 and text[i - 1] == '\r');
         if (text[i] == '\r') try std.testing.expect(i + 1 < text.len and text[i + 1] == '\n');
+    }
+}
+
+const serverconfig_corpus = [_][]const u8{
+    "",
+    \\<ServerSettings>
+    \\  <property name="ServerPort" value="27002"/>
+    \\  <property name="GameName" value="FuzzWorld"/>
+    \\  <property name="ServerMaxPlayerCount" value="16"/>
+    \\</ServerSettings>
+    ,
+    \\<ServerSettings>
+    \\  <property name="ViewRadius" value="999"/>
+    \\  <property name="LandClaimSize" value="40"/>
+    \\  <property name="ZdtdAuthorityMode" value="observe"/>
+    \\  <property name="ServerPasssword" value="typo"/>
+    \\</ServerSettings>
+    ,
+    "<property name=\"ServerPort\" value=\"" ++ ("9" ** 40) ++ "\"/>",
+    "<property name=\"GameName\" value=\"" ++ ("x" ** 200) ++ "\"/>",
+    // truncated / nested noise
+    "<property name=\"ServerPort\"",
+    "property name=ServerPort value=1",
+    "<property name=\"\x00\" value=\"\xff\"/>",
+};
+
+test "fuzz serverconfig.xml parser" {
+    try std.testing.fuzz({}, fuzzServerconfig, .{ .corpus = &serverconfig_corpus });
+}
+
+fn fuzzServerconfig(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var cfg = serverconfig.parse(std.testing.allocator, storage[0..len]) catch return;
+    defer cfg.deinit();
+    try std.testing.expect(cfg.port >= 0);
+    try std.testing.expect(cfg.max_players <= 64);
+    try std.testing.expect(cfg.view_radius >= 1 and cfg.view_radius <= 16);
+    try std.testing.expect(cfg.world_name.len <= len or cfg.world_name.len <= 4);
+}
+
+const water_xml_corpus = [_][]const u8{
+    "",
+    \\<WaterSources>
+    \\  <Water pos="1855, 77, 1406"/>
+    \\  <Water pos="-192, 72, 1924"/>
+    \\</WaterSources>
+    ,
+    "<Water pos=\"0,0,0\"/>",
+    "pos=\"1, 2, 3\" pos=\"a,b,c\" pos=\"1\"",
+    "pos=\"" ++ ("9" ** 20) ++ ",1,1\"",
+    "pos=\"  -1 ,  61 ,  2 \"",
+    "pos=\"\x00,1,2\"",
+};
+
+test "fuzz water_info.xml parser" {
+    try std.testing.fuzz({}, fuzzWaterXml, .{ .corpus = &water_xml_corpus });
+}
+
+fn fuzzWaterXml(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var src = water.parseXml(std.testing.allocator, storage[0..len]) catch return;
+    defer src.deinit();
+    try std.testing.expect(src.points.len <= len);
+    // Point lookups must not panic on arbitrary coords.
+    _ = src.waterYNear(smith.value(i32), smith.value(i32), 12);
+}
+
+const zct_corpus = [_][]const u8{
+    "",
+    "ZCT1",
+    // empty store: magic + count 0
+    &([_]u8{ 'Z', 'C', 'T', '1', 0, 0 }),
+    // one container, 0 slots: pos(0,70,0) block 42, slots=0, touched, player
+    &([_]u8{ 'Z', 'C', 'T', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 0, 0, 1, 1 }),
+    // claimed huge count, truncated
+    &([_]u8{ 'Z', 'C', 'T', '1', 0xff, 0xff }),
+    // wrong magic
+    &([_]u8{ 'Z', 'C', 'T', '0', 0, 0 }),
+    // count=1 but slot_count huge
+    &([_]u8{ 'Z', 'C', 'T', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0 }),
+};
+
+test "fuzz containers.zct loader" {
+    try std.testing.fuzz({}, fuzzContainersZct, .{ .corpus = &zct_corpus });
+}
+
+fn fuzzContainersZct(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // Store is large (256 chests); keep off the fuzz stack.
+    const s = try std.testing.allocator.create(containers.ContainerStore);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.loadFromSlice(storage[0..len]) catch return;
+}
+
+const png_sig = [_]u8{ 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
+// 1x1 RGB white pixel; IDAT is a stored deflate block. Parser skips chunk CRCs.
+const png_ihdr_1x1 = [_]u8{ 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0, 0, 0, 0 };
+const png_iend = [_]u8{ 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0, 0, 0, 0 };
+const png_1x1_rgb = png_sig ++ png_ihdr_1x1 ++
+    [_]u8{ 0, 0, 0, 15, 'I', 'D', 'A', 'T', 0x78, 0x01, 0x01, 0x04, 0x00, 0xfb, 0xff, 0, 0xff, 0xff, 0xff, 0x05, 0xfe, 0x02, 0xfe, 0, 0, 0, 0 } ++
+    png_iend;
+
+const biome_png_corpus = [_][]const u8{
+    "",
+    &png_sig,
+    &png_1x1_rgb,
+    // claimed max u32 dims (raw_len overflow guard must reject, not panic)
+    &(png_sig ++ [_]u8{ 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 8, 2, 0, 0, 0, 0, 0, 0, 0 }),
+    // invalid filter byte 5 in scanline (stored deflate of {5,0,0,0})
+    &(png_sig ++ png_ihdr_1x1 ++
+        [_]u8{ 0, 0, 0, 15, 'I', 'D', 'A', 'T', 0x78, 0x01, 0x01, 0x04, 0x00, 0xfb, 0xff, 5, 0, 0, 0, 0x00, 0x18, 0x00, 0x06, 0, 0, 0, 0 } ++
+        png_iend),
+    // truncated IDAT / garbage zlib
+    &(png_sig ++ png_ihdr_1x1 ++ [_]u8{ 0, 0, 0, 2, 'I', 'D', 'A', 'T', 0x78, 0x9c }),
+    // chunk length past EOF
+    &(png_sig ++ [_]u8{ 0xff, 0xff, 0xff, 0xff, 'I', 'H', 'D', 'R' }),
+    // IEND before IDAT
+    &(png_sig ++ png_ihdr_1x1 ++ png_iend),
+};
+
+test "fuzz biomes.png decoder" {
+    try std.testing.fuzz({}, fuzzBiomePng, .{ .corpus = &biome_png_corpus });
+}
+
+fn fuzzBiomePng(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    // Skip mid-size claimed dims: valid but each iteration would alloc MBs.
+    // Tiny dims and the >max_png_dim reject path stay exercised.
+    if (std.mem.indexOf(u8, input, "IHDR")) |at| {
+        if (at + 12 <= input.len) {
+            const w = std.mem.readInt(u32, input[at + 4 ..][0..4], .big);
+            const h = std.mem.readInt(u32, input[at + 8 ..][0..4], .big);
+            if ((w > 64 or h > 64) and w <= biomes.max_png_dim and h <= biomes.max_png_dim) return;
+        }
+    }
+    var map = biomes.parsePng(std.testing.allocator, input, null) catch return;
+    defer map.deinit();
+    try std.testing.expect(map.width > 0 and map.height > 0);
+    try std.testing.expect(map.r.len == @as(usize, @intCast(map.width)) * @as(usize, @intCast(map.height)));
+    // Lookups must not panic on arbitrary world coords.
+    _ = map.atWorld(smith.value(i32), smith.value(i32));
+    _ = map.chunkDominant(smith.value(i32) >> 16, smith.value(i32) >> 16);
+}
+
+const prefab_xml_corpus = [_][]const u8{
+    "",
+    \\<prefabs>
+    \\  <decoration type="model" name="house_old_bungalow_01" position="10, 40, -5" rotation="1" y_is_groundlevel="true"/>
+    \\  <decoration type="model" name="part_driveway" position="0, 60, 0" rotation="0"/>
+    \\</prefabs>
+    ,
+    "<decoration name=\"x\" position=\"1,2,3\"/>",
+    "<decoration name=\"a\" position=\"1,2\"/>",
+    "<decoration name=\"\" position=\"0,0,0\" rotation=\"99\"/>",
+    "<decoration name=\"" ++ ("n" ** 64) ++ "\" position=\"-1,-2,-3\"/>",
+    // unclosed tag / missing quotes
+    "<decoration name=\"x\" position=\"1,2,3\"",
+    "decoration name=x position=1,2,3",
+};
+
+test "fuzz prefabs.xml parser" {
+    try std.testing.fuzz({}, fuzzPrefabsXml, .{ .corpus = &prefab_xml_corpus });
+}
+
+fn fuzzPrefabsXml(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // No prefabs_data_dir: skip .tts size probes (I/O) in the fuzz loop.
+    var idx = prefabs.parseXml(std.testing.allocator, storage[0..len], null) catch return;
+    defer idx.deinit();
+    try std.testing.expect(idx.items.len <= len);
+    if (idx.items.len > 0) {
+        var heights: [256]u8 = .{64} ** 256;
+        idx.applyToChunkHeights(0, 0, &heights);
+    }
+}
+
+// Minimal valid tiny .tts: magic, ver=5, size 1x1x1, one air block raw=0.
+const tts_min = [_]u8{
+    't', 't', 's', 0,
+    5, 0, 0, 0, // version
+    1, 0, // sx
+    1, 0, // sy
+    1, 0, // sz
+    0, 0, 0, 0, // block raw
+};
+
+const tts_corpus = [_][]const u8{
+    "",
+    "tts\x00",
+    &tts_min,
+    // version too old
+    &([_]u8{ 't', 't', 's', 0, 4, 0, 0, 0, 1, 0, 1, 0, 1, 0 }),
+    // bad size zeros
+    &([_]u8{ 't', 't', 's', 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+    // claimed huge volume (harness skips full parse)
+    &([_]u8{ 't', 't', 's', 0, 5, 0, 0, 0, 0xff, 0x7f, 0xff, 0x7f, 0xff, 0x7f }),
+    // short after header
+    &([_]u8{ 't', 't', 's', 0, 5, 0, 0, 0, 2, 0, 2, 0, 2, 0, 0, 0 }),
+};
+
+test "fuzz .tts block parser" {
+    try std.testing.fuzz({}, fuzzTtsBlocks, .{ .corpus = &tts_corpus });
+}
+
+fn fuzzTtsBlocks(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    // Reject pathological volumes before allocating (count is sx*sy*sz).
+    if (input.len >= 14 and std.mem.eql(u8, input[0..4], "tts\x00")) {
+        const sx: i32 = std.mem.readInt(i16, input[8..10], .little);
+        const sy: i32 = std.mem.readInt(i16, input[10..12], .little);
+        const sz: i32 = std.mem.readInt(i16, input[12..14], .little);
+        if (sx > 0 and sy > 0 and sz > 0) {
+            const vol = @as(i64, sx) * @as(i64, sy) * @as(i64, sz);
+            if (vol > 32 * 32 * 32) return;
+        }
+    }
+    var blocks = tts.parseBlocks(std.testing.allocator, input) catch return;
+    defer blocks.deinit();
+    try std.testing.expect(blocks.types.len == blocks.blockCount());
+    try std.testing.expect(blocks.density.len == 0 or blocks.density.len == blocks.types.len);
+}
+
+const zch_corpus = [_][]const u8{
+    "",
+    "ZCH3",
+    // ZCH3 header pos(0,0), no planes, no heights (torn)
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+    // ZCH3 heights-only for (0,0)
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ ([_]u8{64} ** 256)),
+    // ZCH1 heights for (1,-1)
+    &([_]u8{ 'Z', 'C', 'H', '1', 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff } ++ ([_]u8{50} ** 256)),
+    // ZCH3 with blocks flag but truncated plane
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    // bad flag bytes
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    // wrong magic
+    &([_]u8{ 'Z', 'C', 'H', '4', 0, 0, 0, 0, 0, 0, 0, 0 }),
+};
+
+test "fuzz ZCH chunk validator" {
+    try std.testing.fuzz({}, fuzzZchValidate, .{ .corpus = &zch_corpus });
+}
+
+fn fuzzZchValidate(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const pos: store.ChunkPos = .{
+        .x = smith.value(i32),
+        .z = smith.value(i32),
+    };
+    // Also try matching pos from header when present so valid seeds pass.
+    const input = storage[0..len];
+    _ = store.World.validateChunkBytes(input, pos) catch {};
+    if (input.len >= 12 and input[0] == 'Z' and input[1] == 'C' and input[2] == 'H') {
+        const hx = std.mem.readInt(i32, input[4..8], .little);
+        const hz = std.mem.readInt(i32, input[8..12], .little);
+        _ = store.World.validateChunkBytes(input, .{ .x = hx, .z = hz }) catch {};
     }
 }

@@ -12,3 +12,17 @@ const std = @import("std");
 
 /// Network-facing entity id (stable for wire packages).
 pub const NetId = i32;
+
+/// Slot + generation for internal handles that must not alias after recycle.
+pub const EntityHandle = struct {
+    slot: Slot = invalid_slot,
+    gen: u32 = 0,
+
+    pub fn invalid() EntityHandle {
+        return .{};
+    }
+
+    pub fn isValid(self: EntityHandle) bool {
+        return self.slot != invalid_slot;
+    }
+};

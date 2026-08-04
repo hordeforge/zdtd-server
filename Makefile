@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check lint fmt release-check release clean need-zig
+.PHONY: all build test fuzz run check lint fmt release-check release smoke clean need-zig need-release-tools
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -16,6 +16,13 @@ OPTIMIZE ?= Debug
 need-zig:
 	@command -v "$(ZIG)" >/dev/null || { \
 	  echo "zdtd: missing Zig compiler '$(ZIG)' (need exact pin from .zigversion; see build.zig.zon minimum_zig_version)" >&2; \
+	  exit 127; \
+	}
+
+# Fail before compiling if the release integrity sidecar cannot be produced.
+need-release-tools:
+	@command -v sha256sum >/dev/null || { \
+	  echo "zdtd: missing required release tool: sha256sum (GNU coreutils)" >&2; \
 	  exit 127; \
 	}
 
@@ -38,7 +45,7 @@ run: need-zig
 # -Dcpu=baseline: without it Zig targets the build host's CPU features, so the
 # artifact's bytes vary per build machine and can SIGILL on older operator CPUs.
 # Writes zig-out/bin/zdtd.sha256 (hash of the binary only) for artifact integrity.
-release: release-check need-zig
+release: release-check need-zig need-release-tools
 	$(ZIG) build -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline
 	@bin=zig-out/bin/zdtd; \
 	  test -f "$$bin" || { echo "zdtd: release build did not produce $$bin" >&2; exit 1; }; \
@@ -50,7 +57,12 @@ lint: need-zig
 	  echo "zdtd: missing required tool: rg (ripgrep); apt/brew/cargo install ripgrep" >&2; \
 	  exit 127; \
 	}
+	@command -v shellcheck >/dev/null || { \
+	  echo "zdtd: missing required tool: shellcheck; apt/brew install shellcheck" >&2; \
+	  exit 127; \
+	}
 	bash -n scripts/*.sh
+	shellcheck scripts/*.sh
 	$(ZIG) fmt --check build.zig src
 	bash scripts/lint-architecture.sh
 	bash scripts/lint-wire.sh
@@ -73,6 +85,10 @@ check:
 	$(MAKE) build
 	$(MAKE) test
 	$(MAKE) fuzz
+
+# Operator-binary smoke (CI after `make release`; also local release verification).
+smoke: release
+	bash scripts/smoke-release.sh
 
 clean:
 	rm -rf zig-out .zig-cache .zdtd_cfg_cache

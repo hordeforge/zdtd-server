@@ -153,12 +153,13 @@ The operating principles behind every rule below. When in doubt, these decide.
     interfaces** (`std.Io` vtable) and thin helpers on top (`util/io_fs.zig`) are
     the idiomatic layer. Do **not** open-code `std.os.linux.*`, raw `std.posix`
     file loops, or `std.c` for ordinary FS. Ordinary FS is `util/io_fs` /
-    `std.Io` only. LiteNet UDP is `litenet/udp_socket.zig` (`std.Io.net`);
-    admin/GSI/webui TCP remain **legacy** `std.os.linux` until migrated (see
-    `docs/STD_ABSTRACTIONS.md`; webui should use `std.http.Server`). Shelling
-    out remains forbidden when an in-process API exists (workspace Native APIs
-    rule). Follow [Zig Zen](https://ziglang.org/documentation/master/#Zen) when
-    choosing among correct options.
+    `std.Io` only. LiteNet UDP is `litenet/udp_socket.zig` (`std.Io.net`).
+    Admin/GSI/webui TCP is `util/tcp_listen.zig` (`IpAddress.listen` + poll
+    accept). Optional: webui HTTP body via `std.http.Server` (see
+    `docs/STD_ABSTRACTIONS.md`). Shelling out remains forbidden when an
+    in-process API exists (workspace Native APIs rule). Follow
+    [Zig Zen](https://ziglang.org/documentation/master/#Zen) when choosing among
+    correct options.
 
 ## Commands
 
@@ -166,7 +167,7 @@ The operating principles behind every rule below. When in doubt, these decide.
 zig build              # Debug binary → zig-out/bin/zdtd
 zig build test         # unit + scenario tests (must stay green)
 zig build run
-make check             # version/toolchain pin + build + test + fuzz + lint
+make check             # version/toolchain pin + lint + build + test + fuzz
 make release           # ReleaseSafe + strip (operator binary)
 make clean             # zig-out + .zig-cache + .zdtd_cfg_cache
 ```
@@ -219,7 +220,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 |---|---|---|
 | Stock package body layout | `wire/stock_*.zig`, `packages.zig` | `game.zig` open-coded writes |
 | Block/world mutation | `world/*`, `ecs` | LiteNet / package id tables |
-| Syscalls / sockets | `litenet/udp_socket.zig` (Io.net); GSI/admin/webui TCP still legacy | package builders, ECS systems |
+| Syscalls / sockets | `litenet/udp_socket.zig`, `util/tcp_listen.zig` (Io.net + thin posix) | package builders, ECS systems |
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
 | Metrics | `apm/*` via `Game.harness` | 7dtd-apm bridge |
 
@@ -352,9 +353,9 @@ Init, map load, and admin commands may take longer; amortize into caches.
   `posix`/`std.c` file loops, `/tmp` for large caches (use project or `~/.cache`).
 - **Layering:** app → `io_fs` (optional) → `std.Io` → (std internals). Do not
   skip to the bottom from game/assets/world code.
-- **UDP/LiteNet:** `litenet/udp_socket.zig` via `std.Io.net`. Admin/GSI/webui
-  TCP still legacy; migrate via `docs/STD_ABSTRACTIONS.md` (`std.http.Server`
-  for webui). Do not invent a second raw-syscall net stack.
+- **UDP/LiteNet:** `litenet/udp_socket.zig` via `std.Io.net`. **TCP:** 
+  `util/tcp_listen.zig`. Optional HTTP framing: `std.http.Server` (see
+  `docs/STD_ABSTRACTIONS.md`). Do not invent a second raw-syscall net stack.
 
 ### Zig Zen (tie-break)
 

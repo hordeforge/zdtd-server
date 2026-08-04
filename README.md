@@ -19,7 +19,7 @@ That is **not** sibling `7dtd-apm` (stock Mono dedi).
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
 death/respawn, loot, craft/workstation, trade, persist; automated playtest
-**pass=83 fail=0** (20260804j; soft residuals in STATUS).
+**pass=83 fail=0** (20260804q; soft residuals in STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 | Doc | Role |
@@ -43,9 +43,9 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 # or: --quests assets/fixtures/quests.xml
 # names: Navezgane, Pregen06k01, Pregen06k02, Pregen08k01, Pregen08k02
 
-# Operator web UI (WU0; loopback + secret; docs/WEBUI.md):
-#   zdtd --port 27002 --world worlds/zdtd_default \
-#     --webui-port 8080 --webui-secret change-me
+# Operator web UI (WU0–WU2; loopback + secret min 8 chars; docs/WEBUI.md):
+#   ZDTD_WEBUI_SECRET=change-me zdtd --port 27002 --world worlds/zdtd_default \
+#     --webui-port 8080
 #   curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/
 
 # loadgen joins LiteNet (ServerPort+2), not the TCP info port:
@@ -89,7 +89,7 @@ Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 Requires Linux and Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). The
 server's UDP, admin, WebUI, and clock paths currently use Linux APIs. Canonical
 validation and release builds use the exact compiler in `.zigversion`; `make check`
-enforces that pin and also requires Bash and `rg` (ripgrep). `make release`
+enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck. `make release`
 additionally requires `sha256sum`.
 
 No network fetch: the package has no Zig dependencies. Override the compiler with
@@ -101,7 +101,7 @@ make                 # Debug binary → zig-out/bin/zdtd
 make test
 make check           # pin + lint + build + test + fuzz (serial; safe under -j)
 make release         # ReleaseSafe + strip + zig-out/bin/zdtd.sha256
-# or: zig build / zig build test / zig build -Doptimize=ReleaseSafe -Dstrip=true
+# or: zig build / zig build test (dev builds; make release adds -Dcpu=baseline + sha256)
 ```
 
 ## Layout

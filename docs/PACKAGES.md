@@ -2,7 +2,8 @@
 
 Direction: ToServer=client→server (server MUST handle), ToClient=server→client
 (server may send), Both=either. `handled` = a case in game.zig onData;
-**Totals:** 190 packages; 33 ToServer (all handled: True); handled cases 69; S2C emitted 47.
+**Totals:** 190 stock catalog rows; 33 ToServer (all handled: True); handled cases 69; S2C emitted 47.  
+**Join map:** `packages.default_mappings` has **189** names (runtime `package_maps=189`). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
 `sent` = zdtd emits it S2C. Regenerate with ../7dtd-research/tools/parity + this script.
 
 | Package | Dir | Handled(C2S) | Sent(S2C) | read wire (head) |

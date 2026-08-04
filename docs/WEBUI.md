@@ -7,7 +7,7 @@ dumps with a browser UI.
 | | |
 |---|---|
 | Status | **WU0–WU2 shipped** (dashboard + console cmds); WU3+ optional |
-| Stack | HTMX + Alpine.js + minimal CSS (no React/Vue build chain) |
+| Stack | Server-rendered HTML + inline vanilla JS poller using htmx-style attributes; vendor htmx/alpine embed is WU3 (not shipped) |
 | Server | Zig HTTP on a dedicated bind (loopback default) |
 | Related | [APM.md](APM.md), [AUTHORITY.md](AUTHORITY.md), `src/server/admin.zig`, [PLUGIN_API.md](PLUGIN_API.md) |
 
@@ -58,21 +58,22 @@ parallel JSON-RPC + REST + GraphQL stacks.
     |     router → handlers
     |     static files
     |
-    +-- command queue  (mutex / channel)
-    |     webui enqueues AdminCommand
-    |     Game.step / admin pump dequeues  (same path as admin TCP)
+    +-- admin commands  (shipped: no queue)
+    |     POST /api/cmd runs inline in the request via
+    |     setAdminHandler → runAdminLine  (same parser as admin TCP)
     |
     +-- read snapshots
           apm harness copy
           client list, clock, world stats  (RCU or tick-end snapshot)
 ```
 
-**Critical separation**
+**Critical separation** (shipped: there is no HTTP thread; `Game.step` calls
+non-blocking `webui.poll()` on the tick thread, which does accept, parse, auth,
+HTML render, and the admin command)
 
 | Path | Allowed |
 |---|---|
-| HTTP thread / async accept | parse request, auth, build HTML, enqueue cmd |
-| Tick (50 ms) | drain **bounded** cmd queue; update **snapshot** struct for readers |
+| Tick (`webui.poll()`) | one client slot, short timeout, small pages, one cmd per request |
 | Never on tick | template render of large pages, disk walk, TLS handshake bulk |
 
 Same rule as admin TCP: loopback-first; give/kick are privileged.
@@ -83,10 +84,10 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 |---|---|
 | Bind | IPv4 loopback only; remote access requires a TLS reverse proxy |
 | Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret) |
-| CSRF | SameSite cookie + form field = HMAC session token (secret accepted for API tools) |
+| CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd` and `/logout`) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
-| Rate limit | Single concurrent HTTP client slot + short request timeout; no multi-IP quota yet |
-| Audit log | Append-only ops log: who/when/cmd (file under world dir) |
+| Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
+| Audit log | In-memory ring (24 lines) shown via `/partials/console`; file log not implemented |
 | Read vs write | GET partials need auth; POST cmds need auth + CSRF |
 
 **Do not** expose webui on public WAN without TLS + strong secret + firewall.
@@ -104,19 +105,22 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
 | `GET /partials/apm` | Counters + section p50/p99 | apm harness |
 | `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
-| `GET /partials/console` | Command form + last N log lines | ops log ring |
-| `POST /api/cmd` | Run one admin command | queue → admin parser |
-| `GET /api/apm.json` | Machine-readable apm (loadgen/tools) | snapshot |
-| `GET /login` | Sign-in form (200) | static HTML |
-| `POST /login` | Form body `token=` → session cookie | config secret |
-| `POST /logout` | Clear session cookie (CSRF required) | session |
-| `GET /healthz` | Unauthenticated process liveness | static |
-| `GET /readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
+| `GET /partials/console` | Last N audit log lines (command form lives in the shell) | ops log ring |
+| `POST /api/cmd` | Run one admin command; HTML fragment by default, `text/plain` when `Accept: text/plain` or `application/json` | inline → admin parser (same request) |
+| `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools) | snapshot |
+| `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
+| `POST /login` | Form body `token=` → **303** + session cookie (missing token **400**, wrong secret **401**, non-form content type **415**, lockout **429**) | config secret |
+| `POST /logout` | Clear session cookie (CSRF: session token or secret) | session |
+| `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
+| `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
 | `GET /static/*` | htmx.min.js, alpine, app.css (not implemented; assets inline) | embed or files |
 
-Status notes: wrong method on a known path returns **405** with `Allow` (not
-404). Unknown paths return **404** for any method. Unauthenticated `/api/*`
-returns plain `401 unauthorized` (HTML login form is for browser routes).
+Status notes: auth runs before routing, so unauthenticated requests get **401**
+even on unknown paths or wrong methods. Authenticated: wrong method on a known
+path returns **405** with `Allow` (not 404); unknown paths return **404**. Unauthenticated `/api/*`
+returns plain `401 unauthorized` plus `WWW-Authenticate: Bearer realm="zdtd-webui"`
+(HTML login form is for browser routes). `/readyz` returns **503** with
+`Retry-After: 1` until the first live tick snapshot.
 
 Optional later:
 
@@ -155,9 +159,10 @@ Reuse **exactly** `admin.zig` / `Game` console verbs so TCP and web stay one pat
 | Cmd | Web UI |
 |---|---|
 | `lp` / listplayers | Players table (auto) |
+| `wipeplayer <name>` | Erase `players.zsv` record + kick online (confirm dialog) |
 | `kick <slot>` | Row button |
 | `give <slot> <item> <n>` | Form (name resolve via items table) |
-| `tp` / tele | Form or "TP to spawn" |
+| `tp` / `tele` | Form or "TP to spawn" (admin accepts both) |
 | `settime` | Day/night buttons + custom |
 | `say` | Broadcast form |
 | `killall` / spawnentity | Confirm modal (Alpine) |
@@ -191,7 +196,8 @@ WebSnapshot {
 HTTP handlers **only read** the snapshot (clone under lock, then render). No
 walking live `clients` from the HTTP thread without the snapshot protocol.
 
-Command queue:
+Command queue (design; shipped is a single `cmd_pending` slot, and it is dead
+code in the real server because `setAdminHandler` runs commands inline):
 
 ```text
 WebCmd { id, session, raw_line, enqueued_ns }
@@ -293,11 +299,10 @@ HTTP stack preference (in order):
 | Key | Default | Notes |
 |---|---|---|
 | `--webui-port` | `0` (disabled) | e.g. `8080` |
-| `--webui-bind` | `127.0.0.1` | IPv4 loopback only; put TLS termination in front for remote access |
-| `--webui-secret` | empty → refuse start if port≠0 | or env `ZDTD_WEBUI_SECRET` (min 8 chars) |
-| serverconfig (optional later) | `WebUiPort`, `WebUiBind` | document in GAME_OPTIONS |
+| `--webui-bind` | `127.0.0.1` | literal `127.0.0.1` or `localhost` only; put TLS termination in front for remote access |
+| `--webui-secret` | empty → refuse start if port≠0 | or env `ZDTD_WEBUI_SECRET`; 8–128 chars, printable ASCII, no whitespace/quotes/backslash/comma/semicolon |
 
-Precedence: CLI > env > serverconfig > defaults.
+Precedence: CLI > env > defaults.
 
 ## Testing
 
@@ -341,22 +346,20 @@ against the operator session.
 - [ ] Docs: WEBUI.md, GAME_OPTIONS, README snippet, SECURITY notes
 - [ ] No em dashes / AI attribution in implementation commits
 
-## Open decisions (resolve at WU0)
+## Settled decisions (WU0–WU2)
 
-1. **std.http vs minimal parser** — spike in WU0.
-2. **Embed vs disk static** — prefer embed for single-binary ops; disk override
-   path for CSS tweaks optional.
-3. **Session store** — signed cookie only (stateless) vs server-side session map
-   (cap 16 sessions).
-4. **Command identity** — log “webui” vs TCP peer address for audit.
+Recorded in [ADR 0018](adr/0018-webui-ops-dashboard.md):
 
-## Suggested first issue breakdown
+1. **std.http.Server** over a hand-rolled full parser (`tcp_listen` + std.http).
+2. **Inline assets** in the binary; vendor htmx/Alpine + `/static/*` optional WU3.
+3. **HMAC session cookie** (not raw secret); CSRF = session token (secret OK for API tools).
+4. **Admin line path** for commands; in-memory audit ring for console partial.
 
-1. ADR or STATUS line: "Web UI design accepted; implementation parked at WU0"
-2. WU0 PR: flag + bind + hello world + auth stub
-3. WU1 PR: snapshot + status/players/apm partials
-4. WU2 PR: cmd queue + console + CSRF
-5. WU3 PR: polish + embed assets
+## Optional later (WU3+)
+
+1. Embed vendor htmx/Alpine + `/static/*` disk override for CSS.
+2. Multi-session map / remote TLS bind hardening beyond reverse-proxy notes.
+3. File-backed ops audit log.
 
 ---
 
@@ -369,7 +372,7 @@ against the operator session.
 
 <form hx-post="/api/cmd" hx-target="#console-out" hx-swap="innerHTML">
   <input type="hidden" name="csrf" value="...">
-  <input name="line" placeholder="give 0 resourceWood 10" autocomplete="off">
+  <input name="line" placeholder="give 0 2 10" autocomplete="off">
   <button type="submit">Run</button>
 </form>
 <div id="console-out"></div>

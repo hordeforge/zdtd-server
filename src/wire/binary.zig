@@ -23,67 +23,51 @@ pub const Reader = struct {
         return (try self.readByte()) != 0;
     }
 
-    pub fn readI16(self: *Reader) ReadError!i16 {
-        if (self.pos + 2 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(i16, self.data[self.pos..][0..2], .little);
-        self.pos += 2;
+    fn readInt(self: *Reader, comptime T: type) ReadError!T {
+        const n = @sizeOf(T);
+        if (self.pos + n > self.data.len) return error.EndOfStream;
+        const v = std.mem.readInt(T, self.data[self.pos..][0..n], .little);
+        self.pos += n;
         return v;
+    }
+
+    pub fn readI16(self: *Reader) ReadError!i16 {
+        return self.readInt(i16);
     }
 
     pub fn readU16(self: *Reader) ReadError!u16 {
-        if (self.pos + 2 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(u16, self.data[self.pos..][0..2], .little);
-        self.pos += 2;
-        return v;
+        return self.readInt(u16);
     }
 
     pub fn readI32(self: *Reader) ReadError!i32 {
-        if (self.pos + 4 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(i32, self.data[self.pos..][0..4], .little);
-        self.pos += 4;
-        return v;
+        return self.readInt(i32);
     }
 
     pub fn readU32(self: *Reader) ReadError!u32 {
-        if (self.pos + 4 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(u32, self.data[self.pos..][0..4], .little);
-        self.pos += 4;
-        return v;
+        return self.readInt(u32);
     }
 
     pub fn readI64(self: *Reader) ReadError!i64 {
-        if (self.pos + 8 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(i64, self.data[self.pos..][0..8], .little);
-        self.pos += 8;
-        return v;
+        return self.readInt(i64);
     }
 
     pub fn readU64(self: *Reader) ReadError!u64 {
-        if (self.pos + 8 > self.data.len) return error.EndOfStream;
-        const v = std.mem.readInt(u64, self.data[self.pos..][0..8], .little);
-        self.pos += 8;
-        return v;
+        return self.readInt(u64);
     }
 
     pub fn readF32(self: *Reader) ReadError!f32 {
-        if (self.pos + 4 > self.data.len) return error.EndOfStream;
-        const bits = std.mem.readInt(u32, self.data[self.pos..][0..4], .little);
-        self.pos += 4;
-        return @bitCast(bits);
+        return @bitCast(try self.readInt(u32));
     }
 
     /// .NET BinaryReader 7-bit string length; overlong prefix → InvalidString.
     fn readStringLen(self: *Reader) ReadError!usize {
-        var len: usize = 0;
-        var shift: u6 = 0;
-        while (true) {
-            const b = try self.readByte();
-            len |= @as(usize, b & 0x7F) << shift;
-            if ((b & 0x80) == 0) break;
-            shift += 7;
-            if (shift > 28) return error.InvalidString;
-        }
-        return len;
+        // Same encoding as read7BitEncodedInt; map Overflow so string paths keep
+        // InvalidString (callers and tests distinguish bad length from buffer fit).
+        const n = read7BitEncodedInt(self) catch |err| switch (err) {
+            error.Overflow => return error.InvalidString,
+            else => |e| return e,
+        };
+        return n;
     }
 
     /// .NET BinaryReader.ReadString: 7-bit encoded length + UTF-8.
@@ -125,47 +109,39 @@ pub const Writer = struct {
         try self.writeByte(if (v) 1 else 0);
     }
 
+    fn writeInt(self: *Writer, comptime T: type, v: T) error{Overflow}!void {
+        const n = @sizeOf(T);
+        try self.ensure(n);
+        std.mem.writeInt(T, self.buf[self.pos..][0..n], v, .little);
+        self.pos += n;
+    }
+
     pub fn writeI16(self: *Writer, v: i16) error{Overflow}!void {
-        try self.ensure(2);
-        std.mem.writeInt(i16, self.buf[self.pos..][0..2], v, .little);
-        self.pos += 2;
+        return self.writeInt(i16, v);
     }
 
     pub fn writeU16(self: *Writer, v: u16) error{Overflow}!void {
-        try self.ensure(2);
-        std.mem.writeInt(u16, self.buf[self.pos..][0..2], v, .little);
-        self.pos += 2;
+        return self.writeInt(u16, v);
     }
 
     pub fn writeI32(self: *Writer, v: i32) error{Overflow}!void {
-        try self.ensure(4);
-        std.mem.writeInt(i32, self.buf[self.pos..][0..4], v, .little);
-        self.pos += 4;
+        return self.writeInt(i32, v);
     }
 
     pub fn writeU32(self: *Writer, v: u32) error{Overflow}!void {
-        try self.ensure(4);
-        std.mem.writeInt(u32, self.buf[self.pos..][0..4], v, .little);
-        self.pos += 4;
+        return self.writeInt(u32, v);
     }
 
     pub fn writeI64(self: *Writer, v: i64) error{Overflow}!void {
-        try self.ensure(8);
-        std.mem.writeInt(i64, self.buf[self.pos..][0..8], v, .little);
-        self.pos += 8;
+        return self.writeInt(i64, v);
     }
 
     pub fn writeU64(self: *Writer, v: u64) error{Overflow}!void {
-        try self.ensure(8);
-        std.mem.writeInt(u64, self.buf[self.pos..][0..8], v, .little);
-        self.pos += 8;
+        return self.writeInt(u64, v);
     }
 
     pub fn writeF32(self: *Writer, v: f32) error{Overflow}!void {
-        try self.ensure(4);
-        const bits: u32 = @bitCast(v);
-        std.mem.writeInt(u32, self.buf[self.pos..][0..4], bits, .little);
-        self.pos += 4;
+        return self.writeInt(u32, @bitCast(v));
     }
 
     pub fn writeBytes(self: *Writer, b: []const u8) error{Overflow}!void {
@@ -208,10 +184,14 @@ test "string roundtrip" {
     var buf: [64]u8 = undefined;
     var w: Writer = .{ .buf = &buf };
     try w.writeString("V 3.1.0");
+    try w.writeString("");
     var r: Reader = .{ .data = w.written() };
     var sbuf: [32]u8 = undefined;
     const s = try r.readString(&sbuf);
     try std.testing.expectEqualStrings("V 3.1.0", s);
+    const empty = try r.readString(&sbuf);
+    try std.testing.expectEqualStrings("", empty);
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
 
 test "7bit int rejects overlong encoding without overflowing shift" {

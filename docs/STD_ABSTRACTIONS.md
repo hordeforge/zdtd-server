@@ -1,111 +1,74 @@
 # Zig stdlib abstraction audit (zdtd)
 
-Living map of where we use high-level Zig 0.16 APIs vs residual low-level
-paths. Policy: **AGENTS rule 24** (stdlib / `std.Io` over raw `std.os.linux`).
+Living map of where we use high-level Zig 0.16 APIs vs thin posix.
+Policy: **AGENTS rule 24** (stdlib / `std.Io` over raw `std.os.linux`).
 
 ## Target stack
 
 ```text
 app (server/ecs/world/assets)
-  → util/io_fs, util/clock, litenet/udp_socket, (future tcp_listen)
-  → std.Io / std.Io.net / std.http / std.posix (thin)
+  → util/io_fs, util/clock, util/tcp_listen, litenet/udp_socket
+  → std.Io / std.Io.net / std.posix (thin)
   → OS
 ```
 
-Do **not** open-code `std.os.linux.*` for ordinary FS, time, or new net code.
+**No application `std.os.linux` imports** (only forbid-comments remain).
 
 ## Status by subsystem
 
-| Area | Preferred API | Current state | Notes |
-|---|---|---|---|
-| **Ordinary FS** | `util/io_fs` → `std.Io.Dir`/`File` | **Done** | No raw open/getdents in app code |
-| **Paths** | `std.fs.path`, `std.fs.max_path_bytes` | **OK** | Constants only |
-| **UDP LiteNet** | `std.Io.net` bind/send/receiveTimeout | **Done** (`litenet/udp_socket.zig`) | Peers store `IpAddress`; `posix.setsockopt` only for REUSEADDR |
-| **Monotonic time / sleep** | `std.Io.Clock.awake` + `Duration.sleep` | **Done** (`util/clock.zig`) | Virtual clock for tests unchanged |
-| **Thread pool** | `std.Io` mutex/cond via `util/parallel` | **Done** | No spawn-per-tick |
-| **WebUI HTTP** | `std.Io.net` listen + **`std.http.Server`** | **Open** (`webui.zig` still `std.os.linux` TCP + hand parsers) | Best next migration: listen/accept via `IpAddress.listen`, parse/respond via `http.Server.init` + `receiveHead` + `respond` |
-| **Admin TCP** | `std.Io.net` listen/accept + Stream reader | **Open** (`admin.zig` linux sockets) | Line protocol, not HTTP; share a small `util/tcp_listen.zig` with GSI |
-| **GSI info TCP** | same as admin | **Open** (`serverinfo_tcp.zig`) | Accept + one-shot write |
-| **HTTP Client** | `std.http.Client` | N/A | Not used (no outbound HTTP) |
-
-## Residual `std.os.linux` (as of this doc)
-
-| File | Why still there | Migration |
+| Area | Preferred API | State |
 |---|---|---|
-| `src/server/webui.zig` | Non-blocking TCP + manual HTTP | `IpAddress.listen` + `Server.accept` with zero/timeout accept; request path → `std.http.Server` |
-| `src/server/admin.zig` | Non-blocking multi-session TCP | `std.Io.net` Server + Stream.Reader; poll with WouldBlock accept |
-| `src/server/serverinfo_tcp.zig` | Accept + write GSI blob | Same TCP helper as admin |
-| `src/litenet/udp_socket.zig` | Comment only; `posix.setsockopt` | Acceptable thin posix (no `std.os.linux`) |
-| `src/util/io_fs.zig` | Comment forbidding linux | OK |
+| **Ordinary FS** | `util/io_fs` → `std.Io.Dir`/`File` | **Done** |
+| **Paths** | `std.fs.path`, `std.fs.max_path_bytes` | **OK** |
+| **UDP LiteNet** | `litenet/udp_socket` → `std.Io.net` | **Done** |
+| **Monotonic time** | `util/clock` → `posix.system.clock_gettime` (vDSO; no Threaded) | **Done** |
+| **Sleep** | `posix.system.nanosleep` | **Done** |
+| **Thread pool** | `util/parallel` → `std.Io` | **Done** |
+| **TCP listen** | `util/tcp_listen` → `IpAddress.listen` + poll/`accept4` | **Done** |
+| **Admin TCP** | `tcp_listen` | **Done** |
+| **GSI info TCP** | `tcp_listen` | **Done** |
+| **WebUI TCP** | `tcp_listen` | **Done** |
+| **HTTP framing** | `std.http.Server` | **Done** (`webui.serveHttp`: fixed Reader over recv_buf + Writer → writeAll) |
 
-## `std.http` fit for webui
+## WebUI HTTP path
 
-Zig 0.16 `std.http.Server` is a **per-connection** protocol state machine:
+1. Non-blocking TCP accept/read until full request in `recv_buf`
+2. `http.Server.init(Io.Reader.fixed(buf), Io.Writer.fixed(out))`
+3. `receiveHead` + route on `method`/`target`; body = remainder of fixed reader
+4. `request.respond` + flush Writer buffer via `tcp.writeAll`
 
-- `http.Server.init(*Io.Reader, *Io.Writer)`
-- `receiveHead()` → `Request` with `method`, `target`, headers
-- `request.respond(body, .{ .status, .extra_headers, .keep_alive })`
+## Why clock stays on `posix.system`
 
-It does **not** open the listen socket. Pair with:
+`monoNs` is on the per-packet hot path. Constructing `Io.Threaded` per call is
+too heavy. `posix.system.clock_gettime(CLOCK.MONOTONIC)` hits the vDSO and is the
+idiomatic portable thin layer (not `std.os.linux`).
 
-```zig
-const addr: Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = port } };
-var tcp = try addr.listen(io, .{ .reuse_address = true, .mode = .stream, .protocol = .tcp });
-// non-blocking accept: catch error.WouldBlock
-const stream = try tcp.accept(io);
-var r_buf: [8192]u8 = undefined;
-var w_buf: [8192]u8 = undefined;
-var r = stream.reader(io, &r_buf);
-var w = stream.writer(io, &w_buf);
-var http_srv = std.http.Server.init(&r.interface, &w.interface);
-var req = try http_srv.receiveHead();
-// route on req.head.method + req.head.target
-try req.respond(body, .{ .status = .ok, .extra_headers = &.{
-    .{ .name = "content-type", .value = "text/html; charset=utf-8" },
-}});
-```
+## Why accept uses poll + accept4
 
-WebUI constraints to preserve:
+`Io.net.Server.accept` treats EAGAIN as a programmer bug when the listen socket
+is non-blocking. Listen stays blocking; `poll(0)` gates `accept4(..., NONBLOCK|CLOEXEC)`.
 
-- Polled from `Game.step` (no dedicated thread): accept must be non-blocking
-- Shared secret auth (Bearer / cookie / CSRF)
-- Single in-flight client is OK (current design)
+## Residual thin posix (acceptable)
 
-## Shared TCP listen helper (recommended)
-
-Extract once for admin + GSI + (optional) webui listen shell:
-
-```text
-src/util/tcp_listen.zig
-  TcpListener { io_impl, server: Io.net.Server }
-  listen(bind_ip4, port, backlog) !void
-  acceptNonblock() !?Stream   // null on WouldBlock
-  deinit()
-```
-
-Keep line/HTTP framing in the callers.
-
-## Explicit non-migrations
-
-| Keep as-is | Reason |
+| Call | Where |
 |---|---|
-| LiteNet packet framing | Protocol, not OS |
-| `posix.setsockopt` REUSEADDR on UDP | BindOptions lacks reuse; one-liner is fine |
-| `page_allocator` for `Io.Threaded` bookkeeping | Documented; not tick heap |
-| Parallel pool internals | Already on `std.Io` primitives |
+| `posix.setsockopt` REUSEADDR | UDP bind (BindOptions has no reuse) |
+| `posix.poll` + `system.accept4` | tcp_listen accept |
+| `posix.read` / `system.write` / `system.close` | tcp_listen client I/O |
+| `system.clock_gettime` / `nanosleep` | clock hot path |
 
 ## Checklist for new code
 
-- [ ] No new `std.os.linux` imports
+- [ ] No `std.os.linux` imports
 - [ ] FS via `io_fs` / `std.Io.Dir`
-- [ ] Time via `util/clock` (or inject `Io` if long-lived)
+- [ ] Time via `util/clock`
 - [ ] UDP via `litenet/udp_socket`
-- [ ] TCP via `std.Io.net` (or shared helper when landed)
-- [ ] HTTP prefer `std.http.Server` / `Client` over hand parsers
+- [ ] TCP via `util/tcp_listen`
+- [ ] Prefer `std.http.Server` for new HTTP surfaces
 
 ## Verification
 
 ```bash
-rg -n 'std\.os\.linux' src --type zig   # should shrink to zero app uses
+rg -n 'std\.os\.linux' src --type zig   # comments only
 zig build && zig build test
 ```

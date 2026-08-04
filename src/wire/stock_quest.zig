@@ -300,10 +300,15 @@ pub const SharedQuestHead = struct {
     shared_by_entity_id: i32,
     event: SharedQuestEvent,
     quest_code: i32 = 0,
-    /// Owned slice into `quest_id_storage` (valid while head lives).
-    quest_id: []const u8 = "",
     quest_id_storage: [96]u8 = undefined,
+    /// Length of the id in quest_id_storage. A length, not a slice: a slice
+    /// into the struct's own storage dangles when returned by value.
+    quest_id_len: usize = 0,
     shared_with_entity_id: i32 = -1,
+
+    pub fn questId(self: *const SharedQuestHead) []const u8 {
+        return self.quest_id_storage[0..self.quest_id_len];
+    }
 };
 
 /// Parse C2S SharedQuest head (enough for server accept/remove).
@@ -318,16 +323,14 @@ pub fn parseSharedQuestHead(body: []const u8) !SharedQuestHead {
         if (body.len < 9) return error.EndOfStream;
         head.quest_code = std.mem.readInt(i32, body[5..9], .little);
         var r: binary.Reader = .{ .data = body, .pos = 9 };
-        if (r.readString(head.quest_id_storage[0..])) |id| {
-            head.quest_id = id;
-        } else |_| {}
-        r.skipString() catch {};
+        const id = try r.readString(head.quest_id_storage[0..]);
+        head.quest_id_len = id.len;
+        try r.skipString();
         // 9 f32 + questGiver i32 + sharedWith i32
-        if (r.remaining() >= 36 + 8) {
-            r.pos += 36;
-            _ = r.readI32() catch {};
-            head.shared_with_entity_id = r.readI32() catch -1;
-        }
+        if (r.remaining() < 36 + 8) return error.EndOfStream;
+        r.pos += 36;
+        _ = try r.readI32();
+        head.shared_with_entity_id = try r.readI32();
     } else if (et == .remove_quest) {
         if (body.len < 9) return error.EndOfStream;
         head.quest_code = std.mem.readInt(i32, body[5..9], .little);
@@ -353,8 +356,20 @@ test "shared quest share layout" {
     try std.testing.expectEqual(@as(i32, 106), head.shared_by_entity_id);
     try std.testing.expectEqual(SharedQuestEvent.share_quest, head.event);
     try std.testing.expectEqual(@as(i32, 7), head.quest_code);
-    try std.testing.expectEqualStrings("tier1_clear", head.quest_id);
+    try std.testing.expectEqualStrings("tier1_clear", head.questId());
     try std.testing.expectEqual(@as(i32, 106), head.shared_with_entity_id);
+}
+
+test "shared quest rejects truncated share body" {
+    var buf: [256]u8 = undefined;
+    const body = try buildSharedQuestShare(&buf, .{
+        .shared_by_entity_id = 106,
+        .quest_code = 7,
+        .quest_id = "tier1_clear",
+        .shared_with_entity_id = 106,
+    });
+    try std.testing.expectError(error.EndOfStream, parseSharedQuestHead(body[0 .. body.len - 1]));
+    try std.testing.expectError(error.EndOfStream, parseSharedQuestHead(body[0..10]));
 }
 
 test "stock quest journal one in-progress" {
@@ -384,22 +399,36 @@ test "stock quest journal one in-progress" {
 }
 
 test "treasure chest objective write is 8 bytes not base" {
-    var buf: [64]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &buf };
-    const kinds = [_]ObjectiveWriteKind{.treasure_chest};
-    const q = StockQuestWrite{
+    // TreasureChest.Write = 2×i32 (8 B); BaseObjective.Write = version+value (2 B).
+    // Same quest head → treasure body is exactly 6 bytes longer.
+    var buf_base: [128]u8 = undefined;
+    var buf_tc: [128]u8 = undefined;
+    var w_base: binary.Writer = .{ .buf = &buf_base };
+    var w_tc: binary.Writer = .{ .buf = &buf_tc };
+    const kinds_base = [_]ObjectiveWriteKind{.base};
+    const kinds_tc = [_]ObjectiveWriteKind{.treasure_chest};
+    const q_base = StockQuestWrite{
         .id = "tier1_treasure",
         .state = .in_progress,
         .tracked = true,
         .current_phase = 1,
         .quest_code = 9,
         .objective_count = 1,
-        .objective_kinds = kinds[0..],
+        .objective_kinds = kinds_base[0..],
     };
-    try writeStockQuest(&w, q);
-    // Must contain 8 zero bytes for treasure fields somewhere after phase/code
-    const out = w.written();
-    try std.testing.expect(out.len > 20);
-    // size marker after quest_code: next is UInt16 objectives region including 8 bytes payload
-    try std.testing.expect(std.mem.indexOf(u8, out, &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 }) != null);
+    var q_tc = q_base;
+    q_tc.objective_kinds = kinds_tc[0..];
+    try writeStockQuest(&w_base, q_base);
+    try writeStockQuest(&w_tc, q_tc);
+    const base = w_base.written();
+    const tc = w_tc.written();
+    try std.testing.expectEqual(base.len + 6, tc.len);
+    // Objectives size marker (FinalizeSizeMarker includes the u16): base=4, treasure=10.
+    // Layout after shared head (id/version/state/owners/tracked/phase/code).
+    const id_prefix: usize = 1 + "tier1_treasure".len; // 7-bit len + bytes
+    const head: usize = id_prefix + 1 + 1 + 1 + 4 + 4 + 1 + 1 + 4; // ver,fv,state,owners×2,tracked,phase,code
+    try std.testing.expectEqual(@as(u16, 4), std.mem.readInt(u16, base[head..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, tc[head..][0..2], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 2 ..][0..4], .little)); // destroyCount
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 6 ..][0..4], .little)); // CurrentRadius
 }

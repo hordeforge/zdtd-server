@@ -145,7 +145,9 @@ fn writeStorageFeature(
     // container size: prefer 2×N or 9×6 for 54
     const n = cont.slot_count;
     const size_x: u16 = if (n > 18) 9 else 2;
-    const size_y: u16 = @max(1, n / size_x);
+    // Ceil: declared grid must hold every stack written below, or the stock
+    // client's TEFeatureStorage.read indexes past its container and throws.
+    const size_y: u16 = @max(1, (n + size_x - 1) / size_x);
     try w.writeU16(size_x);
     try w.writeU16(size_y);
     try w.writeBool(cont.touched);
@@ -286,7 +288,9 @@ pub fn applyParsedToContainer(
         @min(@as(usize, parsed.size_x) * @as(usize, parsed.size_y), containers.max_container_slots)
     else
         @min(parsed.item_count, containers.max_container_slots);
-    cont.slot_count = @intCast(n);
+    // Geometry only grows: a client-declared smaller grid must not make the
+    // container's tail slots unaddressable (and drop them from the save).
+    cont.slot_count = @intCast(@max(@as(usize, cont.slot_count), n));
     cont.block_id = parsed.block_id;
     cont.clear();
     var i: usize = 0;

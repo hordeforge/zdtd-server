@@ -142,7 +142,16 @@ pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTabl
 pub fn tryLoadColorTable(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ColorTable {
     var path_buf: [2048]u8 = undefined;
     const path = paths.resolveConfigXml(&path_buf, "biomes.xml", game_dir, config_dir) orelse return null;
-    return loadColorTable(allocator, path) catch null;
+    return loadColorTable(allocator, path) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print(
+                "zdtd: load biomes.xml colors failed: {s} ({s})\n",
+                .{ @errorName(err), path },
+            ),
+        }
+        return null;
+    };
 }
 
 pub const BiomeMap = struct {
@@ -211,6 +220,14 @@ pub fn loadPngR(allocator: std.mem.Allocator, path: []const u8) !BiomeMap {
 pub fn loadPngRWithColors(allocator: std.mem.Allocator, path: []const u8, colors: ?*const ColorTable) !BiomeMap {
     const file = try io_fs.readFileAll(allocator, path);
     defer allocator.free(file);
+    return parsePng(allocator, file, colors);
+}
+
+/// Largest supported map edge; also guards raw_len math against overflow and
+/// claimed-dimension allocation bombs from untrusted files.
+pub const max_png_dim: u32 = 16384;
+
+pub fn parsePng(allocator: std.mem.Allocator, file: []const u8, colors: ?*const ColorTable) !BiomeMap {
     if (file.len < 33) return error.ShortPng;
     if (!std.mem.eql(u8, file[0..8], "\x89PNG\r\n\x1a\n")) return error.BadMagic;
 
@@ -237,6 +254,7 @@ pub fn loadPngRWithColors(allocator: std.mem.Allocator, path: []const u8, colors
             if (cdata[10] != 0 or cdata[11] != 0 or cdata[12] != 0) return error.UnsupportedPng;
             if (bit_depth != 8) return error.UnsupportedPng;
             if (color_type != 2 and color_type != 6) return error.UnsupportedPng;
+            if (width == 0 or height == 0 or width > max_png_dim or height > max_png_dim) return error.UnsupportedPng;
         } else if (std.mem.eql(u8, ctype, "IDAT")) {
             try idat_list.appendSlice(allocator, cdata);
         } else if (std.mem.eql(u8, ctype, "IEND")) {
@@ -330,7 +348,16 @@ pub fn tryLoad(allocator: std.mem.Allocator, map_dir: []const u8) !?BiomeMap {
 pub fn tryLoadWithColors(allocator: std.mem.Allocator, map_dir: []const u8, colors: ?*const ColorTable) !?BiomeMap {
     var path_buf: [2048]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/biomes.png", .{map_dir});
-    return loadPngRWithColors(allocator, p, colors) catch null;
+    return loadPngRWithColors(allocator, p, colors) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print(
+                "zdtd: load biomes.png failed: {s} ({s})\n",
+                .{ @errorName(err), p },
+            ),
+        }
+        return null;
+    };
 }
 
 test "colorToId stock keys" {

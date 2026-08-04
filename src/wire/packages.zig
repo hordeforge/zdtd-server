@@ -1,5 +1,6 @@
 //! Golden package body builders/parsers for join, motion, damage, spawn, TE.
-//! Prefer this facade for stock_* body modules; leaf files stay importable.
+//! Prefer this facade for all wire/stock_* body modules (and te_types); leaf
+//! files stay importable. lint-architecture enforces stock_* re-exports here.
 
 const std = @import("std");
 const binary = @import("binary.zig");
@@ -11,6 +12,7 @@ pub const stock_deco = @import("stock_deco.zig");
 pub const stock_entity = @import("stock_entity.zig");
 pub const stock_quest = @import("stock_quest.zig");
 pub const stock_te = @import("stock_te.zig");
+pub const stock_sign = @import("stock_sign.zig");
 pub const te_types = @import("te_types.zig");
 
 pub const PackageName = enum {
@@ -676,6 +678,13 @@ fn readWorldF32(r: *binary.Reader) binary.ReadError!f32 {
     return v;
 }
 
+/// Finite float for rot/speed fields (no world-coord range).
+fn readFiniteF32(r: *binary.Reader) binary.ReadError!f32 {
+    const v = try r.readF32();
+    if (!std.math.isFinite(v)) return error.Overflow;
+    return v;
+}
+
 pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -685,14 +694,14 @@ pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y:
     const z = try readWorldF32(&r);
     const use_q = try r.readBool();
     if (!use_q) {
-        _ = try r.readF32();
-        _ = try r.readF32();
-        _ = try r.readF32();
+        _ = try readFiniteF32(&r);
+        _ = try readFiniteF32(&r);
+        _ = try readFiniteF32(&r);
     } else {
-        _ = try r.readF32();
-        _ = try r.readF32();
-        _ = try r.readF32();
-        _ = try r.readF32();
+        _ = try readFiniteF32(&r);
+        _ = try readFiniteF32(&r);
+        _ = try readFiniteF32(&r);
+        _ = try readFiniteF32(&r);
     }
     const on_ground = try r.readBool();
     return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground };
@@ -753,8 +762,8 @@ pub fn parseEntitySpeedsBody(body: []const u8) !struct { entity_id: i32, movemen
     return .{
         .entity_id = try r.readI32(),
         .movement_state = try r.readByte(),
-        .speed_forward = try r.readF32(),
-        .speed_strafe = try r.readF32(),
+        .speed_forward = try readFiniteF32(&r),
+        .speed_strafe = try readFiniteF32(&r),
     };
 }
 
@@ -1122,6 +1131,10 @@ pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32
 /// BlockValue: u32 rawData (type in low 16 bits) + u16 damage.
 /// BlockValueRef type 1 = world position Vector3i.
 const block_change_flag_value: u8 = 1; // bChangeBlockValue
+const block_change_flag_density: u8 = 4; // bChangeDensity (sbyte)
+const block_change_flag_texture: u8 = 0x20; // bChangeTexture (TextureFullArray)
+const block_change_flags_known: u8 =
+    block_change_flag_value | block_change_flag_density | block_change_flag_texture;
 
 /// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
@@ -1242,6 +1255,9 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     }
     _ = try r.readI32(); // changedByEntityId
     const flags = try r.readByte();
+    // Unknown flag bits carry fields we do not consume; continuing would leave
+    // the reader desynced and decode the rest of the batch as bogus edits.
+    if ((flags & ~block_change_flags_known) != 0) return error.EndOfStream;
     if ((flags & block_change_flag_value) != 0) {
         const raw = try r.readU32();
         ch.raw = raw;
@@ -1250,11 +1266,11 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
         ch.has_value = true;
     }
     // density sbyte
-    if ((flags & 4) != 0) _ = try r.readByte();
+    if ((flags & block_change_flag_density) != 0) _ = try r.readByte();
     // texture: TextureFullArray.Read(br, 1): typically one u64 when present.
     // Short stream must error, not silently succeed: later changes in the
     // batch would decode from a desynced offset as bogus world edits.
-    if ((flags & 0x20) != 0) _ = try r.readU64();
+    if ((flags & block_change_flag_texture) != 0) _ = try r.readU64();
     return ch;
 }
 
@@ -1309,6 +1325,16 @@ test "pos body rejects non-finite and out-of-range coordinates" {
     try std.testing.expectError(error.Overflow, parsePosAndRotBody(nan));
     const huge = try buildPosAndRotBody(&body_buf, 7, 1, 2, 1e30, 0, 0, 0, true);
     try std.testing.expectError(error.Overflow, parsePosAndRotBody(huge));
+    const nan_rot = try buildPosAndRotBody(&body_buf, 7, 1, 2, 3, std.math.nan(f32), 0, 0, true);
+    try std.testing.expectError(error.Overflow, parsePosAndRotBody(nan_rot));
+}
+
+test "entity speeds rejects non-finite" {
+    var buf: [32]u8 = undefined;
+    const body = try buildEntitySpeedsBody(&buf, 1, 0, std.math.nan(f32), 0);
+    try std.testing.expectError(error.Overflow, parseEntitySpeedsBody(body));
+    const inf = try buildEntitySpeedsBody(&buf, 1, 0, 1, std.math.inf(f32));
+    try std.testing.expectError(error.Overflow, parseEntitySpeedsBody(inf));
 }
 
 test "rel body golden size" {
@@ -1380,6 +1406,7 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     // null _CustomControl0/1 and the whole terrain floor is grey clay.
     // false → GenerateWorldFromRaw(bClientMode) loads splat*.png from GameData.
     // Spawn overlay waits for CGO >= viewDist^2-10; keep stream ring large enough.
+    // Design: docs/adr/0016-fixedsizecc-false-stream-cgo.md
     try wr.writeBool(false);
     try wr.writeBool(true); // firstTimeJoin
     // worldHashesData is raw MemoryStream of: count:i32 + (path:string, crc:u32)*count
@@ -1930,9 +1957,27 @@ test "weather body five biomes is 115" {
     var buf: [256]u8 = undefined;
     var biomes: [5]WeatherBiome = [_]WeatherBiome{.{}} ** 5;
     var i: usize = 0;
-    while (i < 5) : (i += 1) biomes[i].biome_id = @intCast(i + 1);
+    while (i < 5) : (i += 1) {
+        biomes[i].biome_id = @intCast(i + 1);
+        biomes[i].group_index = @intCast(i);
+        biomes[i].remaining_seconds = @intCast(10 + i);
+        biomes[i].params = .{ 70 + @as(f32, @floatFromInt(i)), 0.1, 0.2, 0.3, 0.4 };
+    }
     const body = try buildWeatherBody(&buf, biomes[0..]);
+    // 5 × (3 bytes + 5×f32) = 5 × 23 = 115
     try std.testing.expectEqual(@as(usize, 115), body.len);
+    // Entry 0 layout: biomeId, groupIndex, remainingSeconds, then params[0] f32
+    try std.testing.expectEqual(@as(u8, 1), body[0]);
+    try std.testing.expectEqual(@as(u8, 0), body[1]);
+    try std.testing.expectEqual(@as(u8, 10), body[2]);
+    const temp0: f32 = @bitCast(std.mem.readInt(u32, body[3..7], .little));
+    try std.testing.expectEqual(@as(f32, 70), temp0);
+    // Entry 4 starts at 4*23 = 92
+    try std.testing.expectEqual(@as(u8, 5), body[92]);
+    try std.testing.expectEqual(@as(u8, 4), body[93]);
+    try std.testing.expectEqual(@as(u8, 14), body[94]);
+    const temp4: f32 = @bitCast(std.mem.readInt(u32, body[95..99], .little));
+    try std.testing.expectEqual(@as(f32, 74), temp4);
 }
 
 /// Stock NetPackageChunkRemove: chunkKey i64 (WorldChunkCache.MakeChunkKey).
@@ -2082,15 +2127,13 @@ pub fn parseStockChat(body: []const u8) !struct { chat_type: u8, sender: i32, ms
     var r: binary.Reader = .{ .data = body };
     const chat_type = try r.readByte();
     const sender = try r.readI32();
-    var len: usize = 0;
-    var shift: u6 = 0;
-    while (true) {
-        const b = try r.readByte();
-        len |= @as(usize, b & 0x7F) << shift;
-        if ((b & 0x80) == 0) break;
-        shift += 7;
-        if (shift > 28) return error.InvalidString;
-    }
+    // Zero-copy message slice into `body` (no caller buffer). Overlong length
+    // prefix maps Overflow → InvalidString to match string reader contract.
+    const len_u = binary.read7BitEncodedInt(&r) catch |err| switch (err) {
+        error.Overflow => return error.InvalidString,
+        else => |e| return e,
+    };
+    const len: usize = len_u;
     if (r.pos + len > body.len) return error.EndOfStream;
     const msg = body[r.pos .. r.pos + len];
     return .{ .chat_type = chat_type, .sender = sender, .msg = msg };
@@ -2644,6 +2687,7 @@ pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, t
     if (body.len >= 13) {
         throttle = @bitCast(std.mem.readInt(u32, body[5..9], .little));
         steer = @bitCast(std.mem.readInt(u32, body[9..13], .little));
+        if (!std.math.isFinite(throttle) or !std.math.isFinite(steer)) return error.Overflow;
     }
     return .{ .entity_id = eid, .op = op, .throttle = throttle, .steer = steer };
 }
@@ -2723,6 +2767,15 @@ test "console cmd parse + client reply roundtrip" {
 test "console cmd parse handles empty/malformed" {
     var cbuf: [16]u8 = undefined;
     try std.testing.expectEqualStrings("", parseConsoleCmd(&.{}, &cbuf));
+    // Truncated payload (claimed length longer than remaining bytes).
+    try std.testing.expectEqualStrings("", parseConsoleCmd(&[_]u8{ 5, 'h', 'i' }, &cbuf));
+    // Overlong 7-bit length prefix (same rejection as binary.Reader).
+    try std.testing.expectEqualStrings("", parseConsoleCmd(&[_]u8{ 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 }, &cbuf));
+    // Valid short command still parses after the empty/malformed cases.
+    var ok_body: [16]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &ok_body };
+    try w.writeString("help");
+    try std.testing.expectEqualStrings("help", parseConsoleCmd(w.written(), &cbuf));
 }
 
 test "chunk key roundtrip" {

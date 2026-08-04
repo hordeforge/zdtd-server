@@ -53,8 +53,9 @@ pub fn pathForName(name: []const u8, buf: []u8) ![]const u8 {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Pack {
-    const data = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(data);
+    const read_buf = try allocator.alloc(u8, max_mode_bytes + 1);
+    defer allocator.free(read_buf);
+    const data = try io_fs.readFileInto(allocator, path, read_buf);
     if (data.len > max_mode_bytes) return error.ModeTooLarge;
     return try parse(allocator, data);
 }
@@ -79,23 +80,20 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Pack {
 
     var lines = std.mem.splitScalar(u8, src, '\n');
     while (lines.next()) |raw| {
-        var line = std.mem.trim(u8, raw, " \t\r");
+        var line = std.mem.trim(u8, try stripComment(raw), " \t\r");
         if (line.len == 0) continue;
-        if (line[0] == '#') continue;
         if (line[0] == '[') {
             const end = std.mem.indexOfScalar(u8, line, ']') orelse return error.BadToml;
+            if (std.mem.trim(u8, line[end + 1 ..], " \t").len != 0) return error.BadToml;
             section = try a.dupe(u8, std.mem.trim(u8, line[1..end], " \t"));
+            if (section.len == 0) return error.BadToml;
             continue;
         }
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse {
-            std.debug.print("zdtd: mode pack malformed line (no '='); ignored: '{s}'\n", .{line});
-            continue;
-        };
+        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.BadToml;
         const key = std.mem.trim(u8, line[0..eq], " \t");
-        var val = std.mem.trim(u8, line[eq + 1 ..], " \t");
-        if (std.mem.indexOfScalar(u8, val, '#')) |h| {
-            val = std.mem.trim(u8, val[0..h], " \t");
-        }
+        if (key.len == 0) return error.BadToml;
+        const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
+        if (val.len == 0) return error.BadToml;
         try applyKV(&p, a, section, key, val);
     }
     return p;
@@ -107,8 +105,7 @@ fn applyKV(p: *Pack, a: std.mem.Allocator, section: []const u8, key: []const u8,
         std.mem.eql(u8, section, "gameplay") or
         std.mem.eql(u8, section, "plugin");
     if (!root) {
-        warnUnknownKey(section, key);
-        return;
+        return unknownKey(section, key);
     }
     if (std.mem.eql(u8, key, "name")) {
         p.name = try a.dupe(u8, stripQuotes(val));
@@ -119,12 +116,28 @@ fn applyKV(p: *Pack, a: std.mem.Allocator, section: []const u8, key: []const u8,
     } else if (std.mem.eql(u8, key, "enable_sample_plugin")) {
         p.enable_sample_plugin = try parseBool(val);
     } else {
-        warnUnknownKey(if (section.len == 0) "(root)" else section, key);
+        return unknownKey(if (section.len == 0) "(root)" else section, key);
     }
 }
 
-fn warnUnknownKey(section: []const u8, key: []const u8) void {
-    std.debug.print("zdtd: mode pack unknown key [{s}].{s}; ignored\n", .{ section, key });
+fn unknownKey(section: []const u8, key: []const u8) error{UnknownModeKey} {
+    std.debug.print("zdtd: mode pack unknown key [{s}].{s}\n", .{ section, key });
+    return error.UnknownModeKey;
+}
+
+fn stripComment(line: []const u8) ![]const u8 {
+    var quote: ?u8 = null;
+    for (line, 0..) |c, i| {
+        if (quote) |q| {
+            if (c == q) quote = null;
+        } else if (c == '"' or c == '\'') {
+            quote = c;
+        } else if (c == '#') {
+            return line[0..i];
+        }
+    }
+    if (quote != null) return error.BadToml;
+    return line;
 }
 
 fn stripQuotes(v: []const u8) []const u8 {
@@ -148,8 +161,19 @@ fn parseBool(v: []const u8) !bool {
 }
 
 /// Merge Pack into InitOptions-like fields. Only non-null keys override.
+/// Clamps gameplay numbers to the same ranges as serverconfig (docs/GAME_OPTIONS.md).
 pub fn applyToInitOptions(p: *const Pack, opts: anytype) void {
-    if (p.max_spawned_zombies) |v| opts.max_spawned_zombies = v;
+    if (p.max_spawned_zombies) |v| {
+        // Match config.zig MaxSpawnedZombies: 1..2048 (0 treated as 1).
+        const c: u16 = if (v == 0) 1 else @min(v, 2048);
+        if (c != v) {
+            std.debug.print(
+                "zdtd: mode pack max_spawned_zombies={d} out of range [1..2048]; using {d}\n",
+                .{ v, c },
+            );
+        }
+        opts.max_spawned_zombies = c;
+    }
     if (p.blood_moon_frequency) |v| opts.blood_moon_frequency = v;
     if (p.enable_sample_plugin) |v| opts.enable_sample_plugin = v;
 }
@@ -183,6 +207,21 @@ test "applyToInitOptions overrides only set fields" {
     try std.testing.expectEqual(true, o.wire_chunks);
 }
 
+test "applyToInitOptions clamps max_spawned_zombies" {
+    const Opts = struct {
+        max_spawned_zombies: u16 = 64,
+        blood_moon_frequency: u8 = 7,
+        enable_sample_plugin: bool = false,
+    };
+    var o: Opts = .{};
+    var p = try parse(std.testing.allocator,
+        \\max_spawned_zombies = 9000
+    );
+    defer p.deinit();
+    applyToInitOptions(&p, &o);
+    try std.testing.expectEqual(@as(u16, 2048), o.max_spawned_zombies);
+}
+
 test "isValidModeName rejects path traversal" {
     try std.testing.expect(isValidModeName("default"));
     try std.testing.expect(isValidModeName("pve_hard"));
@@ -214,4 +253,17 @@ test "parse bloodmoon_frequency alias and sections" {
     defer p.deinit();
     try std.testing.expectEqual(@as(u8, 5), p.blood_moon_frequency.?);
     try std.testing.expectEqual(false, p.enable_sample_plugin.?);
+}
+
+test "parse rejects unknown and malformed mode settings" {
+    try std.testing.expectError(error.UnknownModeKey, parse(std.testing.allocator, "max_spawned_zombis = 10\n"));
+    try std.testing.expectError(error.UnknownModeKey, parse(std.testing.allocator, "[unknown]\nname = \"default\"\n"));
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "max_spawned_zombies 10\n"));
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[gameplay] trailing\n"));
+}
+
+test "parse preserves hashes inside quoted mode names" {
+    var p = try parse(std.testing.allocator, "name = \"pve#night\" # comment\n");
+    defer p.deinit();
+    try std.testing.expectEqualStrings("pve#night", p.name);
 }

@@ -4,10 +4,11 @@
 const std = @import("std");
 const version = @import("../version.zig");
 const apm = @import("../apm/root.zig");
-const clock = @import("../apm/clock.zig");
+const clock = @import("../util/clock.zig");
 const ln_server = @import("../litenet/server.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const wire_frame = @import("../wire/frame.zig");
+const wire_binary = @import("../wire/binary.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
 const ecs = @import("../ecs/root.zig");
@@ -19,7 +20,6 @@ const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
 const assets_signs = @import("../assets/signs.zig");
-const stock_sign = @import("../wire/stock_sign.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
@@ -34,7 +34,6 @@ const assets_buffs = @import("../assets/buffs.zig");
 const assets_progression = @import("../assets/progression.zig");
 const assets_vehicles = @import("../assets/vehicles.zig");
 const assets_storage_pairs = @import("../assets/storage_pairs.zig");
-const te_types = @import("../wire/te_types.zig");
 const biomes_mod = @import("../world/biomes.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
@@ -43,24 +42,82 @@ const webui_mod = @import("webui.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
 const workstations_mod = @import("../world/workstations.zig");
-const stock_te = @import("../wire/stock_te.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
 const phase_gate = @import("phase_gate.zig");
 const movement = @import("movement.zig");
+const c2s_text = @import("c2s_text.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
 const plugin_mod = @import("../plugin/root.zig");
+
+// Stock body modules via packages facade (leaf files stay importable elsewhere).
+const stock_sign = packages.stock_sign;
+const stock_te = packages.stock_te;
+const te_types = packages.te_types;
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 
 /// Persist failures are non-fatal but never silent: lost world/player/container
-/// state must show up in the server log.
+/// state must show up in the server log. Counter always increments; log is
+/// rate-limited (first + every 100th) so a full disk does not flood stderr
+/// every save period while still leaving an audit trail.
 fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     self.harness.counters.inc(.persistence_errors);
-    std.debug.print("zdtd: {s} failed: {s}\n", .{ what, @errorName(err) });
+    const n = self.harness.counters.get(.persistence_errors);
+    if (n == 1 or n % 100 == 0) {
+        std.debug.print("zdtd: {s} failed: {s} n={d}\n", .{ what, @errorName(err), n });
+    }
+}
+
+/// Result of dropping named records from a ZPV2 players.zsv blob.
+/// `blob` is null when nothing was removed (caller keeps the original file).
+const Zpv2Drop = struct {
+    blob: ?[]u8 = null,
+    removed: u32 = 0,
+};
+
+/// Pure ZPV2 rewrite: omit records whose name equals `name`. Allocates only when
+/// at least one record is dropped. Caller owns `blob` when non-null.
+fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
+    if (name.len == 0 or name.len > 32) return .{};
+    if (data.len < 8 or !std.mem.eql(u8, data[0..4], "ZPV2")) return error.CorruptPlayersFile;
+    const n = std.mem.readInt(u32, data[4..8], .little);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, &[_]u8{ 'Z', 'P', 'V', '2', 0, 0, 0, 0 });
+    var written: u32 = 0;
+    var removed: u32 = 0;
+    var off: usize = 8;
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const rec_start = off;
+        if (off >= data.len) return error.CorruptPlayersFile;
+        const nl: usize = data[off];
+        if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
+        const rec_name = data[off + 1 ..][0..nl];
+        off += 1 + nl + 16;
+        const inv_n: usize = data[off];
+        off += 1 + inv_n * 7;
+        if (off >= data.len) return error.CorruptPlayersFile;
+        const jn: usize = data[off];
+        off += 1 + jn * 10;
+        if (off > data.len) return error.CorruptPlayersFile;
+        if (nl == name.len and std.mem.eql(u8, rec_name, name)) {
+            removed += 1;
+            continue;
+        }
+        try out.appendSlice(allocator, data[rec_start..off]);
+        written += 1;
+    }
+    if (removed == 0) {
+        out.deinit(allocator);
+        return .{};
+    }
+    std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
+    return .{ .blob = try out.toOwnedSlice(allocator), .removed = removed };
 }
 
 pub const AuthorityMode = server_config.AuthorityMode;
@@ -153,6 +210,18 @@ pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
+/// Max UTF-8 bytes in a player Global chat message (canonical: c2s_text).
+pub const max_chat_msg_len: usize = c2s_text.max_chat_msg_len;
+/// Minimum gap between accepted chat broadcasts from one peer (mono ns).
+pub const min_chat_gap_ns: u64 = 200_000_000;
+/// Inv/block token buckets: capacity and refill period (mono ns).
+pub const inv_bucket_cap: u8 = 40;
+pub const inv_refill_ns: u64 = 50_000_000; // +1 token / 50 ms
+pub const block_bucket_cap: u8 = 30;
+pub const block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
+/// Min gap between DamageEntity accepts (mono ns); burst allows short combos.
+pub const min_damage_gap_ns: u64 = 80_000_000;
+pub const damage_burst_max: u8 = 4;
 pub const default_peer_stale_ms: u64 = 3000;
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
@@ -163,22 +232,10 @@ const speeds_body_off: usize = 64;
 /// AliveFlags body offset (after speeds).
 const flags_body_off: usize = 96;
 
-/// True when `s` equals any of the given alternatives (console verb aliases).
-fn eqAny(s: []const u8, alts: []const []const u8) bool {
-    for (alts) |a| if (std.mem.eql(u8, s, a)) return true;
-    return false;
-}
-
-/// Commands accepted from an ordinary player's F1 console. Administrative and
-/// world-mutating commands are available only through the loopback admin TCP
-/// console, which is a separate trust boundary.
-fn isPlayerConsoleCommand(verb: []const u8) bool {
-    return eqAny(verb, &.{
-        "help",        "commands",  "?",   "gettime", "gt",      "listplayers", "lp",
-        "listents",    "le",        "say", "s",       "version", "dm",          "cm",
-        "settempunit", "debugmenu",
-    });
-}
+const eqAny = c2s_text.eqAny;
+const sanitizePlayerName = c2s_text.sanitizePlayerName;
+const chatMsgOk = c2s_text.chatMsgOk;
+const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
 
 /// A placed land-claim block: protects blocks within land_claim_size around the
 /// keystone for its owner. Owner is the player entity id that placed it.
@@ -230,6 +287,16 @@ const Client = struct {
     last_eatable_units: u32 = 0,
     /// Once: soft warn when streamed_n crosses ~80% of max_streamed_chunks.
     stream_cap_warned: bool = false,
+    /// Last accepted chat broadcast (mono ns); flood throttle for Global chat.
+    last_chat_ns: u64 = 0,
+    /// Cost-class token buckets (refill on accept path).
+    inv_tokens: u8 = inv_bucket_cap,
+    inv_refill_ns: u64 = 0,
+    block_tokens: u8 = block_bucket_cap,
+    block_refill_ns: u64 = 0,
+    /// Combat ledger: last DamageEntity mono ns + short burst count.
+    last_damage_ns: u64 = 0,
+    damage_burst: u8 = 0,
 };
 
 pub const Game = struct {
@@ -251,8 +318,19 @@ pub const Game = struct {
     // Mixed-surface stock chunks (per-cell density) exceed 64KiB easily.
     send_buf: [262144]u8 = undefined,
     body_buf: [524288]u8 = undefined,
-    /// Guards pumpAcks reentrancy while draining ACKs mid-send.
+    /// Stable copy of the C2S payload under dispatch. Package.body slices alias
+    /// this (or the original when oversized) for the whole handlePackage loop;
+    /// mid-handler ACK drains must not overwrite the live body storage.
+    payload_hold: [65536]u8 = undefined,
+    /// Guards pumpAcks reentrancy while draining ACKs mid-send / mid-onData.
+    /// When true, pollNetOnce only drainControl (no nested onData).
     pumping: bool = false,
+    /// Successful sends since the last post-send ACK drain (see pollNetAfterSend).
+    sends_since_poll: u32 = 0,
+    /// >0 while dispatching a payload that was not copied into payload_hold
+    /// (oversized multi-fragment C2S). Suppresses reentrant drainControl so
+    /// peer.deliver_buf cannot be rewritten under the live body slices.
+    drain_suppressed: u8 = 0,
     /// Serializes chunk-map access from the terrain hooks: parallel AI workers
     /// call getOrCreate (hashmap insert/rehash/evict) concurrently with the
     /// main thread's rank-0 range. Held across the chunk-pointer use because a
@@ -485,10 +563,16 @@ pub const Game = struct {
         // OpenFailed = no persist file yet (fresh world); anything else is a
         // corrupt/unreadable file whose contents the next save would clobber.
         self.containers.load(self.world.world_dir) catch |e| {
-            if (e != error.OpenFailed) logPersistErr(self, "load containers", e);
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load containers", e);
+                return e;
+            }
         };
         self.loadBlockMeta() catch |e| {
-            if (e != error.OpenFailed) logPersistErr(self, "load block meta", e);
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load block meta", e);
+                return e;
+            }
         };
         if (opts.map_dir) |md| {
             try self.world.loadStockMap(md);
@@ -855,7 +939,10 @@ pub const Game = struct {
                         if (refs.items.len >= 1200) break;
                     }
                 }
-                if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items) catch null) |sv| {
+                if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items) catch |err| blk: {
+                    std.debug.print("zdtd: sleeper load failed: {s}\n", .{@errorName(err)});
+                    break :blk null;
+                }) |sv| {
                     self.sleepers.deinit();
                     self.sleepers = sv;
                     std.debug.print("zdtd: sleeper volumes={d} (prefabs_near={d})\n", .{ self.sleepers.volumes.len, refs.items.len });
@@ -872,8 +959,16 @@ pub const Game = struct {
         self.info_port = port;
         // Offline harness (port 0): virtual mono clock + serial forRanges so
         // lock/stale/resend and parallel systems are seed-stable under DST.
+        // Run seed is worldgen when set, else default_seed (logged via getSeed).
         // Production always passes a real ServerPort and leaves wall clock.
-        if (port == 0) util_sim.enable(util_sim.default_start_ns);
+        if (port == 0) {
+            const seed = opts.worldgen_seed orelse util_sim.default_seed;
+            util_sim.enableSeeded(util_sim.default_start_ns, seed);
+        }
+        // A later init error (for example invalid WebUI configuration) must not
+        // leak process-wide virtual time or forced-serial scheduling into the
+        // next test. Successful construction transfers cleanup to deinit().
+        errdefer if (port == 0) util_sim.disable();
         if (port != 0) {
             const level = if (opts.world_name) |wn| wn else self.world_name;
             // Advertise ServerPort in GSI.Port; stock client dials LiteNet at Port+2.
@@ -1050,6 +1145,15 @@ pub const Game = struct {
             return .{ .x = x, .y = y, .z = z, .applied = true };
         }
         self.harness.counters.inc(.movement_rejects);
+        // Rubber-band / speed-hack signal: counter always; log rate-limited so a
+        // sticky client does not flood stderr while first/100th stay visible.
+        const n = self.harness.counters.get(.movement_rejects);
+        if (n == 1 or n % 100 == 0) {
+            std.debug.print(
+                "zdtd: movement envelope reject n={d} local_id={d} entity={d}\n",
+                .{ n, peer.local_id, entity_id },
+            );
+        }
         if (!self.authorityCorrects()) {
             return .{ .x = x, .y = y, .z = z, .applied = true };
         }
@@ -1345,22 +1449,27 @@ pub const Game = struct {
     }
 
     /// Record layout (v2): magic ZPV2 | n:u32 | records…
-    /// each: name_len:u8 | name | x,y,z f32 | coins u32 | inv_n u8 | (item u16, count u16)*inv_n
+    /// each: name_len:u8 | name | x,y,z:f32 | coins:u32 |
+    ///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16) |
+    ///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8)
     /// Merge-write: offline players' existing records are carried over, not erased.
+    /// ADR 0011 sibling stores; item_id = ECS handle (ADR 0015).
     fn savePlayers(self: *Game) !void {
         var path_buf: [512]u8 = undefined;
         const path = try self.playersPath(&path_buf);
 
-        var old_recs: [4096]u8 = undefined;
-        var old_len: usize = 0;
+        // Carry the on-disk records by slice: a fixed scratch buffer silently
+        // dropped every offline player past its size on each autosave.
+        var old_file: []u8 = &.{};
+        defer self.allocator.free(old_file);
+        var old_recs: []const u8 = &.{};
         var old_count: u32 = 0;
         if (io_fs.readFileAll(self.allocator, path)) |old_data| {
-            defer self.allocator.free(old_data);
-            if (old_data.len >= 8 and std.mem.eql(u8, old_data[0..4], "ZPV2")) {
-                old_count = std.mem.readInt(u32, old_data[4..8], .little);
-                old_len = @min(old_data.len - 8, old_recs.len);
-                @memcpy(old_recs[0..old_len], old_data[8..][0..old_len]);
-            }
+            old_file = old_data;
+            if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..4], "ZPV2"))
+                return error.CorruptPlayersFile;
+            old_count = std.mem.readInt(u32, old_data[4..8], .little);
+            old_recs = old_data[8..];
             // Unreadable existing file: abort save so offline player records in
             // the on-disk file are not clobbered by a save missing them.
         } else |e| if (e != error.FileNotFound) return e;
@@ -1368,28 +1477,28 @@ pub const Game = struct {
         var out: std.ArrayList(u8) = .empty;
         defer out.deinit(self.allocator);
 
-        var hdr: [8]u8 = .{ 'Z', 'P', 'V', '2', 0, 0, 0, 0 };
-        var count: u32 = 0;
-        for (&self.clients) |*cl| {
-            if (cl.joined and cl.entity_id > 0 and cl.name_len > 0) count += 1;
-        }
-        var kept_old: u32 = 0;
-        var old_off: usize = 0;
-        var keep_flags: [64]bool = .{false} ** 64;
+        // Header count is patched in last, from records actually appended. A
+        // count predicted up front drifts whenever a joined client has no ECS
+        // player slot, and the loader then walks past the last record.
+        try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '2', 0, 0, 0, 0 });
+        var written: u32 = 0;
         {
             var ri: u32 = 0;
-            while (ri < old_count and ri < keep_flags.len) : (ri += 1) {
-                if (old_off >= old_len) break;
-                const nl: usize = old_recs[old_off];
-                if (old_off + 1 + nl + 17 > old_len) break;
-                const rec_name = old_recs[old_off + 1 ..][0..nl];
-                old_off += 1 + nl + 16;
-                const inv_n: usize = old_recs[old_off];
-                old_off += 1 + inv_n * 7;
-                if (old_off >= old_len) break;
-                const jn: usize = old_recs[old_off];
-                old_off += 1 + jn * 10;
-                if (old_off > old_len) break;
+            var off: usize = 0;
+            while (ri < old_count) : (ri += 1) {
+                const rec_start = off;
+                if (off >= old_recs.len) return error.CorruptPlayersFile;
+                const nl: usize = old_recs[off];
+                if (nl > 32 or off + 1 + nl + 17 > old_recs.len)
+                    return error.CorruptPlayersFile;
+                const rec_name = old_recs[off + 1 ..][0..nl];
+                off += 1 + nl + 16;
+                const inv_n: usize = old_recs[off];
+                off += 1 + inv_n * 7;
+                if (off >= old_recs.len) return error.CorruptPlayersFile;
+                const jn: usize = old_recs[off];
+                off += 1 + jn * 10;
+                if (off > old_recs.len) return error.CorruptPlayersFile;
                 var online = false;
                 for (&self.clients) |*cl| {
                     if (cl.joined and cl.name_len == nl and std.mem.eql(u8, cl.name[0..nl], rec_name)) {
@@ -1397,32 +1506,9 @@ pub const Game = struct {
                         break;
                     }
                 }
-                if (!online) {
-                    keep_flags[ri] = true;
-                    kept_old += 1;
-                }
-            }
-        }
-        std.mem.writeInt(u32, hdr[4..8], count + kept_old, .little);
-        try out.appendSlice(self.allocator, &hdr);
-        {
-            var ri: u32 = 0;
-            var off: usize = 0;
-            while (ri < old_count and ri < keep_flags.len) : (ri += 1) {
-                const rec_start = off;
-                if (off >= old_len) break;
-                const nl: usize = old_recs[off];
-                if (off + 1 + nl + 17 > old_len) break;
-                off += 1 + nl + 16;
-                const inv_n: usize = old_recs[off];
-                off += 1 + inv_n * 7;
-                if (off >= old_len) break;
-                const jn2: usize = old_recs[off];
-                off += 1 + jn2 * 10;
-                if (off > old_len) break;
-                if (keep_flags[ri]) {
-                    try out.appendSlice(self.allocator, old_recs[rec_start..off]);
-                }
+                if (online) continue;
+                try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                written += 1;
             }
         }
         for (&self.clients) |*cl| {
@@ -1449,7 +1535,6 @@ pub const Game = struct {
             var inv_n: u8 = 0;
             if (self.sim.mask[ps].inventory) {
                 for (self.sim.inventory[ps].slots) |s| {
-                    if (s.count == 0) continue;
                     if (o + 7 > rec.len) break;
                     std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                     std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
@@ -1478,20 +1563,47 @@ pub const Game = struct {
             }
             rec[j_start] = jn;
             try out.appendSlice(self.allocator, rec[0..o]);
+            written += 1;
         }
+        std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
         try io_fs.writeFile(self.allocator, path, out.items);
+    }
+
+    /// Remove all players.zsv records whose login name equals `name`.
+    /// Returns how many records were dropped. FileNotFound → 0 (no-op).
+    /// Does not log the name (operator reply only).
+    fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
+        if (name.len == 0 or name.len > 32) return 0;
+        var path_buf: [512]u8 = undefined;
+        const path = try self.playersPath(&path_buf);
+        const data = io_fs.readFileAll(self.allocator, path) catch |e| {
+            if (e == error.FileNotFound) return 0;
+            return e;
+        };
+        defer self.allocator.free(data);
+        const filtered = try zpv2DropName(self.allocator, data, name);
+        defer if (filtered.blob) |b| self.allocator.free(b);
+        if (filtered.removed == 0) return 0;
+        try io_fs.writeFile(self.allocator, path, filtered.blob.?);
+        return filtered.removed;
     }
 
     fn tryRestorePlayer(self: *Game, c: *Client) void {
         if (c.name_len == 0) return;
         var path_buf: [512]u8 = undefined;
-        const path = self.playersPath(&path_buf) catch return;
+        const path = self.playersPath(&path_buf) catch |err| {
+            std.debug.print("zdtd: restore player: path failed: {s}\n", .{@errorName(err)});
+            return;
+        };
         const data = io_fs.readFileAll(self.allocator, path) catch |e| {
             if (e != error.FileNotFound) logPersistErr(self, "restore player", e);
             return;
         };
         defer self.allocator.free(data);
-        if (data.len < 8) return;
+        if (data.len < 8) {
+            std.debug.print("zdtd: restore player: file too short ({d} bytes)\n", .{data.len});
+            return;
+        }
         if (data[0] != 'Z' or data[1] != 'P' or data[3] != '2') {
             std.debug.print("zdtd: restore player: bad players file header\n", .{});
             return;
@@ -1500,17 +1612,26 @@ pub const Game = struct {
         var off: usize = 8;
         var i: u32 = 0;
         while (i < n) : (i += 1) {
-            if (off >= data.len) return;
+            if (off >= data.len) {
+                std.debug.print("zdtd: restore player: truncated at record {d}/{d}\n", .{ i, n });
+                return;
+            }
             const nl: usize = data[off];
             off += 1;
-            if (nl > 32 or off + nl + 16 + 1 > data.len) return;
+            if (nl > 32 or off + nl + 16 + 1 > data.len) {
+                std.debug.print("zdtd: restore player: corrupt record {d}/{d} (name_len={d})\n", .{ i, n, nl });
+                return;
+            }
             const name_slice = data[off..][0..nl];
             off += nl;
             const rest = data[off..][0..16];
             off += 16;
             const inv_n: usize = data[off];
             off += 1;
-            if (off + inv_n * 7 + 1 > data.len) return;
+            if (off + inv_n * 7 + 1 > data.len) {
+                std.debug.print("zdtd: restore player: truncated inventory at record {d}/{d}\n", .{ i, n });
+                return;
+            }
             var inv: [32]ecs.components.InvSlot = undefined;
             var k: usize = 0;
             while (k < inv_n) : (k += 1) {
@@ -1525,7 +1646,10 @@ pub const Game = struct {
             }
             const jn: usize = data[off];
             off += 1;
-            if (off + jn * 10 > data.len) return;
+            if (off + jn * 10 > data.len) {
+                std.debug.print("zdtd: restore player: truncated journal at record {d}/{d}\n", .{ i, n });
+                return;
+            }
             var quests: [ecs.components.max_journal]ecs.components.QuestProgress = undefined;
             var qi: usize = 0;
             while (qi < jn) : (qi += 1) {
@@ -1582,7 +1706,7 @@ pub const Game = struct {
                 self.admin.closeActive();
                 return;
             }
-            self.runAdminLine(line);
+            self.runAdminLine(line, "admin_tcp");
         }
     }
 
@@ -1606,7 +1730,7 @@ pub const Game = struct {
             const line = self.webui.takeCmd(&line_buf) orelse break;
             self.admin_reply_len = 0;
             self.admin_reply_sink = self.webui.cmd_out_buf[0..];
-            self.runAdminLine(line);
+            self.runAdminLine(line, "webui");
             self.admin_reply_sink = null;
             self.webui.finishCmd(self.webui.cmd_out_buf[0..self.admin_reply_len]);
         }
@@ -1762,7 +1886,8 @@ pub const Game = struct {
         if (cmd.len == 0) return;
         // Log verb only: args may include player names, chat text, or coords.
         const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
-        std.debug.print("zdtd: console cmd from slot={d}: {s}\n", .{ c.slot, cmd[0..verb_end] });
+        self.harness.counters.inc(.player_console_commands);
+        std.debug.print("zdtd: audit source=player_console slot={d} command={s}\n", .{ c.slot, cmd[0..verb_end] });
 
         var out: ConsoleOut = .{};
         var it = std.mem.tokenizeAny(u8, cmd, " ");
@@ -1779,10 +1904,11 @@ pub const Game = struct {
         const player = self.sim.playerByPeer(c.slot);
 
         if (eqAny(verb, &.{ "help", "commands", "?" })) {
+            // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist.
             out.line("zdtd console commands:");
-            out.line(" gettime");
-            out.line(" listplayers|lp | listents|le | say <msg>");
-            out.line(" version");
+            out.line(" gettime|gt  listplayers|lp  listents|le  version");
+            out.line(" say|s <msg>");
+            out.line(" dm|cm|settempunit|debugmenu (client-side)");
         } else if (eqAny(verb, &.{ "gettime", "gt" })) {
             const clk = &self.sim.director.clock;
             const hh: u32 = @intFromFloat(clk.hours);
@@ -1816,9 +1942,15 @@ pub const Game = struct {
             });
         } else if (eqAny(verb, &.{ "say", "s" })) {
             const msg = it.rest();
-            const chat = try packages.buildStockChat(&self.body_buf, c.entity_id, msg);
-            try self.broadcast("NetPackageChat", chat);
-            out.line("sent");
+            if (!chatMsgOk(msg)) {
+                out.line("message too long or has control characters");
+            } else if (!self.acceptChatRate(c)) {
+                out.line("slow down");
+            } else {
+                const chat = try packages.buildStockChat(&self.body_buf, c.entity_id, msg);
+                try self.broadcast("NetPackageChat", chat);
+                out.line("sent");
+            }
         } else if (eqAny(verb, &.{"kick"})) {
             self.consoleKickBan(it.next(), &out, false);
         } else if (eqAny(verb, &.{"ban"})) {
@@ -2000,6 +2132,7 @@ pub const Game = struct {
     fn daysToBloodMoon(self: *const Game) u32 {
         const clk = self.sim.director.clock;
         if (clk.bloodmoon_frequency == 0) return 999;
+        if (clk.day % clk.bloodmoon_frequency == 0) return 0;
         const next = ((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency;
         return next - clk.day;
     }
@@ -2008,25 +2141,40 @@ pub const Game = struct {
         const self: *Game = @ptrCast(@alignCast(ctx));
         self.admin_reply_len = 0;
         self.admin_reply_sink = out;
-        self.runAdminLine(line);
+        self.runAdminLine(line, "webui");
         self.admin_reply_sink = null;
         return self.admin_reply_len;
     }
 
-    fn runAdminLine(self: *Game, line: []const u8) void {
+    fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
+        const trimmed = std.mem.trim(u8, line, " \t");
+        const verb_end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
+        self.harness.counters.inc(.admin_commands);
+        std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
         const cmd = admin_mod.parseCommand(line);
         switch (cmd) {
             .help => self.adminReply(
                 \\commands:
-                \\  status  guardstats  list  listplayers|lp  listents|le  inv <slot>  version
+                \\  status  guardstats  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
                 \\  gettime|gt  settime|st <day|night|ticks|D H M>
-                \\  give <slot> <item> [count]  tele <slot> <x> <y> <z>  say <msg>
+                \\  give <slot> <itemId> [count]  tele|tp <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
+                \\  wipeplayer <name>
                 \\  kill <id>  killall|ka  spawnentity|se <slot|entityId> <class>
                 \\  save  saveworld|sa  shutdown  quit|exit
                 \\
             ),
-            .unknown => self.adminReply("unknown command. 'help' for list.\n"),
+            .unknown => {
+                // Surface the first token so typos are obvious (matches player console).
+                const bad_verb = if (verb_end > 0) trimmed[0..verb_end] else trimmed;
+                var ub: [160]u8 = undefined;
+                const s = std.fmt.bufPrint(
+                    &ub,
+                    "unknown command '{s}'. 'help' for list.\n",
+                    .{bad_verb},
+                ) catch "unknown command. 'help' for list.\n";
+                self.adminReply(s);
+            },
             .bad_args => |verb| {
                 var eb: [128]u8 = undefined;
                 const s = if (admin_mod.usageFor(verb)) |u|
@@ -2038,32 +2186,67 @@ pub const Game = struct {
                 self.adminReply(s);
             },
             .status => {
-                var sb: [256]u8 = undefined;
-                const s = std.fmt.bufPrint(&sb, "tick={d} players={d} zombies={d} chunks={d}\n", .{
-                    self.tick_n,
-                    self.countJoined(),
-                    self.sim.countKind(.zombie),
-                    self.world.chunks.count(),
-                }) catch return;
+                // One-line ops glance: load + key error counters for incident triage.
+                var sb: [320]u8 = undefined;
+                const s = std.fmt.bufPrint(
+                    &sb,
+                    "tick={d} players={d} zombies={d} chunks={d} overruns={d} encode_err={d} send_err={d} window_drop={d} persist_err={d}\n",
+                    .{
+                        self.tick_n,
+                        self.countJoined(),
+                        self.sim.countKind(.zombie),
+                        self.world.chunks.count(),
+                        self.harness.counters.get(.tick_overruns),
+                        self.harness.counters.get(.encode_errors),
+                        self.harness.counters.get(.net_send_errors),
+                        self.harness.counters.get(.reliable_window_drops),
+                        self.harness.counters.get(.persistence_errors),
+                    },
+                ) catch return;
                 self.adminReply(s);
             },
             .guardstats => {
-                var sb: [256]u8 = undefined;
-                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d}\n", .{
+                var sb: [320]u8 = undefined;
+                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d}\n", .{
                     self.harness.counters.get(.phase_rejects),
                     self.harness.counters.get(.ownership_rejects),
                     self.harness.counters.get(.bounds_rejects),
                     self.harness.counters.get(.movement_rejects),
                     self.harness.counters.get(.decode_rejects),
+                    self.harness.counters.get(.c2s_throttle),
                 }) catch return;
                 self.adminReply(s);
             },
+            .apm => {
+                // Full harness dump without waiting for the minute JSON line or --ticks exit.
+                const snap = self.harness.snapshot();
+                var ab: [2048]u8 = undefined;
+                var w: std.Io.Writer = .fixed(&ab);
+                apm.report.writeText(&snap, &w) catch |err| {
+                    std.debug.print("zdtd: admin apm dump failed: {s}\n", .{@errorName(err)});
+                };
+                if (w.buffered().len > 0) self.adminReply(w.buffered()) else self.adminReply("apm dump empty\n");
+            },
             .save => {
-                self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-                self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
-                self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
-                self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
-                self.adminReply("saved\n");
+                // Same honesty as saveworld: never claim success when disk I/O failed.
+                var save_failed = false;
+                self.savePlayers() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save players", e);
+                };
+                self.world.saveAll() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save world", e);
+                };
+                self.containers.save(self.world.world_dir) catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save containers", e);
+                };
+                self.saveBlockMeta() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save block meta", e);
+                };
+                self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
             },
             .kick => |peer| {
                 if (peer >= max_clients or self.clients[peer].peer == null) {
@@ -2073,6 +2256,7 @@ pub const Game = struct {
                 self.clients[peer].peer.?.alive = false;
                 self.clearLocksForPeer(peer);
                 self.clients[peer] = .{};
+                self.refreshInfoPlayers();
                 self.adminReply("kicked\n");
             },
             .ban => |peer| {
@@ -2085,14 +2269,40 @@ pub const Game = struct {
                 p.alive = false;
                 self.clearLocksForPeer(peer);
                 self.clients[peer] = .{};
+                self.refreshInfoPlayers();
                 self.adminReply("banned\n");
             },
             .unban => |ip| {
                 self.unbanIp(ip);
                 self.adminReply("unbanned\n");
             },
+            .wipeplayer => |nm| {
+                // Drop any online session with this login name first so the next
+                // autosave cannot re-write the wiped players.zsv record.
+                var kicked: u32 = 0;
+                for (&self.clients, 0..) |*cl, i| {
+                    if (!cl.joined or cl.name_len != nm.len) continue;
+                    if (!std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
+                    if (cl.peer) |p| p.alive = false;
+                    self.clearLocksForPeer(i);
+                    self.clients[i] = .{};
+                    self.refreshInfoPlayers();
+                    kicked += 1;
+                }
+                const removed = self.wipePlayerRecordsByName(nm) catch |e| {
+                    logPersistErr(self, "wipe player", e);
+                    self.adminReply("wipe failed; see server log\n");
+                    return;
+                };
+                var lb: [72]u8 = undefined;
+                const s = std.fmt.bufPrint(&lb, "wiped records={d} kicked={d}\n", .{ removed, kicked }) catch "wiped\n";
+                self.adminReply(s);
+                // Count only; never print the login name to process logs.
+                std.debug.print("zdtd: wipeplayer records={d} kicked={d}\n", .{ removed, kicked });
+            },
             .list, .listplayers => {
                 // Stock-ish: include id= so playtest orch re.findall(r"id\s*=\s*(\d+)") works.
+                // Names stay on admin/webui replies only (never process stdout; PlayerLogin logs name_len).
                 var n: usize = 0;
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined) continue;
@@ -2101,7 +2311,6 @@ pub const Game = struct {
                         n, cl.entity_id, cl.name[0..cl.name_len], i,
                     }) catch continue;
                     self.adminReply(s);
-                    std.debug.print("zdtd: player {s}", .{s});
                     n += 1;
                 }
                 if (n == 0) self.adminReply("Total of 0 in the game\n") else {
@@ -2203,7 +2412,7 @@ pub const Game = struct {
                 self.adminReply("time set\n");
             },
             .spawnentity => |sp2| {
-                const nm = self.admin_line[sp2.name_off..][0..sp2.name_len];
+                const nm = line[sp2.name_off..][0..sp2.name_len];
                 const def = self.entities.byName(nm) orelse {
                     self.adminReply("unknown entity class\n");
                     return;
@@ -2381,6 +2590,14 @@ pub const Game = struct {
     }
 
     fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
+        // Fast path: known live peer. This runs per inbound datagram, so the
+        // reap sweep below only pays off on the miss (new-peer) path;
+        // reapStalePeers covers dead peers once per tick regardless.
+        if (peer.alive) {
+            for (&self.clients) |*c| {
+                if (c.peer == peer) return c;
+            }
+        }
         // Drop clients whose LiteNet peer died (disconnect / timeout).
         // Same log/counter as reapStalePeers: whichever sweep wins the race,
         // the disconnect still shows up in the server log.
@@ -2394,6 +2611,7 @@ pub const Game = struct {
                     );
                     self.clearLocksForPeer(c.slot);
                     c.* = .{};
+                    self.refreshInfoPlayers();
                 }
             }
         }
@@ -2429,14 +2647,34 @@ pub const Game = struct {
         // NOT droppable: NetPackageDecoUpdate. DecoManager.Read only allocates
         // loadedDecos on firstPackage=true; dropping that one NREs every later
         // incremental deco on the client.
-        return std.mem.eql(u8, pkg_name, "NetPackageChunk") or std.mem.eql(u8, pkg_name, "NetPackageChunkRemove") or std.mem.eql(u8, pkg_name, "NetPackageDecoResetWorldChunk") or std.mem.eql(u8, pkg_name, "NetPackageEntityPosAndRot") or std.mem.eql(u8, pkg_name, "NetPackageEntitySpeeds") or std.mem.eql(u8, pkg_name, "NetPackageVehiclePositions") or std.mem.eql(u8, pkg_name, "NetPackageWorldTime");
+        const names = [_][]const u8{
+            "NetPackageChunk",
+            "NetPackageChunkRemove",
+            "NetPackageDecoResetWorldChunk",
+            "NetPackageEntityPosAndRot",
+            "NetPackageEntitySpeeds",
+            "NetPackageVehiclePositions",
+            "NetPackageWorldTime",
+        };
+        for (names) |n| {
+            if (std.mem.eql(u8, pkg_name, n)) return true;
+        }
+        return false;
     }
 
     fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
         // Count encode failures here: many callers swallow the error (`catch {}`),
-        // so this is the only place they stay visible in apm.
+        // so this is the only place they stay visible in apm. Rate-limit the log
+        // so a bad package does not flood stdout while still showing first/100th.
         const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
             self.harness.counters.inc(.encode_errors);
+            const n = self.harness.counters.get(.encode_errors);
+            if (n == 1 or n % 100 == 0) {
+                std.debug.print(
+                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
+                    .{ pkg_name, body.len, n, @errorName(err) },
+                );
+            }
             return err;
         };
         // Poll mid-send so client ACKs free the reliable window (explicit anyerror avoids
@@ -2455,25 +2693,40 @@ pub const Game = struct {
         while (attempts < max_attempts) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
                 error.WindowFull => {
-                    peer.resendPending(&self.net.sock) catch {};
+                    peer.resendPending(&self.net.sock) catch {
+                        self.harness.counters.inc(.net_send_errors);
+                    };
                     self.pollNetOnce();
                     if (attempts % 4 == 3) clock.sleepNs(500_000);
                     continue;
                 },
                 else => {
                     self.harness.counters.inc(.net_send_errors);
+                    const n = self.harness.counters.get(.net_send_errors);
+                    if (n == 1 or n % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: send failed pkg={s} local_id={d} n={d}: {s}\n",
+                            .{ pkg_name, peer.local_id, n, @errorName(err) },
+                        );
+                    }
                     return err;
                 },
             };
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
             // Drain a few ACKs so the next package does not immediately fill the window.
-            self.pollNetOnce();
+            self.pollNetAfterSend();
             return;
         }
         // Drop rather than fail the tick: WindowFull must not kill the dedi.
         self.harness.counters.inc(.reliable_window_drops);
-        std.debug.print("zdtd: drop {s} (reliable window full, droppable={})\n", .{ pkg_name, droppable });
+        const drops = self.harness.counters.get(.reliable_window_drops);
+        if (drops == 1 or drops % 100 == 0) {
+            std.debug.print(
+                "zdtd: reliable window drop pkg={s} droppable={} n={d}\n",
+                .{ pkg_name, droppable, drops },
+            );
+        }
     }
 
     /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
@@ -2608,9 +2861,27 @@ pub const Game = struct {
     /// Process pending UDP events (acks free window; data delivered to onData).
     /// Reentrant calls (sendGame / pump_fn mid-onData) only drain control so the
     /// reliable window can free without nested onData corrupting join SM state.
+    /// Mid-onData drain uses a private buffer: never `recv_buf`, which still holds
+    /// the in-flight uncompressed C2S payload (Package.body aliases).
+    /// Post-send ACK drain, every 8th send: pollNetOnce costs a recvfrom
+    /// syscall + peer scan per call, and the 64-deep reliable window has ample
+    /// headroom between drains. WindowFull retry paths still pump directly.
+    fn pollNetAfterSend(self: *Game) void {
+        self.sends_since_poll += 1;
+        if (self.sends_since_poll >= 8) {
+            self.sends_since_poll = 0;
+            self.pollNetOnce();
+        }
+    }
+
     fn pollNetOnce(self: *Game) void {
         if (self.pumping) {
-            self.net.drainControl(&self.recv_buf, 24);
+            // Oversized uncopied payload: any handlePacket that completes a
+            // fragment would rewrite peer.deliver_buf under the live bodies.
+            if (self.drain_suppressed > 0) return;
+            // LiteNet MTU is 1327; 2 KiB covers one datagram with headroom.
+            var ctl: [2048]u8 = undefined;
+            self.net.drainControl(&ctl, 24);
             return;
         }
         self.pumping = true;
@@ -2619,7 +2890,10 @@ pub const Game = struct {
         while (n < 24) : (n += 1) {
             const ev = self.net.poll(&self.recv_buf) catch |err| {
                 self.harness.counters.inc(.net_poll_errors);
-                std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
+                const errors = self.harness.counters.get(.net_poll_errors);
+                if (errors == 1 or errors % 100 == 0) {
+                    std.debug.print("zdtd: net poll error={s} n={d}\n", .{ @errorName(err), errors });
+                }
                 break;
             };
             switch (ev) {
@@ -2634,7 +2908,13 @@ pub const Game = struct {
                 },
                 .data => |d| self.onData(d.peer, d.payload) catch |err| {
                     self.harness.counters.inc(.net_payload_errors);
-                    std.debug.print("zdtd: payload failed local_id={d} error={s}\n", .{ d.peer.local_id, @errorName(err) });
+                    const errors = self.harness.counters.get(.net_payload_errors);
+                    if (errors == 1 or errors % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: payload failed local_id={d} error={s} n={d}\n",
+                            .{ d.peer.local_id, @errorName(err), errors },
+                        );
+                    }
                 },
             }
         }
@@ -2748,6 +3028,7 @@ pub const Game = struct {
     /// Persist sparse block meta (rotation raw + accumulated damage) so doors/
     /// shapes and partial block damage survive restart. File: "ZBM1" | u16 raw_n |
     /// (key u64 + raw u32)* | u16 hp_n | (key u64 + hp u16)*.
+    /// Keys are sorted so bytes do not depend on insert/remove history (DST).
     fn saveBlockMeta(self: *const Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
@@ -2755,21 +3036,44 @@ pub const Game = struct {
         var o: usize = 0;
         @memcpy(buf[0..4], "ZBM1");
         o = 4;
-        std.mem.writeInt(u16, buf[o..][0..2], @intCast(self.block_raw_n), .little);
+
+        // Sort raw keys (pairs) by key for stable disk order.
+        var raw_ord: [self.block_raw_key.len]u16 = undefined;
+        const raw_n = self.block_raw_n;
+        var ri: usize = 0;
+        while (ri < raw_n) : (ri += 1) raw_ord[ri] = @intCast(ri);
+        std.mem.sort(u16, raw_ord[0..raw_n], self, struct {
+            fn less(g: *const Game, a: u16, b: u16) bool {
+                return g.block_raw_key[a] < g.block_raw_key[b];
+            }
+        }.less);
+
+        std.mem.writeInt(u16, buf[o..][0..2], @intCast(raw_n), .little);
         o += 2;
-        for (self.block_raw_key[0..self.block_raw_n], self.block_raw[0..self.block_raw_n]) |k, v| {
+        for (raw_ord[0..raw_n]) |idx| {
             if (o + 12 > buf.len) break;
-            std.mem.writeInt(u64, buf[o..][0..8], k, .little);
-            std.mem.writeInt(u32, buf[o + 8 ..][0..4], v, .little);
+            std.mem.writeInt(u64, buf[o..][0..8], self.block_raw_key[idx], .little);
+            std.mem.writeInt(u32, buf[o + 8 ..][0..4], self.block_raw[idx], .little);
             o += 12;
         }
         if (o + 2 > buf.len) return error.WriteFailed;
-        std.mem.writeInt(u16, buf[o..][0..2], @intCast(self.block_hp_n), .little);
+
+        var hp_ord: [self.block_hp_key.len]u16 = undefined;
+        const hp_n = self.block_hp_n;
+        var hi: usize = 0;
+        while (hi < hp_n) : (hi += 1) hp_ord[hi] = @intCast(hi);
+        std.mem.sort(u16, hp_ord[0..hp_n], self, struct {
+            fn less(g: *const Game, a: u16, b: u16) bool {
+                return g.block_hp_key[a] < g.block_hp_key[b];
+            }
+        }.less);
+
+        std.mem.writeInt(u16, buf[o..][0..2], @intCast(hp_n), .little);
         o += 2;
-        for (self.block_hp_key[0..self.block_hp_n], self.block_hp[0..self.block_hp_n]) |k, v| {
+        for (hp_ord[0..hp_n]) |idx| {
             if (o + 10 > buf.len) break;
-            std.mem.writeInt(u64, buf[o..][0..8], k, .little);
-            std.mem.writeInt(u16, buf[o + 8 ..][0..2], v, .little);
+            std.mem.writeInt(u64, buf[o..][0..8], self.block_hp_key[idx], .little);
+            std.mem.writeInt(u16, buf[o + 8 ..][0..2], self.block_hp[idx], .little);
             o += 10;
         }
         try io_fs.writeFile(self.allocator, p, buf[0..o]);
@@ -2778,7 +3082,10 @@ pub const Game = struct {
     fn loadBlockMeta(self: *Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
-        const data = io_fs.readFileAll(self.allocator, p) catch return error.OpenFailed;
+        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return err,
+        };
         defer self.allocator.free(data);
         if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZBM1")) return error.ReadFailed;
         var o: usize = 4;
@@ -2816,7 +3123,7 @@ pub const Game = struct {
 
     fn firstLockTargetPos(targets_blob: []const u8) ?struct { x: i32, y: i32, z: i32 } {
         if (targets_blob.len < 4) return null;
-        var tr: @import("../wire/binary.zig").Reader = .{ .data = targets_blob };
+        var tr: wire_binary.Reader = .{ .data = targets_blob };
         const n = tr.readI32() catch return null;
         var ti: i32 = 0;
         while (ti < n) : (ti += 1) {
@@ -2877,6 +3184,7 @@ pub const Game = struct {
                 );
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
+                self.refreshInfoPlayers();
                 continue;
             }
             if (p.last_recv_ns == 0) continue;
@@ -2892,15 +3200,30 @@ pub const Game = struct {
                 p.local_window_start = p.local_seq;
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
+                self.refreshInfoPlayers();
             }
         }
     }
 
     fn peerIpKey(peer: *const ln_peer.Peer) u32 {
-        // Host-order IPv4 key for ban/rate tables (loopback = 0x7f000001).
+        // Host-order key for ban/rate tables (IPv4 loopback = 0x7f000001). Port is
+        // excluded so ban/rate apply per host. IPv4-mapped IPv6 shares the IPv4 key.
         return switch (peer.addr) {
             .ip4 => |a| std.mem.readInt(u32, &a.bytes, .big),
-            .ip6 => 0, // IPv6 ban/rate not implemented; skip throttle
+            .ip6 => |a| blk: {
+                // ::ffff:a.b.c.d → same key as native IPv4 a.b.c.d (ban dual-stack bypass).
+                if (std.mem.eql(u8, a.bytes[0..12], &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff })) {
+                    break :blk std.mem.readInt(u32, a.bytes[12..16], .big);
+                }
+                // Stable FNV-1a of the 16-byte address; never 0 (skip sentinel).
+                var h: u32 = 2166136261;
+                for (a.bytes) |b| {
+                    h ^= b;
+                    h *%= 16777619;
+                }
+                if (h == 0 or h == 0x7f000001) h ^= 0x80000000;
+                break :blk h;
+            },
         };
     }
 
@@ -2999,6 +3322,12 @@ pub const Game = struct {
     }
 
     fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!void {
+        // Hold pumping for the whole handler so sendGame / pump_fn only
+        // drainControl (no nested onData, no second parse into inflate_storage).
+        const was_pumping = self.pumping;
+        self.pumping = true;
+        defer self.pumping = was_pumping;
+
         const c = self.clientFor(peer) orelse return;
         self.harness.counters.add(.net_packets_in, 1);
         self.harness.counters.add(.net_bytes_in, payload.len);
@@ -3010,7 +3339,7 @@ pub const Game = struct {
                 const body = try packages.buildPackageIdsBody(&self.body_buf, .{}, &packages.default_mappings);
                 try self.sendGame(peer, "NetPackagePackageIds", body);
                 // Immediate resend once so PackageIds is not lost before first ack.
-                peer.resendPending(&self.net.sock) catch {};
+                peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
                 std.debug.print("zdtd: challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
                 // Replay any game payload that raced ahead of the challenge echo.
                 if (c.preauth_len > 0) {
@@ -3031,40 +3360,57 @@ pub const Game = struct {
     }
 
     fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload: []const u8) !void {
+        // Package.body slices alias the payload for the whole handle loop.
+        // Uncompressed C2S aliases recv_buf; fragmented aliases peer.deliver_buf.
+        // Copy into payload_hold so mid-handler ACK drains cannot clobber bodies.
+        const stable: []const u8 = blk: {
+            if (payload.len <= self.payload_hold.len) {
+                @memcpy(self.payload_hold[0..payload.len], payload);
+                break :blk self.payload_hold[0..payload.len];
+            }
+            // Rare oversized multi-fragment C2S: keep original pointer and
+            // suppress reentrant drain for the duration (see drain_suppressed).
+            self.drain_suppressed +%= 1;
+            break :blk payload;
+        };
+        defer if (payload.len > self.payload_hold.len) {
+            self.drain_suppressed -%= 1;
+        };
+
         var pkgs: [16]wire_frame.Package = undefined;
-        const n = wire_frame.parseChannelPayload(payload, &pkgs);
-        if (n == 0 and payload.len > 0) {
+        const n = wire_frame.parseChannelPayload(stable, &pkgs);
+        if (n == 0 and stable.len > 0) {
             // Frame header only (8 bytes): avoid dumping string fields (names, etc.).
             var hex: [24]u8 = undefined;
-            const show = @min(payload.len, 8);
+            const show = @min(stable.len, 8);
             var hi: usize = 0;
             var bi: usize = 0;
             while (bi < show and hi + 2 <= hex.len) : (bi += 1) {
-                const s = std.fmt.bufPrint(hex[hi..], "{x:0>2}", .{payload[bi]}) catch break;
+                const s = std.fmt.bufPrint(hex[hi..], "{x:0>2}", .{stable[bi]}) catch break;
                 hi += s.len;
             }
-            if (payload.len >= 9) {
-                const psz = std.mem.readInt(i32, payload[1..5], .little);
+            if (stable.len >= 9) {
+                const psz = std.mem.readInt(i32, stable[1..5], .little);
                 std.debug.print("zdtd: unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{
-                    payload.len,
+                    stable.len,
                     hex[0..hi],
-                    payload[0],
+                    stable[0],
                     psz,
-                    payload[5],
-                    payload[6],
-                    std.mem.readInt(u16, payload[7..9], .little),
+                    stable[5],
+                    stable[6],
+                    std.mem.readInt(u16, stable[7..9], .little),
                 });
             } else {
-                std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ payload.len, hex[0..hi] });
+                std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
             }
             // Retry if payload omitted leading channel byte.
-            if (payload.len >= 10) {
+            if (stable.len >= 10) {
                 var alt: [16]wire_frame.Package = undefined;
                 var tmp: [8192]u8 = undefined;
-                if (payload.len + 1 <= tmp.len) {
+                if (stable.len + 1 <= tmp.len) {
                     tmp[0] = 0;
-                    @memcpy(tmp[1..][0..payload.len], payload);
-                    const n2 = wire_frame.parseChannelPayload(tmp[0 .. payload.len + 1], &alt);
+                    @memcpy(tmp[1..][0..stable.len], stable);
+                    const n2 = wire_frame.parseChannelPayload(tmp[0 .. stable.len + 1], &alt);
                     if (n2 > 0) {
                         std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
                         var j: usize = 0;
@@ -3115,6 +3461,14 @@ pub const Game = struct {
             const phase = phase_gate.phaseOf(c.joined, c.entered);
             if (!phase_gate.allowed(phase, name)) {
                 self.harness.counters.inc(.phase_rejects);
+                // First + every 100th: join-SM bugs show as phase spikes with no log.
+                const n = self.harness.counters.get(.phase_rejects);
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: phase reject n={d} pkg={s} joined={} entered={} local_id={d}\n",
+                        .{ n, name, c.joined, c.entered, peer.local_id },
+                    );
+                }
                 return;
             }
         }
@@ -3140,10 +3494,11 @@ pub const Game = struct {
             }
             // parse name for save key (first string in login body)
             if (body.len > 1) {
-                var r: @import("../wire/binary.zig").Reader = .{ .data = body };
+                var r: wire_binary.Reader = .{ .data = body };
                 if (r.readString(c.name[0..])) |nm| {
-                    c.name_len = @min(nm.len, c.name.len);
-                    if (nm.ptr != &c.name) @memcpy(c.name[0..c.name_len], nm[0..c.name_len]);
+                    // Strip C0/DEL so login names cannot inject CR/LF into admin
+                    // replies, audit lines, or GSI-adjacent operator surfaces.
+                    c.name_len = sanitizePlayerName(c.name[0..], nm);
                 } else |_| {}
             }
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
@@ -3333,7 +3688,7 @@ pub const Game = struct {
                         if (self.sim.mask[ps].inventory and self.sim.mask[bs].inventory) {
                             for (self.sim.inventory[bs].slots) |slot| {
                                 if (slot.count == 0 or slot.item_id == 0) continue;
-                                _ = self.sim.inventory[ps].addItem(slot.item_id, slot.count);
+                                _ = self.sim.depositItem(ps, slot.item_id, slot.count);
                             }
                         }
                     }
@@ -3350,21 +3705,24 @@ pub const Game = struct {
         }
         // Stock chat: rebroadcast Global messages to all peers.
         if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
+            if (!self.acceptChatRate(c)) return;
             if (std.mem.eql(u8, name, "NetPackageChat")) {
                 // Re-encode with the authenticated sender: echoing the client body
                 // lets any peer put words in another player's name (clients render
                 // the name from the sender entity id).
                 const ch = packages.parseStockChat(body) catch return;
+                if (!chatMsgOk(ch.msg)) return;
                 const stock = packages.buildStockChat(self.body_buf[0..512], c.entity_id, ch.msg) catch return;
                 try self.broadcastExcept("NetPackageChat", stock, c.slot);
             } else {
                 // Upgrade simple chat to stock Chat when possible
-                var r: @import("../wire/binary.zig").Reader = .{ .data = body };
+                var r: wire_binary.Reader = .{ .data = body };
                 var from_buf: [64]u8 = undefined;
-                var msg_buf: [256]u8 = undefined;
+                var msg_buf: [max_chat_msg_len]u8 = undefined;
                 const from = r.readString(&from_buf) catch "";
                 const msg = r.readString(&msg_buf) catch return;
                 _ = from;
+                if (!chatMsgOk(msg)) return;
                 const stock = try packages.buildStockChat(self.body_buf[0..512], c.entity_id, msg);
                 try self.broadcast("NetPackageChat", stock);
             }
@@ -3375,6 +3733,10 @@ pub const Game = struct {
         // ItemActionEat: stock clients DecHoldingItem locally then push PlayerInventory;
         // detect eatable stack loss and apply Food/Water/HP (same as InvTx use).
         if (std.mem.eql(u8, name, "NetPackagePlayerInventory")) {
+            if (!self.takeInvToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             const ps = self.sim.playerByPeer(c.slot) orelse return;
             if (!self.sim.mask[ps].inventory) return;
             var before: [64]struct { id: u16, n: u32 } = undefined;
@@ -3579,6 +3941,15 @@ pub const Game = struct {
                     self.harness.counters.inc(.ownership_rejects);
                     return;
                 }
+                // Reach: same as Collect/TE. Without this, any peer can rewrite
+                // distant loot-bag (or other non-player inv) contents by id.
+                const ps = self.sim.playerByPeer(c.slot) orelse return;
+                const pp = self.sim.transform[ps];
+                const bp = self.sim.transform[si];
+                if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return;
+                }
                 if (self.sim.mask[si].inventory) {
                     _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return;
                     self.clampInventoryStacks(&self.sim.inventory[si]);
@@ -3653,6 +4024,10 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageInventoryTransactionRequest")) {
+            if (!self.takeInvToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             const tx = packages.parseInvTxRequest(body) catch return;
             var r: invsys.Result = .{};
             // Captured before apply: a rejected place must refund what it consumed.
@@ -3851,14 +4226,21 @@ pub const Game = struct {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
             }
-            if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, false)) |ny| {
+            // Same speed envelope as PosAndRot: without it a client teleports
+            // anywhere and noteAcceptedMove rebaselines the gate to that spot.
+            const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
+            if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, false)) |ny| {
                 // Snapped; do not fan-out void coords.
-                self.noteAcceptedMove(c, p.x, ny, p.z);
+                self.noteAcceptedMove(c, env.x, ny, env.z);
                 return;
             }
-            self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
-            self.noteAcceptedMove(c, p.x, p.y, p.z);
-            try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
+            self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
+            self.noteAcceptedMove(c, env.x, env.y, env.z);
+            // Clamped: the owner already got a correction; peers pick the true
+            // position up on the next motion pass rather than the raw claim.
+            if (env.x == p.x and env.z == p.z) {
+                try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
+            }
             return;
         }
         // Land claim repair ping: acknowledge by echo (client drives repair FX).
@@ -3874,8 +4256,8 @@ pub const Game = struct {
             // forward package to sharedWithEntityID. We forward the body unchanged and
             // update server journal only when quest_id maps to a known catalog def.
             if (head.event == .share_quest) {
-                if (head.quest_id.len > 0) {
-                    if (self.sim.catalog.byName(head.quest_id)) |d| {
+                if (head.quest_id_len > 0) {
+                    if (self.sim.catalog.byName(head.questId())) |d| {
                         _ = systems.questAccept(&self.sim, c.slot, d.id);
                     }
                 }
@@ -3925,22 +4307,38 @@ pub const Game = struct {
             if (ps) |slot| {
                 if (self.sim.mask[slot].inventory) {
                     if (packages.stock_inv.applyPlayerDataNetwork(body, &self.sim.inventory[slot], reverseItemType, self)) |h| {
-                        if (h.entity_id == c.entity_id or c.entity_id <= 0) {
-                            if (c.entity_id <= 0) c.entity_id = h.entity_id;
-                            // Do NOT apply ECD pos: client PDF pos is Unity-origin
-                            // relative after Origin Reposition (y=0 artifacts);
-                            // PosAndRot is the world-space source of truth.
+                        self.clampInventoryStacks(&self.sim.inventory[slot]);
+                        // Entity ids are minted by sim.spawnPlayer; a mismatch is
+                        // a client claiming someone else's body, never adoption.
+                        // Do NOT apply ECD pos either: client PDF pos is
+                        // Unity-origin relative after Origin Reposition (y=0
+                        // artifacts); PosAndRot is the world-space source of truth.
+                        // Success path is silent (periodic PDF is normal). Mismatch
+                        // is the operator-visible signal: counter + rate-limited log.
+                        if (h.entity_id != c.entity_id) {
+                            self.harness.counters.inc(.ownership_rejects);
+                            const n = self.harness.counters.get(.ownership_rejects);
+                            if (n == 1 or n % 100 == 0) {
+                                std.debug.print(
+                                    "zdtd: PlayerData ownership reject n={d} claimed={d} expected={d} local_id={d}\n",
+                                    .{ n, h.entity_id, c.entity_id, peer.local_id },
+                                );
+                            }
                         }
-                        std.debug.print("zdtd: PlayerData save entity={d} pos=({d:.1},{d:.1},{d:.1}) inv_slots={d} body={d}\n", .{
-                            h.entity_id, h.x, h.y, h.z, h.inv_slots, body.len,
-                        });
                     } else |_| {
-                        // Fall back to ECD head only.
+                        // Fall back to ECD head only. Parse-skip is rare; log once per 100
+                        // decode rejects so a broken client is visible without per-packet noise.
                         if (packages.parsePlayerDataEcdHead(body)) |h| {
                             _ = h; // pos unreliable (origin-relative); ignore
-                            std.debug.print("zdtd: PlayerData ecd-only body={d}\n", .{body.len});
                         } else |_| {
-                            std.debug.print("zdtd: PlayerData body={d} (parse skip)\n", .{body.len});
+                            self.harness.counters.inc(.decode_rejects);
+                            const n = self.harness.counters.get(.decode_rejects);
+                            if (n == 1 or n % 100 == 0) {
+                                std.debug.print(
+                                    "zdtd: PlayerData parse skip n={d} body_len={d} local_id={d}\n",
+                                    .{ n, body.len, peer.local_id },
+                                );
+                            }
                         }
                     }
                 }
@@ -4003,7 +4401,7 @@ pub const Game = struct {
         // Body: playerEntityId i32 | groupName str | count i32. Spawn `count`
         // default zombies near the player (full gamestage group roll deferred).
         if (std.mem.eql(u8, name, "NetPackageQuestEntitySpawn")) {
-            var r: @import("../wire/binary.zig").Reader = .{ .data = body };
+            var r: wire_binary.Reader = .{ .data = body };
             _ = r.readI32() catch return; // player entity id
             var gname: [64]u8 = undefined;
             _ = r.readString(&gname) catch return;
@@ -4049,10 +4447,35 @@ pub const Game = struct {
         }
         if (std.mem.eql(u8, name, "NetPackageDamageEntity")) {
             const d = packages.parseDamageHead(body) catch return;
+            if (!self.takeDamageToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
+            // Damage is a client claim, so require both actor and target to be
+            // in the server's current interest range. This blocks forged net
+            // ids from damaging players or AI elsewhere in the world.
+            const actor_slot = self.sim.playerByPeer(c.slot) orelse return;
+            if (!self.sim.alive[actor_slot] or self.sim.health[actor_slot].hp <= 0) {
+                self.harness.counters.inc(.bounds_rejects);
+                return;
+            }
+            const target_slot = self.sim.slotOfNetId(d.entity_id) orelse return;
+            if (!self.sim.alive[target_slot]) {
+                self.harness.counters.inc(.bounds_rejects);
+                return;
+            }
+            if (!self.sim.mask[actor_slot].transform or !self.sim.mask[target_slot].transform) return;
+            const actor_pos = self.sim.transform[actor_slot];
+            const target_pos = self.sim.transform[target_slot];
+            const damage_dx = target_pos.x - actor_pos.x;
+            const damage_dy = target_pos.y - actor_pos.y;
+            const damage_dz = target_pos.z - actor_pos.z;
+            if (damage_dx * damage_dx + damage_dy * damage_dy + damage_dz * damage_dz > self.interest_range * self.interest_range) {
+                self.harness.counters.inc(.bounds_rejects);
+                return;
+            }
             const was_zombie = blk: {
-                if (self.sim.slotOfNetId(d.entity_id)) |ei|
-                    break :blk self.sim.kind[ei] == .zombie or self.sim.kind[ei] == .animal;
-                break :blk false;
+                break :blk self.sim.kind[target_slot] == .zombie or self.sim.kind[target_slot] == .animal;
             };
             // Client strength is a claim: cap it, and honor `fatal` only against
             // NPC kinds (a spoofed fatal must not one-shot another player).
@@ -4148,7 +4571,7 @@ pub const Game = struct {
                     // Re-push TE for any storage container near the first TEFeature target.
                     // Target blob: i32 count | (present, type, …)*
                     if (req.targets_blob.len >= 4) {
-                        var tr: @import("../wire/binary.zig").Reader = .{ .data = req.targets_blob };
+                        var tr: wire_binary.Reader = .{ .data = req.targets_blob };
                         const n = tr.readI32() catch 0;
                         var ti: i32 = 0;
                         while (ti < n) : (ti += 1) {
@@ -4189,6 +4612,10 @@ pub const Game = struct {
             // Stock: C2S is a request. Apply, then S2C authoritative result bodies
             // (absolute BlockValue.damage or air). Never rely on raw C2S echo alone
             // when the server mutates damage/break (RE blocks.md §4-5).
+            if (!self.takeBlockToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             var changes: [32]packages.BlockChange = undefined;
             const n = packages.parseSetBlockChanges(body, changes[0..]) catch {
                 std.debug.print("zdtd: SetBlock parse fail body={d}\n", .{body.len});
@@ -4210,8 +4637,14 @@ pub const Game = struct {
                 // Vertical clamp: mesh float must not fail power/dig suite (type=0).
                 if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
                     self.harness.counters.inc(.bounds_rejects);
-                    if (self.authorityCorrects()) {
-                        std.debug.print("zdtd: SetBlock out of reach ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ b.x, b.y, b.z, ep.x, ep.y, ep.z });
+                    // Observe and Correct both count; rate-limit log so reach spam
+                    // (float mesh, lag) does not flood, first/100th stay actionable.
+                    const rejects = self.harness.counters.get(.bounds_rejects);
+                    if (rejects == 1 or rejects % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n",
+                            .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z },
+                        );
                     }
                     continue;
                 }
@@ -4330,9 +4763,17 @@ pub const Game = struct {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
             }
+            if (!self.takeBlockToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, 6)));
             // Reach: explosion center must be near the acting player.
             if (self.sim.playerByPeer(c.slot)) |bi| {
+                if (!self.sim.alive[bi] or self.sim.health[bi].hp <= 0) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return;
+                }
                 const bp = self.sim.transform[bi];
                 const dx = ex.wx - bp.x;
                 const dy = ex.wy - bp.y;
@@ -4463,16 +4904,18 @@ pub const Game = struct {
             if (self.sim.slotOfNetId(vc.entity_id)) |vi| {
                 if (!self.sim.mask[vi].vehicle) return;
                 if (vc.op == 0) {
-                    _ = systems.vehicleEnter(&self.sim, vi, c.entity_id);
+                    if (!systems.vehicleEnter(&self.sim, vi, c.entity_id)) return;
                     if (packages.buildEntityAttach(self.body_buf[0..16], .attach_server, c.entity_id, vc.entity_id, 0)) |ab| {
                         try self.broadcast("NetPackageEntityAttach", ab);
                     } else |_| {}
                 } else if (vc.op == 1) {
-                    _ = systems.vehicleExit(&self.sim, c.entity_id);
+                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
+                    if (!systems.vehicleExit(&self.sim, c.entity_id)) return;
                     if (packages.buildEntityAttach(self.body_buf[0..16], .detach_server, c.entity_id, vc.entity_id, 0)) |ab| {
                         try self.broadcast("NetPackageEntityAttach", ab);
                     } else |_| {}
                 } else if (vc.op == 2) {
+                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
                     systems.vehicleControl(&self.sim, vi, vc.throttle, vc.steer, 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second)));
                 }
             }
@@ -4484,9 +4927,10 @@ pub const Game = struct {
             if (self.sim.slotOfNetId(a.vehicle_id)) |vi| {
                 if (!self.sim.mask[vi].vehicle) return;
                 if (packages.attachTypeIsDetach(a.attach_type)) {
-                    _ = systems.vehicleExit(&self.sim, c.entity_id);
+                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
+                    if (!systems.vehicleExit(&self.sim, c.entity_id)) return;
                 } else {
-                    _ = systems.vehicleEnter(&self.sim, vi, c.entity_id);
+                    if (!systems.vehicleEnter(&self.sim, vi, c.entity_id)) return;
                 }
             }
             try self.broadcastExcept("NetPackageEntityAttach", body, c.slot);
@@ -4633,11 +5077,11 @@ pub const Game = struct {
             "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",          "sandbox_overrides",
         };
         for (names) |name| {
-            var w: @import("../wire/binary.zig").Writer = .{ .buf = self.body_buf[0..] };
+            var w: wire_binary.Writer = .{ .buf = self.body_buf[0..] };
             try w.writeString(name);
             try w.writeI32(-1); // null payload => EClientFileState.LoadLocal
             try self.sendGame(peer, "NetPackageConfigFile", w.written());
-            peer.resendPending(&self.net.sock) catch {};
+            peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
             self.pollNetOnce();
         }
     }
@@ -4676,6 +5120,56 @@ pub const Game = struct {
         if (dy < -max_v) dy = -max_v;
         const r = self.max_edit_range;
         return dx * dx + dy * dy + dz * dz <= r * r;
+    }
+
+    /// Refill + spend one inv token. False → caller should drop and count throttle.
+    fn takeInvToken(self: *Game, c: *Client) bool {
+        _ = self;
+        const now = clock.monoNs();
+        if (c.inv_refill_ns == 0) c.inv_refill_ns = now;
+        while (c.inv_tokens < inv_bucket_cap and now -% c.inv_refill_ns >= inv_refill_ns) {
+            c.inv_tokens += 1;
+            c.inv_refill_ns +%= inv_refill_ns;
+        }
+        if (c.inv_tokens == 0) return false;
+        c.inv_tokens -= 1;
+        return true;
+    }
+
+    fn takeBlockToken(self: *Game, c: *Client) bool {
+        _ = self;
+        const now = clock.monoNs();
+        if (c.block_refill_ns == 0) c.block_refill_ns = now;
+        while (c.block_tokens < block_bucket_cap and now -% c.block_refill_ns >= block_refill_ns) {
+            c.block_tokens += 1;
+            c.block_refill_ns +%= block_refill_ns;
+        }
+        if (c.block_tokens == 0) return false;
+        c.block_tokens -= 1;
+        return true;
+    }
+
+    /// Combat rate gate: allow burst of damage_burst_max within min_damage_gap.
+    fn takeDamageToken(self: *Game, c: *Client) bool {
+        _ = self;
+        const now = clock.monoNs();
+        if (c.last_damage_ns != 0 and now -% c.last_damage_ns < min_damage_gap_ns) {
+            if (c.damage_burst >= damage_burst_max) return false;
+            c.damage_burst += 1;
+        } else {
+            c.damage_burst = 1;
+        }
+        c.last_damage_ns = now;
+        return true;
+    }
+
+    /// Per-peer chat flood gate. Returns true and stamps `last_chat_ns` when allowed.
+    fn acceptChatRate(self: *const Game, c: *Client) bool {
+        _ = self;
+        const now = clock.monoNs();
+        if (c.last_chat_ns != 0 and now -% c.last_chat_ns < min_chat_gap_ns) return false;
+        c.last_chat_ns = now;
+        return true;
     }
 
     /// Reach + land-claim gate for a block edit requested by `c` (ADR 0004).
@@ -4721,11 +5215,21 @@ pub const Game = struct {
                 const pz = sz + dz;
                 // Ensure surface cell solid.
                 const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
-                if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch {};
+                if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch |err| {
+                    std.debug.print(
+                        "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
+                        .{ px, feet_y, pz, @errorName(err) },
+                    );
+                };
                 // One block below if empty (stairs / overhang).
                 if (feet_y > 0) {
                     const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
-                    if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch {};
+                    if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch |err| {
+                        std.debug.print(
+                            "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
+                            .{ px, feet_y - 1, pz, @errorName(err) },
+                        );
+                    };
                 }
             }
         }
@@ -4878,6 +5382,8 @@ pub const Game = struct {
         const clk = self.sim.director.clock;
         const bm_day: i32 = if (clk.bloodmoon_frequency == 0)
             0
+        else if (clk.day % clk.bloodmoon_frequency == 0)
+            @intCast(clk.day)
         else
             @intCast(((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency);
         const vals: packages.GameStatsValues = .{
@@ -5168,7 +5674,7 @@ pub const Game = struct {
         // Full items.xml map is ~30–50 KiB uncompressed; stock client already has matching AssignIds
         // from the same Config when game-dir is shared.
         var map_buf: [2048]u8 = undefined;
-        var w: @import("../wire/binary.zig").Writer = .{ .buf = &map_buf };
+        var w: wire_binary.Writer = .{ .buf = &map_buf };
         try w.writeI32(1);
         const count_pos = w.pos;
         try w.writeI32(0);
@@ -5211,7 +5717,7 @@ pub const Game = struct {
             );
         } else {
             // Empty ItemStack: entityId + u16 count=0 + holding index.
-            var w: @import("../wire/binary.zig").Writer = .{ .buf = self.body_buf[6144..6160] };
+            var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
             try w.writeI32(c.entity_id);
             try w.writeU16(0);
             const idx: u8 = if (self.sim.inventory[ps].holding < ecs.components.inv_toolbelt)
@@ -5314,7 +5820,7 @@ pub const Game = struct {
                 return false;
             }
         }
-        if (!self.sim.inventory[ps].addItem(out_id, out_count)) {
+        if (!self.sim.depositItem(ps, out_id, out_count)) {
             self.sim.inventory[ps] = inventory_before;
             return false;
         }
@@ -5471,11 +5977,11 @@ pub const Game = struct {
         while (i < n) : (i += 1) {
             const eid = self.ecsIdFromItemName(stacks[i].item_name);
             if (eid == 0) continue;
-            _ = self.sim.inventory[slot].addItem(eid, stacks[i].count);
+            _ = self.sim.depositItem(slot, eid, stacks[i].count);
         }
         // Ensure bag not empty.
         if (self.sim.inventory[slot].countItem(1) == 0 and self.sim.inventory[slot].slots[0].count == 0) {
-            _ = self.sim.inventory[slot].addItem(1, 5);
+            _ = self.sim.depositItem(slot, 1, 5);
         }
     }
 
@@ -5698,14 +6204,19 @@ pub const Game = struct {
         const ch = try self.world.getOrCreate(.{ .x = cx, .z = cz });
         // After TTS paint, create storage TEs for known chest block ids (loot fill once).
         self.ensurePrefabStorageInChunk(ch, cx, cz);
-        // Prefer biomes.png color→id mode; fallback height band.
-        const biome_id: u8 = if (self.world.biomes) |*bm|
-            bm.chunkDominant(cx, cz)
-        else blk: {
-            var hsum: u32 = 0;
-            for (ch.heights) |h| hsum += h;
-            const havg: u8 = @intCast(hsum / 256);
-            break :blk if (havg < 40) @as(u8, 5) else if (havg > 90) @as(u8, 1) else 3;
+        // Prefer biomes.png color→id mode; fallback height band. Cached on the
+        // chunk so re-sends to other clients skip the 256-lookup dominant scan.
+        const biome_id: u8 = ch.biome_id orelse blk: {
+            const b: u8 = if (self.world.biomes) |*bm|
+                bm.chunkDominant(cx, cz)
+            else hb: {
+                var hsum: u32 = 0;
+                for (ch.heights) |h| hsum += h;
+                const havg: u8 = @intCast(hsum / 256);
+                break :hb if (havg < 40) @as(u8, 5) else if (havg > 90) @as(u8, 1) else 3;
+            };
+            ch.biome_id = b;
+            break :blk b;
         };
         // Feed store columns (TTS-painted) into stock encoder.
         const BlockCtx = struct {
@@ -5767,6 +6278,10 @@ pub const Game = struct {
         const base_x = cx * 16;
         const base_z = cz * 16;
         var found: u32 = 0;
+        // Block ids repeat in long runs (terrain), so memo the last id's verdict
+        // to skip the hash probe in isStorageBlockId for nearly every cell.
+        var last_id: u16 = 0;
+        var last_is_storage = false;
         // y outermost so idx advances contiguously (y stride is 1 KiB; the old
         // y-inner order made all 65k reads cache misses across a 256 KiB array).
         var y: i32 = 0;
@@ -5777,7 +6292,12 @@ pub const Game = struct {
                 while (lx < 16) : (lx += 1) {
                     const idx = @as(usize, @intCast(lx + lz * 16 + y * 256));
                     const id: u16 = @truncate(blocks[idx]);
-                    if (id == 0 or !self.isStorageBlockId(id)) continue;
+                    if (id == 0) continue;
+                    if (id != last_id) {
+                        last_id = id;
+                        last_is_storage = self.isStorageBlockId(id);
+                    }
+                    if (!last_is_storage) continue;
                     const wx = base_x + lx;
                     const wz = base_z + lz;
                     const pos = containers_mod.PosKey{ .x = wx, .y = y, .z = wz };
@@ -5860,7 +6380,7 @@ pub const Game = struct {
     fn clientAddStreamed(self: *Game, c: *Client, key: i64) void {
         if (clientHasStreamed(c, key)) return;
         if (c.streamed_n >= max_streamed_chunks_cap) {
-            // drop oldest
+            // drop oldest (FIFO shift; order only matters for this policy)
             var i: usize = 1;
             while (i < c.streamed_n) : (i += 1) c.streamed[i - 1] = c.streamed[i];
             c.streamed_n -= 1;
@@ -5881,9 +6401,9 @@ pub const Game = struct {
         var i: usize = 0;
         while (i < c.streamed_n) : (i += 1) {
             if (c.streamed[i] != key) continue;
-            var j = i + 1;
-            while (j < c.streamed_n) : (j += 1) c.streamed[j - 1] = c.streamed[j];
+            // Membership only; swap-remove avoids O(n) memmove.
             c.streamed_n -= 1;
+            c.streamed[i] = c.streamed[c.streamed_n];
             return;
         }
     }
@@ -5933,33 +6453,40 @@ pub const Game = struct {
             var r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else c.view_radius;
             if (r < self.chunk_stream_radius_min) r = self.chunk_stream_radius_min;
             if (r > self.chunk_stream_radius_max) r = self.chunk_stream_radius_max;
-            // desired set
-            var desired: [max_streamed_chunks_cap]i64 = undefined;
-            var dn: usize = 0;
-            var dz: i32 = -r;
-            while (dz <= r) : (dz += 1) {
-                var dx: i32 = -r;
-                while (dx <= r) : (dx += 1) {
-                    if (dn >= self.max_streamed_chunks) break;
-                    desired[dn] = packages.makeChunkKey(t.pos.x + dx, t.pos.z + dz);
-                    dn += 1;
+            // Shrink to a square that fits the budget: truncating the raster scan
+            // instead would leave a southern band, not the centered hole-free disk
+            // the comment above requires (radius 7 wants 225 vs a 169 cap).
+            while (r > 1 and @as(usize, @intCast((2 * r + 1) * (2 * r + 1))) > self.max_streamed_chunks) r -= 1;
+            const tcx = t.pos.x;
+            const tcz = t.pos.z;
+            const side: i32 = 2 * r + 1;
+            // Relative membership of currently streamed keys inside the view
+            // square: O(streamed_n) build, O(1) probe. Replaces O(n²) desired[]
+            // linear scans (up to 169×169 per client per stream period).
+            var in_view = std.StaticBitSet(256).initEmpty();
+            {
+                var si_i: usize = 0;
+                while (si_i < c.streamed_n) : (si_i += 1) {
+                    const key = c.streamed[si_i];
+                    const cx = packages.extractChunkKeyX(key);
+                    const cz = packages.extractChunkKeyZ(key);
+                    const dx = cx - tcx;
+                    const dz = cz - tcz;
+                    if (@abs(dx) > r or @abs(dz) > r) continue;
+                    const bit: usize = @intCast((dx + r) + (dz + r) * side);
+                    if (bit < 256) in_view.set(bit);
                 }
             }
-            // removes
+            // removes: keys outside the current square
             var i: usize = 0;
             while (i < c.streamed_n) {
                 const key = c.streamed[i];
-                var keep = false;
-                var j: usize = 0;
-                while (j < dn) : (j += 1) {
-                    if (desired[j] == key) {
-                        keep = true;
-                        break;
-                    }
-                }
+                const cx = packages.extractChunkKeyX(key);
+                const cz = packages.extractChunkKeyZ(key);
+                const dx = cx - tcx;
+                const dz = cz - tcz;
+                const keep = @abs(dx) <= r and @abs(dz) <= r;
                 if (!keep) {
-                    const cx = packages.extractChunkKeyX(key);
-                    const cz = packages.extractChunkKeyZ(key);
                     const rb = try packages.buildChunkRemoveBody(self.body_buf[0..16], cx, cz);
                     try self.sendGame(peer, "NetPackageChunkRemove", rb);
                     // Stock also clears deco for unloaded world chunks.
@@ -5967,35 +6494,46 @@ pub const Game = struct {
                         self.sendGame(peer, "NetPackageDecoResetWorldChunk", db) catch {};
                     } else |_| {}
                     clientRemoveStreamed(c, key);
-                    // do not advance i: remove shifted
+                    // do not advance i: swap-remove put a new key at i
                 } else {
                     i += 1;
                 }
             }
             // adds: enough per pass to fill 13×13 before overlay timeout; still
             // paced so LiteNet reliable window can drain.
-            var aj: usize = 0;
             var added: u32 = 0;
-            while (aj < dn and added < self.chunk_adds_per_stream_tick) : (aj += 1) {
-                const key = desired[aj];
-                if (clientHasStreamed(c, key)) continue;
-                const cx = packages.extractChunkKeyX(key);
-                const cz = packages.extractChunkKeyZ(key);
-                try self.sendSpawnChunk(peer, cx, cz);
-                self.clientAddStreamed(c, key);
-                // Plants/trees for the newly visible terrain chunk (fixed-size clients need S2C).
-                // On failure deco is not marked (sendDecoForTerrainChunk); log so silent
-                // missing trees are visible. Do not bulk-retry all streamed keys: join
-                // flood marks terrain streamed without per-chunk deco, and a full-view
-                // resend would flood the reliable window.
-                self.sendDecoForTerrainChunk(c, peer, cx, cz) catch |err| {
-                    self.harness.counters.inc(.stream_errors);
-                    std.debug.print(
-                        "zdtd: deco stream failed cx={d} cz={d}: {s}\n",
-                        .{ cx, cz, @errorName(err) },
-                    );
-                };
-                added += 1;
+            var dz: i32 = -r;
+            outer: while (dz <= r) : (dz += 1) {
+                var dx: i32 = -r;
+                while (dx <= r) : (dx += 1) {
+                    if (added >= self.chunk_adds_per_stream_tick) break :outer;
+                    const bit: usize = @intCast((dx + r) + (dz + r) * side);
+                    if (bit < 256 and in_view.isSet(bit)) continue;
+                    const cx = tcx + dx;
+                    const cz = tcz + dz;
+                    const key = packages.makeChunkKey(cx, cz);
+                    // Cap path / race: bitset miss but list still holds key.
+                    if (clientHasStreamed(c, key)) continue;
+                    try self.sendSpawnChunk(peer, cx, cz);
+                    self.clientAddStreamed(c, key);
+                    in_view.set(bit);
+                    // Plants/trees for the newly visible terrain chunk (fixed-size clients need S2C).
+                    // On failure deco is not marked (sendDecoForTerrainChunk); log so silent
+                    // missing trees are visible. Do not bulk-retry all streamed keys: join
+                    // flood marks terrain streamed without per-chunk deco, and a full-view
+                    // resend would flood the reliable window.
+                    self.sendDecoForTerrainChunk(c, peer, cx, cz) catch |err| {
+                        self.harness.counters.inc(.stream_errors);
+                        const n = self.harness.counters.get(.stream_errors);
+                        if (n == 1 or n % 100 == 0) {
+                            std.debug.print(
+                                "zdtd: deco stream failed cx={d} cz={d} n={d}: {s}\n",
+                                .{ cx, cz, n, @errorName(err) },
+                            );
+                        }
+                    };
+                    added += 1;
+                }
             }
         }
     }
@@ -6008,23 +6546,41 @@ pub const Game = struct {
         while (attempts < max_attempts) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
                 error.WindowFull => {
-                    peer.resendPending(&self.net.sock) catch {};
+                    peer.resendPending(&self.net.sock) catch {
+                        self.harness.counters.inc(.net_send_errors);
+                    };
                     self.pollNetOnce();
                     if (attempts % 4 == 3) clock.sleepNs(500_000);
                     continue;
                 },
                 else => {
+                    // Hard send failure (not window pressure): count + rate-limit log.
                     self.harness.counters.inc(.net_send_errors);
+                    const n = self.harness.counters.get(.net_send_errors);
+                    if (n == 1 or n % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: framed stream send failed local_id={d} n={d}: {s}\n",
+                            .{ peer.local_id, n, @errorName(err) },
+                        );
+                    }
                     return;
                 },
             };
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
-            self.pollNetOnce();
+            self.pollNetAfterSend();
             return;
         }
+        // Same signal as sendGame drops: counter always, log rate-limited.
         self.harness.counters.inc(.reliable_window_drops);
+        const n = self.harness.counters.get(.reliable_window_drops);
+        if (n == 1 or n % 100 == 0) {
+            std.debug.print(
+                "zdtd: drop framed stream (reliable window full) n={d} local_id={d}\n",
+                .{ n, peer.local_id },
+            );
+        }
     }
 
     fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
@@ -6034,8 +6590,18 @@ pub const Game = struct {
     /// World-position broadcast: only clients whose player is within
     /// `range_blocks` of (wx,wz). Chat/time stay global via broadcast().
     fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
+        // Encode failures were counter-only (no log). Match sendGame: counter +
+        // rate-limited log. Successful fan-out must also tick net_packets/bytes
+        // so apm RED rates reflect broadcast traffic (chat, setblock, time, …).
         const framed = packages.framed(&self.send_buf, name, body) catch |err| {
             self.harness.counters.inc(.encode_errors);
+            const n = self.harness.counters.get(.encode_errors);
+            if (n == 1 or n % 100 == 0) {
+                std.debug.print(
+                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
+                    .{ name, body.len, n, @errorName(err) },
+                );
+            }
             return err;
         };
         for (&self.clients) |*c| {
@@ -6047,10 +6613,19 @@ pub const Game = struct {
                 const dz = self.sim.transform[ps].z - wz;
                 if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
             }
-            p.sendReliable(&self.net.sock, framed) catch {
+            p.sendReliable(&self.net.sock, framed) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
+                const n = self.harness.counters.get(.net_send_errors);
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
+                        .{ name, p.local_id, n, @errorName(err) },
+                    );
+                }
                 continue;
             };
+            self.harness.counters.add(.net_packets_out, 1);
+            self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         }
     }
@@ -6058,16 +6633,32 @@ pub const Game = struct {
     fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
         const framed = packages.framed(&self.send_buf, name, body) catch |err| {
             self.harness.counters.inc(.encode_errors);
+            const n = self.harness.counters.get(.encode_errors);
+            if (n == 1 or n % 100 == 0) {
+                std.debug.print(
+                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
+                    .{ name, body.len, n, @errorName(err) },
+                );
+            }
             return err;
         };
         for (&self.clients) |*c| {
             const p = c.peer orelse continue;
             if (!c.joined) continue;
             if (except_slot) |ex| if (c.slot == ex) continue;
-            p.sendReliable(&self.net.sock, framed) catch {
+            p.sendReliable(&self.net.sock, framed) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
+                const n = self.harness.counters.get(.net_send_errors);
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
+                        .{ name, p.local_id, n, @errorName(err) },
+                    );
+                }
                 continue;
             };
+            self.harness.counters.add(.net_packets_out, 1);
+            self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         }
     }
@@ -6090,10 +6681,13 @@ pub const Game = struct {
                 if (!cl.joined or !cl.entered or cl.peer == null) continue;
                 self.streamChunksForClient(cl) catch |err| {
                     self.harness.counters.inc(.stream_errors);
-                    std.debug.print(
-                        "zdtd: chunk stream failed slot={d} entity={d}: {s}\n",
-                        .{ cl.slot, cl.entity_id, @errorName(err) },
-                    );
+                    const n = self.harness.counters.get(.stream_errors);
+                    if (n == 1 or n % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: chunk stream failed slot={d} entity={d} n={d}: {s}\n",
+                            .{ cl.slot, cl.entity_id, n, @errorName(err) },
+                        );
+                    }
                 };
             }
         }
@@ -6102,27 +6696,34 @@ pub const Game = struct {
             self.clearDeadKnownEntities();
             return;
         }
+        // Empty world: still reconcile known bits if anything died this tick.
+        if (self.sim.entity_count == 0) {
+            self.clearDeadKnownEntities();
+            return;
+        }
 
         var pos_frame_buf: [replicate_frame_cap]u8 = undefined;
         var speeds_frame_buf: [replicate_frame_cap]u8 = undefined;
         var flags_frame_buf: [replicate_frame_cap]u8 = undefined;
 
-        // Observer positions resolved once per pass (sim is not mutated below),
-        // not per entity × client in each interest loop.
-        var obs_px: [max_clients]f32 = .{0} ** max_clients;
-        var obs_pz: [max_clients]f32 = .{0} ** max_clients;
+        // Observer interest cells resolved once per pass (sim is not mutated
+        // below), not per entity × client in each interest loop.
+        var obs_cx: [max_clients]i32 = .{0} ** max_clients;
+        var obs_cz: [max_clients]i32 = .{0} ** max_clients;
         for (&self.clients, 0..) |*cl, ci| {
             // Empty/joining slots have no entity; skip before the net-id lookup.
             if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
             if (self.sim.slotOfNetId(cl.entity_id)) |si| {
-                obs_px[ci] = self.sim.transform[si].x;
-                obs_pz[ci] = self.sim.transform[si].z;
+                const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
+                obs_cx[ci] = oc.cx;
+                obs_cz[ci] = oc.cz;
             }
         }
 
         var i: ecs.Slot = 0;
         while (i < ecs.max_entities) : (i += 1) {
             if (!self.sim.alive[i] or !self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
+            const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
 
             // Spawn-on-approach is per-observer (known_entities); still entity-outer
             // so we only build EntitySpawn once when multiple clients need it.
@@ -6132,7 +6733,7 @@ pub const Game = struct {
                 for (&self.clients, 0..) |*cl, ci| {
                     if (!cl.joined or !cl.entered or cl.peer == null) continue;
                     if (cl.known_entities.isSet(i)) continue;
-                    if (!interest.inRange(obs_px[ci], obs_pz[ci], self.sim.transform[i].x, self.sim.transform[i].z, cl.view_radius)) continue;
+                    if (!interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
                     need_spawn_any = true;
                     break;
                 }
@@ -6157,7 +6758,7 @@ pub const Game = struct {
                         if (!cl.joined or !cl.entered) continue;
                         const peer = cl.peer orelse continue;
                         if (cl.known_entities.isSet(i)) continue;
-                        if (!interest.inRange(obs_px[ci], obs_pz[ci], self.sim.transform[i].x, self.sim.transform[i].z, cl.view_radius)) continue;
+                        if (!interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
                         try self.sendGame(peer, "NetPackageEntitySpawn", spb);
                         cl.known_entities.set(i);
                     }
@@ -6175,7 +6776,7 @@ pub const Game = struct {
             for (&self.clients, 0..) |*cl, ci| {
                 if (!cl.joined or !cl.entered or cl.peer == null) continue;
                 if (self.sim.mask[i].player and self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot))) continue;
-                if (!interest.inRange(obs_px[ci], obs_pz[ci], self.sim.transform[i].x, self.sim.transform[i].z, cl.view_radius)) continue;
+                if (!interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
                 any_observer = true;
                 break;
             }
@@ -6231,7 +6832,7 @@ pub const Game = struct {
                 if (!cl.joined or !cl.entered) continue;
                 const peer = cl.peer orelse continue;
                 if (self.sim.mask[i].player and self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot))) continue;
-                if (!interest.inRange(obs_px[ci], obs_pz[ci], self.sim.transform[i].x, self.sim.transform[i].z, cl.view_radius)) continue;
+                if (!interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
                 self.sendFramedDroppable(peer, pos_framed);
                 if (speeds_framed) |sf| self.sendFramedDroppable(peer, sf);
                 if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
@@ -6249,6 +6850,8 @@ pub const Game = struct {
     }
 
     fn clearDeadKnownEntities(self: *Game) void {
+        // Most ticks free no slots; skip the 512-wide alive bitset rebuild.
+        if (!self.sim.any_freed_this_tick) return;
         // One alive-bitset build + word-wise AND per client, instead of a
         // per-slot × per-client unset sweep (512×64 every tick).
         var alive_bits = std.StaticBitSet(ecs.max_entities).initEmpty();
@@ -6257,11 +6860,19 @@ pub const Game = struct {
             if (self.sim.alive[j]) alive_bits.set(j);
         }
         for (&self.clients) |*kc| kc.known_entities.setIntersection(alive_bits);
+        self.sim.any_freed_this_tick = false;
     }
 
     pub fn step(self: *Game) !void {
         const sc = apm.profiler.scope(&self.harness.prof, .tick_total);
-        defer sc.end();
+        var completed = false;
+        defer {
+            // End profiling before advancing logical time: a deterministic
+            // step has no host-runtime latency, but it still consumes one
+            // stock tick for deadlines, retries, and stale-state checks.
+            sc.end();
+            if (completed and clock.isVirtual()) util_sim.advanceTick();
+        }
         self.tick_n += 1;
         self.harness.counters.inc(.ticks);
         self.plugins.setTick(self.tick_n);
@@ -6400,17 +7011,9 @@ pub const Game = struct {
         // One parseable line per minute gives unbounded production runs a
         // bounded-cost health signal without per-packet label cardinality.
         if (self.tick_n % apm_report_period_ticks == 0) {
-            const snap = self.harness.snapshot();
-            var report_buf: [4096]u8 = undefined;
-            var report_writer: std.Io.Writer = .fixed(&report_buf);
-            var report_ok = true;
-            apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
-                report_ok = false;
-                std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
-            };
-            if (report_ok) std.debug.print("{s}", .{report_writer.buffered()});
-            // Instantaneous ops gauges (not cumulative counters): who is online
-            // and how many peers LiteNet still holds when the snapshot fires.
+            var snap = self.harness.snapshot();
+            // Instantaneous gauges ride the same JSON line as counters so log
+            // scrapers get load + error rates in one event (not a free-text tail).
             var entered_n: u32 = 0;
             var peers_alive: u32 = 0;
             for (&self.clients) |cl| {
@@ -6419,18 +7022,24 @@ pub const Game = struct {
             for (&self.net.peers) |p| {
                 if (p.alive) peers_alive += 1;
             }
-            std.debug.print(
-                "zdtd: ops tick={d} joined={d} entered={d} peers_alive={d} zombies={d} chunks={d}\n",
-                .{
-                    self.tick_n,
-                    self.countJoined(),
-                    entered_n,
-                    peers_alive,
-                    self.sim.countKind(.zombie),
-                    self.world.chunks.count(),
-                },
-            );
+            snap.ops = .{
+                .tick = self.tick_n,
+                .joined = self.countJoined(),
+                .entered = entered_n,
+                .peers_alive = peers_alive,
+                .zombies = @intCast(@min(self.sim.countKind(.zombie), std.math.maxInt(u32))),
+                .chunks = @intCast(@min(self.world.chunks.count(), std.math.maxInt(u32))),
+            };
+            var report_buf: [4096]u8 = undefined;
+            var report_writer: std.Io.Writer = .fixed(&report_buf);
+            var report_ok = true;
+            apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
+                report_ok = false;
+                std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
+            };
+            if (report_ok) std.debug.print("{s}", .{report_writer.buffered()});
         }
+        completed = true;
     }
 
     fn anyEnteredClient(self: *const Game) bool {
@@ -6602,7 +7211,7 @@ pub const Game = struct {
         wire_frame.buildChallenge(&ch, c.challenge);
         try self.onData(peer, &ch);
         var login_body: [64]u8 = undefined;
-        var w: @import("../wire/binary.zig").Writer = .{ .buf = &login_body };
+        var w: wire_binary.Writer = .{ .buf = &login_body };
         try w.writeString("Bot");
         try w.writeByte(0);
         try w.writeString("");
@@ -6642,14 +7251,172 @@ pub const Game = struct {
     }
 };
 
-test "player console policy rejects administrative mutations" {
-    try std.testing.expect(isPlayerConsoleCommand("help"));
-    try std.testing.expect(isPlayerConsoleCommand("gettime"));
-    try std.testing.expect(isPlayerConsoleCommand("say"));
-    try std.testing.expect(!isPlayerConsoleCommand("settime"));
-    try std.testing.expect(!isPlayerConsoleCommand("giveself"));
-    try std.testing.expect(!isPlayerConsoleCommand("spawnentity"));
-    try std.testing.expect(!isPlayerConsoleCommand("killall"));
-    try std.testing.expect(!isPlayerConsoleCommand("kick"));
-    try std.testing.expect(!isPlayerConsoleCommand("ban"));
+test "peerIpKey covers ipv4 mapped ipv6 and pure ipv6" {
+    var p: ln_peer.Peer = .{};
+    p.addr = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 1 } };
+    try std.testing.expectEqual(@as(u32, 0x7f000001), Game.peerIpKey(&p));
+
+    p.addr = .{ .ip6 = .{
+        .bytes = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 1, 2 },
+        .port = 1,
+    } };
+    try std.testing.expectEqual(@as(u32, 0xc0a80102), Game.peerIpKey(&p));
+
+    p.addr = .{ .ip6 = .{
+        .bytes = .{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        .port = 1,
+    } };
+    const k = Game.peerIpKey(&p);
+    try std.testing.expect(k != 0);
+    try std.testing.expect(k != 0x7f000001);
+}
+
+test "zpv2DropName removes matching player record only" {
+    // Two minimal records: Alice (inv=0,j=0), Bob (inv=0,j=0).
+    // each: name_len|name|x,y,z,coins (16 bytes)|inv_n|jn
+    var buf: [128]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPV2");
+    o = 8;
+    // Alice
+    buf[o] = 5;
+    o += 1;
+    @memcpy(buf[o..][0..5], "Alice");
+    o += 5;
+    @memset(buf[o..][0..16], 0);
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    // Bob
+    buf[o] = 3;
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bob");
+    o += 3;
+    @memset(buf[o..][0..16], 0);
+    o += 16;
+    buf[o] = 0;
+    o += 1;
+    buf[o] = 0;
+    o += 1;
+    std.mem.writeInt(u32, buf[4..8], 2, .little);
+
+    const dropped = try zpv2DropName(std.testing.allocator, buf[0..o], "Alice");
+    defer if (dropped.blob) |b| std.testing.allocator.free(b);
+    try std.testing.expectEqual(@as(u32, 1), dropped.removed);
+    try std.testing.expect(dropped.blob != null);
+    const out = dropped.blob.?;
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, out[4..8], .little));
+    try std.testing.expect(std.mem.indexOf(u8, out, "Alice") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Bob") != null);
+
+    const none = try zpv2DropName(std.testing.allocator, buf[0..o], "Carol");
+    try std.testing.expectEqual(@as(u32, 0), none.removed);
+    try std.testing.expect(none.blob == null);
+}
+
+test "players zpv2 preserves inventory slot gaps across restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        g.sim.inventory[ps] = .{};
+        g.sim.inventory[ps].slots[7] = .{ .item_id = 2, .count = 3, .quality = 4, .meta = 5 };
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[0].count);
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[7].item_id);
+        try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps].slots[7].count);
+        try std.testing.expectEqual(@as(u8, 4), g.sim.inventory[ps].slots[7].quality);
+        try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[7].meta);
+    }
+}
+
+test "offline init failure restores deterministic sim globals" {
+    util_sim.disable();
+    try std.testing.expectError(error.SecretRequired, Game.createWithOptions(
+        std.testing.allocator,
+        ".zdtd_cfg_cache/dst_init_failure",
+        0,
+        .{ .webui_port = 1, .enable_sample_plugin = false },
+    ));
+    try std.testing.expect(!util_sim.isEnabled());
+}
+
+test "offline successful step advances exactly one virtual tick" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_step_clock", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    const before = clock.monoNs();
+    try g.step();
+    try std.testing.expectEqual(before + util_sim.tick_ns, clock.monoNs());
+}
+
+test "offline init records default DST run seed" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_run_seed", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expectEqual(util_sim.default_seed, util_sim.getSeed());
+}
+
+test "offline steps replay same world_time for same seed" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    var t_a: u64 = 0;
+    var t_b: u64 = 0;
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_replay_a", 0, .{
+            .worldgen_seed = 99,
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expectEqual(@as(u64, 99), util_sim.getSeed());
+        var i: u32 = 0;
+        while (i < 20) : (i += 1) try g.step();
+        t_a = g.sim.director.clock.worldTimeBits();
+    }
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_replay_b", 0, .{
+            .worldgen_seed = 99,
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var i: u32 = 0;
+        while (i < 20) : (i += 1) try g.step();
+        t_b = g.sim.director.clock.worldTimeBits();
+    }
+    try std.testing.expectEqual(t_a, t_b);
 }

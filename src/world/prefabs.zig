@@ -101,10 +101,15 @@ pub const Index = struct {
         if (self.tts_cache.getPtr(name)) |p| return p;
         var path_buf: [2048]u8 = undefined;
         const path = self.findTtsPath(name, &path_buf) orelse return null;
-        const loaded = tts.loadBlocks(self.allocator, path) catch return null;
+        // Path exists (findTtsPath); load failure is corrupt TTS / OOM, not "no prefab".
+        const loaded = tts.loadBlocks(self.allocator, path) catch |err| {
+            std.debug.print("zdtd: tts load failed {s}: {s}\n", .{ path, @errorName(err) });
+            return null;
+        };
         self.tts_cache.put(name, loaded) catch {
             var tmp = loaded;
             tmp.deinit();
+            std.debug.print("zdtd: tts cache put failed for {s}\n", .{name});
             return null;
         };
         return self.tts_cache.getPtr(name);
@@ -191,13 +196,9 @@ fn attrValue(tag: []const u8, key: []const u8) ?[]const u8 {
     return tag[start .. start + end];
 }
 
-/// Parse world prefabs.xml into an Index (names interned into one buffer).
-pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, prefabs_data_dir: ?[]const u8) !Index {
-    var path_buf: [1024]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}/prefabs.xml", .{world_dir});
-    const xml = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(xml);
-
+/// Parse prefabs.xml bytes into an Index (names interned into one buffer).
+/// When `prefabs_data_dir` is set, resolves POI sizes from `.tts` under that root.
+pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir: ?[]const u8) !Index {
     // First pass: count
     var count: usize = 0;
     var search: usize = 0;
@@ -283,6 +284,15 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, pre
         try fillSizesFromTts(&idx);
     }
     return idx;
+}
+
+/// Parse world prefabs.xml into an Index (names interned into one buffer).
+pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, prefabs_data_dir: ?[]const u8) !Index {
+    var path_buf: [1024]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/prefabs.xml", .{world_dir});
+    const xml = try io_fs.readFileAll(allocator, path);
+    defer allocator.free(xml);
+    return parseXml(allocator, xml, prefabs_data_dir);
 }
 
 /// Read size_x/y/z from tts header: magic "tts\0", ver u32 LE, sx/sy/sz u16 LE.

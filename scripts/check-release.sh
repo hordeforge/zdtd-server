@@ -21,14 +21,25 @@ need_cmd grep
 need_cmd head
 need_cmd tr
 
-manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)
-source_version=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
+manifest_versions=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' build.zig.zon)
+source_versions=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig)
+manifest_version=$(printf '%s\n' "$manifest_versions" | head -n1)
+source_version=$(printf '%s\n' "$source_versions" | head -n1)
 min_zig=$(sed -n 's/^[[:space:]]*\.minimum_zig_version = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)
 toolchain_zig=$(tr -d '[:space:]' < .zigversion)
 stock_wire=$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
+stock_wire_announce=$(sed -n 's/^pub const stock_wire_announce = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
 
 if [[ -z "$manifest_version" || -z "$source_version" ]]; then
   echo "release-check: could not read product version" >&2
+  exit 1
+fi
+if [[ $(printf '%s\n' "$manifest_versions" | grep -c .) -ne 1 ]]; then
+  echo "release-check: build.zig.zon must declare exactly one package version" >&2
+  exit 1
+fi
+if [[ $(printf '%s\n' "$source_versions" | grep -c .) -ne 1 ]]; then
+  echo "release-check: src/version.zig must declare exactly one product version" >&2
   exit 1
 fi
 
@@ -76,6 +87,15 @@ if [[ -z "$stock_wire" ]]; then
   echo "release-check: stock_wire missing in src/version.zig" >&2
   exit 1
 fi
+if [[ ! "$stock_wire" =~ ^V([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]b[0-9]+$ ]]; then
+  echo "release-check: stock_wire '$stock_wire' must match 'VMAJOR.MINOR.PATCH bBUILD'" >&2
+  exit 1
+fi
+expected_stock_wire_announce="V ${BASH_REMATCH[1]}"
+if [[ "$stock_wire_announce" != "$expected_stock_wire_announce" ]]; then
+  echo "release-check: stock_wire_announce '$stock_wire_announce' != '$expected_stock_wire_announce' derived from stock_wire" >&2
+  exit 1
+fi
 
 # Compare host Zig to minimum (numeric major.minor.patch only; ignore pre-release suffix).
 host_zig="$("$ZIG" version 2>/dev/null || true)"
@@ -118,8 +138,9 @@ if [[ "$host_zig" != "$toolchain_zig" ]]; then
   exit 1
 fi
 
-if ! grep -Fqx '## [Unreleased]' CHANGELOG.md; then
-  echo "release-check: CHANGELOG.md must contain an Unreleased section" >&2
+unreleased_heading_count=$(grep -Fxc '## [Unreleased]' CHANGELOG.md || true)
+if [[ "$unreleased_heading_count" -ne 1 ]]; then
+  echo "release-check: CHANGELOG.md must contain exactly one Unreleased section" >&2
   exit 1
 fi
 
@@ -139,8 +160,17 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
       echo "release-check: HEAD tag $head_tag != v$source_version (src/version.zig)" >&2
       exit 1
     fi
-    if ! grep -Eq "^## \[$source_version\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
-      echo "release-check: CHANGELOG.md missing dated '## [$source_version] - YYYY-MM-DD' section for tag $head_tag" >&2
+    release_heading_count=$(awk -v version="$source_version" '
+      $0 ~ /^## \[[^]]+\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
+        heading = $0
+        sub(/^## \[/, "", heading)
+        sub(/\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/, "", heading)
+        if (heading == version) count++
+      }
+      END { print count + 0 }
+    ' CHANGELOG.md)
+    if [[ "$release_heading_count" -ne 1 ]]; then
+      echo "release-check: CHANGELOG.md must contain exactly one dated '## [$source_version] - YYYY-MM-DD' section for tag $head_tag" >&2
       exit 1
     fi
     # docs/RELEASES.md step 4: entries move to the release section at tag time.
@@ -153,6 +183,19 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
     # while still reporting the tag's product version.
     if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
       echo "release-check: tagged release $head_tag must be built from a clean worktree" >&2
+      exit 1
+    fi
+  fi
+
+  # Once a product version has an immutable tag, no other commit may build
+  # under that identity. This also makes the required post-release version bump
+  # fail closed on main instead of producing two different "0.1.0" binaries.
+  version_tag="v$source_version"
+  if git show-ref --verify --quiet "refs/tags/$version_tag"; then
+    tagged_commit=$(git rev-list -n 1 "$version_tag")
+    head_commit=$(git rev-parse HEAD)
+    if [[ "$tagged_commit" != "$head_commit" ]]; then
+      echo "release-check: $version_tag already identifies $tagged_commit; bump the product version before building $head_commit" >&2
       exit 1
     fi
   fi

@@ -1,7 +1,7 @@
 //! Stock EntityCreationData + NetPackageEntitySpawn (networkWrite=true).
 //!
 //! ECD is header + entityClass switch + networkWrite tail (see
-//! ../../7dtd-research/docs/protocol-packages.md 5.1). Implemented branches:
+//! ../../../7dtd-research/docs/protocol-packages.md 5.1). Implemented branches:
 //! zombie/NPC/animal (empty middle), itemClass, fallingBlock, fallingBlocks,
 //! fallingTree, and player (male/female), plus the junk-drone tail. A class whose
 //! branch needs data the caller did not supply returns an error rather than a
@@ -328,7 +328,12 @@ test "stock dropped loot container class in spawn body" {
         .y = 70,
         .z = 2,
     });
+    try std.testing.expect(body.len > 40);
+    try std.testing.expectEqual(@as(i32, 301), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(u8, 36), body[4]); // ECD FileVersion
     try std.testing.expectEqual(class_dropped_loot_container, std.mem.readInt(i32, body[5..9], .little));
+    // ECD entity id repeats after class
+    try std.testing.expectEqual(@as(i32, 301), std.mem.readInt(i32, body[9..13], .little));
 }
 
 test "stock item-drop spawn emits itemClass branch (belongsPlayerId, clientEntityId, itemStack)" {

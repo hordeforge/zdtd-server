@@ -1,5 +1,9 @@
 //! Native static plugin host (ADR 0005 skeleton).
 //! No dynlib, no Wasm, no stock IModApi.
+//!
+//! Dependency direction: leaf layer below server (server imports plugin, never
+//! the reverse). Currently std-only; must not import server, ecs, wire, world,
+//! assets, litenet, or apm.
 
 pub const api = @import("api.zig");
 pub const host = @import("host.zig");

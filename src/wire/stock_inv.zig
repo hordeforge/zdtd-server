@@ -28,6 +28,16 @@ pub const bag_slots: usize = 45;
 /// Equipment.m_slots length in ctor.
 pub const equipment_slots: usize = 12;
 
+// ECS subset must fit stock wire widths (ADR 0007). Mismatch = silent truncate bugs.
+comptime {
+    if (components.inv_toolbelt != toolbelt_slots)
+        @compileError("ECS toolbelt width must match stock toolbelt_slots");
+    if (components.inv_bag_count > bag_slots)
+        @compileError("ECS bag wider than stock bag_slots");
+    if (components.inv_equip_count > equipment_slots)
+        @compileError("ECS equip wider than stock equipment_slots");
+}
+
 pub const StockSlot = struct {
     /// Absolute ItemValue.type (block id < items_start_here, or items_start_here + item index).
     /// Prefer encodeItemType() helpers for item classes.
@@ -886,10 +896,32 @@ pub fn buildPersistentPlayerState(
 test "persistent player state body layout" {
     var buf: [512]u8 = undefined;
     const body = try buildPersistentPlayerState(&buf, 107, "maci", "76561190000000000", -273, 61, 449);
-    try std.testing.expectEqual(persistent_reason_login, body[0]);
-    // First PUID: present bool at [1]
-    try std.testing.expectEqual(@as(u8, 1), body[1]);
-    try std.testing.expect(body.len > 60);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(persistent_reason_login, try r.readByte());
+    // PrimaryId PUID
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // present
+    _ = try r.readByte(); // platform enum byte (stock FromStream pops)
+    var sbuf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
+    // NativeId PUID (same shape)
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    _ = try r.readByte();
+    try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // playGroup Standard
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // AuthoredText present
+    try std.testing.expectEqualStrings("maci", try r.readString(&sbuf));
+    // author PUID
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    _ = try r.readByte();
+    try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
+    try std.testing.expectEqual(@as(i64, 0), try r.readI64()); // lastLogin
+    try std.testing.expectEqual(@as(i32, -273), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 61), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 449), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 107), try r.readI32()); // entity_id
 }
 
 // --- NetPackageBag: entityId i32 | u16 blob_len | Bag.Write ---
@@ -1211,6 +1243,32 @@ test "ecs starter kit encodes without overflow" {
     const body = try buildFromEcs(&buf, &inv);
     try std.testing.expect(body.len < buf.len);
     try std.testing.expect(body.len > 100); // padded bag + equipment
+    // Header: has toolbelt + 10-slot toolbelt list (stock shape), not just non-empty.
+    try std.testing.expectEqual(@as(u8, 1), body[0]);
+    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[1..3], .little));
+    // Round-trip apply so overflow-free encode still carries the three stacks.
+    var inv2: components.Inventory = .{};
+    const rev = struct {
+        fn f(_: ?*anyopaque, st: i32) u16 {
+            if (st >= items_start_here) {
+                const rel = st - items_start_here;
+                if (rel > 0 and rel < 100) return @intCast(rel);
+            }
+            return 0;
+        }
+    }.f;
+    try applyPlayerInventoryBody(body, &inv2, rev, null);
+    var n8: u16 = 0;
+    var n2: u16 = 0;
+    var n7: u16 = 0;
+    for (inv2.slots[0..components.inv_equip_start]) |s| {
+        if (s.item_id == 8) n8 += s.count;
+        if (s.item_id == 2) n2 += s.count;
+        if (s.item_id == 7) n7 += s.count;
+    }
+    try std.testing.expectEqual(@as(u16, 1), n8);
+    try std.testing.expectEqual(@as(u16, 5), n2);
+    try std.testing.expectEqual(@as(u16, 20), n7);
 }
 
 test "player inventory encode then apply roundtrip" {

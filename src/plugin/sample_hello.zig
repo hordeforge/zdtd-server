@@ -1,5 +1,6 @@
 //! In-tree sample static plugin: logs once on enable.
 
+const std = @import("std");
 const api = @import("api.zig");
 
 var enabled_once: bool = false;
@@ -24,7 +25,10 @@ pub fn resetForTest() void {
 test "sample_hello enable logs once" {
     resetForTest();
     var host: api.Host = .{};
+    try std.testing.expect(!enabled_once);
     vtable.on_enable.?(&host);
+    try std.testing.expect(enabled_once);
+    // Second call is a no-op (one-shot flag already set).
     vtable.on_enable.?(&host);
-    // second call is a no-op; no assert on print
+    try std.testing.expect(enabled_once);
 }

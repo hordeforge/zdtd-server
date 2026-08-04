@@ -7,7 +7,8 @@
   Missing or unreadable --serverconfig path is a fatal error (no silent defaults).
 
   Password is ServerPassword (LiteNet Connect key). Never commit real secrets.
-  AdminPort opens an unauthenticated console on 127.0.0.1 only.
+  AdminPort opens an unauthenticated console on 127.0.0.1 only (not for shared hosts).
+  Typos of applied property names print a stderr hint; other stock keys are ignored.
   See docs/GAME_OPTIONS.md for the full property list and ranges.
 -->
 <ServerSettings>

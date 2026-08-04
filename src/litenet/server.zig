@@ -47,17 +47,8 @@ pub const Server = struct {
         const prop = packet.propertyOf(raw[0]);
         if (prop == .connect_request) {
             const req = packet.parseConnectRequest(raw) orelse return .none;
-            // Retransmitted ConnectRequest from an already-accepted peer: only re-send Accept.
-            if (self.findPeer(&src)) |existing| {
-                existing.connect_time = req.connection_time;
-                existing.conn_num = req.connection_number;
-                existing.remote_id = req.peer_id;
-                var accept_buf: [32]u8 = undefined;
-                const accept = try packet.writeConnectAccept(&accept_buf, req.connection_time, req.connection_number, existing.local_id);
-                try existing.sendRaw(&self.sock, accept);
-                return .none;
-            }
-            // Stock ConnectionRequestCheck: request.Data.GetString() != serverPassword → Reject([0,0]).
+            // Stock ConnectionRequestCheck always: retransmits from an existing peer
+            // must still present the ServerPassword (do not skip auth on retransmit).
             if (!packet.connectKeyMatches(req.data, self.server_password)) {
                 var rej_buf: [32]u8 = undefined;
                 const rej = try packet.writeDisconnect(
@@ -68,6 +59,16 @@ pub const Server = struct {
                 );
                 self.sock.sendTo(rej, &src) catch {};
                 std.debug.print("zdtd: connect rejected (bad password) remote_peer_id={d}\n", .{req.peer_id});
+                return .none;
+            }
+            // Retransmitted ConnectRequest from an already-accepted peer: only re-send Accept.
+            if (self.findPeer(&src)) |existing| {
+                existing.connect_time = req.connection_time;
+                existing.conn_num = req.connection_number;
+                existing.remote_id = req.peer_id;
+                var accept_buf: [32]u8 = undefined;
+                const accept = try packet.writeConnectAccept(&accept_buf, req.connection_time, req.connection_number, existing.local_id);
+                try existing.sendRaw(&self.sock, accept);
                 return .none;
             }
             const p = try self.allocPeer(&src, req);

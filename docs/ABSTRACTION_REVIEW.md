@@ -21,9 +21,9 @@ tree + scorecard. Complementary to idiomatic Zig / `std.Io` migration.
 | `assignids_comptime` pins | `assets/assignids_comptime.zig` | comptime pins + dump test | offline defaults / fixtures | assets |
 | `IdByNameFn` hooks | blocks, biome_layers, storage_pairs | callback boundary | load paths | assets |
 | `Game` orchestration | `server/game.zig` | domain (large) | main | server |
-| LiteNet UDP | `litenet/*` | net stack (legacy syscalls) | listen/tick | litenet |
-| admin / GSI TCP | `server/admin.zig`, `serverinfo_tcp.zig` | sockets (legacy) | optional ports | server |
-| `apm/clock` | `apm/clock.zig` | monotonic clock (linux) | metrics | apm |
+| LiteNet UDP | `litenet/udp_socket` | `std.Io.net` + thin posix | listen/tick | litenet |
+| admin / GSI / webui TCP | `util/tcp_listen` | `IpAddress.listen` + poll/accept4 | optional ports | util/server |
+| `util/clock` / `apm/clock` | monotonic time | `posix.system.clock_gettime` (vDSO) | metrics/tick | util |
 
 Deleted this pass: `util/owned_arena.zig` (zero production call sites; only
 pulled into assets test root). `linux_fs` module: already absent (no file).
@@ -47,8 +47,8 @@ pulled into assets test root). `linux_fs` module: already absent (no file).
 | `game.zig` size (~5.5k) | orchestration god | **document** | P2 | Wrong-layer open-code wire is already mostly in packages; further split is product work, not this pass |
 | `parallel` | 3 sites, no alloc on hot path | **keep** | - | - |
 | Plugin / System vtable | none | **do not build** | - | - |
-| LiteNet + admin TCP linux | intentional legacy sockets | **keep legacy** | P2 | Migrate only with deliberate net I/O work; not ordinary FS |
-| `apm/clock` linux | timing | **keep** | P3 | Prefer `std.Io` clock when touching |
+| LiteNet + admin/GSI TCP | migrated to `std.Io.net` / `tcp_listen` | **keep** | - | See [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md); residual thin posix only |
+| clock hot path | `posix.system.clock_gettime` | **keep** | - | Io.Threaded per call too heavy on packet path |
 
 ## Dual paths
 
@@ -56,7 +56,7 @@ pulled into assets test root). `linux_fs` module: already absent (no file).
 |---|---|
 | `linux_fs` module vs `io_fs` | **Eliminated** (module was already gone; remaining raw `std.os.linux` FS callers migrated to `io_fs`) |
 | App FS via `std.os.linux.open/read/write/mkdir/unlink` vs `io_fs` | **Eliminated** in world store/containers/dem/dtm/prefabs/water/tts/biomes/blocks_nim, assets assignids/maxdamage, server config/scenarios/game player+blockmeta+seed chest, main CLI |
-| Socket stacks (LiteNet, admin TCP, GSI) still on `std.os.linux` | **Kept** (not ordinary FS; AGENTS legacy) |
+| Socket stacks (LiteNet, admin TCP, GSI) | **Migrated** to `std.Io.net` / `tcp_listen` (thin posix residual) |
 | Chunk height-plane builders vs stock network chunk | **Not dual**: different wire shapes; production uses `stock_chunk` |
 | Holding/inventory alias forwards | **Eliminated** dead aliases |
 | Id: AssignIds dump vs comptime pins | **Documented one authority**: runtime dump for play; pins for offline fixtures only |
@@ -99,8 +99,8 @@ Matches AGENTS table. FS helpers stay in `util/io_fs`. Wire bodies stay in
 
 ## Residual (not P0/P1)
 
-- LiteNet / admin / GSI / apm clock still use `std.os.linux` (sockets/time).
+- Thin posix residuals on net/clock: REUSEADDR, poll+accept4, clock_gettime (see STD_ABSTRACTIONS).
 - `packages.zig` / `game.zig` size (document only).
 - Private per-file `fileExists` forwards (harmless).
-- Comptime AssignIds pins vs runtime dump (documented dual-role, not dual path).
+- Comptime AssignIds pins vs runtime dump (documented dual-role, not dual path; ECS item handles: ADR 0015).
 

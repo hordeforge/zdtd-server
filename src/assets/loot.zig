@@ -101,9 +101,10 @@ pub const LootTable = struct {
             const e = cont.entries[i];
             s = s *% 1103515245 +% 12345;
             // Always include first entry; others with prob.
+            // Fixed-point milli-prob (0..1000) so the gate is integer-only (DST).
             if (i > 0 and e.prob < 1.0) {
-                const r = @as(f32, @floatFromInt(s % 1000)) / 1000.0;
-                if (r > e.prob) continue;
+                const thresh: u32 = @intFromFloat(@round(e.prob * 1000.0));
+                if ((s % 1000) > thresh) continue;
             }
             if (e.is_group) {
                 n += self.rollGroup(e.name, s, out[n..], 0);

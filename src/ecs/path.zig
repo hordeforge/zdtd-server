@@ -32,6 +32,35 @@ pub const Path = struct {
     }
 };
 
+/// Open-addressed coord→node-index map for BFS/A* dedup. Fixed 512 slots
+/// (2x max node cap, so load factor <= 0.5); 1 KiB, lives on the stack.
+const NodeMap = struct {
+    const cap: usize = 512;
+    const empty: u16 = 0xffff;
+    table: [cap]u16 = .{empty} ** cap,
+
+    fn slot(x: i32, z: i32) usize {
+        const ux: u32 = @bitCast(x);
+        const uz: u32 = @bitCast(z);
+        return (ux *% 0x9e3779b1 ^ uz *% 0x85ebca77) & (cap - 1);
+    }
+
+    fn get(self: *const NodeMap, xs: []const i32, zs: []const i32, x: i32, z: i32) ?usize {
+        var i = slot(x, z);
+        while (self.table[i] != empty) : (i = (i + 1) & (cap - 1)) {
+            const n = self.table[i];
+            if (xs[n] == x and zs[n] == z) return n;
+        }
+        return null;
+    }
+
+    fn put(self: *NodeMap, x: i32, z: i32, n: usize) void {
+        var i = slot(x, z);
+        while (self.table[i] != empty) i = (i + 1) & (cap - 1);
+        self.table[i] = @intCast(n);
+    }
+};
+
 /// Greedy walk toward goal. `solid` true = blocked.
 pub fn greedyToward(
     path: *Path,
@@ -105,20 +134,13 @@ pub fn bfsToward(
     var seen_n: usize = 0;
     var qh: usize = 0;
     var qt: usize = 0;
-    const key = struct {
-        fn has(xs: []const i32, zs: []const i32, n: usize, x: i32, z: i32) bool {
-            var i: usize = 0;
-            while (i < n) : (i += 1) {
-                if (xs[i] == x and zs[i] == z) return true;
-            }
-            return false;
-        }
-    }.has;
+    var seen: NodeMap = .{};
     qx[qt] = sx;
     qz[qt] = sz;
     qt += 1;
     seen_x[0] = sx;
     seen_z[0] = sz;
+    seen.put(sx, sz, 0);
     seen_n = 1;
     var found: i32 = -1;
     var expanded: usize = 0;
@@ -136,13 +158,14 @@ pub fn bfsToward(
             const nx = cx + d[0];
             const nz = cz + d[1];
             if (solid(ctx, nx, nz)) continue;
-            if (key(seen_x[0..seen_n], seen_z[0..seen_n], seen_n, nx, nz)) continue;
+            if (seen.get(seen_x[0..seen_n], seen_z[0..seen_n], nx, nz) != null) continue;
             if (qt >= max_nodes or seen_n >= max_nodes) break;
             qx[qt] = nx;
             qz[qt] = nz;
             parent[qt] = ci;
             seen_x[seen_n] = nx;
             seen_z[seen_n] = nz;
+            seen.put(nx, nz, seen_n);
             seen_n += 1;
             qt += 1;
         }
@@ -160,8 +183,50 @@ fn manhattan(ax: i32, az: i32, bx: i32, bz: i32) u32 {
     return dx + dz;
 }
 
+/// Binary min-heap entry: f-cost primary, node index secondary (deterministic ties).
+const OpenEntry = struct { f: u32, ni: u16 };
+
+fn openLess(a: OpenEntry, b: OpenEntry) bool {
+    return a.f < b.f or (a.f == b.f and a.ni < b.ni);
+}
+
+fn openPush(heap: []OpenEntry, n: *usize, e: OpenEntry) void {
+    if (n.* >= heap.len) return;
+    var i = n.*;
+    n.* = i + 1;
+    while (i > 0) {
+        const p = (i - 1) / 2;
+        if (!openLess(e, heap[p])) break;
+        heap[i] = heap[p];
+        i = p;
+    }
+    heap[i] = e;
+}
+
+fn openPop(heap: []OpenEntry, n: *usize) ?OpenEntry {
+    if (n.* == 0) return null;
+    const out = heap[0];
+    n.* -= 1;
+    if (n.* == 0) return out;
+    const last = heap[n.*];
+    var i: usize = 0;
+    while (true) {
+        const l = i * 2 + 1;
+        if (l >= n.*) break;
+        var best = l;
+        const r = l + 1;
+        if (r < n.* and openLess(heap[r], heap[l])) best = r;
+        if (!openLess(heap[best], last)) break;
+        heap[i] = heap[best];
+        i = best;
+    }
+    heap[i] = last;
+    return out;
+}
+
 /// Grid A* on 4-neighborhood, Manhattan heuristic. Deterministic equal-f ties
 /// (lower node index wins). Caps expand/node table; greedy fallback.
+/// Open set is a binary heap (was linear scan extract-min each expand).
 pub fn aStarToward(
     path: *Path,
     sx: i32,
@@ -180,6 +245,8 @@ pub fn aStarToward(
     }
 
     const max_nodes: usize = 256;
+    // Heap may hold stale entries after g improves; size above node cap.
+    const heap_cap: usize = 512;
     var nx_arr: [max_nodes]i32 = undefined;
     var nz_arr: [max_nodes]i32 = undefined;
     var g_cost: [max_nodes]u32 = .{std.math.maxInt(u32)} ** max_nodes;
@@ -187,49 +254,30 @@ pub fn aStarToward(
     var closed: [max_nodes]bool = .{false} ** max_nodes;
     var n_nodes: usize = 0;
 
-    const find = struct {
-        fn idx(xs: []const i32, zs: []const i32, n: usize, x: i32, z: i32) ?usize {
-            var i: usize = 0;
-            while (i < n) : (i += 1) {
-                if (xs[i] == x and zs[i] == z) return i;
-            }
-            return null;
-        }
-    }.idx;
+    var node_map: NodeMap = .{};
 
-    var open: [max_nodes]u16 = undefined;
-    var open_n: usize = 0;
+    var heap: [heap_cap]OpenEntry = undefined;
+    var heap_n: usize = 0;
 
     nx_arr[0] = sx;
     nz_arr[0] = sz;
     g_cost[0] = 0;
     n_nodes = 1;
-    open[0] = 0;
-    open_n = 1;
+    node_map.put(sx, sz, 0);
+    openPush(heap[0..], &heap_n, .{ .f = manhattan(sx, sz, gx, gz), .ni = 0 });
 
     var found: i32 = -1;
     var expanded: usize = 0;
     const dirs = [_][2]i32{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } };
     const span = manhattan(sx, sz, gx, gz) + 8;
 
-    while (open_n > 0 and expanded < max_expand) : (expanded += 1) {
-        var best_oi: usize = 0;
-        var best_f: u32 = std.math.maxInt(u32);
-        var best_idx: u16 = 0;
-        var oi: usize = 0;
-        while (oi < open_n) : (oi += 1) {
-            const ni = open[oi];
-            const f = g_cost[ni] + manhattan(nx_arr[ni], nz_arr[ni], gx, gz);
-            if (f < best_f or (f == best_f and ni < best_idx)) {
-                best_f = f;
-                best_oi = oi;
-                best_idx = ni;
-            }
-        }
-        open_n -= 1;
-        open[best_oi] = open[open_n];
-        const ci: usize = best_idx;
+    while (expanded < max_expand) : (expanded += 1) {
+        const popped = openPop(heap[0..], &heap_n) orelse break;
+        const ci: usize = popped.ni;
         if (closed[ci]) continue;
+        // Lazy heap: skip stale entries whose f no longer matches current g.
+        const cur_f = g_cost[ci] + manhattan(nx_arr[ci], nz_arr[ci], gx, gz);
+        if (popped.f != cur_f) continue;
         closed[ci] = true;
 
         const cx = nx_arr[ci];
@@ -246,7 +294,7 @@ pub fn aStarToward(
             if (manhattan(sx, sz, nx, nz) > span) continue;
 
             const tent_g = g_cost[ci] + 1;
-            const existing = find(nx_arr[0..n_nodes], nz_arr[0..n_nodes], n_nodes, nx, nz);
+            const existing = node_map.get(nx_arr[0..n_nodes], nz_arr[0..n_nodes], nx, nz);
             const ni: usize = blk: {
                 if (existing) |e| {
                     if (closed[e]) continue;
@@ -257,23 +305,14 @@ pub fn aStarToward(
                 const e = n_nodes;
                 nx_arr[e] = nx;
                 nz_arr[e] = nz;
+                node_map.put(nx, nz, e);
                 n_nodes += 1;
                 break :blk e;
             };
             g_cost[ni] = tent_g;
             parent[ni] = @intCast(ci);
-            var in_open = false;
-            var k: usize = 0;
-            while (k < open_n) : (k += 1) {
-                if (open[k] == ni) {
-                    in_open = true;
-                    break;
-                }
-            }
-            if (!in_open and open_n < max_nodes) {
-                open[open_n] = @intCast(ni);
-                open_n += 1;
-            }
+            const f = tent_g + manhattan(nx, nz, gx, gz);
+            openPush(heap[0..], &heap_n, .{ .f = f, .ni = @intCast(ni) });
         }
     }
 

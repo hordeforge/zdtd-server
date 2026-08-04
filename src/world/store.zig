@@ -88,6 +88,9 @@ pub const Chunk = struct {
     dirty: bool = false,
     /// Runtime-only: server finished its one-time storage-TE scan of this chunk.
     te_scanned: bool = false,
+    /// Runtime-only: dominant biome, computed once per resident chunk (the
+    /// biome map is static). Recomputing costs 256 map lookups per chunk send.
+    biome_id: ?u8 = null,
     allocator: ?std.mem.Allocator = null,
 
     pub fn generateFlat(pos: ChunkPos) Chunk {
@@ -364,25 +367,14 @@ pub const World = struct {
     }
 
     pub fn loadStockMapEx(self: *World, map_dir: []const u8, prefabs_data_dir: ?[]const u8) !void {
-        if (self.heightmap) |*hm| hm.deinit();
-        if (self.prefabs) |*p| p.deinit();
-        if (self.water) |*w| w.deinit();
-        if (self.biomes) |*b| b.deinit();
-        if (self.map_dir) |d| self.allocator.free(d);
-        self.heightmap = null;
-        self.prefabs = null;
-        self.water = null;
-        self.biomes = null;
-
-        self.heightmap = try dtm.loadFromWorldDir(self.allocator, map_dir);
-        self.map_dir = try self.allocator.dupe(u8, map_dir);
-        self.spawn_count = try dtm.loadSpawnPoints(self.allocator, map_dir, self.spawns[0..]);
-        self.biomes = biomes_mod.tryLoad(self.allocator, map_dir) catch null;
-        if (self.biomes) |*bm| {
-            if (self.heightmap) |*hm| bm.scale = @max(1, @divTrunc(hm.width, @max(1, bm.width)));
-        }
-        self.terrain_source = .baked;
-        self.worldgen = null;
+        var new_heightmap = try dtm.loadFromWorldDir(self.allocator, map_dir);
+        errdefer new_heightmap.deinit();
+        const new_map_dir = try self.allocator.dupe(u8, map_dir);
+        errdefer self.allocator.free(new_map_dir);
+        var new_spawns: [32]dtm.SpawnPoint = undefined;
+        const new_spawn_count = try dtm.loadSpawnPoints(self.allocator, map_dir, new_spawns[0..]);
+        var new_biomes = try biomes_mod.tryLoad(self.allocator, map_dir);
+        errdefer if (new_biomes) |*bm| bm.deinit();
 
         var owned_prefab_root: ?[]u8 = null;
         defer if (owned_prefab_root) |r| self.allocator.free(r);
@@ -399,8 +391,32 @@ pub const World = struct {
             break :blk null;
         };
 
-        self.prefabs = prefabs_mod.loadFromWorldDir(self.allocator, map_dir, prefab_root) catch null;
-        self.water = water_mod.loadFromWorldDir(self.allocator, map_dir) catch null;
+        var new_prefabs: ?prefabs_mod.Index = prefabs_mod.loadFromWorldDir(self.allocator, map_dir, prefab_root) catch |err| blk: {
+            if (err != error.FileNotFound and err != error.OpenFailed) {
+                std.debug.print("zdtd: load prefabs.xml failed: {s} ({s})\n", .{ @errorName(err), map_dir });
+            }
+            break :blk null;
+        };
+        errdefer if (new_prefabs) |*p| p.deinit();
+        var new_water: ?water_mod.Sources = try water_mod.loadFromWorldDir(self.allocator, map_dir);
+        errdefer if (new_water) |*w| w.deinit();
+
+        if (new_biomes) |*bm| bm.scale = @max(1, @divTrunc(new_heightmap.width, @max(1, bm.width)));
+
+        if (self.heightmap) |*hm| hm.deinit();
+        if (self.prefabs) |*p| p.deinit();
+        if (self.water) |*w| w.deinit();
+        if (self.biomes) |*b| b.deinit();
+        if (self.map_dir) |d| self.allocator.free(d);
+        self.heightmap = new_heightmap;
+        self.map_dir = new_map_dir;
+        self.spawns = new_spawns;
+        self.spawn_count = new_spawn_count;
+        self.biomes = new_biomes;
+        self.prefabs = new_prefabs;
+        self.water = new_water;
+        self.terrain_source = .baked;
+        self.worldgen = null;
     }
 
     pub fn deinit(self: *World) void {
@@ -421,8 +437,8 @@ pub const World = struct {
     }
 
     /// Resident chunk cap: beyond this, evict (save + free) before insert so a
-    /// roaming/malicious peer cannot grow the map without bound. ~65 KiB
-    /// per block-allocated chunk → cap ≈ 256 MiB worst case.
+    /// roaming/malicious peer cannot grow the map without bound. ~256 KiB
+    /// per block-allocated chunk → cap ≈ 1 GiB worst case.
     pub const max_resident_chunks: usize = 4096;
 
     fn evictOneChunk(self: *World, keep_key: u64) !void {
@@ -447,7 +463,7 @@ pub const World = struct {
 
     pub fn getOrCreate(self: *World, pos: ChunkPos) !*Chunk {
         const k = pos.hash();
-        if (self.chunks.count() >= max_resident_chunks and self.chunks.get(k) == null) {
+        if (self.chunks.count() >= max_resident_chunks and !self.chunks.contains(k)) {
             try self.evictOneChunk(k);
         }
         const gop = try self.chunks.getOrPut(k);
@@ -576,6 +592,35 @@ pub const World = struct {
     /// dens_set bitset bytes for one chunk (blocks_per_chunk bits).
     const dens_set_bytes: usize = (blocks_per_chunk + 7) / 8;
 
+    /// Bounds-check a ZCH1/2/3 record for `pos` without mutating chunk state.
+    /// Used by loadChunk and fuzz harnesses for torn/corrupt save rejection.
+    pub fn validateChunkBytes(data: []const u8, pos: ChunkPos) !void {
+        if (data.len < 12) return error.ReadFailed;
+        if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {
+            const stored_x = std.mem.readInt(i32, data[4..8], .little);
+            const stored_z = std.mem.readInt(i32, data[8..12], .little);
+            if (stored_x != pos.x or stored_z != pos.z) return error.ReadFailed;
+            if (data[12] > 1 or data[13] > 1 or data[14] > 1) return error.ReadFailed;
+            const has_blocks = data[12] == 1;
+            const has_textures = data[3] == '3' and data[13] == 1;
+            const has_densities = data[3] == '3' and data[14] == 1;
+            var required: usize = 16 + 256; // heights plane
+            if (data[3] == '3' and has_blocks) required += blocks_per_chunk * @sizeOf(u32);
+            if (has_textures) required += blocks_per_chunk * @sizeOf(u64);
+            if (has_densities) required += blocks_per_chunk + dens_set_bytes;
+            if (data.len < required) return error.ReadFailed;
+            return;
+        }
+        if (data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and data[3] == '1') {
+            if (data.len < 12 + 256) return error.ReadFailed;
+            const stored_x = std.mem.readInt(i32, data[4..8], .little);
+            const stored_z = std.mem.readInt(i32, data[8..12], .little);
+            if (stored_x != pos.x or stored_z != pos.z) return error.ReadFailed;
+            return;
+        }
+        return error.ReadFailed;
+    }
+
     pub fn saveChunk(self: *World, c: *const Chunk) !void {
         var path_buf: [512]u8 = undefined;
         const path = try self.chunkPath(c.pos, &path_buf);
@@ -669,7 +714,12 @@ pub const World = struct {
             var o: usize = 16 + c.heights.len;
             if (has_blocks) {
                 if (data[3] == '3') {
-                    try c.ensureBlocks(self.allocator);
+                    // Raw alloc only: the memcpy below fully initializes the
+                    // plane, so ensureBlocks' terrain generation would be waste.
+                    if (c.blocks == null) {
+                        c.allocator = self.allocator;
+                        c.blocks = try self.allocator.alloc(u32, blocks_per_chunk);
+                    }
                     const b = c.blocks.?;
                     const bytes = std.mem.sliceAsBytes(b);
                     if (data.len < o + bytes.len) return error.ReadFailed;
@@ -720,9 +770,18 @@ pub const World = struct {
         // Sort dirty keys so disk write order is independent of HashMap walk
         // (insert history / capacity). Needed for deterministic fault injection
         // and mid-save crash replay.
-        const total = self.chunks.count();
-        if (total == 0) return;
-        var keys = try self.allocator.alloc(u64, total);
+        if (self.chunks.count() == 0) return;
+        var dirty_n: usize = 0;
+        var count_it = self.chunks.iterator();
+        while (count_it.next()) |e| {
+            if (e.value_ptr.dirty) dirty_n += 1;
+        }
+        if (dirty_n == 0) return;
+
+        // Loaded terrain can be much larger than the mutation set. Size this
+        // temporary to the dirty set so autosave cost follows pending writes,
+        // not resident-world size.
+        var keys = try self.allocator.alloc(u64, dirty_n);
         defer self.allocator.free(keys);
         var kn: usize = 0;
         var it = self.chunks.iterator();
@@ -731,7 +790,7 @@ pub const World = struct {
             keys[kn] = e.key_ptr.*;
             kn += 1;
         }
-        if (kn == 0) return;
+        std.debug.assert(kn == dirty_n);
         std.mem.sort(u64, keys[0..kn], {}, std.sort.asc(u64));
 
         var list: [512]*Chunk = undefined;

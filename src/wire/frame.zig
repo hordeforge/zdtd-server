@@ -12,9 +12,18 @@ pub const challenge_size = protocol.challenge_size;
 /// Inflate window for C2S compressed envelopes (stock Noemax deflate).
 const inflate_cap: usize = 512 * 1024;
 
+/// Expansion ceiling per envelope. Without it a ~1.3 KiB datagram can force a
+/// full 512 KiB inflate plus a package-stream scan, ~400x amplification per
+/// packet. Stock package streams compress nowhere near this ratio.
+const max_inflate_ratio: usize = 64;
+
 /// Holds last inflated package stream so Package.body slices remain valid
-/// until the next parseChannelPayload call.
+/// until the next parseChannelPayload call. Nested parseChannelPayload that
+/// needs inflate fails closed (see parse_depth) so bodies of the outer parse
+/// are not clobbered. Game.onData also holds `pumping` to avoid nested parse.
 var inflate_storage: [inflate_cap]u8 = undefined;
+/// In-flight parseChannelPayload nesting depth (single-threaded game loop).
+var parse_depth: u8 = 0;
 
 pub const Package = struct {
     id: u16,
@@ -33,17 +42,29 @@ pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
 /// Inflate stock C2S compressed payload. Header-sniff picks the container so
 /// the common case decompresses in one pass; the others stay as fallback.
 fn inflatePayload(src: []const u8) ?[]const u8 {
+    // Nested parse (parse_depth > 1) would overwrite inflate_storage while an
+    // outer Package.body still aliases it. Fail closed; same as corrupt deflate.
+    if (parse_depth > 1) return null;
+
     const first: flate.Container = if (src.len >= 2 and src[0] == 0x1f and src[1] == 0x8b)
         .gzip
     else if (src.len >= 2 and src[0] & 0x0f == 8 and (@as(u16, src[0]) << 8 | src[1]) % 31 == 0)
         .zlib
     else
         .raw;
-    const containers = [_]flate.Container{ first, .zlib, .raw, .gzip };
-    for (containers, 0..) |container, i| {
-        if (i > 0 and container == first) continue; // sniffed pick already tried
+    // A confident sniff (gzip magic / valid zlib header) is authoritative: a
+    // late failure means the stream is malformed, and re-inflating it as the
+    // other containers costs up to 3 more full passes over attacker-controlled
+    // input. Only the inconclusive .raw sniff keeps the fallback attempts
+    // (their header checks fail immediately on genuine raw-deflate data).
+    const containers: []const flate.Container = if (first == .raw)
+        &.{ .raw, .zlib, .gzip }
+    else
+        &.{first};
+    const cap = @min(inflate_cap, src.len *| max_inflate_ratio);
+    for (containers) |container| {
         var in: std.Io.Reader = .fixed(src);
-        var out: std.Io.Writer = .fixed(&inflate_storage);
+        var out: std.Io.Writer = .fixed(inflate_storage[0..cap]);
         var dec: flate.Decompress = .init(&in, container, &.{});
         const n = dec.reader.streamRemaining(&out) catch continue;
         if (n == 0) continue;
@@ -74,7 +95,12 @@ fn parsePackageStream(payload: []const u8, count: u16, out: []Package) usize {
 /// Parse channel-prefixed game message into packages.
 /// Supports stock uncompressed and deflate-compressed (Noemax) envelopes.
 /// Encrypted payloads are still rejected.
+/// Not reentrant for compressed envelopes: nested calls that need inflate
+/// return 0 so outer Package.body slices into inflate_storage stay valid.
 pub fn parseChannelPayload(data: []const u8, out: []Package) usize {
+    parse_depth +%= 1;
+    defer parse_depth -%= 1;
+
     if (data.len < 9) return 0;
     var o: usize = 1; // skip channel
     const payload_size: i32 = std.mem.readInt(i32, data[o..][0..4], .little);

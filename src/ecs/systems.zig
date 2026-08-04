@@ -462,7 +462,7 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
             var transferred = true;
             for (w.inventory[i].slots) |slot| {
                 if (slot.count == 0) continue;
-                if (!w.inventory[ps].addItem(slot.item_id, slot.count)) {
+                if (!w.depositItem(ps, slot.item_id, slot.count)) {
                     transferred = false;
                     break;
                 }
@@ -511,17 +511,21 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             const cost: u32 = unit * qty;
             if (cost > std.math.maxInt(u16)) return false;
             if (w.wallet[ps].coins < cost) return false;
-            // Prefer removing casinoCoin items so client bag matches wallet.
+            // Spend coins from the client bag first so it matches the wallet;
+            // only the remainder draws on server-side balance (quest rewards).
+            // Removing min(have, cost) keeps wallet >= inv coins, so the sync
+            // above can never re-mint what a buy already spent.
             if (w.mask[ps].inventory) {
                 const inventory_before = w.inventory[ps];
                 const have = w.inventory[ps].countItem(coin_id);
-                if (have >= cost) {
-                    if (!w.inventory[ps].removeItem(coin_id, @intCast(cost))) {
+                const from_inv: u32 = @min(have, cost);
+                if (from_inv > 0) {
+                    if (!w.inventory[ps].removeItem(coin_id, @intCast(from_inv))) {
                         w.inventory[ps] = inventory_before;
                         return false;
                     }
                 }
-                if (!w.inventory[ps].addItem(item, qty)) {
+                if (!w.depositItem(ps, item, qty)) {
                     w.inventory[ps] = inventory_before;
                     return false;
                 }
@@ -539,7 +543,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 const inventory_before = w.inventory[ps];
                 if (w.inventory[ps].countItem(item) < qty) return false;
                 if (!w.inventory[ps].removeItem(item, qty)) return false;
-                if (!w.inventory[ps].addItem(coin_id, @intCast(gain))) {
+                if (!w.depositItem(ps, coin_id, @intCast(gain))) {
                     w.inventory[ps] = inventory_before;
                     return false;
                 }
@@ -701,6 +705,24 @@ const AiCtx = struct {
 
             const np = nearestPlayerSnap(ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z);
             ai.active_scale = if (np.id >= 0) lodScale(np.d2) else 0.1;
+
+            // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
+            // only (no A*/task scan) unless chewing a blocked path. No-player still
+            // runs the normal table (wander / territorial / spot).
+            if (np.id >= 0 and np.d2 > full_ai_dist_sq * 4.0 and !ai.path_blocked and
+                ai.active_task != .break_block and ai.active_task != .destroy_area)
+            {
+                if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
+                ai.decision_cd -= ctx.dt * 0.05;
+                if (ai.decision_cd > 0) continue;
+                const sscale = ctx.zombie_speed_scale;
+                const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
+                const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else wander_speed) * sscale;
+                ai.active_task = .wander;
+                ai.decision_cd = 1.0;
+                wanderUpdate(ctx.w, s, ai, wspd * 0.5, ctx.dt);
+                continue;
+            }
 
             // A11: class_table from entityclasses (0 field → module floor only).
             // MoveSpeed ~0.08 shamble → x10; MoveSpeedAggro max ~1.35 → x1.6.
@@ -1019,6 +1041,8 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
 }
 
 pub fn systemZombieAi(w: *World, dt: f32) u32 {
+    // Zombie AI also drives animal wander (kind.animal reuses zombie_ai mask).
+    if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
@@ -1031,7 +1055,10 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
         .hits = &hits_a,
         .zombie_speed_scale = w.zombie_speed_scale,
     };
-    parallel.forRanges(max_entities, ctx, AiCtx.work);
+    // Slot count is the constant 512, so forRanges always pays the pool
+    // broadcast/wait round-trip; skip it while the live population is small
+    // enough that one worker's share would finish before the wakeup does.
+    if (w.entity_count < 64) AiCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, AiCtx.work);
     _ = applyDeferredDamage(w, dmg_fp[0..]);
     return hits_a.load(.monotonic);
 }
@@ -1046,6 +1073,7 @@ pub fn systemDirector(w: *World, dt: f32) struct { spawned: u32, world_time: u64
 const gravity_accel: f32 = -9.81;
 
 pub fn systemVehicles(w: *World, dt: f32) void {
+    if (w.countKind(.vehicle) == 0) return;
     var i: Slot = 0;
     while (i < max_entities) : (i += 1) {
         if (!w.alive[i] or !w.mask[i].vehicle or !w.mask[i].transform) continue;
@@ -1164,6 +1192,9 @@ const TurretCtx = struct {
     /// Alive zombie slots with transform, snapshotted once per tick so each
     /// turret does not rescan all entity slots.
     zombies: []const Slot,
+    /// Per-slot powered flags, resolved once per tick from the power grid so
+    /// each turret skips the O(node_n) isEntityPowered scan.
+    powered: *const [max_entities]bool,
 
     fn work(ctx: TurretCtx, begin: usize, end: usize) void {
         var i: usize = begin;
@@ -1172,7 +1203,7 @@ const TurretCtx = struct {
             if (!ctx.w.alive[s] or !ctx.w.mask[s].turret or !ctx.w.mask[s].transform) continue;
             var t = &ctx.w.turret[s];
             if (t.fire_cd > 0) t.fire_cd -= ctx.dt;
-            const powered = ctx.w.power.isEntityPowered(ctx.w.network_id[s].id);
+            const powered = ctx.powered[s];
             if (!powered or t.ammo == 0) {
                 t.target_id = -1;
                 continue;
@@ -1219,6 +1250,7 @@ pub const TurretTick = struct {
 };
 
 pub fn systemTurrets(w: *World, dt: f32) TurretTick {
+    if (w.countKind(.turret) == 0) return .{};
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     var zombie_slots: [max_entities]Slot = undefined;
     var zn: usize = 0;
@@ -1229,8 +1261,18 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             zn += 1;
         }
     }
-    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn] };
-    parallel.forRanges(max_entities, ctx, TurretCtx.work);
+    // One O(node_n) pass here replaces an O(node_n) scan per turret per tick.
+    var powered: [max_entities]bool = .{false} ** max_entities;
+    var ni: usize = 0;
+    while (ni < w.power.node_n) : (ni += 1) {
+        const node = &w.power.nodes[ni];
+        if (!node.powered or node.entity_id < 0) continue;
+        if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
+    }
+    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .powered = &powered };
+    // Same small-population gate as systemZombieAi: pool sync costs more than
+    // a serial sweep of 512 slots when few entities are alive.
+    if (w.entity_count < 64) TurretCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, TurretCtx.work);
     var out: TurretTick = .{};
     var i: Slot = 0;
     while (i < max_entities) : (i += 1) {
@@ -1239,6 +1281,11 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (!w.alive[i] or !w.mask[i].health) continue;
         if (w.kind[i] != .zombie) continue;
         const amount = fpDamage(fp);
+        // Report lists full: stop before a kill nobody would be told about
+        // (destroy without EntityRemove leaves a permanent client ghost).
+        // Remaining damage re-accumulates next tick, like systemDespawnFar.
+        const would_kill = w.health[i].hp - amount <= 0;
+        if (would_kill and (out.killed_n >= out.killed_ids.len or out.loot_n >= out.loot_bag_ids.len)) break;
         w.health[i].hp -= amount;
         if (w.health[i].hp <= 0) {
             const x = if (w.mask[i].transform) w.transform[i].x else 0;
@@ -1272,6 +1319,7 @@ pub const despawn_dist_sq: f32 = 200.0 * 200.0;
 /// Remove idle/wandering zombies far from every player. Returns removed ids
 /// (caller broadcasts EntityRemove with Despawned reason).
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
+    if (w.countKind(.zombie) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps);
     var n: u8 = 0;
@@ -1377,9 +1425,12 @@ test "isBestTask: approach preempts wander, wander cannot preempt approach" {
     try std.testing.expect(!isBestTask(wander, .approach_attack));
     try std.testing.expect(!isBestTask(spot, .approach_attack));
     try std.testing.expect(!isBestTask(territorial, .approach_attack));
-    // BreakBlock mutex 0 is compatible with approach (overlap == 0).
+    // BreakBlock / DestroyArea mutex 0 is compatible with approach (overlap == 0).
+    const destroy = taskById(.destroy_area).?;
     try std.testing.expect(isBestTask(brk, .approach_attack));
+    try std.testing.expect(isBestTask(destroy, .approach_attack));
     try std.testing.expect(isBestTask(approach, .break_block));
+    try std.testing.expect(isBestTask(approach, .destroy_area));
     // No executing task, or self as the executor, is always best.
     try std.testing.expect(isBestTask(approach, .none));
     try std.testing.expect(isBestTask(wander, .none));
