@@ -1,4 +1,5 @@
-//! Golden package body builders/parsers for join, motion, damage, spawn.
+//! Golden package body builders/parsers for join, motion, damage, spawn, TE.
+//! Prefer this facade for stock_* body modules; leaf files stay importable.
 
 const std = @import("std");
 const binary = @import("binary.zig");
@@ -8,6 +9,8 @@ pub const stock_chunk = @import("stock_chunk.zig");
 pub const stock_deco = @import("stock_deco.zig");
 pub const stock_entity = @import("stock_entity.zig");
 pub const stock_quest = @import("stock_quest.zig");
+pub const stock_te = @import("stock_te.zig");
+pub const te_types = @import("te_types.zig");
 
 pub const PackageName = enum {
     NetPackagePackageIds,
@@ -346,10 +349,29 @@ pub fn buildPlayerIdBodyInv(
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
 ) ![]u8 {
+    return buildPlayerIdBodyInvLoaded(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, true);
+}
+
+/// Like buildPlayerIdBodyInv; b_loaded=false for death-respawn re-bundle (avoids
+/// GameManager.PlayerId CreateEntity+ToPlayer on an already-spawned local player).
+pub fn buildPlayerIdBodyInvLoaded(
+    buf: []u8,
+    entity_id: i32,
+    team: i16,
+    chunk_view_dim: i32,
+    sx: i32,
+    sy: i32,
+    sz: i32,
+    quests: []const stock_quest.StockQuestWrite,
+    unlocked_recipes: []const []const u8,
+    toolbelt: []const stock_inv.StockSlot,
+    bag: []const stock_inv.StockSlot,
+    b_loaded: bool,
+) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
     try w.writeI16(team);
-    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag);
+    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, b_loaded);
     try w.writeI32(chunk_view_dim);
     return w.written();
 }
@@ -365,13 +387,16 @@ fn writeEmptyPlayerDataFileNetwork(
     unlocked_recipes: []const []const u8,
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
+    b_loaded: bool,
 ) !void {
     const px: f32 = @floatFromInt(sx);
     const py: f32 = @floatFromInt(sy);
     const pz: f32 = @floatFromInt(sz);
     // --- EntityCreationData.write(bw, networkWrite=false) ---
-    try w.writeByte(35); // FileVersion
-    try w.writeI32(0); // entityClass (not player/item special path on stock client)
+    // V3.1.0 ECD FileVersion=36. Use playerMale + profile so GameManager.PlayerId
+    // with bLoaded=true can CreateEntity + ToPlayer (applies bag/toolbelt).
+    try w.writeByte(36); // FileVersion
+    try w.writeI32(stock_entity.class_player_male);
     try w.writeI32(entity_id); // id (match PlayerId entity)
     try w.writeF32(std.math.floatMax(f32)); // lifetime
     try w.writeF32(px);
@@ -393,18 +418,41 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeI32(sz); // homePosition
     try w.writeI16(-1); // homeRange
     try w.writeByte(0); // spawnerSource
-    // entityClass 0 skips item/falling/player branches
+    // player branch: holdingItem, team, name, skin, profile
+    try stock_inv.writeEmptyItemValue(w);
+    try w.writeByte(0); // teamNumber
+    try w.writeString("Player");
+    try w.writeString(""); // skinTexture
+    try w.writeBool(true); // has PlayerProfile
+    try stock_entity.writePlayerProfile(w, .{
+        .archetype = "BaseMale",
+        .is_male = true,
+        .race_name = "White",
+        .variant_number = 1,
+        .eye_color = "Blue01",
+    });
     try w.writeU16(0); // entityData length
     try w.writeBool(false); // no traderData
     // networkWrite=false: skip sleeper/spawnBy/head/override fields
-    // junkDroneClass branch skipped (entityClass != junk)
+    try w.writeF32(0); // stressAmount (ECD v36 tail)
 
     // --- PlayerDataFile.Write remainder ---
-    // inventory (toolbelt) ItemStack list: restored stacks or empty
-    try stock_inv.writeItemStackList(w, toolbelt);
+    // inventory (toolbelt) ItemStack list: pad to stock PUBLIC_SLOTS (10)
+    var tb_pad: [stock_inv.toolbelt_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** stock_inv.toolbelt_slots;
+    {
+        const n = @min(toolbelt.len, tb_pad.len);
+        @memcpy(tb_pad[0..n], toolbelt[0..n]);
+    }
+    try stock_inv.writeItemStackList(w, tb_pad[0..]);
     try w.writeByte(0); // selectedInventorySlot
-    // Bag: restored stacks (touched when non-empty) or Bag(0)
-    try stock_inv.writeBag(w, bag, bag.len > 0);
+    // Bag: pad to stock CarryCapacity base (45). Mismatched counts resize the
+    // client bag via Bag.ReadInto and leave every slot occupied (AddItem fails).
+    var bag_pad: [stock_inv.bag_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** stock_inv.bag_slots;
+    {
+        const n = @min(bag.len, bag_pad.len);
+        @memcpy(bag_pad[0..n], bag[0..n]);
+    }
+    try stock_inv.writeBag(w, bag_pad[0..], true);
     // dragAndDropItem as 1-element empty stack list
     try w.writeU16(1);
     try w.writeU16(0); // ItemStack.count == 0 (no ItemValue)
@@ -413,7 +461,9 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeI64(0); // selectedSpawnPointKey
     try w.writeBool(true); // stock hardcodes true
     try w.writeI16(0); // stock hardcodes 0
-    try w.writeBool(false); // bLoaded
+    // bLoaded=true → first join: ToPlayer applies toolbelt/bag. false on death
+    // re-bundle so PlayerId does not re-CreateEntity the local player (NRE).
+    try w.writeBool(b_loaded);
     // lastSpawnPosition: world spawn + heading
     try w.writeI32(sx);
     try w.writeI32(sy);
@@ -486,22 +536,23 @@ fn writeEmptyPlayerDataFileNetwork(
 }
 
 test "player id body layout: header fields and non-empty pdf" {
-    var buf: [2048]u8 = undefined;
+    // PDF bag pads to CarryCapacity (45); keep headroom for quests/unlocks.
+    var buf: [4096]u8 = undefined;
     const body = try buildPlayerIdBody(&buf, 171, 0, 4, -273, 61, 449);
     // Must be larger than the old 4-byte stub (id only).
     try std.testing.expect(body.len > 64);
     try std.testing.expectEqual(@as(i32, 171), std.mem.readInt(i32, body[0..4], .little));
     try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, body[4..6], .little));
     // ECD FileVersion byte immediately after team
-    try std.testing.expectEqual(@as(u8, 35), body[6]);
+    try std.testing.expectEqual(@as(u8, 36), body[6]);
     // chunkViewDim is the trailing i32
     const dim = std.mem.readInt(i32, body[body.len - 4 ..][0..4], .little);
     try std.testing.expectEqual(@as(i32, 4), dim);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(i32, 171), try r.readI32());
     try std.testing.expectEqual(@as(i16, 0), try r.readI16());
-    try std.testing.expectEqual(@as(u8, 35), try r.readByte()); // ECD FileVersion
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // entityClass
+    try std.testing.expectEqual(@as(u8, 36), try r.readByte()); // ECD FileVersion
+    try std.testing.expectEqual(stock_entity.class_player_male, try r.readI32()); // entityClass
     try std.testing.expectEqual(@as(i32, 171), try r.readI32()); // ecd id
     _ = try r.readF32(); // lifetime
     try std.testing.expectEqual(@as(f32, -273), try r.readF32());
@@ -698,7 +749,7 @@ pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32, x: f32
     if (body.len < 1 + 4 + 4 + 4 + 12) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const ver = try r.readByte();
-    if (ver != 35) return error.EndOfStream;
+    if (ver != 35 and ver != 36) return error.EndOfStream;
     _ = try r.readI32(); // entityClass
     const entity_id = try r.readI32();
     _ = try r.readF32(); // lifetime
@@ -719,14 +770,66 @@ test "entity speeds body roundtrip" {
 }
 
 test "player data ecd head from empty pdf write" {
-    var buf: [512]u8 = undefined;
+    var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{});
+    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true);
     const h = try parsePlayerDataEcdHead(w.written());
     try std.testing.expectEqual(@as(i32, 106), h.entity_id);
     try std.testing.expectApproxEqAbs(@as(f32, -273), h.x, 0.01);
     try std.testing.expectApproxEqAbs(@as(f32, 61), h.y, 0.01);
     try std.testing.expectApproxEqAbs(@as(f32, 449), h.z, 0.01);
+}
+
+test "player id PDF bag is CarryCapacity empties" {
+    var buf: [8192]u8 = undefined;
+    // Non-empty starter-like stacks in bag[0..3]; rest must pad empty.
+    var bag: [4]stock_inv.StockSlot = .{
+        .{ .type_id = stock_inv.items_start_here + 8, .count = 1 },
+        .{ .type_id = stock_inv.items_start_here + 2, .count = 5 },
+        .{ .type_id = stock_inv.items_start_here + 7, .count = 20 },
+        .{ .type_id = stock_inv.items_start_here + 6, .count = 50 },
+    };
+    const body = try buildPlayerIdBodyInv(&buf, 171, 0, 4, -273, 61, 449, &.{}, &.{}, &.{}, bag[0..]);
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readI32(); // entity
+    _ = try r.readI16(); // team
+    // Skip ECD through entityData/trader (same as writeEmptyPlayerDataFileNetwork head).
+    // Skip ECD via stock_inv helper (player branch + v36 stress).
+    _ = try stock_inv.skipEcdNetworkWriteFalse(&r);
+    const tb_n = try r.readU16();
+    try std.testing.expectEqual(@as(u16, @intCast(stock_inv.toolbelt_slots)), tb_n);
+    var i: usize = 0;
+    while (i < tb_n) : (i += 1) {
+        const c = try r.readU16();
+        try std.testing.expectEqual(@as(u16, 0), c);
+    }
+    _ = try r.readByte(); // selected
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // bag ver
+    const bag_n = try r.readU16();
+    try std.testing.expectEqual(@as(u16, @intCast(stock_inv.bag_slots)), bag_n);
+    var nonempty: usize = 0;
+    i = 0;
+    while (i < bag_n) : (i += 1) {
+        const c = try r.readU16();
+        if (c != 0) {
+            nonempty += 1;
+            // skip ItemValue v9 minimal
+            try std.testing.expectEqual(@as(u8, 9), try r.readByte());
+            _ = try r.readByte(); // flags
+            _ = try r.readU16(); // type
+            _ = try r.readF32();
+            _ = try r.readU16();
+            _ = try r.readU16();
+            _ = try r.readByte(); // meta count
+            _ = try r.readByte();
+            _ = try r.readByte(); // mods
+            _ = try r.readByte();
+            _ = try r.readByte();
+            _ = try r.readU16();
+            _ = try r.readBool();
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 4), nonempty);
 }
 
 /// Stock EnumRemoveEntityReason: Undef=0 Unloaded=1 Killed=2 Despawned=3 Captured=4.
@@ -945,11 +1048,6 @@ pub fn buildChunkBodyStockEnvelope(buf: []u8, cx: i32, cz: i32, heights: *const 
     return w.written();
 }
 
-/// Bare intermediate payload (no envelope) for bots that expect 268-byte layout.
-pub fn buildChunkBodyBare(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) ![]u8 {
-    return buildChunkPayload(buf, cx, cz, heights);
-}
-
 pub const ChunkParsed = struct {
     cx: i32,
     cz: i32,
@@ -1026,6 +1124,20 @@ pub fn buildSetBlockBodyFull(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
+    return buildSetBlockBodyDamage(buf, x, y, z, block_id, 0, changed_by_entity, local_player_that_changed);
+}
+
+/// Authoritative SetBlock with absolute BlockValue.damage (stock DamageBlock path).
+pub fn buildSetBlockBodyDamage(
+    buf: []u8,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    damage: u16,
+    changed_by_entity: i32,
+    local_player_that_changed: i32,
+) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(false); // no PlatformUserIdentifierAbs
     try w.writeI16(1); // one BlockChangeInfo
@@ -1036,9 +1148,9 @@ pub fn buildSetBlockBodyFull(
     try w.writeI32(z);
     try w.writeI32(changed_by_entity);
     try w.writeByte(block_change_flag_value);
-    // BlockValue: type in low 16 of rawData, damage 0
+    // BlockValue: type in low 16 of rawData, then absolute damage u16
     try w.writeU32(@as(u32, block_id));
-    try w.writeU16(0);
+    try w.writeU16(damage);
     try w.writeI32(local_player_that_changed);
     return w.written();
 }
@@ -1147,6 +1259,12 @@ test "setblock stock body roundtrip" {
     try std.testing.expectEqual(@as(i32, -10), p.x);
     try std.testing.expectEqual(@as(i32, 61), p.y);
     try std.testing.expectEqual(@as(i32, 400), p.z);
+    const dmg_body = try buildSetBlockBodyDamage(&buf, 1, 2, 3, 20304, 7, 100, 100);
+    var one: [1]BlockChange = undefined;
+    const n = try parseSetBlockChanges(dmg_body, one[0..]);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(@as(u16, 20304), one[0].block_id);
+    try std.testing.expectEqual(@as(u16, 7), one[0].damage);
     try std.testing.expectEqual(@as(u16, 13), p.block_id);
 }
 
@@ -1236,12 +1354,12 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     try wr.writeString("00000000-0000-0000-0000-000000000001"); // guid
     try wr.writeBool(false); // no PersistentPlayerList blob
     try wr.writeU64(0); // ticks
-    // fixedSizeCC=true: authored worlds (Navezgane) are fixed-size ChunkClusters.
-    // XUiC_SpawnSelectionWindow.updateLoadState closes the "Starting game..."
-    // overlay at CGO>=0 for fixed-size; with false the client waits for
-    // viewDist^2-10 chunk GOs and our capped stream ring (CGO 25) never
-    // reaches it, wedging the overlay forever.
-    try wr.writeBool(true);
+    // fixedSizeCC MUST be false for stock maps (Navezgane): true installs
+    // ChunkProviderDummy on the client (no splat maps). MicroSplat then samples
+    // null _CustomControl0/1 and the whole terrain floor is grey clay.
+    // false → GenerateWorldFromRaw(bClientMode) loads splat*.png from GameData.
+    // Spawn overlay waits for CGO >= viewDist^2-10; keep stream ring large enough.
+    try wr.writeBool(false);
     try wr.writeBool(true); // firstTimeJoin
     // worldHashesData is raw MemoryStream of: count:i32 + (path:string, crc:u32)*count
     // PrepareWorldHashes writes count=0 when no RWG file CRC table.
@@ -1249,7 +1367,6 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     try wr.writeI64(0); // worldDataSize
     return wr.written();
 }
-
 
 test "world info body layout ends with hashCount0 and worldDataSize" {
     var buf: [256]u8 = undefined;
@@ -1338,11 +1455,6 @@ pub fn buildInventoryBodyStockResolved(
     return stock_inv.buildFromEcsResolved(buf, inv, resolve, ctx);
 }
 
-/// Default S→C inventory: stock wire for vanilla client UI parity.
-pub fn buildInventoryBody(buf: []u8, inv: *const @import("../ecs/components.zig").Inventory) ![]u8 {
-    return buildInventoryBodyStock(buf, inv);
-}
-
 /// NetPackageIdMapping body: name string + i32 len + bytes.
 pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
@@ -1361,12 +1473,8 @@ pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_c
     };
 }
 
-/// Holding: stock NetPackageHoldingItem body.
-pub fn buildHoldingBodyStock(buf: []u8, entity_id: i32, inv: *const @import("../ecs/components.zig").Inventory) ![]u8 {
-    return stock_inv.buildHoldingFromEcs(buf, entity_id, inv);
-}
 
-pub fn buildHoldingBodyStockResolved(
+pub fn buildHoldingBodyResolved(
     buf: []u8,
     entity_id: i32,
     inv: *const @import("../ecs/components.zig").Inventory,
@@ -1619,35 +1727,195 @@ test "inventory data request stock layout and not-found response" {
     try std.testing.expect(ok.len > resp.len);
 }
 
-/// Legacy holding (entity_id + item_id only). Prefer buildHoldingBodyStock for vanilla UI.
-pub fn buildHoldingBody(buf: []u8, entity_id: i32, inv: *const @import("../ecs/components.zig").Inventory) ![]u8 {
-    return buildHoldingBodyStock(buf, entity_id, inv);
-}
 
-pub fn buildHoldingBodyResolved(
-    buf: []u8,
-    entity_id: i32,
-    inv: *const @import("../ecs/components.zig").Inventory,
-    resolve: ?stock_inv.TypeResolver,
-    ctx: ?*anyopaque,
-) ![]u8 {
-    return buildHoldingBodyStockResolved(buf, entity_id, inv, resolve, ctx);
-}
+/// Live overrides for persistent GameStats.Write fields (stock defaults otherwise).
+/// RE: EnumGameStats + initPropertyDecl bPersistent filter (sandbox-options §6.1).
+/// There is **no** current-day field in the net blob; HUD day comes from
+/// NetPackageWorldTime (`worldTime / 24000`). BloodMoonDay is the scheduled BM day.
+pub const GameStatsValues = struct {
+    game_difficulty: i32 = 2,
+    blood_moon_enemy_count: i32 = 8,
+    enemy_difficulty: i32 = 0,
+    day_light_length: i32 = 18,
+    day_night_length: i32 = 60,
+    blood_moon_day: i32 = 0,
+    blood_moon_warning: i32 = 8,
+    block_damage_player: i32 = 100,
+    block_damage_ai: i32 = 100,
+    block_damage_ai_bm: i32 = 100,
+    xp_multiplier: i32 = 100,
+    player_killing_mode: i32 = 3,
+    drop_on_death: i32 = 1,
+    land_claim_size: i32 = 41,
+    land_claim_online_dur: i32 = 32,
+    land_claim_offline_dur: i32 = 32,
+    air_drop_frequency: i32 = 0,
+    party_shared_kill_range: i32 = 100,
+    show_friend_player_on_map: bool = true,
+    is_spawn_enemies: bool = true,
+    enemy_spawn_mode: bool = true,
+    time_of_day_inc_per_sec: i32 = 20,
+    death_penalty: i32 = 1,
+    quest_progression_daily_limit: i32 = 4,
+    storm_freq: i32 = 0,
+    loot_abundance: i32 = 100,
+    loot_respawn_days: i32 = 7,
+    bedroll_expiry_time: i32 = 45,
+    land_claim_count: i32 = 5,
+    land_claim_dead_zone: i32 = 30,
+    land_claim_expiry_time: i32 = 3,
+    land_claim_decay_mode: i32 = 0,
+    land_claim_offline_delay: i32 = 0,
+    jar_refund: i32 = 60,
+    sandbox_preset: []const u8 = "",
+    sandbox_code: []const u8 = "",
+};
 
 /// Stock NetPackageGameStats body: i16 payload_len + GameStats.Write blob.
-/// Empty payload (len=0) is valid; non-empty must match persistent GameStats layout.
+/// Write emits only bPersistent PropertyDecls in engine propertyList order with
+/// no name/id prefix (RE sandbox-options §6.1, GameStats.il Write IL=60).
+/// Empty payload (len=0) remains valid. Full blob uses stock defaults + overrides.
 pub fn buildGameStatsBody(buf: []u8, players: u16, zombies: u16, day: u32, hours: f32) ![]u8 {
     _ = players;
     _ = zombies;
     _ = day;
     _ = hours;
+    return buildGameStatsBodyValues(buf, .{});
+}
+
+/// Full persistent GameStats.Write matching V3.0.1 propertyList order.
+pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
-    // Length-prefixed empty GameStats.Write (reader StreamCopy(0) then Read on empty stream
-    // is soft; size check requires content_len == bytes consumed by read()).
-    // read() only consumes i16 + len bytes; with len=0 that is 2 bytes total body.
+    // Reserve i16 length; fill after payload.
     try w.writeI16(0);
+    const payload_start = w.pos;
+
+    // propertyList order, bPersistent only (78 decls, 9 skipped). Types: 0=i32 2=string 3=bool.
+    try w.writeI32(0); // GameState
+    try w.writeI32(0); // GameModeId
+    try w.writeBool(false); // TimeLimitActive
+    try w.writeI32(0); // TimeLimitThisRound
+    try w.writeBool(false); // FragLimitActive
+    try w.writeI32(0); // FragLimitThisRound
+    try w.writeBool(false); // DayLimitActive
+    try w.writeI32(0); // DayLimitThisRound
+    try w.writeString(""); // ShowWindow
+    try w.writeString(""); // LoadScene
+    try w.writeI32(0); // CurrentRoundIx
+    try w.writeBool(false); // ShowAllPlayersOnMap
+    try w.writeBool(v.show_friend_player_on_map); // ShowFriendPlayerOnMap
+    try w.writeBool(false); // ShowSpawnWindow
+    try w.writeBool(false); // IsSpawnNearOtherPlayer
+    try w.writeI32(v.time_of_day_inc_per_sec); // TimeOfDayIncPerSec
+    try w.writeBool(false); // IsCreativeMenuEnabled
+    try w.writeBool(false); // IsTeleportEnabled
+    try w.writeBool(false); // IsFlyingEnabled
+    try w.writeBool(true); // IsPlayerDamageEnabled
+    try w.writeBool(true); // IsPlayerCollisionEnabled
+    try w.writeBool(v.is_spawn_enemies); // IsSpawnEnemies
+    try w.writeI32(v.player_killing_mode); // PlayerKillingMode
+    try w.writeI32(1); // ScorePlayerKillMultiplier
+    try w.writeI32(1); // ScoreZombieKillMultiplier
+    try w.writeI32(-5); // ScoreDiedMultiplier
+    try w.writeI32(v.drop_on_death); // DropOnDeath
+    try w.writeI32(0); // DropOnQuit
+    try w.writeI32(v.game_difficulty); // GameDifficulty
+    try w.writeI32(v.blood_moon_enemy_count); // BloodMoonEnemyCount
+    try w.writeBool(v.enemy_spawn_mode); // EnemySpawnMode
+    try w.writeI32(v.enemy_difficulty); // EnemyDifficulty
+    try w.writeI32(v.day_light_length); // DayLightLength
+    try w.writeI32(v.land_claim_count); // LandClaimCount
+    try w.writeI32(v.land_claim_size); // LandClaimSize
+    try w.writeI32(v.land_claim_dead_zone); // LandClaimDeadZone
+    try w.writeI32(v.land_claim_expiry_time); // LandClaimExpiryTime
+    try w.writeI32(v.land_claim_decay_mode); // LandClaimDecayMode
+    try w.writeI32(v.land_claim_online_dur); // LandClaimOnlineDurabilityModifier
+    try w.writeI32(v.land_claim_offline_dur); // LandClaimOfflineDurabilityModifier
+    try w.writeI32(v.land_claim_offline_delay); // LandClaimOfflineDelay
+    try w.writeI32(v.bedroll_expiry_time); // BedrollExpiryTime
+    try w.writeI32(v.air_drop_frequency); // AirDropFrequency
+    try w.writeBool(true); // AirDropMarker
+    try w.writeI32(v.party_shared_kill_range); // PartySharedKillRange
+    try w.writeBool(false); // AutoParty
+    try w.writeI32(0); // OptionsPOICulling
+    try w.writeI32(v.blood_moon_day); // BloodMoonDay (scheduled, not HUD day)
+    try w.writeI32(v.block_damage_player); // BlockDamagePlayer
+    try w.writeI32(v.xp_multiplier); // XPMultiplier
+    try w.writeI32(v.blood_moon_warning); // BloodMoonWarning
+    try w.writeBool(true); // TwitchBloodMoonAllowed
+    try w.writeI32(v.death_penalty); // DeathPenalty
+    try w.writeI32(v.quest_progression_daily_limit); // QuestProgressionDailyLimit
+    try w.writeBool(true); // BiomeProgression
+    try w.writeI32(v.storm_freq); // StormFreq
+    try w.writeI32(0); // CameraRestrictionMode
+    try w.writeI32(v.jar_refund); // JarRefund
+    try w.writeString(v.sandbox_preset); // SandboxPreset
+    try w.writeString(v.sandbox_code); // SandboxCode
+    try w.writeI32(v.day_night_length); // DayNightLength
+    try w.writeI32(v.block_damage_ai); // BlockDamageAI
+    try w.writeI32(v.block_damage_ai_bm); // BlockDamageAIBM
+    try w.writeI32(v.loot_abundance); // LootAbundance
+    try w.writeI32(v.loot_respawn_days); // LootRespawnDays
+    try w.writeI32(100); // GlobalGSModifier
+    try w.writeI32(100); // BiomeGSModifier
+    try w.writeI32(100); // GlobalLMModifier
+    try w.writeI32(100); // BiomeLMModifier
+
+    const payload_len: i32 = @intCast(w.pos - payload_start);
+    if (payload_len > std.math.maxInt(i16)) return error.Overflow;
+    std.mem.writeInt(i16, buf[0..2], @intCast(payload_len), .little);
     return w.written();
 }
+
+test "GameStats body is i16 len + full persistent blob" {
+    var buf: [512]u8 = undefined;
+    const body = try buildGameStatsBodyValues(&buf, .{
+        .game_difficulty = 3,
+        .blood_moon_day = 14,
+        .day_night_length = 90,
+    });
+    try std.testing.expect(body.len >= 4);
+    const plen = std.mem.readInt(i16, body[0..2], .little);
+    try std.testing.expectEqual(@as(usize, @intCast(plen)), body.len - 2);
+    // Empty string defaults + 69 typed fields: payload is non-trivial (not empty blob).
+    try std.testing.expect(plen > 100);
+    // Compatibility wrapper still builds.
+    const emptyish = try buildGameStatsBody(buf[256..], 0, 0, 1, 8);
+    try std.testing.expect(emptyish.len > 100);
+}
+
+/// One biome weather snapshot (WeatherPackage on wire).
+pub const WeatherBiome = struct {
+    biome_id: u8 = 3,
+    group_index: u8 = 0,
+    remaining_seconds: u8 = 0,
+    /// temp, precip, cloud, wind, fog
+    params: [5]f32 = .{ 70, 0, 0.2, 0.1, 0.05 },
+};
+
+/// Stock NetPackageWeather: no count prefix; client sizes from its biomeWeather.Count.
+/// Emit one entry per biomemap biome we care about (same count both sides ideally).
+/// RE: weather-environment.md §3 — biomeId u8, groupIndex u8, remainingSeconds u8, 5×f32.
+pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    for (biomes) |b| {
+        try w.writeByte(b.biome_id);
+        try w.writeByte(b.group_index);
+        try w.writeByte(b.remaining_seconds);
+        for (b.params) |p| try w.writeF32(p);
+    }
+    return w.written();
+}
+
+test "weather body five biomes is 115" {
+    var buf: [256]u8 = undefined;
+    var biomes: [5]WeatherBiome = [_]WeatherBiome{.{}} ** 5;
+    var i: usize = 0;
+    while (i < 5) : (i += 1) biomes[i].biome_id = @intCast(i + 1);
+    const body = try buildWeatherBody(&buf, biomes[0..]);
+    try std.testing.expectEqual(@as(usize, 115), body.len);
+}
+
 
 /// Stock NetPackageChunkRemove: chunkKey i64 (WorldChunkCache.MakeChunkKey).
 pub fn buildChunkRemoveBody(buf: []u8, cx: i32, cz: i32) ![]u8 {
@@ -2395,7 +2663,7 @@ test "chunk body layout size and fields" {
     try std.testing.expectEqual(@as(i32, -2), p.cz);
     try std.testing.expectEqual(@as(u8, 70), p.heights[5 + 5 * 16]);
     // bare payload still parses
-    const bare = try buildChunkBodyBare(buf[0..chunk_body_size], 3, 4, &heights);
+    const bare = try buildChunkPayload(buf[0..chunk_body_size], 3, 4, &heights);
     const p2 = try parseChunkBody(bare);
     try std.testing.expectEqual(@as(i32, 3), p2.cx);
 }

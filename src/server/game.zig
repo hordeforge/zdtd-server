@@ -60,9 +60,11 @@ pub const InitOptions = struct {
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
     quests_path: ?[]const u8 = null,
-    view_radius: i32 = 6,
+    view_radius: i32 = 7,
     admin_port: u16 = 0,
     world_name: ?[]const u8 = null,
+    /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
+    max_players: u16 = 8,
     /// ServerPassword from serverconfig. Non-empty rejects join until Encryption* path lands.
     password: []const u8 = "",
     /// Stream NetPackageChunk on join/tick. Default on: stock clients need server chunks
@@ -102,8 +104,8 @@ pub const InitOptions = struct {
     // zdtd stream/authority tunables (Bucket B). Defaults == historical consts.
     // Full file surface (zdtd.toml) still open; fields are the single source for hot path.
     max_streamed_chunks: usize = 169,
-    chunk_stream_radius_min: i32 = 6,
-    chunk_stream_radius_max: i32 = 8,
+    chunk_stream_radius_min: i32 = 7,
+    chunk_stream_radius_max: i32 = 9,
     chunk_adds_per_stream_tick: u32 = 8,
     chunk_stream_period_ticks: u64 = 5,
     motion_replicate_period_ticks: u64 = 2,
@@ -118,8 +120,8 @@ pub const InitOptions = struct {
 const max_streamed_chunks_cap: usize = 169;
 /// Default stream/authority values (also InitOptions / Game field defaults).
 pub const default_max_streamed_chunks: usize = 169;
-pub const default_chunk_stream_radius_min: i32 = 6;
-pub const default_chunk_stream_radius_max: i32 = 8;
+pub const default_chunk_stream_radius_min: i32 = 7;
+pub const default_chunk_stream_radius_max: i32 = 9;
 pub const default_chunk_adds_per_stream_tick: u32 = 8;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
@@ -164,7 +166,7 @@ const Client = struct {
     entered: bool = false,
     challenge: [16]u8 = .{0} ** 16,
     slot: usize = 0,
-    view_radius: i32 = 6,
+    view_radius: i32 = 7,
     name: [32]u8 = .{0} ** 32,
     name_len: usize = 0,
     /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
@@ -266,7 +268,9 @@ pub const Game = struct {
     block_raw_key: [128]u64 = .{0} ** 128,
     block_raw: [128]u32 = .{0} ** 128,
     block_raw_n: usize = 0,
-    view_radius: i32 = 6,
+    view_radius: i32 = 7,
+    /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
+    max_players: u16 = 8,
     world_name: []const u8 = "zdtd",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
@@ -311,10 +315,15 @@ pub const Game = struct {
 
     /// Initialize into an existing allocation (must be heap for live server size).
     pub fn initWithOptions(self: *Game, allocator: std.mem.Allocator, world_dir: []const u8, port: u16, opts: InitOptions) !void {
+        const max_pl: u16 = blk: {
+            const n = if (opts.max_players == 0) @as(u16, 8) else opts.max_players;
+            break :blk @min(n, @as(u16, max_clients));
+        };
         self.* = .{
             .allocator = allocator,
             .world = try world_store.World.init(allocator, world_dir),
             .view_radius = opts.view_radius,
+            .max_players = max_pl,
             .wire_chunks = opts.wire_chunks,
             .password = opts.password,
             .pvp_mode = opts.player_killing_mode,
@@ -761,7 +770,7 @@ pub const Game = struct {
                 .level_name = level,
                 .ip = "127.0.0.1",
                 .info_port = port,
-                .max_players = max_clients,
+                .max_players = self.max_players,
                 .current_players = 0,
                 .server_version = "V 3.1.0",
                 .world_size = 6144,
@@ -770,7 +779,14 @@ pub const Game = struct {
                 std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
             };
         }
-        if (opts.admin_port != 0) self.admin.listen(opts.admin_port) catch {};
+        if (opts.admin_port != 0) {
+            self.admin.listen(opts.admin_port) catch |err| {
+                std.debug.print("zdtd: warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ opts.admin_port, err });
+            };
+            if (self.admin.port != 0) {
+                std.debug.print("zdtd: admin console 127.0.0.1:{d}\n", .{self.admin.port});
+            }
+        }
         if (opts.world_name) |wn| self.world_name = wn;
 
         const sp = self.world.primarySpawn();
@@ -1587,23 +1603,26 @@ pub const Game = struct {
                 self.admin.reply("saved\n");
             },
             .kick => |peer| {
-                if (peer < max_clients) {
-                    if (self.clients[peer].peer) |p| p.alive = false;
-                    self.clearLocksForPeer(peer);
-                    self.clients[peer] = .{};
-                    self.admin.reply("kicked\n");
+                if (peer >= max_clients or self.clients[peer].peer == null) {
+                    self.admin.reply("no player in slot\n");
+                    return;
                 }
+                self.clients[peer].peer.?.alive = false;
+                self.clearLocksForPeer(peer);
+                self.clients[peer] = .{};
+                self.admin.reply("kicked\n");
             },
             .ban => |peer| {
-                if (peer < max_clients) {
-                    if (self.clients[peer].peer) |p| {
-                        self.banIp(peerIpKey(p));
-                        p.alive = false;
-                    }
-                    self.clearLocksForPeer(peer);
-                    self.clients[peer] = .{};
-                    self.admin.reply("banned\n");
+                if (peer >= max_clients or self.clients[peer].peer == null) {
+                    self.admin.reply("no player in slot\n");
+                    return;
                 }
+                const p = self.clients[peer].peer.?;
+                self.banIp(peerIpKey(p));
+                p.alive = false;
+                self.clearLocksForPeer(peer);
+                self.clients[peer] = .{};
+                self.admin.reply("banned\n");
             },
             .unban => |ip| {
                 self.unbanIp(ip);
@@ -1874,11 +1893,12 @@ pub const Game = struct {
         for (&self.clients) |*c| {
             if (c.peer == peer) return c;
         }
+        // Soft capacity: ServerMaxPlayerCount (slots still sized to max_clients).
+        var occupied: u16 = 0;
         for (&self.clients) |*c| {
-            if (c.peer) |p| {
-                if (!p.alive) c.* = .{};
-            }
+            if (c.peer != null) occupied += 1;
         }
+        if (occupied >= self.max_players) return null;
         for (&self.clients, 0..) |*c, i| {
             if (c.peer == null) {
                 c.* = .{ .peer = peer, .slot = i };
@@ -1943,17 +1963,18 @@ pub const Game = struct {
         if (slot >= self.clients.len) return;
         const c = &self.clients[slot];
         c.xp += base * self.xp_multiplier / 100;
-        // Level-up loop against stock geometric curve.
+        // Compute the current cumulative threshold once, then advance it as
+        // levels are crossed. Re-summing from level one on every iteration is
+        // quadratic for large XP awards.
+        var next_threshold: u64 = 0;
+        var level: u16 = 1;
+        while (level <= c.level) : (level += 1) {
+            next_threshold += self.progression.expForLevel(level);
+        }
         while (c.level < self.progression.max_level) {
-            const need = self.progression.expForLevel(c.level);
-            // Approximate: total XP threshold as sum is expensive; use per-level residual.
-            // Store xp as lifetime; level when xp crosses cumulative estimate.
-            var cum: u64 = 0;
-            var L: u16 = 1;
-            while (L < c.level) : (L += 1) cum += self.progression.expForLevel(L);
-            const next_need = cum + need;
-            if (c.xp < next_need) break;
+            if (c.xp < next_threshold) break;
             c.level += 1;
+            next_threshold += self.progression.expForLevel(c.level);
         }
     }
 
@@ -2513,7 +2534,7 @@ pub const Game = struct {
             .level_name = self.world_name,
             .ip = "127.0.0.1",
             .info_port = self.info_port,
-            .max_players = 8,
+            .max_players = self.max_players,
             .current_players = @intCast(self.countJoined()),
             .server_version = "V 3.1.0",
             .world_size = 6144,
@@ -2606,7 +2627,8 @@ pub const Game = struct {
             const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
             try self.sendGame(peer, "NetPackageWorldTime", wt);
             try self.sendGameStats(peer);
-            try self.sendWeather(peer);
+            // NetPackageWeather: only after client WeatherManager.InitPackages (post-enter).
+            // Early send → NCSimple "parsed 2 vs expected 117" and disconnect.
             // Fixed-size clients only apply grass/trees from S2C deco (no local random gen).
             // firstPackage=true before/during OnWorldLoaded marks deco chunks decorated.
             try self.sendDecoAroundSpawn(peer, sp.x, sp.z, true);
@@ -3976,7 +3998,9 @@ pub const Game = struct {
         const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
         try self.sendGame(peer, "NetPackageWorldTime", wt);
         try self.sendGameStats(peer);
-        try self.sendWeather(peer);
+        // Weather only once the client has already completed first join (re-bundle /
+        // respawn). First join: client InitPackages may still be null → underrun kick.
+        if (!first_join) try self.sendWeather(peer);
     }
 
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).
@@ -5393,25 +5417,57 @@ pub const Game = struct {
     /// Build NetPackageWeather from biomes.xml default groups (omit if none loaded).
     fn buildWeatherBodyFromBiomes(self: *Game) ?[]const u8 {
         const bl = &self.world.biome_layers_table;
-        if (bl.weather_n == 0) return null;
-        var defs: [assets_biome_layers.max_weather_biomes]assets_biome_layers.WeatherDefaults = undefined;
-        const n = bl.weatherPackages(&defs);
-        if (n == 0) return null;
+        // Stock client InitPackages sizes from biomeWeather.Count (Navezgane / stock
+        // biomes with weather groups → 5). Wire has no count prefix, so body length
+        // must be exactly Count * 23 (3 u8 + 5 f32).
+        const stock_count: usize = 5;
         var wb: [assets_biome_layers.max_weather_biomes]packages.WeatherBiome = undefined;
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            wb[i] = .{
-                .biome_id = defs[i].biome_id,
-                .group_index = 0,
-                .remaining_seconds = 0,
-                .params = defs[i].params,
-            };
+        var n: usize = 0;
+        if (bl.weather_n > 0) {
+            var defs: [assets_biome_layers.max_weather_biomes]assets_biome_layers.WeatherDefaults = undefined;
+            n = bl.weatherPackages(&defs);
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                wb[i] = .{
+                    .biome_id = defs[i].biome_id,
+                    .group_index = 0,
+                    .remaining_seconds = 0,
+                    .params = defs[i].params,
+                };
+            }
+        }
+        // Pad or trim to stock_count so content_len matches client expected size.
+        if (n == 0) {
+            // Fallback mild defaults (pine-ish) for biomap ids 1..5.
+            var i: usize = 0;
+            while (i < stock_count) : (i += 1) {
+                wb[i] = .{
+                    .biome_id = @intCast(i + 1),
+                    .group_index = 0,
+                    .remaining_seconds = 0,
+                    .params = .{ 70, 0, 0.2, 0.1, 0.05 },
+                };
+            }
+            n = stock_count;
+        } else if (n < stock_count) {
+            var i = n;
+            while (i < stock_count) : (i += 1) {
+                wb[i] = wb[n - 1];
+                wb[i].biome_id = @intCast(i + 1);
+            }
+            n = stock_count;
+        } else if (n > stock_count) {
+            n = stock_count;
         }
         return packages.buildWeatherBody(&self.body_buf, wb[0..n]) catch null;
     }
 
     fn sendWeather(self: *Game, peer: *ln_peer.Peer) !void {
         const body = self.buildWeatherBodyFromBiomes() orelse return;
+        // Stock client sizes read from biomeWeather.Count (usually 5 → 115 body / 117 content).
+        if (body.len != 115 and body.len != 0) {
+            std.debug.print("zdtd: weather body len={d} (stock often 115 for 5 biomes)\n", .{body.len});
+        }
         try self.sendGame(peer, "NetPackageWeather", body);
     }
 
