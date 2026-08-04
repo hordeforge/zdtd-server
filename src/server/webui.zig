@@ -11,6 +11,9 @@ pub const max_req: usize = 8192;
 pub const max_secret: usize = 128;
 pub const max_players_snap: usize = 16;
 pub const max_name: usize = 32;
+/// Max admin line from web console POST /api/cmd (Game.pollWebui).
+pub const max_cmd_line: usize = 256;
+pub const max_cmd_out: usize = 4096;
 
 pub const Config = struct {
     port: u16 = 0,
@@ -36,13 +39,27 @@ pub const Snapshot = struct {
     day: u32 = 1,
     hours: f32 = 8,
     bloodmoon_active: bool = false,
+    bloodmoon_frequency: u32 = 7,
     joined: u16 = 0,
     entered: u16 = 0,
     peers_alive: u16 = 0,
     max_players: u16 = 8,
+    // Entity census
     zombies: u16 = 0,
     animals: u16 = 0,
+    traders: u16 = 0,
+    vehicles: u16 = 0,
+    turrets: u16 = 0,
+    loot_bags: u16 = 0,
+    players_ent: u16 = 0,
     chunks: u32 = 0,
+    // Net counters
+    net_packets_in: u64 = 0,
+    net_packets_out: u64 = 0,
+    net_bytes_in: u64 = 0,
+    net_bytes_out: u64 = 0,
+    entities_ticked: u64 = 0,
+    // Errors / ops
     tick_overruns: u64 = 0,
     encode_errors: u64 = 0,
     stream_errors: u64 = 0,
@@ -50,13 +67,37 @@ pub const Snapshot = struct {
     join_fail: u64 = 0,
     packages_encoded: u64 = 0,
     packages_broadcast: u64 = 0,
+    net_poll_errors: u64 = 0,
+    net_payload_errors: u64 = 0,
+    net_send_errors: u64 = 0,
+    reliable_window_drops: u64 = 0,
+    persistence_errors: u64 = 0,
+    stale_peers_reaped: u64 = 0,
+    // Latency
     tick_mean_ns: u64 = 0,
     tick_p50_ns: u64 = 0,
     tick_p99_ns: u64 = 0,
+    tick_max_ns: u64 = 0,
     net_mean_ns: u64 = 0,
+    net_p99_ns: u64 = 0,
     sim_mean_ns: u64 = 0,
+    sim_p99_ns: u64 = 0,
     repl_mean_ns: u64 = 0,
+    repl_p99_ns: u64 = 0,
     stream_mean_ns: u64 = 0,
+    stream_p99_ns: u64 = 0,
+    save_mean_ns: u64 = 0,
+    // Config / policy (read-only)
+    view_radius: i32 = 7,
+    max_streamed_chunks: u16 = 169,
+    interest_range: f32 = 160,
+    max_edit_range: f32 = 96,
+    max_spawned_zombies: u16 = 64,
+    info_port: u16 = 0,
+    webui_port: u16 = 0,
+    authority_correct: bool = true,
+    password_set: bool = false,
+    wire_chunks: bool = true,
     world_name_len: u8 = 0,
     world_name: [48]u8 = .{0} ** 48,
     players: [max_players_snap]PlayerRow = [_]PlayerRow{.{}} ** max_players_snap,
@@ -73,6 +114,13 @@ pub const Server = struct {
     recv_len: usize = 0,
     snap: Snapshot = .{},
     set_cookie: bool = false,
+    /// Queued console line from POST /api/cmd (drained by Game.pollWebui).
+    cmd_pending: bool = false,
+    cmd_line_buf: [max_cmd_line]u8 = undefined,
+    cmd_line_len: usize = 0,
+    /// Response text filled by Game via finishCmd after runAdminLine.
+    cmd_out_buf: [max_cmd_out]u8 = undefined,
+    cmd_out_len: usize = 0,
 
     pub fn enabled(self: *const Server) bool {
         return self.fd >= 0;
@@ -132,6 +180,32 @@ pub const Server = struct {
         self.acceptOne();
         if (self.client_fd < 0) return;
         self.readAndServe();
+    }
+
+    /// Copy pending console command into `out` and clear the queue. Null if empty.
+    pub fn takeCmd(self: *Server, out: []u8) ?[]const u8 {
+        if (!self.cmd_pending or self.cmd_line_len == 0) return null;
+        const n = @min(self.cmd_line_len, out.len);
+        @memcpy(out[0..n], self.cmd_line_buf[0..n]);
+        self.cmd_pending = false;
+        self.cmd_line_len = 0;
+        return out[0..n];
+    }
+
+    pub fn finishCmd(self: *Server, reply: []const u8) void {
+        const n = @min(reply.len, self.cmd_out_buf.len);
+        if (n > 0) @memcpy(self.cmd_out_buf[0..n], reply[0..n]);
+        self.cmd_out_len = n;
+    }
+
+    pub fn enqueueCmd(self: *Server, line: []const u8) bool {
+        if (self.cmd_pending) return false;
+        if (line.len == 0 or line.len > max_cmd_line) return false;
+        @memcpy(self.cmd_line_buf[0..line.len], line);
+        self.cmd_line_len = line.len;
+        self.cmd_pending = true;
+        self.cmd_out_len = 0;
+        return true;
     }
 
     fn acceptOne(self: *Server) void {
@@ -442,23 +516,56 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
     const wn = s.world_name[0..s.world_name_len];
     const hh: u32 = @intFromFloat(@floor(s.hours));
     const mm: u32 = @intFromFloat(@floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0));
-    const bm: []const u8 = if (s.bloodmoon_active) "YES" else "no";
+    const bm: []const u8 = if (s.bloodmoon_active) "ACTIVE" else "idle";
+    const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
+    const pw: []const u8 = if (s.password_set) "set" else "open";
+    const wc: []const u8 = if (s.wire_chunks) "on" else "off";
     return std.fmt.bufPrint(buf,
         \\<h2>Status</h2>
         \\<div class="grid">
         \\<div class="stat"><b class="num">{d}</b><span>tick</span></div>
-        \\<div class="stat"><b class="num">day {d} {d:0>2}:{d:0>2}</b><span>world time</span></div>
-        \\<div class="stat"><b>{s}</b><span>blood moon</span></div>
+        \\<div class="stat"><b class="num">d{d} {d:0>2}:{d:0>2}</b><span>world time</span></div>
+        \\<div class="stat"><b>{s}</b><span>blood moon (every {d}d)</span></div>
         \\<div class="stat"><b class="num">{d}/{d}</b><span>joined / max</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>entered</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>peers alive</span></div>
-        \\<div class="stat"><b class="num">{d}</b><span>zombies</span></div>
-        \\<div class="stat"><b class="num">{d}</b><span>animals</span></div>
-        \\<div class="stat"><b class="num">{d}</b><span>chunks</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>chunks RAM</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>tick overruns</span></div>
         \\</div>
-        \\<p style="margin:0.75rem 0 0;color:var(--muted);font-size:0.85rem">world <code>{s}</code></p>
-    , .{ s.tick_n, s.day, hh, mm, bm, s.joined, s.max_players, s.entered, s.peers_alive, s.zombies, s.animals, s.chunks, s.tick_overruns, wn });
+        \\<h2 style="margin-top:1rem">Entities</h2>
+        \\<div class="grid">
+        \\<div class="stat"><b class="num">{d}/{d}</b><span>zombies / cap</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>animals</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>players (ecs)</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>traders</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>vehicles</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>turrets</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>loot bags</span></div>
+        \\</div>
+        \\<h2 style="margin-top:1rem">Server</h2>
+        \\<div class="grid">
+        \\<div class="stat"><b>{s}</b><span>world</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>info port</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>litenet port</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>webui port</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>view radius</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>max streamed</span></div>
+        \\<div class="stat"><b class="num">{d:.0}</b><span>interest m</span></div>
+        \\<div class="stat"><b class="num">{d:.0}</b><span>edit range m</span></div>
+        \\<div class="stat"><b>{s}</b><span>authority</span></div>
+        \\<div class="stat"><b>{s}</b><span>password</span></div>
+        \\<div class="stat"><b>{s}</b><span>wire chunks</span></div>
+        \\</div>
+    , .{
+        s.tick_n,      s.day,                 hh,               mm,
+        bm,            s.bloodmoon_frequency, s.joined,         s.max_players,
+        s.entered,     s.peers_alive,         s.chunks,         s.tick_overruns,
+        s.zombies,     s.max_spawned_zombies, s.animals,        s.players_ent,
+        s.traders,     s.vehicles,            s.turrets,        s.loot_bags,
+        wn,            s.info_port,           s.info_port +% 2, s.webui_port,
+        s.view_radius, s.max_streamed_chunks, s.interest_range, s.max_edit_range,
+        auth,          pw,                    wc,
+    });
 }
 
 fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
@@ -479,35 +586,58 @@ fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
     return w.buffered();
 }
 
+fn us(ns: u64) u64 {
+    return ns / 1000;
+}
+fn ms(ns: u64) u64 {
+    return ns / 1_000_000;
+}
+
 fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
-    const t_ms = s.tick_mean_ns / 1_000_000;
-    const p50_ms = s.tick_p50_ns / 1_000_000;
-    const p99_ms = s.tick_p99_ns / 1_000_000;
     return std.fmt.bufPrint(buf,
+        \\<h3 style="margin:0 0 0.5rem;font-size:0.8rem;color:var(--muted)">Latency (tick budget 50 ms)</h3>
         \\<div class="grid">
         \\<div class="stat"><b class="num">{d} ms</b><span>tick mean</span></div>
-        \\<div class="stat"><b class="num">{d} / {d} ms</b><span>p50 / p99</span></div>
-        \\<div class="stat"><b class="num">{d}</b><span>encode err</span></div>
-        \\<div class="stat"><b class="num">{d}</b><span>stream err</span></div>
-        \\<div class="stat"><b class="num">{d}/{d}</b><span>join ok/fail</span></div>
+        \\<div class="stat"><b class="num">{d} / {d} ms</b><span>tick p50 / p99</span></div>
+        \\<div class="stat"><b class="num">{d} ms</b><span>tick max</span></div>
+        \\<div class="stat"><b class="num">{d} / {d} us</b><span>net mean/p99</span></div>
+        \\<div class="stat"><b class="num">{d} / {d} us</b><span>sim mean/p99</span></div>
+        \\<div class="stat"><b class="num">{d} / {d} us</b><span>repl mean/p99</span></div>
+        \\<div class="stat"><b class="num">{d} / {d} us</b><span>stream mean/p99</span></div>
+        \\<div class="stat"><b class="num">{d} us</b><span>save mean</span></div>
+        \\</div>
+        \\<h3 style="margin:1rem 0 0.5rem;font-size:0.8rem;color:var(--muted)">Traffic</h3>
+        \\<div class="grid">
+        \\<div class="stat"><b class="num">{d}</b><span>pkt in</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>pkt out</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>bytes in</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>bytes out</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>pkg encoded</span></div>
         \\<div class="stat"><b class="num">{d}</b><span>pkg broadcast</span></div>
-        \\<div class="stat"><b class="num">{d}/{d}/{d}/{d}</b><span>net/sim/repl/stream µs mean</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>entities ticked</span></div>
+        \\</div>
+        \\<h3 style="margin:1rem 0 0.5rem;font-size:0.8rem;color:var(--muted)">Errors / ops</h3>
+        \\<div class="grid">
+        \\<div class="stat"><b class="num">{d}/{d}</b><span>join ok/fail</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>tick overruns</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>encode err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>stream err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>net poll err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>payload err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>send err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>window drops</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>persist err</span></div>
+        \\<div class="stat"><b class="num">{d}</b><span>stale reaped</span></div>
         \\</div>
     , .{
-        t_ms,
-        p50_ms,
-        p99_ms,
-        s.encode_errors,
-        s.stream_errors,
-        s.join_ok,
-        s.join_fail,
-        s.packages_encoded,
-        s.packages_broadcast,
-        s.net_mean_ns / 1000,
-        s.sim_mean_ns / 1000,
-        s.repl_mean_ns / 1000,
-        s.stream_mean_ns / 1000,
+        ms(s.tick_mean_ns),      ms(s.tick_p50_ns),    ms(s.tick_p99_ns),    ms(s.tick_max_ns),
+        us(s.net_mean_ns),       us(s.net_p99_ns),     us(s.sim_mean_ns),    us(s.sim_p99_ns),
+        us(s.repl_mean_ns),      us(s.repl_p99_ns),    us(s.stream_mean_ns), us(s.stream_p99_ns),
+        us(s.save_mean_ns),      s.net_packets_in,     s.net_packets_out,    s.net_bytes_in,
+        s.net_bytes_out,         s.packages_encoded,   s.packages_broadcast, s.entities_ticked,
+        s.join_ok,               s.join_fail,          s.tick_overruns,      s.encode_errors,
+        s.stream_errors,         s.net_poll_errors,    s.net_payload_errors, s.net_send_errors,
+        s.reliable_window_drops, s.persistence_errors, s.stale_peers_reaped,
     });
 }
 
