@@ -1,5 +1,7 @@
 //! All sim component types (plain data; no behavior). SoA columns live on World.
 
+const std = @import("std");
+
 pub const Kind = enum(u8) {
     player,
     zombie,
@@ -319,13 +321,6 @@ pub const Inventory = struct {
     }
 };
 
-test "putInSlot rejects overflowing stack counts" {
-    var inv: Inventory = .{};
-    inv.slots[0] = .{ .item_id = 1, .count = std.math.maxInt(u16) };
-    try std.testing.expect(!inv.putInSlot(0, .{ .item_id = 1, .count = 1 }, std.math.maxInt(u16)));
-    try std.testing.expectEqual(std.math.maxInt(u16), inv.slots[0].count);
-}
-
 pub const StockEntry = struct {
     item: u16 = 0,
     count: u16 = 0,
@@ -402,3 +397,10 @@ pub const Mask = packed struct(u32) {
     dirty: bool = false,
     _pad: u14 = 0,
 };
+
+test "putInSlot rejects overflowing stack counts" {
+    var inv: Inventory = .{};
+    inv.slots[0] = .{ .item_id = 1, .count = std.math.maxInt(u16) };
+    try std.testing.expect(!inv.putInSlot(0, .{ .item_id = 1, .count = 1 }, std.math.maxInt(u16)));
+    try std.testing.expectEqual(std.math.maxInt(u16), inv.slots[0].count);
+}

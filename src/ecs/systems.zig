@@ -489,17 +489,21 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             const cost: u32 = unit * qty;
             if (cost > std.math.maxInt(u16)) return false;
             if (w.wallet[ps].coins < cost) return false;
-            if (w.mask[ps].inventory and !w.inventory[ps].addItem(item, qty)) return false;
             // Prefer removing casinoCoin items so client bag matches wallet.
             if (w.mask[ps].inventory) {
+                const inventory_before = w.inventory[ps];
                 const have = w.inventory[ps].countItem(coin_id);
                 if (have >= cost) {
                     if (!w.inventory[ps].removeItem(coin_id, @intCast(cost))) {
-                        _ = w.inventory[ps].removeItem(item, qty);
+                        w.inventory[ps] = inventory_before;
                         return false;
                     }
-                    if (w.mask[ps].dirty) w.dirty[ps].inv = true;
                 }
+                if (!w.inventory[ps].addItem(item, qty)) {
+                    w.inventory[ps] = inventory_before;
+                    return false;
+                }
+                if (w.mask[ps].dirty) w.dirty[ps].inv = true;
             }
             stock.entries[e].count -= qty;
             w.wallet[ps].coins -= cost;
@@ -511,9 +515,13 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             if (stock.entries[e].count > std.math.maxInt(u16) - qty) return false;
             // Take goods from inv when selling.
             if (w.mask[ps].inventory) {
+                const inventory_before = w.inventory[ps];
                 if (w.inventory[ps].countItem(item) < qty) return false;
-                if (!w.inventory[ps].addItem(coin_id, @intCast(gain))) return false;
                 if (!w.inventory[ps].removeItem(item, qty)) return false;
+                if (!w.inventory[ps].addItem(coin_id, @intCast(gain))) {
+                    w.inventory[ps] = inventory_before;
+                    return false;
+                }
                 if (w.mask[ps].dirty) w.dirty[ps].inv = true;
             }
             stock.entries[e].count += qty;
@@ -1361,4 +1369,38 @@ test "quest turn_in needs trader open" {
     questOnTraderOpen(&w, 0);
     try std.testing.expect(!questHasActive(&w, 0, 9));
     try std.testing.expectEqual(@as(u32, 40), questCoins(&w, 0));
+}
+
+test "full inventory preserves nearby loot bag" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |*slot, i| {
+        slot.* = .{ .item_id = @intCast(i + 100), .count = 60000 };
+    }
+    const bag_id = w.spawnLootBag(1, 70, 1, 1, 5).?;
+
+    try std.testing.expectEqual(@as(u32, 0), collectLootNear(&w, 0, 8));
+    try std.testing.expect(w.slotOfNetId(bag_id) != null);
+}
+
+test "failed trader buy leaves wallet stock and inventory unchanged" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |*slot, i| {
+        slot.* = .{ .item_id = @intCast(i + 100), .count = 60000 };
+    }
+    w.wallet[ps].coins = 100;
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 2, .price = 10 };
+    const inventory_before = w.inventory[ps];
+
+    try std.testing.expect(!trade(&w, 0, trader_id, 99, 1, 0, 6));
+    try std.testing.expectEqual(@as(u32, 100), w.wallet[ps].coins);
+    try std.testing.expectEqual(@as(u16, 2), w.trader_stock[ts].entries[0].count);
+    try std.testing.expectEqualSlices(c.InvSlot, &inventory_before.slots, &w.inventory[ps].slots);
 }
