@@ -24,7 +24,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **81 pass / 2 fail** (20260804h) (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **81 pass / 2 fail** peak (20260804h); 20260804i **76/7** (eat+ranged PASS; power float flake) (kill/spawn/respawn PASS); version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
@@ -34,10 +34,10 @@ Score: **pass=81 fail=2**. CGO gate **PASS**. Seed-Y + void-rescue RelPos + fixt
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `combat/ranged_shot` | intermittent ammo/meta or retarget HP | fixture timing / weapon equip |
-| `economy/eat_food_consume` | count stuck 1; food stat moved | consume C2S / item use |
+| `power/*` place suite | intermittent type=0 when client floats | mesh float late-suite; FixtureSeedOrigin + void rescue help but not 100% |
+| `combat/zombie_target_has_health` | intermittent no EntityAlive | spawn/clear timing |
 
-Closed 20260804h: dig/place, block_damage_melee, explosion_client, power suite, land_claim, workstation, chest, jump_motor, CGO/ground.
+Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** + **ranged_shot** (04i: force stack dec + SetHeldMeta). Peak score **81/83**.
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
@@ -83,6 +83,17 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [ ] Planet-scale M2+ gateway/shards (DEM M1 proven; after M11) - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
 - [ ] SpacetimeDB: **rejected** (SCALE_ARCHITECTURE.md)
 - [ ] Steam browser / full telnet parity (P3 ops)
+
+### Extension roadmap (ADR 0010; after playability)
+
+Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plugins.md), [PLUGIN_API.md](docs/PLUGIN_API.md).
+
+- [ ] Hardcode audit P0/P1 remaining (stock XML/AssignIds on production paths)
+- [ ] `zdtd.toml` (stream, AI bands, wallets, feature flags) + GAME_OPTIONS
+- [ ] Native static plugin host (ADR 0005) + one in-tree sample plugin
+- [ ] Gamemode = config pack + static plugin (`modes/` + `plugins/`)
+- [ ] **Wasm guest mods** (sandboxed): same hooks, fuel/memory caps, command queue only; no stock Mods/ promise
+- [ ] Dynlib native plugins only if still needed after static + Wasm
 
 ### Procedural worldgen (parked; **on-the-fly stream**, not static bake)
 
