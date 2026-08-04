@@ -27,21 +27,21 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **77 pass / 6 fail** (kill/spawn/respawn PASS); version pin V3.1.0
 
 
-### Residual playtest fails (demo, 2026-08-04c) - product depth
+### Residual playtest fails (demo, 2026-08-04d) - product depth
 
-Latest: `server/logs/playtest_zdtd_demo_20260804c.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
-Score: **pass=77 fail=6**.
+Latest: `server/logs/playtest_zdtd_demo_20260804d.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Score: **pass=77 fail=6**. CGO gate **PASS** (cgo=63 need=39) after stream radius 7..9.
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `smoke/cgo_ready` | cgo=35 need=39 | stream radius bumped 7..9 after run; re-measure |
-| `core/block_damage_melee` | hay 20304 dmg 0 (seed Y negative) | SetBlock damage / client seed |
-| `combat/explosion_client` | same soft-block dmg | same path |
-| `economy/eat_food_consume` | no food item | client give food |
-| `economy/trader_buy` | coins 0 / buyOk=False | wallet / buy C2S |
-| `power/place_generator` | not placed | placement Y/pad |
+| `core/block_damage_melee` | hay 20304 dmg 0 (seed at Y=-6) | client seed Y / SetBlock damage apply |
+| `combat/explosion_client` | same soft-block path | same |
+| `combat/zombie_target_has_health` | intermittent no EntityAlive in range | spawn/kill timing |
+| `economy/eat_food_consume` | count stuck 1; food stat moved | consume C2S / item use |
+| `power/place_generator` | type=0 not placed | placement Y/pad |
+| `power/wire_set_parent` | relay not placed | same pad |
 
-Closed this campaign: dig/place, loot pickup, craft consume, death loot, respawn, kill/spawn fixtures, weather underrun, V3.1.0 pin.
+Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
 Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect Despawned, ECD v36+stress, PDF **bLoaded=true** + playerMale profile (ToPlayer applies bag), starter coins, orch zdtd fresh-save.
 
