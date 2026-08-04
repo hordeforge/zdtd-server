@@ -96,6 +96,9 @@ const Pool = struct {
                     );
                     break;
                 };
+                // Detach so process/test exit is not blocked waiting for idle
+                // workers parked on work_cv (pool is process-lifetime).
+                self.threads[i].detach();
                 self.worker_n += 1;
             }
         }

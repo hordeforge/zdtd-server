@@ -7,6 +7,8 @@ const components = @import("../ecs/components.zig");
 pub const max_container_slots: usize = 54; // 9x6 common chest
 /// Keep small: Game embeds ContainerStore; large arrays blow the stack on init.
 pub const max_containers: usize = 256;
+const persisted_container_size: usize = 20 + max_container_slots * 7;
+const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
 pub const PosKey = struct {
     x: i32,
@@ -116,7 +118,7 @@ pub const ContainerStore = struct {
     pub fn save(self: *const ContainerStore, dir: []const u8) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
-        var buf: [64 * 1024]u8 = undefined;
+        var buf: [save_capacity]u8 = undefined;
         var o: usize = 0;
         @memcpy(buf[0..4], "ZCT1");
         o = 6; // count patched below
@@ -218,4 +220,20 @@ test "container get or create" {
     const g = guidFromPos(.{ .x = 1, .y = 70, .z = 2 });
     try std.testing.expectEqualSlices(u8, &g, &c.inv_guid);
     try std.testing.expect(s.getByGuid(&g) == c);
+}
+
+test "container persistence retains every full-capacity container" {
+    var s: ContainerStore = .{};
+    var i: usize = 0;
+    while (i < max_containers) : (i += 1) {
+        const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = 0 }, max_container_slots, 42).?;
+        c.setSlot(max_container_slots - 1, .{ .item_id = 7, .count = @intCast(i + 1) });
+    }
+    try s.save(".");
+    var s2: ContainerStore = .{};
+    try s2.load(".");
+    try std.testing.expectEqual(max_containers, s2.n);
+    const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
+    try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);
+    io_fs.deleteFileSimple("./containers.zct");
 }

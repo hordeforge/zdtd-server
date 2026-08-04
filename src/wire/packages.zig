@@ -4,6 +4,7 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 const frame = @import("frame.zig");
+const components = @import("../ecs/components.zig");
 pub const stock_inv = @import("stock_inv.zig");
 pub const stock_chunk = @import("stock_chunk.zig");
 pub const stock_deco = @import("stock_deco.zig");
@@ -663,13 +664,25 @@ pub fn buildTraderDataStock(
     return w.written();
 }
 
+/// Widest world coordinate a client may claim. Downstream sim code funnels
+/// positions through `@intFromFloat(@floor(v))`, which traps on NaN/inf/huge in
+/// safe builds, so non-finite coordinates are rejected at the wire boundary
+/// rather than clamped somewhere deeper.
+const world_coord_limit: f32 = 1 << 24;
+
+fn readWorldF32(r: *binary.Reader) binary.ReadError!f32 {
+    const v = try r.readF32();
+    if (!std.math.isFinite(v) or @abs(v) > world_coord_limit) return error.Overflow;
+    return v;
+}
+
 pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
-    const x = try r.readF32();
-    const y = try r.readF32();
-    const z = try r.readF32();
+    const x = try readWorldF32(&r);
+    const y = try readWorldF32(&r);
+    const z = try readWorldF32(&r);
     const use_q = try r.readBool();
     if (!use_q) {
         _ = try r.readF32();
@@ -1289,6 +1302,14 @@ test "pos body golden size" {
     try std.testing.expect(p.on_ground);
 }
 
+test "pos body rejects non-finite and out-of-range coordinates" {
+    var body_buf: [64]u8 = undefined;
+    const nan = try buildPosAndRotBody(&body_buf, 7, std.math.nan(f32), 2, 3, 0, 0, 0, true);
+    try std.testing.expectError(error.Overflow, parsePosAndRotBody(nan));
+    const huge = try buildPosAndRotBody(&body_buf, 7, 1, 2, 1e30, 0, 0, 0, true);
+    try std.testing.expectError(error.Overflow, parsePosAndRotBody(huge));
+}
+
 test "rel body golden size" {
     var body_buf: [64]u8 = undefined;
     const body = try buildRelPosBody(&body_buf, 1, 1, 0, -1, 0, 128, 0, true, 2);
@@ -1441,13 +1462,13 @@ test "entity stat changed body size" {
 }
 
 /// Stock-compatible player inventory body (NetPackagePlayerInventory.write fields).
-pub fn buildInventoryBodyStock(buf: []u8, inv: *const @import("../ecs/components.zig").Inventory) ![]u8 {
+pub fn buildInventoryBodyStock(buf: []u8, inv: *const components.Inventory) ![]u8 {
     return stock_inv.buildFromEcs(buf, inv);
 }
 
 pub fn buildInventoryBodyStockResolved(
     buf: []u8,
-    inv: *const @import("../ecs/components.zig").Inventory,
+    inv: *const components.Inventory,
     resolve: ?stock_inv.TypeResolver,
     ctx: ?*anyopaque,
 ) ![]u8 {
@@ -1476,7 +1497,7 @@ pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_c
 pub fn buildHoldingBodyResolved(
     buf: []u8,
     entity_id: i32,
-    inv: *const @import("../ecs/components.zig").Inventory,
+    inv: *const components.Inventory,
     resolve: ?stock_inv.TypeResolver,
     ctx: ?*anyopaque,
 ) ![]u8 {
@@ -2286,9 +2307,9 @@ pub const ExplosionInitiate = struct {
 pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
     var r: binary.Reader = .{ .data = body };
     var out: ExplosionInitiate = .{};
-    out.wx = try r.readF32();
-    out.wy = try r.readF32();
-    out.wz = try r.readF32();
+    out.wx = try readWorldF32(&r);
+    out.wy = try readWorldF32(&r);
+    out.wz = try readWorldF32(&r);
     out.bx = try r.readI32();
     out.by = try r.readI32();
     out.bz = try r.readI32();

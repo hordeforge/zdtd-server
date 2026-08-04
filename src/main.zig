@@ -411,6 +411,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var i: u64 = 0;
         while (i < max_ticks) : (i += 1) {
             try g.step();
+            g.fillWebuiSnap();
         }
         try g.world.saveAll();
         const snap = g.harness.snapshot();

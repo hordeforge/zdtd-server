@@ -3,6 +3,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const components = @import("../ecs/components.zig");
 
 pub const max_recipes: usize = 1024;
 pub const max_ingredients: usize = 8;
@@ -203,7 +204,7 @@ pub const NameToEcs = *const fn (ctx: ?*anyopaque, name: []const u8) u16;
 
 pub fn canCraft(
     recipe: RecipeDef,
-    inv: *const @import("../ecs/components.zig").Inventory,
+    inv: *const components.Inventory,
     name_to_ecs: NameToEcs,
     ctx: ?*anyopaque,
 ) bool {

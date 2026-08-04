@@ -214,13 +214,22 @@ curl -sS http://127.0.0.1:8080/healthz
 
 ### WU1 — Read-only dashboard
 
-- [ ] Tick-end `WebSnapshot` fill
-- [ ] Partials: status, players, apm (HTML)
-- [ ] HTMX auto-refresh 2s (toggle)
-- [ ] `GET /api/apm.json` for scripts
-- [ ] APM counters already include tick_overruns / encode_errors
+- [x] Tick-end `WebSnapshot` fill (`Game.fillWebuiSnap` → `webui.publishSnap`)
+- [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML)
+- [x] Auto-refresh 2s via small inline poller (no CDN; `hx-get` attributes)
+- [x] `GET /api/apm.json` for scripts
+- [x] Cookie login: `/login?token=SECRET` → `Set-Cookie: zdtd_webui=…`
+- [x] APM counters include tick_overruns / encode_errors / join / pkg / section means
 
-**Exit:** operator watches live join/tick without TCP client.
+**Exit:** browser or curl with secret sees live tick/players/apm.
+
+```bash
+zig-out/bin/zdtd --port 27002 --world worlds/zdtd_default \
+  --webui-port 8080 --webui-secret change-me
+# browser: http://127.0.0.1:8080/login?token=change-me
+curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/partials/status
+curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
+```
 
 ### WU2 — Commands
 

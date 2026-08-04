@@ -35,3 +35,10 @@ pub const Harness = struct {
         self.prof.reset();
     }
 };
+
+test {
+    _ = metrics;
+    _ = profiler;
+    _ = report;
+    _ = clock;
+}

@@ -23,6 +23,8 @@ pub const Mask = components.Mask;
 pub const max_entities = world.max_entities;
 
 test {
+    _ = entity;
+    _ = components;
     _ = world;
     _ = systems;
     _ = quest;

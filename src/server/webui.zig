@@ -643,25 +643,20 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
 
 fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     return std.fmt.bufPrint(buf,
-        \\{{"type":"zdtd_webui_apm","tick":{d},"day":{d},"hours":{d:.2},"joined":{d},"entered":{d},"peers":{d},"zombies":{d},"chunks":{d},"tick_overruns":{d},"encode_errors":{d},"stream_errors":{d},"tick_mean_ns":{d},"tick_p50_ns":{d},"tick_p99_ns":{d},"join_ok":{d},"join_fail":{d}}}
+        \\{{"type":"zdtd_webui_apm","tick":{d},"day":{d},"hours":{d:.2},"bm":{s},"joined":{d},"entered":{d},"peers":{d},"zombies":{d},"animals":{d},"traders":{d},"vehicles":{d},"turrets":{d},"loot":{d},"chunks":{d},"view_r":{d},"interest":{d:.0},"pkt_in":{d},"pkt_out":{d},"bytes_in":{d},"bytes_out":{d},"tick_overruns":{d},"encode_errors":{d},"stream_errors":{d},"net_poll_err":{d},"payload_err":{d},"send_err":{d},"window_drops":{d},"persist_err":{d},"stale_reaped":{d},"tick_mean_ns":{d},"tick_p50_ns":{d},"tick_p99_ns":{d},"tick_max_ns":{d},"net_mean_ns":{d},"sim_mean_ns":{d},"repl_mean_ns":{d},"stream_mean_ns":{d},"join_ok":{d},"join_fail":{d},"pkg_enc":{d},"pkg_bc":{d},"info_port":{d},"auth":"{s}","password":"{s}"}}
         \\
     , .{
-        s.tick_n,
-        s.day,
-        s.hours,
-        s.joined,
-        s.entered,
-        s.peers_alive,
-        s.zombies,
-        s.chunks,
-        s.tick_overruns,
-        s.encode_errors,
-        s.stream_errors,
-        s.tick_mean_ns,
-        s.tick_p50_ns,
-        s.tick_p99_ns,
-        s.join_ok,
-        s.join_fail,
+        s.tick_n,             s.day,             s.hours,                                           if (s.bloodmoon_active) "true" else "false",
+        s.joined,             s.entered,         s.peers_alive,                                     s.zombies,
+        s.animals,            s.traders,         s.vehicles,                                        s.turrets,
+        s.loot_bags,          s.chunks,          s.view_radius,                                     s.interest_range,
+        s.net_packets_in,     s.net_packets_out, s.net_bytes_in,                                    s.net_bytes_out,
+        s.tick_overruns,      s.encode_errors,   s.stream_errors,                                   s.net_poll_errors,
+        s.net_payload_errors, s.net_send_errors, s.reliable_window_drops,                           s.persistence_errors,
+        s.stale_peers_reaped, s.tick_mean_ns,    s.tick_p50_ns,                                     s.tick_p99_ns,
+        s.tick_max_ns,        s.net_mean_ns,     s.sim_mean_ns,                                     s.repl_mean_ns,
+        s.stream_mean_ns,     s.join_ok,         s.join_fail,                                       s.packages_encoded,
+        s.packages_broadcast, s.info_port,       if (s.authority_correct) "correct" else "observe", if (s.password_set) "set" else "open",
     });
 }
 

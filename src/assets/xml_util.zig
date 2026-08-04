@@ -26,24 +26,28 @@ pub fn stripComments(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 pub fn attr(hay: []const u8, start: usize, name: []const u8) ?[]const u8 {
     const end = std.mem.indexOfPos(u8, hay, start, ">") orelse hay.len;
     const window = hay[start..end];
-    var needle_buf: [64]u8 = undefined;
-    if (name.len + 2 > needle_buf.len) return null;
-    @memcpy(needle_buf[0..name.len], name);
-    needle_buf[name.len] = '=';
-    const needle = needle_buf[0 .. name.len + 1];
-    // Anchor on a preceding delimiter: `prob=` must not match `force_prob=`.
-    var from: usize = 0;
-    const ai = while (std.mem.indexOfPos(u8, window, from, needle)) |k| {
-        if (k > 0 and (window[k - 1] == ' ' or window[k - 1] == '\t' or
-            window[k - 1] == '\n' or window[k - 1] == '\r')) break k;
-        from = k + 1;
-    } else return null;
-    var p = window[ai + needle.len ..];
-    while (p.len > 0 and (p[0] == ' ' or p[0] == '\t')) p = p[1..];
-    if (p.len == 0 or p[0] != '"') return null;
-    p = p[1..];
-    const q = std.mem.indexOfScalar(u8, p, '"') orelse return null;
-    return p[0..q];
+    var i: usize = 0;
+    while (i < window.len) {
+        while (i < window.len and std.ascii.isWhitespace(window[i])) i += 1;
+        const key_start = i;
+        while (i < window.len and !std.ascii.isWhitespace(window[i]) and window[i] != '=') i += 1;
+        const key = window[key_start..i];
+        while (i < window.len and std.ascii.isWhitespace(window[i])) i += 1;
+        if (i >= window.len or window[i] != '=') {
+            continue;
+        }
+        i += 1;
+        while (i < window.len and std.ascii.isWhitespace(window[i])) i += 1;
+        if (i >= window.len or (window[i] != '"' and window[i] != '\'')) continue;
+        const quote = window[i];
+        i += 1;
+        const value_start = i;
+        while (i < window.len and window[i] != quote) i += 1;
+        if (i >= window.len) return null;
+        if (std.mem.eql(u8, key, name)) return window[value_start..i];
+        i += 1;
+    }
+    return null;
 }
 
 /// Property inside a quest body: `<property name="X" value="Y"/>` or with extra attrs.
@@ -138,4 +142,11 @@ test "attr and propertyValue" {
     try std.testing.expectEqualStrings("tier1_clear", attr(s, 0, "id").?);
     const body_start = std.mem.indexOf(u8, s, ">").? + 1;
     try std.testing.expectEqualStrings("quest_tier1_clear", propertyValue(s[body_start..], "name_key").?);
+}
+
+test "attr accepts XML whitespace and quote forms without suffix matches" {
+    const s = "<property force_prob=\"wrong\" name = 'ServerPort' value = \"27002\"/>";
+    try std.testing.expectEqualStrings("ServerPort", attr(s, 0, "name").?);
+    try std.testing.expectEqualStrings("27002", attr(s, 0, "value").?);
+    try std.testing.expect(attr(s, 0, "prob") == null);
 }
