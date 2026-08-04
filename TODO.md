@@ -24,22 +24,20 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **74 pass / 9 fail** (20260804g; power suite green; dig/place flaky feet) (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **81 pass / 2 fail** (20260804h) (kill/spawn/respawn PASS); version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
 
-Latest: `server/logs/playtest_zdtd_demo_20260804d.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
-Score: **pass=77 fail=6**. CGO gate **PASS** (cgo=63 need=39) after stream radius 7..9.
+Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Score: **pass=81 fail=2**. CGO gate **PASS**. Seed-Y + void-rescue RelPos + fixture clamp closed dig/place/block_dmg/power.
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `core/block_damage_melee` | hay seed dmg sometimes 0 | hybrid SetBlockRpc dmg; void rescue RelPos (`3983fdc`); fixture Y clamp on disk |
-| `core/dig_confirm` / `place_confirm` | intermittent no solid under feet | client float above mesh; FixtureSeedOrigin high-Y clamp |
+| `combat/ranged_shot` | intermittent ammo/meta or retarget HP | fixture timing / weapon equip |
 | `economy/eat_food_consume` | count stuck 1; food stat moved | consume C2S / item use |
-| `world/water_plane` / `biome_id` / `block_sample_ring` | intermittent air/biome -1 | chunk mesh lag after float |
-| `combat/ranged_shot` | intermittent | ammo/meta timing |
-| power suite | **PASS** 20260804g | place_generator + wire + turret + fuel |
+
+Closed 20260804h: dig/place, block_damage_melee, explosion_client, power suite, land_claim, workstation, chest, jump_motor, CGO/ground.
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
