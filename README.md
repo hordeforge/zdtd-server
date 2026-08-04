@@ -18,7 +18,8 @@ That is **not** sibling `7dtd-apm` (stock Mono dedi).
 ## Status
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
-death/respawn, loot, craft/workstation, trade, persist; 11/11 automated playtest.
+death/respawn, loot, craft/workstation, trade, persist; automated playtest
+77/83 (residuals listed in STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 | Doc | Role |
@@ -40,14 +41,15 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 # or: --quests assets/fixtures/quests.xml
 # names: Navezgane, Pregen06k01, Pregen06k02, Pregen08k01, Pregen08k02
 
-# loadgen:
-#   7dtd-loadgen --join --host 127.0.0.1 --port 27002 --count 2 --actions 20
+# loadgen joins LiteNet (ServerPort+2), not the TCP info port:
+#   7dtd-loadgen --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
 ```
+
 
 **Stock maps:** `--map` points at a game world folder (`map_info.xml`, `dtm.raw` /
 `dtm_processed.raw`, optional `spawnpoints.xml`). Heights are u16 LE `gameY*256`,
-world origin at map center (`wx + W/2`). `--world` remains the zdtd save overlay
-for `.zch` player edits on top of the DTM.
+world origin at map center (`wx + W/2`). `--world` remains the writable zdtd save
+overlay; `.zch` files use the ZCH3 format for heights and full u32 block data.
 
 Milestones / architecture: [`docs/zig-clone.md`](docs/zig-clone.md).
 
@@ -77,17 +79,20 @@ Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 
 ## Build
 
-Requires Zig **0.16+**.
+Requires Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). Canonical
+validation and release builds use the exact compiler in `.zigversion`; `make check`
+enforces that pin.
+No network fetch: the package has no Zig dependencies. Override the compiler with
+`ZIG=/path/to/zig` if needed.
 
 ```bash
 cd zdtd
-zig build
-zig build test
-zig build run
-# binary: zig-out/bin/zdtd
+make                 # Debug binary → zig-out/bin/zdtd
+make test
+make check           # version pin + build + test + fuzz corpus + wire lint
+make release         # ReleaseSafe + strip (operator binary)
+# or: zig build / zig build test / zig build -Doptimize=ReleaseSafe -Dstrip=true
 ```
-
-Or: `make` / `make test` / `make run`.
 
 ## Layout
 
@@ -101,11 +106,14 @@ src/ecs/               SoA ECS: components, systems, catalog/power/director reso
 src/util/parallel.zig  multi-thread range split (AI, turrets, chunk save)
 src/assets/            stock config loaders (quests.xml, …)
 assets/fixtures/       offline XML fixtures for tests
-src/world/store.zig    16×256×16 chunks + .zch disk
+src/world/store.zig    16×256×16 chunks + ZCH3 persistence in .zch files
 src/world/dtm.zig      stock Navezgane/Pregen dtm.raw + map_info + spawns
 src/world/prefabs.zig  prefab footprints
 src/world/water.zig    water_info sources
 src/apm/               metrics + section profiler + report
+src/version.zig        product/wire version pins (read by scripts/check-release.sh)
+src/fuzz.zig           fuzz entry (`zig build fuzz`, part of `make check`)
+scripts/               release check, wire lint, auto-join helpers
 docs/STATUS.md         living hub
 docs/INDEX.md          doc map
 docs/                 gaps, plan, wire, scale, APM

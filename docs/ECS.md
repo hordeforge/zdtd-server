@@ -8,7 +8,7 @@ src/ecs/
   components.zig   plain data types + Mask
   world.zig        SoA columns + shared resources + spawn helpers
   systems.zig      all mutations and tickAll (AI/turrets threaded)
-  interest.zig     per-client interest / known-entity tracking
+  interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
   path.zig         greedy path helper (no navmesh yet)
   quest.zig        Catalog resource types (defs from stock XML or builtin)
@@ -72,13 +72,29 @@ LINQ-style value predicates. Interest uses spatial range on top of that.
 |---|---|
 | AI / turrets | range-split threads + atomic damage FP |
 | Chunk save | parallel when many dirty |
-| Net poll / replicate | single-threaded owner |
+| Net poll / replicate | single-threaded owner; serialize-once framed fan-out |
 | World block store | not lock-free; tick-owned |
 
 Not a third-party ECS port. Keep Zig SoA + explicit `tickAll` phases +
 `util/parallel`. Zig ECS survey + steal checklist + scale brainstorm:
 [../TODO.md](../TODO.md) (P3 + scale). Priority path: apm baseline → persistent
-pool → dirty/serialize-once interest → chunk stream workers → sharded store.
+pool → dirty/serialize-once interest **[shipped]** → chunk stream workers →
+sharded store.
+
+### Serialize-once interest (M11.2)
+
+`Game.replicate` walks entities outer, clients inner:
+
+1. Gate with `Dirty` + `interest.needsPosSend` (dirty pos/rot or heartbeat).
+2. Encode PosAndRot once; for zombies also Speeds + AliveFlags once.
+3. `packages.framed` once per package kind into stack scratch.
+4. Fan-out framed bytes via `sendFramedDroppable` to peers in cell range
+   (no self-echo for the owning player).
+5. `interest.clearAfterReplicate` clears pos/rot/spawn/flags; hp/inv/remove stay.
+
+Spawn-on-approach still builds ECD EntitySpawn once when any peer needs it.
+Chunk stream caps are named in `game.zig` (`max_streamed_chunks`,
+`chunk_stream_radius_*`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`).
 
 ## Game wiring
 

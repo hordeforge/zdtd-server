@@ -2,10 +2,12 @@
 
 const std = @import("std");
 const binary = @import("binary.zig");
+const protocol = @import("../protocol.zig");
 const flate = std.compress.flate;
 
-pub const challenge_marker: u8 = 0xCA;
-pub const challenge_size: usize = 17;
+/// Re-export wire constants (single source of truth in protocol.zig).
+pub const challenge_marker = protocol.challenge_marker;
+pub const challenge_size = protocol.challenge_size;
 
 /// Inflate window for C2S compressed envelopes (stock Noemax deflate).
 const inflate_cap: usize = 512 * 1024;
@@ -20,7 +22,7 @@ pub const Package = struct {
 };
 
 pub fn isChallenge(data: []const u8) bool {
-    return data.len == challenge_size and data[0] == challenge_marker;
+    return protocol.challengeEchoValid(data);
 }
 
 pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
@@ -28,9 +30,16 @@ pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
     @memcpy(out.*[1..17], &guid);
 }
 
-/// Inflate stock C2S compressed payload (try zlib, raw, gzip).
+/// Inflate stock C2S compressed payload. Header-sniff picks the container so
+/// the common case decompresses in one pass; the others stay as fallback.
 fn inflatePayload(src: []const u8) ?[]const u8 {
-    const containers = [_]flate.Container{ .zlib, .raw, .gzip };
+    const first: flate.Container = if (src.len >= 2 and src[0] == 0x1f and src[1] == 0x8b)
+        .gzip
+    else if (src.len >= 2 and src[0] & 0x0f == 8 and (@as(u16, src[0]) << 8 | src[1]) % 31 == 0)
+        .zlib
+    else
+        .raw;
+    const containers = [_]flate.Container{ first, .zlib, .raw, .gzip };
     for (containers) |container| {
         var in: std.Io.Reader = .fixed(src);
         var out: std.Io.Writer = .fixed(&inflate_storage);
@@ -83,18 +92,11 @@ pub fn parseChannelPayload(data: []const u8, out: []Package) usize {
 
     const raw = data[o .. o + ps];
     const stream: []const u8 = if (compressed != 0) blk: {
-        const inflated = inflatePayload(raw) orelse {
-            std.debug.print("zdtd: frame inflate failed len={d} cnt={d}\n", .{ raw.len, count });
-            return 0;
-        };
+        const inflated = inflatePayload(raw) orelse return 0;
         break :blk inflated;
     } else raw;
 
-    const n = parsePackageStream(stream, count, out);
-    if (compressed != 0 and n > 0) {
-        std.debug.print("zdtd: frame inflated pkgs={d}/{d} raw={d} plain={d}\n", .{ n, count, raw.len, stream.len });
-    }
-    return n;
+    return parsePackageStream(stream, count, out);
 }
 
 /// Frame one package: channel + envelope + single inner package (uncompressed).

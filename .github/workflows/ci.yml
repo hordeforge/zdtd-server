@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # lint-wire.sh (make lint / make check) requires rg; not on ubuntu-24.04 images.
+      - name: Install ripgrep
+        run: |
+          if command -v rg >/dev/null 2>&1; then
+            rg --version
+          else
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ripgrep
+          fi
+
+      - name: Read toolchain pin
+        id: pin
+        run: echo "zig=$(tr -d '[:space:]' < .zigversion)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          # Single source of truth: .zigversion (also enforced by make release-check).
+          version: ${{ steps.pin.outputs.zig }}
+
+      - name: Verify workflow toolchain pin
+        run: test "$(zig version)" = "$(tr -d '[:space:]' < .zigversion)"
+
+      - name: Run validation gate
+        run: make check
+
+      - name: Build operator binary
+        run: make release
+
+      - name: Smoke-test release binary
+        run: |
+          expected=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig)
+          test "$(zig-out/bin/zdtd --version 2>&1)" = "zdtd $expected"
+
+      - name: Upload release binary
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zdtd-linux-x86_64-${{ github.sha }}
+          path: zig-out/bin/zdtd
+          if-no-files-found: error
+          retention-days: 14

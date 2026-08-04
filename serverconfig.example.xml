@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!--
+  Example stock-like ServerSettings for zdtd.
+  Copy and pass:  zdtd --serverconfig ./my-serverconfig.xml …
+
+  Precedence: CLI flags (--port, --admin-port, --world-name) override these keys.
+  Missing or unreadable --serverconfig path is a fatal error (no silent defaults).
+
+  Password is ServerPassword (LiteNet Connect key). Never commit real secrets.
+  AdminPort opens an unauthenticated console on 127.0.0.1 only.
+  See docs/GAME_OPTIONS.md for the full property list and ranges.
+-->
+<ServerSettings>
+  <property name="ServerPort" value="26902"/>
+  <property name="ServerMaxPlayerCount" value="8"/>
+  <property name="ServerPassword" value=""/>
+  <property name="GameName" value="zdtd"/>
+  <!-- Stock world folder name under --game-dir/Data/Worlds/ (e.g. Navezgane) -->
+  <property name="GameWorld" value=""/>
+  <!-- Unauthenticated TCP admin on 127.0.0.1; 0 = disabled -->
+  <property name="AdminPort" value="0"/>
+  <property name="ViewRadius" value="7"/>
+
+  <property name="GameDifficulty" value="2"/>
+  <property name="BloodMoonFrequency" value="7"/>
+  <property name="BloodMoonRange" value="0"/>
+  <property name="BloodMoonEnemyCount" value="8"/>
+  <property name="PlayerKillingMode" value="3"/>
+  <property name="DayNightLength" value="60"/>
+  <property name="DayLightLength" value="18"/>
+  <property name="MaxSpawnedZombies" value="64"/>
+  <property name="MaxSpawnedAnimals" value="50"/>
+  <property name="ZombieMove" value="0"/>
+  <property name="ZombieMoveNight" value="3"/>
+  <property name="ZombieFeralMove" value="3"/>
+  <property name="ZombieBMMove" value="3"/>
+  <property name="EnemyDifficulty" value="0"/>
+  <property name="LootAbundance" value="100"/>
+  <property name="XPMultiplier" value="100"/>
+  <property name="BlockDamagePlayer" value="100"/>
+  <property name="BlockDamageAI" value="100"/>
+  <property name="BlockDamageAIBM" value="100"/>
+  <property name="AirDropFrequency" value="72"/>
+  <property name="DropOnDeath" value="1"/>
+  <property name="LandClaimSize" value="41"/>
+  <property name="LandClaimOnlineDurabilityModifier" value="4"/>
+  <property name="LandClaimOfflineDurabilityModifier" value="4"/>
+
+  <!-- observe | permissive (alias of observe) | correct (default) -->
+  <property name="ZdtdAuthorityMode" value="correct"/>
+</ServerSettings>

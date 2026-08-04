@@ -253,11 +253,14 @@ pub const default_mappings = [_][]const u8{
     "NetPackageTreeFade",
 };
 
+const id_map = blk: {
+    var kvs: [default_mappings.len]struct { []const u8, u16 } = undefined;
+    for (default_mappings, 0..) |m, i| kvs[i] = .{ m, @intCast(i) };
+    break :blk std.StaticStringMap(u16).initComptime(kvs);
+};
+
 pub fn idOf(name: []const u8) ?u16 {
-    for (default_mappings, 0..) |m, i| {
-        if (std.mem.eql(u8, m, name)) return @intCast(i);
-    }
-    return null;
+    return id_map.get(name);
 }
 
 pub const VersionInfo = struct {
@@ -1000,11 +1003,7 @@ pub const chunk_body_size: usize = 12 + 256;
 pub const chunk_stock_envelope_overhead: usize = 11;
 
 /// WorldChunkCache.MakeChunkKey(x, z): ((z & 0xFFFFFF) << 24) | (x & 0xFFFFFF)
-pub fn makeChunkKey(cx: i32, cz: i32) i64 {
-    const x = @as(i64, cx) & 0xFFFFFF;
-    const z = @as(i64, cz) & 0xFFFFFF;
-    return (z << 24) | x;
-}
+pub const makeChunkKey = stock_deco.makeChunkKey;
 
 pub fn extractChunkKeyX(key: i64) i32 {
     // extractX: sign-extend low 24 bits
@@ -1238,10 +1237,10 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     }
     // density sbyte
     if ((flags & 4) != 0) _ = try r.readByte();
-    // texture: TextureFullArray.Read(br, 1): typically one u64 when present
-    if ((flags & 0x20) != 0) {
-        if (r.remaining() >= 8) _ = try r.readU64();
-    }
+    // texture: TextureFullArray.Read(br, 1): typically one u64 when present.
+    // Short stream must error, not silently succeed: later changes in the
+    // batch would decode from a desynced offset as bogus world edits.
+    if ((flags & 0x20) != 0) _ = try r.readU64();
     return ch;
 }
 
@@ -2178,9 +2177,9 @@ test "world spawn points stock wire" {
 pub fn parseLandClaimRepair(body: []const u8) !struct { x: i32, y: i32, z: i32, begin_repair: bool } {
     if (body.len < 25) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
-    const x: i32 = @intCast(try r.readI64());
-    const y: i32 = @intCast(try r.readI64());
-    const z: i32 = @intCast(try r.readI64());
+    const x = std.math.cast(i32, try r.readI64()) orelse return error.EndOfStream;
+    const y = std.math.cast(i32, try r.readI64()) orelse return error.EndOfStream;
+    const z = std.math.cast(i32, try r.readI64()) orelse return error.EndOfStream;
     const begin = try r.readBool();
     return .{ .x = x, .y = y, .z = z, .begin_repair = begin };
 }

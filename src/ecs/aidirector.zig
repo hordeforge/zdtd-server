@@ -70,6 +70,13 @@ pub const WorldClock = struct {
 pub const Director = struct {
     clock: WorldClock = .{},
     horde_cd: f32 = 0,
+    /// Entity group names from spawning.xml (empty → class_table rotation).
+    night_group: []const u8 = "",
+    day_group: []const u8 = "",
+    animal_group: []const u8 = "",
+    /// Optional pick: (ctx, group_name, seed) → class name; Game wires entitygroups.
+    group_pick_ctx: ?*anyopaque = null,
+    group_pick_fn: ?*const fn (?*anyopaque, []const u8, u32) ?[]const u8 = null,
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
@@ -179,12 +186,25 @@ pub const Director = struct {
     }
 
     fn spawnAnimalsNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
-        // Find an animal class slot (from entityclasses when loaded).
         var animal_ct: ?ecs_world.EntityClass = null;
-        for (w.class_table) |ct| {
-            if (ct.kind == .animal and ct.hash != 0) {
-                animal_ct = ct;
-                break;
+        if (self.animal_group.len > 0) {
+            if (self.group_pick_fn) |pick| {
+                if (pick(self.group_pick_ctx, self.animal_group, self.total_spawned)) |cname| {
+                    for (w.class_table) |ct| {
+                        if (ct.kind == .animal and std.mem.eql(u8, ct.name, cname)) {
+                            animal_ct = ct;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (animal_ct == null) {
+            for (w.class_table) |ct| {
+                if (ct.kind == .animal and ct.hash != 0) {
+                    animal_ct = ct;
+                    break;
+                }
             }
         }
         var n: u32 = 0;
@@ -222,13 +242,26 @@ pub const Director = struct {
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
                 const y = w.transform[p].y;
-                // Rotate through zombie class slots (1, 8..11) so hordes vary;
-                // slots beyond 1 are filled from entitygroups when XML loads.
-                const zombie_slots = [_]usize{ 1, 8, 9, 10, 11 };
+                // Prefer spawning.xml entity group → entityclasses; else class_table rotation.
                 var ct = w.class_table[1];
-                const csel = zombie_slots[(self.total_spawned +% n) % zombie_slots.len];
-                if (w.class_table[csel].hash != 0 and w.class_table[csel].kind == .zombie) {
-                    ct = w.class_table[csel];
+                const grp = if (self.clock.isNight()) self.night_group else self.day_group;
+                if (grp.len > 0) {
+                    if (self.group_pick_fn) |pick| {
+                        if (pick(self.group_pick_ctx, grp, self.total_spawned +% n)) |cname| {
+                            for (w.class_table) |slot_ct| {
+                                if (slot_ct.kind == .zombie and std.mem.eql(u8, slot_ct.name, cname)) {
+                                    ct = slot_ct;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    const zombie_slots = [_]usize{ 1, 8, 9, 10, 11 };
+                    const csel = zombie_slots[(self.total_spawned +% n) % zombie_slots.len];
+                    if (w.class_table[csel].hash != 0 and w.class_table[csel].kind == .zombie) {
+                        ct = w.class_table[csel];
+                    }
                 }
                 const bm_mul: f32 = if (self.bloodmoon_active) 1.5 else 1.0;
                 const hp: f32 = ct.max_hp * bm_mul * self.hpScale();

@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** 239/239 · stock join: green (0 NRE) · core play loop: **yes** (11/11 automated playtest) · full stock parity: **partial** (gaps below)
+**Tests:** 239/239 · stock join: green (0 NRE) · core play loop: **yes** (automated playtest 77/83, residuals in STATUS) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -42,7 +42,7 @@ This document is deliberately exhaustive. Status labels:
 
 **Honest bottom line:** core stock loop is playable under EAC-off (join, move,
 dig/build, fight, death/respawn, loot, craft + workstation, trade, persist;
-11/11 automated playtest). Remaining work is **depth and scale**, not join.
+automated playtest 77/83). Remaining work is **depth and scale**, not join.
 Prefer missing over fakes. Best PARTIAL write-ups: §5.2.1 EAI, §6.1 quests,
 electrical gaps, vehicle physics, blood-moon FX.
 

@@ -69,6 +69,12 @@ pub const ZombieAi = struct {
     path_goal_x: f32 = 0,
     path_goal_z: f32 = 0,
     has_path: bool = false,
+    /// Seconds until next A* replan (chase only).
+    path_replan_cd: f32 = 0,
+    /// Next waypoint cell (world block xz) while following a planned path.
+    path_wp_x: i32 = 0,
+    path_wp_z: i32 = 0,
+    path_wp_valid: bool = false,
     /// Per-entity xorshift state for wander decisions (0 = unseeded; first
     /// decision seeds from net id so streams differ per entity).
     wander_rng: u32 = 0,
@@ -89,6 +95,8 @@ pub const Vehicle = struct {
     driver_net_id: i32 = -1,
     /// Vertical velocity accumulator for gravity integration (systemVehicles).
     vy: f32 = 0,
+    /// Cap from vehicles.xml velocityMax; 0 → kind default in vehicleControl.
+    max_speed: f32 = 0,
 };
 
 pub const Turret = struct {
@@ -196,6 +204,17 @@ pub const Inventory = struct {
 
     pub fn addItemStacked(self: *Inventory, item_id: u16, count: u16, max_stack: u16) bool {
         if (item_id == 0 or count == 0) return false;
+        // All-or-nothing: a partial deposit followed by `false` makes callers
+        // that refund on failure duplicate items (container take/put, craft).
+        var room_total: u32 = 0;
+        for (self.slots[0..inv_equip_start]) |s| {
+            if (s.count == 0) {
+                room_total += max_stack;
+            } else if (s.item_id == item_id and s.count < max_stack) {
+                room_total += max_stack - s.count;
+            }
+        }
+        if (room_total < count) return false;
         var left = count;
         // stack into existing (toolbelt first, then bag)
         var i: usize = 0;
@@ -264,7 +283,7 @@ pub const Inventory = struct {
             return true;
         }
         if (s.item_id != item.item_id) return false;
-        if (s.count +% item.count > max_stack) return false;
+        if (s.count >= max_stack or item.count > max_stack - s.count) return false;
         s.count += item.count;
         return true;
     }
@@ -299,6 +318,13 @@ pub const Inventory = struct {
         return true;
     }
 };
+
+test "putInSlot rejects overflowing stack counts" {
+    var inv: Inventory = .{};
+    inv.slots[0] = .{ .item_id = 1, .count = std.math.maxInt(u16) };
+    try std.testing.expect(!inv.putInSlot(0, .{ .item_id = 1, .count = 1 }, std.math.maxInt(u16)));
+    try std.testing.expectEqual(std.math.maxInt(u16), inv.slots[0].count);
+}
 
 pub const StockEntry = struct {
     item: u16 = 0,

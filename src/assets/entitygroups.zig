@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const max_groups: usize = 512;
 pub const max_entries: usize = 64;
@@ -77,33 +77,8 @@ const builtin_groups = [_]Group{
     },
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
@@ -146,11 +121,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
             };
             var w: f32 = 1;
             if (xml.attr(body, et, "p")) |ps| {
-                w = xml.parseF32(ps) orelse 1;
+                // Explicit p="0" disables the entry; do not coerce it to 1.
+                w = @max(0, xml.parseF32(ps) orelse 1);
             }
             g.entries[g.entry_n] = .{
                 .name = try arena.dupe(u8, en),
-                .weight = if (w > 0) w else 1,
+                .weight = w,
             };
             g.weight_sum += g.entries[g.entry_n].weight;
             g.entry_n += 1;
@@ -170,16 +146,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?GroupTable {
-    var path_buf: [2048]u8 = undefined;
-    if (config_dir) |cd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/entitygroups.xml", .{cd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    if (game_dir) |gd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/entitygroups.xml", .{gd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    return null;
+    const paths = @import("paths.zig");
+    return paths.tryLoadConfig("entitygroups.xml", GroupTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
 test "builtin group pick" {

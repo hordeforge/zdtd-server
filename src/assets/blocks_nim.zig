@@ -1,8 +1,9 @@
 //! Prefab `.blocks.nim` local-id → block name table (Prefab name mapping).
-//! Use when TTS types are local indices rather than AssignIds.
+//! Catalog/asset parse (not world store). Use when TTS types are local indices
+//! rather than AssignIds. world/root re-exports for stable import paths.
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const max_entries: usize = 4096;
 
@@ -28,31 +29,6 @@ pub const Map = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 fn read7BitLen(data: []const u8, pos: *usize) !usize {
     var length: usize = 0;
     var shift: u6 = 0;
@@ -70,7 +46,7 @@ fn read7BitLen(data: []const u8, pos: *usize) !usize {
 
 /// Layout (observed stock): version:u32 | count:u32 | (local_id:u32 | 7bit-string name)*count
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
-    const data = try readFileAll(allocator, path);
+    const data = try io_fs.readFileAll(allocator, path);
     defer allocator.free(data);
     if (data.len < 8) return error.ShortNim;
     const version = std.mem.readInt(u32, data[0..4], .little);
@@ -99,6 +75,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
         pos += ln;
         if (id > max_id) max_id = id;
     }
+    // max_id sizes the allocation below; an untrusted file must not drive it
+    // unbounded (a crafted id of 0xFFFFFFFF would demand a 64 GiB table).
+    // Stock local ids are u16-range block ids, which can exceed max_entries.
+    if (max_id > std.math.maxInt(u16)) return error.BadLocalId;
 
     const names = try arena.alloc([]const u8, max_id + 1);
     @memset(names, "");
@@ -122,13 +102,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
 
 test "load abandoned_house blocks.nim if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
-    var path_z: [512]u8 = undefined;
-    if (p.len >= path_z.len) return error.SkipZigTest;
-    @memcpy(path_z[0..p.len], p);
-    path_z[p.len] = 0;
-    const rc = linux.open(path_z[0..p.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest;
-    _ = linux.close(@intCast(rc));
+    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
 
     var m = try loadFromPath(std.testing.allocator, p);
     defer m.deinit();

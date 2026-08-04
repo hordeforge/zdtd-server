@@ -24,7 +24,7 @@ pub const Heightmap = struct {
     }
 
     /// Surface block Y at world XZ (u16; stock DTM stores gameY*256 in u16 samples).
-    /// Out of bounds → null. Values above 255 are rare on stock maps but not clamped here.
+    /// Out of bounds → null. `samples >> 8` caps the result at 255.
     pub fn heightAtWorld(self: *const Heightmap, wx: i32, wz: i32) ?u16 {
         const dx = wx + self.half_w;
         const dz = wz + self.half_h;
@@ -34,7 +34,7 @@ pub const Heightmap = struct {
     }
 
     /// Fill a 16×16 chunk height plane for chunk (cx, cz). Missing samples use `fallback`.
-    /// Plane remains u8 for stock wire/disk; values >255 clamp to 255.
+    /// Plane remains u8 for stock wire/disk.
     pub fn fillChunkHeights(self: *const Heightmap, cx: i32, cz: i32, out: *[256]u8, fallback: u8) void {
         const base_x = cx * 16;
         const base_z = cz * 16;

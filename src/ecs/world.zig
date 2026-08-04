@@ -70,6 +70,22 @@ pub const World = struct {
     /// physics is skipped and no fake flat floor is invented.
     ground_ctx: ?*anyopaque = null,
     ground_fn: ?*const fn (?*anyopaque, i32, i32) f32 = null,
+    /// Optional solid-cell probe for AI pathing: true = blocked at feet.
+    /// Unset → open grid (tests / headless). Game wires world.isSolidWorld at body y.
+    solid_ctx: ?*anyopaque = null,
+    solid_fn: ?*const fn (?*anyopaque, i32, i32) bool = null,
+    /// Optional item_id → placeable block id (AssignIds). Null → inventory offline map.
+    place_ctx: ?*anyopaque = null,
+    place_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Optional item_id → items.xml FuelValue (0 = not fuel). Game wires ItemTable.
+    fuel_value_ctx: ?*anyopaque = null,
+    fuel_value_fn: ?*const fn (?*anyopaque, u16) f32 = null,
+    /// Optional item_id → max stack (items.xml Stacknumber). Null → builtin_defs.
+    stack_ctx: ?*anyopaque = null,
+    stack_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Optional item_id → armor? (name prefix armor*). Null → offline pin.
+    is_armor_ctx: ?*anyopaque = null,
+    is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
 
     class_table: [16]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
@@ -85,6 +101,7 @@ pub const World = struct {
     pub fn ensureNetMap(self: *World, allocator: std.mem.Allocator) !void {
         if (self.net_map_init) return;
         self.net_to_slot = std.AutoHashMap(i32, Slot).init(allocator);
+        try self.net_to_slot.ensureTotalCapacity(max_entities);
         self.net_map_init = true;
     }
 
@@ -136,6 +153,12 @@ pub const World = struct {
         return null;
     }
 
+    /// True when cell (wx,wz) blocks horizontal AI movement (optional hook).
+    pub fn isPathSolid(self: *const World, wx: i32, wz: i32) bool {
+        if (self.solid_fn) |f| return f(self.solid_ctx, wx, wz);
+        return false;
+    }
+
     pub fn slotOfNetId(self: *const World, id: NetId) ?Slot {
         if (self.net_map_init) {
             return self.net_to_slot.get(id);
@@ -148,9 +171,10 @@ pub const World = struct {
     }
 
     fn registerNet(self: *World, slot: Slot, id: NetId) void {
-        if (self.net_map_init) {
-            self.net_to_slot.put(id, slot) catch {};
-        }
+        if (!self.net_map_init) return;
+        // Pre-sized at init; insert failure only if map allocator is exhausted.
+        // Fall back: slotOfNetId still walks SoA when map misses.
+        self.net_to_slot.put(id, slot) catch {};
     }
 
     fn spawnBase(self: *World, kind: Kind, x: f32, y: f32, z: f32, hp: f32) ?Slot {
@@ -240,10 +264,15 @@ pub const World = struct {
         self.journal[s] = .{};
         self.wallet[s] = .{};
         self.inventory[s] = .{};
-        // starter kit
-        _ = self.inventory[s].addItem(8, 1); // stone axe
-        _ = self.inventory[s].addItem(2, 5); // food
-        _ = self.inventory[s].addItem(7, 20); // wood
+        // Starter kit by stock item name → ECS id (items.builtinStockName reverse).
+        // Production may refill via Game after items.xml load.
+        const starter = [_]struct { u16, u16 }{
+            .{ 8, 1 }, // meleeToolRepairT0StoneAxe
+            .{ 2, 5 }, // foodCanBeef
+            .{ 7, 20 }, // resourceWood
+            .{ 6, 50 }, // casinoCoin
+        };
+        for (starter) |it| _ = self.inventory[s].addItem(it[0], it[1]);
         return self.network_id[s].id;
     }
 
@@ -287,11 +316,18 @@ pub const World = struct {
     }
 
     pub fn spawnVehicle(self: *World, kind: c.VehicleKind, x: f32, y: f32, z: f32) ?NetId {
-        const s = self.spawnBase(.vehicle, x, y, z, 200) orelse return null;
+        return self.spawnVehicleEx(kind, x, y, z, 200, 0);
+    }
+
+    /// max_hp / max_speed from vehicles.xml when known (0 speed → kind default).
+    pub fn spawnVehicleEx(self: *World, kind: c.VehicleKind, x: f32, y: f32, z: f32, max_hp: f32, max_speed: f32) ?NetId {
+        const hp = if (max_hp > 0) max_hp else 200;
+        const s = self.spawnBase(.vehicle, x, y, z, hp) orelse return null;
         self.mask[s].vehicle = true;
         self.vehicle[s] = .{
             .kind = kind,
             .fuel = if (kind == .bicycle) 0 else 100,
+            .max_speed = max_speed,
         };
         return self.network_id[s].id;
     }

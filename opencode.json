@@ -18,8 +18,8 @@
   },
   "command": {
     "check": {
-      "description": "Build and run the full zig test suite (make check)",
-      "template": "Run the project validation loop from the repo root:\n\n```bash\nmake check\n```\n\nThat is `zig build` then `zig build test`. Fix any compile or test failures. Do not skip failing tests. Prefer the smallest correct fix over drive-by refactors."
+      "description": "Full validation gate (make check)",
+      "template": "Run the project validation loop from the repo root:\n\n```bash\nmake check\n```\n\nThat is `release-check` (version/toolchain pin) then `zig build`, `zig build test`, `zig build fuzz`, and `scripts/lint-wire.sh`. Fix any compile, test, or lint failures. Do not skip failing tests. Prefer the smallest correct fix over drive-by refactors."
     },
     "test": {
       "description": "Run zig build test only",

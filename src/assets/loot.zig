@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const max_groups: usize = 2048;
 pub const max_containers: usize = 512;
@@ -214,31 +214,6 @@ const builtin_containers = [_]LootContainer{
     },
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 fn parseCountRange(s: []const u8) struct { min: u16, max: u16 } {
     if (std.mem.indexOfScalar(u8, s, ',')) |c| {
         const a = xml.parseU16(std.mem.trim(u8, s[0..c], " \t")) orelse 1;
@@ -265,7 +240,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize) ?LootEntry {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
@@ -376,16 +351,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?LootTable {
-    var path_buf: [2048]u8 = undefined;
-    if (config_dir) |cd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/loot.xml", .{cd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    if (game_dir) |gd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/loot.xml", .{gd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    return null;
+    const paths = @import("paths.zig");
+    return paths.tryLoadConfig("loot.xml", LootTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
 test "builtin loot roll" {

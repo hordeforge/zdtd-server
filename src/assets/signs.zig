@@ -3,7 +3,7 @@
 //! retrieve sign data" for missing library guids; full layer paint is later).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 const binary = @import("../wire/binary.zig");
 
 pub const max_signs: usize = 4096;
@@ -86,7 +86,13 @@ fn attrValue(open_tag: []const u8, key: []const u8) ?[]const u8 {
     needle_buf[key.len] = '=';
     needle_buf[key.len + 1] = '"';
     const needle = needle_buf[0 .. key.len + 2];
-    const i = std.mem.indexOf(u8, open_tag, needle) orelse return null;
+    // Anchor on a preceding delimiter: `prob=` must not match `force_prob=`.
+    var from: usize = 0;
+    const i = while (std.mem.indexOfPos(u8, open_tag, from, needle)) |k| {
+        if (k > 0 and (open_tag[k - 1] == ' ' or open_tag[k - 1] == '\t' or
+            open_tag[k - 1] == '\n' or open_tag[k - 1] == '\r')) break k;
+        from = k + 1;
+    } else return null;
     const start = i + needle.len;
     const end = std.mem.indexOfPos(u8, open_tag, start, "\"") orelse return null;
     return open_tag[start..end];
@@ -123,43 +129,26 @@ fn walkSigns(
     dir_path: []const u8,
     list: *std.ArrayList(SignEntry),
 ) !void {
-    var path_z: [2048]u8 = undefined;
-    if (dir_path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..dir_path.len], dir_path);
-    path_z[dir_path.len] = 0;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(io);
 
-    const fd_rc = linux.open(path_z[0..dir_path.len :0].ptr, .{ .ACCMODE = .RDONLY, .DIRECTORY = true }, 0);
-    if (linux.errno(fd_rc) != .SUCCESS) return; // missing dir is ok
-    const fd: i32 = @intCast(fd_rc);
-    defer _ = linux.close(fd);
-
-    var buf: [8192]u8 = undefined;
-    while (true) {
-        const n = linux.getdents64(fd, &buf, buf.len);
-        if (linux.errno(n) != .SUCCESS) break;
-        if (n == 0) break;
-        var off: usize = 0;
-        while (off < @as(usize, @intCast(n))) {
-            const ent: *align(1) const linux.dirent64 = @ptrCast(@alignCast(buf[off..].ptr));
-            const reclen = ent.reclen;
-            if (reclen == 0) break;
-            const name_ptr: [*:0]const u8 = @ptrCast(&ent.name);
-            const name = std.mem.span(name_ptr);
-            off += reclen;
-            if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
-
-            var child_buf: [2048]u8 = undefined;
-            const child = std.fmt.bufPrint(&child_buf, "{s}/{s}", .{ dir_path, name }) catch continue;
-
-            if (ent.type == linux.DT.DIR) {
-                try walkSigns(gpa, arena, child, list);
-                continue;
-            }
-            if (!std.mem.endsWith(u8, name, "_signs.xml")) continue;
-            const lib = name[0 .. name.len - "_signs.xml".len];
-            try parseSignsFile(gpa, arena, child, lib, list);
-            if (list.items.len >= max_signs) return;
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "..")) continue;
+        var child_buf: [2048]u8 = undefined;
+        const child = std.fmt.bufPrint(&child_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
+        if (entry.kind == .directory) {
+            try walkSigns(gpa, arena, child, list);
+            continue;
         }
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, "_signs.xml")) continue;
+        const lib = entry.name[0 .. entry.name.len - "_signs.xml".len];
+        try parseSignsFile(gpa, arena, child, lib, list);
+        if (list.items.len >= max_signs) return;
     }
 }
 
@@ -170,7 +159,7 @@ fn parseSignsFile(
     library: []const u8,
     list: *std.ArrayList(SignEntry),
 ) !void {
-    const raw = readFileAll(gpa, path) catch return;
+    const raw = io_fs.readFileAll(gpa, path) catch return;
     defer gpa.free(raw);
 
     const lib_owned = try arena.dupe(u8, library);
@@ -195,31 +184,6 @@ fn parseSignsFile(
             .next_group = parseI32Attr(tag, "next_group_id", 0),
         });
     }
-}
-
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var got: usize = 0;
-    while (got < size) {
-        const n = linux.read(fd, buf[got..].ptr, size - got);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        got += @intCast(n);
-    }
-    return buf[0..got];
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8) !?Catalog {

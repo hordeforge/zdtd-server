@@ -11,33 +11,30 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
 
-/// EntityClass.list keys are `name.GetHashCode()` (Unity Mono / .NET string hash),
-/// not XML order and not modern randomized .NET hashes.
-/// Algorithm: dual djb2-style 5381 streams over even/odd chars, then
-/// `hash1 + hash2 * 1566083941` (signed i32). Verified client-side:
-/// playerMale → 2001454542 (EntityClass.list after Init).
-pub fn unityStringHash(s: []const u8) i32 {
-    // Same as Extensions.GetStableHashCode / Mono string.GetHashCode for ASCII.
-    return @import("stock_te.zig").getStableHashCode(s);
-}
+const unity_hash = @import("../assets/unity_hash.zig");
 
-pub const class_player_male: i32 = unityStringHash("playerMale");
-pub const class_player_female: i32 = unityStringHash("playerFemale");
+/// EntityClass.list keys are `name.GetHashCode()` (Unity Mono / .NET string hash),
+/// not XML order and not modern randomized .NET hashes. Implementation:
+/// `assets/unity_hash.zig` (re-exported here for stable wire API).
+pub const unityStringHash = unity_hash.unityStringHash;
+
+pub const class_player_male = unity_hash.class_player_male;
+pub const class_player_female = unity_hash.class_player_female;
 /// Template-only (Mesh empty, UserSpawnType=None). Do not spawn on wire.
-pub const class_zombie_template_male: i32 = unityStringHash("zombieTemplateMale");
-pub const class_zombie_template_short: i32 = unityStringHash("zombieShortTemplate");
+pub const class_zombie_template_male = unity_hash.class_zombie_template_male;
+pub const class_zombie_template_short = unity_hash.class_zombie_template_short;
 /// Spawnable walkers (Mesh + UserSpawnType=Menu).
-pub const class_zombie_boe: i32 = unityStringHash("zombieBoe");
-pub const class_zombie_joe: i32 = unityStringHash("zombieJoe");
+pub const class_zombie_boe = unity_hash.class_zombie_boe;
+pub const class_zombie_joe = unity_hash.class_zombie_joe;
 /// Default ECD class for seed zombies (real mesh, not template).
-pub const class_zombie_default: i32 = class_zombie_boe;
+pub const class_zombie_default = unity_hash.class_zombie_default;
 /// Dropped ground loot bag (EntityLootContainer subclass).
-pub const class_dropped_loot_container: i32 = unityStringHash("DroppedLootContainer");
+pub const class_dropped_loot_container = unity_hash.class_dropped_loot_container;
 /// Named loot container entity class (prefab / TE-style loot).
-pub const class_entity_loot_container: i32 = unityStringHash("EntityLootContainer");
+pub const class_entity_loot_container = unity_hash.class_entity_loot_container;
 /// Dropped-item entity (EntityItem). EntityClass.itemClass = hash("item"); the
 /// EntityCreationData.write itemClass branch carries the item stack + owner ids.
-pub const class_item: i32 = unityStringHash("item");
+pub const class_item = unity_hash.class_item;
 
 pub const SpawnOpts = struct {
     entity_id: i32,
@@ -115,14 +112,15 @@ pub const FallingTreeInfo = struct {
 
 /// Class-name strings verified against EntityClass.Init ldstr literals.
 /// Falling-tree entity class (EntityClass.fallingTreeClass).
-pub const class_falling_tree: i32 = unityStringHash("fallingTree");
-/// Single/multi falling-block classes. Their ECD branches (BlockValue arrays +
-/// TextureFullArray) are not implemented; spawning them is an explicit error.
-pub const class_falling_block: i32 = unityStringHash("fallingBlock");
-pub const class_falling_blocks: i32 = unityStringHash("fallingBlocks");
+pub const class_falling_tree = unity_hash.class_falling_tree;
+/// Single/multi falling-block classes. Their ECD branches (BlockValue + texture
+/// for single, count + three arrays for multi) require payload in the spawn
+/// request; absent payload is an explicit error.
+pub const class_falling_block = unity_hash.class_falling_block;
+pub const class_falling_blocks = unity_hash.class_falling_blocks;
 /// Junk drone (EntityClass.junkDroneClass): adds belongsPlayerId + orderState to
 /// the ECD tail, outside the networkWrite guard.
-pub const class_junk_drone: i32 = unityStringHash("entityJunkDrone");
+pub const class_junk_drone = unity_hash.class_junk_drone;
 
 /// One falling block: packed BlockValue plus its texture word.
 /// `TextureFullArray.Write` emits exactly one i64 (loop bound 1 in the IL).
@@ -168,8 +166,8 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // NetPackageEntityTargeted
     try w.writeI32(opts.entity_id);
-    // EntityCreationData.write FileVersion 35
-    try w.writeByte(35);
+    // EntityCreationData.write FileVersion 36 (V3.1.0; ends with stressAmount)
+    try w.writeByte(36);
     try w.writeI32(opts.entity_class);
     try w.writeI32(opts.entity_id);
     try w.writeF32(std.math.floatMax(f32)); // lifetime
@@ -192,9 +190,10 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     } else {
         try w.writeBool(false); // no bag
     }
-    try w.writeI32(@intFromFloat(opts.x));
-    try w.writeI32(@intFromFloat(opts.y));
-    try w.writeI32(@intFromFloat(opts.z)); // homePosition
+    // lossyCast: client-fed transforms may be NaN/inf/huge; @intFromFloat traps.
+    try w.writeI32(std.math.lossyCast(i32, opts.x));
+    try w.writeI32(std.math.lossyCast(i32, opts.y));
+    try w.writeI32(std.math.lossyCast(i32, opts.z)); // homePosition
     try w.writeI16(-1); // homeRange
     try w.writeByte(0); // spawnerSource Dynamic
     // entityClass switch (EntityCreationData.write). The branches are mutually
@@ -272,6 +271,8 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
         try w.writeI32(opts.belongs_player_id);
         try w.writeI32(opts.drone_order_state);
     }
+    // ECD v36 tail (always written after junkDrone branch).
+    try w.writeF32(0); // stressAmount
     return w.written();
 }
 
@@ -293,7 +294,7 @@ test "stock zombie spawn body non-empty" {
     try std.testing.expectEqual(@as(i32, -1846908538), class_entity_loot_container);
     try std.testing.expect(body.len > 40);
     try std.testing.expectEqual(@as(i32, 200), std.mem.readInt(i32, body[0..4], .little));
-    try std.testing.expectEqual(@as(u8, 35), body[4]);
+    try std.testing.expectEqual(@as(u8, 36), body[4]);
     try std.testing.expectEqual(class_zombie_default, std.mem.readInt(i32, body[5..9], .little));
     try std.testing.expectEqual(class_zombie_boe, class_zombie_default);
 }
@@ -408,13 +409,25 @@ test "stock falling-tree spawn emits blockPos + fallTreeDir" {
 test "class branches that need payload fail loudly instead of emitting a short body" {
     var buf: [512]u8 = undefined;
     try std.testing.expectError(error.MissingPlayerSpawnInfo, buildEntitySpawnStock(&buf, .{
-        .entity_id = 1, .entity_class = class_player_male, .x = 0, .y = 0, .z = 0,
+        .entity_id = 1,
+        .entity_class = class_player_male,
+        .x = 0,
+        .y = 0,
+        .z = 0,
     }));
     try std.testing.expectError(error.MissingFallingTreeData, buildEntitySpawnStock(&buf, .{
-        .entity_id = 2, .entity_class = class_falling_tree, .x = 0, .y = 0, .z = 0,
+        .entity_id = 2,
+        .entity_class = class_falling_tree,
+        .x = 0,
+        .y = 0,
+        .z = 0,
     }));
     try std.testing.expectError(error.MissingItemDropData, buildEntitySpawnStock(&buf, .{
-        .entity_id = 3, .entity_class = class_item, .x = 0, .y = 0, .z = 0,
+        .entity_id = 3,
+        .entity_class = class_item,
+        .x = 0,
+        .y = 0,
+        .z = 0,
     }));
     // a zombie is unaffected by the guards
     _ = try buildEntitySpawnStock(&buf, .{ .entity_id = 4, .x = 0, .y = 0, .z = 0 });
@@ -425,17 +438,24 @@ test "junk drone appends belongsPlayerId + orderState after the networkWrite tai
     const drone = try buildEntitySpawnStock(&buf, .{
         .entity_id = 700,
         .entity_class = class_junk_drone,
-        .x = 0, .y = 64, .z = 0,
+        .x = 0,
+        .y = 64,
+        .z = 0,
         .belongs_player_id = 171,
         .drone_order_state = 2,
     });
     const zombie = try buildEntitySpawnStock(buf[drone.len..], .{
-        .entity_id = 701, .x = 0, .y = 64, .z = 0,
+        .entity_id = 701,
+        .x = 0,
+        .y = 64,
+        .z = 0,
     });
-    // the drone body is exactly 8 bytes longer than an otherwise identical zombie
+    // drone adds belongsPlayerId+orderState (8 B) before shared stressAmount tail
     try std.testing.expectEqual(zombie.len + 8, drone.len);
-    try std.testing.expectEqual(@as(i32, 171), std.mem.readInt(i32, drone[drone.len - 8 ..][0..4], .little));
-    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, drone[drone.len - 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 171), std.mem.readInt(i32, drone[drone.len - 12 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, drone[drone.len - 8 ..][0..4], .little));
+    // trailing stressAmount f32 == 0 on both
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, drone[drone.len - 4 ..][0..4], .little));
 }
 
 test "fallingBlock branch emits rawData + one texture i64" {
@@ -443,7 +463,9 @@ test "fallingBlock branch emits rawData + one texture i64" {
     const body = try buildEntitySpawnStock(&buf, .{
         .entity_id = 800,
         .entity_class = class_falling_block,
-        .x = 0, .y = 64, .z = 0,
+        .x = 0,
+        .y = 64,
+        .z = 0,
         .falling_block = .{ .block = .{ .raw_data = 0xDEADBEEF, .texture = 0x1122334455667788 } },
     });
     // branch starts right after spawnerSource (offset 72)
@@ -460,7 +482,9 @@ test "fallingBlocks branch writes one count for all three arrays" {
     const body = try buildEntitySpawnStock(&buf, .{
         .entity_id = 801,
         .entity_class = class_falling_blocks,
-        .x = 0, .y = 64, .z = 0,
+        .x = 0,
+        .y = 64,
+        .z = 0,
         .falling_blocks = .{ .blocks = blocks[0..] },
     });
     var o: usize = 73;
@@ -482,9 +506,17 @@ test "fallingBlocks branch writes one count for all three arrays" {
 test "falling-block classes without payload error instead of writing a short body" {
     var buf: [512]u8 = undefined;
     try std.testing.expectError(error.MissingFallingBlockData, buildEntitySpawnStock(&buf, .{
-        .entity_id = 1, .entity_class = class_falling_block, .x = 0, .y = 0, .z = 0,
+        .entity_id = 1,
+        .entity_class = class_falling_block,
+        .x = 0,
+        .y = 0,
+        .z = 0,
     }));
     try std.testing.expectError(error.MissingFallingBlocksData, buildEntitySpawnStock(&buf, .{
-        .entity_id = 2, .entity_class = class_falling_blocks, .x = 0, .y = 0, .z = 0,
+        .entity_id = 2,
+        .entity_class = class_falling_blocks,
+        .x = 0,
+        .y = 0,
+        .z = 0,
     }));
 }

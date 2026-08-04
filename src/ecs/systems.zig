@@ -7,6 +7,7 @@ const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
+const path_mod = @import("path.zig");
 const parallel = @import("../util/parallel.zig");
 
 pub const full_ai_dist_sq: f32 = 64.0 * 64.0;
@@ -17,6 +18,12 @@ pub const attack_damage: f32 = 8.0;
 pub const chase_speed: f32 = 2.2;
 pub const wander_speed: f32 = 0.8;
 pub const attack_cooldown_s: f32 = 1.2;
+/// Replan grid A* at most this often while chasing (keeps 20 TPS budget).
+const path_replan_interval_s: f32 = 0.35;
+/// Max A* node expansions per replan (coarse local grid).
+const path_max_expand: usize = 96;
+/// Snap to next waypoint within this distance (blocks).
+const path_wp_arrive: f32 = 0.55;
 
 /// Fixed-point damage unit (1.0 hp = 100).
 const dmg_scale: u32 = 100;
@@ -290,6 +297,62 @@ pub fn questOnFetchItem(w: *World, peer_slot: usize, count: u16) void {
     }
 }
 
+/// Craft progress: phase craft or legacy QuestKind.craft. recipe_name matched via def.name contains.
+pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    if (!w.mask[ps].journal) return;
+    var j = &w.journal[ps];
+    for (&j.slots) |*s| {
+        if (!s.active or s.completed or s.ready_turn_in) continue;
+        const d = w.catalog.byId(s.def_id) orelse continue;
+        if (d.phases.len > 0) {
+            if (currentPhaseSpec(d, s)) |spec| {
+                if (spec.kind == .craft) bumpPhase(w, ps, s, d, .craft, 1);
+            }
+            continue;
+        }
+        if (d.kind != .craft) continue;
+        // Optional: def.name is recipe id or contains it.
+        if (d.name.len > 0 and recipe_name.len > 0) {
+            if (std.mem.indexOf(u8, recipe_name, d.name) == null and std.mem.indexOf(u8, d.name, recipe_name) == null)
+                continue;
+        }
+        s.progress +%= 1;
+        markProgress(w, ps, s, d);
+    }
+}
+
+/// StayWithin: player must remain near def.tx/tz (radius from target_count as blocks, min 8).
+pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    if (!w.mask[ps].journal) return;
+    var j = &w.journal[ps];
+    for (&j.slots) |*s| {
+        if (!s.active or s.completed or s.ready_turn_in) continue;
+        const d = w.catalog.byId(s.def_id) orelse continue;
+        const radius: f32 = blk: {
+            if (d.phases.len > 0) {
+                const spec = currentPhaseSpec(d, s) orelse continue;
+                if (spec.kind != .stay_within) continue;
+                break :blk @max(8, @as(f32, @floatFromInt(spec.required)));
+            }
+            if (d.kind != .stay_within) continue;
+            break :blk @max(8, @as(f32, @floatFromInt(d.target_count)));
+        };
+        const dx = px - d.tx;
+        const dz = pz - d.tz;
+        const r2 = radius * radius;
+        if (dx * dx + dz * dz <= r2) {
+            if (d.phases.len > 0) {
+                bumpPhase(w, ps, s, d, .stay_within, 1);
+            } else {
+                s.progress +%= 1;
+                markProgress(w, ps, s, d);
+            }
+        }
+    }
+}
+
 pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) void {
     _ = py;
     const ps = w.playerByPeer(peer_slot) orelse return;
@@ -380,9 +443,18 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
         const dz = w.transform[i].z - pz;
         if (dx * dx + dz * dz > r2) continue;
         if (w.mask[i].inventory) {
+            const inventory_before = w.inventory[ps];
+            var transferred = true;
             for (w.inventory[i].slots) |slot| {
                 if (slot.count == 0) continue;
-                _ = w.inventory[ps].addItem(slot.item_id, slot.count);
+                if (!w.inventory[ps].addItem(slot.item_id, slot.count)) {
+                    transferred = false;
+                    break;
+                }
+            }
+            if (!transferred) {
+                w.inventory[ps] = inventory_before;
+                continue;
             }
         }
         w.destroy(i);
@@ -392,29 +464,60 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
     return n;
 }
 
-/// Buy (side=0) or sell (side=1) against trader entity stock + player wallet.
-pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16, side: u8) bool {
+/// Buy (side=0) or sell (side=1) against trader stock + wallet and/or casinoCoin stacks.
+/// `coin_item_id` = ECS id for casinoCoin from items table (ecsIdByName). 0 = fail closed.
+pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16, side: u8, coin_item_id: u16) bool {
     if (qty == 0) return false;
+    if (coin_item_id == 0) return false;
+    const coin_id: u16 = coin_item_id;
     const ps = w.playerByPeer(player_peer) orelse return false;
     if (!w.mask[ps].wallet) return false;
     const ts = w.slotOfNetId(trader_net) orelse return false;
     if (!w.mask[ts].trader or !w.mask[ts].trader_stock) return false;
+    // Sync wallet from inventory coins when inv has more (client-authoritative stacks).
+    if (w.mask[ps].inventory) {
+        const inv_coins = w.inventory[ps].countItem(coin_id);
+        if (inv_coins > w.wallet[ps].coins) w.wallet[ps].coins = inv_coins;
+    }
     var stock = &w.trader_stock[ts];
     var e: usize = 0;
     while (e < stock.n) : (e += 1) {
         if (stock.entries[e].item != item) continue;
         if (side == 0) {
             if (stock.entries[e].count < qty) return false;
-            // Buy price with simple markup (+20% rounded up via price table).
             const unit: u32 = @max(1, @as(u32, stock.entries[e].price));
             const cost: u32 = unit * qty;
+            if (cost > std.math.maxInt(u16)) return false;
             if (w.wallet[ps].coins < cost) return false;
+            if (w.mask[ps].inventory and !w.inventory[ps].addItem(item, qty)) return false;
+            // Prefer removing casinoCoin items so client bag matches wallet.
+            if (w.mask[ps].inventory) {
+                const have = w.inventory[ps].countItem(coin_id);
+                if (have >= cost) {
+                    if (!w.inventory[ps].removeItem(coin_id, @intCast(cost))) {
+                        _ = w.inventory[ps].removeItem(item, qty);
+                        return false;
+                    }
+                    if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+                }
+            }
             stock.entries[e].count -= qty;
             w.wallet[ps].coins -= cost;
+            if (w.mask[ps].inventory and w.mask[ps].dirty) w.dirty[ps].inv = true;
         } else {
             const gain: u32 = @as(u32, stock.entries[e].sell) * qty;
-            stock.entries[e].count +%= qty;
-            w.wallet[ps].coins +%= gain;
+            if (gain > std.math.maxInt(u16)) return false;
+            if (w.wallet[ps].coins > std.math.maxInt(u32) - gain) return false;
+            if (stock.entries[e].count > std.math.maxInt(u16) - qty) return false;
+            // Take goods from inv when selling.
+            if (w.mask[ps].inventory) {
+                if (w.inventory[ps].countItem(item) < qty) return false;
+                if (!w.inventory[ps].addItem(coin_id, @intCast(gain))) return false;
+                if (!w.inventory[ps].removeItem(item, qty)) return false;
+                if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+            }
+            stock.entries[e].count += qty;
+            w.wallet[ps].coins += gain;
         }
         return true;
     }
@@ -626,9 +729,9 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
     ai.wander_tz = w.transform[s].z + oz;
 }
 
-/// EAIApproachAndAttackTarget::Update: greedy straight-line chase toward the
-/// sensed player (full A* pathing is an honest gap), melee on contact. Projects
-/// .attack in range else .chase. Aggro persists with no fresh target (np.id<0).
+/// EAIApproachAndAttackTarget::Update: grid A* toward the sensed player when a
+/// solid hook is set (else straight-line), melee on contact. Projects .attack
+/// in range else .chase. Aggro persists with no fresh target (np.id<0).
 fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, ct: anytype) void {
     ai.alert = true;
     if (np.id < 0) {
@@ -643,6 +746,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     ai.has_path = true;
     if (np.d2 <= attack_range_sq) {
         ai.state = .attack;
+        ai.path_wp_valid = false;
         if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
             const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else attack_damage;
             const add: u32 = @intFromFloat(adm * @as(f32, @floatFromInt(dmg_scale)));
@@ -653,7 +757,52 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
         }
     } else {
         ai.state = .chase;
-        stepToward(ctx.w, s, np.px, np.pz, cspd * ai.active_scale, ctx.dt);
+        chaseAlongPath(ctx.w, s, ai, np.px, np.pz, cspd * ai.active_scale, ctx.dt);
+    }
+}
+
+fn pathSolidCb(ctx: ?*anyopaque, x: i32, z: i32) bool {
+    const w: *const World = @ptrCast(@alignCast(ctx.?));
+    return w.isPathSolid(x, z);
+}
+
+/// Replan A* on a throttle, then step toward the next waypoint (or goal).
+/// When no solid_fn is wired, degenerates to straight-line stepToward.
+fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: f32, dt: f32) void {
+    if (w.solid_fn == null) {
+        stepToward(w, s, gx, gz, speed, dt);
+        return;
+    }
+    if (ai.path_replan_cd > 0) ai.path_replan_cd -= dt;
+    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
+    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
+    const gxi: i32 = @intFromFloat(@floor(gx));
+    const gzi: i32 = @intFromFloat(@floor(gz));
+    const need_replan = ai.path_replan_cd <= 0 or !ai.path_wp_valid;
+    if (need_replan) {
+        var p: path_mod.Path = .{};
+        path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
+        if (p.next()) |wp| {
+            ai.path_wp_x = wp.x;
+            ai.path_wp_z = wp.z;
+            ai.path_wp_valid = true;
+        } else {
+            ai.path_wp_valid = false;
+        }
+        ai.path_replan_cd = path_replan_interval_s;
+    }
+    if (ai.path_wp_valid) {
+        const tx = @as(f32, @floatFromInt(ai.path_wp_x)) + 0.5;
+        const tz = @as(f32, @floatFromInt(ai.path_wp_z)) + 0.5;
+        const dx = tx - w.transform[s].x;
+        const dz = tz - w.transform[s].z;
+        if (dx * dx + dz * dz < path_wp_arrive * path_wp_arrive) {
+            ai.path_wp_valid = false;
+            ai.path_replan_cd = 0;
+        }
+        stepToward(w, s, tx, tz, speed, dt);
+    } else {
+        stepToward(w, s, gx, gz, speed, dt);
     }
 }
 
@@ -663,6 +812,7 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.alert = false;
     ai.target_id = -1;
     ai.has_path = false;
+    ai.path_wp_valid = false;
     stepToward(w, s, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
 }
 
@@ -731,7 +881,7 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
     if (!w.alive[slot] or !w.mask[slot].vehicle or !w.mask[slot].transform) return;
     if (w.vehicle[slot].driver_net_id < 0) return;
     var v = &w.vehicle[slot];
-    const max_spd: f32 = switch (v.kind) {
+    const max_spd: f32 = if (v.max_speed > 0) v.max_speed else switch (v.kind) {
         .bicycle => 6,
         .minibike => 12,
         .motorcycle => 18,
@@ -882,6 +1032,8 @@ pub const despawn_dist_sq: f32 = 200.0 * 200.0;
 /// Remove idle/wandering zombies far from every player. Returns removed ids
 /// (caller broadcasts EntityRemove with Despawned reason).
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
+    var snaps: [64]PlayerSnap = undefined;
+    const pn = snapshotPlayers(w, &snaps);
     var n: u8 = 0;
     var i: Slot = 0;
     while (i < max_entities and n < out_ids.len) : (i += 1) {
@@ -890,11 +1042,9 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
         if (w.mask[i].sleeper) continue;
         if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
         var near = false;
-        var p: Slot = 0;
-        while (p < max_entities) : (p += 1) {
-            if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
-            const dx = w.transform[p].x - w.transform[i].x;
-            const dz = w.transform[p].z - w.transform[i].z;
+        for (snaps[0..pn]) |p| {
+            const dx = p.x - w.transform[i].x;
+            const dz = p.z - w.transform[i].z;
             if (dx * dx + dz * dz < despawn_dist_sq) {
                 near = true;
                 break;
@@ -1029,6 +1179,29 @@ test "system zombie chases" {
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
     try std.testing.expectEqual(c.AiState.attack, w.zombie_ai[zs].state);
     try std.testing.expect(w.zombie_ai[zs].alert);
+}
+
+test "system zombie paths around solid wall via A*" {
+    // Wall at x=2, z=-2..2; zombie at 0, player at 4. Straight line blocked.
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, z: i32) bool {
+            return x == 2 and z >= -2 and z <= 2;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.solid_fn = Wall.solid;
+    w.solid_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 8.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    // Should have progressed toward the player (around the wall), not stuck at x~1.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
 }
 
 test "system zombie wanders when no player sensed" {

@@ -1,12 +1,31 @@
 //! World-position keyed workstation state (forge/campfire/workbench TE 12).
 //! Slots mirror TileEntityWorkstation arrays; craft tick advances the queue.
+//!
+//! Domain types (`QueueItem`, slot/queue caps) live here so `wire/stock_te`
+//! can import them without a world → wire cycle. Wire re-exports the same
+//! symbols for encode/decode callers.
 
 const std = @import("std");
 const components = @import("../ecs/components.zig");
-const stock_te = @import("../wire/stock_te.zig");
 
 pub const max_workstations: usize = 64;
-pub const slots_per_group: usize = stock_te.max_ws_slots;
+/// Stock workstation grid width (fuel/input/tools/output array size).
+pub const max_ws_slots: usize = 9;
+/// Stock RecipeQueueItem array cap on a workstation TE.
+pub const max_ws_queue: usize = 4;
+pub const slots_per_group: usize = max_ws_slots;
+
+/// Recipe queue cell shared by sim state and TE wire (stock RecipeQueueItem fields).
+pub const QueueItem = struct {
+    multiplier: i16 = 0,
+    is_crafting: bool = false,
+    craft_time_left: f32 = 0,
+    one_item_craft_time: f32 = 0,
+    /// Recipe output ItemValue.type (absolute); 0 = no recipe.
+    output_type: i32 = 0,
+    output_count: i32 = 0,
+    crafting_time: f32 = 0,
+};
 
 /// Resolves a stock output ItemValue.type to an ECS item id (Game supplies
 /// items-table reverse lookup; null in unit tests → outputs skipped).
@@ -20,7 +39,7 @@ pub const Workstation = struct {
     input: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
     tools: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
     output: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    queue: [stock_te.max_ws_queue]stock_te.QueueItem = [_]stock_te.QueueItem{.{}} ** stock_te.max_ws_queue,
+    queue: [max_ws_queue]QueueItem = [_]QueueItem{.{}} ** max_ws_queue,
     queue_n: usize = 0,
     is_burning: bool = false,
     burn_time_left: f32 = 0,

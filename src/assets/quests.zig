@@ -5,47 +5,14 @@
 //! journal can progress kills / goto / trader interact without a full POI graph.
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 const xml = @import("xml_util.zig");
 const quest = @import("../ecs/quest.zig");
 
 pub const max_list_entries: usize = 64;
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    if (off != size) return error.ShortRead;
-    return buf;
-}
-
 pub fn fileExists(path: []const u8) bool {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return false;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    _ = linux.close(@intCast(rc));
-    return true;
+    return io_fs.fileExistsSimple(path);
 }
 
 /// `…/Data/Worlds/<Name>` → `…/Data/Config/quests.xml`
@@ -80,6 +47,11 @@ fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind
     if (std.mem.eql(u8, obj_type, "TreasureChest")) return .fetch_item;
     if (std.mem.eql(u8, obj_type, "InteractWithNPC")) return .fetch_trader;
     if (std.mem.eql(u8, obj_type, "ReturnToNPC")) return .fetch_trader;
+    if (std.mem.eql(u8, obj_type, "Craft") or
+        std.mem.eql(u8, obj_type, "CraftItem") or
+        std.mem.eql(u8, obj_type, "Recipe")) return .craft;
+    if (std.mem.eql(u8, obj_type, "StayWithin") or
+        std.mem.eql(u8, obj_type, "StayWithinArea")) return .stay_within;
     if (std.mem.eql(u8, obj_type, "Goto") or
         std.mem.eql(u8, obj_type, "RandomPOIGoto") or
         std.mem.eql(u8, obj_type, "ClosestPOIGoto") or
@@ -106,6 +78,11 @@ fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind 
     if (std.mem.eql(u8, obj_type, "InteractWithNPC") or
         std.mem.eql(u8, obj_type, "ReturnToNPC") or
         std.mem.eql(u8, obj_type, "RandomGotoNPC")) return .trader_interact;
+    if (std.mem.eql(u8, obj_type, "Craft") or
+        std.mem.eql(u8, obj_type, "CraftItem") or
+        std.mem.eql(u8, obj_type, "Recipe")) return .craft;
+    if (std.mem.eql(u8, obj_type, "StayWithin") or
+        std.mem.eql(u8, obj_type, "StayWithinArea")) return .stay_within;
     if (std.mem.eql(u8, obj_type, "Goto") or
         std.mem.eql(u8, obj_type, "RandomPOIGoto") or
         std.mem.eql(u8, obj_type, "ClosestPOIGoto") or
@@ -151,6 +128,11 @@ fn objectiveTarget(body: []const u8, oi: usize, elem_end: usize) u16 {
 
 fn objectiveScore(typ: []const u8, oid: ?[]const u8) i32 {
     if (std.mem.eql(u8, typ, "ClearSleepers")) return 100;
+    if (std.mem.eql(u8, typ, "Craft") or
+        std.mem.eql(u8, typ, "CraftItem") or
+        std.mem.eql(u8, typ, "Recipe")) return 90;
+    if (std.mem.eql(u8, typ, "StayWithin") or
+        std.mem.eql(u8, typ, "StayWithinArea")) return 85;
     if (std.mem.eql(u8, typ, "FetchFromContainer") or
         std.mem.eql(u8, typ, "FetchKeep") or
         std.mem.eql(u8, typ, "FetchFromTreasure") or
@@ -503,7 +485,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !quest.Catalog {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     var cat = try parseCatalog(allocator, raw);
     errdefer cat.deinit();
@@ -520,6 +502,7 @@ pub fn loadFromConfigDir(allocator: std.mem.Allocator, config_dir: []const u8) !
 }
 
 /// Try explicit path, config dir, game dir, then map-derived Data/Config.
+/// Applies --config-overrides patches when set (via paths.override_dirs).
 pub fn tryLoad(
     allocator: std.mem.Allocator,
     game_dir: ?[]const u8,
@@ -527,10 +510,32 @@ pub fn tryLoad(
     config_dir: ?[]const u8,
     quests_path: ?[]const u8,
 ) !?quest.Catalog {
+    const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     if (quests_path) |p| {
         if (!fileExists(p)) return error.OpenFailed;
-        return try loadFromPath(allocator, p);
+        if (paths.override_dirs.len == 0) return try loadFromPath(allocator, p);
+        const base = try io_fs.readFileAll(allocator, p);
+        defer allocator.free(base);
+        const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
+        defer allocator.free(merged);
+        io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+        const cp = ".zdtd_cfg_cache/quests.xml";
+        {
+            try io_fs.writeFile(allocator, cp, merged);
+        }
+        return try loadFromPath(allocator, cp);
+    }
+    if (paths.override_dirs.len > 0) {
+        if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
+            defer allocator.free(merged);
+            io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+            const cp = ".zdtd_cfg_cache/quests.xml";
+            {
+                try io_fs.writeFile(allocator, cp, merged);
+            }
+            return try loadFromPath(allocator, cp);
+        }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);

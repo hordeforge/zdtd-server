@@ -16,30 +16,20 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
-const components = @import("../ecs/components.zig");
 const containers = @import("../world/containers.zig");
+const workstations = @import("../world/workstations.zig");
+
+// Domain caps/types owned by world/workstations (avoids world → wire cycle).
+// Re-exported so existing `stock_te.QueueItem` / `max_ws_*` callers stay stable.
+pub const max_ws_slots: usize = workstations.max_ws_slots;
+pub const max_ws_queue: usize = workstations.max_ws_queue;
+pub const QueueItem = workstations.QueueItem;
 
 /// GetStableHashCode("TEFeatureStorage"): matches Extensions.GetStableHashCode.
 pub const feature_hash_storage: i32 = 731446478;
 
-pub fn getStableHashCode(s: []const u8) i32 {
-    var num: i32 = 5381;
-    var num2: i32 = 5381;
-    var i: usize = 0;
-    while (true) {
-        if (i >= s.len) break;
-        const c0: i32 = s[i];
-        num = ((num << 5) +% num) ^ c0;
-        if (i + 1 >= s.len) break;
-        const c1: i32 = s[i + 1];
-        if (c1 == 0) break;
-        num2 = ((num2 << 5) +% num2) ^ c1;
-        i += 2;
-        if (i >= s.len) break;
-        if (s[i] == 0) break;
-    }
-    return num +% (num2 *% 1566083941);
-}
+/// Re-export: implementation lives in assets/unity_hash.zig (catalog leaf).
+pub const getStableHashCode = @import("../assets/unity_hash.zig").getStableHashCode;
 
 fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
     // stock chunk: 16×256×16; y is full world y in ToWorldPos (chunk Y * 256)
@@ -168,13 +158,13 @@ fn writeStorageFeature(
     var i: usize = 0;
     while (i < @as(usize, @intCast(count))) : (i += 1) {
         const s = cont.slots[i];
+        // InvSlot has meta only; seed stays 0 (matches stock_inv.slotFromEcs / wsGroupToStock).
         const stock = if (s.count > 0 and s.item_id != 0)
             stock_inv.StockSlot{
                 .type_id = if (resolve) |r| r(ctx, s.item_id) else stock_inv.typeFromBuiltinId(s.item_id),
                 .count = s.count,
                 .quality = s.quality,
                 .meta = s.meta,
-                .seed = s.meta,
             }
         else
             stock_inv.StockSlot{};
@@ -336,8 +326,6 @@ pub fn applyParsedToContainer(
 //   isPlayerPlaced bool | lastTickTime-delta u64 (network read adds GameTimer)
 
 pub const workstation_te_version: u8 = 50;
-pub const max_ws_slots: usize = 9;
-pub const max_ws_queue: usize = 4;
 
 pub const WorkstationSlots = struct {
     fuel: []const stock_inv.StockSlot = &.{},
@@ -369,7 +357,8 @@ fn writeQueueItem(w: *binary.Writer, q: QueueItem) !void {
     try w.writeBool(false); // recipe omitted on echo
 }
 
-/// Build NetPackageTileEntity body for a workstation (queue always empty for now).
+/// Build NetPackageTileEntity body for a workstation (queue emitted from live state,
+/// capped at 255 items).
 pub fn buildWorkstationTeBody(
     buf: []u8,
     handle: u8,
@@ -437,17 +426,6 @@ fn readWsStackArray(r: *binary.Reader, out: []stock_inv.StockSlot, out_n: *usize
         }
     }
 }
-
-pub const QueueItem = struct {
-    multiplier: i16 = 0,
-    is_crafting: bool = false,
-    craft_time_left: f32 = 0,
-    one_item_craft_time: f32 = 0,
-    /// Recipe output ItemValue.type (absolute); 0 = no recipe.
-    output_type: i32 = 0,
-    output_count: i32 = 0,
-    crafting_time: f32 = 0,
-};
 
 /// Recipe.Read (IL): ver u16 | itemValueType i32 | count i32 | isScrap bool |
 /// craftingTime f32 | craftExpGain i32 | craftingArea string | i32 n + ItemStack*n.

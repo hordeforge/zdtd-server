@@ -1,8 +1,24 @@
 //! Minimal serverconfig.xml subset (port, max players, world name, password).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
+
+/// C2S validation strictness. Default correct hard-rejects illegal claims.
+pub const AuthorityMode = enum {
+    /// Counters / log only; still server-owned state (phase gates stay hard).
+    observe,
+    /// Hard reject illegal C2S (default).
+    correct,
+
+    pub fn parse(s: []const u8) ?AuthorityMode {
+        if (std.ascii.eqlIgnoreCase(s, "observe")) return .observe;
+        // Documented alias of observe (docs/AUTHORITY.md).
+        if (std.ascii.eqlIgnoreCase(s, "permissive")) return .observe;
+        if (std.ascii.eqlIgnoreCase(s, "correct")) return .correct;
+        return null;
+    }
+};
 
 pub const Config = struct {
     port: u16 = 26902,
@@ -11,7 +27,9 @@ pub const Config = struct {
     game_world: []const u8 = "",
     password: []const u8 = "",
     admin_port: u16 = 0,
-    view_radius: i32 = 4,
+    /// Align with Game/InitOptions default and chunk_stream_radius_min (7).
+    view_radius: i32 = 7,
+    authority_mode: AuthorityMode = .correct,
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim in
     // game.initWithOptions; see docs/GAME_OPTIONS.md for which are wired.
@@ -53,31 +71,6 @@ pub const Config = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
     // <property name="ServerPort" value="26900"/>
     var i: usize = 0;
@@ -94,7 +87,7 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
     arena_holder.* = std.heap.ArenaAllocator.init(allocator);
@@ -104,13 +97,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
     }
     const arena = arena_holder.allocator();
     var cfg: Config = .{ .arena_ptr = arena_holder };
-    if (prop(raw, "ServerPort")) |v| cfg.port = xml.parseU16(v) orelse cfg.port;
-    if (prop(raw, "ServerMaxPlayerCount")) |v| cfg.max_players = xml.parseU16(v) orelse cfg.max_players;
+    if (prop(raw, "ServerPort")) |v| {
+        cfg.port = xml.parseU16(v) orelse blk: {
+            std.debug.print("zdtd: serverconfig ServerPort '{s}' invalid; keeping {d}\n", .{ v, cfg.port });
+            break :blk cfg.port;
+        };
+    }
+    if (prop(raw, "ServerMaxPlayerCount")) |v| {
+        // Cap at LiteNet peer slots (64). 0 is treated as default.
+        const n = xml.parseU16(v) orelse blk: {
+            std.debug.print("zdtd: serverconfig ServerMaxPlayerCount '{s}' invalid; keeping {d}\n", .{ v, cfg.max_players });
+            break :blk cfg.max_players;
+        };
+        cfg.max_players = if (n == 0) cfg.max_players else @min(n, 64);
+    }
     if (prop(raw, "GameName")) |v| cfg.world_name = try arena.dupe(u8, v);
     if (prop(raw, "GameWorld")) |v| cfg.game_world = try arena.dupe(u8, v);
     if (prop(raw, "ServerPassword")) |v| cfg.password = try arena.dupe(u8, v);
-    if (prop(raw, "AdminPort")) |v| cfg.admin_port = xml.parseU16(v) orelse 0;
-    if (prop(raw, "ViewRadius")) |v| cfg.view_radius = @intCast(xml.parseU16(v) orelse 4);
+    if (prop(raw, "AdminPort")) |v| {
+        cfg.admin_port = xml.parseU16(v) orelse blk: {
+            std.debug.print("zdtd: serverconfig AdminPort '{s}' invalid; keeping {d}\n", .{ v, cfg.admin_port });
+            break :blk cfg.admin_port;
+        };
+    }
+    if (prop(raw, "ViewRadius")) |v| cfg.view_radius = clampRange(xml.parseU16(v), 1, 16, @intCast(cfg.view_radius));
     if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8(xml.parseU16(v), 0, 5, cfg.game_difficulty);
     if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8(xml.parseU16(v), 0, 255, cfg.blood_moon_frequency);
     if (prop(raw, "BloodMoonEnemyCount")) |v| cfg.blood_moon_enemy_count = clampU8(xml.parseU16(v), 0, 60, cfg.blood_moon_enemy_count);
@@ -132,9 +142,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
     if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRange(xml.parseU16(v), 0, 2048, cfg.max_spawned_animals);
     if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRange(xml.parseU16(v), 0, 8760, cfg.air_drop_frequency);
     if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8(xml.parseU16(v), 0, 4, cfg.drop_on_death);
-    if (prop(raw, "LandClaimSize")) |v| cfg.land_claim_size = clampRange(xml.parseU16(v), 1, 255, cfg.land_claim_size);
+    if (prop(raw, "LandClaimSize")) |v| {
+        // Stock keystone area is odd (centered on block); force odd after clamp.
+        var sz = clampRange(xml.parseU16(v), 1, 255, cfg.land_claim_size);
+        if (sz % 2 == 0) sz -= 1;
+        cfg.land_claim_size = if (sz == 0) 1 else sz;
+    }
     if (prop(raw, "LandClaimOnlineDurabilityModifier")) |v| cfg.land_claim_online_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_online_durability_modifier);
     if (prop(raw, "LandClaimOfflineDurabilityModifier")) |v| cfg.land_claim_offline_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_offline_durability_modifier);
+    if (prop(raw, "ZdtdAuthorityMode")) |v| {
+        if (AuthorityMode.parse(v)) |m| {
+            cfg.authority_mode = m;
+        } else {
+            std.debug.print("zdtd: serverconfig ZdtdAuthorityMode '{s}' unknown (use observe|permissive|correct); keeping correct\n", .{v});
+        }
+    }
     return cfg;
 }
 
@@ -157,15 +179,10 @@ test "parse config fixture" {
         \\</ServerSettings>
     ;
     const dir = "worlds/zdtd_cfg_test";
-    _ = linux.mkdir("worlds", 0o755);
-    _ = linux.mkdir(dir, 0o755);
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
     const path = dir ++ "/serverconfig.xml";
-    var pz: [64]u8 = undefined;
-    @memcpy(pz[0..path.len], path);
-    pz[path.len] = 0;
-    const fd: i32 = @intCast(linux.open(pz[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644));
-    _ = linux.write(fd, xml_src.ptr, xml_src.len);
-    _ = linux.close(fd);
+    try io_fs.writeFileSimple(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u16, 27002), cfg.port);
@@ -179,6 +196,7 @@ test "parse config fixture" {
 test "parse gameplay options with clamping" {
     const xml_src =
         \\<ServerSettings>
+        \\  <property name="ViewRadius" value="999"/>
         \\  <property name="GameDifficulty" value="99"/>
         \\  <property name="BloodMoonFrequency" value="10"/>
         \\  <property name="PlayerKillingMode" value="0"/>
@@ -201,18 +219,14 @@ test "parse gameplay options with clamping" {
         \\</ServerSettings>
     ;
     const dir = "worlds/zdtd_cfg_test2";
-    _ = linux.mkdir("worlds", 0o755);
-    _ = linux.mkdir(dir, 0o755);
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
     const path = dir ++ "/serverconfig.xml";
-    var pz: [64]u8 = undefined;
-    @memcpy(pz[0..path.len], path);
-    pz[path.len] = 0;
-    const fd: i32 = @intCast(linux.open(pz[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644));
-    _ = linux.write(fd, xml_src.ptr, xml_src.len);
-    _ = linux.close(fd);
+    try io_fs.writeFileSimple(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u8, 5), cfg.game_difficulty); // 99 clamped to max 5
+    try std.testing.expectEqual(@as(i32, 16), cfg.view_radius); // 999 clamped to max 16
     try std.testing.expectEqual(@as(u8, 10), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u8, 0), cfg.player_killing_mode);
     try std.testing.expectEqual(@as(u16, 90), cfg.day_night_length);
@@ -231,4 +245,41 @@ test "parse gameplay options with clamping" {
     try std.testing.expectEqual(@as(u8, 2), cfg.drop_on_death);
     try std.testing.expectEqual(@as(u16, 31), cfg.land_claim_size);
     try std.testing.expectEqual(@as(u16, 8), cfg.land_claim_online_durability_modifier);
+    try std.testing.expectEqual(AuthorityMode.correct, cfg.authority_mode);
+}
+
+test "parse authority mode observe" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="ZdtdAuthorityMode" value="observe"/>
+        \\</ServerSettings>
+    ;
+    const dir = "worlds/zdtd_cfg_auth";
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
+    const path = dir ++ "/serverconfig.xml";
+    try io_fs.writeFileSimple(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(AuthorityMode.observe, cfg.authority_mode);
+}
+
+test "parse authority mode permissive alias and land claim odd" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="ZdtdAuthorityMode" value="permissive"/>
+        \\  <property name="LandClaimSize" value="40"/>
+        \\  <property name="ServerMaxPlayerCount" value="12"/>
+        \\</ServerSettings>
+    ;
+    const dir = "worlds/zdtd_cfg_auth2";
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
+    const path = dir ++ "/serverconfig.xml";
+    try io_fs.writeFileSimple(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(AuthorityMode.observe, cfg.authority_mode);
+    try std.testing.expectEqual(@as(u16, 39), cfg.land_claim_size);
+    try std.testing.expectEqual(@as(u16, 12), cfg.max_players);
 }

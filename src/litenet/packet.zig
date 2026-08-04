@@ -42,6 +42,9 @@ pub const Property = enum(u8) {
     invalid_protocol = 15,
     nat_message = 16,
     empty = 17,
+    /// Ordinals 18..31 are unassigned; keep the enum non-exhaustive so a hostile
+    /// datagram cannot turn @enumFromInt into an illegal-value panic.
+    _,
 };
 
 pub fn propertyOf(byte0: u8) Property {
@@ -244,6 +247,15 @@ test "connect accept size" {
     try std.testing.expectEqual(Property.connect_accept, propertyOf(a[0]));
 }
 
+test "unassigned property ordinal does not trap" {
+    var b: u8 = 18;
+    while (b < 32) : (b += 1) {
+        const p = propertyOf(b);
+        try std.testing.expect(p != .connect_request);
+        try std.testing.expect(p != .channeled);
+    }
+}
+
 test "net string empty and roundtrip" {
     var buf: [64]u8 = undefined;
     const empty = try writeNetString(&buf, "");
@@ -257,6 +269,40 @@ test "net string empty and roundtrip" {
     try std.testing.expect(!connectKeyMatches(empty, "x"));
     try std.testing.expect(connectKeyMatches(&.{}, ""));
     try std.testing.expect(!connectKeyMatches(&.{}, "x"));
+}
+
+test "net string rejects truncated payload and oversized writes" {
+    try std.testing.expect(readNetString(&.{ 2, 0 }) == null);
+    try std.testing.expect(readNetString(&.{1}) == null);
+
+    var short: [3]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeNetString(&short, "ab"));
+
+    const oversized = [_]u8{'x'} ** 65535;
+    var unused: [2]u8 = undefined;
+    try std.testing.expectError(error.Overflow, writeNetString(&unused, &oversized));
+}
+
+test "connect request rejects invalid protocol address size and truncation" {
+    var raw: [connect_request_header + 28]u8 = @splat(0);
+    raw[0] = makeByte0(.connect_request, 3);
+    std.mem.writeInt(i32, raw[1..][0..4], protocol_id, .little);
+    std.mem.writeInt(i64, raw[5..][0..8], 42, .little);
+    std.mem.writeInt(i32, raw[13..][0..4], 7, .little);
+
+    raw[17] = 16;
+    const parsed = parseConnectRequest(raw[0 .. connect_request_header + 16]).?;
+    try std.testing.expectEqual(@as(i64, 42), parsed.connection_time);
+    try std.testing.expectEqual(@as(u8, 3), parsed.connection_number);
+    try std.testing.expectEqual(@as(i32, 7), parsed.peer_id);
+    try std.testing.expectEqual(@as(usize, 0), parsed.data.len);
+
+    try std.testing.expect(parseConnectRequest(raw[0 .. connect_request_header + 15]) == null);
+    raw[17] = 17;
+    try std.testing.expect(parseConnectRequest(&raw) == null);
+    raw[17] = 16;
+    std.mem.writeInt(i32, raw[1..][0..4], protocol_id + 1, .little);
+    try std.testing.expect(parseConnectRequest(&raw) == null);
 }
 
 test "disconnect reject invalid password layout" {
@@ -293,4 +339,16 @@ test "fragmented channeled header" {
     try std.testing.expectEqual(@as(u16, 4), info.frag_total);
     try std.testing.expectEqualStrings(part, info.user);
     try std.testing.expect(channeledUserData(p) == null);
+}
+
+test "channeled parser rejects truncated headers and wrong property" {
+    const ordinary = [_]u8{ makeByte0(.channeled, 0), 1, 0 };
+    try std.testing.expect(parseChanneled(&ordinary) == null);
+
+    var fragmented: [fragmented_header_total]u8 = @splat(0);
+    fragmented[0] = makeByte0(.channeled, 0) | fragment_flag;
+    try std.testing.expect(parseChanneled(fragmented[0 .. fragmented_header_total - 1]) == null);
+
+    fragmented[0] = makeByte0(.merged, 0);
+    try std.testing.expect(parseChanneled(&fragmented) == null);
 }

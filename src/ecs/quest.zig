@@ -12,6 +12,8 @@ pub const QuestKind = enum(u8) {
     goto_point,
     fetch_trader,
     fetch_item,
+    craft,
+    stay_within,
 };
 
 /// Max phases per quest (stock CurrentPhase is uint8; real quests stay well under this).
@@ -26,6 +28,8 @@ pub const PhaseKind = enum(u8) {
     goto_point,
     fetch_item,
     trader_interact,
+    craft,
+    stay_within,
     auto,
 };
 
@@ -180,4 +184,3 @@ pub const builtin_defs = [_]QuestDef{
         .objective_phases = &[_]u8{ 1, 2 },
     },
 };
-

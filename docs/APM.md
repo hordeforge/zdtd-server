@@ -23,13 +23,17 @@ Stock APM ladders remain useful as **design targets** (player O(N²) shapes). Ru
 tick loop
   counters.inc / add          # rates, totals
   profiler.begin/end section  # latency hist per phase
-  snapshot → text or JSON     # periodic dump
+  snapshot → text             # emitted after bounded --ticks/--once runs
+           → JSON             # available through apm.report.writeJsonLine
 ```
 
 ### Counters (`CounterId`)
 
 `ticks`, `net_packets_in/out`, `net_bytes_in/out`, `entities_ticked`,  
-`packages_encoded`, `packages_broadcast`, `join_ok`, `join_fail`, …
+`packages_encoded`, `packages_broadcast`, `join_ok`, `join_fail`,
+`net_poll_errors`, `net_payload_errors`, `net_send_errors`,
+`reliable_window_drops`, `persistence_errors`, `stale_peers_reaped`,
+`stream_errors`, …
 
 Extend the enum as features land. Prefer append-only ids for stable JSON keys.
 
@@ -39,36 +43,37 @@ Extend the enum as features land. Prefer append-only ids for stable JSON keys.
 |---|---|
 | `tick_total` | Whole 50 ms step |
 | `net_poll` | Socket / LiteNet poll |
-| `net_decode` | Frame → packages → commands |
-| `sim_apply` | Apply client commands |
 | `sim_entities` | Entity tick budget |
 | `replicate` | Interest + encode |
-| `net_flush` | Send queues |
+| `chunk_stream` | Per-client chunk stream work |
 | `save_io` | Region / snapshot disk |
 
 Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
 
 ## Output
 
-- **Text:** human log / telnet later  
-- **JSON line:** `{"type":"zdtd_apm",...}` for file tail / simple compare scripts  
+- **Text:** printed when a bounded `--ticks N` or `--once` run exits
+- **JSON line:** `{"type":"zdtd_apm",...}` is emitted once per minute during
+  unbounded runs and is also available through the report API
 
-M0: dump once at process exit (demo). Later: every N ticks, or on signal.
+Signal-triggered dumps remain future work.
 
 ## Roadmap
 
 | Phase | Deliverable |
 |---|---|
-| M0 | Counters + section hist + text/JSON report (done scaffold) |
-| M1 | Wire net join counters; dump on interval |
+| M0 | Counters + section hist + text/JSON report API (done) |
+| M1 | Wire net/join/error counters + periodic JSON dump (done) |
 | M3+ | Per-player / per-interest byte budgets |
 | Later | Optional HTTP `/metrics` or unix socket; never depend on 7dtd-apm |
 
 ## Compare under load
 
-1. Run zdtd with metrics dump interval.  
-2. Drive with `7dtd-loadgen` (same profile as stock baselining if desired).  
-3. Diff JSON ticks / p99 `tick_total` across builds **using zdtd output only**.
+1. Run zdtd with the same finite `--ticks N` value for each build.
+2. Drive each run with the same `7dtd-loadgen` profile.
+3. Compare the emitted text counters and `tick_total` latency statistics. For
+   automated JSON comparison, call `apm.report.writeJsonLine` from the harness;
+   there is no JSON CLI switch yet.
 
 ## Related
 

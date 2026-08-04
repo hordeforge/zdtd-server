@@ -25,7 +25,10 @@ pub const ServerInfo = struct {
 /// Build GameServerInfo.ToString(true): `Key:Value;\r\n` … trailing `\r\n`.
 /// Includes the keys stock NetworkClientLiteNetLib / connect dialog use.
 pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
-    return std.fmt.bufPrint(buf,
+    const max_players = @max(0, info.max_players);
+    const current_players = @max(0, @min(info.current_players, max_players));
+    return std.fmt.bufPrint(
+        buf,
         "GameType:7DTD;\r\nGameName:{s};\r\nGameMode:Survival;\r\nGameHost:{s};\r\nLevelName:{s};\r\nIP:{s};\r\nServerVersion:{s};\r\nPort:{d};\r\nCurrentPlayers:{d};\r\nMaxPlayers:{d};\r\nFreePlayerSlots:{d};\r\nWorldSize:{d};\r\nIsDedicated:True;\r\nIsPasswordProtected:False;\r\nEACEnabled:{s};\r\nAllowCrossplay:False;\r\nArchitecture64:True;\r\nIsPublic:True;\r\n\r\n",
         .{
             info.game_name,
@@ -34,9 +37,9 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
             info.ip,
             info.server_version,
             info.info_port,
-            info.current_players,
-            info.max_players,
-            info.max_players - info.current_players,
+            current_players,
+            max_players,
+            max_players - current_players,
             info.world_size,
             if (info.eac_enabled) "True" else "False",
         },
@@ -98,8 +101,9 @@ pub const Provider = struct {
     }
 
     pub fn setPlayers(self: *Provider, current: i32) void {
-        self.info.current_players = current;
-        self.rebuildText() catch {};
+        self.info.current_players = @max(0, @min(current, @max(0, self.info.max_players)));
+        self.rebuildText() catch |err|
+            std.debug.print("zdtd: serverinfo rebuild failed: {s}; serving stale info\n", .{@errorName(err)});
     }
 
     fn rebuildText(self: *Provider) !void {
@@ -149,6 +153,17 @@ test "info text has Port and CRLF records" {
     try std.testing.expect(std.mem.indexOf(u8, t, "IsDedicated:True;") != null);
     try std.testing.expect(std.mem.indexOf(u8, t, "\r\n") != null);
     try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
+}
+
+test "info text clamps player counts" {
+    var buf: [1024]u8 = undefined;
+    const full = try buildInfoText(&buf, .{ .max_players = 8, .current_players = 12 });
+    try std.testing.expect(std.mem.indexOf(u8, full, "CurrentPlayers:8;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, full, "FreePlayerSlots:0;") != null);
+
+    const empty = try buildInfoText(&buf, .{ .max_players = 8, .current_players = -1 });
+    try std.testing.expect(std.mem.indexOf(u8, empty, "CurrentPlayers:0;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, empty, "FreePlayerSlots:8;") != null);
 }
 
 test "response header is 5 digit length" {

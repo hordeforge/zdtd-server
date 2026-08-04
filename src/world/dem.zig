@@ -9,6 +9,7 @@
 //! grid (bilinear) and clamping elevation into 7DTD's 0..255 block band.
 
 const std = @import("std");
+const io_fs = @import("../util/io_fs.zig");
 
 pub const cog_header_len: usize = 64 * 1024;
 pub const tile_px: u32 = 1024;
@@ -191,10 +192,12 @@ pub const Fetcher = struct {
 
     /// Range GET into out; returns bytes written. Anonymous request.
     pub fn fetchRange(self: *Fetcher, key: []const u8, off: u64, len: usize, out: []u8) !usize {
+        if (len == 0) return 0;
+        const end = std.math.add(u64, off, @as(u64, @intCast(len - 1))) catch return error.InvalidRange;
         var url_buf: [512]u8 = undefined;
         const url = try std.fmt.bufPrint(&url_buf, "https://{s}/{s}", .{ bucket_host, key });
         var range_buf: [64]u8 = undefined;
-        const range = try std.fmt.bufPrint(&range_buf, "bytes={d}-{d}", .{ off, off + len - 1 });
+        const range = try std.fmt.bufPrint(&range_buf, "bytes={d}-{d}", .{ off, end });
 
         var body: std.Io.Writer.Allocating = .init(self.allocator);
         defer body.deinit();
@@ -213,26 +216,19 @@ pub const Fetcher = struct {
     /// Header (first 64 KiB) with disk cache: {cache}/glo30_{lat}_{lon}.hdr
     pub fn tileHeader(self: *Fetcher, lat: i32, lon: i32, out: *[cog_header_len]u8) !usize {
         var pbuf: [512]u8 = undefined;
-        const cpath = try std.fmt.bufPrint(pbuf[0 .. pbuf.len - 1], "{s}/glo30_{d}_{d}.hdr", .{ self.cache_dir, lat, lon });
-        pbuf[cpath.len] = 0;
-        const linux = std.os.linux;
-        const rc = linux.open(pbuf[0..cpath.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-        if (linux.errno(rc) == .SUCCESS) {
-            const fd: i32 = @intCast(rc);
-            defer _ = linux.close(fd);
-            const nr = linux.read(fd, out, out.len);
-            if (linux.errno(nr) == .SUCCESS and nr > 0) return @intCast(nr);
-        }
+        const cpath = try std.fmt.bufPrint(&pbuf, "{s}/glo30_{d}_{d}.hdr", .{ self.cache_dir, lat, lon });
+        if (io_fs.readFileAll(self.allocator, cpath)) |cached| {
+            defer self.allocator.free(cached);
+            const n = @min(cached.len, out.len);
+            if (n > 0) {
+                @memcpy(out[0..n], cached[0..n]);
+                return n;
+            }
+        } else |_| {}
         var kbuf: [160]u8 = undefined;
         const key = try tileKey(&kbuf, lat, lon);
         const n = try self.fetchRange(key, 0, cog_header_len, out);
-        // best-effort cache write
-        const wc = linux.open(pbuf[0..cpath.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-        if (linux.errno(wc) == .SUCCESS) {
-            const wfd: i32 = @intCast(wc);
-            defer _ = linux.close(wfd);
-            _ = linux.write(wfd, out, n);
-        }
+        io_fs.writeFile(self.allocator, cpath, out[0..n]) catch {};
         return n;
     }
 
@@ -259,15 +255,13 @@ pub const Fetcher = struct {
 test "cog header parses live GLO-30 sample" {
     // Sample fetched 2026-07-22 (first 64KiB); skip when absent (offline CI).
     const path = "/home/maci/.cache/zdtd-scratch/glo30_head.bin";
-    const linux = std.os.linux;
-    const rc = linux.open(path, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return; // offline: skip
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
+    const raw = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer std.testing.allocator.free(raw);
+    if (raw.len == 0) return error.SkipZigTest;
     var head: [cog_header_len]u8 = undefined;
-    const nr = linux.read(fd, &head, head.len);
-    if (linux.errno(nr) != .SUCCESS or nr <= 0) return;
-    const info = try parseCogHeader(head[0..@intCast(nr)]);
+    const nr = @min(raw.len, head.len);
+    @memcpy(head[0..nr], raw[0..nr]);
+    const info = try parseCogHeader(head[0..nr]);
     try std.testing.expectEqual(@as(u32, 3600), info.width);
     try std.testing.expectEqual(@as(u32, 1024), info.tile_w);
     try std.testing.expectEqual(@as(u16, 8), info.compression);

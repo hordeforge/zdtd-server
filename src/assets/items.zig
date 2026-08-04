@@ -2,13 +2,21 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
-const linux = std.os.linux;
-const stock_inv = @import("../wire/stock_inv.zig");
+const io_fs = @import("../util/io_fs.zig");
 
 pub const max_items: usize = 8192;
 
+/// Matches Block.ItemsStartHere (MAX_BLOCKS). Catalog constant; wire stock_inv
+/// keeps the same pin for encode. Assets must not import wire for this alone.
+pub const items_start_here: i32 = 65536;
+
 /// First free item id after Blocks.ItemsStartHere (assignLeftOverItems pre-increments).
-pub const stock_first_item_type: i32 = stock_inv.items_start_here + 1;
+pub const stock_first_item_type: i32 = items_start_here + 1;
+
+fn typeFromBuiltinId(item_id: u16) i32 {
+    if (item_id == 0) return 0;
+    return items_start_here + @as(i32, item_id);
+}
 
 pub const ItemDef = struct {
     /// zdtd internal id (small, used in ECS inventory).
@@ -21,6 +29,8 @@ pub const ItemDef = struct {
     econ: u16 = 0,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
+    /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
+    fuel_value: f32 = 0,
 };
 
 pub const ItemTable = struct {
@@ -54,7 +64,20 @@ pub const ItemTable = struct {
         for (self.defs) |d| {
             if (std.mem.eql(u8, d.name, name)) return d;
         }
+        // Stock items.xml name → builtin ECS row (e.g. casinoCoin → id 6).
+        var id: u16 = 1;
+        while (id < 64) : (id += 1) {
+            const sn = builtinStockName(id) orelse continue;
+            if (!std.mem.eql(u8, sn, name)) continue;
+            if (self.byId(id)) |d| return d;
+        }
         return null;
+    }
+
+    /// ECS id for a stock or short name (0 unknown). Prefers defs after XML load.
+    pub fn ecsIdByName(self: *const ItemTable, name: []const u8) u16 {
+        if (self.byName(name)) |d| return d.id;
+        return 0;
     }
 
     pub fn byStockName(self: *const ItemTable, name: []const u8) ?i32 {
@@ -76,6 +99,14 @@ pub const ItemTable = struct {
         return 1;
     }
 
+    /// FuelValue from items.xml (0 if unset / not a fuel item).
+    pub fn fuelValueFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| {
+            if (d.fuel_value > 0) return d.fuel_value;
+        }
+        return 0;
+    }
+
     /// Resolve ECS item_id → absolute stock type for wire encode.
     pub fn stockTypeFor(self: *const ItemTable, item_id: u16) i32 {
         if (item_id == 0) return 0;
@@ -92,7 +123,7 @@ pub const ItemTable = struct {
             if (self.byStockName(sn)) |t| return t;
         }
         // Fallback: linear relative index (always parseable; may wrong icon).
-        return stock_inv.typeFromBuiltinId(item_id);
+        return typeFromBuiltinId(item_id);
     }
 
     /// Reverse: absolute stock type → ECS item_id (0 if unknown).
@@ -108,26 +139,51 @@ pub const ItemTable = struct {
             if (self.stockTypeFor(id) == stock_type) return id;
         }
         // Fallback relative index when types were encoded as 65536+ecs_id
-        if (stock_type > stock_inv.items_start_here) {
-            const rel = stock_type - stock_inv.items_start_here;
+        if (stock_type > items_start_here) {
+            const rel = stock_type - items_start_here;
             if (rel > 0 and rel < 100) return @intCast(rel);
         }
         return 0;
     }
 
     /// NameIdMapping payload (version 1 + count + id/name pairs).
+    /// LE i32 + .NET 7-bit strings; open-coded so assets stays free of wire.
     pub fn writeNameIdMapping(self: *const ItemTable, buf: []u8) ![]u8 {
-        var w: @import("../wire/binary.zig").Writer = .{ .buf = buf };
-        try w.writeI32(1); // FILE_VERSION
-        const n: i32 = @intCast(self.stock_names.len);
-        try w.writeI32(n);
+        var pos: usize = 0;
+        try writeI32Le(buf, &pos, 1); // FILE_VERSION
+        try writeI32Le(buf, &pos, @intCast(self.stock_names.len));
         for (self.stock_names, 0..) |name, i| {
-            try w.writeI32(self.stock_types[i]);
-            try w.writeString(name);
+            try writeI32Le(buf, &pos, self.stock_types[i]);
+            try writeDotNetString(buf, &pos, name);
         }
-        return w.written();
+        return buf[0..pos];
     }
 };
+
+fn writeI32Le(buf: []u8, pos: *usize, v: i32) error{Overflow}!void {
+    if (pos.* + 4 > buf.len) return error.Overflow;
+    std.mem.writeInt(i32, buf[pos.*..][0..4], v, .little);
+    pos.* += 4;
+}
+
+fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!void {
+    var len = s.len;
+    while (true) {
+        if (pos.* >= buf.len) return error.Overflow;
+        const b: u8 = @truncate(len);
+        if (len < 0x80) {
+            buf[pos.*] = b;
+            pos.* += 1;
+            break;
+        }
+        buf[pos.*] = b | 0x80;
+        pos.* += 1;
+        len >>= 7;
+    }
+    if (pos.* + s.len > buf.len) return error.Overflow;
+    @memcpy(buf[pos.* .. pos.* + s.len], s);
+    pos.* += s.len;
+}
 
 /// Builtin ECS catalog (stable small ids for sim/save).
 pub const builtin_defs = [_]ItemDef{
@@ -165,35 +221,10 @@ pub fn builtinStockName(item_id: u16) ?[]const u8 {
     };
 }
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 /// Load items.xml: assign stock types like ItemClass.assignLeftOverItems
 /// (first free id = ItemsStartHere+1, then sequential in document order).
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
@@ -216,6 +247,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_econs.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
+    var stock_fuels: std.ArrayList(f32) = .empty;
+    defer stock_fuels.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -250,6 +283,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 edmg = xml.parseF32(v) orelse 0;
             }
             try stock_edmgs.append(allocator, edmg);
+            var fuel: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "FuelValue")) |v| {
+                fuel = xml.parseF32(v) orelse 0;
+            }
+            try stock_fuels.append(allocator, fuel);
             try stock_stacks.append(allocator, stack);
             try stock_names.append(allocator, try arena.dupe(u8, name));
             try stock_types.append(allocator, next_stock);
@@ -258,7 +296,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         i = ii + 6;
     }
 
-    // Builtin defs with stock_type filled from aliases / stock table.
+    // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
     var list: std.ArrayList(ItemDef) = .empty;
     defer list.deinit(allocator);
     for (builtin_defs) |d| {
@@ -266,10 +304,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         def.name = try arena.dupe(u8, d.name);
         if (builtinStockName(d.id)) |sn| {
             for (stock_names.items, 0..) |n, idx| {
-                if (std.mem.eql(u8, n, sn)) {
-                    def.stock_type = stock_types.items[idx];
-                    break;
-                }
+                if (!std.mem.eql(u8, n, sn)) continue;
+                def.stock_type = stock_types.items[idx];
+                def.stack = stock_stacks.items[idx];
+                def.econ = stock_econs.items[idx];
+                def.entity_damage = stock_edmgs.items[idx];
+                def.fuel_value = stock_fuels.items[idx];
+                // Prefer stock name so byName("casinoCoin") works without alias walk.
+                def.name = n;
+                break;
             }
         }
         try list.append(allocator, def);
@@ -293,6 +336,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .stock_type = stock_types.items[idx],
             .econ = stock_econs.items[idx],
             .entity_damage = stock_edmgs.items[idx],
+            .fuel_value = stock_fuels.items[idx],
         });
         next_sim +%= 1;
         if (list.items.len >= max_items) break;
@@ -315,16 +359,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
-    var path_buf: [2048]u8 = undefined;
-    if (config_dir) |cd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{cd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    if (game_dir) |gd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/items.xml", .{gd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    return null;
+    const paths = @import("paths.zig");
+    return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
 test "builtin items" {
@@ -345,6 +381,11 @@ test "load stock items.xml when present" {
     try std.testing.expectEqual(@as(i32, 65537), t.byStockName("meleeToolRepairT0StoneAxe").?);
     try std.testing.expectEqual(t.byStockName("meleeToolRepairT0StoneAxe").?, t.stockTypeFor(8));
     try std.testing.expect(t.stockTypeFor(7) > stock_first_item_type); // wood
+    // Stock gas can: FuelValue from items.xml (ammoGasCan).
+    if (t.byName("ammoGasCan")) |gas| {
+        try std.testing.expect(gas.fuel_value > 0);
+        try std.testing.expectEqual(gas.fuel_value, t.fuelValueFor(gas.id));
+    }
     var buf: [512 * 1024]u8 = undefined;
     const map = try t.writeNameIdMapping(&buf);
     try std.testing.expect(map.len > 16);

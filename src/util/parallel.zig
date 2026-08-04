@@ -1,5 +1,5 @@
-//! Lightweight parallel-for over dense slot ranges (no pool heap; spawn/join per call).
-//! Used by ECS systems when work is large enough to amortize thread costs.
+//! Parallel-for over dense slot ranges with a persistent worker pool.
+//! Uses Zig 0.16 `std.Io` mutex/condition (no raw syscalls, no spawn-per-call).
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -39,6 +39,166 @@ pub fn splitRanges(total: usize, workers: usize, out: *[max_workers]Range) usize
     return produced;
 }
 
+const WorkFn = *const fn (*anyopaque, usize, usize) void;
+
+const Job = struct {
+    work: WorkFn = undefined,
+    ctx: *anyopaque = undefined,
+    begin: usize = 0,
+    end: usize = 0,
+};
+
+const StartState = enum(u8) { unstarted, starting, started };
+
+const Pool = struct {
+    threaded: std.Io.Threaded = undefined,
+    mutex: std.Io.Mutex = .init,
+    work_cv: std.Io.Condition = .init,
+    done_cv: std.Io.Condition = .init,
+    jobs: [max_workers]Job = [_]Job{.{}} ** max_workers,
+    job_n: usize = 0,
+    outstanding: usize = 0,
+    shutdown: bool = false,
+    start_state: std.atomic.Value(StartState) = .init(.unstarted),
+    /// True while a parallel dispatch owns `jobs`/`outstanding`; a nested or
+    /// concurrent `run` degrades to serial instead of clobbering that state.
+    in_run: std.atomic.Value(bool) = .init(false),
+    threads: [max_workers]std.Thread = undefined,
+    worker_n: usize = 0,
+
+    fn io(self: *Pool) std.Io {
+        return self.threaded.io();
+    }
+
+    fn ensureStarted(self: *Pool) void {
+        if (builtin.single_threaded) return;
+        if (self.start_state.load(.acquire) == .started) return;
+        if (self.start_state.cmpxchgStrong(.unstarted, .starting, .acquire, .acquire) != null) {
+            // Lost the init race: wait for the winner's .release publish.
+            // Workers never reach here before their first job, and jobs only
+            // dispatch after init completes, so this cannot self-deadlock.
+            while (self.start_state.load(.acquire) != .started) std.Thread.yield() catch {};
+            return;
+        }
+        // Once: Threaded for mutex/cond; workers = cpu-1. Workers observe a
+        // fully initialized pool: everything written before Thread.spawn
+        // happens-before the worker's first read.
+        self.threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        const n = cpuWorkers();
+        if (n > 1) {
+            const want = n - 1;
+            var i: usize = 0;
+            while (i < want) : (i += 1) {
+                self.threads[i] = std.Thread.spawn(.{}, workerMain, .{self}) catch |err| {
+                    std.debug.print(
+                        "zdtd: worker spawn failed: {s}; running with {d} of {d} workers\n",
+                        .{ @errorName(err), self.worker_n, want },
+                    );
+                    break;
+                };
+                self.worker_n += 1;
+            }
+        }
+        // Publishes threaded/worker_n to fast-path readers on other threads.
+        self.start_state.store(.started, .release);
+    }
+
+    fn workerMain(self: *Pool) void {
+        const iop = self.io();
+        while (true) {
+            self.mutex.lockUncancelable(iop);
+            while (self.job_n == 0 and !self.shutdown) {
+                self.work_cv.waitUncancelable(iop, &self.mutex);
+            }
+            if (self.shutdown and self.job_n == 0) {
+                self.mutex.unlock(iop);
+                return;
+            }
+            self.job_n -= 1;
+            const job = self.jobs[self.job_n];
+            self.mutex.unlock(iop);
+            job.work(job.ctx, job.begin, job.end);
+            self.mutex.lockUncancelable(iop);
+            self.outstanding -= 1;
+            if (self.outstanding == 0) self.done_cv.signal(iop);
+            self.mutex.unlock(iop);
+        }
+    }
+
+    fn run(self: *Pool, total: usize, work: WorkFn, ctx: *anyopaque) void {
+        if (total == 0) return;
+        self.ensureStarted();
+        const workers = if (self.worker_n == 0) 1 else self.worker_n + 1;
+        if (builtin.single_threaded or workers <= 1 or total < min_parallel_items or self.worker_n == 0) {
+            work(ctx, 0, total);
+            return;
+        }
+
+        var ranges: [max_workers]Range = undefined;
+        const n = splitRanges(total, workers, &ranges);
+        if (n <= 1) {
+            work(ctx, 0, total);
+            return;
+        }
+
+        if (self.in_run.swap(true, .acquire)) {
+            // A parallel dispatch is already in flight (nested forRanges from a
+            // work callback, or a second thread): sharing jobs/outstanding
+            // would corrupt both runs, so run this one serially.
+            work(ctx, 0, total);
+            return;
+        }
+        defer self.in_run.store(false, .release);
+
+        const iop = self.io();
+        self.mutex.lockUncancelable(iop);
+        self.job_n = 0;
+        self.outstanding = 0;
+        var i: usize = 1;
+        while (i < n) : (i += 1) {
+            self.jobs[self.job_n] = .{
+                .work = work,
+                .ctx = ctx,
+                .begin = ranges[i].begin,
+                .end = ranges[i].end,
+            };
+            self.job_n += 1;
+            self.outstanding += 1;
+        }
+        self.work_cv.broadcast(iop);
+        self.mutex.unlock(iop);
+
+        work(ctx, ranges[0].begin, ranges[0].end);
+
+        self.mutex.lockUncancelable(iop);
+        while (self.outstanding > 0) {
+            self.done_cv.waitUncancelable(iop, &self.mutex);
+        }
+        self.mutex.unlock(iop);
+    }
+};
+
+var global_pool: Pool = .{};
+
+/// Process-wide mutex usable without threading an `std.Io` through callers
+/// (Zig 0.16 dropped `std.Thread.Mutex`; `std.Io.Mutex` needs an io for the
+/// contended futex path, which the pool's `Threaded` provides). No-op in
+/// single-threaded builds where the pool never runs workers.
+pub const IoMutex = struct {
+    inner: std.Io.Mutex = .init,
+
+    pub fn lock(self: *IoMutex) void {
+        if (builtin.single_threaded) return;
+        global_pool.ensureStarted();
+        self.inner.lockUncancelable(global_pool.io());
+    }
+
+    pub fn unlock(self: *IoMutex) void {
+        if (builtin.single_threaded) return;
+        self.inner.unlock(global_pool.io());
+    }
+};
+
 /// Run `work(ctx, begin, end)` over `[0, total)` in parallel when beneficial.
 /// `work` must be thread-safe for disjoint ranges.
 pub fn forRanges(
@@ -47,50 +207,15 @@ pub fn forRanges(
     comptime work: *const fn (@TypeOf(ctx), begin: usize, end: usize) void,
 ) void {
     if (total == 0) return;
-    const workers = cpuWorkers();
-    if (builtin.single_threaded or workers <= 1 or total < min_parallel_items) {
-        work(ctx, 0, total);
-        return;
-    }
-
-    var ranges: [max_workers]Range = undefined;
-    const n = splitRanges(total, workers, &ranges);
-    if (n <= 1) {
-        work(ctx, 0, total);
-        return;
-    }
-
-    const Worker = struct {
-        ctx: @TypeOf(ctx),
-        begin: usize,
-        end: usize,
-        fn entry(self: *@This()) void {
-            work(self.ctx, self.begin, self.end);
+    const Ctx = @TypeOf(ctx);
+    const Wrapper = struct {
+        fn entry(raw: *anyopaque, begin: usize, end: usize) void {
+            const c: *const Ctx = @ptrCast(@alignCast(raw));
+            work(c.*, begin, end);
         }
     };
-
-    var jobs: [max_workers]Worker = undefined;
-    var threads: [max_workers]std.Thread = undefined;
-    var spawned: usize = 0;
-    // Main thread runs range 0; others on workers.
-    var i: usize = 1;
-    while (i < n) : (i += 1) {
-        jobs[i] = .{ .ctx = ctx, .begin = ranges[i].begin, .end = ranges[i].end };
-        threads[i] = std.Thread.spawn(.{}, Worker.entry, .{&jobs[i]}) catch {
-            // Fallback: run remaining serially on this thread.
-            var j = i;
-            while (j < n) : (j += 1) {
-                work(ctx, ranges[j].begin, ranges[j].end);
-            }
-            break;
-        };
-        spawned += 1;
-    }
-    work(ctx, ranges[0].begin, ranges[0].end);
-    i = 1;
-    while (i <= spawned) : (i += 1) {
-        threads[i].join();
-    }
+    var ctx_local = ctx;
+    global_pool.run(total, Wrapper.entry, @ptrCast(&ctx_local));
 }
 
 test "split ranges cover total" {
@@ -114,4 +239,18 @@ test "forRanges serial when small" {
     };
     forRanges(10, Ctx{ .hits = &hits }, Ctx.work);
     try std.testing.expectEqual(@as(usize, 10), hits);
+}
+
+test "forRanges parallel covers all" {
+    if (builtin.single_threaded) return;
+    var hits: [64]u8 = .{0} ** 64;
+    const Ctx = struct {
+        hits: []u8,
+        fn work(ctx: @This(), begin: usize, end: usize) void {
+            var i = begin;
+            while (i < end) : (i += 1) ctx.hits[i] = 1;
+        }
+    };
+    forRanges(64, Ctx{ .hits = hits[0..] }, Ctx.work);
+    for (hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
 }

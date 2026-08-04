@@ -109,21 +109,10 @@ pub const Server = struct {
         }
     }
 
-    fn addrKey(addr: *const linux.sockaddr.storage, len: linux.socklen_t) u64 {
-        const bytes: [*]const u8 = @ptrCast(addr);
-        var h: u64 = 1469598103934665603;
-        var i: linux.socklen_t = 0;
-        while (i < len and i < 28) : (i += 1) {
-            h ^= bytes[i];
-            h *%= 1099511628211;
-        }
-        return h;
-    }
-
     fn findPeer(self: *Server, addr: *const linux.sockaddr.storage, len: linux.socklen_t) ?*peer_mod.Peer {
-        const key = addrKey(addr, len);
+        const key = peer_mod.Peer.hashAddr(addr, len);
         for (&self.peers) |*p| {
-            if (p.alive and addrKey(&p.addr, p.addr_len) == key) return p;
+            if (p.alive and p.addr_key == key) return p;
         }
         return null;
     }

@@ -61,6 +61,8 @@ pub const Chunk = struct {
     densities: ?[]u8 = null,
     dens_set: ?[]u8 = null, // bitset: 1 = densities[i] is valid TTS paint
     dirty: bool = false,
+    /// Runtime-only: server finished its one-time storage-TE scan of this chunk.
+    te_scanned: bool = false,
     allocator: ?std.mem.Allocator = null,
 
     pub fn generateFlat(pos: ChunkPos) Chunk {
@@ -221,11 +223,19 @@ pub const Chunk = struct {
         try self.ensureBlocks(allocator);
         const b = self.blocks.?;
         b[blockIndex(lx, y, lz)] = raw;
-        var top: i32 = y_dim - 1;
-        while (top >= 0) : (top -= 1) {
-            if ((b[blockIndex(lx, top, lz)] & 0xffff) != block_air) break;
+        // Incremental surface height: heights and blocks stay consistent (both
+        // writers are ensureBlocks and this), so a full column rescan is only
+        // needed when the surface block itself is cleared to air.
+        const h: i32 = self.heightAt(lx, lz);
+        if ((raw & 0xffff) != block_air) {
+            if (y > h) self.setHeight(lx, lz, @intCast(y));
+        } else if (y == h) {
+            var top: i32 = y - 1;
+            while (top >= 0) : (top -= 1) {
+                if ((b[blockIndex(lx, top, lz)] & 0xffff) != block_air) break;
+            }
+            self.setHeight(lx, lz, if (top < 0) 0 else @intCast(top));
         }
-        self.setHeight(lx, lz, if (top < 0) 0 else @intCast(top));
         self.dirty = true;
     }
 
@@ -344,33 +354,37 @@ pub const World = struct {
     /// per block-allocated chunk → cap ≈ 256 MiB worst case.
     pub const max_resident_chunks: usize = 4096;
 
-    fn evictOneChunk(self: *World, keep_key: u64) void {
+    fn evictOneChunk(self: *World, keep_key: u64) !void {
         var it = self.chunks.iterator();
         while (it.next()) |e| {
             if (e.key_ptr.* == keep_key) continue;
-            self.saveChunk(e.value_ptr) catch |err| std.debug.print(
-                "zdtd: chunk ({d},{d}) save on evict failed: {s}; edits lost\n",
-                .{ e.value_ptr.pos.x, e.value_ptr.pos.z, @errorName(err) },
-            );
+            // Never discard a resident chunk unless its latest state reached disk.
+            // The caller can reject the new chunk request and retry later.
+            try self.saveChunk(e.value_ptr);
             e.value_ptr.deinitBlocks();
             _ = self.chunks.remove(e.key_ptr.*);
             return;
         }
+        return error.NoEvictionCandidate;
     }
 
     pub fn getOrCreate(self: *World, pos: ChunkPos) !*Chunk {
         const k = pos.hash();
         if (self.chunks.count() >= max_resident_chunks and self.chunks.get(k) == null) {
-            self.evictOneChunk(k);
+            try self.evictOneChunk(k);
         }
         const gop = try self.chunks.getOrPut(k);
         if (!gop.found_existing) {
             gop.value_ptr.* = Chunk.generateFlat(pos);
+            errdefer {
+                gop.value_ptr.deinitBlocks();
+                _ = self.chunks.remove(k);
+            }
             if (self.terrain_source == .proc) {
                 if (self.worldgen) |*wg| {
                     wg.fillHeights(pos.x, pos.z, &gop.value_ptr.heights);
                     // Single-biome dirt/stone/bedrock (AssignIds pins via defaultStack).
-                    gop.value_ptr.ensureBlocksWithStack(self.allocator, biome_layers.defaultStack()) catch {};
+                    try gop.value_ptr.ensureBlocksWithStack(self.allocator, biome_layers.defaultStack());
                 }
             } else {
                 if (self.heightmap) |*hm| {
@@ -379,7 +393,7 @@ pub const World = struct {
                 // Terrain columns from biomes.xml layers (before POI paint / disk load).
                 const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
                 const stack = self.biome_layers_table.stackFor(biome_id);
-                gop.value_ptr.ensureBlocksWithStack(self.allocator, stack) catch {};
+                try gop.value_ptr.ensureBlocksWithStack(self.allocator, stack);
                 if (self.prefabs) |*pf| {
                     pf.applyToChunkHeights(pos.x, pos.z, &gop.value_ptr.heights);
                     // Stock .tts block paint into this chunk only (no setBlockWorld re-entry).

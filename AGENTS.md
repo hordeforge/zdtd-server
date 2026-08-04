@@ -40,7 +40,9 @@ The operating principles behind every rule below. When in doubt, these decide.
    never a product; client tooling stays join / automation.
 6. **Correctness and security first, then minimalism, then style.** Server is
    authoritative and validates at trust boundaries; make illegal states
-   unrepresentable; apply YAGNI; prefer native platform APIs over shelling out.
+   unrepresentable; apply YAGNI and **Zig Zen** (intent, edge cases, one obvious
+   way, memory is a resource). Prefer idiomatic Zig **stdlib abstractions**
+   (`std.Io`, …) over shelling out or OS-specific syscall glue (rule 24).
 7. **Hold the 20 TPS budget.** The 50 ms tick is the constraint. Validate with
    loadgen plus a real stock client (EAC off) plus zdtd apm dumps, not by unit
    tests alone.
@@ -86,14 +88,21 @@ The operating principles behind every rule below. When in doubt, these decide.
 11. **Name for what it does.** A flag that only throttles streaming is not
     `world_enabled`. Confusing names are defects.
 12. **One stock package shape → one builder.** No second "almost stock" encoder.
-13. **Do not hardcode game asset data.** Anything stock ships in `Data/Config`,
-    prefabs, DTM, TTS, blocks/items/recipes/loot/quests/entities XML, or other
-    install files must be **read from those assets** (runtime via `game-dir` /
-    `assets/*`, or **comptime** embed/parse that generates tables/code). No
-    hand-copied id lists, block names, recipe graphs, entity stats, or similar
-    "good enough" constants in sim/wire when a loader or codegen path exists or
-    should. Fixtures under `assets/fixtures/` are for offline tests only; they
-    are not a license to freeze production catalogs in source.
+13. **Do not hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md).
+    Anything stock ships in `Data/Config`, prefabs, DTM, TTS, XML catalogs, or
+    other install files must be **read from those assets** (runtime via
+    `game-dir` / `assets/*`, or **comptime** embed/parse that generates tables).
+    Rules of thumb:
+    - **Block/item wire ids** = AssignIds dump (`idByName`) only. Never sequential
+      XML declaration order, never invent parallel id spaces.
+    - **Properties** (MaxDamage, Texture, Class, stack, HP, prices) from the
+      matching XML after name resolve.
+    - **Biomemap colors/layers** from `biomes.xml`, not RGB switch tables.
+    - **Fail closed:** missing name → omit / not placeable / skip deco object.
+      Wrong id is worse than missing.
+    - **Fixtures** under `assets/fixtures/` are offline tests only.
+    - **OK hardcodes:** wire layout RE constants, Unity hashes computed from
+      stock **names**, ConfigFile LoadLocal name list (protocol).
 14. **RE before inventing wire.** Package field order, types, lengths, and join
     sequence come from `../7dtd-research/docs`, loadgen goldens, or verified stock
     `Read`/`Write`. Do not guess layouts from "what seems right." If RE and
@@ -130,10 +139,22 @@ The operating principles behind every rule below. When in doubt, these decide.
     catalog entry, buffer too small, unknown TE type), omit or send the stock
     empty/error form. Never truncate mid-field, pad with zeros to a guessed
     size, or send a partial blob that desyncs `BinaryReader`.
-23. **Keep `make check` green.** No "fix later," no skipped assertions to land
-    a feature. New wire/sim behavior gets a unit or `scenarios.zig` test when
+23. **Keep `make check` green.** No "fix later," no skipped assertions to land a
+    feature. New wire/sim behavior gets a unit or `scenarios.zig` test when
     the path is non-trivial; join/spawn/chunk/inv changes need loadgen smoke
     when practical.
+24. **Stdlib abstractions, not OS-specific guts. No raw syscalls in new or
+    touched code.** Prefer the highest stable Zig 0.16 API that fits:
+    `std.Io` / `Dir` / `File` / `Threaded`, `std.mem`, `std.fmt`, `std.Thread`
+    (via `util/parallel`), etc. Zig does not use OOP abstract classes; **stdlib
+    interfaces** (`std.Io` vtable) and thin helpers on top (`util/io_fs.zig`) are
+    the idiomatic layer. Do **not** open-code `std.os.linux.*`, raw `std.posix`
+    file loops, or `std.c` for ordinary FS. Ordinary FS is `util/io_fs` /
+    `std.Io` only. LiteNet/UDP batch and admin/GSI TCP sockets remain **legacy**
+    `std.os.linux` until a deliberate net migration. Shelling out remains
+    forbidden when an in-process API exists (workspace Native APIs rule). Follow
+    [Zig Zen](https://ziglang.org/documentation/master/#Zen) when choosing among
+    correct options.
 
 ## Commands
 
@@ -141,8 +162,9 @@ The operating principles behind every rule below. When in doubt, these decide.
 zig build              # Debug binary → zig-out/bin/zdtd
 zig build test         # unit + scenario tests (must stay green)
 zig build run
-make check             # build + test
-make clean             # zig-out + .zig-cache
+make check             # version/toolchain pin + build + test + fuzz + lint
+make release           # ReleaseSafe + strip (operator binary)
+make clean             # zig-out + .zig-cache + .zdtd_cfg_cache
 ```
 
 ```bash
@@ -160,7 +182,8 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 ```bash
 # From sibling 7dtd-loadgen (port must match zdtd --port)
 ./src/LoadGen/bin/Release/net8.0/7dtd-loadgen \
-  --join --host 127.0.0.1 --port 27002 --count 2 --actions 20
+  --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
+# LiteNet is ServerPort+2 (example: zdtd --port 27002 → loadgen --port 27004)
 
 # Metrics: zdtd text/JSON snapshot (docs/APM.md), not 7dtd-apm sessions
 ```
@@ -196,8 +219,10 @@ worlds/                local save overlays (.zch2, player data)
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
 | Metrics | `apm/*` via `Game.harness` | 7dtd-apm bridge |
 
-- Import **facades** when they exist: `ecs/root.zig`, `wire/packages.zig`,
-  `apm/root.zig`, `assets/root.zig`. Avoid cycles server ↔ ecs ↔ wire ↔ world.
+- Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`,
+  `litenet`, `wire`, `assets`, `ecs`, `world`, `server`) and `wire/packages.zig`
+  for stock body modules. Leaf files stay importable. Avoid cycles; world must
+  not import wire (TE domain types live in world, wire re-exports as needed).
 - `pub` only for intended API. Helpers stay file-private by default.
 
 ## Docs map
@@ -210,6 +235,7 @@ Full index: [`docs/INDEX.md`](docs/INDEX.md). **STATUS wins** if inventory docs 
 | [`TODO.md`](TODO.md) | Open backlog (shipped log below the fold) |
 | [`docs/MISSING_FEATURES.md`](docs/MISSING_FEATURES.md) | Full gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased plan (M7+; post-playable stack) |
+| [`docs/AUTHORITY.md`](docs/AUTHORITY.md) | Server-authoritative C2S gates + mode |
 | [`docs/APM.md`](docs/APM.md) | Native metrics harness |
 | [`docs/PACKAGES.md`](docs/PACKAGES.md) / [`docs/GAME_OPTIONS.md`](docs/GAME_OPTIONS.md) | Package catalog / serverconfig |
 | [`docs/ECS.md`](docs/ECS.md) / [`docs/SYSTEMS.md`](docs/SYSTEMS.md) | Sim architecture |
@@ -263,19 +289,28 @@ mapping captures, bit masks, buffer caps, and RE version pins are named module
   stores. No global allocator for sim/wire.
 - Allocators are explicit: `std.mem.Allocator` or caller-owned buffers.
   `defer deinit` immediately after acquire; `errdefer` for error-only paths.
-- Tick / per-packet: reuse `recv_buf` / `send_buf` / `body_buf`, fixed client
-  slots, SoA columns, pools. No unbounded grow-per-entity or grow-per-chunk
-  without a bound or pool.
-- Init/load may allocate (maps, TTS cache, XML, prefabs). Cache by stable keys;
-  never re-parse XML every tick.
+- **Hot path: no heap allocation.** Tick, per-packet C2S/S2C, interest/
+  replicate, chunk stream encode, and ECS systems must not `alloc` / `create` /
+  `dupe` / `allocPrint`, must not grow `ArrayList`/`HashMap`, and must not
+  spin up arenas. Reuse `recv_buf` / `send_buf` / `body_buf`, fixed client
+  slots, SoA columns, pools, and stack/`bufPrint` scratch. At cap: drop or
+  omit (named const), do not realloc.
+- Init/load/admin may allocate (maps, TTS cache, XML, prefabs, first-touch
+  chunk **slot** fill into pre-reserved storage). Cache by stable keys; never
+  re-parse XML every tick.
 - `page_allocator` is not for tick or package work. Tests use
   `std.testing.allocator` (or `DebugAllocator`) so leaks fail CI.
+- Review prompts: [`docs/PROMPTS/review-zig-idiomatic.md`](docs/PROMPTS/review-zig-idiomatic.md)
+  (language/hot path), [`docs/PROMPTS/review-abstractions.md`](docs/PROMPTS/review-abstractions.md)
+  (when to build or delete helpers/layers),
+  [`docs/PROMPTS/review-simd.md`](docs/PROMPTS/review-simd.md) (SIMD on dense loops).
 
 ### Tick path (20 TPS / 50 ms)
 
 Main sim + net loop is effectively single-threaded for game rules.
 
-- No unbounded heap; no new threads per tick.
+- **No heap allocation** (see Memory). No unbounded growth.
+- No new threads per tick (`util/parallel` pool only).
 - Syscalls stay on the existing poll / `recv` / `sendto` batch path (LiteNet +
   GSI). No open files or XML re-read mid-tick.
 - Optional parallelism only via `util/parallel.zig`, never ad-hoc
@@ -298,6 +333,32 @@ Init, map load, and admin commands may take longer; amortize into caches.
 - Build logic in `build.zig` / `build.zig.zon`. `Debug` for safety;
   `ReleaseFast` for soak. Thin Makefile is fine; do not hide the real build
   only in Make.
+
+### Filesystem and I/O (Zig 0.16)
+
+- **Default:** `std.Io.Threaded` (or the process Io) + `std.Io.Dir` / `File`.
+  Examples: `Dir.cwd().writeFile(io, .{ .sub_path, .data })`,
+  `Dir.cwd().openDir(io, path, .{ .iterate = true })`, `createDirPath`,
+  `openFile` + read helpers.
+- Shared helpers: `src/util/io_fs.zig` (mkdir/write/read/list via `std.Io` only).
+- Config load + `--config-overrides` go through `assets/paths.zig` + `io_fs`,
+  never raw open/getdents.
+- **Forbidden in new code:** `std.os.linux.*` for ordinary files, ad-hoc
+  `posix`/`std.c` file loops, `/tmp` for large caches (use project or `~/.cache`).
+- **Layering:** app → `io_fs` (optional) → `std.Io` → (std internals). Do not
+  skip to the bottom from game/assets/world code.
+- **UDP/LiteNet:** keep the existing batched socket path until a deliberate
+  migration; do not invent a second raw-syscall net stack. New net features
+  prefer std abstractions where they fit.
+
+### Zig Zen (tie-break)
+
+When two approaches are correct, pick the one that matches
+[Zig Zen](https://ziglang.org/documentation/master/#Zen): precise intent, edge
+cases, readable code, one obvious way, fail at compile time when possible,
+incremental migration off legacy I/O, **memory is a resource** (no hot-path
+heap), dealloc always succeeds (`defer`). Full review rubric:
+[`docs/PROMPTS/review-zig-idiomatic.md`](docs/PROMPTS/review-zig-idiomatic.md).
 
 ### Errors and safety
 
@@ -345,8 +406,11 @@ Init, map load, and admin commands may take longer; amortize into caches.
 - `catch {}` on encode/decode without intentional drop + comment
 - Fake world/FX/journal content to silence client errors
 - Game assemblies or bulk IL committed here
-- `page_allocator` or unbounded `ArrayList` growth on the tick path
+- Heap alloc / `dupe` / `allocPrint` / growing `ArrayList`/`HashMap` on tick or
+  per-packet encode/interest/stream paths
+- `page_allocator` on the tick path
 - Syscalls or XML parse inside package body builders
+- Raw `std.os.linux` / open-coded posix FS for ordinary files (use `std.Io` / `io_fs`)
 - Names broader or opposite to the real control
 - Manual cleanup in `catch` when `defer` / `errdefer` suffices
 - Wiring 7dtd-apm, Harmony, or ModAPI into this process
@@ -358,7 +422,9 @@ Init, map load, and admin commands may take longer; amortize into caches.
 
 - [ ] Code sits in the correct layer (table above)
 - [ ] Naming matches table; new wire/tick constants are named
-- [ ] Allocators explicit; `defer` / `errdefer`; no tick heap churn
+- [ ] Allocators explicit; `defer` / `errdefer`
+- [ ] Hot path: no heap alloc / no growing lists; caller buffers + named caps
+- [ ] FS/I/O via `std.Io` / `io_fs` (no new raw linux/posix file syscalls)
 - [ ] Package body uses `binary` + buffer builder; ids via map
 - [ ] Layout matches RE or has a unit / scenario test
 - [ ] No incomplete stock packages sent; missing preferred over fake

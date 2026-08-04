@@ -12,6 +12,8 @@ pub const Server = struct {
     port: u16 = 0,
     /// Persistent telnet-style sessions (-1 = free slot).
     sessions: [max_sessions]i32 = .{-1} ** max_sessions,
+    recv_bufs: [max_sessions][max_cmd]u8 = undefined,
+    recv_lens: [max_sessions]usize = .{0} ** max_sessions,
     /// Session whose line is currently being handled (reply target).
     active: usize = 0,
 
@@ -22,10 +24,11 @@ pub const Server = struct {
         const fd: i32 = @intCast(sock_rc);
         var yes: c_int = 1;
         _ = linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, @ptrCast(&yes), @sizeOf(c_int));
+        // Loopback only: admin has no auth (give/kick/shutdown). Do not bind 0.0.0.0.
         var addr = linux.sockaddr.in{
             .family = linux.AF.INET,
             .port = std.mem.nativeToBig(u16, port),
-            .addr = 0, // INADDR_ANY
+            .addr = std.mem.nativeToBig(u32, 0x7f000001), // 127.0.0.1
         };
         const rc = linux.bind(fd, @ptrCast(&addr), @sizeOf(linux.sockaddr.in));
         if (linux.errno(rc) != .SUCCESS) {
@@ -46,6 +49,7 @@ pub const Server = struct {
             if (s.* >= 0) _ = linux.close(s.*);
             s.* = -1;
         }
+        self.recv_lens = .{0} ** max_sessions;
         if (self.fd >= 0) _ = linux.close(self.fd);
         self.fd = -1;
     }
@@ -61,6 +65,7 @@ pub const Server = struct {
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) {
                 s.* = cfd;
+                self.recv_lens[i] = 0;
                 self.active = i;
                 self.reply("zdtd admin. 'help' for commands.\n");
                 return;
@@ -69,6 +74,7 @@ pub const Server = struct {
         // all slots busy: evict oldest (slot 0)
         _ = linux.close(self.sessions[0]);
         self.sessions[0] = cfd;
+        self.recv_lens[0] = 0;
         self.active = 0;
         self.reply("zdtd admin. 'help' for commands.\n");
     }
@@ -81,17 +87,44 @@ pub const Server = struct {
         self.acceptNew();
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) continue;
-            const n = linux.read(s.*, buf.ptr, buf.len);
-            const errn = linux.errno(n);
-            if (errn == .AGAIN) continue;
-            if (errn != .SUCCESS or n == 0) {
+            const pending = self.recv_lens[i];
+            if (pending == max_cmd) {
                 _ = linux.close(s.*);
                 s.* = -1;
+                self.recv_lens[i] = 0;
                 continue;
             }
-            const len: usize = @intCast(n);
-            var end = len;
-            while (end > 0 and (buf[end - 1] == '\n' or buf[end - 1] == '\r')) end -= 1;
+            var total = pending;
+            if (std.mem.indexOfScalar(u8, self.recv_bufs[i][0..pending], '\n') == null) {
+                const dst = self.recv_bufs[i][pending..];
+                const n = linux.read(s.*, dst.ptr, dst.len);
+                const errn = linux.errno(n);
+                if (errn == .AGAIN) continue;
+                if (errn != .SUCCESS or n == 0) {
+                    _ = linux.close(s.*);
+                    s.* = -1;
+                    self.recv_lens[i] = 0;
+                    continue;
+                }
+                total += @intCast(n);
+            }
+            const newline = std.mem.indexOfScalar(u8, self.recv_bufs[i][0..total], '\n') orelse {
+                self.recv_lens[i] = total;
+                continue;
+            };
+            var end = newline;
+            if (end > 0 and self.recv_bufs[i][end - 1] == '\r') end -= 1;
+            if (end > buf.len) {
+                _ = linux.close(s.*);
+                s.* = -1;
+                self.recv_lens[i] = 0;
+                continue;
+            }
+            @memcpy(buf[0..end], self.recv_bufs[i][0..end]);
+            const consumed = newline + 1;
+            const remaining = total - consumed;
+            std.mem.copyForwards(u8, self.recv_bufs[i][0..remaining], self.recv_bufs[i][consumed..total]);
+            self.recv_lens[i] = remaining;
             if (end == 0) continue;
             self.active = i;
             return buf[0..end];
@@ -103,7 +136,12 @@ pub const Server = struct {
     pub fn reply(self: *Server, text: []const u8) void {
         const fd = self.sessions[self.active];
         if (fd < 0) return;
-        _ = linux.write(fd, text.ptr, text.len);
+        var sent: usize = 0;
+        while (sent < text.len) {
+            const n = linux.write(fd, text[sent..].ptr, text.len - sent);
+            if (linux.errno(n) != .SUCCESS or n == 0) return;
+            sent += @intCast(n);
+        }
     }
 };
 
@@ -173,7 +211,7 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .give = .{
             .peer = std.fmt.parseInt(usize, p, 10) catch return .unknown,
             .item = std.fmt.parseInt(u16, i, 10) catch return .unknown,
-            .count = std.fmt.parseInt(u16, c, 10) catch 1,
+            .count = std.fmt.parseInt(u16, c, 10) catch return .unknown,
         } };
     }
     if (std.mem.eql(u8, cmd, "tele")) {
@@ -222,8 +260,9 @@ pub fn parseCommand(line: []const u8) Command {
             return .{ .settime = .{ .day = n, .hour = 8, .minute = 0 } };
         }
         // "settime <day> <hour> <minute>"
-        const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch 8;
-        const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch 0;
+        const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch return .unknown;
+        const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch return .unknown;
+        if (h > 23 or mi > 59) return .unknown;
         return .{ .settime = .{ .day = n, .hour = h, .minute = mi } };
     }
     if (std.mem.eql(u8, cmd, "spawnentity") or std.mem.eql(u8, cmd, "se")) {
@@ -293,4 +332,11 @@ test "parse stock ops commands" {
     try std.testing.expect(parseCommand("saveworld") == .saveworld);
     try std.testing.expect(parseCommand("version") == .version);
     try std.testing.expect(parseCommand("shutdown") == .shutdown);
+}
+
+test "parse rejects malformed numeric arguments" {
+    try std.testing.expect(parseCommand("give 0 2 many") == .unknown);
+    try std.testing.expect(parseCommand("settime 7 noon 30") == .unknown);
+    try std.testing.expect(parseCommand("settime 7 24 00") == .unknown);
+    try std.testing.expect(parseCommand("settime 7 23 60") == .unknown);
 }

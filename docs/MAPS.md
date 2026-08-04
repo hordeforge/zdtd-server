@@ -34,7 +34,7 @@ zdtd --port 27002 --map "$GAME/Data/Worlds/Navezgane" --world worlds/nav_save
 |---|---|
 | `--map` | Read-only stock terrain + prefabs + water + spawns |
 | `--game-dir` + `--world-name` | Resolve `$game/Data/Worlds/$name` |
-| `--world` | Writable zdtd overlay (`.zch` chunk heights after edits) |
+| `--world` | Writable zdtd overlay (`.zch` files: ZCH3 heights + full u32 block data) |
 
 Supported folders on a typical install: `Navezgane`, `Pregen06k01`, `Pregen06k02`,
 `Pregen08k01`, `Pregen08k02` (size from each `map_info.xml`).
@@ -66,7 +66,8 @@ generating chunk only** (no recursive world set during paint).
   See `docs/SCALE_ARCHITECTURE.md`.
 - TTS: types + **texture channel** (per-block `textureFull` paint decoded from
   the sparse v>=10 channel and wired into the chunk `chnTextures` so paint-driven
-  shape blocks render their material, not grey). No density/damage channels yet.
+  shape blocks render their material, not grey). Density from type + TTS; terrain
+  floor MicroSplat needs client splat load (`fixedSizeCC=false`, see WIRE_CHUNK).
 - No TTS name→AssignIds remap if prefab ids drift from runtime blocks.xml.
 - TTS TE lists spawn loot-type containers (Loot/SecureLoot/Composite); non-loot TEs and TTS-driven sleeper volumes not yet spawned (sleeper volumes come from prefab XML).
 - Biome paint from `biomes.png`: per-chunk dominant biome (HAVE); per-cell biome paint still one value per chunk.

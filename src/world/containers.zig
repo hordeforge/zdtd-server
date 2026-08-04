@@ -1,6 +1,7 @@
 //! World-position keyed loot containers (block TE storage).
 
 const std = @import("std");
+const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
 pub const max_container_slots: usize = 54; // 9x6 common chest
@@ -113,14 +114,8 @@ pub const ContainerStore = struct {
     /// pos xyz i32*3 | block_id i32 | slot_count u16 | touched u8 | player u8 |
     /// slot_count * (item_id u16 | count u16 | quality u8 | meta u16).
     pub fn save(self: *const ContainerStore, dir: []const u8) !void {
-        const linux = std.os.linux;
         var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(path[0 .. path.len - 1], "{s}/containers.zct", .{dir});
-        path[p.len] = 0;
-        const rc = linux.open(path[0..p.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-        if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-        const fd: i32 = @intCast(rc);
-        defer _ = linux.close(fd);
+        const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
         var buf: [64 * 1024]u8 = undefined;
         var o: usize = 0;
         @memcpy(buf[0..4], "ZCT1");
@@ -151,31 +146,16 @@ pub const ContainerStore = struct {
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
-        var off: usize = 0;
-        while (off < o) {
-            const n = linux.write(fd, buf[off..].ptr, o - off);
-            if (linux.errno(n) != .SUCCESS or n == 0) return error.WriteFailed;
-            off += @intCast(n);
-        }
+        try io_fs.writeFileSimple(p, buf[0..o]);
     }
 
     pub fn load(self: *ContainerStore, dir: []const u8) !void {
-        const linux = std.os.linux;
         var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(path[0 .. path.len - 1], "{s}/containers.zct", .{dir});
-        path[p.len] = 0;
-        const rc = linux.open(path[0..p.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-        if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-        const fd: i32 = @intCast(rc);
-        defer _ = linux.close(fd);
-        var buf: [64 * 1024]u8 = undefined;
-        var len: usize = 0;
-        while (len < buf.len) {
-            const n = linux.read(fd, buf[len..].ptr, buf.len - len);
-            if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-            if (n == 0) break;
-            len += @intCast(n);
-        }
+        const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
+        const data = io_fs.readFileAll(std.heap.page_allocator, p) catch return error.OpenFailed;
+        defer std.heap.page_allocator.free(data);
+        const buf = data;
+        const len = data.len;
         if (len < 6 or !std.mem.eql(u8, buf[0..4], "ZCT1")) return error.ReadFailed;
         const count = std.mem.readInt(u16, buf[4..6], .little);
         var o: usize = 6;
@@ -227,7 +207,7 @@ test "container store save load roundtrip" {
     try std.testing.expectEqual(@as(u16, 12), c2.slots[0].count);
     try std.testing.expectEqual(@as(u8, 2), c2.slots[0].quality);
     try std.testing.expect(c2.touched);
-    _ = std.os.linux.unlink("./containers.zct");
+    io_fs.deleteFileSimple("./containers.zct");
 }
 
 test "container get or create" {

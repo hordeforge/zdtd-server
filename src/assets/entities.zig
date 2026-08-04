@@ -2,8 +2,8 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
-const linux = std.os.linux;
-const stock_entity = @import("../wire/stock_entity.zig");
+const io_fs = @import("../util/io_fs.zig");
+const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
 
 pub const max_entities_defs: usize = 512;
@@ -83,7 +83,7 @@ pub const EntityTable = struct {
 pub const builtin_defs = [_]EntityDef{
     .{
         .name = "playerMale",
-        .hash = stock_entity.class_player_male,
+        .hash = unity_hash.class_player_male,
         .max_hp = 100,
         .kind = .player,
         .spawnable = false,
@@ -91,7 +91,7 @@ pub const builtin_defs = [_]EntityDef{
     },
     .{
         .name = "zombieBoe",
-        .hash = stock_entity.class_zombie_boe,
+        .hash = unity_hash.class_zombie_boe,
         .max_hp = 40,
         .kind = .zombie,
         .loot_list = "EntityLootContainerRegular",
@@ -107,31 +107,6 @@ pub const builtin_defs = [_]EntityDef{
         .is_enemy = false,
     },
 };
-
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
 
 const RawClass = struct {
     name: []const u8,
@@ -168,22 +143,21 @@ fn inferKind(name: []const u8, tags: []const u8, is_animal: bool, is_enemy: bool
     return .zombie;
 }
 
-/// Default HP when XML has no numeric MaxHealth (templates use buffs).
+/// Fail-closed HP when MaxHealth is missing or non-numeric (buff-driven templates).
+/// Prefer entityclasses MaxHealth; these are last-resort kind floors only.
 fn defaultHp(kind: components.Kind, name: []const u8) f32 {
-    if (kind == .player) return 100;
-    if (kind == .trader) return 9999;
-    if (kind == .animal) {
-        if (std.mem.indexOf(u8, name, "Bear") != null) return 200;
-        if (std.mem.indexOf(u8, name, "Wolf") != null) return 80;
-        return 30;
-    }
-    if (std.mem.indexOf(u8, name, "Feral") != null) return 60;
-    if (std.mem.indexOf(u8, name, "Radiated") != null) return 80;
-    return 40;
+    _ = name;
+    return switch (kind) {
+        .player => 100,
+        .trader => 9999,
+        .animal => 30,
+        .zombie => 40,
+        else => 40,
+    };
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
@@ -285,7 +259,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const hand = resolveProp(&classes, name, "HandItem", 0) orelse "";
         try list.append(allocator, .{
             .name = name,
-            .hash = stock_entity.unityStringHash(name),
+            .hash = unity_hash.unityStringHash(name),
             .max_hp = max_hp,
             .kind = kind,
             .loot_list = loot,
@@ -315,27 +289,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?EntityTable {
-    var path_buf: [2048]u8 = undefined;
-    if (config_dir) |cd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/entityclasses.xml", .{cd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    if (game_dir) |gd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/entityclasses.xml", .{gd});
-        return loadFromPath(allocator, p) catch null;
-    }
-    return null;
+    const paths = @import("paths.zig");
+    return paths.tryLoadConfig("entityclasses.xml", EntityTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
 test "builtin entities" {
     const t = EntityTable.builtin();
     try std.testing.expectEqualStrings("zombieBoe", t.defaultZombie().name);
-    try std.testing.expectEqual(stock_entity.class_zombie_boe, t.defaultZombie().hash);
+    try std.testing.expectEqual(unity_hash.class_zombie_boe, t.defaultZombie().hash);
 }
 
 test "unity hash matches known playerMale" {
-    try std.testing.expectEqual(stock_entity.class_player_male, stock_entity.unityStringHash("playerMale"));
-    try std.testing.expectEqual(stock_entity.class_zombie_boe, stock_entity.unityStringHash("zombieBoe"));
+    try std.testing.expectEqual(unity_hash.class_player_male, unity_hash.unityStringHash("playerMale"));
+    try std.testing.expectEqual(unity_hash.class_zombie_boe, unity_hash.unityStringHash("zombieBoe"));
 }
 
 test "load stock entityclasses when present" {
@@ -344,7 +310,7 @@ test "load stock entityclasses when present" {
     defer t.deinit();
     try std.testing.expect(t.defs.len > 100);
     const boe = t.byName("zombieBoe") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(stock_entity.class_zombie_boe, boe.hash);
+    try std.testing.expectEqual(unity_hash.class_zombie_boe, boe.hash);
     try std.testing.expect(boe.spawnable);
     try std.testing.expectEqual(components.Kind.zombie, boe.kind);
     try std.testing.expectEqualStrings("EntityLootContainerRegular", boe.loot_list);

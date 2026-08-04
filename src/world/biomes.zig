@@ -5,23 +5,144 @@
 //! World XZ center origin (same as DTM): img_x = wx + W/2.
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
+const xml = @import("../assets/xml_util.zig");
+const paths = @import("../assets/paths.zig");
 
-/// Stock biomes.xml biomemapcolor → biomemap id (v3.1 Navezgane).
-/// Unknown → pine_forest (3). Always < 50 for CalcDominantBiome.
+/// RGB packed 0xRRGGBB → biomemap id. Loaded from biomes.xml; fallback for tests.
+pub const ColorTable = struct {
+    /// sparse: we store pairs in parallel arrays (small N).
+    colors: []const u32 = &.{},
+    ids: []const u8 = &.{},
+    default_id: u8 = 3,
+    arena_ptr: ?*std.heap.ArenaAllocator = null,
+
+    pub fn empty() ColorTable {
+        return .{};
+    }
+
+    pub fn deinit(self: *ColorTable) void {
+        if (self.arena_ptr) |ap| {
+            const child = ap.child_allocator;
+            ap.deinit();
+            child.destroy(ap);
+            self.arena_ptr = null;
+        }
+        self.* = .{};
+    }
+
+    pub fn lookup(self: *const ColorTable, r: u8, g: u8, b: u8) u8 {
+        const rgb: u32 = (@as(u32, r) << 16) | (@as(u32, g) << 8) | b;
+        for (self.colors, self.ids) |c, id| {
+            if (c == rgb) return id;
+        }
+        return self.default_id;
+    }
+};
+
+/// Fallback when biomes.xml is missing (offline tests). Matches stock V3.1 keys.
 pub fn colorToId(r: u8, g: u8, b: u8) u8 {
-    const rgb: u32 = (@as(u32, r) << 16) | (@as(u32, g) << 8) | b;
-    return switch (rgb) {
-        0xFFFFFF => 1, // snow
-        0x004000 => 3, // pine_forest
-        0xFFE477 => 5, // desert
-        0x0000FF => 6, // water
-        0x001234 => 19, // underwater
-        0xFF0000 => 7, // radiated
-        0xFFA800 => 8, // wasteland
-        0xBA00FF => 9, // burnt_forest
-        else => 3, // unknown → pine_forest
+    return fallback_colors.lookup(r, g, b);
+}
+
+const fallback_colors = blk: {
+    @setEvalBranchQuota(1000);
+    break :blk ColorTable{
+        .colors = &[_]u32{ 0xFFFFFF, 0x004000, 0xFFE477, 0x0000FF, 0x001234, 0xFF0000, 0xFFA800, 0xBA00FF },
+        .ids = &[_]u8{ 1, 3, 5, 6, 19, 7, 8, 9 },
+        .default_id = 3,
     };
+};
+
+fn parseHexColor(s: []const u8) ?u32 {
+    var t = std.mem.trim(u8, s, " \t\"'");
+    if (t.len > 0 and t[0] == '#') t = t[1..];
+    if (t.len != 6) return null;
+    return std.fmt.parseInt(u32, t, 16) catch null;
+}
+
+/// Load biomemapcolor + biomemap id from biomes.xml.
+pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTable {
+    const raw = try io_fs.readFileAll(allocator, path);
+    defer allocator.free(raw);
+    const clean = try xml.stripComments(allocator, raw);
+    defer allocator.free(clean);
+
+    const ap = try allocator.create(std.heap.ArenaAllocator);
+    ap.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer {
+        ap.deinit();
+        allocator.destroy(ap);
+    }
+    const arena = ap.allocator();
+
+    // name → id from <biomemap id="09" name="burnt_forest"/>
+    var name_to_id: std.StringHashMapUnmanaged(u8) = .{};
+    var i: usize = 0;
+    while (i < clean.len) {
+        const mi = std.mem.indexOfPos(u8, clean, i, "<biomemap") orelse break;
+        const id_s = xml.attr(clean, mi, "id") orelse {
+            i = mi + 9;
+            continue;
+        };
+        const nm = xml.attr(clean, mi, "name") orelse {
+            i = mi + 9;
+            continue;
+        };
+        const id_n = std.fmt.parseInt(u8, id_s, 10) catch {
+            i = mi + 9;
+            continue;
+        };
+        try name_to_id.put(arena, try arena.dupe(u8, nm), id_n);
+        i = mi + 9;
+    }
+
+    var colors: std.ArrayList(u32) = .empty;
+    defer colors.deinit(allocator);
+    var ids: std.ArrayList(u8) = .empty;
+    defer ids.deinit(allocator);
+
+    i = 0;
+    while (i < clean.len) {
+        const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
+        const bname = xml.attr(clean, bi, "name") orelse {
+            i = bi + 7;
+            continue;
+        };
+        const col_s = xml.attr(clean, bi, "biomemapcolor") orelse {
+            i = bi + 7;
+            continue;
+        };
+        const rgb = parseHexColor(col_s) orelse {
+            i = bi + 7;
+            continue;
+        };
+        const id = name_to_id.get(bname) orelse {
+            i = bi + 7;
+            continue;
+        };
+        try colors.append(allocator, rgb);
+        try ids.append(allocator, id);
+        i = bi + 7;
+    }
+
+    const cslice = try arena.alloc(u32, colors.items.len);
+    @memcpy(cslice, colors.items);
+    const islice = try arena.alloc(u8, ids.items.len);
+    @memcpy(islice, ids.items);
+    const def: u8 = name_to_id.get("pine_forest") orelse 3;
+    return .{
+        .colors = cslice,
+        .ids = islice,
+        .default_id = def,
+        .arena_ptr = ap,
+    };
+}
+
+pub fn tryLoadColorTable(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ColorTable {
+    var path_buf: [2048]u8 = undefined;
+    const path = paths.resolveConfigXml(&path_buf, "biomes.xml", game_dir, config_dir) orelse return null;
+    return loadColorTable(allocator, path) catch null;
 }
 
 pub const BiomeMap = struct {
@@ -32,6 +153,10 @@ pub const BiomeMap = struct {
     allocator: std.mem.Allocator = undefined,
     half_w: i32 = 0,
     half_h: i32 = 0,
+    /// Blocks per biomes.png pixel (world size / png size); Navezgane ships 3072px for a 6144 world.
+    scale: i32 = 1,
+    /// Optional table used at decode time (not owned).
+    color_table: ?*const ColorTable = null,
 
     pub fn deinit(self: *BiomeMap) void {
         if (self.r.len != 0) self.allocator.free(self.r);
@@ -41,8 +166,9 @@ pub const BiomeMap = struct {
     /// Biome id for world XZ; null if OOB / unloaded.
     pub fn atWorld(self: *const BiomeMap, wx: i32, wz: i32) ?u8 {
         if (self.r.len == 0) return null;
-        const dx = wx + self.half_w;
-        const dz = wz + self.half_h;
+        // PNG row 0 is north (+Z), so Z flips; X maps straight through.
+        const dx = @divFloor(wx, self.scale) + self.half_w;
+        const dz = self.half_h - 1 - @divFloor(wz, self.scale);
         if (dx < 0 or dz < 0 or dx >= self.width or dz >= self.height) return null;
         const idx: usize = @intCast(@as(i64, dz) * @as(i64, self.width) + @as(i64, dx));
         return self.r[idx];
@@ -77,34 +203,13 @@ pub const BiomeMap = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 /// Minimal PNG decoder: 8-bit RGBA or RGB, non-interlaced, filter 0–4.
 pub fn loadPngR(allocator: std.mem.Allocator, path: []const u8) !BiomeMap {
-    const file = try readFileAll(allocator, path);
+    return loadPngRWithColors(allocator, path, null);
+}
+
+pub fn loadPngRWithColors(allocator: std.mem.Allocator, path: []const u8, colors: ?*const ColorTable) !BiomeMap {
+    const file = try io_fs.readFileAll(allocator, path);
     defer allocator.free(file);
     if (file.len < 33) return error.ShortPng;
     if (!std.mem.eql(u8, file[0..8], "\x89PNG\r\n\x1a\n")) return error.BadMagic;
@@ -186,7 +291,8 @@ pub fn loadPngR(allocator: std.mem.Allocator, path: []const u8) !BiomeMap {
         var px: usize = 0;
         while (px < width) : (px += 1) {
             const o = px * bpp;
-            out_ids[y * width + px] = colorToId(row[o], row[o + 1], row[o + 2]);
+            const ct = colors orelse &fallback_colors;
+            out_ids[y * width + px] = ct.lookup(row[o], row[o + 1], row[o + 2]);
         }
         prev = row;
         row_off += 1 + stride;
@@ -218,9 +324,13 @@ fn paeth(a: u8, b: u8, c: u8) u8 {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, map_dir: []const u8) !?BiomeMap {
+    return tryLoadWithColors(allocator, map_dir, null);
+}
+
+pub fn tryLoadWithColors(allocator: std.mem.Allocator, map_dir: []const u8, colors: ?*const ColorTable) !?BiomeMap {
     var path_buf: [2048]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/biomes.png", .{map_dir});
-    return loadPngR(allocator, p) catch null;
+    return loadPngRWithColors(allocator, p, colors) catch null;
 }
 
 test "colorToId stock keys" {
@@ -235,20 +345,16 @@ test "colorToId stock keys" {
 
 test "load navezgane biomes.png if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane/biomes.png";
-    var path_z: [512]u8 = undefined;
-    if (p.len >= path_z.len) return error.SkipZigTest;
-    @memcpy(path_z[0..p.len], p);
-    path_z[p.len] = 0;
-    const rc = linux.open(path_z[0..p.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest;
-    _ = linux.close(@intCast(rc));
+    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
 
     var m = try loadPngR(std.testing.allocator, p);
     defer m.deinit();
+    m.scale = 2; // 3072px biomes.png over the 6144 Navezgane world
     try std.testing.expectEqual(@as(i32, 3072), m.width);
     try std.testing.expectEqual(@as(i32, 3072), m.height);
     try std.testing.expectEqual(@as(usize, 3072 * 3072), m.r.len);
-    // Spawn (-273,449) is burnt_forest color → biomemap id 9
-    try std.testing.expectEqual(@as(u8, 9), m.atWorld(-273, 449).?);
+    // All 8 stock spawnpoints sit in pine_forest under the scale-2 north-up
+    // mapping (the old 1:1 no-flip read put this one in burnt_forest).
+    try std.testing.expectEqual(@as(u8, 3), m.atWorld(-273, 449).?);
     try std.testing.expect(m.chunkDominant(@divFloor(-273, 16), @divFloor(449, 16)) < 50);
 }

@@ -6,6 +6,20 @@ dedicated server and **applied to the sim** (`game.initWithOptions` + runtime
 systems). Out-of-range values are clamped (see `clampU8` / `clampRange` and the
 config tests).
 
+Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
+
+## Loading and precedence
+
+| Source | Role |
+|---|---|
+| CLI (`--port`, `--admin-port`, `--world-name`, …) | Highest; overrides matching file keys |
+| `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
+| Code defaults | Used when neither CLI nor file sets a value |
+
+Startup prints a one-line effective summary (`password=set|open`, never the secret).
+`AdminPort` binds **127.0.0.1 only** (no auth on the console).
+`ServerMaxPlayerCount` is applied to GSI ads and soft join capacity (capped at 64).
+
 ## Applied to the sim
 
 | Property | Default | Range | Effect + where |
@@ -28,10 +42,16 @@ config tests).
 | `BlockDamageAIBM` | 100 | 0..1000 | as above during a blood moon |
 | `AirDropFrequency` | 72 | 0..8760 | game-hours between supply-crate drops; 0 off (`tickAirDrop`) |
 | `DropOnDeath` | 1 | 0..4 | 0 nothing / 1 all / 2 toolbelt / 3 backpack / 4 delete → loot bag on death |
-| `LandClaimSize` | 41 | 1..255 | keystone protection area (blocks per side) |
+| `LandClaimSize` | 41 | 1..255 (odd) | keystone protection area; even values forced odd |
 | `LandClaimOnlineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner online |
 | `LandClaimOfflineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner offline |
-| `ServerPort` / `ServerMaxPlayerCount` / `ServerPassword` / `ViewRadius` / `GameName` / `GameWorld` | n/a | n/a | listener, capacity, join, stream radius, world identity |
+| `ServerPort` | 26902 | u16 | TCP GameServerInfo; LiteNet = port+2 (CLI `--port` wins) |
+| `ServerMaxPlayerCount` | 8 | 1..64 | GSI max + soft join cap |
+| `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
+| `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
+| `GameName` / `GameWorld` | zdtd / empty | string | world identity / stock map folder under `--game-dir` |
+| `AdminPort` | 0 | u16 | unauthenticated admin TCP on 127.0.0.1; 0 = off |
+| `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the
@@ -45,4 +65,5 @@ Notes:
 ## Missing world folder
 
 A serverconfig `GameName`/`GameWorld` that resolves to a non-existent world dir
-no longer crashes: `main.dirExists` falls back to a flat world with a warning.
+does not abort startup: `io_fs.dirExistsSimple` detects the missing directory and
+the server falls back to a flat world with a warning.

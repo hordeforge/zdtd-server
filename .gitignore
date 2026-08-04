@@ -1,17 +1,42 @@
 # Build artifacts
 zig-out/
 .zig-cache/
+.zdtd_cfg_cache/
 *.o
 *.a
 
 # Generated / test worlds (large; may embed game-derived world data)
 worlds/
 
+# Local server config (may hold ServerPassword; example is serverconfig.example.xml)
+serverconfig.xml
+**/serverconfig.xml
+
+# Secrets / local env (never commit)
+.env
+.env.*
+!.env.example
+
 # Full client id dump (game-derived data; kept local, not redistributed)
 assets/fixtures/assignids_v314.txt
+
+# Runtime playtest / local operator output (not src/server/)
+/server/
+*.pid
+
+# Local scratch / agent caches (not product inputs)
+.cache_fixed_block_ids.txt
+.ruff_cache/
+.opencode/
 
 # Editor / agent scratch
 .claude.bak/
 
 # Agent runtime state (locks, session)
 .claude/
+.review-loop.lock
+
+# Installed npm packages (opencode tooling only; not part of the Zig build)
+node_modules/
+package.json
+package-lock.json

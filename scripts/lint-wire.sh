@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Wire / project lint for zdtd.
 # ast-grep has no Zig language support, so this uses ripgrep heuristics.
-# Exit 0 = clean. Exit 1 = findings.
+# Exit 0 = clean. Exit 1 = findings. Exit 127 = missing tool.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+if ! command -v rg >/dev/null 2>&1; then
+  echo "lint-wire: missing required tool: rg (ripgrep)" >&2
+  echo "lint-wire: install: apt install ripgrep  |  brew install ripgrep  |  cargo install ripgrep" >&2
+  exit 127
+fi
 
 fail=0
 note() { printf '==> %s\n' "$*"; }

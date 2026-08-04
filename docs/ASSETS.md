@@ -1,82 +1,108 @@
 # Stock config assets
 
-zdtd can load real game **Data/Config** files (starting with quests) so the
-sim catalog is not hard-coded.
+Policy hub for loading game data from the operator's install (`--game-dir`).
+
+## Config XML + overrides
+
+| Flag | Role |
+|---|---|
+| `--game-dir` | Install root → `$game/Data/Config/*` |
+| `--config-dir` | Replace Config root (full files) |
+| `--config-overrides DIR` | **Repeatable.** Dir of xpath patch XMLs; files applied in **filename order** (then dir order). Clean-room subset of stock XmlPatcher: `set`/`setattribute`, `remove`, `append` with simple `/tag[@attr='v']/.../@attr` paths. |
+
+Optional root: `<configs file="blocks.xml">…</configs>`. If `file=` omitted, target is inferred from the first xpath tag (`/blocks/…` → blocks.xml).
+
+Patched bytes are written under `.zdtd_cfg_cache/` (cwd, gitignored) then parsed by existing loaders. Not a Harmony/ModAPI host.
+Implements AGENTS.md rule 13: **no hand-copied catalogs** when a loader exists
+or should.
 
 ## Paths
 
 | Flag | Role |
 |---|---|
-| `--game-dir` | Install root; loads `$game/Data/Config/quests.xml` |
-| `--map` | Stock world; also probes sibling `Data/Config/quests.xml` |
-| `--config-dir` | Explicit `Data/Config` directory |
-| `--quests` | Explicit `quests.xml` path (fixture or stock) |
+| `--game-dir` | Install root → `$game/Data/Config/*` |
+| `--map` | Stock world; may probe sibling Config |
+| `--config-dir` | Explicit `Data/Config` |
+| `--quests` | Explicit quests.xml (fixture or stock) |
 
-Resolution order: `--quests` → `--config-dir` → `--game-dir` → derive from `--map`.
-
-If nothing is found, the **builtin** three-quest catalog stays active.
+Offline without game-dir: tiny `builtin_*` tables + bundled AssignIds dump for
+tests only. Production play always uses `--game-dir`.
 
 ```bash
 GAME="$HOME/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server"
 zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
-# or offline fixture:
-zdtd --quests assets/fixtures/quests.xml --world worlds/zdtd_default
 ```
 
-Boot log includes `quests=… defs=N starter=…`.
+## Id spaces (critical)
 
-## quests.xml → ECS catalog
-
-Source: stock `Data/Config/quests.xml` (or fixture).
-
-| Stock field | zdtd |
-|---|---|
-| `<quests starter_quest>` | `Catalog.starter_id` / `starter_name` (auto-accepted on join) |
-| `<quest id="…">` | `QuestDef` with sequential numeric `id` for wire |
-| `name_key` / id | `title` / `name` |
-| `difficulty_tier` | kill target scaling for ClearSleepers |
-| `completiontype=TurnIn` | `turn_in`: objectives set `ready_turn_in`; complete on trader open |
-| `quest_list id="trader_jen_quests"` | `Catalog.lists` for trader offer tables |
-| `<reward type="Exp">` | `reward_coin ≈ exp/20` (lightweight economy) |
-
-### Primary objective mapping
-
-Stock quests are multi-phase. We pick the **highest-score** playable objective:
-
-| Stock objective | QuestKind |
-|---|---|
-| `ClearSleepers` | `kill_zombies` (count = 3 + tier×2 if unset) |
-| `FetchFromContainer` / `FetchKeep` / treasure | `fetch_item` |
-| `Goto id="trader"` / `InteractWithNPC` | `fetch_trader` |
-| `RandomPOIGoto` / `Goto` / … | `goto_point` (hashed target coords) |
-| Rally / StayWithin / Return scaffolding | ignored as primary |
-
-Honest limits: no localization CSV,
-no full reward choice UI. Turn-in and kill/goto/trader progress are playable
-server-side hooks.
-
-## Code
-
-```text
-src/assets/xml_util.zig   comment strip + attr/property helpers
-src/assets/quests.zig     parser + tryLoad path resolution
-src/ecs/quest.zig         Catalog resource types (builtin or stock)
-src/ecs/systems.zig       questAccept / journal ops on player components
-assets/fixtures/quests.xml offline subset for tests
-```
-
-## entityclasses / recipes / loot
-
-| File | Module | Boot log |
+| Space | Source | Never |
 |---|---|---|
-| `entityclasses.xml` | `src/assets/entities.zig` | `entityclasses defs=N zombie=… hash=…` |
-| `recipes.xml` | `src/assets/recipes.zig` | `recipes defs=N` |
-| `loot.xml` | `src/assets/loot.zig` | `loot groups=N containers=N` |
+| Block.blockID | Client AssignIds Postfix dump | XML order, sequential counters |
+| Item type id | AssignIds ItemsStartHere + leftover | Invented ECS-only ids on the wire |
+| Paint id (0–255) | `painting.xml` | Truncating TextureId >255 onto channel |
+| Biomemap id | `biomes.xml` `<biomemap id>` | Raw PNG R channel |
+| TE type enum | RE / IL | Guessed numbers without cite |
 
-Sleeper volumes (prefab XML under `Data/Prefabs`, not Config):
-`src/world/sleepers.zig` → `sleeper volumes=N` on stock map load.
+Resolve: **name → id** via `maxdamage.idByName` (AssignIds merge) after XML
+property load. Dump must match the **connected client** version (STATUS pin).
+
+## Loaders (`src/assets/`)
+
+| Module | Stock file | Notes |
+|---|---|---|
+| `maxdamage.zig` | blocks.xml, materials.xml + AssignIds dump | HP, storage, power watts/Class, MaxFuel, OutputPerFuel/Charge/Stack, id↔name |
+| `blocks.zig` | blocks.xml + AssignIds | solid flags; **ids from dump only** |
+| `block_textures.zig` | blocks.xml Texture | defaults; terrain >255 not on chunk channel |
+| `painting.zig` | painting.xml | paint id ↔ TextureId |
+| `biome_layers.zig` | biomes.xml layers + default weather | column fill; WeatherPackage params from weather name=default |
+| biomap colors | biomes.xml biomemapcolor | `world/biomes.zig` ColorTable |
+| `items.zig` | items.xml | stacks, prices, stock type, placeable block |
+| `entities.zig` | entityclasses.xml | hash, HP, loot |
+| `entitygroups.zig` | entitygroups.xml | director / spawn groups |
+| `spawning.zig` | spawning.xml | biome spawn rules |
+| `loot.zig` | loot.xml | groups + containers |
+| `recipes.zig` | recipes.xml | craft graph |
+| `quests.zig` | quests.xml | catalog |
+| `traders.zig` | traders.xml | groups + rolls |
+| `buffs.zig` | buffs.xml | metadata + passive_effect rows |
+| `progression.zig` | progression.xml | level curve + attributes/perks catalog |
+| `vehicles.zig` | vehicles.xml | kind, velocityMax, torque, fuel |
+| `storage_pairs.zig` | blocks.xml DowngradeBlock | Closed↔Open storage ids |
+| `signs.zig` | Prefabs `*_signs.xml` | world signs |
+| `wire/te_types.zig` | RE enum (not XML) | named TileEntityType constants |
+
+Wire/sim code must not pin numeric block ids except dump-validated offline pins
+in `assignids_comptime.zig` (tests / no-game-dir fallback).
+
+## Fail closed
+
+| Situation | Behavior |
+|---|---|
+| AssignIds miss for deco tree | Skip that DecoObject |
+| Unknown placeable item | `itemToBlock` → 0 (not placeable) |
+| Encode missing catalog row | Omit package / stock empty form |
+| Dump version skew vs client | Prefer suppress deco over NRE |
+
+## WorldInfo and client assets
+
+Terrain MicroSplat needs client-local `Data/Worlds/<level>/splat*.png`. That
+requires WorldInfo `fixedSizeCC=false` (FromRaw client provider). See
+`WIRE_CHUNK.md` and research `protocol-packages.md` §4.2.
+
+## Shared I/O and load helpers (do not copy-paste)
+
+| Module | Use |
+|---|---|
+| `src/util/io_fs.zig` | `readFileAll` / `writeFile` / `fileExists` / mkdir / delete (via `std.Io`) |
+| `src/assets/paths.zig` | `resolveConfigXml`, `tryLoadConfig(file, T, loadFn, …)` |
+| `src/assets/xml_util.zig` | `stripComments`, `attr`, `propertyValue`, `nextElement`, `putDupeKey` |
+
+New loaders: call these; do not reimplement open/read or config path resolution.
 
 ## Extending
 
-Same pattern for `traders.xml`, `entitygroups.xml`, `vehicles.xml`: add
-`src/assets/<name>.zig`, resolve under `Data/Config`, attach to ECS resources.
+1. Add `src/assets/<name>.zig` with `loadFromPath` + `tryLoad` via `paths.tryLoadConfig`.
+2. Attach on `Game.init`; never re-parse XML on the tick path.
+3. Resolve ids through AssignIds / existing tables.
+4. Unit test with install path or `SkipZigTest` if missing.
+5. Update this doc + STATUS when surface changes.

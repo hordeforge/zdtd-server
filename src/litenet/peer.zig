@@ -5,15 +5,15 @@ const std = @import("std");
 const linux = std.os.linux;
 const packet = @import("packet.zig");
 const udp = @import("linux_udp.zig");
-const clock = @import("../apm/clock.zig");
+const clock = @import("../util/clock.zig");
 
-/// Max assembled user message. Mixed-surface stock chunks (per-cell density) can exceed 128 KiB.
-pub const max_payload: usize = 262144;
-/// Pending retransmit slots (each fragment is one slot). One large chunk ≈ 200 parts.
-const pending_cap: usize = 512;
+/// Max assembled user message. Mixed-surface stock chunks + texture planes can exceed 128 KiB.
+pub const max_payload: usize = 524288;
+/// Pending retransmit slots (each fragment is one slot). Large POI chunk ≈ 80–150 parts.
+const pending_cap: usize = 1024;
 /// One pending slot holds one MTU-sized channeled/fragment datagram.
 const pending_bytes: usize = packet.max_packet_size;
-const max_frag_parts: usize = 256;
+const max_frag_parts: usize = 512;
 const assemble_cap: usize = max_payload;
 /// Game: (windowSize-1)/8 + 2 = 9 bitmap payload bytes on Ack.
 const ack_bitmap_bytes: usize = (packet.window_size - 1) / 8 + 2;
@@ -30,9 +30,9 @@ const Pending = struct {
 /// Optional outbound capture for integration tests (records game payloads, not LiteNet headers).
 pub const Capture = struct {
     /// Per-message cap must fit stock inventory frames and medium packages.
-    /// Slot count covers join floods + multi-step sim (turret fire, motion, time).
-    /// Full stock chunks may exceed this; tests assert via net path counters too.
-    slots: [128]struct { len: u16 = 0, data: [8192]u8 = undefined } = undefined,
+    /// Slot count covers join floods (stream r≤8 → 100+ chunks) + multi-step sim.
+    /// Full stock chunks may exceed per-slot size; tests assert via counters too.
+    slots: [256]struct { len: u16 = 0, data: [8192]u8 = undefined } = undefined,
     n: usize = 0,
 
     pub fn push(self: *Capture, user: []const u8) void {
@@ -86,11 +86,32 @@ pub const Capture = struct {
         }
         return null;
     }
+
+    /// Find EntitySpawn-style body with matching class hash at body[5..9] (after id+ver).
+    pub fn findPkgIdClass(self: *const Capture, pkg_id: u16, class_hash: i32) ?[]const u8 {
+        const frame = @import("../wire/frame.zig");
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const msg = self.slots[i].data[0..self.slots[i].len];
+            var pkgs: [8]frame.Package = undefined;
+            const pn = frame.parseChannelPayload(msg, &pkgs);
+            var j: usize = 0;
+            while (j < pn) : (j += 1) {
+                if (pkgs[j].id != pkg_id) continue;
+                if (pkgs[j].body.len < 9) continue;
+                const h = std.mem.readInt(i32, pkgs[j].body[5..9], .little);
+                if (h == class_hash) return pkgs[j].body;
+            }
+        }
+        return null;
+    }
 };
 
 pub const Peer = struct {
     addr: linux.sockaddr.storage = undefined,
     addr_len: linux.socklen_t = 0,
+    /// Cached hashAddr(addr) (set in setAddr); key for per-datagram peer lookup.
+    addr_key: u64 = 0,
     remote_id: i32 = 0,
     local_id: i32 = 0,
     connect_time: i64 = 0,
@@ -139,6 +160,20 @@ pub const Peer = struct {
         const dst: [*]u8 = @ptrCast(&self.addr);
         @memcpy(dst[0..addr_len], src[0..addr_len]);
         self.addr_len = addr_len;
+        self.addr_key = hashAddr(addr, addr_len);
+    }
+
+    /// FNV-1a over the first ≤28 sockaddr bytes; cached in `addr_key` so the
+    /// per-datagram peer lookup compares one u64 instead of re-hashing.
+    pub fn hashAddr(addr: *const linux.sockaddr.storage, len: linux.socklen_t) u64 {
+        const bytes: [*]const u8 = @ptrCast(addr);
+        var h: u64 = 1469598103934665603;
+        var i: linux.socklen_t = 0;
+        while (i < len and i < 28) : (i += 1) {
+            h ^= bytes[i];
+            h *%= 1099511628211;
+        }
+        return h;
     }
 
     pub fn sendRaw(self: *Peer, sock: *udp.Socket, raw: []const u8) !void {
@@ -151,11 +186,12 @@ pub const Peer = struct {
             try self.resendPending(sock);
             return error.WindowFull;
         }
-        for (&self.pending) |*p| {
-            if (!p.used) return p;
+        const p = &self.pending[self.local_seq % pending_cap];
+        if (p.used) {
+            try self.resendPending(sock);
+            return error.WindowFull;
         }
-        try self.resendPending(sock);
-        return error.WindowFull;
+        return p;
     }
 
     /// Fire-and-forget unreliable (LiteNet property Unreliable). No retransmit.
@@ -257,7 +293,9 @@ pub const Peer = struct {
 
     pub fn resendPending(self: *Peer, sock: *udp.Socket) !void {
         const now = clock.monoNs();
-        for (&self.pending) |*p| {
+        var seq = self.local_window_start;
+        while (seq != self.local_seq) : (seq = @intCast((@as(u32, seq) + 1) % packet.max_sequence)) {
+            const p = &self.pending[seq % pending_cap];
             if (!p.used) continue;
             if (now -% p.last_sent_ns < resend_ns) continue;
             try self.sendRaw(sock, p.data[0..p.len]);
@@ -354,6 +392,9 @@ pub const Peer = struct {
                     if (off + slen > raw.len) break;
                     const sub = raw[off .. off + slen];
                     off += slen;
+                    // Stock LiteNet never nests Merged; refusing it bounds recursion
+                    // depth at 1 so a self-nested datagram cannot blow the stack.
+                    if (packet.propertyOf(sub[0]) == .merged) continue;
                     if (try self.handlePacket(sock, sub)) |user| {
                         self.pushExtra(user);
                     }
@@ -362,6 +403,8 @@ pub const Peer = struct {
             },
             .channeled => {
                 const info = packet.parseChanneled(raw) orelse return null;
+                // Stock rejects seq >= MaxSequence; relSeq would alias it into the window.
+                if (info.seq >= packet.max_sequence) return null;
                 const relate = relSeq(@as(i32, info.seq) - @as(i32, self.remote_window_start));
                 if (relate < 0 or relate >= @as(i32, @intCast(packet.window_size * 2))) {
                     self.must_ack = true;
@@ -442,6 +485,7 @@ pub const Peer = struct {
         if (raw.len < packet.channeled_header_size + 1) return;
         _ = expect; // accept ≥ header; loadgen/stock both send full 13-byte acks
         const ack_seq = std.mem.readInt(u16, raw[1..][0..2], .little);
+        if (ack_seq >= packet.max_sequence) return;
         // Stock: RelativeSequenceNumber(localWindowStart, ackSeq) = local - ack ∈ [0, window).
         const rel_base = relSeq(@as(i32, self.local_window_start) - @as(i32, ack_seq));
         if (rel_base < 0 or rel_base >= @as(i32, @intCast(packet.window_size))) return;
@@ -456,11 +500,9 @@ pub const Peer = struct {
             const bit_i: u3 = @intCast(pending_idx % 8);
             if (byte_i >= raw.len) break;
             if ((raw[byte_i] & (@as(u8, 1) << bit_i)) == 0) continue;
-            for (&self.pending) |*p| {
-                if (p.used and p.seq == seq) {
-                    p.used = false;
-                    break;
-                }
+            const p = &self.pending[seq % pending_cap];
+            if (p.used and p.seq == seq) {
+                p.used = false;
             }
             if (seq == self.local_window_start) {
                 self.local_window_start = @intCast((@as(u32, self.local_window_start) + 1) % packet.max_sequence);
@@ -468,14 +510,8 @@ pub const Peer = struct {
         }
         // Slide window start past contiguous free seqs.
         while (self.local_window_start != self.local_seq) {
-            var found = false;
-            for (self.pending) |p| {
-                if (p.used and p.seq == self.local_window_start) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found) break;
+            const p = &self.pending[self.local_window_start % pending_cap];
+            if (p.used and p.seq == self.local_window_start) break;
             self.local_window_start = @intCast((@as(u32, self.local_window_start) + 1) % packet.max_sequence);
         }
     }

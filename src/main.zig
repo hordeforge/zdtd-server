@@ -12,18 +12,79 @@ const server_config = @import("server/config.zig");
 const io_fs = @import("util/io_fs.zig");
 const version = @import("version.zig");
 
+const help_text =
+    \\Usage: zdtd [options]
+    \\
+    \\  Zig dedicated server for the stock 7DTD client wire (EAC off).
+    \\
+    \\Options:
+    \\  --port N              ServerPort: TCP GameServerInfo; LiteNet uses N+2 (default 26902)
+    \\  --world DIR           zdtd save/overlay dir (default worlds/zdtd_default)
+    \\  --map DIR             stock Data/Worlds/<Name> (dtm + prefabs)
+    \\  --game-dir DIR        install root (Data/Worlds + Data/Config)
+    \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
+    \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
+    \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
+    \\  --quests PATH         explicit quests.xml
+    \\  --config-dir DIR      stock Data/Config dir (XML assets)
+    \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order)
+    \\  --worldgen-seed U64   procedural terrain (on-the-fly; no --map). Empty world dir ok.
+    \\  --ticks N             run N ticks then save and exit (0 = run forever)
+    \\  --once                run a single tick then save and exit
+    \\  -V, --version         print product and stock wire versions and exit
+    \\  -h, --help            show this help
+    \\
+    \\Value forms: --flag VALUE or --flag=VALUE
+    \\Precedence: CLI flags override matching serverconfig.xml keys.
+    \\
+    \\Examples:
+    \\  zdtd --port 27002 --world worlds/zdtd_default
+    \\  zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
+    \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
+    \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
+    \\  zdtd --worldgen-seed 42 --once
+    \\
+;
+
 fn usageError(comptime fmt: []const u8, fmt_args: anytype) noreturn {
     std.debug.print("zdtd: " ++ fmt ++ "\nzdtd: try 'zdtd --help'\n", fmt_args);
     std.process.exit(2);
 }
 
-fn flagValue(it: *std.process.Args.Iterator, flag: []const u8) [:0]const u8 {
+/// Help and version go to stdout (not stderr) so operators can pipe them.
+fn printStdout(comptime fmt: []const u8, fmt_args: anytype) void {
+    var msg_buf: [4096]u8 = undefined;
+    const msg = std.fmt.bufPrint(&msg_buf, fmt, fmt_args) catch {
+        std.debug.print(fmt, fmt_args);
+        return;
+    };
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    std.Io.File.stdout().writeStreamingAll(threaded.io(), msg) catch {
+        std.debug.print(fmt, fmt_args);
+    };
+}
+
+/// Resolve a value for `--flag` or `--flag=value`. Rejects empty `--flag=`.
+fn flagValue(it: *std.process.Args.Iterator, flag: []const u8, inline_val: ?[]const u8) []const u8 {
+    if (inline_val) |v| {
+        if (v.len == 0) usageError("option '{s}' requires a value", .{flag});
+        return v;
+    }
     return it.next() orelse usageError("option '{s}' requires a value", .{flag});
 }
 
 fn flagInt(comptime T: type, flag: []const u8, s: []const u8, base: u8) T {
     return std.fmt.parseInt(T, s, base) catch
-        usageError("invalid value '{s}' for option '{s}'", .{ s, flag });
+        usageError("invalid value '{s}' for option '{s}' (expected integer)", .{ s, flag });
+}
+
+/// Split `--name` / `--name=value` into (name, optional value).
+fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
+    if (std.mem.indexOfScalar(u8, a, '=')) |eq| {
+        return .{ .name = a[0..eq], .value = a[eq + 1 ..] };
+    }
+    return .{ .name = a, .value = null };
 }
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -55,70 +116,53 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var it = std.process.Args.Iterator.init(init.args);
     _ = it.next(); // argv0
     while (it.next()) |a| {
-        if (std.mem.eql(u8, a, "--port")) {
-            port = flagInt(u16, a, flagValue(&it, a), 10);
+        const parts = splitFlag(a);
+        const name = parts.name;
+        const inline_val = parts.value;
+
+        if (std.mem.eql(u8, name, "--port")) {
+            port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
             port_cli = true;
-        } else if (std.mem.eql(u8, a, "--world")) {
-            world_dir = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--map")) {
-            map_dir = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--game-dir")) {
-            game_dir = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--config-dir")) {
-            config_dir = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--config-overrides")) {
-            try config_overrides.append(gpa, flagValue(&it, a));
-        } else if (std.mem.eql(u8, a, "--quests")) {
-            quests_path = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--world-name")) {
-            world_name = flagValue(&it, a);
+        } else if (std.mem.eql(u8, name, "--world")) {
+            world_dir = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--map")) {
+            map_dir = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--game-dir")) {
+            game_dir = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--config-dir")) {
+            config_dir = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--config-overrides")) {
+            try config_overrides.append(gpa, flagValue(&it, name, inline_val));
+        } else if (std.mem.eql(u8, name, "--quests")) {
+            quests_path = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--world-name")) {
+            world_name = flagValue(&it, name, inline_val);
             world_name_cli = true;
-        } else if (std.mem.eql(u8, a, "--serverconfig")) {
-            serverconfig_path = flagValue(&it, a);
-        } else if (std.mem.eql(u8, a, "--admin-port")) {
-            admin_port = flagInt(u16, a, flagValue(&it, a), 10);
+        } else if (std.mem.eql(u8, name, "--serverconfig")) {
+            serverconfig_path = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--admin-port")) {
+            admin_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
             admin_port_cli = true;
-        } else if (std.mem.eql(u8, a, "--worldgen-seed")) {
-            worldgen_seed = flagInt(u64, a, flagValue(&it, a), 0);
-        } else if (std.mem.eql(u8, a, "--ticks")) {
-            max_ticks = flagInt(u64, a, flagValue(&it, a), 10);
-        } else if (std.mem.eql(u8, a, "--once")) {
+        } else if (std.mem.eql(u8, name, "--worldgen-seed")) {
+            worldgen_seed = flagInt(u64, name, flagValue(&it, name, inline_val), 0);
+        } else if (std.mem.eql(u8, name, "--ticks")) {
+            max_ticks = flagInt(u64, name, flagValue(&it, name, inline_val), 10);
+        } else if (std.mem.eql(u8, name, "--once")) {
+            if (inline_val != null) usageError("option '--once' does not take a value", .{});
             once = true;
             max_ticks = 1;
-        } else if (std.mem.eql(u8, a, "--version")) {
-            std.debug.print("zdtd {s}\n", .{version.product});
+        } else if (std.mem.eql(u8, name, "--version") or std.mem.eql(u8, name, "-V")) {
+            if (inline_val != null) usageError("option '{s}' does not take a value", .{name});
+            printStdout("zdtd {s} (stock wire {s})\n", .{ version.product, version.stock_wire });
             return;
-        } else if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            std.debug.print(
-                \\zdtd [--port 26902] [--world SAVE_DIR] [--map STOCK_WORLD_DIR] [--ticks N] [--once]
-                \\     [--game-dir DEDI_OR_CLIENT_ROOT] [--world-name Navezgane|Pregen06k01|…]
-                \\     [--config-dir Data/Config] [--config-overrides DIR]…
-                \\     [--quests path/to/quests.xml]
-                \\     [--serverconfig path/serverconfig.xml] [--admin-port N]
-                \\     [--worldgen-seed U64]
-                \\
-                \\  --port           ServerPort: TCP GameServerInfo; LiteNet uses port+2
-                \\  --world          zdtd save/overlay dir (default worlds/zdtd_default)
-                \\  --map            stock Data/Worlds/<Name>
-                \\  --game-dir       install root (Data/Worlds + Data/Config)
-                \\  --world-name     Navezgane | Pregen06k01 | …
-                \\  --serverconfig   stock-like ServerSettings XML (required file; see serverconfig.example.xml)
-                \\  --admin-port     TCP admin console on 127.0.0.1 (give/tele/save/kick/say)
-                \\  --quests         explicit quests.xml
-                \\  --config-dir     stock Data/Config dir (XML assets)
-                \\  --config-overrides  dir of xpath patch XMLs (repeatable; filename order)
-                \\  --worldgen-seed  procedural terrain (on-the-fly; no --map). Empty world dir ok.
-                \\  --ticks          run N ticks then save and exit (0 = run forever)
-                \\  --once           run a single tick then save and exit
-                \\  --version        print version and exit
-                \\  -h, --help       show this help
-                \\
-                \\  Precedence: CLI flags override matching serverconfig.xml keys.
-                \\
-            , .{});
+        } else if (std.mem.eql(u8, name, "--help") or std.mem.eql(u8, name, "-h")) {
+            if (inline_val != null) usageError("option '{s}' does not take a value", .{name});
+            printStdout("{s}", .{help_text});
             return;
+        } else if (std.mem.startsWith(u8, a, "-")) {
+            usageError("unknown option '{s}'", .{name});
         } else {
-            usageError("unknown option '{s}'", .{a});
+            usageError("unexpected argument '{s}' (zdtd takes options only, not positionals)", .{a});
         }
     }
 
@@ -127,13 +171,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
         cfg_owned = server_config.loadFromPath(gpa, scp) catch |err| {
             usageError("cannot load --serverconfig '{s}': {s}", .{ scp, @errorName(err) });
         };
-        if (cfg_owned) |cfg| {
-            if (!port_cli) port = cfg.port;
-            if (!admin_port_cli and cfg.admin_port != 0) admin_port = cfg.admin_port;
-            if (!world_name_cli and cfg.world_name.len > 0) world_name = cfg.world_name;
+        if (cfg_owned) |c| {
+            if (!port_cli) port = c.port;
+            if (!admin_port_cli and c.admin_port != 0) admin_port = c.admin_port;
+            if (!world_name_cli and c.world_name.len > 0) world_name = c.world_name;
             // GameWorld only fills map identity when CLI did not set --world-name.
-            if (!world_name_cli and cfg.game_world.len > 0 and map_dir == null and game_dir != null) {
-                world_name = cfg.game_world;
+            if (!world_name_cli and c.game_world.len > 0 and map_dir == null and game_dir != null) {
+                world_name = c.game_world;
             }
         }
     }
@@ -163,10 +207,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         break :blk world_name;
     };
-    const cfg_max_players: u16 = if (cfg_owned) |c| c.max_players else 8;
-    const cfg_password: []const u8 = if (cfg_owned) |c| c.password else "";
-    const cfg_view_radius: i32 = if (cfg_owned) |c| c.view_radius else 6;
-    const cfg_authority = if (cfg_owned) |c| c.authority_mode else .correct;
+    // Effective config: loaded file or struct defaults (single source in config.zig).
+    const cfg: server_config.Config = cfg_owned orelse .{};
 
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, port, .{
         .map_dir = map_dir,
@@ -176,35 +218,35 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .quests_path = quests_path,
         .admin_port = admin_port,
         .world_name = resolved_world_name,
-        .view_radius = cfg_view_radius,
-        .max_players = cfg_max_players,
-        .password = cfg_password,
-        .game_difficulty = if (cfg_owned) |c| c.game_difficulty else 2,
-        .blood_moon_frequency = if (cfg_owned) |c| c.blood_moon_frequency else 7,
-        .blood_moon_enemy_count = if (cfg_owned) |c| c.blood_moon_enemy_count else 8,
-        .blood_moon_range = if (cfg_owned) |c| c.blood_moon_range else 0,
-        .player_killing_mode = if (cfg_owned) |c| c.player_killing_mode else 3,
-        .day_night_length = if (cfg_owned) |c| c.day_night_length else 60,
-        .day_light_length = if (cfg_owned) |c| c.day_light_length else 18,
-        .max_spawned_zombies = if (cfg_owned) |c| c.max_spawned_zombies else 64,
-        .zombie_move = if (cfg_owned) |c| c.zombie_move else 0,
-        .zombie_move_night = if (cfg_owned) |c| c.zombie_move_night else 3,
-        .zombie_feral_move = if (cfg_owned) |c| c.zombie_feral_move else 3,
-        .zombie_bm_move = if (cfg_owned) |c| c.zombie_bm_move else 3,
-        .enemy_difficulty = if (cfg_owned) |c| c.enemy_difficulty else 0,
-        .loot_abundance = if (cfg_owned) |c| c.loot_abundance else 100,
-        .xp_multiplier = if (cfg_owned) |c| c.xp_multiplier else 100,
-        .block_damage_player = if (cfg_owned) |c| c.block_damage_player else 100,
-        .block_damage_ai = if (cfg_owned) |c| c.block_damage_ai else 100,
-        .block_damage_ai_bm = if (cfg_owned) |c| c.block_damage_ai_bm else 100,
-        .max_spawned_animals = if (cfg_owned) |c| c.max_spawned_animals else 50,
-        .air_drop_frequency = if (cfg_owned) |c| c.air_drop_frequency else 72,
-        .drop_on_death = if (cfg_owned) |c| c.drop_on_death else 1,
-        .land_claim_size = if (cfg_owned) |c| c.land_claim_size else 41,
-        .land_claim_online_durability_modifier = if (cfg_owned) |c| c.land_claim_online_durability_modifier else 4,
-        .land_claim_offline_durability_modifier = if (cfg_owned) |c| c.land_claim_offline_durability_modifier else 4,
+        .view_radius = cfg.view_radius,
+        .max_players = cfg.max_players,
+        .password = cfg.password,
+        .game_difficulty = cfg.game_difficulty,
+        .blood_moon_frequency = cfg.blood_moon_frequency,
+        .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
+        .blood_moon_range = cfg.blood_moon_range,
+        .player_killing_mode = cfg.player_killing_mode,
+        .day_night_length = cfg.day_night_length,
+        .day_light_length = cfg.day_light_length,
+        .max_spawned_zombies = cfg.max_spawned_zombies,
+        .zombie_move = cfg.zombie_move,
+        .zombie_move_night = cfg.zombie_move_night,
+        .zombie_feral_move = cfg.zombie_feral_move,
+        .zombie_bm_move = cfg.zombie_bm_move,
+        .enemy_difficulty = cfg.enemy_difficulty,
+        .loot_abundance = cfg.loot_abundance,
+        .xp_multiplier = cfg.xp_multiplier,
+        .block_damage_player = cfg.block_damage_player,
+        .block_damage_ai = cfg.block_damage_ai,
+        .block_damage_ai_bm = cfg.block_damage_ai_bm,
+        .max_spawned_animals = cfg.max_spawned_animals,
+        .air_drop_frequency = cfg.air_drop_frequency,
+        .drop_on_death = cfg.drop_on_death,
+        .land_claim_size = cfg.land_claim_size,
+        .land_claim_online_durability_modifier = cfg.land_claim_online_durability_modifier,
+        .land_claim_offline_durability_modifier = cfg.land_claim_offline_durability_modifier,
         .worldgen_seed = worldgen_seed,
-        .authority_mode = cfg_authority,
+        .authority_mode = cfg.authority_mode,
     });
     defer {
         g.deinit();
@@ -219,8 +261,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
             g.max_players,
             g.view_radius,
             admin_port,
-            if (cfg_password.len > 0) "set" else "open",
-            @tagName(cfg_authority),
+            if (cfg.password.len > 0) "set" else "open",
+            @tagName(cfg.authority_mode),
         },
     );
 
@@ -346,6 +388,20 @@ test {
     _ = @import("ecs/root.zig");
     _ = @import("world/root.zig");
     _ = @import("server/root.zig");
+}
+
+test "splitFlag bare and equals forms" {
+    const bare = splitFlag("--port");
+    try std.testing.expectEqualStrings("--port", bare.name);
+    try std.testing.expect(bare.value == null);
+
+    const eq = splitFlag("--port=27002");
+    try std.testing.expectEqualStrings("--port", eq.name);
+    try std.testing.expectEqualStrings("27002", eq.value.?);
+
+    const empty = splitFlag("--world=");
+    try std.testing.expectEqualStrings("--world", empty.name);
+    try std.testing.expectEqualStrings("", empty.value.?);
 }
 
 test "integration world persist + damage + packages" {

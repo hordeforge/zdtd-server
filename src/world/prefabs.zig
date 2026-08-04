@@ -2,7 +2,7 @@
 //! Block paint: stock `.tts` via `tts.zig` (Prefab.readBlockData raw types).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 const tts = @import("tts.zig");
 
 pub const Decoration = struct {
@@ -162,41 +162,8 @@ pub const Index = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    if (off != size) return error.ShortRead;
-    return buf;
-}
-
 fn fileExists(path: []const u8) bool {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return false;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    _ = linux.close(@intCast(rc));
-    return true;
+    return io_fs.fileExistsSimple(path);
 }
 
 fn parseI32Prefix(s: []const u8) ?i32 {
@@ -228,7 +195,7 @@ fn attrValue(tag: []const u8, key: []const u8) ?[]const u8 {
 pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, prefabs_data_dir: ?[]const u8) !Index {
     var path_buf: [1024]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/prefabs.xml", .{world_dir});
-    const xml = try readFileAll(allocator, path);
+    const xml = try io_fs.readFileAll(allocator, path);
     defer allocator.free(xml);
 
     // First pass: count
@@ -320,21 +287,14 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, pre
 
 /// Read size_x/y/z from tts header: magic "tts\0", ver u32 LE, sx/sy/sz u16 LE.
 fn readTtsSize(path: []const u8, sx: *i32, sy: *i32, sz: *i32) bool {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return false;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    var hdr: [16]u8 = undefined;
-    const n = linux.read(fd, &hdr, hdr.len);
-    if (linux.errno(n) != .SUCCESS or n < 14) return false;
-    if (!std.mem.eql(u8, hdr[0..4], "tts\x00")) return false;
-    sx.* = std.mem.readInt(u16, hdr[8..10], .little);
-    sy.* = std.mem.readInt(u16, hdr[10..12], .little);
-    sz.* = std.mem.readInt(u16, hdr[12..14], .little);
+    // Header-only read: a .tts can be multi-MB, and startup probes every prefab.
+    var hdr: [14]u8 = undefined;
+    const data = io_fs.readFileInto(std.heap.page_allocator, path, &hdr) catch return false;
+    if (data.len < 14) return false;
+    if (!std.mem.eql(u8, data[0..4], "tts\x00")) return false;
+    sx.* = std.mem.readInt(u16, data[8..10], .little);
+    sy.* = std.mem.readInt(u16, data[10..12], .little);
+    sz.* = std.mem.readInt(u16, data[12..14], .little);
     return sx.* > 0 and sz.* > 0;
 }
 
@@ -394,9 +354,9 @@ test "parse decoration line" {
     ;
     // write temp file
     const dir = "worlds/zdtd_prefab_test";
-    mkdirP("worlds");
-    mkdirP(dir);
-    writeFile(dir ++ "/prefabs.xml", xml);
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
+    try io_fs.writeFileSimple(dir ++ "/prefabs.xml", xml);
 
     var idx = try loadFromWorldDir(std.testing.allocator, dir, null);
     defer idx.deinit();
@@ -419,34 +379,6 @@ test "parse decoration line" {
     try std.testing.expect(max_h >= 61);
 }
 
-fn mkdirP(path: []const u8) void {
-    var buf: [512]u8 = undefined;
-    if (path.len >= buf.len) return;
-    @memcpy(buf[0..path.len], path);
-    var i: usize = 1;
-    while (i < path.len) : (i += 1) {
-        if (buf[i] != '/') continue;
-        buf[i] = 0;
-        _ = linux.mkdir(buf[0..i :0].ptr, 0o755);
-        buf[i] = '/';
-    }
-    var zbuf: [513]u8 = undefined;
-    @memcpy(zbuf[0..path.len], path);
-    zbuf[path.len] = 0;
-    _ = linux.mkdir(zbuf[0..path.len :0].ptr, 0o755);
-}
-
-fn writeFile(path: []const u8, data: []const u8) void {
-    var path_z: [512]u8 = undefined;
-    if (path.len >= path_z.len) return;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    if (linux.errno(rc) != .SUCCESS) return;
-    const fd: i32 = @intCast(rc);
-    _ = linux.write(fd, data.ptr, data.len);
-    _ = linux.close(fd);
-}
 
 test "tts size read abandoned_house if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";

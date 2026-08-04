@@ -1,7 +1,7 @@
 //! Stock water_info.xml point sources (used as local water-table hints).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const WaterPoint = struct {
     x: i32,
@@ -57,32 +57,6 @@ pub const Sources = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    if (off != size) return error.ShortRead;
-    return buf;
-}
-
 fn parseI32Prefix(s: []const u8) ?i32 {
     if (s.len == 0) return null;
     var i: usize = 0;
@@ -103,7 +77,7 @@ fn parseI32Prefix(s: []const u8) ?i32 {
 pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !Sources {
     var path_buf: [1024]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/water_info.xml", .{world_dir});
-    const xml = readFileAll(allocator, path) catch {
+    const xml = io_fs.readFileAll(allocator, path) catch {
         return .{ .points = try allocator.alloc(WaterPoint, 0), .allocator = allocator };
     };
     defer allocator.free(xml);
@@ -150,9 +124,9 @@ test "parse water pos" {
         \\  <Water pos="-192, 72, 1924"/>
         \\</WaterSources>
     ;
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_water_test");
-    writeFile("worlds/zdtd_water_test/water_info.xml", xml);
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_water_test");
+    try io_fs.writeFileSimple("worlds/zdtd_water_test/water_info.xml", xml);
     var s = try loadFromWorldDir(std.testing.allocator, "worlds/zdtd_water_test");
     defer s.deinit();
     try std.testing.expectEqual(@as(usize, 2), s.points.len);
@@ -162,31 +136,3 @@ test "parse water pos" {
     try std.testing.expect(s.waterYNear(1855, 1406, 5).? == 77);
 }
 
-fn mkdirP(path: []const u8) void {
-    var buf: [512]u8 = undefined;
-    if (path.len >= buf.len) return;
-    @memcpy(buf[0..path.len], path);
-    var i: usize = 1;
-    while (i < path.len) : (i += 1) {
-        if (buf[i] != '/') continue;
-        buf[i] = 0;
-        _ = linux.mkdir(buf[0..i :0].ptr, 0o755);
-        buf[i] = '/';
-    }
-    var zbuf: [513]u8 = undefined;
-    @memcpy(zbuf[0..path.len], path);
-    zbuf[path.len] = 0;
-    _ = linux.mkdir(zbuf[0..path.len :0].ptr, 0o755);
-}
-
-fn writeFile(path: []const u8, data: []const u8) void {
-    var path_z: [512]u8 = undefined;
-    if (path.len >= path_z.len) return;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    if (linux.errno(rc) != .SUCCESS) return;
-    const fd: i32 = @intCast(rc);
-    _ = linux.write(fd, data.ptr, data.len);
-    _ = linux.close(fd);
-}

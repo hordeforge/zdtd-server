@@ -25,6 +25,18 @@ pub const PowerNode = struct {
     powered: bool = false,
     /// Optional link to game entity (turret entity id).
     entity_id: i32 = -1,
+    /// Generator: remaining fuel units (0 = empty, stops output). Battery: stored energy.
+    fuel_or_energy: f32 = 0,
+    /// Generator max fuel / battery capacity (set at add).
+    capacity: f32 = 0,
+    /// Generator: fuel burn per second when on. Battery unused.
+    burn_rate: f32 = 0,
+    /// Trigger/timer: seconds remaining until next toggle (0 = idle).
+    timer_left: f32 = 0,
+    /// Trigger: seconds between actuations when armed (0 = not a timer).
+    timer_period: f32 = 0,
+    /// Solar (no MaxFuel): only contributes when daylight is true.
+    solar: bool = false,
 };
 
 pub const Wire = struct {
@@ -53,6 +65,7 @@ pub const PowerGrid = struct {
         if (self.node_n >= max_nodes) return null;
         const id = self.next_id;
         self.next_id +%= 1;
+        // Fuel/capacity/burn left 0 unless caller applies stock props (powerblocks.Resolved).
         self.nodes[self.node_n] = .{
             .id = id,
             .kind = kind,
@@ -62,9 +75,163 @@ pub const PowerGrid = struct {
             .watts = watts,
             .on = true,
             .powered = kind == .generator,
+            .fuel_or_energy = 0,
+            .capacity = 0,
+            .burn_rate = 0,
         };
         self.node_n += 1;
         return id;
+    }
+
+    /// Place or update node at position, then apply stock fuel/SoC props.
+    pub fn addNodeAtResolved(
+        self: *PowerGrid,
+        kind: NodeKind,
+        x: i32,
+        y: i32,
+        z: i32,
+        watts: f32,
+        apply: *const fn (*PowerNode) void,
+    ) ?u16 {
+        const id = self.addNodeAt(kind, x, y, z, watts) orelse return null;
+        if (self.indexOfId(id)) |i| apply(&self.nodes[i]);
+        return id;
+    }
+
+    /// Arm a trigger/timer node: period seconds between on/off toggles of `target_id` consumer.
+    pub fn armTimer(self: *PowerGrid, id: u16, period_s: f32) bool {
+        const i = self.indexOfId(id) orelse return false;
+        if (period_s <= 0) return false;
+        self.nodes[i].timer_period = period_s;
+        self.nodes[i].timer_left = period_s;
+        return true;
+    }
+
+    /// Advance fuel burn, battery charge/discharge, and trigger timers. Call after resolve intent.
+    /// `dt` in seconds. `daylight` gates solar generators (no MaxFuel). Returns true if state changed.
+    pub fn tick(self: *PowerGrid, dt: f32, daylight: bool) bool {
+        if (dt <= 0) return false;
+        var dirty = false;
+        // 1) Burn generator fuel when capacity>0 (MaxFuel from XML). Solar: on only in daylight.
+        var i: usize = 0;
+        while (i < self.node_n) : (i += 1) {
+            var n = &self.nodes[i];
+            if (n.kind != .generator) continue;
+            if (n.solar) {
+                // Solar: keep desired on flag; resolve skips when !daylight via powered gate.
+                if (n.on and !daylight and n.powered) {
+                    n.powered = false;
+                    dirty = true;
+                }
+                continue;
+            }
+            if (!n.on or n.capacity <= 0) continue;
+            if (n.fuel_or_energy <= 0) {
+                n.on = false;
+                n.powered = false;
+                dirty = true;
+                continue;
+            }
+            if (n.burn_rate > 0) {
+                n.fuel_or_energy = @max(0, n.fuel_or_energy - n.burn_rate * dt);
+                if (n.fuel_or_energy <= 0) {
+                    n.on = false;
+                    n.powered = false;
+                    dirty = true;
+                }
+            }
+        }
+        // 2) Resolve connectivity + load shed with current on flags.
+        self.resolveDay(daylight);
+        // 3) Battery: discharge to cover shortfall, charge on surplus.
+        var gen_now: f32 = 0;
+        var load_now: f32 = 0;
+        i = 0;
+        while (i < self.node_n) : (i += 1) {
+            const n = self.nodes[i];
+            if (n.kind == .generator and n.on and n.powered) gen_now += n.watts;
+            if (n.kind == .consumer and n.powered) load_now += n.watts;
+        }
+        const shortfall = load_now - gen_now;
+        if (shortfall > 0) {
+            var need = shortfall * dt;
+            i = 0;
+            while (i < self.node_n and need > 0) : (i += 1) {
+                var n = &self.nodes[i];
+                if (n.kind != .battery or !n.powered) continue;
+                const take = @min(n.fuel_or_energy, need);
+                n.fuel_or_energy -= take;
+                need -= take;
+            }
+            // Residual need: batteries empty; consumers already load-shed vs gen-only.
+            if (need > 0.001) dirty = true;
+        } else if (shortfall < 0) {
+            var surplus = (-shortfall) * dt;
+            i = 0;
+            while (i < self.node_n and surplus > 0) : (i += 1) {
+                var n = &self.nodes[i];
+                if (n.kind != .battery or !n.powered) continue;
+                const room = n.capacity - n.fuel_or_energy;
+                const add = @min(room, surplus);
+                n.fuel_or_energy += add;
+                surplus -= add;
+            }
+        }
+        // 4) Trigger timers: when period elapses, toggle linked consumer by entity or self.on.
+        i = 0;
+        while (i < self.node_n) : (i += 1) {
+            var n = &self.nodes[i];
+            if (n.timer_period <= 0) continue;
+            if (!n.powered and n.kind != .generator) continue;
+            n.timer_left -= dt;
+            if (n.timer_left > 0) continue;
+            n.timer_left = n.timer_period;
+            // Toggle self if consumer/relay; else toggle first wired consumer.
+            if (n.kind == .consumer or n.kind == .relay) {
+                n.on = !n.on;
+                dirty = true;
+            } else if (n.entity_id >= 0) {
+                if (self.indexOfEntity(n.entity_id)) |ti| {
+                    self.nodes[ti].on = !self.nodes[ti].on;
+                    dirty = true;
+                }
+            } else {
+                // Toggle nearest wired consumer.
+                const uid = n.id;
+                var w: usize = 0;
+                while (w < self.wire_n) : (w += 1) {
+                    const wire = self.wires[w];
+                    const other: u16 = if (wire.a == uid) wire.b else if (wire.b == uid) wire.a else continue;
+                    if (self.indexOfId(other)) |oi| {
+                        if (self.nodes[oi].kind == .consumer) {
+                            self.nodes[oi].on = !self.nodes[oi].on;
+                            dirty = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (dirty) self.resolveDay(daylight);
+        return dirty;
+    }
+
+    /// Refuel generator at position (admin/console/item use). Returns false if no gen there.
+    pub fn refuelAt(self: *PowerGrid, x: i32, y: i32, z: i32, amount: f32) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (self.nodes[i].kind != .generator) return false;
+        if (self.nodes[i].capacity <= 0) {
+            // Establish a fuel tank if stock props were never applied (tests/admin).
+            self.nodes[i].capacity = amount;
+            self.nodes[i].fuel_or_energy = amount;
+        } else {
+            self.nodes[i].fuel_or_energy = @min(self.nodes[i].capacity, self.nodes[i].fuel_or_energy + amount);
+        }
+        if (self.nodes[i].fuel_or_energy > 0 and !self.nodes[i].on) {
+            self.nodes[i].on = true;
+            self.resolve();
+        }
+        return true;
     }
 
     pub fn indexOfId(self: *const PowerGrid, id: u16) ?usize {
@@ -155,8 +322,13 @@ pub const PowerGrid = struct {
         return true;
     }
 
-    /// BFS power flood from generators; batteries store leftover conceptually.
+    /// BFS power flood from generators (daylight=true for solar).
     pub fn resolve(self: *PowerGrid) void {
+        self.resolveDay(true);
+    }
+
+    /// BFS power flood; solar generators only source when `daylight`.
+    pub fn resolveDay(self: *PowerGrid, daylight: bool) void {
         // Reset
         self.total_gen = 0;
         self.total_load = 0;
@@ -173,7 +345,10 @@ pub const PowerGrid = struct {
 
         i = 0;
         while (i < self.node_n) : (i += 1) {
+            // Generators need fuel (or zero capacity = infinite for tests that zero it).
             if (self.nodes[i].kind == .generator and self.nodes[i].on) {
+                if (self.nodes[i].solar and !daylight) continue;
+                if (self.nodes[i].capacity > 0 and self.nodes[i].fuel_or_energy <= 0) continue;
                 queue[qt] = i;
                 qt += 1;
                 visited[i] = true;
@@ -259,6 +434,7 @@ pub const PowerGrid = struct {
         }
         if (op == 0 and body.len >= 1 + 1 + 12 + 4) {
             // kind u8, x i32, y i32, z i32, watts f32 bits
+            if (body[1] > @intFromEnum(NodeKind.consumer)) return false;
             const kind: NodeKind = @enumFromInt(body[1]);
             const x = std.mem.readInt(i32, body[2..6], .little);
             const y = std.mem.readInt(i32, body[6..10], .little);
@@ -414,4 +590,81 @@ test "stock wire action rejects malformed child count" {
     try std.testing.expect(!g.applyWireActionsStock(&bad));
     // Too short for even the header.
     try std.testing.expect(!g.applyWireActionsStock(&[_]u8{ 0, 1, 2 }));
+}
+
+test "generator fuel burn empties and unpowers" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    try std.testing.expect(g.connect(gen, load));
+    // Stock-like props (tests apply explicitly; production uses powerblocks.Resolved).
+    const gi = g.indexOfId(gen).?;
+    g.nodes[gi].capacity = 1000;
+    g.nodes[gi].fuel_or_energy = 1000;
+    g.nodes[gi].burn_rate = 1;
+    g.resolve();
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    // Fast-burn: set tiny fuel and high burn rate.
+    g.nodes[gi].fuel_or_energy = 2;
+    g.nodes[gi].burn_rate = 10;
+    _ = g.tick(1.0, true);
+    try std.testing.expect(g.nodes[gi].fuel_or_energy <= 0);
+    try std.testing.expect(!g.nodes[gi].on);
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    // Refuel restores.
+    try std.testing.expect(g.refuelAt(0, 70, 0, 100));
+    try std.testing.expect(g.nodes[gi].on);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "battery charges on surplus and discharges on shortfall" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const bat = g.addNodeAt(.battery, 2, 70, 0, 0).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    try std.testing.expect(g.connect(gen, bat));
+    try std.testing.expect(g.connect(bat, load));
+    const bi = g.indexOfId(bat).?;
+    g.nodes[bi].fuel_or_energy = 100;
+    g.nodes[bi].capacity = 1000;
+    _ = g.tick(1.0, true);
+    // Surplus gen: battery should gain energy.
+    try std.testing.expect(g.nodes[bi].fuel_or_energy > 100);
+    // Kill gen fuel: battery still holds charge (gen off after burn).
+    const gi = g.indexOfId(gen).?;
+    g.nodes[gi].fuel_or_energy = 0;
+    g.nodes[gi].on = false;
+    g.resolve();
+    // Without gen, consumers unpowered (battery is buffer not infinite source in this model).
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "timer toggles consumer on" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    try std.testing.expect(g.connect(gen, load));
+    g.resolve();
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].on);
+    try std.testing.expect(g.armTimer(gen, 0.5));
+    _ = g.tick(0.6, true);
+    // Generator timer toggles wired consumer.
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].on);
+}
+
+test "solar generator day gate" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    try std.testing.expect(g.connect(gen, load));
+    const gi = g.indexOfId(gen).?;
+    g.nodes[gi].solar = true;
+    g.nodes[gi].capacity = 0;
+    g.nodes[gi].burn_rate = 0;
+    g.resolveDay(true);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    g.resolveDay(false);
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    _ = g.tick(1.0, true);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
 }

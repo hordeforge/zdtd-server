@@ -212,23 +212,26 @@ Holding: item_id / slot index
 - Per-client set of entity ids in radius (view dim).  
 - Rebuild on cell change only.  
 
-#### M11.2 Dirty bitsets + encode once
+#### M11.2 Dirty bitsets + encode once **[shipped]**
 ```text
 dirty: POS | ROT | FLAGS | HP | SPAWN | REMOVE
-for each dirty entity:
-  encode shared buffer once
-  for each interested client: queue bytes (memcpy)
-RelPos: only per-observer encode
+for each entity needing send (dirty or heartbeat):
+  encode shared buffer once; frame once
+  for each interested client: sendFramedDroppable (no re-encode)
+clear pos/rot/spawn/flags after fan-out
 ```
+`src/server/game.zig` `replicate` + `src/ecs/interest.zig` helpers.
 
-#### M11.3 Connection map
-- `entityId → *Peer` / client slot O(1).  
+#### M11.3 Connection map **[shipped]**
+- `World.net_to_slot` O(1) NetId → Slot.
 
-#### M11.4 Persistent thread pool
-- Replace per-tick Thread.spawn with `WorkerPool` for AI/turrets/path/save.  
+#### M11.4 Persistent thread pool **[shipped]**
+- `util/parallel.zig` long-lived Io mutex/cond workers.
 
 #### M11.5 Loadgen 128-bot bench
 - Scenario + apm snapshot thresholds documented.  
+
+Chunk stream: named caps shipped; async workers still open.
 
 ### Acceptance
 - [ ] 128 bots join and move 5 minutes without death spiral.  
@@ -342,7 +345,7 @@ RelPos: only per-observer encode
 | Multi-version client matrix | Pin tested game build in docs |
 | Encryption path | If password requires |
 | Stock `.ttc` read/write | After sector codec RE |
-| RWG | Optional; prefer baked maps |
+| RWG / procedural | Optional; prefer baked maps; design [WORLDGEN.md](WORLDGEN.md) (density + WFC tiles) |
 | Steam browser | Steamworks server API |
 | Sparse Y sections | Memory for large maps |
 | io_uring net | Linux perf stretch |

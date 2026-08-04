@@ -13,7 +13,7 @@
 //! BlockValue.type = raw & 0xFFFF; child bit = 0x40000000 (skip children).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const child_bit: u32 = 0x4000_0000;
 pub const type_mask: u32 = 0xFFFF;
@@ -34,8 +34,8 @@ pub const TtsBlocks = struct {
     sx: i32,
     sy: i32,
     sz: i32,
-    /// Block type ids (AssignIds), length sx*sy*sz. Air = 0.
-    types: []u16,
+    /// Full BlockValue.rawData (type 0..15 + rotation/meta); air = 0. Child cells cleared.
+    types: []u32,
     /// Density channel (stock sbyte as u8 bit pattern), length types.len or empty.
     density: []u8 = &.{},
     /// Damage plane (u16 LE per cell) when present.
@@ -115,7 +115,7 @@ fn skipSparseI64Channel(data: []const u8, pos_in: usize) !usize {
 
 /// Load block type plane from a stock .tts path (version >= 5 raw u32 path).
 pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
-    const data = try readFileAll(allocator, path);
+    const data = try io_fs.readFileAll(allocator, path);
     defer allocator.free(data);
     if (data.len < 14) return error.ShortTts;
     if (!std.mem.eql(u8, data[0..4], "tts\x00")) return error.BadMagic;
@@ -128,7 +128,7 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
     const count: usize = @intCast(@as(i64, sx) * @as(i64, sy) * @as(i64, sz));
     const need = 14 + count * 4;
     if (data.len < need) return error.ShortTts;
-    const types = try allocator.alloc(u16, count);
+    const types = try allocator.alloc(u32, count);
     errdefer allocator.free(types);
     var i: usize = 0;
     while (i < count) : (i += 1) {
@@ -138,7 +138,8 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
             types[i] = 0;
             continue;
         }
-        types[i] = @truncate(raw & type_mask);
+        // Keep type + rotation + meta; drop hasdecal if any (bit 31 unused for paint).
+        types[i] = raw & ~child_bit;
     }
 
     var pos: usize = need;
@@ -289,10 +290,15 @@ pub fn rotateLocalXZ(x: i32, z: i32, sx: i32, sz: i32, rot: u8) struct { x: i32,
     };
 }
 
-pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, block_id: u16, tex: u64) void;
+/// dens: TTS density sbyte as u8 when plane present; null when unknown.
+pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void;
 
-/// Stamp non-air TTS types into the world at decoration origin.
+/// Stamp non-air TTS cells into the world at decoration origin.
 /// `origin_y` is ground (y_is_ground) or prefab base Y.
+/// Skips air and terrainFiller / terrainFillerAdaptive: those are stock "keep
+/// world terrain" placeholders. Stamping filler paints grey marching-cubes clay.
+/// Full BlockValue.rawData (type + rotation + meta) is stamped so shape meshes
+/// face the correct way and take TTS paint textures.
 pub fn paintDecoration(
     tts: *const TtsBlocks,
     origin_x: i32,
@@ -302,11 +308,14 @@ pub fn paintDecoration(
     set_block: SetBlockFn,
     ctx: ?*anyopaque,
 ) void {
+    const assignids = @import("../assets/assignids_comptime.zig");
     const count: i32 = @intCast(tts.blockCount());
     var i: i32 = 0;
     while (i < count) : (i += 1) {
-        const typ = tts.types[@intCast(i)];
-        if (typ == 0) continue;
+        const raw = tts.types[@intCast(i)];
+        if (raw == 0) continue;
+        const typ: u16 = @truncate(raw & type_mask);
+        if (typ == assignids.terrain_filler or typ == assignids.terrain_filler_adaptive) continue;
         const c = tts.offsetToCoord(i);
         const r = rotateLocalXZ(c.x, c.z, tts.sx, tts.sz, rot);
         const wx = origin_x + r.x;
@@ -314,45 +323,14 @@ pub fn paintDecoration(
         const wz = origin_z + r.z;
         if (wy < 0 or wy >= 256) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
-        set_block(ctx, wx, wy, wz, typ, tex);
+        const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
+        set_block(ctx, wx, wy, wz, raw, tex, dens);
     }
-}
-
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    if (off != size) return error.ShortRead;
-    return buf;
 }
 
 test "tts load abandoned_house block types if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
-    var path_z: [512]u8 = undefined;
-    if (p.len >= path_z.len) return error.SkipZigTest;
-    @memcpy(path_z[0..p.len], p);
-    path_z[p.len] = 0;
-    const rc = linux.open(path_z[0..p.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest;
-    _ = linux.close(@intCast(rc));
+    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
 
     var t = try loadBlocks(std.testing.allocator, p);
     defer t.deinit();

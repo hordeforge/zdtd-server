@@ -82,7 +82,7 @@ zdtd     → Zig dedi, client wire only, no mods
 |---|---|---|
 | DTM height load (Navezgane etc.) | `world/dtm.zig` | center origin |
 | Full columns biome layers + AssignIds terrain ids | `world/store.zig`, `assets/biome_layers.zig` | biomes.xml first `<layers>`; dirt=5 stone=1 bedrock=4 water=240 |
-| `.zch3` chunk persist (u32 rawData) | `world/store.zig` | ZCH2 u16 dropped on load (regen from DTM+TTS) |
+| ZCH3 chunk persist (`.zch` files, u32 rawData) | `world/store.zig` | ZCH2 u16 blocks are dropped on load (regen from DTM+TTS); heights remain |
 | Stock `NetPackageChunk` write path | `wire/stock_chunk.zig` | full rawData upper24; density repair rules; TTS dens; topsoil broken all-1s; light 0xFF |
 | Spawn/stream ring for light+mesh | `server/game.zig` | join/stream r 6..8, 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
@@ -90,7 +90,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | skip terrainFiller; rotation bits kept |
 | AssignIds pins + dump merge | `assets/assignids_comptime.zig`, `maxdamage.zig` | cwd + /proc/self/exe paths |
 | Catalog loaders (XML) | `assets/*` | blocks ids=dump only; biomes colors; painting; spawning; buffs+passives; progression attrs/perks; vehicles; storage pairs; traders groups |
-| Shared I/O | `util/linux_fs`, `assets/paths` | no copy-paste readFileAll / tryLoad |
+| Shared I/O | `util/io_fs.zig`, `assets/paths.zig` | std.Io-backed filesystem helpers and config-path resolution |
 | Seed chest AssignIds | `stock_deco.zig` | cntWoodenChestClosed from dump |
 | Place item→block | `ecs/inventory` + Game.place_fn | name→AssignIds (wood→frameShapes:cube) |
 

@@ -1,5 +1,8 @@
 //! zdtd-native metrics + profiling harness.
 //! Not 7dtd-apm (stock Mono). This is first-class instrumentation inside the Zig process.
+//!
+//! Dependency direction: metrics layer on util (clock re-export). Must not
+//! import server, wire, ecs, world, assets, or litenet.
 
 pub const metrics = @import("metrics.zig");
 pub const profiler = @import("profiler.zig");

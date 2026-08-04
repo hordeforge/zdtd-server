@@ -195,10 +195,10 @@ pub const Writer = struct {
 /// .NET BinaryReader.Read7BitEncodedInt (unsigned payload in 7-bit groups).
 pub fn read7BitEncodedInt(r: *Reader) ReadError!u32 {
     var result: u32 = 0;
-    var shift: u5 = 0;
+    var shift: u32 = 0;
     while (true) {
         const b = try r.readByte();
-        result |= @as(u32, b & 0x7F) << shift;
+        result |= @as(u32, b & 0x7F) << @intCast(shift);
         if ((b & 0x80) == 0) break;
         shift += 7;
         if (shift > 28) return error.Overflow;
@@ -214,6 +214,26 @@ test "string roundtrip" {
     var sbuf: [32]u8 = undefined;
     const s = try r.readString(&sbuf);
     try std.testing.expectEqualStrings("V 3.1.0", s);
+}
+
+test "7bit int rejects overlong encoding without overflowing shift" {
+    var r: Reader = .{ .data = &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F } };
+    try std.testing.expectError(error.Overflow, read7BitEncodedInt(&r));
+}
+
+test "string readers reject truncation and preserve cursor at payload" {
+    var truncated: Reader = .{ .data = &.{ 3, 'a', 'b' } };
+    var buf: [3]u8 = undefined;
+    try std.testing.expectError(error.EndOfStream, truncated.readString(&buf));
+    try std.testing.expectEqual(@as(usize, 1), truncated.pos);
+
+    var too_small: Reader = .{ .data = &.{ 3, 'a', 'b', 'c' } };
+    var short: [2]u8 = undefined;
+    try std.testing.expectError(error.Overflow, too_small.readString(&short));
+    try std.testing.expectEqual(@as(usize, 1), too_small.pos);
+
+    var skip_truncated: Reader = .{ .data = &.{ 2, 'a' } };
+    try std.testing.expectError(error.EndOfStream, skip_truncated.skipString());
 }
 
 test "le ints" {

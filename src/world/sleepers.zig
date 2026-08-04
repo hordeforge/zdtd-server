@@ -1,10 +1,10 @@
 //! Prefab sleeper volumes: parse XML + wake/spawn on player enter.
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
-const blocks_nim = @import("blocks_nim.zig");
+const blocks_nim = @import("../assets/blocks_nim.zig");
 
 pub const max_volumes: usize = 8192;
 pub const max_group_classes: usize = 4;
@@ -65,7 +65,7 @@ pub const Store = struct {
 
     pub fn containsXZ(self: *const Store, vi: usize, x: f32, z: f32) bool {
         if (vi >= self.volumes.len) return false;
-        const v = self.volumes[vi];
+        const v = &self.volumes[vi];
         const xi: i32 = @intFromFloat(@floor(x));
         const zi: i32 = @intFromFloat(@floor(z));
         return xi >= v.x0 and xi < v.x1 and zi >= v.z0 and zi < v.z1;
@@ -73,7 +73,7 @@ pub const Store = struct {
 
     pub fn contains(self: *const Store, vi: usize, x: f32, y: f32, z: f32) bool {
         if (vi >= self.volumes.len) return false;
-        const v = self.volumes[vi];
+        const v = &self.volumes[vi];
         const xi: i32 = @intFromFloat(@floor(x));
         const yi: i32 = @intFromFloat(@floor(y));
         const zi: i32 = @intFromFloat(@floor(z));
@@ -81,40 +81,8 @@ pub const Store = struct {
     }
 };
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
-
 fn fileExists(path: []const u8) bool {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return false;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    _ = linux.close(@intCast(rc));
-    return true;
+    return io_fs.fileExistsSimple(path);
 }
 
 fn prop(body: []const u8, name: []const u8) ?[]const u8 {
@@ -256,7 +224,7 @@ pub fn loadFromPrefabs(
                 if (need >= path_buf.len) continue;
                 const p = std.fmt.bufPrint(&path_buf, "{s}/{s}/{s}.xml", .{ prefabs_root, sub, d.name }) catch continue;
                 if (!fileExists(p)) continue;
-                const raw = readFileAll(allocator, p) catch continue;
+                const raw = io_fs.readFileAll(allocator, p) catch continue;
                 defer allocator.free(raw);
                 // Stock prefab XML often has UTF-8 BOM.
                 const raw_nb = if (raw.len >= 3 and raw[0] == 0xEF and raw[1] == 0xBB and raw[2] == 0xBF)
@@ -341,7 +309,8 @@ pub fn loadFromPrefabs(
             const cnt: i32 = @intCast(tb.blockCount());
             var bi: i32 = 0;
             while (bi < cnt) : (bi += 1) {
-                const name = nm.nameOf(tb.types[@intCast(bi)]) orelse continue;
+                const tid: u16 = @truncate(tb.types[@intCast(bi)] & 0xffff);
+                const name = nm.nameOf(tid) orelse continue;
                 if (!std.mem.startsWith(u8, name, "sleeper")) continue;
                 const c = tb.offsetToCoord(bi);
                 try sleeper_local.append(allocator, .{ .x = c.x, .y = c.y, .z = c.z });

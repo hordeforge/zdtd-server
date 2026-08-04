@@ -14,6 +14,13 @@ pub const CounterId = enum(u16) {
     packages_broadcast,
     join_ok,
     join_fail,
+    net_poll_errors,
+    net_payload_errors,
+    net_send_errors,
+    reliable_window_drops,
+    persistence_errors,
+    stale_peers_reaped,
+    stream_errors,
     _,
 };
 

@@ -1,4 +1,8 @@
 //! ECS package root: SoA world, components, systems, resources.
+//!
+//! Dependency direction: may import util and assets (catalog lookups). Must not
+//! import wire, server, world, or litenet. Wire/world may use pure component
+//! types from here.
 
 pub const entity = @import("entity.zig");
 pub const components = @import("components.zig");

@@ -29,6 +29,11 @@ wins**. Refresh inventory docs when closing work.
 | [MAPS.md](MAPS.md) | DTM / prefabs / TTS |
 | [ASSETS.md](ASSETS.md) | XML load paths |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |
+| [AUTHORITY.md](AUTHORITY.md) | Server-authoritative C2S gates + mode |
+| [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) | Hardcoded data audit (Bucket A/B/OK) + zdtd.toml draft |
+| [SIMD_REVIEW.md](SIMD_REVIEW.md) | SIMD/`@Vector` candidates (chunk density, worldgen, SoA) |
+| [ZIG_REVIEW.md](ZIG_REVIEW.md) | Idiomatic Zig review findings |
+| [ABSTRACTION_REVIEW.md](ABSTRACTION_REVIEW.md) | Abstraction keep/merge/delete verdicts |
 
 ## Architecture
 
@@ -37,9 +42,19 @@ wins**. Refresh inventory docs when closing work.
 | [zig-clone.md](zig-clone.md) | M0–M6 architecture from RE |
 | [ECS.md](ECS.md) | SoA sim |
 | [SYSTEMS.md](SYSTEMS.md) | Systems overview |
+| [AUTHORITY.md](AUTHORITY.md) | Join phase, C2S validation, interest, mode |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Native plugin design (proposed) |
 | [adr/README.md](adr/README.md) | Architecture decision records |
+
+## Agent prompts
+
+| Doc | Role |
+|---|---|
+| [PROMPTS/audit-hardcoded-data.md](PROMPTS/audit-hardcoded-data.md) | Stock XML vs zdtd config hardcode audit |
+| [PROMPTS/review-zig-idiomatic.md](PROMPTS/review-zig-idiomatic.md) | Zig 0.16 idioms, comptime, hot-path no-alloc, std.Io, Zig Zen |
+| [PROMPTS/review-abstractions.md](PROMPTS/review-abstractions.md) | When to build/keep/delete abstractions; layer fit; YAGNI scorecard |
+| [PROMPTS/review-simd.md](PROMPTS/review-simd.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
 
 ## Scale (parked until M11)
 
@@ -57,10 +72,10 @@ wins**. Refresh inventory docs when closing work.
 | [../../7dtd-research/docs/protocol-frames.md](../../7dtd-research/docs/protocol-frames.md) | Byte frames per package |
 | [../../7dtd-research/docs/INDEX.md](../../7dtd-research/docs/INDEX.md) | Research hub |
 
-## Milestone snapshot (2026-07-23)
+## Milestone snapshot (2026-08-04)
 
 ```text
-Core playable loop     DONE (11/11 playtest, 0 NRE)
+Core playable loop     DONE (playtest 77/83, 0 NRE; residuals in STATUS)
 M7–M10 core            DONE
 M11 interest/scale     PARTIAL (open 1.0 scale gate)
 M12–M15 depth/ops      PARTIAL (honest gaps in MISSING)

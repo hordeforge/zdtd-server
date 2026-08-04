@@ -10,6 +10,7 @@ const binary = @import("binary.zig");
 const components = @import("../ecs/components.zig");
 
 /// Matches Block.ItemsStartHere after static init (MAX_BLOCKS).
+/// Same pin as assets/items.zig `items_start_here` (catalog + wire agree).
 pub const items_start_here: i32 = 65536;
 
 /// ItemValue.CurrentSaveVersion in V3.0.1.
@@ -18,8 +19,9 @@ pub const item_value_save_version: u8 = 9;
 /// Inventory.PUBLIC_SLOTS_PLAYMODE.
 pub const toolbelt_slots: usize = 10;
 
-/// EntityPlayer bag size in Awake (ldc.i4.s 99).
-pub const bag_slots: usize = 99;
+/// EntityPlayer bag size: CarryCapacity base is 45 (Awake EffectManager base
+/// f32 45 → Bag.ctor). ldc.i4.s 99 in Awake is the PassiveEffects enum, not size.
+pub const bag_slots: usize = 45;
 
 /// Equipment.m_slots length in ctor.
 pub const equipment_slots: usize = 12;
@@ -228,13 +230,18 @@ pub fn buildHoldingFromEcsResolved(
 }
 
 pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaque) StockSlot {
+    // Empty stacks must be type 0 / count 0. Resolving item_id=0 through the
+    // catalog can yield a non-zero fallback type and fill the client bag.
+    if (s.count == 0 or s.item_id == 0) return .{};
     const type_id: i32 = if (resolve) |r| r(ctx, s.item_id) else typeFromBuiltinId(s.item_id);
+    if (type_id == 0) return .{};
+    // InvSlot stores a single meta field (durability / flags); stock seed is not
+    // tracked separately, so leave seed at default 0 (do not mirror meta into seed).
     return .{
         .type_id = type_id,
         .count = s.count,
         .quality = s.quality,
         .meta = s.meta,
-        .seed = s.meta,
     };
 }
 
@@ -310,7 +317,8 @@ fn skipPlayerProfile(r: *binary.Reader) binary.ReadError!void {
 /// Returns entity_id and position from the ECD head.
 pub fn skipEcdNetworkWriteFalse(r: *binary.Reader) binary.ReadError!struct { entity_id: i32, x: f32, y: f32, z: f32 } {
     const file_ver = try r.readByte();
-    if (file_ver != 35) return error.EndOfStream;
+    // V3.0.1 wrote 35; V3.1.0 client ECD.write is 36 (+ stressAmount tail).
+    if (file_ver != 35 and file_ver != 36) return error.EndOfStream;
     const entity_class = try r.readI32();
     const entity_id = try r.readI32();
     _ = try r.readF32(); // lifetime
@@ -351,7 +359,8 @@ pub fn skipEcdNetworkWriteFalse(r: *binary.Reader) binary.ReadError!struct { ent
     r.pos += ed_len;
     const has_trader = try r.readBool();
     if (has_trader) return error.EndOfStream; // rare on join PDF
-    // networkWrite=false: no sleeper tail
+    // networkWrite=false: no sleeper tail; junkDrone skipped (class 0)
+    if (file_ver >= 36) _ = try r.readF32(); // stressAmount
     return .{ .entity_id = entity_id, .x = x, .y = y, .z = z };
 }
 
@@ -382,7 +391,7 @@ pub fn applyPlayerDataNetwork(
     try skipBagApply(&r, inv, reverse, ctx);
 
     // dragAndDrop as 1-element list
-    var drag: [1]StockSlot = .{.{} };
+    var drag: [1]StockSlot = .{.{}};
     _ = try readItemStackList(&r, drag[0..]);
 
     // alreadyCraftedList: u16 count + strings
@@ -680,12 +689,11 @@ pub fn applyPlayerInventoryBody(
 }
 
 fn skipPackedBoolArray(r: *binary.Reader) binary.ReadError!void {
-    // PackedBoolArray.Write: write length (int), then packed bytes.
-    // If short stream, ignore.
-    if (r.remaining() < 4) return error.EndOfStream;
-    const len = try r.readI32();
-    if (len <= 0) return;
-    const nbytes: usize = @intCast((@as(usize, @intCast(len)) + 7) / 8);
+    // PackedBoolArray.Write: 7-bit encoded length (StreamUtils.Write7BitEncodedInt
+    // per IL), then packed bytes. Matches the reader in stock_te.zig.
+    const len = try binary.read7BitEncodedInt(r);
+    if (len == 0) return;
+    const nbytes: usize = (@as(usize, len) + 7) / 8;
     if (r.remaining() < nbytes) return error.EndOfStream;
     r.pos += nbytes;
 }
@@ -825,7 +833,7 @@ test "persistent player state body layout" {
 
 // --- NetPackageBag: entityId i32 | u16 blob_len | Bag.Write ---
 
-/// Build NetPackageBag body from ECS inventory bag slots (player: 10..41 padded to 99).
+/// Build NetPackageBag body from ECS inventory bag slots (player bag padded to bag_slots).
 pub fn buildBagPackage(
     buf: []u8,
     entity_id: i32,
@@ -989,7 +997,7 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     var buf: [1024]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
     // ECD.write(networkWrite=false), entityClass 0 (no player mid fields)
-    try w.writeByte(35);
+    try w.writeByte(36);
     try w.writeI32(0);
     try w.writeI32(106);
     try w.writeF32(std.math.floatMax(f32));
@@ -1013,6 +1021,7 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     try w.writeByte(0);
     try w.writeU16(0);
     try w.writeBool(false);
+    try w.writeF32(0); // stressAmount v36
     // toolbelt: 1 stack (item 2) then pad to empty via list count=1 (rest empty on apply)
     try w.writeU16(1);
     try writeItemStack(&w, .{ .type_id = items_start_here + 2, .count = 3, .quality = 1 });
@@ -1032,7 +1041,7 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     try w.writeI64(0);
     try w.writeBool(true);
     try w.writeI16(0);
-    try w.writeBool(false);
+    try w.writeBool(true); // bLoaded
     try w.writeI32(-273);
     try w.writeI32(61);
     try w.writeI32(449);
@@ -1221,4 +1230,3 @@ test "drop items container encode decode" {
     try std.testing.expectEqual(@as(usize, 2), p.item_count);
     try std.testing.expectEqual(@as(u16, 5), p.items[0].count);
 }
-

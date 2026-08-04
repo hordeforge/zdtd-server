@@ -31,7 +31,13 @@ pub fn attr(hay: []const u8, start: usize, name: []const u8) ?[]const u8 {
     @memcpy(needle_buf[0..name.len], name);
     needle_buf[name.len] = '=';
     const needle = needle_buf[0 .. name.len + 1];
-    const ai = std.mem.indexOf(u8, window, needle) orelse return null;
+    // Anchor on a preceding delimiter: `prob=` must not match `force_prob=`.
+    var from: usize = 0;
+    const ai = while (std.mem.indexOfPos(u8, window, from, needle)) |k| {
+        if (k > 0 and (window[k - 1] == ' ' or window[k - 1] == '\t' or
+            window[k - 1] == '\n' or window[k - 1] == '\r')) break k;
+        from = k + 1;
+    } else return null;
     var p = window[ai + needle.len ..];
     while (p.len > 0 and (p[0] == ' ' or p[0] == '\t')) p = p[1..];
     if (p.len == 0 or p[0] != '"') return null;
@@ -71,6 +77,47 @@ pub fn parseU32(s: []const u8) ?u32 {
 
 pub fn parseF32(s: []const u8) ?f32 {
     return std.fmt.parseFloat(f32, s) catch null;
+}
+
+/// One element body between open tag and matching close (or self-closing).
+pub const Element = struct {
+    /// Index of '<' of the open tag.
+    open_at: usize,
+    /// Slice between `>` and close tag (empty if self-closing).
+    body: []const u8,
+    /// Index to resume scan after this element.
+    next_i: usize,
+};
+
+/// Find next element starting with `open_prefix` (e.g. `"<block "`) after `start`.
+/// `close_tag` is e.g. `"</block>"`. Handles self-closing `/>`.
+pub fn nextElement(
+    hay: []const u8,
+    start: usize,
+    comptime open_prefix: []const u8,
+    comptime close_tag: []const u8,
+) ?Element {
+    const open_at = std.mem.indexOfPos(u8, hay, start, open_prefix) orelse return null;
+    const gt = std.mem.indexOfPos(u8, hay, open_at, ">") orelse return null;
+    if (gt > open_at and hay[gt - 1] == '/') {
+        return .{
+            .open_at = open_at,
+            .body = hay[gt + 1 .. gt + 1],
+            .next_i = gt + 1,
+        };
+    }
+    const close = std.mem.indexOfPos(u8, hay, gt, close_tag) orelse return null;
+    return .{
+        .open_at = open_at,
+        .body = hay[gt + 1 .. close],
+        .next_i = close + close_tag.len,
+    };
+}
+
+/// Arena-dupe key then put into a StringHashMapUnmanaged.
+pub fn putDupeKey(map: anytype, arena: std.mem.Allocator, key: []const u8, value: anytype) !void {
+    const kn = try arena.dupe(u8, key);
+    try map.put(arena, kn, value);
 }
 
 test "strip comments removes doc block" {

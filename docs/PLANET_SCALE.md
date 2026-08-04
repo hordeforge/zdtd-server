@@ -35,7 +35,8 @@ budgets. Neither axis dominates: a giant empty planet is easy, a small map with
 ## The one fact the whole design hinges on
 
 A stock client's world view is tiny. `ViewRadius` defaults to 4 and zdtd caps
-its chunk-GO stream ring at 25 (`docs/STATUS.md`, `wire/packages.zig:1242`);
+its chunk-GO stream ring (meshable core after neighbor halo; STATUS/WIRE_CHUNK:
+  fixedSizeCC=false needs CGO ≥ viewDist²−10, stream r≥6);
 even a maxed client at
 `viewDist` ~12 sees a 25x25 chunk ring. At `chunk_size = 16`
 (`world/store.zig:11`) that is a **~400m x 400m** window into a 40,000km

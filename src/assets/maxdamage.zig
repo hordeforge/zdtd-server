@@ -4,12 +4,24 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
-const linux = std.os.linux;
-const blocks_nim = @import("../world/blocks_nim.zig");
+const io_fs = @import("../util/io_fs.zig");
+const blocks_nim = @import("blocks_nim.zig");
 
 /// Bundled V3.1.4 full client AssignIds dump (ZDTD_DUMP_BLOCK_IDS Postfix).
 /// Pins verified: treeDeadTree02=24626, cntWoodenChestClosed=18671. No stale saves.
-pub const bundled_assignids_path = "assets/fixtures/assignids_v314.txt";
+/// Bundled dump basenames; resolved relative to cwd and common parents (playtest
+/// orch often starts zdtd with a non-repo cwd).
+pub const bundled_assignids_name = "assignids_v314.embed.txt";
+pub const bundled_assignids_rel_paths = [_][]const u8{
+    "src/assets/assignids_v314.embed.txt",
+    "assets/fixtures/assignids_v314.txt",
+    "zdtd/src/assets/assignids_v314.embed.txt",
+    "zdtd/assets/fixtures/assignids_v314.txt",
+    "../zdtd/src/assets/assignids_v314.embed.txt",
+    "../zdtd/assets/fixtures/assignids_v314.txt",
+    "../src/assets/assignids_v314.embed.txt",
+    "../assets/fixtures/assignids_v314.txt",
+};
 
 pub const Table = struct {
     /// name → MaxDamage
@@ -25,6 +37,21 @@ pub const Table = struct {
     /// block name → power watts (MaxPower for sources, else RequiredPower for
     /// consumers). From blocks.xml DynamicProperties, keyed by name like by_name.
     power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// block name → blocks.xml Class (Generator, BatteryBank, …). Arena keys.
+    power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// Generator MaxFuel (blocks.xml); missing → no fuel budget entry.
+    power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// Generator OutputPerFuel (blocks.xml).
+    power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// Battery OutputPerCharge (blocks.xml); used as capacity scale with MaxPower.
+    power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// OutputPerStack (solar/battery/gen sub-cell scale).
+    power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml id → MaxDamage (e.g. Mhay → 50). Used when block has no
+    /// MaxDamage property and only a Material ref.
+    material_max: std.StringHashMapUnmanaged(u16) = .{},
+    /// block name → material id (from blocks.xml Material property).
+    block_material: std.StringHashMapUnmanaged([]const u8) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -37,6 +64,13 @@ pub const Table = struct {
             self.storage_names = .{};
             self.id_by_name = .{};
             self.power_watts_by_name = .{};
+            self.power_class_by_name = .{};
+            self.power_max_fuel_by_name = .{};
+            self.power_output_per_fuel_by_name = .{};
+            self.power_output_per_charge_by_name = .{};
+            self.power_output_per_stack_by_name = .{};
+            self.material_max = .{};
+            self.block_material = .{};
             ap.deinit();
             child.destroy(ap);
             self.arena_ptr = null;
@@ -70,9 +104,37 @@ pub const Table = struct {
         return self.power_watts_by_name.get(name);
     }
 
-    fn arenaAlloc(self: *Table, allocator: std.mem.Allocator) std.mem.Allocator {
+    /// blocks.xml Class property for a block name, else null.
+    pub fn classByName(self: *const Table, name: []const u8) ?[]const u8 {
+        return self.power_class_by_name.get(name);
+    }
+
+    pub fn maxFuelByName(self: *const Table, name: []const u8) ?f32 {
+        return self.power_max_fuel_by_name.get(name);
+    }
+
+    pub fn outputPerFuelByName(self: *const Table, name: []const u8) ?f32 {
+        return self.power_output_per_fuel_by_name.get(name);
+    }
+
+    pub fn outputPerChargeByName(self: *const Table, name: []const u8) ?f32 {
+        return self.power_output_per_charge_by_name.get(name);
+    }
+
+    pub fn outputPerStackByName(self: *const Table, name: []const u8) ?f32 {
+        return self.power_output_per_stack_by_name.get(name);
+    }
+
+    fn ensureArena(self: *Table, allocator: std.mem.Allocator) !std.mem.Allocator {
         if (self.arena_ptr) |ap| return ap.allocator();
-        return allocator;
+        const ap = try allocator.create(std.heap.ArenaAllocator);
+        ap.* = std.heap.ArenaAllocator.init(allocator);
+        self.arena_ptr = ap;
+        return ap.allocator();
+    }
+
+    fn arenaAlloc(self: *Table, allocator: std.mem.Allocator) std.mem.Allocator {
+        return self.ensureArena(allocator) catch allocator;
     }
 
     fn markStorageIfKnown(self: *Table, arena: std.mem.Allocator, id: u16, name: []const u8) !void {
@@ -99,9 +161,9 @@ pub const Table = struct {
 
     /// Merge AssignIds dump: lines `id\tname` or `id name` (client ZDTD_DUMP_BLOCK_IDS).
     pub fn mergeAssignIdsDump(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
-        const raw = readFileAll(allocator, path) catch return;
+        const raw = io_fs.readFileAll(allocator, path) catch return;
         defer allocator.free(raw);
-        const arena = self.arenaAlloc(allocator);
+        const arena = try self.ensureArena(allocator);
         var it = std.mem.splitScalar(u8, raw, '\n');
         while (it.next()) |line_raw| {
             var line = std.mem.trim(u8, line_raw, " \t\r");
@@ -122,6 +184,12 @@ pub const Table = struct {
             if (name.len == 0) continue;
             if (self.by_name.get(name)) |hp| {
                 try self.by_id.put(arena, id, hp);
+            } else if (self.block_material.get(name)) |mat| {
+                // Material-only MaxDamage (hayBaleSquare → Mhay → 50).
+                if (self.material_max.get(mat)) |mhp| {
+                    try self.by_id.put(arena, id, mhp);
+                    try self.by_name.put(arena, try arena.dupe(u8, name), mhp);
+                }
             }
             try self.markStorageIfKnown(arena, id, name);
             const name_dup = try arena.dupe(u8, name);
@@ -129,36 +197,80 @@ pub const Table = struct {
         }
     }
 
-    /// Try bundled fixture then optional external path. Silent no-op if missing.
+    /// Load materials.xml MaxDamage table (material id → hp).
+    pub fn mergeMaterialsXml(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
+        const raw = try io_fs.readFileAll(allocator, path);
+        defer allocator.free(raw);
+        const clean = try xml.stripComments(allocator, raw);
+        defer allocator.free(clean);
+        const arena = self.arenaAlloc(allocator);
+        var i: usize = 0;
+        while (i < clean.len) {
+            const mi = std.mem.indexOfPos(u8, clean, i, "<material ") orelse break;
+            const mid = xml.attr(clean, mi, "id") orelse {
+                i = mi + 10;
+                continue;
+            };
+            const gt = std.mem.indexOfPos(u8, clean, mi, ">") orelse break;
+            var body_end = gt + 1;
+            if (!(gt > mi and clean[gt - 1] == '/')) {
+                const close = std.mem.indexOfPos(u8, clean, gt, "</material>") orelse break;
+                body_end = close;
+            }
+            const body = clean[gt + 1 .. body_end];
+            if (xml.propertyValue(body, "MaxDamage")) |md| {
+                if (xml.parseU16(md)) |hp| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_max.put(arena, kn, hp);
+                }
+            }
+            i = body_end + 1;
+        }
+    }
+
+    /// After materials + blocks Material refs + AssignIds: fill by_id for material-only blocks.
+    pub fn resolveMaterialMaxDamage(self: *Table, allocator: std.mem.Allocator) !void {
+        const arena = self.arenaAlloc(allocator);
+        var it = self.block_material.iterator();
+        while (it.next()) |e| {
+            const bname = e.key_ptr.*;
+            const mat = e.value_ptr.*;
+            if (self.by_name.contains(bname)) continue;
+            const mhp = self.material_max.get(mat) orelse continue;
+            try self.by_name.put(arena, bname, mhp);
+            if (self.id_by_name.get(bname)) |id| {
+                try self.by_id.put(arena, id, mhp);
+            }
+        }
+    }
+
+    /// Try bundled fixture paths (cwd-relative + next to executable). Silent no-op if none exist.
     pub fn tryMergeBundledAssignIds(self: *Table, allocator: std.mem.Allocator) void {
-        self.mergeAssignIdsDump(allocator, bundled_assignids_path) catch {};
+        for (bundled_assignids_rel_paths) |p| {
+            self.mergeAssignIdsDump(allocator, p) catch continue;
+            if (self.id_by_name.count() > 0) return;
+        }
+        // zig-out/bin/zdtd → ../../src/assets/… via /proc/self/exe
+        var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (io_fs.readLinkAbsoluteSimple("/proc/self/exe", &exe_buf)) |exe| {
+            if (std.fs.path.dirname(exe)) |bin_dir| {
+                if (std.fs.path.dirname(bin_dir)) |out_dir| {
+                    if (std.fs.path.dirname(out_dir)) |root| {
+                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        if (std.fmt.bufPrint(&path_buf, "{s}/src/assets/{s}", .{ root, bundled_assignids_name })) |p| {
+                            // Best-effort bundled dump; missing path is fine.
+                            self.mergeAssignIdsDump(allocator, p) catch {};
+                            if (self.id_by_name.count() > 0) return;
+                        } else |_| {}
+                        if (std.fmt.bufPrint(&path_buf, "{s}/assets/fixtures/assignids_v314.txt", .{root})) |p| {
+                            self.mergeAssignIdsDump(allocator, p) catch {};
+                        } else |_| {}
+                    }
+                }
+            }
+        } else |_| {}
     }
 };
-
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [2048]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    return buf[0..off];
-}
 
 fn bodyHasStorage(body: []const u8) bool {
     // LootList property or CompositeTileEntity class → storage TE candidate.
@@ -170,7 +282,7 @@ fn bodyHasStorage(body: []const u8) bool {
 }
 
 pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try readFileAll(allocator, path);
+    const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
@@ -186,6 +298,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var by_name: std.StringHashMapUnmanaged(u16) = .{};
     var storage_names: std.StringHashMapUnmanaged(void) = .{};
     var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
+    var power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var block_material: std.StringHashMapUnmanaged([]const u8) = .{};
     var i: usize = 0;
     while (i < clean.len) {
         const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
@@ -206,12 +324,14 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
                 try by_name.put(arena, kn, hp);
             }
         }
+        if (xml.propertyValue(body, "Material")) |mat| {
+            const mn = try arena.dupe(u8, mat);
+            try block_material.put(arena, kn, mn);
+        }
         if (bodyHasStorage(body)) {
             try storage_names.put(arena, kn, {});
         }
         // Power watts: prefer MaxPower (sources) over RequiredPower (consumers).
-        // PowerConsumer::SetValuesFromBlock parses RequiredPower (asm.il:892090);
-        // source MaxPower comes from the block property (generatorbank etc.).
         const watts: ?f32 = if (xml.propertyValue(body, "MaxPower")) |mp|
             xml.parseF32(mp)
         else if (xml.propertyValue(body, "RequiredPower")) |rp|
@@ -220,6 +340,22 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
             null;
         if (watts) |w| {
             try power_watts_by_name.put(arena, kn, w);
+        }
+        if (xml.propertyValue(body, "Class")) |cls| {
+            const cn = try arena.dupe(u8, cls);
+            try power_class_by_name.put(arena, kn, cn);
+        }
+        if (xml.propertyValue(body, "MaxFuel")) |mf| {
+            if (xml.parseF32(mf)) |v| try power_max_fuel_by_name.put(arena, kn, v);
+        }
+        if (xml.propertyValue(body, "OutputPerFuel")) |opf| {
+            if (xml.parseF32(opf)) |v| try power_output_per_fuel_by_name.put(arena, kn, v);
+        }
+        if (xml.propertyValue(body, "OutputPerCharge")) |opc| {
+            if (xml.parseF32(opc)) |v| try power_output_per_charge_by_name.put(arena, kn, v);
+        }
+        if (xml.propertyValue(body, "OutputPerStack")) |ops| {
+            if (xml.parseF32(ops)) |v| try power_output_per_stack_by_name.put(arena, kn, v);
         }
         i = body_end + 1;
     }
@@ -230,21 +366,43 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .storage_ids = .{},
         .storage_names = storage_names,
         .power_watts_by_name = power_watts_by_name,
+        .power_class_by_name = power_class_by_name,
+        .power_max_fuel_by_name = power_max_fuel_by_name,
+        .power_output_per_fuel_by_name = power_output_per_fuel_by_name,
+        .power_output_per_charge_by_name = power_output_per_charge_by_name,
+        .power_output_per_stack_by_name = power_output_per_stack_by_name,
+        .block_material = block_material,
         .arena_ptr = arena_holder,
     };
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
+    const paths = @import("paths.zig");
+    // Patched blocks.xml (overrides apply); materials merged after.
+    var tbl = (try paths.tryLoadConfig("blocks.xml", Table, loadFromBlocksXml, allocator, game_dir, config_dir)) orelse return null;
+    errdefer tbl.deinit();
     var path_buf: [2048]u8 = undefined;
-    if (config_dir) |cd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/blocks.xml", .{cd});
-        return loadFromBlocksXml(allocator, p) catch null;
+    if (paths.resolveConfigXml(&path_buf, "materials.xml", game_dir, config_dir)) |mp| {
+        // Apply materials patches via cache path when overrides set.
+        if (paths.override_dirs.len > 0) {
+            if (try paths.readConfigXml(allocator, "materials.xml", game_dir, config_dir)) |merged| {
+                defer allocator.free(merged);
+                io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+                const cp = ".zdtd_cfg_cache/materials.xml";
+                if (io_fs.writeFile(allocator, cp, merged)) |_| {
+                    tbl.mergeMaterialsXml(allocator, cp) catch {};
+                } else |_| {
+                    tbl.mergeMaterialsXml(allocator, mp) catch {};
+                }
+            } else {
+                tbl.mergeMaterialsXml(allocator, mp) catch {};
+            }
+        } else {
+            tbl.mergeMaterialsXml(allocator, mp) catch {};
+        }
+        tbl.resolveMaterialMaxDamage(allocator) catch {};
     }
-    if (game_dir) |gd| {
-        const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/blocks.xml", .{gd});
-        return loadFromBlocksXml(allocator, p) catch null;
-    }
-    return null;
+    return tbl;
 }
 
 test "load blocks.xml MaxDamage when present" {
@@ -256,11 +414,26 @@ test "load blocks.xml MaxDamage when present" {
     try std.testing.expect(t.storage_names.contains("cntWoodenChestClosed"));
     // Power watts: source MaxPower and consumer RequiredPower from blocks.xml.
     try std.testing.expect(t.wattsByName("generatorbank").? >= 12250);
+    try std.testing.expectEqual(@as(f32, 1000), t.maxFuelByName("generatorbank").?);
+    try std.testing.expectEqual(@as(f32, 11250), t.outputPerFuelByName("generatorbank").?);
+    try std.testing.expectEqual(@as(f32, 90), t.outputPerChargeByName("batterybank").?);
     try std.testing.expectEqual(@as(f32, 15), t.wattsByName("autoTurret").?);
     // Merge nim map
     const nim = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
     try t.mergeNim(std.testing.allocator, nim);
     try std.testing.expect(t.by_id.count() > 0);
+}
+
+test "materials.xml MaxDamage fills hayBaleSquare" {
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    // hay has no block MaxDamage; material Mhay = 50.
+    try std.testing.expectEqual(@as(u16, 50), t.maxDamageByName("hayBaleSquare").?);
+    if (t.idByName("hayBaleSquare")) |hid| {
+        try std.testing.expectEqual(@as(u16, 50), t.maxDamage(hid).?);
+    }
 }
 
 test "bundled assignids dump matches stock_deco pins" {
@@ -288,7 +461,8 @@ test "bundled assignids dump matches stock_deco pins" {
             try t.storage_names.put(arena, kn, {});
         }
     }
-    t.mergeAssignIdsDump(std.testing.allocator, bundled_assignids_path) catch return error.SkipZigTest;
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    if (t.id_by_name.count() == 0) return error.SkipZigTest;
     try std.testing.expectEqual(@as(u16, 300), t.maxDamage(18671).?);
     try std.testing.expectEqual(@as(u16, 7500), t.maxDamage(18650).?);
     try std.testing.expectEqual(@as(u16, 2000), t.maxDamage(18515).?);

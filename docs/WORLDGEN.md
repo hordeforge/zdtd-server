@@ -1,29 +1,87 @@
 # Procedural world generation (design)
 
+**Product model: on-the-fly streaming gen**, not a static full-map bake.
+
+Minecraft-style infinite (or huge) worlds: the server never materializes the
+whole map up front. As players move, interest/stream requests chunks; each
+missing chunk is **generated at request time** from `(seed, chunkX, chunkZ)`,
+encoded with the existing stock `NetPackageChunk` path, then cached. Same seed
++ coords always yield the same blocks (regenerate after cache drop = identical).
+
 Design for a stateless, high-throughput procedural voxel generator for zdtd:
 realistic terrain, generated on demand per 16-wide chunk, as a pure function of
 `(seed, position)` so it shards trivially and caches cheaply. Complements the
 real-DEM streamer (`src/world/dem.zig`, Copernicus GLO-30); see the blend policy
 below.
 
-Status: design only. No generator code yet. This doc is the plan; each section
-tags what is a verified research finding vs reasoned inference (deep-research
+Status: **W0/W1 landed** (`src/world/noise.zig`, `src/world/worldgen.zig`,
+`TerrainSource.proc` in `store.zig`, `--worldgen-seed`). W2+ still design.
+Each section tags verified research vs reasoned inference (deep-research
 2026-07-23, 24/25 claims confirmed by 3-vote adversarial verification).
 
 ## Design goals
 
+- **On-the-fly, not prebaked.** No "generate world then host" step for the
+  procedural mode. Generation is a **runtime terrain source** inside
+  `World.getOrCreate` / the chunk stream pipeline. Optional offline bake tools
+  may exist later for ops; they are not the play path.
 - **Stateless pure function.** `block(seed, x, y, z)` depends only on inputs, no
-  global RNG. This is the load-bearing property: it makes generation shardable
-  (any region server regenerates any cell identically), cache-friendly, and
-  reproducible. Position-based hashing (wyhash / splitmix64 of `(seed,x,y,z)`)
-  replaces any seeded-stream RNG.
-- **On demand, per chunk.** Fits the existing `world/store.zig` `getOrCreate`:
-  generate a chunk's block columns when first touched, feed the stock chunk wire
-  (`wire/stock_chunk.zig`), unchanged.
-- **Realistic.** Continents, oceans, mountains, biomes, caves, rivers, that read
+  global RNG. Load-bearing: shardable (any region server regenerates any cell
+  identically), cache-friendly, reproducible. Position-based hashing (wyhash /
+  splitmix64 of `(seed,x,y,z)`) replaces any seeded-stream RNG.
+- **Demand-driven per chunk.** Player move / interest → miss in RAM → miss on
+  `.zch3` disk → **run worldgen for that chunk only** → fill store → stock wire
+  send. Fits `world/store.zig` `getOrCreate` + existing stream caps
+  (`max_streamed_chunks`, adds/tick). Prefetch a ring ahead of the player on
+  workers so gen latency does not stall the 50 ms tick.
+- **Cache is an optimization, not the source of truth.** Order: RAM chunk →
+  disk overlay (player edits + first-touch gen) → pure regen from seed. Edits
+  always win over regen (persist dig/build in `.zch3` / blockmeta).
+- **Realistic.** Continents, oceans, mountains, biomes, caves, rivers that read
   as a plausible world, not noise mush.
-- **20 TPS budget.** Generation must not stall the tick; runs off-tick / on a
-  worker pool (like `parallel.forRanges`), results cached to `.zch2`.
+- **20 TPS budget.** Never run unbounded gen on the main tick. Worker pool +
+  named caps; apm section on gen wait / queue depth. Drop or delay stream adds
+  rather than blow the tick (same discipline as chunk stream today).
+- **Baked maps remain first-class.** Navezgane / Pregen / DEM modes stay. Proc
+  mode is another `World` terrain backend, selected by CLI/config, not a fork
+  of the net/sim stack.
+
+## Runtime pipeline (streaming)
+
+```text
+  peer interest / stream ring
+           |
+           v
+  store.getOrCreate(cx,cz)
+           |
+     +-----+------+
+     | RAM hit?   | yes --> encode stock chunk --> send
+     +-----+------+
+           | no
+           v
+     load .zch3 / overlay?  yes --> materialize --> send
+           | no
+           v
+     worldgen.generateChunk(seed, cx, cz)   // pure, may be async worker
+           |
+           v
+     apply POI/WFC stamps that touch this chunk (deterministic neighbors)
+           |
+           v
+     insert RAM + optional disk cache --> stock_chunk wire --> client
+```
+
+**Concurrency:** main tick only dequeues finished gen jobs and sends; workers
+own noise/density/WFC. Cross-chunk features (POI radius, WFC boundary) must
+still be pure functions of seed + coords so two workers never disagree.
+
+**Unload:** far chunks may leave RAM; disk cache optional. Re-entry regenerates
+or reloads; player mutations must have been persisted or they are lost (same
+as baked worlds today).
+
+**Not this design:** stock dedicated RWG "create world" wizard that writes a
+full `Data/Worlds/...` tree before listen. zdtd proc mode **listens first**,
+generates as explored.
 
 ## 1. Noise foundation
 
@@ -147,6 +205,48 @@ for Poisson-disk, 3-0; devmag.org.za Poisson-disk, and a Bridson O(n) paper):
 - This is exactly how zdtd's existing prefab stamping should feed: candidate POI
   -> `.tts` paint into the chunk (`world/tts.zig`).
 
+### 6.1 Wave Function Collapse / tile layout (settlements, not terrain)
+
+**Terrain** stays density-noise (sections 1-5). **WFC (and cousins) are for
+discrete layout**: roads, district tiles, interior room graphs, prefab
+neighborhoods. Do not run WFC per-block for continents; that is the wrong tool.
+
+| Layer | Algorithm | Output |
+|---|---|---|
+| Continents / height / caves | OpenSimplex2 + density router (MC 1.18+) | solid/air/fluid per block |
+| Biome surface / ore | climate axes + depth rules | block ids via AssignIds names |
+| Settlement / trader strip / downtown | **WFC or model synthesis** on a tile grid | which prefab/tile occupies each cell |
+| Single POI stamp | deterministic cell hash + `.tts` | blocks into chunk store |
+
+**WFC sketch (zdtd-owned, clean-room):**
+
+1. **Tiles** = stock RWG-style tiles and/or zdtd tile defs: edge tags
+   (road_N/E/S/W, wall, open, water), footprint in chunks, prefab name list.
+   Prefer reading stock `rwgmixer.xml` / tile prefab metadata when present;
+   never invent block ids (AGENTS rule 13).
+2. **Grid** = coarse cells (e.g. 1 cell = 1 RWG tile or N chunks). Seeded
+   Shannon entropy collapse: pick lowest-entropy cell, pick weighted tile via
+   `hash(seed, cell)`, propagate adjacency constraints.
+3. **Determinism:** full collapse of a region must be a pure function of
+   `(seed, region_origin, tile_set)`. Neighbor regions that overlap must agree
+   on shared boundary cells (same cross-boundary rule as POI placement).
+4. **Failure:** if contradiction, backtrack limited depth or regenerate cell
+   with next hash salt; never leave illegal adjacency on the wire.
+5. **Stamp:** resolved tile -> prefab `.tts` / parts via existing TTS path.
+6. **Alternatives when WFC is heavy:** Wang tiles / edge-matched random walk
+   (faster, less expressive); stock-like hub-and-spoke road graph + Poisson POI
+   (W5) as MVP before full WFC.
+
+**Non-goals for WFC:** replacing biomes.xml colors, faking Navezgane, or
+shipping a second block id space. Stock RWG C# pipeline is **not** a host
+target; this is a Zig reimplementation of the *idea* (seeded infinite map +
+prefab stamps), not a DLL callout.
+
+**References (layout, not terrain):** Maxim Gumin WFC; Paul Merrell model
+synthesis; Oskar Stalberg (Townscaper) tile grammars; stock 7DTD RWG tile/hub
+docs in research when cited. Treat adjacency rule extraction from stock XML as
+an RE task under `../7dtd-research`, implementation under `src/world/`.
+
 ## 7. Performance and architecture
 
 - **Pure `(seed,pos)` => chunk-parallel + shardable** (verified LOD/statelessness,
@@ -172,7 +272,9 @@ New module `src/world/worldgen.zig`:
 pub const WorldGen = struct {
     seed: u64,
     // density-function tree (climate + continentalness/erosion splines + caves)
-    pub fn columnBlocks(self, cx, cz, out: *[16*256*16]u16) void { ... }
+    pub fn heightAt(self, wx, wz) u16 { ... }
+    pub fn fillHeights(self, cx, cz, out: *[256]u8) void { ... }
+    pub fn generateChunkBlocks(self, cx, cz, blocks: []u32) void { ... }
     fn finalDensity(self, x, y, z) f32 { ... }   // coarse-cell + interpolate
     fn climate(self, x, z) Climate { ... }        // cache_2d per column
     fn biomeAt(self, c: Climate, depth) Biome { ... } // 6D nearest hypercube
@@ -180,11 +282,16 @@ pub const WorldGen = struct {
 ```
 
 - Wire into `world/store.zig` `getOrCreate` as a terrain source alongside DEM and
-  flat: `heights`/`blocks` filled from `worldgen.columnBlocks` when the world is
-  in procedural mode. Block-id selection per biome + depth (topsoil/dirt/stone/
-  biome surface). Stock chunk wire (`stock_chunk.zig`) unchanged; the texture
-  channel (already wired) carries paint for painted blocks.
-- Parallelize generation with the existing worker pattern; cache to `.zch2`.
+  flat: on cache miss in procedural mode, call `worldgen` for that chunk only
+  (sync stub first; then async job + stream wait). `heights` filled via
+  `wg.fillHeights`; blocks via `ensureBlocksWithStack(biome_layers.defaultStack())`
+  in `store.zig`. Block ids via biomes.xml names + AssignIds. Stock
+  chunk wire (`stock_chunk.zig`) unchanged.
+- Stream path (`game.zig` chunk interest) unchanged at the package layer: it
+  already demand-loads via `getOrCreate`. Proc mode only changes what miss
+  means (gen vs heightmap/TTS).
+- Parallelize with existing worker pattern; cache RAM then `.zch3`. Never
+  require a full-map prepass before `zdtd` accepts joins.
 
 ## 9. Procedural vs real-DEM (blend policy)
 
@@ -219,18 +326,35 @@ do not present them as settled.
 
 ## Milestones
 
+Parked behind join/play fidelity and M11 CPU unless explicitly unparked.
+Baked Navezgane / Pregen remain available; **proc mode is live stream gen**.
+
+- **W0** Terrain-source enum on `World` (`flat` | `baked` | `dem` | `proc`);
+  `getOrCreate` miss → proc generate one chunk; join with empty disk works;
+  stream ring exercises gen under loadgen (no full prebake).
 - **W1** Zig OpenSimplex2 + fBm/ridged + domain warp; unit tests (determinism,
   no-global-state, artifact spot-checks).
 - **W2** 3D density field + coarse-cell interpolation + `y_clamped_gradient`;
-  single-biome terrain into `store.zig`, stock chunk wire.
+  single-biome terrain into `store.zig` on the fly; stock chunk wire.
+- **W2b** Async gen queue + prefetch ring + apm (`worldgen_queue`, wait ns);
+  main tick never blocks on multi-chunk gen.
 - **W3** 6-axis climate + continentalness/erosion/PV splines; biome surface
-  blocks; nearest-hypercube biome lookup.
+  blocks from biomes.xml names via AssignIds; nearest-hypercube biome lookup.
 - **W4** caves (cheese/spaghetti/noodle) + aquifers.
 - **W5** deterministic feature/POI placement (per-cell hash), cross-boundary
-  resolution, `.tts` stamp.
-- **W6** DEM blend policy + boundary feathering; procedural detail on DEM base.
+  resolution, `.tts` stamp at first touch (MVP settlements without WFC).
+- **W5b** tile WFC / edge-matched layout for trader strips and districts; stamp
+  stock prefabs on demand when the settlement cell is first needed; optional
+  `rwgmixer`-driven weights when RE allows.
+- **W6** DEM blend policy + boundary feathering; procedural detail on DEM base
+  (still streamed per chunk).
 - **W7** far-terrain LOD sampling for planet-scale streaming (ties to
   `docs/PLANET_SCALE.md`).
+
+**CLI / world mode:** `--worldgen-seed <u64>` (implies proc terrain source;
+see `src/main.zig`) or serverconfig keys in GAME_OPTIONS; flat and baked map
+modes stay. World dir holds **overlays + cache only**, not a mandatory full
+export.
 
 ## Sources
 

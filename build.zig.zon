@@ -1,12 +1,17 @@
 .{
     .name = .zdtd,
-    .version = "0.0.1",
+    .version = "0.1.0",
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "assets/fixtures",
+        "scripts",
+        "Makefile",
         "README.md",
+        "CHANGELOG.md",
+        "docs/RELEASES.md",
         "AGENTS.md",
         "LICENSE",
     },
