@@ -8,34 +8,20 @@ const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
-
-fn mkdirP(path: []const u8) void {
-    const linux = std.os.linux;
-    var buf: [512]u8 = undefined;
-    if (path.len >= buf.len) return;
-    @memcpy(buf[0..path.len], path);
-    var i: usize = 1;
-    while (i < path.len) : (i += 1) {
-        if (buf[i] != '/') continue;
-        buf[i] = 0;
-        _ = linux.mkdir(buf[0..i :0].ptr, 0o755);
-        buf[i] = '/';
-    }
-    var zbuf: [513]u8 = undefined;
-    @memcpy(zbuf[0..path.len], path);
-    zbuf[path.len] = 0;
-    _ = linux.mkdir(zbuf[0..path.len :0].ptr, 0o755);
-}
+const io_fs = @import("../util/io_fs.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_motion");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_motion");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motion", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -74,14 +60,17 @@ test "scenario two-peer motion: B receives A PosAndRot" {
 }
 
 test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_dmg");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_dmg");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dmg", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -120,7 +109,7 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     const sp_b = cap_b.findPkgId(spawn_id);
     try std.testing.expect(sp_b != null);
     // body: entityId i32 | ECD ver35 | entityClass DroppedLootContainer
-    try std.testing.expectEqual(@as(u8, 35), sp_b.?[4]);
+    try std.testing.expectEqual(@as(u8, 36), sp_b.?[4]);
     try std.testing.expectEqual(
         packages.stock_entity.class_dropped_loot_container,
         std.mem.readInt(i32, sp_b.?[5..9], .little),
@@ -135,14 +124,17 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
 }
 
 test "scenario setblock: peer B receives SetBlock after A edit" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_block");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_block");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_block", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -195,11 +187,11 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
 }
 
 test "scenario persist: block write, process restart, read-back, rejoin" {
-    mkdirP("worlds");
+    io_fs.mkdirPathSimple("worlds");
     const dir = "worlds/zdtd_sc_persist";
-    mkdirP(dir);
+    io_fs.mkdirPathSimple(dir);
     // wipe prior chunk
-    _ = std.os.linux.unlink(@as([*:0]const u8, @ptrCast("worlds/zdtd_sc_persist/c_0_0.zch")));
+    io_fs.deleteFileSimple("worlds/zdtd_sc_persist/c_0_0.zch");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -207,7 +199,10 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
 
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer { g.deinit(); gpa.destroy(g); }
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
         try g.setBlock(7, 72, 9, world_store.block_stone);
         try g.world.saveAll();
         // also join once pre-restart
@@ -219,9 +214,12 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
     // Restart: new Game process-equivalent (new struct, same world dir).
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer { g2.deinit(); gpa.destroy(g2); }
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
         const c = try g2.world.getOrCreate(.{ .x = 0, .z = 0 });
-        try std.testing.expectEqual(@as(u8, 72), c.heightAt(7, 9));
+        try std.testing.expectEqual(@as(u16, 72), c.heightAt(7, 9));
         try std.testing.expectEqual(world_store.block_stone, try g2.world.blockWorld(7, 72, 9));
 
         // Join still works on reloaded world (PlayerId + HoldingItem; no S2C inv/chunk).
@@ -241,28 +239,23 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
 const navezgane_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
 
 fn stockMapPresent() bool {
-    const linux = std.os.linux;
-    var path_z: [512]u8 = undefined;
-    if (navezgane_path.len >= path_z.len) return false;
-    @memcpy(path_z[0..navezgane_path.len], navezgane_path);
-    path_z[navezgane_path.len] = 0;
-    const rc = linux.open(path_z[0..navezgane_path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    _ = linux.close(@intCast(rc));
-    return true;
+    return io_fs.dirExistsSimple(navezgane_path) or io_fs.fileExistsSimple(navezgane_path);
 }
 
 test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
     if (!stockMapPresent()) return error.SkipZigTest;
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_stockmap");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_stockmap");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithMap(gpa, "worlds/zdtd_sc_stockmap", navezgane_path, 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
     try std.testing.expect(g.world.heightmap != null);
     const sp = g.world.primarySpawn();
     try std.testing.expectEqual(@as(i32, -273), sp.x);
@@ -287,11 +280,11 @@ test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
 
 test "scenario persist with stock map: edit survives restart under same --map" {
     if (!stockMapPresent()) return error.SkipZigTest;
-    mkdirP("worlds");
+    io_fs.mkdirPathSimple("worlds");
     const dir = "worlds/zdtd_sc_map_persist";
-    mkdirP(dir);
+    io_fs.mkdirPathSimple(dir);
     // wipe overlay near spawn chunk
-    _ = std.os.linux.unlink(@as([*:0]const u8, @ptrCast("worlds/zdtd_sc_map_persist/c_-18_28.zch")));
+    io_fs.deleteFileSimple("worlds/zdtd_sc_map_persist/c_-18_28.zch");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -303,7 +296,10 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
     {
         const g = try game_mod.Game.createWithMap(gpa, dir, navezgane_path, 0);
-        defer { g.deinit(); gpa.destroy(g); }
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
         const base_h = try g.world.heightWorld(edit_x, edit_z);
         edit_y = @as(i32, @intCast(base_h)) + 5;
         try g.setBlock(edit_x, edit_y, edit_z, world_store.block_stone);
@@ -312,9 +308,12 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
     {
         const g2 = try game_mod.Game.createWithMap(gpa, dir, navezgane_path, 0);
-        defer { g2.deinit(); gpa.destroy(g2); }
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
         try std.testing.expect(g2.world.heightmap != null);
-        // Overlay edit must still be present (height is u8-capped in store; compare as i32).
+        // Overlay edit must still be present (disk heights still u8; API is u16).
         const h = try g2.world.heightWorld(edit_x, edit_z);
         const expect_h: i32 = @min(edit_y, 255);
         try std.testing.expectEqual(expect_h, @as(i32, h));
@@ -333,8 +332,8 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
 test "scenario synthetic DTM fixture always runs" {
     // Tiny 32×32 DTM on disk → loadStockMap path without Steam tree.
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_fixture_map");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_fixture_map");
     writeFixtureMap("worlds/zdtd_fixture_map");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -342,7 +341,10 @@ test "scenario synthetic DTM fixture always runs" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithMap(gpa, "worlds/zdtd_fixture_save", "worlds/zdtd_fixture_map", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
     try std.testing.expect(g.world.heightmap != null);
     try std.testing.expectEqual(@as(i32, 32), g.world.heightmap.?.width);
     // world (0,0) → DTM (16,16) height 80 in fixture
@@ -384,8 +386,8 @@ fn writeFixtureMap(dir: []const u8) void {
 }
 
 test "scenario stock fixture quests.xml load" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_qxml");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_qxml");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -393,7 +395,10 @@ test "scenario stock fixture quests.xml load" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_qxml", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
 
     try std.testing.expectEqual(quest_mod.CatalogSource.stock_xml, g.sim.catalog.source);
     try std.testing.expect(g.sim.catalog.defs.len >= 4);
@@ -432,14 +437,17 @@ test "scenario stock fixture quests.xml load" {
 }
 
 test "scenario quest accept kill complete and trader buy" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_quest");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_quest");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_quest", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -501,14 +509,17 @@ test "scenario quest accept kill complete and trader buy" {
 }
 
 test "scenario vehicle enter drive and turret kills with power" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_veh");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_veh");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_veh", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.sim.countKind(.vehicle) >= 1);
@@ -552,6 +563,8 @@ test "scenario vehicle enter drive and turret kills with power" {
             break;
         }
     }
+    try std.testing.expect(te > 0);
+    g.sim.power.resolve();
     try std.testing.expect(g.sim.power.isEntityPowered(te));
     const zid = g.sim.spawnZombie(tx + 2, ty, tz, 15).?;
     cap.clear();
@@ -563,13 +576,10 @@ test "scenario vehicle enter drive and turret kills with power" {
     const rm_id = packages.idOf("NetPackageEntityRemove").?;
     const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
     try std.testing.expect(cap.findPkgIdEntity(rm_id, zid) != null);
-    const sp = cap.findPkgId(spawn_id);
+    // Join flood may include other EntitySpawns; match loot bag class hash.
+    const sp = cap.findPkgIdClass(spawn_id, packages.stock_entity.class_dropped_loot_container);
     try std.testing.expect(sp != null);
-    try std.testing.expectEqual(@as(u8, 35), sp.?[4]);
-    try std.testing.expectEqual(
-        packages.stock_entity.class_dropped_loot_container,
-        std.mem.readInt(i32, sp.?[5..9], .little),
-    );
+    try std.testing.expectEqual(@as(u8, 36), sp.?[4]);
 
     const load = g.sim.power.addNode(.consumer, 1, 70, 1, 5).?;
     const gen_i = blk: {
@@ -592,13 +602,16 @@ test "scenario vehicle enter drive and turret kills with power" {
 }
 
 test "scenario inventory move drop place equip" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_inv");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_inv");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_inv", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -636,7 +649,8 @@ test "scenario inventory move drop place equip" {
         10, // x
     );
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
-    try std.testing.expectEqual(@as(u16, 4), try g.world.blockWorld(10, 70, 10));
+    // resourceWood places frameShapes:cube (AssignIds), not bedrock(4).
+    try std.testing.expectEqual(inv.place_wood_block_id, try g.world.blockWorld(10, 70, 10));
 
     // equip armor
     const armor_slot: u16 = blk: {
@@ -717,13 +731,16 @@ test "scenario inventory move drop place equip" {
 }
 
 test "scenario aidirector night spawn" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_dir");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_dir");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dir", 0);
-    defer { g.deinit(); gpa.destroy(g); }
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     g.sim.director.clock.hours = 23.0;
@@ -739,8 +756,8 @@ test "scenario aidirector night spawn" {
 }
 
 test "scenario craft invtx + explosion dig + lock deny" {
-    mkdirP("worlds");
-    mkdirP("worlds/zdtd_sc_craft");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_craft");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -816,16 +833,93 @@ test "scenario craft invtx + explosion dig + lock deny" {
     std.debug.print("PASS craft+explosion+lock: wood ok, dig air, lock held by A\n", .{});
 }
 
+test "scenario gas can refuel generator via InvTx place" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_refuel");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_refuel", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Place a generator node with empty tank at a known world pos near spawn.
+    const gx: i32 = 260;
+    const gy: i32 = 70;
+    const gz: i32 = 260;
+    const gen = g.sim.power.addNodeAt(.generator, gx, gy, gz, 100).?;
+    const gi = g.sim.power.indexOfId(gen).?;
+    g.sim.power.nodes[gi].capacity = 1000;
+    g.sim.power.nodes[gi].fuel_or_energy = 0;
+    g.sim.power.nodes[gi].on = false;
+    g.sim.power.nodes[gi].burn_rate = 1;
+    g.sim.power.resolve();
+
+    // Register a fuel item with FuelValue (stock ammoGasCan shape) without full items.xml.
+    // Inject into ItemTable defs via a temporary override on fuel_value_fn.
+    const fuel_id: u16 = 50;
+    const FuelCtx = struct {
+        fn fuel(_: ?*anyopaque, id: u16) f32 {
+            return if (id == 50) 25 else 0;
+        }
+    };
+    g.sim.fuel_value_ctx = null;
+    g.sim.fuel_value_fn = &FuelCtx.fuel;
+
+    const inv = @import("../ecs/inventory.zig");
+    const ps0 = g.sim.playerByPeer(c.slot).?;
+    // Starter kit may already hold item_id 50; isolate the fuel stack.
+    g.sim.inventory[ps0].clear();
+    try std.testing.expect(inv.give(&g.sim, c.slot, fuel_id, 3));
+    const fuel_slot: u16 = blk: {
+        for (g.sim.inventory[ps0].slots, 0..) |s, i| {
+            if (s.item_id == fuel_id and s.count > 0) break :blk @intCast(i);
+        }
+        break :blk 0;
+    };
+    try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps0].slots[fuel_slot].count);
+
+    // Move player near generator for range check.
+    if (g.sim.slotOfNetId(c.entity_id)) |ps| {
+        g.sim.transform[ps].x = @floatFromInt(gx);
+        g.sim.transform[ps].y = @floatFromInt(gy);
+        g.sim.transform[ps].z = @floatFromInt(gz);
+    }
+
+    var txb: [32]u8 = undefined;
+    // InvTx place: a=slot, b=y, qty=z, entity_id=x
+    const place_req = try packages.buildInvTxRequest(
+        &txb,
+        @intFromEnum(inv.Op.place),
+        fuel_slot,
+        @bitCast(@as(i16, @intCast(gy))),
+        @bitCast(@as(i16, @intCast(gz))),
+        gx,
+    );
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
+
+    try std.testing.expect(g.sim.power.nodes[gi].fuel_or_energy >= 25);
+    try std.testing.expect(g.sim.power.nodes[gi].on);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var remaining: u32 = 0;
+    for (g.sim.inventory[ps].slots) |s| {
+        if (s.item_id == fuel_id) remaining += s.count;
+    }
+    try std.testing.expectEqual(@as(u32, 2), remaining);
+
+    std.debug.print(
+        "PASS refuel: gen_fuel={d:.0} remaining_cans={d}\n",
+        .{ g.sim.power.nodes[gi].fuel_or_energy, remaining },
+    );
+}
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) void {
-    const linux = std.os.linux;
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch return;
-    var z: [513]u8 = undefined;
-    @memcpy(z[0..path.len], path);
-    z[path.len] = 0;
-    const rc = linux.open(z[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    if (linux.errno(rc) != .SUCCESS) return;
-    const fd: i32 = @intCast(rc);
-    _ = linux.write(fd, data.ptr, data.len);
-    _ = linux.close(fd);
+    io_fs.writeFileSimple(path, data) catch {};
 }

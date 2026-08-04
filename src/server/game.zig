@@ -2,6 +2,7 @@
 //! Simulation is an SoA ECS (`ecs.World` + systems).
 
 const std = @import("std");
+const version = @import("../version.zig");
 const apm = @import("../apm/root.zig");
 const clock = @import("../apm/clock.zig");
 const ln_server = @import("../litenet/server.zig");
@@ -11,6 +12,7 @@ const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
+const parallel_util = @import("../util/parallel.zig");
 const protocol = @import("../protocol.zig");
 const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
@@ -45,6 +47,14 @@ const io_fs = @import("../util/io_fs.zig");
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
+const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
+
+/// Persist failures are non-fatal but never silent: lost world/player/container
+/// state must show up in the server log.
+fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
+    self.harness.counters.inc(.persistence_errors);
+    std.debug.print("zdtd: {s} failed: {s}\n", .{ what, @errorName(err) });
+}
 
 pub const AuthorityMode = server_config.AuthorityMode;
 
@@ -204,6 +214,12 @@ pub const Game = struct {
     body_buf: [524288]u8 = undefined,
     /// Guards pumpAcks reentrancy while draining ACKs mid-send.
     pumping: bool = false,
+    /// Serializes chunk-map access from the terrain hooks: parallel AI workers
+    /// call getOrCreate (hashmap insert/rehash/evict) concurrently with the
+    /// main thread's rank-0 range. Held across the chunk-pointer use because a
+    /// rehash on another thread would invalidate it.
+    // ponytail: one global lock; shard per chunk-key if AI pathing contends.
+    terrain_mu: parallel_util.IoMutex = .{},
     /// PlayerKillingMode from serverconfig (0 = PvP off).
     pvp_mode: u8 = 3,
     /// Gameplay multipliers/settings from serverconfig (percent unless noted).
@@ -404,8 +420,14 @@ pub const Game = struct {
         self.sim.is_armor_fn = &itemIsArmor;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
-        self.containers.load(self.world.world_dir) catch {};
-        self.loadBlockMeta() catch {};
+        // OpenFailed = no persist file yet (fresh world); anything else is a
+        // corrupt/unreadable file whose contents the next save would clobber.
+        self.containers.load(self.world.world_dir) catch |e| {
+            if (e != error.OpenFailed) logPersistErr(self, "load containers", e);
+        };
+        self.loadBlockMeta() catch |e| {
+            if (e != error.OpenFailed) logPersistErr(self, "load block meta", e);
+        };
         if (opts.map_dir) |md| {
             try self.world.loadStockMap(md);
             self.world_name = "stock";
@@ -853,6 +875,8 @@ pub const Game = struct {
     fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const t = world_store.World.worldToChunk(wx, wz);
+        g.terrain_mu.lock();
+        defer g.terrain_mu.unlock();
         const ch = g.world.getOrCreate(t.pos) catch return 61;
         return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
     }
@@ -862,6 +886,8 @@ pub const Game = struct {
     fn pathSolidAt(ctx: ?*anyopaque, wx: i32, wz: i32) bool {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const t = world_store.World.worldToChunk(wx, wz);
+        g.terrain_mu.lock();
+        defer g.terrain_mu.unlock();
         const ch = g.world.getOrCreate(t.pos) catch return false;
         const h: i32 = ch.heightAt(t.lx, t.lz);
         // Foot cell is air/walkable on surface; block if something solid at body.
@@ -926,7 +952,7 @@ pub const Game = struct {
         return self.sim.power.refuelAt(x, y, z, amount);
     }
 
-    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u8 {
+    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const t = world_store.World.worldToChunk(wx, wz);
         const ch = g.world.getOrCreate(t.pos) catch return 64;
@@ -1068,10 +1094,10 @@ pub const Game = struct {
 
     pub fn deinit(self: *Game) void {
         // Shutdown persist is best-effort; do not fail deinit on disk errors.
-        self.savePlayers() catch {};
-        self.world.saveAll() catch {};
-        self.containers.save(self.world.world_dir) catch {};
-        self.saveBlockMeta() catch {};
+        self.savePlayers() catch |e| logPersistErr(self, "save players", e);
+        self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+        self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+        self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.land_claims_n = 0;
         self.sim.deinit();
         self.blocks.deinit();
@@ -1419,7 +1445,7 @@ pub const Game = struct {
         } else if (eqAny(verb, &.{"ban"})) {
             self.consoleKickBan(it.next(), &out, true);
         } else if (eqAny(verb, &.{"version"})) {
-            out.line("zdtd 0.1.0 (V3.1.0 wire)");
+            out.line("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)");
         } else if (eqAny(verb, &.{ "dm", "cm", "settempunit", "debugmenu" })) {
             out.line("ok (client-side toggle)");
         } else {
@@ -1596,10 +1622,10 @@ pub const Game = struct {
                 self.admin.reply(s);
             },
             .save => {
-                self.savePlayers() catch {};
-                self.world.saveAll() catch {};
-                self.containers.save(self.world.world_dir) catch {};
-                self.saveBlockMeta() catch {};
+                self.savePlayers() catch |e| logPersistErr(self, "save players", e);
+                self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+                self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+                self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
                 self.admin.reply("saved\n");
             },
             .kick => |peer| {
@@ -1803,17 +1829,17 @@ pub const Game = struct {
                 self.admin.reply("end\n");
             },
             .saveworld => {
-                self.world.saveAll() catch {};
-                self.containers.save(self.world.world_dir) catch {};
-                self.saveBlockMeta() catch {};
-                self.savePlayers() catch {};
+                self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+                self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+                self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
+                self.savePlayers() catch |e| logPersistErr(self, "save players", e);
                 self.admin.reply("world saved\n");
             },
             .shutdown => {
                 self.admin.reply("shutting down\n");
                 self.running = false;
             },
-            .version => self.admin.reply("zdtd 0.1.0 (V3.1.0 wire)\n"),
+            .version => self.admin.reply("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)\n"),
             .inv => |peer_slot| {
                 const ps = self.sim.playerByPeer(peer_slot) orelse {
                     self.admin.reply("no player in slot\n");
@@ -1887,7 +1913,10 @@ pub const Game = struct {
         // Drop clients whose LiteNet peer died (disconnect / timeout).
         for (&self.clients) |*c| {
             if (c.peer) |p| {
-                if (!p.alive) c.* = .{};
+                if (!p.alive) {
+                    self.clearLocksForPeer(c.slot);
+                    c.* = .{};
+                }
             }
         }
         for (&self.clients) |*c| {
@@ -1945,7 +1974,10 @@ pub const Game = struct {
                     if (attempts % 4 == 3) clock.sleepNs(500_000);
                     continue;
                 },
-                else => return err,
+                else => {
+                    self.harness.counters.inc(.net_send_errors);
+                    return err;
+                },
             };
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
@@ -1954,6 +1986,7 @@ pub const Game = struct {
             return;
         }
         // Drop rather than fail the tick: WindowFull must not kill the dedi.
+        self.harness.counters.inc(.reliable_window_drops);
         std.debug.print("zdtd: drop {s} (reliable window full, droppable={})\n", .{ pkg_name, droppable });
     }
 
@@ -2097,12 +2130,21 @@ pub const Game = struct {
     fn pollNetOnce(self: *Game) void {
         var n: u32 = 0;
         while (n < 24) : (n += 1) {
-            const ev = self.net.poll(&self.recv_buf) catch break;
+            const ev = self.net.poll(&self.recv_buf) catch {
+                self.harness.counters.inc(.net_poll_errors);
+                break;
+            };
             switch (ev) {
                 // Best-effort: one bad peer must not stop the poll loop.
                 .none => break,
-                .connected => |p| self.onConnected(p) catch {},
-                .data => |d| self.onData(d.peer, d.payload) catch {},
+                .connected => |p| self.onConnected(p) catch |e| std.debug.print(
+                    "zdtd: onConnected failed: {s}\n",
+                    .{@errorName(e)},
+                ),
+                .data => |d| self.onData(d.peer, d.payload) catch |err| {
+                    self.harness.counters.inc(.net_payload_errors);
+                    std.debug.print("zdtd: payload failed local_id={d} error={s}\n", .{ d.peer.local_id, @errorName(err) });
+                },
             }
         }
     }
@@ -2337,12 +2379,14 @@ pub const Game = struct {
         for (&self.clients) |*c| {
             const p = c.peer orelse continue;
             if (!p.alive) {
+                self.harness.counters.inc(.stale_peers_reaped);
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
                 continue;
             }
             if (p.last_recv_ns == 0) continue;
             if (now -% p.last_recv_ns > stale_ns) {
+                self.harness.counters.inc(.stale_peers_reaped);
                 p.alive = false;
                 p.authenticated = false;
                 for (&p.pending) |*slot| slot.used = false;
@@ -2423,6 +2467,7 @@ pub const Game = struct {
         const ip = peerIpKey(peer);
         if (self.isBanned(ip)) {
             std.debug.print("zdtd: ban reject ip={x} local_id={d}\n", .{ ip, peer.local_id });
+            self.harness.counters.inc(.join_fail);
             peer.alive = false;
             c.* = .{};
             return;
@@ -2437,6 +2482,8 @@ pub const Game = struct {
         var ch: [17]u8 = undefined;
         wire_frame.buildChallenge(&ch, c.challenge);
         peer.sendReliable(&self.net.sock, &ch) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            self.harness.counters.inc(.join_fail);
             std.debug.print("zdtd: challenge send failed: {}\n", .{err});
             return;
         };
@@ -2725,19 +2772,23 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
             const p = packages.parsePosAndRotBody(body) catch return;
             if (p.entity_id == c.entity_id) {
-                // Void rescue only (aggressive float snap desynced client mesh vs
-                // server height and broke dig/sample rings). Dig pad is fixed by
-                // authoritative SetBlock echo instead.
-                if (p.y < -4) {
-                    const gx: i32 = @intFromFloat(p.x);
-                    const gz: i32 = @intFromFloat(p.z);
-                    const h: f32 = @floatFromInt(self.world.heightWorld(gx, gz) catch @as(u8, @intCast(self.world.primarySpawn().y)));
-                    const ny = h + 1.08;
+                // Ground clamp: client falls through uncollided mesh (void / holes).
+                // Snap when more than ~2 blocks below DTM surface (not only y<-4).
+                const gx: i32 = @intFromFloat(@floor(p.x));
+                const gz: i32 = @intFromFloat(@floor(p.z));
+                const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
+                const surface: f32 = @floatFromInt(h_u16);
+                // Entity feet should sit slightly above the top solid (surface block).
+                const min_y = surface + 0.9;
+                if (p.y < min_y - 2.0 or p.y < -1.0) {
+                    const ny = min_y;
                     self.sim.setPos(p.entity_id, p.x, ny, p.z, 0);
                     if (packages.buildEntityTeleportBody(&self.body_buf, p.entity_id, p.x, ny, p.z, 0, 0, 0, true)) |tb| {
                         try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                     } else |_| {}
-                    std.debug.print("zdtd: void rescue entity={d} y={d:.0} -> {d:.0}\n", .{ p.entity_id, p.y, ny });
+                    std.debug.print("zdtd: ground clamp entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ p.entity_id, p.y, surface, ny });
+                    systems.questTickGoto(&self.sim, c.slot, p.x, ny, p.z);
+                    systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
                     return;
                 }
                 self.sim.setPos(p.entity_id, p.x, p.y, p.z, 0);
@@ -3409,12 +3460,11 @@ pub const Game = struct {
                 const dx = @as(f32, @floatFromInt(b.x)) - ep.x;
                 const dy = @as(f32, @floatFromInt(b.y)) - ep.y;
                 const dz = @as(f32, @floatFromInt(b.z)) - ep.z;
+                // Reach is always Hard (reject in both Correct and Observe).
                 if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
                     if (self.authorityCorrects()) {
                         std.debug.print("zdtd: SetBlock out of reach ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ b.x, b.y, b.z, ep.x, ep.y, ep.z });
-                        continue;
                     }
-                    // Observe: still reject reach (Hard invariant); log only difference later.
                     continue;
                 }
                 if (self.claimCovering(b.x, b.z)) |claim| {
@@ -3861,17 +3911,29 @@ pub const Game = struct {
     /// Align spawn to DTM height and ensure a solid under the feet block so
     /// dig/place sample rings (BlockUnderFeet) see terrain, not air.
     fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
-        const fallback: u8 = @intCast(@max(1, self.world.primarySpawn().y));
-        const h_u8: u8 = self.world.heightWorld(sx, sz) catch fallback;
-        const h: i32 = @intCast(h_u8);
-        // heightWorld is surface top; feet stand on that block, player PDF Y = surface.
+        const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
+        const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
+        const h: i32 = @intCast(h_u16);
+        // heightWorld = top solid; PDF/entity feet use that block Y; entity float y = h+1.
         const feet_y = if (h > 1) h else 1;
-        const under = self.world.blockWorld(sx, feet_y, sz) catch 0;
-        if (under == 0) {
-            const dirt = world_store.block_dirt;
-            self.world.setBlockWorld(sx, feet_y, sz, dirt) catch {};
+        const dirt = world_store.block_dirt;
+        // 3x3 pad of solid at surface so client mesh + BlockUnderFeet see ground.
+        var dz: i32 = -1;
+        while (dz <= 1) : (dz += 1) {
+            var dx: i32 = -1;
+            while (dx <= 1) : (dx += 1) {
+                const px = sx + dx;
+                const pz = sz + dz;
+                // Ensure surface cell solid.
+                const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
+                if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch {};
+                // One block below if empty (stairs / overhang).
+                if (feet_y > 0) {
+                    const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
+                    if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch {};
+                }
+            }
         }
-        // Standing Y for entity is surface + small offset; PDF uses block Y of feet surface.
         return .{ .x = sx, .y = feet_y, .z = sz };
     }
 
@@ -4187,8 +4249,9 @@ pub const Game = struct {
     }
 
     /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
+    /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
     fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
-        const range: f32 = 96;
+        const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         const pfx: f32 = @floatFromInt(px);
         const pfz: f32 = @floatFromInt(pz);
         var i: ecs.Slot = 0;
@@ -4204,9 +4267,7 @@ pub const Game = struct {
             if (self.sim.mask[i].player) continue;
             const nid = self.sim.network_id[i].id;
             if (nid == c.entity_id or nid <= 0) continue;
-            const dx = self.sim.transform[i].x - pfx;
-            const dz = self.sim.transform[i].z - pfz;
-            if (dx * dx + dz * dz > range * range) continue;
+            if (!interest.inRange(pfx, pfz, self.sim.transform[i].x, self.sim.transform[i].z, radius)) continue;
             const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
             const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
                 self.sim.class_id[i].hash
@@ -4835,6 +4896,11 @@ pub const Game = struct {
     }
 
     /// Scan painted columns for known storage AssignIds; create + roll loot once.
+    /// Deterministic loot seed from world block position (stable across chunk scans).
+    fn lootSeedAt(wx: i32, wy: i32, wz: i32) u32 {
+        return @as(u32, @bitCast(wx *% 73856093 ^ wz *% 19349663 ^ wy));
+    }
+
     /// Also honor prefab TTS TE list (Loot/SecureLoot/Composite types).
     fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
         const blocks = ch.blocks orelse return;
@@ -4856,7 +4922,7 @@ pub const Game = struct {
                     if (self.containers.get(pos) != null) continue;
                     const cont = self.containers.getOrCreate(pos, 8, id) orelse continue;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        self.fillContainerFromLoot(cont, "woodenChest", @as(u32, @bitCast(wx *% 73856093 ^ wz *% 19349663 ^ y)));
+                        self.fillContainerFromLoot(cont, "woodenChest", lootSeedAt(wx, y, wz));
                     }
                     found += 1;
                     if (found >= 32) return;
@@ -4879,7 +4945,7 @@ pub const Game = struct {
                     const id: u16 = if (block_id != 0) block_id else tc.g.seedChestBlockId();
                     const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        tc.g.fillContainerFromLoot(cont, "woodenChest", @as(u32, @bitCast(wx *% 73856093 ^ wz *% 19349663 ^ wy)));
+                        tc.g.fillContainerFromLoot(cont, "woodenChest", lootSeedAt(wx, wy, wz));
                     }
                     tc.found.* += 1;
                 }
@@ -5063,7 +5129,10 @@ pub const Game = struct {
                     if (attempts % 4 == 3) clock.sleepNs(500_000);
                     continue;
                 },
-                else => return,
+                else => {
+                    self.harness.counters.inc(.net_send_errors);
+                    return;
+                },
             };
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
@@ -5071,6 +5140,7 @@ pub const Game = struct {
             self.pollNetOnce();
             return;
         }
+        self.harness.counters.inc(.reliable_window_drops);
     }
 
     fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
@@ -5093,7 +5163,10 @@ pub const Game = struct {
                     continue;
                 }
             }
-            p.sendReliable(&self.net.sock, framed) catch continue;
+            p.sendReliable(&self.net.sock, framed) catch {
+                self.harness.counters.inc(.net_send_errors);
+                continue;
+            };
             self.harness.counters.inc(.packages_broadcast);
         }
     }
@@ -5104,7 +5177,10 @@ pub const Game = struct {
             const p = c.peer orelse continue;
             if (!c.joined) continue;
             if (except_slot) |ex| if (c.slot == ex) continue;
-            p.sendReliable(&self.net.sock, framed) catch continue;
+            p.sendReliable(&self.net.sock, framed) catch {
+                self.harness.counters.inc(.net_send_errors);
+                continue;
+            };
             self.harness.counters.inc(.packages_broadcast);
         }
     }
@@ -5123,7 +5199,9 @@ pub const Game = struct {
         if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
             for (&self.clients) |*cl| {
                 if (!cl.joined or !cl.entered or cl.peer == null) continue;
-                self.streamChunksForClient(cl) catch {};
+                self.streamChunksForClient(cl) catch {
+                    self.harness.counters.inc(.stream_errors);
+                };
             }
         }
         // Motion every other tick so join/control packages keep window room.
@@ -5306,11 +5384,17 @@ pub const Game = struct {
             defer sn.end();
             var polls: u32 = 0;
             while (polls < 64) : (polls += 1) {
-                const ev = try self.net.poll(&self.recv_buf);
+                const ev = self.net.poll(&self.recv_buf) catch |err| {
+                    self.harness.counters.inc(.net_poll_errors);
+                    return err;
+                };
                 switch (ev) {
                     .none => break,
                     .connected => |p| try self.onConnected(p),
-                    .data => |d| try self.onData(d.peer, d.payload),
+                    .data => |d| self.onData(d.peer, d.payload) catch |err| {
+                        self.harness.counters.inc(.net_payload_errors);
+                        return err;
+                    },
                 }
             }
             // Drop silent peers (client quit) so we stop flooding a stuck window.
@@ -5397,13 +5481,26 @@ pub const Game = struct {
         if (self.tick_n % 100 == 0) {
             const ss = apm.profiler.scope(&self.harness.prof, .save_io);
             defer ss.end();
-            self.world.saveAll() catch {};
-            self.containers.save(self.world.world_dir) catch {};
-            self.saveBlockMeta() catch {};
+            self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+            self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+            self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             if (self.players_dirty) {
                 self.players_dirty = false;
-                self.savePlayers() catch {};
+                self.savePlayers() catch |e| logPersistErr(self, "save players", e);
             }
+        }
+
+        // One parseable line per minute gives unbounded production runs a
+        // bounded-cost health signal without per-packet label cardinality.
+        if (self.tick_n % apm_report_period_ticks == 0) {
+            const snap = self.harness.snapshot();
+            var report_buf: [4096]u8 = undefined;
+            var report_writer: std.Io.Writer = .fixed(&report_buf);
+            apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
+                std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
+                return;
+            };
+            std.debug.print("{s}", .{report_writer.buffered()});
         }
     }
 

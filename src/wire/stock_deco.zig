@@ -5,22 +5,21 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 
-/// Runtime Block.blockID after AssignIds (not XML declaration order).
-/// Non-terrain starts at 256; shape variants inflate total to ~24k.
-/// Captured client V3.1.4 via ZDTD_DUMP_BLOCK_IDS (AssignIds Postfix).
+/// Runtime Block.blockID after AssignIds (bundled dump, comptime).
 /// DecoObject requires BlockShapeDistantDeco (+ Model). plantShrub is ModelEntity only.
-pub const plant_shrub: u32 = 24619; // plantShrub (NOT valid deco shape)
-pub const tree_dead_pine_leaf: u32 = 24612; // BillboardPlant (no Model)
-pub const tree_dead_02: u32 = 24626; // treeDeadTree02 DistantDecoTree + Model
-pub const tree_oak_sml: u32 = 24629; // treeOakSml01 DistantDecoTree + Model
-pub const tree_winter_evergreen: u32 = 24651; // treeWinterEverGreen DistantDecoTree
+const assignids = @import("../assets/assignids_comptime.zig");
+pub const plant_shrub: u32 = assignids.plant_shrub;
+pub const tree_dead_pine_leaf: u32 = assignids.tree_dead_pine_leaf;
+pub const tree_dead_02: u32 = assignids.tree_dead_02;
+pub const tree_oak_sml: u32 = assignids.tree_oak_sml;
+pub const tree_winter_evergreen: u32 = assignids.tree_winter_evergreen;
 
-/// Storage / loot containers (same AssignIds capture as trees).
-pub const cnt_wooden_chest_closed: u32 = 18671; // cntWoodenChestClosed
-pub const cnt_wooden_chest_open: u32 = 18672; // cntWoodenChestOpen
-pub const cnt_wood_writable_crate: u32 = 18683; // cntWoodWritableCrate
-pub const cnt_desk_safe: u32 = 18515; // cntDeskSafe
-pub const cnt_hardened_chest_insecure: u32 = 18650; // cntHardenedChestInsecure
+/// Storage / loot containers (same AssignIds dump).
+pub const cnt_wooden_chest_closed: u32 = assignids.cnt_wooden_chest_closed;
+pub const cnt_wooden_chest_open: u32 = assignids.cnt_wooden_chest_open;
+pub const cnt_wood_writable_crate: u32 = assignids.cnt_wood_writable_crate;
+pub const cnt_desk_safe: u32 = assignids.cnt_desk_safe;
+pub const cnt_hardened_chest_insecure: u32 = assignids.cnt_hardened_chest_insecure;
 
 /// DecoState.GeneratedActive
 pub const deco_state_active: u8 = 0;
@@ -72,7 +71,7 @@ pub fn generateAround(
     wz0: i32,
     wx1: i32,
     wz1: i32,
-    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u8,
+    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u16,
     ctx: ?*anyopaque,
     every_n: u32,
 ) usize {
@@ -87,7 +86,7 @@ pub fn generateAroundIds(
     wz0: i32,
     wx1: i32,
     wz1: i32,
-    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u8,
+    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u16,
     ctx: ?*anyopaque,
     every_n: u32,
     oak_id: u32,
@@ -126,7 +125,7 @@ pub fn generateForTerrainChunk(
     out: []DecoObj,
     cx: i32,
     cz: i32,
-    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u8,
+    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u16,
     ctx: ?*anyopaque,
     every_n: u32,
 ) usize {
@@ -169,12 +168,16 @@ test "deco plant/tree runtime block ids" {
     try std.testing.expectEqual(@as(u32, 24651), tree_winter_evergreen);
 }
 
-/// NetPackageDecoResetWorldChunk body: dataLen:i32 | chunkKey:i64 (WorldChunkCache key).
-pub fn buildDecoResetWorldChunk(buf: []u8, cx: i32, cz: i32) ![]u8 {
-    // Reuse makeChunkKey layout: ((z & 0xFFFFFF) << 24) | (x & 0xFFFFFF)
+/// WorldChunkCache.MakeChunkKey(x, z). Shared with packages.makeChunkKey (re-export).
+pub fn makeChunkKey(cx: i32, cz: i32) i64 {
     const x = @as(i64, cx) & 0xFFFFFF;
     const z = @as(i64, cz) & 0xFFFFFF;
-    const key: i64 = (z << 24) | x;
+    return (z << 24) | x;
+}
+
+/// NetPackageDecoResetWorldChunk body: dataLen:i32 | chunkKey:i64 (WorldChunkCache key).
+pub fn buildDecoResetWorldChunk(buf: []u8, cx: i32, cz: i32) ![]u8 {
+    const key = makeChunkKey(cx, cz);
     if (buf.len < 12) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], 8, .little);
     std.mem.writeInt(i64, buf[4..12], key, .little);

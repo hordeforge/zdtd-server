@@ -7,7 +7,7 @@
 //! Prefer dtm_processed.raw when present (same layout).
 
 const std = @import("std");
-const linux = std.os.linux;
+const io_fs = @import("../util/io_fs.zig");
 
 pub const Heightmap = struct {
     width: i32,
@@ -23,16 +23,18 @@ pub const Heightmap = struct {
         self.* = undefined;
     }
 
-    /// Surface block Y (0..255) at world XZ. Out of bounds → null.
-    pub fn heightAtWorld(self: *const Heightmap, wx: i32, wz: i32) ?u8 {
+    /// Surface block Y at world XZ (u16; stock DTM stores gameY*256 in u16 samples).
+    /// Out of bounds → null. Values above 255 are rare on stock maps but not clamped here.
+    pub fn heightAtWorld(self: *const Heightmap, wx: i32, wz: i32) ?u16 {
         const dx = wx + self.half_w;
         const dz = wz + self.half_h;
         if (dx < 0 or dz < 0 or dx >= self.width or dz >= self.height) return null;
         const idx: usize = @intCast(@as(i64, dz) * @as(i64, self.width) + @as(i64, dx));
-        return @intCast(self.samples[idx] >> 8);
+        return @as(u16, self.samples[idx] >> 8);
     }
 
     /// Fill a 16×16 chunk height plane for chunk (cx, cz). Missing samples use `fallback`.
+    /// Plane remains u8 for stock wire/disk; values >255 clamp to 255.
     pub fn fillChunkHeights(self: *const Heightmap, cx: i32, cz: i32, out: *[256]u8, fallback: u8) void {
         const base_x = cx * 16;
         const base_z = cz * 16;
@@ -40,8 +42,8 @@ pub const Heightmap = struct {
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const h = self.heightAtWorld(base_x + lx, base_z + lz) orelse fallback;
-                out[@intCast(lx + lz * 16)] = h;
+                const h16 = self.heightAtWorld(base_x + lx, base_z + lz) orelse @as(u16, fallback);
+                out[@intCast(lx + lz * 16)] = if (h16 > 255) 255 else @intCast(h16);
             }
         }
     }
@@ -134,42 +136,8 @@ fn skipToComma(s: []const u8) ?[]const u8 {
     return s[i..];
 }
 
-fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return error.PathTooLong;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.OpenFailed;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    // SEEK_END then SEEK_SET (no linux.Stat on this Zig 0.16 surface).
-    const end = linux.lseek(fd, 0, linux.SEEK.END);
-    if (linux.errno(end) != .SUCCESS) return error.SeekFailed;
-    const size: usize = @intCast(end);
-    _ = linux.lseek(fd, 0, linux.SEEK.SET);
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
-    var off: usize = 0;
-    while (off < size) {
-        const n = linux.read(fd, buf[off..].ptr, size - off);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        off += @intCast(n);
-    }
-    if (off != size) return error.ShortRead;
-    return buf;
-}
-
 fn fileExists(path: []const u8) bool {
-    var path_z: [1024]u8 = undefined;
-    if (path.len >= path_z.len) return false;
-    @memcpy(path_z[0..path.len], path);
-    path_z[path.len] = 0;
-    const rc = linux.open(path_z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY }, 0);
-    if (linux.errno(rc) != .SUCCESS) return false;
-    _ = linux.close(@intCast(rc));
-    return true;
+    return io_fs.fileExistsSimple(path);
 }
 
 fn joinPath(buf: []u8, a: []const u8, b: []const u8) ![]const u8 {
@@ -180,7 +148,7 @@ fn joinPath(buf: []u8, a: []const u8, b: []const u8) ![]const u8 {
 pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !Heightmap {
     var path_buf: [1024]u8 = undefined;
     const info_path = try joinPath(&path_buf, world_dir, "map_info.xml");
-    const info_xml = try readFileAll(allocator, info_path);
+    const info_xml = try io_fs.readFileAll(allocator, info_path);
     defer allocator.free(info_xml);
     const size = try parseMapInfoSize(info_xml);
     const expected: usize = @as(usize, @intCast(size.w)) * @as(usize, @intCast(size.h)) * 2;
@@ -190,7 +158,7 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !He
     const processed = try joinPath(&dtm_path_buf, world_dir, "dtm_processed.raw");
     const raw_name = if (fileExists(processed)) "dtm_processed.raw" else "dtm.raw";
     const dtm_path = try joinPath(&dtm_path_buf, world_dir, raw_name);
-    const raw = try readFileAll(allocator, dtm_path);
+    const raw = try io_fs.readFileAll(allocator, dtm_path);
     defer allocator.free(raw);
     if (raw.len < expected) return error.DtmTooSmall;
     if (raw.len != expected) {
@@ -219,7 +187,7 @@ pub fn loadSpawnPoints(allocator: std.mem.Allocator, world_dir: []const u8, out:
     var path_buf: [1024]u8 = undefined;
     const path = try joinPath(&path_buf, world_dir, "spawnpoints.xml");
     if (!fileExists(path)) return 0;
-    const xml = try readFileAll(allocator, path);
+    const xml = try io_fs.readFileAll(allocator, path);
     defer allocator.free(xml);
     return parseSpawnPoints(xml, out);
 }
@@ -277,8 +245,8 @@ test "synthetic dtm center mapping" {
         .half_w = 16,
         .half_h = 16,
     };
-    try std.testing.expectEqual(@as(u8, 80), hm.heightAtWorld(0, 0).?);
-    try std.testing.expectEqual(@as(u8, 70), hm.heightAtWorld(1, 0).?);
+    try std.testing.expectEqual(@as(u16, 80), hm.heightAtWorld(0, 0).?);
+    try std.testing.expectEqual(@as(u16, 70), hm.heightAtWorld(1, 0).?);
     try std.testing.expect(hm.heightAtWorld(-17, 0) == null);
 
     var plane: [256]u8 = undefined;

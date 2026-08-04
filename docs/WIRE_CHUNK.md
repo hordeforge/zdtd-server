@@ -3,6 +3,8 @@
 Stock `Chunk.write` is ~601 IL (64 layers, channels, TE, …). Until capture-golden
 stock bytes land, zdtd speaks two **documented intermediate** layouts.
 
+
+**API note:** in-memory `heightWorld` / `heightAt` return **u16** for headroom; stock wire and `.zch` still store **u8[256]** (clamp on write).
 ## Layout A: height plane (inner payload)
 
 ```text
@@ -67,32 +69,40 @@ See `src/world/store.zig`.
 `src/wire/stock_chunk.zig` implements network-mode `Chunk.write` (bNetwork=true)
 for height-column terrain:
 
-- 64 block layers: same-value lower8 when uniform, plus a per-cell upper24 array (`id>>8,>>16,>>24`) whenever any id >= 256 so construction/POI ids are not truncated to their low byte
-- height/terrain maps, topsoil bitfield, biomes, interleaved BiomeIntensity[256] (6 B each)
-- density: mixed-surface layers (solid bands same-value; surface layer per-cell)
-- light/damage/water channels same-value (light fill 0, client LightChunk fills); texture channel per-block textureFull (bpv=6, low 6 bytes) from TTS paint, same-value only for uniform bands
+- 64 block layers: full `BlockValue.rawData` (u32); lower8 same-value or 1024 array; upper24 (3072) whenever bits 8..31 set (type≥256 **or** rotation/meta)
+- height/terrain maps; **topsoil broken bitfield all 0xFF** (avoid MicroSplat empty-splat path when Dummy); biomes + BiomeIntensity[256]
+- density: stock CheckDensities rules (terrain dens &lt; 0 → −128; non-terrain ≥ 0 → +1); TTS density override when painted
+- light same-value 0xFF + NeedsLightCalculation true; damage/water 0; texture bpv=6 from TTS paint only (terrain atlas ids &gt;255 stay on client Block.list, not channel)
 - empty entity/TE/volume tails; network bool false + insideDevices 0 + culled false
 
 `NetPackageChunk` first delivery uses **overwrite=false** so the client allocates
 and `Chunk.read`s during package.read. Continuous stream uses the same builder.
 
-Client network path forces `NeedsLightCalculation=true` after read; mesh needs
-full 8-neighbor rings + light clear (`RegenerateNextChunk`). Server join/stream
-must keep a hole-free disk (pw10: join r≤4, stream r≤4) or CGO stays 0.
+Client mesh needs full neighbor rings (`RegenerateNextChunk`). Only **inner**
+chunks (stream radius minus ~2) become displayed GOs. With stream r=4, max CGO
+≈25; spawn overlay with `fixedSizeCC=false` needs viewDist²−10 (often 39+).
+Join/stream disk: **r 6..8**, hole-free, enough adds/tick.
 
-Intermediate height-plane (layout A/D) remains for loadgen helpers that call
-`buildChunkBody` directly; join path uses stock encoder.
+## WorldInfo + terrain textures (not in chunk body)
 
-## Evidence (pw10)
+Terrain floor materials on stock maps use **client MicroSplat** + local
+`Data/Worlds/<level>/splat*.png`. That requires WorldInfo **`fixedSizeCC=false`**
+so the client installs `ChunkProviderGenerateWorldFromRaw(bClientMode)` instead
+of Dummy. See `../7dtd-research/docs/protocol-packages.md` §4.2 and
+`chunk-providers.md` §4.5. Block ids alone cannot fix a grey floor when splats
+never load.
 
-- Server sent 81 unique stock chunks around spawn (-273,449 → cx~-18..-17 cz~28).
-- Client: `Chunks:90 CGO:25` stable, FPS~275, no NRE on mesh path.
+## Evidence
+
+- Surface AssignIds id 8 = terrBurntForestGround; burnt biome layers from biomes.xml.
+- Client log with fixedSize=false: `GenWorldFromRaw splats took …ms`.
+- Stream r=4 → CGO stuck 25/39 ("Starting game"); r≥6 required for viewDist 7.
 
 ## Path to full parity
 
-1. Mixed-surface density layers: **HAVE** (`stock_chunk.zig`).  
-2. Stock biome paint from biomes.png: **HAVE** (`world/biomes.zig` color→biomemap id).  
-3. Prefab `.tts` **type** paint: **HAVE** (`src/world/tts.zig` on chunk create).  
-   Remaining: **density** channel from TTS (texture done), TE lists on chunk stream, name→id remap, `part_*` policy.  
-4. Capture golden blobs from stock dedi for bit-diff.  
-5. Grow stream with client viewDim (Allowed ChunkViewDistance 7) without flooding LiteNet.
+1. Mixed-surface density + TTS dens: **HAVE**.  
+2. Biome paint + biomes.xml column layers: **HAVE**.  
+3. Prefab TTS rawData+tex+density: **HAVE** (filler skipped).  
+4. fixedSizeCC=false + stream for CGO gate: **HAVE** (validate soak).  
+5. Capture golden blobs from stock dedi for bit-diff.  
+6. TE lists on chunk stream; name→id remap; `part_*` policy.
