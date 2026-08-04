@@ -24,7 +24,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **77 pass / 6 fail** (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **74 pass / 9 fail** (20260804g; power suite green; dig/place flaky feet) (kill/spawn/respawn PASS); version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
@@ -34,12 +34,12 @@ Score: **pass=77 fail=6**. CGO gate **PASS** (cgo=63 need=39) after stream radiu
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `core/block_damage_melee` | hay 20304 dmg 0 (seed at Y=-6) | **playtest clamp on disk:** `Helpers.FixtureSeedOrigin` + zdtd ground clamp/3x3 pad; re-run demo to re-score |
-| `combat/explosion_client` | same soft-block path | same (seed origin clamped) |
-| `combat/zombie_target_has_health` | intermittent no EntityAlive in range | spawn/kill timing |
+| `core/block_damage_melee` | hay seed dmg sometimes 0 | hybrid SetBlockRpc dmg; void rescue RelPos (`3983fdc`); fixture Y clamp on disk |
+| `core/dig_confirm` / `place_confirm` | intermittent no solid under feet | client float above mesh; FixtureSeedOrigin high-Y clamp |
 | `economy/eat_food_consume` | count stuck 1; food stat moved | consume C2S / item use |
-| `power/place_generator` | type=0 not placed | FixtureSeedOrigin on place (re-score) |
-| `power/wire_set_parent` | relay not placed | same |
+| `world/water_plane` / `biome_id` / `block_sample_ring` | intermittent air/biome -1 | chunk mesh lag after float |
+| `combat/ranged_shot` | intermittent | ammo/meta timing |
+| power suite | **PASS** 20260804g | place_generator + wire + turret + fuel |
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
