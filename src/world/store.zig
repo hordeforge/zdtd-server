@@ -426,17 +426,23 @@ pub const World = struct {
     pub const max_resident_chunks: usize = 4096;
 
     fn evictOneChunk(self: *World, keep_key: u64) !void {
+        // Min key among residents (not HashMap walk order). Insert history
+        // would otherwise pick different victims for the same resident set,
+        // breaking DST replay under cap pressure.
+        var best_key: ?u64 = null;
         var it = self.chunks.iterator();
         while (it.next()) |e| {
-            if (e.key_ptr.* == keep_key) continue;
-            // Never discard a resident chunk unless its latest state reached disk.
-            // The caller can reject the new chunk request and retry later.
-            try self.saveChunk(e.value_ptr);
-            e.value_ptr.deinitBlocks();
-            _ = self.chunks.remove(e.key_ptr.*);
-            return;
+            const k = e.key_ptr.*;
+            if (k == keep_key) continue;
+            if (best_key == null or k < best_key.?) best_key = k;
         }
-        return error.NoEvictionCandidate;
+        const victim = best_key orelse return error.NoEvictionCandidate;
+        const c = self.chunks.getPtr(victim) orelse return error.NoEvictionCandidate;
+        // Never discard a resident chunk unless its latest state reached disk.
+        // The caller can reject the new chunk request and retry later.
+        try self.saveChunk(c);
+        c.deinitBlocks();
+        _ = self.chunks.remove(victim);
     }
 
     pub fn getOrCreate(self: *World, pos: ChunkPos) !*Chunk {
@@ -519,7 +525,12 @@ pub const World = struct {
             }
             // Player edits / first-touch cache win over regen (heights-only or
             // v2 saves restore heights again after regen filled blocks).
-            if (load_state == .heights_only) self.loadChunk(gop.value_ptr) catch {};
+            if (load_state == .heights_only) self.loadChunk(gop.value_ptr) catch |err| {
+                std.debug.print(
+                    "zdtd: chunk ({d},{d}) edit re-load failed: {s}\n",
+                    .{ pos.x, pos.z, @errorName(err) },
+                );
+            };
         }
         return gop.value_ptr;
     }
@@ -638,11 +649,22 @@ pub const World = struct {
         defer self.allocator.free(data);
         if (data.len < 12) return error.ReadFailed;
         if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {
+            const stored_x = std.mem.readInt(i32, data[4..8], .little);
+            const stored_z = std.mem.readInt(i32, data[8..12], .little);
+            if (stored_x != c.pos.x or stored_z != c.pos.z) return error.ReadFailed;
+            if (data[12] > 1 or data[13] > 1 or data[14] > 1) return error.ReadFailed;
             const has_blocks = data[12] == 1;
             // hdr[13]/[14] are 0 on pre-paint ZCH3 files (backward compatible).
             const has_textures = data[3] == '3' and data[13] == 1;
             const has_densities = data[3] == '3' and data[14] == 1;
-            if (data.len < 16 + c.heights.len) return error.ReadFailed;
+            var required: usize = 16 + c.heights.len;
+            if (data[3] == '3' and has_blocks) required += blocks_per_chunk * @sizeOf(u32);
+            if (has_textures) required += blocks_per_chunk * @sizeOf(u64);
+            if (has_densities) required += blocks_per_chunk + dens_set_bytes;
+            // Validate the complete record before mutating the resident chunk.
+            // A torn save must regenerate, never leave a half-loaded plane that
+            // suppresses terrain materialization.
+            if (data.len < required) return error.ReadFailed;
             @memcpy(&c.heights, data[16..][0..c.heights.len]);
             var o: usize = 16 + c.heights.len;
             if (has_blocks) {
@@ -683,25 +705,45 @@ pub const World = struct {
                 o += blocks_per_chunk;
                 @memcpy(c.dens_set.?[0..dens_set_bytes], data[o..][0..dens_set_bytes]);
             }
-        } else {
+        } else if (data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and data[3] == '1') {
             // v1: 12-byte hdr then heights.
             if (data.len < 12 + c.heights.len) return error.ReadFailed;
+            const stored_x = std.mem.readInt(i32, data[4..8], .little);
+            const stored_z = std.mem.readInt(i32, data[8..12], .little);
+            if (stored_x != c.pos.x or stored_z != c.pos.z) return error.ReadFailed;
             @memcpy(&c.heights, data[12..][0..c.heights.len]);
-        }
+        } else return error.ReadFailed;
         c.dirty = false;
     }
 
     pub fn saveAll(self: *World) !void {
-        var list: [512]*Chunk = undefined;
-        var n: usize = 0;
+        // Sort dirty keys so disk write order is independent of HashMap walk
+        // (insert history / capacity). Needed for deterministic fault injection
+        // and mid-save crash replay.
+        const total = self.chunks.count();
+        if (total == 0) return;
+        var keys = try self.allocator.alloc(u64, total);
+        defer self.allocator.free(keys);
+        var kn: usize = 0;
         var it = self.chunks.iterator();
         while (it.next()) |e| {
             if (!e.value_ptr.dirty) continue;
+            keys[kn] = e.key_ptr.*;
+            kn += 1;
+        }
+        if (kn == 0) return;
+        std.mem.sort(u64, keys[0..kn], {}, std.sort.asc(u64));
+
+        var list: [512]*Chunk = undefined;
+        var n: usize = 0;
+        for (keys[0..kn]) |k| {
+            const c = self.chunks.getPtr(k) orelse continue;
+            if (!c.dirty) continue;
             if (n >= list.len) {
                 try self.saveChunkSlice(list[0..n]);
                 n = 0;
             }
-            list[n] = e.value_ptr;
+            list[n] = c;
             n += 1;
         }
         try self.saveChunkSlice(list[0..n]);
@@ -742,9 +784,11 @@ pub const World = struct {
 };
 
 test "proc worldgen getOrCreate heights from seed" {
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_proc_test");
-    var w = try World.init(std.testing.allocator, "worlds/zdtd_proc_test");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
     w.enableProc(0xA11CE);
     try std.testing.expect(w.terrain_source == .proc);
@@ -767,10 +811,10 @@ test "proc worldgen getOrCreate heights from seed" {
 }
 
 test "flat world set dig persist" {
-    const dir = "worlds/zdtd_test_world";
-    io_fs.deleteFileSimple("worlds/zdtd_test_world/c_0_0.zch");
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -791,11 +835,30 @@ test "flat world set dig persist" {
     try std.testing.expectEqual(block_stone, try w2.blockWorld(6, 71, 5));
 }
 
+test "evictOneChunk picks min key (DST)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    // Insert in reverse key order so HashMap walk ≠ sorted order.
+    _ = try w.getOrCreate(.{ .x = 3, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = 2, .z = 0 });
+    const keep = ChunkPos.hash(.{ .x = 2, .z = 0 });
+    try w.evictOneChunk(keep);
+    // Min key among {1,2,3} excluding keep=2 is 1.
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 1, .z = 0 })) == null);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 2, .z = 0 })) != null);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 3, .z = 0 })) != null);
+}
+
 test "paint clear on setBlock and ZCH3 texture density roundtrip" {
-    const dir = "worlds/zdtd_paint_persist";
-    io_fs.deleteFileSimple("worlds/zdtd_paint_persist/c_0_0.zch");
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -821,6 +884,40 @@ test "paint clear on setBlock and ZCH3 texture density roundtrip" {
     try std.testing.expectEqual(block_dirt, c2.blockAt(1, 10, 2));
     try std.testing.expectEqual(@as(u64, 0x22), c2.texAt(1, 10, 2));
     try std.testing.expectEqual(@as(?u8, 3), c2.densAt(1, 10, 2));
+}
+
+test "torn or misplaced chunk save cannot partially replace generated state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/c_0_0.zch", .{dir});
+
+    var torn: [16 + 256]u8 = .{0} ** (16 + 256);
+    @memcpy(torn[0..4], "ZCH3");
+    torn[12] = 1; // Claims a block plane that is not present.
+    @memset(torn[16..], 200);
+    try io_fs.writeFileSimple(path, &torn);
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u16, sea_level), c.heightAt(0, 0));
+    try std.testing.expect(c.blocks != null);
+
+    // The filename is not identity: embedded coordinates must agree too.
+    std.mem.writeInt(i32, torn[4..8], 7, .little);
+    torn[12] = 0;
+    try io_fs.writeFileSimple(path, &torn);
+    var direct = Chunk.generateFlat(.{ .x = 0, .z = 0 });
+    try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
+    try std.testing.expectEqual(@as(u16, sea_level), direct.heightAt(0, 0));
+
+    @memcpy(torn[0..4], "NOPE");
+    std.mem.writeInt(i32, torn[4..8], 0, .little);
+    try io_fs.writeFileSimple(path, &torn);
+    try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
 }
 
 test "stock map heights via DTM if Navezgane present" {

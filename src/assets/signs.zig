@@ -117,6 +117,16 @@ pub fn loadFromPrefabsRoot(allocator: std.mem.Allocator, prefabs_root: []const u
 
     try walkSigns(allocator, arena, prefabs_root, &list);
 
+    // readdir order is OS/filesystem dependent; wire batches iterate this
+    // slice, so sort for seed-stable SignDataResponse across machines (DST).
+    std.mem.sort(SignEntry, list.items, {}, struct {
+        fn less(_: void, a: SignEntry, b: SignEntry) bool {
+            const o = std.mem.order(u8, a.library, b.library);
+            if (o != .eq) return o == .lt;
+            return std.mem.order(u8, a.name, b.name) == .lt;
+        }
+    }.less);
+
     const entries = try arena.alloc(SignEntry, list.items.len);
     @memcpy(entries, list.items);
     return .{ .entries = entries, .arena_ptr = arena_holder };

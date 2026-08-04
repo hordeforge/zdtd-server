@@ -1913,7 +1913,7 @@ pub const WeatherBiome = struct {
 
 /// Stock NetPackageWeather: no count prefix; client sizes from its biomeWeather.Count.
 /// Emit one entry per biomemap biome we care about (same count both sides ideally).
-/// RE: weather-environment.md §3 — biomeId u8, groupIndex u8, remainingSeconds u8, 5×f32.
+/// RE: weather-environment.md §3: biomeId u8, groupIndex u8, remainingSeconds u8, 5xf32.
 pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     for (biomes) |b| {

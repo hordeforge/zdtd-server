@@ -72,8 +72,8 @@ pub const Reader = struct {
         return @bitCast(bits);
     }
 
-    /// .NET BinaryReader.ReadString: 7-bit encoded length + UTF-8.
-    pub fn readString(self: *Reader, buf: []u8) ReadError![]const u8 {
+    /// .NET BinaryReader 7-bit string length; overlong prefix → InvalidString.
+    fn readStringLen(self: *Reader) ReadError!usize {
         var len: usize = 0;
         var shift: u6 = 0;
         while (true) {
@@ -83,6 +83,12 @@ pub const Reader = struct {
             shift += 7;
             if (shift > 28) return error.InvalidString;
         }
+        return len;
+    }
+
+    /// .NET BinaryReader.ReadString: 7-bit encoded length + UTF-8.
+    pub fn readString(self: *Reader, buf: []u8) ReadError![]const u8 {
+        const len = try self.readStringLen();
         if (len > buf.len) return error.Overflow;
         if (self.pos + len > self.data.len) return error.EndOfStream;
         @memcpy(buf[0..len], self.data[self.pos..][0..len]);
@@ -91,15 +97,7 @@ pub const Reader = struct {
     }
 
     pub fn skipString(self: *Reader) ReadError!void {
-        var len: usize = 0;
-        var shift: u6 = 0;
-        while (true) {
-            const b = try self.readByte();
-            len |= @as(usize, b & 0x7F) << shift;
-            if ((b & 0x80) == 0) break;
-            shift += 7;
-            if (shift > 28) return error.InvalidString;
-        }
+        const len = try self.readStringLen();
         if (self.pos + len > self.data.len) return error.EndOfStream;
         self.pos += len;
     }

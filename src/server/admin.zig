@@ -132,6 +132,15 @@ pub const Server = struct {
         return null;
     }
 
+    /// Close the session whose line is being handled (admin `quit`/`exit`).
+    pub fn closeActive(self: *Server) void {
+        const fd = self.sessions[self.active];
+        if (fd < 0) return;
+        _ = linux.close(fd);
+        self.sessions[self.active] = -1;
+        self.recv_lens[self.active] = 0;
+    }
+
     /// Best-effort response to the session whose line is being handled.
     pub fn reply(self: *Server, text: []const u8) void {
         const fd = self.sessions[self.active];
@@ -179,6 +188,8 @@ pub const Command = union(enum) {
     shutdown,
     /// Stock `version`.
     version,
+    /// Known verb, missing or malformed arguments (slice of the input line).
+    bad_args: []const u8,
     unknown,
 };
 
@@ -189,66 +200,70 @@ pub fn parseCommand(line: []const u8) Command {
     if (std.mem.eql(u8, cmd, "status")) return .status;
     if (std.mem.eql(u8, cmd, "save")) return .save;
     if (std.mem.eql(u8, cmd, "kick")) {
-        const p = it.next() orelse return .unknown;
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
         return .{ .kick = peer };
     }
     if (std.mem.eql(u8, cmd, "ban")) {
-        const p = it.next() orelse return .unknown;
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
         return .{ .ban = peer };
     }
     if (std.mem.eql(u8, cmd, "unban")) {
-        const p = it.next() orelse return .unknown;
-        const ip = std.fmt.parseInt(u32, p, 16) catch return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const ip = std.fmt.parseInt(u32, p, 16) catch return .{ .bad_args = cmd };
         return .{ .unban = ip };
     }
     if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "players")) return .list;
     if (std.mem.eql(u8, cmd, "give")) {
-        const p = it.next() orelse return .unknown;
-        const i = it.next() orelse return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const i = it.next() orelse return .{ .bad_args = cmd };
         const c = it.next() orelse "1";
         return .{ .give = .{
-            .peer = std.fmt.parseInt(usize, p, 10) catch return .unknown,
-            .item = std.fmt.parseInt(u16, i, 10) catch return .unknown,
-            .count = std.fmt.parseInt(u16, c, 10) catch return .unknown,
+            .peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd },
+            .item = std.fmt.parseInt(u16, i, 10) catch return .{ .bad_args = cmd },
+            .count = std.fmt.parseInt(u16, c, 10) catch return .{ .bad_args = cmd },
         } };
     }
     if (std.mem.eql(u8, cmd, "tele")) {
-        const p = it.next() orelse return .unknown;
-        const xs = it.next() orelse return .unknown;
-        const ys = it.next() orelse return .unknown;
-        const zs = it.next() orelse return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const xs = it.next() orelse return .{ .bad_args = cmd };
+        const ys = it.next() orelse return .{ .bad_args = cmd };
+        const zs = it.next() orelse return .{ .bad_args = cmd };
+        const x = std.fmt.parseFloat(f32, xs) catch return .{ .bad_args = cmd };
+        const y = std.fmt.parseFloat(f32, ys) catch return .{ .bad_args = cmd };
+        const z = std.fmt.parseFloat(f32, zs) catch return .{ .bad_args = cmd };
+        if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(z)) return .{ .bad_args = cmd };
         return .{ .tele = .{
-            .peer = std.fmt.parseInt(usize, p, 10) catch return .unknown,
-            .x = std.fmt.parseFloat(f32, xs) catch return .unknown,
-            .y = std.fmt.parseFloat(f32, ys) catch return .unknown,
-            .z = std.fmt.parseFloat(f32, zs) catch return .unknown,
+            .peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd },
+            .x = x,
+            .y = y,
+            .z = z,
         } };
     }
     if (std.mem.eql(u8, cmd, "say")) {
         const rest = std.mem.trimStart(u8, line["say".len..], " ");
-        if (rest.len == 0) return .unknown;
+        if (rest.len == 0) return .{ .bad_args = cmd };
         return .{ .say = rest };
     }
     if (std.mem.eql(u8, cmd, "kill")) {
-        const p = it.next() orelse return .unknown;
-        const id = std.fmt.parseInt(i32, p, 10) catch return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const id = std.fmt.parseInt(i32, p, 10) catch return .{ .bad_args = cmd };
         return .{ .kill = id };
     }
     if (std.mem.eql(u8, cmd, "inv")) {
-        const p = it.next() orelse return .unknown;
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
         return .{ .inv = peer };
     }
     if (std.mem.eql(u8, cmd, "gettime") or std.mem.eql(u8, cmd, "gt")) return .gettime;
     if (std.mem.eql(u8, cmd, "settime") or std.mem.eql(u8, cmd, "st")) {
-        const a = it.next() orelse return .unknown;
+        const a = it.next() orelse return .{ .bad_args = cmd };
         if (std.mem.eql(u8, a, "day")) return .{ .settime = .{ .day = 0, .hour = 8, .minute = 0 } };
         if (std.mem.eql(u8, a, "night")) return .{ .settime = .{ .day = 0, .hour = 22, .minute = 0 } };
         // Stock telnet often sends a single world-time integer (e.g. 8000, 22000).
         // Packing used by playtest orch: thousands digit ~ hour*1000-ish; map common values.
-        const n = std.fmt.parseInt(u32, a, 10) catch return .unknown;
+        const n = std.fmt.parseInt(u32, a, 10) catch return .{ .bad_args = cmd };
         if (it.peek() == null) {
             // Single token: either stock ticks-ish or a lone day number.
             if (n >= 100) {
@@ -260,16 +275,16 @@ pub fn parseCommand(line: []const u8) Command {
             return .{ .settime = .{ .day = n, .hour = 8, .minute = 0 } };
         }
         // "settime <day> <hour> <minute>"
-        const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch return .unknown;
-        const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch return .unknown;
-        if (h > 23 or mi > 59) return .unknown;
+        const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch return .{ .bad_args = cmd };
+        const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch return .{ .bad_args = cmd };
+        if (h > 23 or mi > 59) return .{ .bad_args = cmd };
         return .{ .settime = .{ .day = n, .hour = h, .minute = mi } };
     }
     if (std.mem.eql(u8, cmd, "spawnentity") or std.mem.eql(u8, cmd, "se")) {
-        const p = it.next() orelse return .unknown;
+        const p = it.next() orelse return .{ .bad_args = cmd };
         // peer slot (0..7) or stock player entity id (>=100). Game resolves both.
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .unknown;
-        const name = it.next() orelse return .unknown;
+        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
+        const name = it.next() orelse return .{ .bad_args = cmd };
         // Offsets into the original line (name slice must outlive tokenizer).
         const off = @intFromPtr(name.ptr) - @intFromPtr(line.ptr);
         return .{ .spawnentity = .{ .peer = peer, .name_off = off, .name_len = name.len } };
@@ -335,8 +350,18 @@ test "parse stock ops commands" {
 }
 
 test "parse rejects malformed numeric arguments" {
-    try std.testing.expect(parseCommand("give 0 2 many") == .unknown);
-    try std.testing.expect(parseCommand("settime 7 noon 30") == .unknown);
-    try std.testing.expect(parseCommand("settime 7 24 00") == .unknown);
-    try std.testing.expect(parseCommand("settime 7 23 60") == .unknown);
+    try std.testing.expect(parseCommand("give 0 2 many") == .bad_args);
+    try std.testing.expect(parseCommand("tele 0 nan 70 10") == .bad_args);
+    try std.testing.expect(parseCommand("tele 0 10 inf 10") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 noon 30") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 24 00") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 23 60") == .bad_args);
+}
+
+test "bad args carry the verb; unknown verbs stay unknown" {
+    const c = parseCommand("kick many");
+    try std.testing.expect(c == .bad_args);
+    try std.testing.expectEqualStrings("kick", c.bad_args);
+    try std.testing.expect(parseCommand("frobnicate 1") == .unknown);
+    try std.testing.expect(parseCommand("kick") == .bad_args);
 }

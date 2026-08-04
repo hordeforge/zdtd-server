@@ -1,5 +1,6 @@
 //! zdtd.toml: operator tunables (Bucket B), not stock serverconfig.
-//! Precedence (applied by caller): CLI > world/zdtd.toml > CWD zdtd.toml > defaults.
+//! Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml >
+//! CWD zdtd.toml > --serverconfig keys > code defaults.
 //! Minimal TOML subset: [section] + key = int|float|bool|string. No arrays/tables-in-tables.
 //! Design: docs/HARDCODE_AUDIT.md, docs/adr/0010-data-config-zig-plugins.md
 
@@ -51,6 +52,7 @@ const max_toml_bytes: usize = 256 * 1024;
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !File {
     const data = try io_fs.readFileAll(allocator, path);
     defer allocator.free(data);
+    if (data.len > max_toml_bytes) return error.TomlTooLarge;
     return try parse(allocator, data);
 }
 
@@ -83,7 +85,10 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
             section = try a.dupe(u8, std.mem.trim(u8, line[1..end], " \t"));
             continue;
         }
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+        const eq = std.mem.indexOfScalar(u8, line, '=') orelse {
+            std.debug.print("zdtd: zdtd.toml malformed line (no '='); ignored: '{s}'\n", .{line});
+            continue;
+        };
         const key = std.mem.trim(u8, line[0..eq], " \t");
         var val = std.mem.trim(u8, line[eq + 1 ..], " \t");
         if (std.mem.indexOfScalar(u8, val, '#')) |h| {
@@ -262,6 +267,18 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
     try std.testing.expectEqual(false, f.feature.wire_chunks.?);
+}
+
+test "loadFromPath rejects oversized file" {
+    const dir = "worlds/zdtd_toml_big";
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
+    const path = dir ++ "/zdtd.toml";
+    const big = try std.testing.allocator.alloc(u8, max_toml_bytes + 1);
+    defer std.testing.allocator.free(big);
+    @memset(big, '#');
+    try io_fs.writeFileSimple(path, big);
+    try std.testing.expectError(error.TomlTooLarge, loadFromPath(std.testing.allocator, path));
 }
 
 test "parse ignores unknown keys" {

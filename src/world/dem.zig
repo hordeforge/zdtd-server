@@ -228,6 +228,7 @@ pub const Fetcher = struct {
         var kbuf: [160]u8 = undefined;
         const key = try tileKey(&kbuf, lat, lon);
         const n = try self.fetchRange(key, 0, cog_header_len, out);
+        // Cache is optional: fetch already succeeded; disk full/permission must not fail.
         io_fs.writeFile(self.allocator, cpath, out[0..n]) catch {};
         return n;
     }

@@ -477,6 +477,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .econ = stock_econs.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .fuel_value = stock_fuels.items[idx],
+            // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
+            .is_eat = stock_is_eat.items[idx],
+            .food_amount = stock_food_amt.items[idx],
+            .food_health = stock_food_hp.items[idx],
+            .water_amount = stock_water_amt.items[idx],
         });
         next_sim +%= 1;
         if (list.items.len >= max_items) break;

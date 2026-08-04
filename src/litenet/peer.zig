@@ -35,6 +35,9 @@ const Pending = struct {
 
 /// Optional outbound capture for integration tests (records game payloads, not LiteNet headers).
 pub const Capture = struct {
+    /// Test-only reach into wire/ for package parse (see root.zig dependency note).
+    const frame = @import("../wire/frame.zig");
+
     /// Per-message cap must fit stock inventory frames and medium packages.
     /// Slot count covers join floods (stream r≤8 → 100+ chunks) + multi-step sim.
     /// Full stock chunks may exceed per-slot size; tests assert via counters too.
@@ -60,7 +63,6 @@ pub const Capture = struct {
     }
 
     pub fn findPkgId(self: *const Capture, pkg_id: u16) ?[]const u8 {
-        const frame = @import("../wire/frame.zig");
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
@@ -76,7 +78,6 @@ pub const Capture = struct {
 
     /// Find PosAndRot/etc body whose first i32 is entity_id (common package layout).
     pub fn findPkgIdEntity(self: *const Capture, pkg_id: u16, entity_id: i32) ?[]const u8 {
-        const frame = @import("../wire/frame.zig");
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
@@ -95,7 +96,6 @@ pub const Capture = struct {
 
     /// Find EntitySpawn-style body with matching class hash at body[5..9] (after id+ver).
     pub fn findPkgIdClass(self: *const Capture, pkg_id: u16, class_hash: i32) ?[]const u8 {
-        const frame = @import("../wire/frame.zig");
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];

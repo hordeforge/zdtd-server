@@ -34,5 +34,4 @@ test {
     _ = path;
     _ = interest;
     _ = inventory;
-    _ = @import("../util/parallel.zig");
 }

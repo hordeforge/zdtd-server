@@ -597,10 +597,10 @@ test "server port must leave room for LiteNet offset" {
 }
 
 test "integration world persist + damage + packages" {
-    const dir = "worlds/zdtd_itest";
-    io_fs.deleteFileSimple("worlds/zdtd_itest/c_0_0.zch");
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();

@@ -104,6 +104,9 @@ pub const Vehicle = struct {
     vy: f32 = 0,
     /// Cap from vehicles.xml velocityMax; 0 → kind default in vehicleControl.
     max_speed: f32 = 0,
+    /// Last drive input (held until exit or new op=2). Applied each sim tick.
+    throttle: f32 = 0,
+    steer: f32 = 0,
 };
 
 pub const Turret = struct {
@@ -212,25 +215,31 @@ pub const Inventory = struct {
         return self.addItemStacked(item_id, count, 60000);
     }
 
+    /// Deposit with default quality=1 / meta=0 (admin give, craft output, loot fill).
     pub fn addItemStacked(self: *Inventory, item_id: u16, count: u16, max_stack: u16) bool {
-        if (item_id == 0 or count == 0) return false;
-        // All-or-nothing: a partial deposit followed by `false` makes callers
-        // that refund on failure duplicate items (container take/put, craft).
+        return self.addSlotStacked(.{ .item_id = item_id, .count = count, .quality = 1, .meta = 0 }, max_stack);
+    }
+
+    /// Deposit a full slot value. Only merges stacks with matching quality and meta.
+    /// All-or-nothing: a partial deposit followed by `false` makes callers that
+    /// refund on failure (container take/put, craft) duplicate items.
+    pub fn addSlotStacked(self: *Inventory, item: InvSlot, max_stack: u16) bool {
+        if (item.item_id == 0 or item.count == 0) return false;
         var room_total: u32 = 0;
         for (self.slots[0..inv_equip_start]) |s| {
             if (s.count == 0) {
                 room_total += max_stack;
-            } else if (s.item_id == item_id and s.count < max_stack) {
+            } else if (s.item_id == item.item_id and s.quality == item.quality and s.meta == item.meta and s.count < max_stack) {
                 room_total += max_stack - s.count;
             }
         }
-        if (room_total < count) return false;
-        var left = count;
+        if (room_total < item.count) return false;
+        var left = item.count;
         // stack into existing (toolbelt first, then bag)
         var i: usize = 0;
         while (i < inv_equip_start and left > 0) : (i += 1) {
             const s = &self.slots[i];
-            if (s.item_id != item_id or s.count == 0) continue;
+            if (s.item_id != item.item_id or s.quality != item.quality or s.meta != item.meta or s.count == 0) continue;
             const room: u16 = if (s.count >= max_stack) 0 else max_stack - s.count;
             if (room == 0) continue;
             const put: u16 = @min(room, left);
@@ -243,7 +252,7 @@ pub const Inventory = struct {
             const s = &self.slots[i];
             if (s.item_id != 0 and s.count != 0) continue;
             const put: u16 = @min(max_stack, left);
-            s.* = .{ .item_id = item_id, .count = put, .quality = 1 };
+            s.* = .{ .item_id = item.item_id, .count = put, .quality = item.quality, .meta = item.meta };
             left -= put;
         }
         return left == 0;
@@ -292,7 +301,8 @@ pub const Inventory = struct {
             s.* = item;
             return true;
         }
-        if (s.item_id != item.item_id) return false;
+        // Same type only; quality/meta must match (tools, durability).
+        if (s.item_id != item.item_id or s.quality != item.quality or s.meta != item.meta) return false;
         if (s.count >= max_stack or item.count > max_stack - s.count) return false;
         s.count += item.count;
         return true;
@@ -312,7 +322,8 @@ pub const Inventory = struct {
             if (self.holding == from and self.slots[from].count == 0) self.holding = inv_no_holding;
             return true;
         }
-        if (dst.item_id == src.item_id) {
+        // Merge only when quality and meta match (do not blend tool tiers/durability).
+        if (dst.item_id == src.item_id and dst.quality == src.quality and dst.meta == src.meta) {
             const room: u16 = if (dst.count >= max_stack) 0 else max_stack - dst.count;
             if (room == 0) return false;
             const put: u16 = @min(room, n);
@@ -411,4 +422,31 @@ test "putInSlot rejects overflowing stack counts" {
     inv.slots[0] = .{ .item_id = 1, .count = std.math.maxInt(u16) };
     try std.testing.expect(!inv.putInSlot(0, .{ .item_id = 1, .count = 1 }, std.math.maxInt(u16)));
     try std.testing.expectEqual(std.math.maxInt(u16), inv.slots[0].count);
+}
+
+test "putInSlot and moveSlot refuse mismatched quality or meta merge" {
+    var inv: Inventory = .{};
+    inv.slots[0] = .{ .item_id = 5, .count = 2, .quality = 6, .meta = 10 };
+    inv.slots[1] = .{ .item_id = 5, .count = 2, .quality = 1, .meta = 10 };
+    try std.testing.expect(!inv.putInSlot(0, .{ .item_id = 5, .count = 1, .quality = 1, .meta = 10 }, 64));
+    // Partial move onto a different-quality stack must not merge (and cannot swap).
+    try std.testing.expect(!inv.moveSlot(1, 0, 1, 64));
+    try std.testing.expectEqual(@as(u16, 2), inv.slots[0].count);
+    try std.testing.expectEqual(@as(u8, 6), inv.slots[0].quality);
+    // Matching quality+meta still merges.
+    inv.slots[2] = .{ .item_id = 5, .count = 1, .quality = 6, .meta = 10 };
+    try std.testing.expect(inv.moveSlot(2, 0, 1, 64));
+    try std.testing.expectEqual(@as(u16, 3), inv.slots[0].count);
+    try std.testing.expectEqual(@as(u16, 0), inv.slots[2].count);
+}
+
+test "addSlotStacked preserves quality and meta" {
+    var inv: Inventory = .{};
+    try std.testing.expect(inv.addSlotStacked(.{ .item_id = 11, .count = 2, .quality = 4, .meta = 99 }, 64));
+    try std.testing.expectEqual(InvSlot{ .item_id = 11, .count = 2, .quality = 4, .meta = 99 }, inv.slots[0]);
+    // Different quality does not merge into the q4 stack.
+    try std.testing.expect(inv.addSlotStacked(.{ .item_id = 11, .count = 1, .quality = 1, .meta = 0 }, 64));
+    try std.testing.expectEqual(@as(u16, 2), inv.slots[0].count);
+    try std.testing.expectEqual(@as(u8, 4), inv.slots[0].quality);
+    try std.testing.expectEqual(InvSlot{ .item_id = 11, .count = 1, .quality = 1, .meta = 0 }, inv.slots[1]);
 }

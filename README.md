@@ -86,9 +86,12 @@ Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 
 ## Build
 
-Requires Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). Canonical
+Requires Linux and Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). The
+server's UDP, admin, WebUI, and clock paths currently use Linux APIs. Canonical
 validation and release builds use the exact compiler in `.zigversion`; `make check`
-enforces that pin.
+enforces that pin and also requires Bash and `rg` (ripgrep). `make release`
+additionally requires `sha256sum`.
+
 No network fetch: the package has no Zig dependencies. Override the compiler with
 `ZIG=/path/to/zig` if needed.
 

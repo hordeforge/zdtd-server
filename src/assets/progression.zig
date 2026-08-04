@@ -83,7 +83,7 @@ pub const Table = struct {
 /// Backward-compatible curve-only load (used by older tryLoad callers).
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
     const t = try loadTableFromPath(allocator, path);
-    // leak table arena into curve-only path is wrong — load curve without full table
+    // leak table arena into curve-only path is wrong: load curve without full table
     _ = t;
     // Actually loadTable owns arena; for LevelCurve-only we parse lightly:
     return loadCurveOnly(allocator, path);

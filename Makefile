@@ -35,9 +35,11 @@ run: need-zig
 
 # Operator-facing binary: safety checks on, debug symbols stripped.
 # Depends on release-check so a version-drifted tree cannot produce a release binary.
+# -Dcpu=baseline: without it Zig targets the build host's CPU features, so the
+# artifact's bytes vary per build machine and can SIGILL on older operator CPUs.
 # Writes zig-out/bin/zdtd.sha256 (hash of the binary only) for artifact integrity.
 release: release-check need-zig
-	$(ZIG) build -Doptimize=ReleaseSafe -Dstrip=true
+	$(ZIG) build -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline
 	@bin=zig-out/bin/zdtd; \
 	  test -f "$$bin" || { echo "zdtd: release build did not produce $$bin" >&2; exit 1; }; \
 	  (cd zig-out/bin && sha256sum zdtd > zdtd.sha256); \
@@ -48,6 +50,7 @@ lint: need-zig
 	  echo "zdtd: missing required tool: rg (ripgrep); apt/brew/cargo install ripgrep" >&2; \
 	  exit 127; \
 	}
+	bash -n scripts/*.sh
 	$(ZIG) fmt --check build.zig src
 	bash scripts/lint-architecture.sh
 	bash scripts/lint-wire.sh
@@ -55,8 +58,10 @@ lint: need-zig
 fmt: need-zig
 	$(ZIG) fmt build.zig src
 
+# Pass ZIG explicitly: make variables are not exported to recipe environments,
+# so `make ZIG=/path/zig release` must validate the same compiler it builds with.
 release-check:
-	bash scripts/check-release.sh
+	ZIG="$(ZIG)" bash scripts/check-release.sh
 
 # Full local gate (same intent as a clean CI job): version pin, wire lint, build, tests, fuzz.
 # Recipe form (not a multi-prereq list) so `make -j check` cannot race concurrent

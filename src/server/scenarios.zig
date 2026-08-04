@@ -187,11 +187,10 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
 }
 
 test "scenario persist: block write, process restart, read-back, rejoin" {
-    io_fs.mkdirPathSimple("worlds");
-    const dir = "worlds/zdtd_sc_persist";
-    io_fs.mkdirPathSimple(dir);
-    // wipe prior chunk
-    io_fs.deleteFileSimple("worlds/zdtd_sc_persist/c_0_0.zch");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -280,11 +279,10 @@ test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
 
 test "scenario persist with stock map: edit survives restart under same --map" {
     if (!stockMapPresent()) return error.SkipZigTest;
-    io_fs.mkdirPathSimple("worlds");
-    const dir = "worlds/zdtd_sc_map_persist";
-    io_fs.mkdirPathSimple(dir);
-    // wipe overlay near spawn chunk
-    io_fs.deleteFileSimple("worlds/zdtd_sc_map_persist/c_-18_28.zch");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -332,15 +330,23 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
 test "scenario synthetic DTM fixture always runs" {
     // Tiny 32×32 DTM on disk → loadStockMap path without Steam tree.
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_fixture_map");
-    try writeFixtureMap("worlds/zdtd_fixture_map");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = root_buf[0..try tmp.dir.realPath(std.testing.io, &root_buf)];
+    var map_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const map_dir = try std.fmt.bufPrint(&map_buf, "{s}/map", .{root});
+    var save_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const save_dir = try std.fmt.bufPrint(&save_buf, "{s}/save", .{root});
+    io_fs.mkdirPathSimple(map_dir);
+    io_fs.mkdirPathSimple(save_dir);
+    try writeFixtureMap(map_dir);
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.createWithMap(gpa, "worlds/zdtd_fixture_save", "worlds/zdtd_fixture_map", 0);
+    const g = try game_mod.Game.createWithMap(gpa, save_dir, map_dir, 0);
     defer {
         g.deinit();
         gpa.destroy(g);
@@ -386,13 +392,15 @@ fn writeFixtureMap(dir: []const u8) !void {
 }
 
 test "scenario stock fixture quests.xml load" {
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_sc_qxml");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_qxml", 0, .{
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
     defer {

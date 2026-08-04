@@ -10,6 +10,8 @@
         "assets/fixtures",
         "scripts",
         "Makefile",
+        "serverconfig.example.xml",
+        "zdtd.toml.example",
         "README.md",
         "CHANGELOG.md",
         "docs/RELEASES.md",

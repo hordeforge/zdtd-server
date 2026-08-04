@@ -54,7 +54,7 @@ wins**. Refresh inventory docs when closing work.
 | Doc | Role |
 |---|---|
 | [APM.md](APM.md) | Native metrics harness |
-| [WEBUI.md](WEBUI.md) | Operator web UI design (HTMX + Alpine; design only) |
+| [WEBUI.md](WEBUI.md) | Shipped operator web UI, security model, and optional roadmap |
 | [AUTHORITY.md](AUTHORITY.md) | C2S gates (admin/webui must not bypass) |
 
 ## Agent prompts

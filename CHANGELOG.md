@@ -21,6 +21,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - `--version` reports the zdtd product version.
 - Stock-like `serverconfig.xml`, config override directories, and procedural
   terrain seed options are available. Run `zdtd --help` for precedence.
+- Operator tunables can be set in `zdtd.toml` (world directory or CWD; see
+  `zdtd.toml.example`). Run `zdtd --help` for the full precedence order.
+- An operator web UI is available via `--webui-port`, `--webui-bind`, and
+  `--webui-secret` (or env `ZDTD_WEBUI_SECRET`). It is off by default, binds
+  to loopback, and refuses to start without a secret. It exposes the same
+  command surface as the `--admin-port` TCP console. See `docs/WEBUI.md`.
 
 ### Fixed
 

@@ -37,14 +37,22 @@ pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []con
     if (std.mem.lastIndexOfScalar(u8, rel_path, '/')) |sl| {
         if (sl > 0) try std.Io.Dir.cwd().createDirPath(io, rel_path[0..sl]);
     }
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = rel_path, .data = data });
+    // Write temp then rename: a crash or full disk mid-write must not corrupt
+    // the previous contents (players/chunks/containers all come through here).
+    var tmp_buf: [512 + 4]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{rel_path}) catch return error.NameTooLong;
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = data });
+    try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
 }
 
 pub fn writeFileSimple(rel_path: []const u8, data: []const u8) !void {
     try writeFile(std.heap.page_allocator, rel_path, data);
 }
 
-/// List file basenames in `dir_path`. Caller frees each name and the slice.
+/// List file basenames in `dir_path`, sorted lexicographically.
+/// Sort removes readdir order (filesystem / OS dependent) so callers that
+/// apply files in list order stay deterministic across machines (DST).
+/// Caller frees each name and the slice.
 pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]const u8 {
     var threaded = ioThreaded();
     defer threaded.deinit();
@@ -62,6 +70,11 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
         if (entry.kind != .file) continue;
         try names.append(allocator, try allocator.dupe(u8, entry.name));
     }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.less);
     return try names.toOwnedSlice(allocator);
 }
 

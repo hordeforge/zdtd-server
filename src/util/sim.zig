@@ -3,9 +3,22 @@
 //! Enable at the start of a DST harness so monoNs/sleepNs and forRanges are
 //! fully controlled by the test. Production never calls this; the default is
 //! wall clock + optional OS threads.
+//!
+//! Offline Game paths (port == 0) call enable/disable automatically so
+//! scenarios and unit tests share one seed-stable mono clock without each
+//! test wiring sim mode by hand.
 
 const clock = @import("clock.zig");
 const parallel = @import("parallel.zig");
+const std = @import("std");
+
+/// Default virtual epoch for harnesses (1 s). Avoid 0 so age/stale math that
+/// subtracts from monoNs stays well-defined without underflow edge cases.
+pub const default_start_ns: u64 = 1_000_000_000;
+
+/// Stock main-loop tick length (20 TPS). Use with advanceTick for lock/peer
+/// stale windows and resend deadlines under the virtual clock.
+pub const tick_ns: u64 = 50_000_000;
 
 /// Enter deterministic sim: virtual mono clock at `start_ns`, force serial work.
 pub fn enable(start_ns: u64) void {
@@ -24,7 +37,16 @@ pub fn isEnabled() bool {
     return clock.isVirtual() and parallel.isForceSerial();
 }
 
-const std = @import("std");
+/// Advance the virtual clock by one main-loop tick (no-op when not virtual).
+pub fn advanceTick() void {
+    clock.advanceNs(tick_ns);
+}
+
+/// Advance by `n` main-loop ticks (no-op when not virtual).
+pub fn advanceTicks(n: u32) void {
+    if (n == 0) return;
+    clock.advanceNs(tick_ns *% @as(u64, n));
+}
 
 test "sim enable couples clock and serial" {
     defer disable();
@@ -35,4 +57,13 @@ test "sim enable couples clock and serial" {
     try std.testing.expectEqual(@as(u64, 1_050), clock.monoNs());
     disable();
     try std.testing.expect(!isEnabled());
+}
+
+test "sim advanceTick steps 50ms" {
+    defer disable();
+    enable(default_start_ns);
+    advanceTick();
+    try std.testing.expectEqual(default_start_ns + tick_ns, clock.monoNs());
+    advanceTicks(3);
+    try std.testing.expectEqual(default_start_ns + tick_ns * 4, clock.monoNs());
 }

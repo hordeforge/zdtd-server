@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const linux = std.os.linux;
+const version = @import("../version.zig");
 
 pub const ServerInfo = struct {
     /// Advertised display / world names.
@@ -17,7 +18,7 @@ pub const ServerInfo = struct {
     info_port: u16 = 27015,
     max_players: i32 = 8,
     current_players: i32 = 0,
-    server_version: []const u8 = "V 3.1.0",
+    server_version: []const u8 = version.stock_wire_announce,
     world_size: i32 = 6144,
     eac_enabled: bool = false,
     /// Stock IsPasswordProtected (ServerPassword set).

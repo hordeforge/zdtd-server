@@ -1,5 +1,6 @@
 //! Coverage-guided fuzz targets for remote wire parsing boundaries and
-//! other untrusted-input surfaces (admin lines, map XML, COG headers).
+//! other untrusted-input surfaces (admin lines, map XML, COG headers,
+//! config XML patches, quest catalogs, GSI text builders).
 
 const std = @import("std");
 const packet = @import("litenet/packet.zig");
@@ -11,7 +12,10 @@ const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
 const admin = @import("server/admin.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
+const serverinfo = @import("server/serverinfo_tcp.zig");
 const xml_util = @import("assets/xml_util.zig");
+const xml_patch = @import("assets/xml_patch.zig");
+const quests_xml = @import("assets/quests.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 
@@ -54,15 +58,33 @@ fn fuzzPacketDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packet.connectKeyMatches(input, "fuzz-password");
 }
 
+// zlib of package stream: content_len=7, id=42, body="hello"
+// (matches wire/frame.zig "compressed zlib package stream parses" test).
+const frame_zlib_hello = [_]u8{
+    0x78, 0x9c, 0x63, 0x67, 0x60, 0x60, 0xd0, 0x62, 0xc8, 0x48, 0xcd, 0xc9,
+    0xc9, 0x07, 0x00, 0x07, 0xa5, 0x02, 0x46,
+};
+
 const frame_corpus = [_][]const u8{
     "",
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     &.{ 0, 6, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 1, 0 },
+    // compressed flag set, truncated zlib header
     &.{ 0, 2, 0, 0, 0, 1, 0, 1, 0, 0x78, 0x9c },
+    // full zlib-compressed single package (channel=0, compressed=1, count=1)
+    &([_]u8{ 0, 19, 0, 0, 0, 1, 0, 1, 0 } ++ frame_zlib_hello),
+    // gzip magic under compressed flag (header sniff path)
+    &.{ 0, 4, 0, 0, 0, 1, 0, 1, 0, 0x1f, 0x8b, 0x08, 0x00 },
     // claimed large package body truncated mid-stream
     &.{ 0, 0xff, 0xff, 0x00, 0x00, 0, 0, 1, 0 },
     // multi-package envelope with empty bodies
     &.{ 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0 },
+    // encrypted flag set (must reject)
+    &.{ 0, 6, 0, 0, 0, 0, 1, 1, 0, 2, 0, 0, 0, 1, 0 },
+    // zero package count
+    &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // negative payload size (LE 0xffffffff)
+    &.{ 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 1, 0 },
 };
 
 test "fuzz channel envelope decoder" {
@@ -92,16 +114,40 @@ const package_corpus = [_][]const u8{
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
     // stock set-block: no user | count=1 | pos ref | entity | flags | raw | dmg | local
     &.{ 0, 1, 0, 1, 10, 0, 0, 0, 61, 0, 0, 0, 0x90, 1, 0, 0, 106, 0, 0, 0, 1, 13, 0, 0, 0, 0, 0, 106, 0, 0, 0 },
+    // set-block change count max (claimed huge count, truncated stream)
+    &.{ 0, 0xff, 0x7f },
     // chat: type | sender | 7bit-len "hi"
     &.{ 0, 106, 0, 0, 0, 2, 'h', 'i' },
+    // chat: overlong 7-bit string length
+    &.{ 0, 106, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0x0f },
     // lock: locking | channel | count=0
     &.{ 1, 0, 0, 0, 0, 0, 0 },
     // explosion head: 3xf32 + 3xi32 + 4xf32 + blob_len=0 + entity + delay
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // explosion with huge claimed blob_len
+    &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0 },
     // npc quest list: trader entity + count 0
     &.{ 1, 0, 0, 0, 0, 0 },
     // quest objective update minimal
     &.{ 0, 0, 0, 0, 0 },
+    // storage TE: handle + xyz + block + empty-ish tail
+    &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // workstation TE truncated after outer header
+    &.{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // console cmd: 7bit-len oversize
+    &.{ 0x80, 0x80, 0x01, 'x' },
+    // inv data request stock minimal
+    &.{ 106, 0, 0, 0, 0 },
+    // vehicle control: entity + op + 2xf32
+    &.{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // trader trade minimal
+    &.{ 1, 0, 0, 0, 1, 0, 1, 0, 0 },
+    // entity attach: type + rider + vehicle + slot
+    &.{ 0, 106, 0, 0, 0, 1, 0, 0, 0, 0, 0 },
+    // land claim repair: xyz + begin
+    &.{ 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 1 },
+    // chunk body: cx,cz,pad + 256 heights zeros
+    &([_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
 };
 
 test "fuzz variable-length C2S package decoders" {
@@ -434,4 +480,181 @@ fn fuzzCogHeader(_: void, smith: *std.testing.Smith) !void {
     if (dem.parseCogHeader(storage[0..len])) |info| {
         try std.testing.expect(info.tile_n <= info.tile_offsets.len);
     } else |_| {}
+    // S3 key formatting must not panic on extreme lat/lon.
+    var key_buf: [256]u8 = undefined;
+    const lat = smith.value(i32);
+    const lon = smith.value(i32);
+    if (dem.tileKey(&key_buf, lat, lon)) |key| {
+        try std.testing.expect(key.len <= key_buf.len);
+        try std.testing.expect(key.len > 0);
+    } else |_| {}
+    _ = dem.elevToBlockY(smith.value(f32));
+}
+
+// Minimal base docs so patch apply exercises xpath match paths, not only reject.
+const patch_base_blocks =
+    \\<blocks>
+    \\  <block name="stone"><property name="Material" value="Mstone"/></block>
+    \\  <block name="air"><property name="Material" value="Mair"/></block>
+    \\</blocks>
+;
+
+const xml_patch_corpus = [_][]const u8{
+    "",
+    "/blocks/block[@name='stone']/@Material",
+    "/items/item[@name='x']",
+    "/blocks/block[@name=\"stone\"]/property[@name='Material']/@value",
+    // set by xpath
+    \\<configs file="blocks.xml">
+    \\  <set xpath="/blocks/block[@name='stone']/property[@name='Material']/@value">Mmetal</set>
+    \\</configs>
+    ,
+    // remove
+    \\<configs file="blocks.xml">
+    \\  <remove xpath="/blocks/block[@name='air']"/>
+    \\</configs>
+    ,
+    // append
+    \\<configs>
+    \\  <append xpath="/blocks"><block name="fuzz"/></append>
+    \\</configs>
+    ,
+    // wrong target file filter
+    \\<configs file="items.xml">
+    \\  <set xpath="/items/item[@name='x']/@value">1</set>
+    \\</configs>
+    ,
+    // adversarial xpath depth / empty segments / unclosed filters
+    "//////////",
+    "/blocks/block[@name='",
+    "/blocks/block[@name='stone']/@" ++ ("a" ** 64),
+    // nested ops + junk
+    \\<set xpath="/blocks"><remove xpath="/"/></set>
+    ,
+    // huge claimed attribute value
+    "<set xpath=\"/blocks/block[@name='stone']/@value\">" ++ ("Z" ** 200) ++ "</set>",
+};
+
+test "fuzz config XML patch xpath and apply" {
+    try std.testing.fuzz({}, fuzzXmlPatch, .{ .corpus = &xml_patch_corpus });
+}
+
+fn fuzzXmlPatch(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+
+    if (xml_patch.fileFromXPath(input)) |f| {
+        try std.testing.expect(f.len > 0);
+        try std.testing.expect(std.mem.endsWith(u8, f, ".xml"));
+    }
+
+    // Split input into base | patch when non-empty; otherwise use fixed base.
+    const split = if (len == 0) 0 else smith.index(len + 1);
+    const base: []const u8 = if (split == 0 or split >= len) patch_base_blocks else input[0..split];
+    const patch: []const u8 = if (split >= len) input else input[split..];
+
+    const targets = [_][]const u8{ "blocks.xml", "items.xml", "quests.xml" };
+    const target = targets[smith.index(targets.len)];
+    const out = xml_patch.applyPatchDoc(std.testing.allocator, base, patch, target) catch return;
+    defer std.testing.allocator.free(out);
+    // No-op apply is a base dupe; mutations may grow or shrink but stay finite.
+    if (std.mem.eql(u8, target, "blocks.xml") and patch.len == 0) {
+        try std.testing.expectEqualStrings(base, out);
+    }
+}
+
+const quest_xml_corpus = [_][]const u8{
+    "",
+    "<quests starter_quest=\"q1\" max_quest_tier=\"3\" quests_per_tier=\"2\"></quests>",
+    \\<quests starter_quest="tier1_clear" max_quest_tier="6" quests_per_tier="10">
+    \\  <quest id="tier1_clear" group_name_key="g" name_key="n" subtitle_key="s"
+    \\         description_key="d" icon="i" category_key="c" difficulty="1">
+    \\    <property name="completiontype" value="TurnIn"/>
+    \\    <reward type="Exp" value="100"/>
+    \\  </quest>
+    \\  <quest_list id="trader_joel">
+    \\    <quest id="tier1_clear"/>
+    \\  </quest_list>
+    \\</quests>
+    ,
+    // unclosed quest / huge tier attrs
+    \\<quests starter_quest="x" max_quest_tier="999" quests_per_tier="0">
+    \\  <quest id="a"
+    ,
+    // nested quest tags without close
+    "<quest id=\"a\"><quest id=\"b\"></quest>",
+    // many empty quest shells
+    "<quest id=\"1\"/><quest id=\"2\"/><quest id=\"3\"/>",
+    // null bytes / control
+    "<quests\x00 starter_quest=\"x\">\x01</quests>",
+    // comment + CDATA-ish noise
+    "<!-- c --><quests><!-- q --><quest id=\"z\"/></quests>",
+    // quest_list only
+    "<quest_list id=\"L\"><quest id=\"missing\"/></quest_list>",
+};
+
+test "fuzz quests.xml catalog parser" {
+    try std.testing.fuzz({}, fuzzQuestCatalog, .{ .corpus = &quest_xml_corpus });
+}
+
+fn fuzzQuestCatalog(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var cat = quests_xml.parseCatalog(std.testing.allocator, storage[0..len]) catch return;
+    defer cat.deinit();
+    // Arena-owned slices must stay within catalog lifetime; just bound counts.
+    try std.testing.expect(cat.defs.len < 100_000);
+    try std.testing.expect(cat.lists.len < 100_000);
+    try std.testing.expect(cat.starter_name.len <= len or cat.starter_name.len < 256);
+}
+
+const gsi_corpus = [_][]const u8{
+    "",
+    "zdtd",
+    "name;with:colons\r\ninjection",
+    "evil\nGameType:HACK;",
+    "x" ** 128,
+    "Navezgane",
+    "127.0.0.1",
+    "\x00\xff;Port:1;\r\n",
+};
+
+test "fuzz GSI info text builder" {
+    try std.testing.fuzz({}, fuzzGsiText, .{ .corpus = &gsi_corpus });
+}
+
+fn fuzzGsiText(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [512]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const s = storage[0..len];
+
+    var buf: [4096]u8 = undefined;
+    const info: serverinfo.ServerInfo = .{
+        .game_name = s,
+        .game_host = s,
+        .level_name = s,
+        .ip = s,
+        .server_version = s,
+        .info_port = smith.value(u16),
+        .max_players = smith.value(i32),
+        .current_players = smith.value(i32),
+        .world_size = smith.value(i32),
+        .eac_enabled = smith.boolWeighted(1, 1),
+        .password_protected = smith.boolWeighted(1, 1),
+    };
+    const text = serverinfo.buildInfoText(&buf, info) catch return;
+    try std.testing.expect(text.len <= buf.len);
+    try std.testing.expect(std.mem.startsWith(u8, text, "GameType:7DTD;\r\n"));
+    try std.testing.expect(std.mem.endsWith(u8, text, "\r\n\r\n"));
+    // gsiSafe must strip bare CR/LF from operator-supplied name fields so only
+    // stock Key:Value;\r\n line endings remain.
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        if (text[i] == '\n') try std.testing.expect(i > 0 and text[i - 1] == '\r');
+        if (text[i] == '\r') try std.testing.expect(i + 1 < text.len and text[i + 1] == '\n');
+    }
 }

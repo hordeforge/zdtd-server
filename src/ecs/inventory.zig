@@ -252,8 +252,10 @@ pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
     if (!w.mask[cs].loot_bag and !w.mask[cs].inventory) return false;
     if (w.mask[ps].transform and w.mask[cs].transform) {
         const dx = w.transform[ps].x - w.transform[cs].x;
+        const dy = w.transform[ps].y - w.transform[cs].y;
         const dz = w.transform[ps].z - w.transform[cs].z;
-        if (dx * dx + dz * dz > 64.0) return false;
+        // 3D range (8 blocks): XZ-only allowed remote open through floors/ceilings.
+        if (dx * dx + dy * dy + dz * dz > 64.0) return false;
     }
     w.inventory[ps].open_container = container_net;
     if (w.mask[cs].loot_bag) w.loot_bag[cs].open = true;
@@ -284,7 +286,8 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
     if (cont_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[cs].holding;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
-    if (!w.inventory[ps].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id))) {
+    // Preserve quality/meta (addItemStacked would reset to q1/meta0).
+    if (!w.inventory[ps].addSlotStacked(taken, maxStackFor(w, taken.item_id))) {
         restoreTaken(&w.inventory[cs], cont_slot, taken, holding_before);
         return false;
     }
@@ -314,7 +317,8 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
     if (player_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(player_slot, if (qty == 0) w.inventory[ps].slots[player_slot].count else qty) orelse return false;
-    if (!w.inventory[cs].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id))) {
+    // Preserve quality/meta when depositing into a container.
+    if (!w.inventory[cs].addSlotStacked(taken, maxStackFor(w, taken.item_id))) {
         restoreTaken(&w.inventory[ps], player_slot, taken, holding_before);
         return false;
     }
@@ -491,6 +495,51 @@ test "failed container put restores exact source stack and holding slot" {
     try std.testing.expect(!putIntoContainer(&w, 0, 0, 0));
     try std.testing.expectEqual(c.InvSlot{ .item_id = 11, .count = 2, .quality = 6, .meta = 321 }, w.inventory[ps].slots[0]);
     try std.testing.expectEqual(@as(u16, 0), w.inventory[ps].holding);
+}
+
+test "container take and put preserve quality and meta" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    // Anchor item so the bag is not destroyed when the quality stack is taken.
+    const bag = w.spawnLootBag(1, 70, 1, 3, 1).?;
+    const cs = w.slotOfNetId(bag).?;
+    w.inventory[cs].slots[1] = .{ .item_id = 11, .count = 1, .quality = 5, .meta = 42 };
+    try std.testing.expect(openContainer(&w, 0, bag));
+    try std.testing.expect(takeFromContainer(&w, 0, 1, 1));
+    var found: ?c.InvSlot = null;
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
+        if (s.item_id == 11) found = s;
+    }
+    try std.testing.expectEqual(c.InvSlot{ .item_id = 11, .count = 1, .quality = 5, .meta = 42 }, found.?);
+    // Put back into bag and check destination preserves quality/meta.
+    var src_slot: u16 = 0;
+    for (w.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == 11) {
+            src_slot = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(putIntoContainer(&w, 0, src_slot, 1));
+    var bag_found: ?c.InvSlot = null;
+    for (w.inventory[cs].slots[0..c.inv_equip_start]) |s| {
+        if (s.item_id == 11) bag_found = s;
+    }
+    try std.testing.expectEqual(c.InvSlot{ .item_id = 11, .count = 1, .quality = 5, .meta = 42 }, bag_found.?);
+}
+
+test "open container rejects far vertical targets" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    // Same XZ, 20 blocks above (outside 8-block 3D radius).
+    const bag = w.spawnLootBag(0, 90, 0, 3, 1).?;
+    try std.testing.expect(!openContainer(&w, 0, bag));
 }
 
 test "craft op reserved" {

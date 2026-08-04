@@ -186,23 +186,23 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 
 ### P0
 
-1. **A05** `world/store.block_*` / flat column still module comptime pins (correct if dump == pin version; not live `idByName` fields on World).
+1. ~~**A05**~~ **Done:** `World.terrain_ids` + `resolveTerrainIds` after AssignIds merge; module pins remain offline/test defaults; `isSolidWorld` uses live ids.
 2. **A08/A22** deco module numeric pins remain for labels; live stream is idByName. Document dump version skew suppress.
 
 ### P1
 
 1. **A10–A12** class_table scrap, AI combat floors, vehicle speed switch residuals.
 2. **B13 residual** world-time / save / sleeper `% N` not all Game fields.
-3. **B22** no `zdtd.toml` file loader (operators cannot change caps without rebuild / InitOptions wiring from CLI).
+3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature). AI bands / wallets / tick %N still open.
 4. **A07** biome default stack pins before XML (acceptable offline).
 
 ---
 
 ## Ordered next steps
 
-1. World init: resolve `block_air/stone/dirt/water/bedrock` into World fields via `idByName` once (A05).
-2. Optional CLI flags for stream caps until toml lands.
-3. `zdtd.toml` loader (`src/server/zdtd_config.zig`) for B01–B13.
+1. ~~World init terrain ids (A05).~~
+2. ~~`zdtd.toml` loader for B01–B07 + feature.~~
+3. Extend toml for AI bands / wallets / tick throttles (B08–B14).
 4. AI floors / vehicle speeds from entityclasses + vehicles.xml only (A11/A12).
 5. Drop recipe unlock extras when `source==xml` (A13).
 

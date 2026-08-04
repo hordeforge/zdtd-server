@@ -42,7 +42,7 @@ pub const Table = struct {
     }
 
     pub fn resolveIds(self: *Table, id_by_name: *const fn (?*anyopaque, []const u8) ?u16, ctx: ?*anyopaque) void {
-        // pairs is const slice of arena data; need mutable — store as owned mutable via cast
+        // pairs is const slice of arena data; need mutable: store as owned mutable via cast
         const mut: []Pair = @constCast(self.pairs);
         for (mut) |*p| {
             if (id_by_name(ctx, p.closed_name)) |id| p.closed_id = id;

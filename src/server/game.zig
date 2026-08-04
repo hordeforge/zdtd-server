@@ -47,6 +47,7 @@ const stock_te = @import("../wire/stock_te.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
 const io_fs = @import("../util/io_fs.zig");
+const util_sim = @import("../util/sim.zig");
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
@@ -73,7 +74,7 @@ pub const InitOptions = struct {
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
     quests_path: ?[]const u8 = null,
-    view_radius: i32 = 7,
+    view_radius: i32 = default_view_radius,
     admin_port: u16 = 0,
     /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
     webui_port: u16 = 0,
@@ -81,7 +82,7 @@ pub const InitOptions = struct {
     webui_secret: []const u8 = "",
     world_name: ?[]const u8 = null,
     /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
-    max_players: u16 = 8,
+    max_players: u16 = default_max_players,
     /// ServerPassword from serverconfig. Used as the LiteNet Connect key: non-empty
     /// rejects Connect requests whose key does not match.
     password: []const u8 = "",
@@ -119,25 +120,25 @@ pub const InitOptions = struct {
     /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
     authority_mode: AuthorityMode = .correct,
 
-    // zdtd stream/authority tunables (Bucket B). Defaults == historical consts.
+    // zdtd stream/authority tunables (Bucket B). Single source: default_* below.
     // Full file surface (zdtd.toml) still open; fields are the single source for hot path.
-    max_streamed_chunks: usize = 169,
-    chunk_stream_radius_min: i32 = 7,
-    chunk_stream_radius_max: i32 = 9,
-    chunk_adds_per_stream_tick: u32 = 8,
-    chunk_stream_period_ticks: u64 = 5,
-    motion_replicate_period_ticks: u64 = 2,
-    spawn_area_radius_max: i32 = 8,
-    max_claimed_damage: i32 = 200,
-    max_edit_range: f32 = 96,
-    interest_range: f32 = 160,
-    peer_stale_ms: u64 = 3000,
+    max_streamed_chunks: usize = default_max_streamed_chunks,
+    chunk_stream_radius_min: i32 = default_chunk_stream_radius_min,
+    chunk_stream_radius_max: i32 = default_chunk_stream_radius_max,
+    chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
+    chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
+    motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    spawn_area_radius_max: i32 = default_spawn_area_radius_max,
+    max_claimed_damage: i32 = default_max_claimed_damage,
+    max_edit_range: f32 = default_max_edit_range,
+    interest_range: f32 = default_interest_range,
+    peer_stale_ms: u64 = default_peer_stale_ms,
 };
 
 // Compile-time array bound for Client.streamed / deco_streamed (must cover max config).
 const max_streamed_chunks_cap: usize = 169;
 /// Default stream/authority values (also InitOptions / Game field defaults).
-pub const default_max_streamed_chunks: usize = 169;
+pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
 pub const default_chunk_stream_radius_min: i32 = 7;
 pub const default_chunk_stream_radius_max: i32 = 9;
 pub const default_chunk_adds_per_stream_tick: u32 = 8;
@@ -148,6 +149,8 @@ pub const default_max_claimed_damage: i32 = 200;
 pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
 pub const default_peer_stale_ms: u64 = 3000;
+pub const default_view_radius: i32 = 7;
+pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
 const replicate_frame_cap: usize = 256;
 /// Speeds body offset inside body_buf during zombie motion encode.
@@ -195,7 +198,7 @@ const Client = struct {
     entered: bool = false,
     challenge: [16]u8 = .{0} ** 16,
     slot: usize = 0,
-    view_radius: i32 = 7,
+    view_radius: i32 = default_view_radius,
     name: [32]u8 = .{0} ** 32,
     name_len: usize = 0,
     /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
@@ -303,9 +306,9 @@ pub const Game = struct {
     block_raw_key: [128]u64 = .{0} ** 128,
     block_raw: [128]u32 = .{0} ** 128,
     block_raw_n: usize = 0,
-    view_radius: i32 = 7,
+    view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
-    max_players: u16 = 8,
+    max_players: u16 = default_max_players,
     world_name: []const u8 = "zdtd",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
@@ -360,7 +363,7 @@ pub const Game = struct {
         // an unrelated privileged or ephemeral port.
         if (port > std.math.maxInt(u16) - 2) return error.InvalidPort;
         const max_pl: u16 = blk: {
-            const n = if (opts.max_players == 0) @as(u16, 8) else opts.max_players;
+            const n = if (opts.max_players == 0) default_max_players else opts.max_players;
             break :blk @min(n, @as(u16, max_clients));
         };
         self.* = .{
@@ -835,6 +838,10 @@ pub const Game = struct {
         // ServerPassword is LiteNet Connect key (not Encryption* / not PlayerLogin).
         self.net.server_password = self.password;
         self.info_port = port;
+        // Offline harness (port 0): virtual mono clock + serial forRanges so
+        // lock/stale/resend and parallel systems are seed-stable under DST.
+        // Production always passes a real ServerPort and leaves wall clock.
+        if (port == 0) util_sim.enable(util_sim.default_start_ns);
         if (port != 0) {
             const level = if (opts.world_name) |wn| wn else self.world_name;
             // Advertise ServerPort in GSI.Port; stock client dials LiteNet at Port+2.
@@ -846,7 +853,7 @@ pub const Game = struct {
                 .info_port = port,
                 .max_players = self.max_players,
                 .current_players = 0,
-                .server_version = "V 3.1.0",
+                .server_version = version.stock_wire_announce,
                 .world_size = 6144,
                 .eac_enabled = false,
                 .password_protected = self.password.len > 0,
@@ -1211,6 +1218,9 @@ pub const Game = struct {
     }
 
     pub fn deinit(self: *Game) void {
+        // Offline harness left sim mode on; restore wall clock before return so
+        // later tests that expect real monoNs are not stuck in virtual time.
+        const leave_sim = self.info_port == 0;
         // Shutdown persist is best-effort; do not fail deinit on disk errors.
         self.savePlayers() catch |e| logPersistErr(self, "save players", e);
         self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
@@ -1241,6 +1251,7 @@ pub const Game = struct {
         self.info_tcp.stop();
         self.world.deinit();
         self.net.deinit();
+        if (leave_sim) util_sim.disable();
     }
 
     pub fn infoPort(self: *const Game) u16 {
@@ -1272,7 +1283,9 @@ pub const Game = struct {
                 old_len = @min(old_data.len - 8, old_recs.len);
                 @memcpy(old_recs[0..old_len], old_data[8..][0..old_len]);
             }
-        } else |_| {}
+            // Unreadable existing file: abort save so offline player records in
+            // the on-disk file are not clobbered by a save missing them.
+        } else |e| if (e != error.FileNotFound) return e;
 
         var out: std.ArrayList(u8) = .empty;
         defer out.deinit(self.allocator);
@@ -1395,10 +1408,16 @@ pub const Game = struct {
         if (c.name_len == 0) return;
         var path_buf: [512]u8 = undefined;
         const path = self.playersPath(&path_buf) catch return;
-        const data = io_fs.readFileAll(self.allocator, path) catch return;
+        const data = io_fs.readFileAll(self.allocator, path) catch |e| {
+            if (e != error.FileNotFound) logPersistErr(self, "restore player", e);
+            return;
+        };
         defer self.allocator.free(data);
         if (data.len < 8) return;
-        if (data[0] != 'Z' or data[1] != 'P' or data[3] != '2') return;
+        if (data[0] != 'Z' or data[1] != 'P' or data[3] != '2') {
+            std.debug.print("zdtd: restore player: bad players file header\n", .{});
+            return;
+        }
         const n = std.mem.readInt(u32, data[4..8], .little);
         var off: usize = 8;
         var i: u32 = 0;
@@ -1478,7 +1497,15 @@ pub const Game = struct {
         const chunk = self.admin.pollLine(&self.admin_line) orelse return;
         // One read may carry several newline-separated commands (piped input).
         var it = std.mem.tokenizeAny(u8, chunk, "\r\n");
-        while (it.next()) |line| self.runAdminLine(line);
+        while (it.next()) |line| {
+            // TCP-session-only: closing a session makes no sense on the webui path.
+            if (std.mem.eql(u8, line, "quit") or std.mem.eql(u8, line, "exit")) {
+                self.admin.reply("bye\n");
+                self.admin.closeActive();
+                return;
+            }
+            self.runAdminLine(line);
+        }
     }
 
     /// Admin TCP + optional webui sink (same text both paths).
@@ -1563,6 +1590,9 @@ pub const Game = struct {
         s.reliable_window_drops = self.harness.counters.get(.reliable_window_drops);
         s.persistence_errors = self.harness.counters.get(.persistence_errors);
         s.stale_peers_reaped = self.harness.counters.get(.stale_peers_reaped);
+        s.phase_rejects = self.harness.counters.get(.phase_rejects);
+        s.ownership_rejects = self.harness.counters.get(.ownership_rejects);
+        s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
         const th = self.harness.prof.histOf(.tick_total);
         s.tick_mean_ns = th.meanNs();
         s.tick_p50_ns = th.percentileNs(50);
@@ -1764,7 +1794,14 @@ pub const Game = struct {
         const x = std.fmt.parseFloat(f32, xs.?) catch return;
         const y = std.fmt.parseFloat(f32, ys.?) catch return;
         const z = std.fmt.parseFloat(f32, zs.?) catch return;
+        if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(z)) {
+            out.line("coordinates must be finite");
+            return;
+        }
         self.sim.transform[ps] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
+        const entity_id = self.sim.netId(ps);
+        const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, y, z, 0, 0, 0, true) catch return;
+        self.broadcast("NetPackageEntityTeleport", body) catch {};
         out.linef("teleported to {d:.0} {d:.0} {d:.0}", .{ x, y, z });
     }
 
@@ -1896,8 +1933,23 @@ pub const Game = struct {
     fn runAdminLine(self: *Game, line: []const u8) void {
         const cmd = admin_mod.parseCommand(line);
         switch (cmd) {
-            .help => self.adminReply("commands: help status save saveworld list listplayers|lp listents inv <slot> kick <slot> ban <slot> unban <iphex> give <slot> <item> [n] tele <slot> <x> <y> <z> say <msg> kill <id> killall spawnentity <slot|entityId> <class> gettime settime <day|night|ticks|D H M> version shutdown\n"),
+            .help => self.adminReply(
+                \\commands:
+                \\  status  list  listplayers|lp  listents|le  inv <slot>  version
+                \\  gettime|gt  settime|st <day|night|ticks|D H M>
+                \\  give <slot> <item> [count]  tele <slot> <x> <y> <z>  say <msg>
+                \\  kick <slot>  ban <slot>  unban <iphex>
+                \\  kill <id>  killall|ka  spawnentity|se <slot|entityId> <class>
+                \\  save  saveworld|sa  shutdown  quit
+                \\
+            ),
             .unknown => self.adminReply("unknown command. 'help' for list.\n"),
+            .bad_args => |verb| {
+                var eb: [96]u8 = undefined;
+                const s = std.fmt.bufPrint(&eb, "bad arguments to '{s}'. 'help' for usage.\n", .{verb}) catch
+                    "bad arguments. 'help' for usage.\n";
+                self.adminReply(s);
+            },
             .status => {
                 var sb: [256]u8 = undefined;
                 const s = std.fmt.bufPrint(&sb, "tick={d} players={d} zombies={d} chunks={d}\n", .{
@@ -2018,6 +2070,15 @@ pub const Game = struct {
             .tele => |t| {
                 if (self.sim.playerByPeer(t.peer)) |ps| {
                     self.sim.transform[ps] = .{ .x = t.x, .y = t.y, .z = t.z, .yaw = 0 };
+                    const entity_id = self.sim.netId(ps);
+                    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, t.x, t.y, t.z, 0, 0, 0, true) catch {
+                        self.adminReply("teleport encode failed\n");
+                        return;
+                    };
+                    self.broadcast("NetPackageEntityTeleport", body) catch {
+                        self.adminReply("teleport send failed\n");
+                        return;
+                    };
                     self.adminReply("teleported\n");
                 } else self.adminReply("no player in slot\n");
             },
@@ -2273,7 +2334,12 @@ pub const Game = struct {
     }
 
     fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
-        const framed = try packages.framed(&self.send_buf, pkg_name, body);
+        // Count encode failures here: many callers swallow the error (`catch {}`),
+        // so this is the only place they stay visible in apm.
+        const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
+            self.harness.counters.inc(.encode_errors);
+            return err;
+        };
         // Poll mid-send so client ACKs free the reliable window (explicit anyerror avoids
         // inferred error-set cycles with onData).
         // Streaming: ~8ms budget then soft-drop. Critical: keep pumping ACKs up
@@ -2934,7 +3000,7 @@ pub const Game = struct {
             .info_port = self.info_port,
             .max_players = self.max_players,
             .current_players = @intCast(self.countJoined()),
-            .server_version = "V 3.1.0",
+            .server_version = version.stock_wire_announce,
             .world_size = 6144,
             .eac_enabled = false,
             .password_protected = self.password.len > 0,
@@ -2962,6 +3028,7 @@ pub const Game = struct {
             const pre_login_ok = std.mem.eql(u8, name, "NetPackagePlayerLogin") or std.mem.eql(u8, name, "NetPackageRequestToEnterGame") or std.mem.eql(u8, name, "NetPackageRequestToSpawnPlayer") or std.mem.eql(u8, name, "NetPackageAuthConfirmation") or std.mem.eql(u8, name, "NetPackageSignDataRequest") or std.mem.eql(u8, name, "NetPackageWorldInitInfoRequest") or std.mem.eql(u8, name, "NetPackageDynamicClientArrive") or std.mem.eql(u8, name, "NetPackagePlayerDisconnect");
             if (!pre_login_ok) {
                 // Phase gate is always Hard (never apply play C2S pre-join).
+                self.harness.counters.inc(.phase_rejects);
                 return;
             }
         }
@@ -3154,7 +3221,10 @@ pub const Game = struct {
                         const dx = bp.x - pp.x;
                         const dy = bp.y - pp.y;
                         const dz = bp.z - pp.z;
-                        if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return;
+                        if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
+                            self.harness.counters.inc(.bounds_rejects);
+                            return;
+                        }
                         if (self.sim.mask[ps].inventory and self.sim.mask[bs].inventory) {
                             for (self.sim.inventory[bs].slots) |slot| {
                                 if (slot.count == 0 or slot.item_id == 0) continue;
@@ -3252,7 +3322,10 @@ pub const Game = struct {
         }
         if (std.mem.eql(u8, name, "NetPackageHoldingItem")) {
             const h = packages.stock_inv.readHoldingItem(body) catch return;
-            if (h.entity_id != 0 and h.entity_id != c.entity_id) return;
+            if (h.entity_id != 0 and h.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             const ps = self.sim.playerByPeer(c.slot) orelse return;
             if (!self.sim.mask[ps].inventory) return;
             if (h.holding_index < ecs.components.inv_toolbelt) {
@@ -3329,7 +3402,10 @@ pub const Game = struct {
                 const tdx = @as(f32, @floatFromInt(parsed.world_x)) - op.x;
                 const tdy = @as(f32, @floatFromInt(parsed.world_y)) - op.y;
                 const tdz = @as(f32, @floatFromInt(parsed.world_z)) - op.z;
-                if (tdx * tdx + tdy * tdy + tdz * tdz > self.max_edit_range * self.max_edit_range) return;
+                if (tdx * tdx + tdy * tdy + tdz * tdz > self.max_edit_range * self.max_edit_range) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return;
+                }
                 const pos: containers_mod.PosKey = .{ .x = parsed.world_x, .y = parsed.world_y, .z = parsed.world_z };
                 const sc: u16 = if (parsed.size_x > 0 and parsed.size_y > 0)
                     @intCast(@min(@as(usize, parsed.size_x) * @as(usize, parsed.size_y), containers_mod.max_container_slots))
@@ -3349,7 +3425,10 @@ pub const Game = struct {
                 const wdx = @as(f32, @floatFromInt(ws.world_x)) - wp.x;
                 const wdy = @as(f32, @floatFromInt(ws.world_y)) - wp.y;
                 const wdz = @as(f32, @floatFromInt(ws.world_z)) - wp.z;
-                if (wdx * wdx + wdy * wdy + wdz * wdz > self.max_edit_range * self.max_edit_range) return;
+                if (wdx * wdx + wdy * wdy + wdz * wdz > self.max_edit_range * self.max_edit_range) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return;
+                }
                 if (self.workstations.getOrCreate(ws.world_x, ws.world_y, ws.world_z)) |st| {
                     applyWsGroup(self, st.fuel[0..], ws.fuel[0..ws.fuel_n]);
                     applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
@@ -3514,7 +3593,10 @@ pub const Game = struct {
         }
         if (std.mem.eql(u8, name, "NetPackageEntityAliveFlags")) {
             const f = packages.parseAliveFlagsBody(body) catch return;
-            if (f.entity_id != c.entity_id) return;
+            if (f.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             if (self.sim.slotOfNetId(f.entity_id)) |idx| self.sim.flags[idx].bits = f.flags;
             // Fan-out to other peers (stock tracked-players path).
             try self.broadcastExcept("NetPackageEntityAliveFlags", body, c.slot);
@@ -3523,14 +3605,20 @@ pub const Game = struct {
         // Stock C2S player motion speeds; rebroadcast to other clients.
         if (std.mem.eql(u8, name, "NetPackageEntitySpeeds")) {
             const s = packages.parseEntitySpeedsBody(body) catch return;
-            if (s.entity_id != c.entity_id) return;
+            if (s.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
             return;
         }
         // Stock hard teleport (same wire as PosAndRot). Apply + fan-out.
         if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
             const p = packages.parsePosAndRotBody(body) catch return;
-            if (p.entity_id != c.entity_id) return;
+            if (p.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             if (try self.rescueDeepVoid(peer, p.entity_id, p.x, p.y, p.z, false)) |_| {
                 // Snapped; do not fan-out void coords.
                 return;
@@ -3887,6 +3975,7 @@ pub const Game = struct {
                 // Reach is always Hard (reject in both Correct and Observe).
                 // Vertical clamp: mesh float must not fail power/dig suite (type=0).
                 if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
+                    self.harness.counters.inc(.bounds_rejects);
                     if (self.authorityCorrects()) {
                         std.debug.print("zdtd: SetBlock out of reach ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ b.x, b.y, b.z, ep.x, ep.y, ep.z });
                     }
@@ -4003,7 +4092,10 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageExplosionInitiate")) {
             const ex = packages.parseExplosionInitiate(body) catch return;
             // Only accept from joined players; ignore entity_id spoof if mismatch.
-            if (ex.entity_id > 0 and c.entity_id > 0 and ex.entity_id != c.entity_id) return;
+            if (ex.entity_id > 0 and c.entity_id > 0 and ex.entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
             const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, 6)));
             // Reach: explosion center must be near the acting player.
             if (self.sim.playerByPeer(c.slot)) |bi| {
@@ -4011,7 +4103,10 @@ pub const Game = struct {
                 const dx = ex.wx - bp.x;
                 const dy = ex.wy - bp.y;
                 const dz = ex.wz - bp.z;
-                if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return;
+                if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return;
+                }
             } else return;
             const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @intFromFloat(@floor(ex.wx)));
             const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @intFromFloat(@floor(ex.wy)));
@@ -4871,23 +4966,45 @@ pub const Game = struct {
     }
 
     /// Holding-only S2C (valid direction for stock clients).
+    /// Join: send empty held stack (entityId + count=0 + index). Full ItemValue held
+    /// stacks have underrun'd stock HoldingItem.read mid-join when framing/window is tight;
+    /// PDF already carries toolbelt. Echo path after InvTx still sends resolved hold.
     fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+        try self.sendHoldingOnlyEx(peer, c, false);
+    }
+
+    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void {
         const ps = self.sim.playerByPeer(c.slot) orelse return;
         if (!self.sim.mask[ps].inventory) return;
-        const hb = try packages.buildHoldingBodyResolved(
-            self.body_buf[6144..6272],
-            c.entity_id,
-            &self.sim.inventory[ps],
-            resolveItemType,
-            self,
-        );
+        // Dedicated slice after PlayerId region; keep short fixed body.
+        var hb: []const u8 = undefined;
+        if (full_stack) {
+            hb = try packages.buildHoldingBodyResolved(
+                self.body_buf[6144..6400],
+                c.entity_id,
+                &self.sim.inventory[ps],
+                resolveItemType,
+                self,
+            );
+        } else {
+            // Empty ItemStack: entityId + u16 count=0 + holding index.
+            var w: @import("../wire/binary.zig").Writer = .{ .buf = self.body_buf[6144..6160] };
+            try w.writeI32(c.entity_id);
+            try w.writeU16(0);
+            const idx: u8 = if (self.sim.inventory[ps].holding < ecs.components.inv_toolbelt)
+                @intCast(self.sim.inventory[ps].holding)
+            else
+                0;
+            try w.writeByte(idx);
+            hb = w.written();
+        }
         try self.sendGame(peer, "NetPackageHoldingItem", hb);
     }
 
     /// Post-change inv echo. PlayerInventory/Bag are ToServer-only for stock
     /// clients; only HoldingItem is a valid S2C echo.
     fn sendHoldingEcho(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
-        try self.sendHoldingOnly(peer, c);
+        try self.sendHoldingOnlyEx(peer, c, true);
     }
 
     fn isStorageBlockId(self: *const Game, block_id: u16) bool {
@@ -4936,6 +5053,8 @@ pub const Game = struct {
         const ps = self.sim.playerByPeer(peer_slot) orelse return false;
         if (!self.sim.mask[ps].inventory) return false;
         const n: u16 = if (times == 0) 1 else @min(times, 20);
+        // Aggregate by ECS id so duplicate ingredient lines (or aliases that
+        // resolve to the same id) do not double-count inventory room.
         var need: [assets_recipes.max_ingredients]struct { id: u16, count: u32 } = undefined;
         var nn: usize = 0;
         var i: u8 = 0;
@@ -4943,27 +5062,43 @@ pub const Game = struct {
             const ing = recipe.ingredients[i];
             const id = self.ecsIdFromItemName(ing.name);
             if (id == 0) return false;
-            need[nn] = .{ .id = id, .count = @as(u32, ing.count) * n };
-            nn += 1;
+            const add: u32 = @as(u32, ing.count) * n;
+            var merged = false;
+            var k: usize = 0;
+            while (k < nn) : (k += 1) {
+                if (need[k].id == id) {
+                    need[k].count += add;
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) {
+                if (nn >= need.len) return false;
+                need[nn] = .{ .id = id, .count = add };
+                nn += 1;
+            }
         }
         var j: usize = 0;
         while (j < nn) : (j += 1) {
+            if (need[j].count > std.math.maxInt(u16)) return false;
             if (self.sim.inventory[ps].countItem(need[j].id) < need[j].count) return false;
         }
+        const out_id = self.ecsIdFromItemName(recipe.name);
+        if (out_id == 0) return false;
+        const out_u32: u32 = @as(u32, recipe.count) * n;
+        if (out_u32 == 0 or out_u32 > std.math.maxInt(u16)) return false;
+        const out_count: u16 = @intCast(out_u32);
+        // Snapshot so any remove/add failure restores the exact pre-craft bag.
+        const inventory_before = self.sim.inventory[ps];
         j = 0;
         while (j < nn) : (j += 1) {
-            if (!self.sim.inventory[ps].removeItem(need[j].id, @intCast(need[j].count))) return false;
+            if (!self.sim.inventory[ps].removeItem(need[j].id, @intCast(need[j].count))) {
+                self.sim.inventory[ps] = inventory_before;
+                return false;
+            }
         }
-        const out_id = self.ecsIdFromItemName(recipe.name);
-        if (out_id == 0) {
-            j = 0;
-            while (j < nn) : (j += 1) _ = self.sim.inventory[ps].addItem(need[j].id, @intCast(need[j].count));
-            return false;
-        }
-        const out_count: u16 = @intCast(@as(u32, recipe.count) * n);
         if (!self.sim.inventory[ps].addItem(out_id, out_count)) {
-            j = 0;
-            while (j < nn) : (j += 1) _ = self.sim.inventory[ps].addItem(need[j].id, @intCast(need[j].count));
+            self.sim.inventory[ps] = inventory_before;
             return false;
         }
         if (self.sim.mask[ps].dirty) self.sim.dirty[ps].inv = true;
@@ -5669,7 +5804,10 @@ pub const Game = struct {
     /// World-position broadcast: only clients whose player is within
     /// `range_blocks` of (wx,wz). Chat/time stay global via broadcast().
     fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
-        const framed = try packages.framed(&self.send_buf, name, body);
+        const framed = packages.framed(&self.send_buf, name, body) catch |err| {
+            self.harness.counters.inc(.encode_errors);
+            return err;
+        };
         for (&self.clients) |*c| {
             const p = c.peer orelse continue;
             if (!c.joined) continue;
@@ -5688,7 +5826,10 @@ pub const Game = struct {
     }
 
     fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
-        const framed = try packages.framed(&self.send_buf, name, body);
+        const framed = packages.framed(&self.send_buf, name, body) catch |err| {
+            self.harness.counters.inc(.encode_errors);
+            return err;
+        };
         for (&self.clients) |*c| {
             const p = c.peer orelse continue;
             if (!c.joined) continue;
@@ -5709,7 +5850,9 @@ pub const Game = struct {
         const sc = apm.profiler.scope(&self.harness.prof, .replicate);
         defer sc.end();
         for (&self.clients) |*c| {
-            if (c.peer) |p| p.resendPending(&self.net.sock) catch {};
+            // Persistent socket failure here is the "player times out silently"
+            // path; keep it visible via the send-error counter.
+            if (c.peer) |p| p.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
         }
         // Continuous stock chunk stream around each player (ChunkRemove far keys).
         if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
@@ -6228,8 +6371,8 @@ pub const Game = struct {
         try w.writeString("");
         try w.writeByte(0);
         try w.writeString("");
-        try w.writeString("V 3.1.0");
-        try w.writeString("V 3.1.0");
+        try w.writeString(version.stock_wire_announce);
+        try w.writeString(version.stock_wire_announce);
         try w.writeU64(0);
         var frame_buf: [256]u8 = undefined;
         const framed = try packages.framed(&frame_buf, "NetPackagePlayerLogin", w.written());

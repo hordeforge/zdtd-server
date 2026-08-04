@@ -338,7 +338,7 @@ pub fn loadFromPath(
             }
         }
     }
-    // water / underwater: keep default (no land layers) — surface gen still uses heights.
+    // water / underwater: keep default (no land layers); surface gen still uses heights.
     table.loaded = true;
     return table;
 }

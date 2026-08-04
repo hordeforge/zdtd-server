@@ -263,6 +263,7 @@ pub const Table = struct {
                             if (self.id_by_name.count() > 0) return;
                         } else |_| {}
                         if (std.fmt.bufPrint(&path_buf, "{s}/assets/fixtures/assignids_v314.txt", .{root})) |p| {
+                            // Best-effort fixture dump when not under src/assets layout.
                             self.mergeAssignIdsDump(allocator, p) catch {};
                         } else |_| {}
                     }

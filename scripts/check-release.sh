@@ -143,6 +143,12 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
       echo "release-check: CHANGELOG.md missing dated '## [$source_version] - YYYY-MM-DD' section for tag $head_tag" >&2
       exit 1
     fi
+    # docs/RELEASES.md step 4: entries move to the release section at tag time.
+    unreleased_body="$(awk '/^## \[Unreleased\]$/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -v '^[[:space:]]*$' || true)"
+    if [[ -n "$unreleased_body" ]]; then
+      echo "release-check: Unreleased section must be empty at tag $head_tag (move entries to ## [$source_version])" >&2
+      exit 1
+    fi
     # A dirty tree can build bytes that never existed at the immutable tag
     # while still reporting the tag's product version.
     if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then

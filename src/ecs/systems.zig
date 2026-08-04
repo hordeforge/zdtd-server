@@ -102,8 +102,12 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         const fp = dmg_fp[i];
         if (fp == 0) continue;
         if (!w.alive[i] or !w.mask[i].health) continue;
-        const amount = fpDamage(fp);
         if (w.kind[i] == .trader) continue;
+        // Skip corpses: players stay at hp=0 until respawn; re-applying would
+        // only drive hp negative then clamp, with no gameplay purpose.
+        if (w.health[i].hp <= 0) continue;
+        const amount = fpDamage(fp);
+        if (!(amount > 0)) continue;
         w.health[i].hp -= amount;
         applied += 1;
         if (w.health[i].hp <= 0) {
@@ -889,22 +893,32 @@ pub fn systemVehicles(w: *World, dt: f32) void {
     }
 }
 
-pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32) void {
-    if (!w.alive[slot] or !w.mask[slot].vehicle or !w.mask[slot].transform) return;
-    if (w.vehicle[slot].driver_net_id < 0) return;
-    var v = &w.vehicle[slot];
-    const max_spd: f32 = if (v.max_speed > 0) v.max_speed else switch (v.kind) {
+/// Kind defaults when vehicles.xml velocityMax missing (A12: XML first, then this).
+pub fn vehicleKindDefaultSpeed(kind: c.VehicleKind) f32 {
+    return switch (kind) {
         .bicycle => 6,
         .minibike => 12,
         .motorcycle => 18,
         .four_by_four => 14,
         .gyrocopter => 20,
     };
-    v.speed += throttle * 8.0 * dt;
+}
+
+pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32) void {
+    if (!w.alive[slot] or !w.mask[slot].vehicle or !w.mask[slot].transform) return;
+    if (w.vehicle[slot].driver_net_id < 0) return;
+    var v = &w.vehicle[slot];
+    v.throttle = throttle;
+    v.steer = steer;
+    const max_spd: f32 = if (v.max_speed > 0.1) v.max_speed else vehicleKindDefaultSpeed(v.kind);
+    // Stronger accel so a short C2S drive pulse still moves (playtest ≥0.4 m).
+    v.speed += throttle * 14.0 * dt;
     if (v.speed > max_spd) v.speed = max_spd;
     if (v.speed < -max_spd * 0.3) v.speed = -max_spd * 0.3;
-    v.speed *= 1.0 - 0.5 * dt;
-    w.transform[slot].yaw += steer * 90.0 * dt * (@abs(v.speed) / max_spd);
+    // Coast decay only when no throttle input.
+    if (@abs(throttle) < 0.05) v.speed *= 1.0 - 0.8 * dt;
+    const spd_frac = if (max_spd > 0.01) @abs(v.speed) / max_spd else 0;
+    w.transform[slot].yaw += steer * 100.0 * dt * @max(spd_frac, 0.15);
     const rad = w.transform[slot].yaw * (std.math.pi / 180.0);
     w.transform[slot].x += @sin(rad) * v.speed * dt;
     w.transform[slot].z += @cos(rad) * v.speed * dt;
@@ -915,6 +929,18 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
         }
         v.fuel -= @abs(v.speed) * 0.02 * dt;
         if (v.fuel < 0) v.fuel = 0;
+    }
+}
+
+/// Apply held throttle/steer every sim tick (stock client may send sparse drive pkgs).
+pub fn vehicleTickHeld(w: *World, dt: f32) void {
+    var i: Slot = 0;
+    while (i < max_entities) : (i += 1) {
+        if (!w.alive[i] or !w.mask[i].vehicle) continue;
+        if (w.vehicle[i].driver_net_id < 0) continue;
+        const v = w.vehicle[i];
+        // Re-apply held input; zero throttle still coasts via vehicleControl.
+        vehicleControl(w, i, v.throttle, v.steer, dt);
     }
 }
 
@@ -936,6 +962,8 @@ pub fn vehicleExit(w: *World, player_net: i32) bool {
         if (w.alive[i] and w.mask[i].vehicle and w.vehicle[i].driver_net_id == player_net) {
             w.vehicle[i].driver_net_id = -1;
             w.vehicle[i].speed = 0;
+            w.vehicle[i].throttle = 0;
+            w.vehicle[i].steer = 0;
             return true;
         }
     }

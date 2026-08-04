@@ -2,7 +2,8 @@
 
 const std = @import("std");
 
-/// Named counters (atomic-friendly u64; single-threaded M0, multi later).
+/// Named counters owned by the single-threaded game loop. These are plain u64
+/// values, so callers must synchronize any access from other threads.
 pub const CounterId = enum(u16) {
     ticks,
     net_packets_in,
@@ -25,6 +26,12 @@ pub const CounterId = enum(u16) {
     tick_overruns,
     /// Package body encode failed (omit/skip path; not a send error).
     encode_errors,
+    /// C2S dropped by join-phase gate (unjoined peer, non-handshake package).
+    phase_rejects,
+    /// C2S dropped by ownership / bag / entity id mismatch.
+    ownership_rejects,
+    /// C2S dropped by reach / range / damage-cap bounds.
+    bounds_rejects,
     _,
 };
 

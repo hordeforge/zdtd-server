@@ -29,6 +29,8 @@ pub const EntityClass = struct {
 };
 
 pub const World = struct {
+    const no_player_slot = std.math.maxInt(Slot);
+
     alive: [max_entities]bool = .{false} ** max_entities,
     mask: [max_entities]Mask = [_]Mask{.{}} ** max_entities,
 
@@ -49,6 +51,11 @@ pub const World = struct {
     sleeper: [max_entities]c.Sleeper = [_]c.Sleeper{.{}} ** max_entities,
     flags: [max_entities]c.Flags = [_]c.Flags{.{}} ** max_entities,
     dirty: [max_entities]c.Dirty = [_]c.Dirty{.{}} ** max_entities,
+
+    /// Peer slots are bounded by the server's fixed client table. Keeping the
+    /// reverse index here avoids a full entity scan in every C2S inventory,
+    /// quest, movement, and replication lookup.
+    peer_to_player: [max_entities]Slot = .{no_player_slot} ** max_entities,
 
     next_net_id: i32 = 100,
     /// O(1) NetId → Slot (0xFFFF = empty).
@@ -119,6 +126,16 @@ pub const World = struct {
     }
 
     pub fn playerByPeer(self: *const World, peer_slot: usize) ?Slot {
+        if (peer_slot < self.peer_to_player.len) {
+            const slot = self.peer_to_player[peer_slot];
+            if (slot != no_player_slot and self.alive[slot] and self.mask[slot].player and
+                self.player[slot].peer_slot == @as(i32, @intCast(peer_slot)))
+            {
+                return slot;
+            }
+        }
+        // Preserve the standalone ECS API for callers using an out-of-range
+        // synthetic peer id, and recover if a derived index is ever stale.
         var i: Slot = 0;
         while (i < max_entities) : (i += 1) {
             if (self.alive[i] and self.mask[i].player and self.player[i].peer_slot == @as(i32, @intCast(peer_slot))) {
@@ -138,6 +155,14 @@ pub const World = struct {
 
     pub fn destroy(self: *World, slot: Slot) void {
         if (slot >= max_entities or !self.alive[slot]) return;
+        if (self.mask[slot].player) {
+            const peer_slot = self.player[slot].peer_slot;
+            if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len)) and
+                self.peer_to_player[@intCast(peer_slot)] == slot)
+            {
+                self.peer_to_player[@intCast(peer_slot)] = no_player_slot;
+            }
+        }
         if (self.mask[slot].network_id and self.net_map_init) {
             _ = self.net_to_slot.remove(self.network_id[slot].id);
         }
@@ -161,8 +186,11 @@ pub const World = struct {
 
     pub fn slotOfNetId(self: *const World, id: NetId) ?Slot {
         if (self.net_map_init) {
-            return self.net_to_slot.get(id);
+            if (self.net_to_slot.get(id)) |slot| return slot;
         }
+        // The SoA columns are authoritative. The map is a derived index and
+        // may miss after a failed insertion, so preserve correctness with the
+        // bounded scan promised by registerNet's failure path.
         var i: Slot = 0;
         while (i < max_entities) : (i += 1) {
             if (self.alive[i] and self.mask[i].network_id and self.network_id[i].id == id) return i;
@@ -272,6 +300,9 @@ pub const World = struct {
         self.mask[s].wallet = true;
         self.mask[s].inventory = true;
         self.player[s] = .{ .peer_slot = peer_slot };
+        if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len))) {
+            self.peer_to_player[@intCast(peer_slot)] = s;
+        }
         self.journal[s] = .{};
         self.wallet[s] = .{};
         self.inventory[s] = .{};
@@ -375,6 +406,11 @@ pub const World = struct {
         const s = self.slotOfNetId(net_id) orelse return .{};
         if (self.kind[s] == .trader) return .{};
         if (!self.mask[s].health) return .{};
+        // Non-positive / NaN must not heal, mark dirty, or re-fire kill side effects.
+        if (!(amount > 0)) return .{};
+        // Already dead (hp<=0): players stay in-world; a second hit must not
+        // report killed again (double DropOnDeath bags / quest XP / loot).
+        if (self.health[s].hp <= 0) return .{};
         self.health[s].hp -= amount;
         if (self.mask[s].dirty) self.dirty[s].hp = true;
         if (self.health[s].hp <= 0) {
@@ -470,4 +506,45 @@ test "ecs spawn player zombie damage" {
     try std.testing.expect(w.inventory[ps].countItem(8) >= 1);
     try std.testing.expect(w.damage(z, 100).killed);
     try std.testing.expect(w.slotOfNetId(z) == null);
+}
+
+test "damage ignores non-positive amount and already-dead players" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    try std.testing.expect(!w.damage(p, 0).killed);
+    try std.testing.expect(!w.damage(p, -10).killed);
+    try std.testing.expect(w.damage(p, 9999).killed);
+    // Second kill must not re-fire (DropOnDeath / quest side effects).
+    try std.testing.expect(!w.damage(p, 1).killed);
+    const ps = w.slotOfNetId(p).?;
+    try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
+    try std.testing.expect(w.alive[ps]);
+}
+
+test "net id lookup falls back to authoritative columns when index misses" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const id = w.spawnZombie(1, 2, 3, 40).?;
+    const expected = w.slotOfNetId(id).?;
+    try std.testing.expect(w.net_to_slot.remove(id));
+    try std.testing.expectEqual(expected, w.slotOfNetId(id).?);
+}
+
+test "player peer index follows replacement and destroy" {
+    var w: World = .{};
+    defer w.deinit();
+    const first_id = w.spawnPlayer(0, 70, 0, 3).?;
+    const first = w.slotOfNetId(first_id).?;
+    try std.testing.expectEqual(first, w.playerByPeer(3).?);
+
+    const second_id = w.spawnPlayer(1, 70, 0, 4).?;
+    const second = w.slotOfNetId(second_id).?;
+    try std.testing.expectEqual(second, w.playerByPeer(4).?);
+
+    w.destroy(second);
+    try std.testing.expect(w.playerByPeer(4) == null);
+    try std.testing.expectEqual(first, w.playerByPeer(3).?);
 }

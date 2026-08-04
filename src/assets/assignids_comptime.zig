@@ -1,5 +1,5 @@
 //! Named AssignIds pins for V3.1.x (bundled dump). Values are the stock client
-//! Block.blockID after AssignIds Postfix — not XML declaration order.
+//! Block.blockID after AssignIds Postfix, not XML declaration order.
 //! Validated at test time against `assignids_v314.embed.txt` so a dump refresh
 //! that moves a pin fails CI. Prefer runtime `maxdamage.idByName` for open sets.
 

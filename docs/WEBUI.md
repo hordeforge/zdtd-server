@@ -6,7 +6,7 @@ dumps with a browser UI.
 
 | | |
 |---|---|
-| Status | **Design only** (no code) |
+| Status | **WU0–WU2 shipped** (dashboard + console cmds); WU3+ optional |
 | Stack | HTMX + Alpine.js + minimal CSS (no React/Vue build chain) |
 | Server | Zig HTTP on a dedicated bind (loopback default) |
 | Related | [APM.md](APM.md), [AUTHORITY.md](AUTHORITY.md), `src/server/admin.zig`, [PLUGIN_API.md](PLUGIN_API.md) |
@@ -82,10 +82,10 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Control | Default |
 |---|---|
 | Bind | `127.0.0.1` only (`--webui-bind 0.0.0.0` explicit opt-in) |
-| Auth | Shared secret header or `/login?token=`; cookie is HMAC session token (not the secret) |
+| Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret) |
 | CSRF | SameSite cookie + form field = HMAC session token (secret accepted for API tools) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
-| Rate limit | Per-IP cmd rate (reuse join-style throttle ideas) |
+| Rate limit | Single concurrent HTTP client slot + short request timeout; no multi-IP quota yet |
 | Audit log | Append-only ops log: who/when/cmd (file under world dir) |
 | Read vs write | GET partials need auth; POST cmds need auth + CSRF |
 
@@ -107,8 +107,14 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/console` | Command form + last N log lines | ops log ring |
 | `POST /api/cmd` | Run one admin command | queue → admin parser |
 | `GET /api/apm.json` | Machine-readable apm (loadgen/tools) | snapshot |
-| `GET /login` / `POST /login` | Session | config secret |
+| `GET /login` | Sign-in form (200); bad `?token=` → 401 | config secret |
+| `POST /login` | Form body `token=` → session cookie | config secret |
+| `POST /logout` | Clear session cookie (CSRF required) | session |
 | `GET /static/*` | htmx.min.js, alpine, app.css | embed or files |
+
+Status notes: wrong method on a known path returns **405** with `Allow` (not
+404). Unknown paths return **404** for any method. Unauthenticated `/api/*`
+returns plain `401 unauthorized` (HTML login form is for browser routes).
 
 Optional later:
 
@@ -218,7 +224,7 @@ curl -sS http://127.0.0.1:8080/healthz
 - [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML)
 - [x] Auto-refresh 2s via small inline poller (no CDN; `hx-get` attributes)
 - [x] `GET /api/apm.json` for scripts
-- [x] Cookie login: `/login?token=SECRET` → `Set-Cookie: zdtd_webui=<HMAC session>` (not the secret)
+- [x] Cookie login: POST `/login` form (secret in body, not URL) → `Set-Cookie: zdtd_webui=<HMAC session>` (not the secret)
 - [x] APM counters include tick_overruns / encode_errors / join / pkg / section means
 
 **Exit:** browser or curl with secret sees live tick/players/apm.
@@ -226,18 +232,18 @@ curl -sS http://127.0.0.1:8080/healthz
 ```bash
 zig-out/bin/zdtd --port 27002 --world worlds/zdtd_default \
   --webui-port 8080 --webui-secret change-me
-# browser: http://127.0.0.1:8080/login?token=change-me
+# browser: http://127.0.0.1:8080/login (enter secret in the form)
 curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/partials/status
 curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 ```
 
 ### WU2 — Commands
 
-- [x] Shared command parse path (admin TCP + web POST)
-- [x] `POST /api/cmd` runs through the bounded admin command handler
-- [x] Console partial with response lines
-- [x] CSRF + session cookie
-- [ ] Ops audit log file
+- [x] Shared command parse path (admin TCP + web POST via `setAdminHandler` → `runAdminLine`)
+- [x] `POST /api/cmd` form `line`+`csrf`; same-request HTML reply
+- [x] Console section + `/partials/console` audit ring (24 lines in-memory)
+- [x] CSRF + session cookie (cookie-only needs csrf=secret)
+- [ ] Ops audit log **file** (ring only for now)
 
 **Exit:** give/kick/settime from browser matches admin TCP semantics.
 

@@ -182,10 +182,12 @@ test "parse config fixture" {
         \\  <property name="ServerMaxPlayerCount" value="16"/>
         \\</ServerSettings>
     ;
-    const dir = "worlds/zdtd_cfg_test";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
-    const path = dir ++ "/serverconfig.xml";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFileSimple(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
@@ -222,10 +224,12 @@ test "parse gameplay options with clamping" {
         \\  <property name="LandClaimOnlineDurabilityModifier" value="8"/>
         \\</ServerSettings>
     ;
-    const dir = "worlds/zdtd_cfg_test2";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
-    const path = dir ++ "/serverconfig.xml";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFileSimple(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();

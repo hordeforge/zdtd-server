@@ -2,9 +2,9 @@
 //! Override files under --config-overrides dirs, applied in filename order.
 //!
 //! Supported ops (element local name, case-insensitive):
-//!   set / setattribute / setbyxpath  — set attribute or replace element text
-//!   remove / removebyxpath           — delete matched element
-//!   append / appendbyxpath           — append child markup under matched element
+//!   set / setattribute / setbyxpath  : set attribute or replace element text
+//!   remove / removebyxpath           : delete matched element
+//!   append / appendbyxpath           : append child markup under matched element
 //!
 //! XPath subset: /tag/tag[@attr='val']/... and optional trailing /@attr
 //! Root may be <configs file="blocks.xml"> … or file inferred from first /tag.
@@ -455,9 +455,15 @@ pub fn applyOverrideDirs(
         try listXmlFilesSorted(allocator, d, &files);
     }
     for (files.items) |fp| {
-        const patch_raw = io_fs.readFileAll(allocator, fp) catch continue;
+        const patch_raw = io_fs.readFileAll(allocator, fp) catch |err| {
+            std.debug.print("zdtd: override {s} unreadable: {s}; skipped\n", .{ fp, @errorName(err) });
+            continue;
+        };
         defer allocator.free(patch_raw);
-        const next = applyPatchDoc(allocator, cur, patch_raw, target_file) catch continue;
+        const next = applyPatchDoc(allocator, cur, patch_raw, target_file) catch |err| {
+            std.debug.print("zdtd: override {s} failed: {s}; skipped\n", .{ fp, @errorName(err) });
+            continue;
+        };
         allocator.free(cur);
         cur = next;
     }

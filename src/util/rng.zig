@@ -22,15 +22,12 @@ pub const XorShift32 = struct {
 
     /// Advance and return the new state (classic xorshift32).
     pub fn next(self: *XorShift32) u32 {
-        var r = self.state;
-        r ^= r << 13;
-        r ^= r >> 17;
-        r ^= r << 5;
-        self.state = r;
-        return r;
+        self.state = xorshift32Step(self.state);
+        return self.state;
     }
 
-    /// Uniform in [0, bound) when bound > 0; else 0.
+    /// Value in [0, bound) when bound > 0; else 0. Modulo reduction is biased
+    /// unless `bound` divides the u32 range, so this is not for fair draws.
     pub fn nextBounded(self: *XorShift32, bound: u32) u32 {
         if (bound == 0) return 0;
         return self.next() % bound;

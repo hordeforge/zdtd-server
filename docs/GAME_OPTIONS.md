@@ -56,7 +56,7 @@ Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 | `AdminPort` | 0 | u16 | unauthenticated admin TCP on 127.0.0.1; 0 = off |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
 
-### Web UI (CLI / env for WU0; not serverconfig yet)
+### Web UI (CLI / env; WU0–WU2 shipped)
 
 | Flag / env | Default | Notes |
 |---|---|---|
@@ -65,7 +65,7 @@ Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 | `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / `?token=`; visible in `ps` (prefer env) |
 | `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty |
 
-`/healthz` is unauthenticated liveness. All other routes need the secret (WU0).
+`/healthz` is unauthenticated liveness. Dashboard + `POST /api/cmd` (admin verbs) need secret; CSRF field required for cookie-only sessions.
 
 ### zdtd.toml (operator tunables)
 

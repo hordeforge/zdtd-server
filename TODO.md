@@ -23,7 +23,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Demo green on **stock dedi** Navezgane: pass=24 fail=0 skip=7 (`make playtest-demo`)
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
-- [ ] Phase C: persist multi-phase rejoin in orchestrator
+- [x] Phase C: persist multi-phase rejoin in orchestrator (`7dtd-playtest` suite `persist`: setup → saveworld → restart → rejoin)
 - [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **83 pass / 0 fail** (20260804j) (kill/spawn/respawn PASS); version pin V3.1.0
 
 
@@ -76,8 +76,8 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 ### P4 authority spine (formalize existing gates)
 
 - [x] Policy/mode config + AUTHORITY.md short doc (`ZdtdAuthorityMode`, docs/AUTHORITY.md)
-- [ ] Protocol phase × package matrix counters
-- [ ] Entity ownership Hard reject centralization
+- [x] Phase / ownership / bounds reject counters (`phase_rejects`, `ownership_rejects`, `bounds_rejects` in apm + webui)
+- [ ] Per-package phase matrix table (full name×phase grid; counters are aggregate)
 - [ ] Movement envelope / inv cause ledger / evidence JSONL (see P4 section below)
 
 ### Parked
@@ -90,8 +90,9 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plugins.md), [PLUGIN_API.md](docs/PLUGIN_API.md).
 
-- [ ] Hardcode audit P0/P1 remaining (stock XML/AssignIds on production paths)
-- [ ] `zdtd.toml` (stream, AI bands, wallets, feature flags) + GAME_OPTIONS
+- [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
+- [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
+- [ ] Hardcode audit residual P1 (A10–A12 AI/vehicle floors; B13 tick %N; A08/A22 deco pin labels)
 - [ ] Native static plugin host (ADR 0005) + one in-tree sample plugin
 - [ ] Gamemode = config pack + static plugin (`modes/` + `plugins/`)
 - [ ] **Wasm guest mods** (sandboxed): same hooks, fuel/memory caps, command queue only; no stock Mods/ promise
@@ -131,6 +132,10 @@ Do not adopt third-party ECS cores.
 Core loop and parity landings. Do not re-open without new evidence.
 
 ### Recent (2026-08-04)
+- [x] **WebUI WU2**: POST `/api/cmd` + console UI + CSRF; expanded Snapshot (entity census, all apm counters, p99/max, policy knobs)
+- [x] **zdtd.toml**: minimal TOML loader + example; stream/authority/feature → InitOptions; sanitize radii
+- [x] **A05 terrain ids**: `World.terrain_ids` + `resolveTerrainIds` after AssignIds merge
+- [x] **P4 reject counters**: phase/ownership/bounds apm + webui Errors panel
 - [x] **Playtest flake mitigations**: void rescue threshold surface-8; `withinEditReach` vertical clamp; admin/console spawnentity at DTM surface + force ECD via known_entities unset
 - [x] **ADR 0010** data/config/Zig + Wasm guest roadmap; WebUI WU0 skeleton
 - [x] **WebUI WU1**: tick snapshot + status/players/apm partials + `/api/apm.json` + cookie login

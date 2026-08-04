@@ -28,6 +28,8 @@ pub const body_entity_alive_flags: usize = 6;
 /// contentLen = pkgId(2) + body for RelPos !q
 pub const content_len_entity_rel_pos_and_rot_no_q: usize = 22;
 
+/// Validate the challenge envelope shape. The caller compares the echoed GUID;
+/// this helper intentionally checks only the fixed length and marker byte.
 pub fn challengeEchoValid(packet: []const u8) bool {
     return packet.len == challenge_size and packet[0] == challenge_marker;
 }
