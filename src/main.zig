@@ -18,19 +18,22 @@ const help_text =
     \\  Zig dedicated server for the stock 7DTD client wire (EAC off).
     \\
     \\Options:
-    \\  --port N              ServerPort: TCP GameServerInfo; LiteNet uses N+2 (default 26902)
+    \\  --port N              TCP info port 0..65533; LiteNet uses N+2 (default 26902)
     \\  --world DIR           zdtd save/overlay dir (default worlds/zdtd_default)
     \\  --map DIR             stock Data/Worlds/<Name> (dtm + prefabs)
     \\  --game-dir DIR        install root (Data/Worlds + Data/Config)
     \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
     \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
     \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
+    \\  --webui-port N        HTTP ops UI (0 = off; requires --webui-secret; see docs/WEBUI.md)
+    \\  --webui-bind ADDR     webui bind (default 127.0.0.1; 0.0.0.0 needs firewall)
+    \\  --webui-secret STR    shared secret (Bearer / X-Zdtd-Secret / ?token=)
     \\  --quests PATH         explicit quests.xml
     \\  --config-dir DIR      stock Data/Config dir (XML assets)
     \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order)
-    \\  --worldgen-seed U64   procedural terrain (on-the-fly; no --map). Empty world dir ok.
+    \\  --worldgen-seed U64   procedural terrain (on-the-fly; conflicts with --map)
     \\  --ticks N             run N ticks then save and exit (0 = run forever)
-    \\  --once                run a single tick then save and exit
+    \\  --once                run one tick then save and exit (conflicts with --ticks)
     \\  -V, --version         print product and stock wire versions and exit
     \\  -h, --help            show this help
     \\
@@ -42,6 +45,7 @@ const help_text =
     \\  zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
     \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
     \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
+    \\  zdtd --webui-port 8080 --webui-secret change-me
     \\  zdtd --worldgen-seed 42 --once
     \\
 ;
@@ -111,8 +115,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var serverconfig_path: ?[]const u8 = null;
     var admin_port: u16 = 0;
     var admin_port_cli = false;
+    var webui_port: u16 = 0;
+    var webui_bind: []const u8 = "127.0.0.1";
+    var webui_secret: []const u8 = "";
     var max_ticks: u64 = 0;
     var once = false;
+    var ticks_cli = false;
     var worldgen_seed: ?u64 = null;
     var map_path_buf: [1024]u8 = undefined;
     var cfg_owned: ?server_config.Config = null;
@@ -127,6 +135,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
         if (std.mem.eql(u8, name, "--port")) {
             port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
+            if (port > std.math.maxInt(u16) - 2) {
+                usageError("value for '--port' must be between 0 and 65533 (LiteNet uses port+2)", .{});
+            }
             port_cli = true;
         } else if (std.mem.eql(u8, name, "--world")) {
             world_dir = flagValue(&it, name, inline_val);
@@ -148,12 +159,21 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else if (std.mem.eql(u8, name, "--admin-port")) {
             admin_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
             admin_port_cli = true;
+        } else if (std.mem.eql(u8, name, "--webui-port")) {
+            webui_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
+        } else if (std.mem.eql(u8, name, "--webui-bind")) {
+            webui_bind = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--webui-secret")) {
+            webui_secret = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--worldgen-seed")) {
             worldgen_seed = flagInt(u64, name, flagValue(&it, name, inline_val), 0);
         } else if (std.mem.eql(u8, name, "--ticks")) {
+            if (once) usageError("options '--ticks' and '--once' cannot be used together", .{});
             max_ticks = flagInt(u64, name, flagValue(&it, name, inline_val), 10);
+            ticks_cli = true;
         } else if (std.mem.eql(u8, name, "--once")) {
             if (inline_val != null) usageError("option '--once' does not take a value", .{});
+            if (ticks_cli) usageError("options '--ticks' and '--once' cannot be used together", .{});
             once = true;
             max_ticks = 1;
         } else if (std.mem.eql(u8, name, "--version") or std.mem.eql(u8, name, "-V")) {
@@ -169,6 +189,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else {
             usageError("unexpected argument '{s}' (zdtd takes options only, not positionals)", .{a});
         }
+    }
+
+    if (map_dir != null and worldgen_seed != null) {
+        usageError("options '--map' and '--worldgen-seed' select different terrain sources", .{});
+    }
+    if (world_name_cli and map_dir == null and game_dir == null) {
+        usageError("option '--world-name' requires '--game-dir' (or use '--map' directly)", .{});
     }
 
     if (serverconfig_path) |scp| {
@@ -187,6 +214,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
+    // ServerPort may also come from serverconfig.xml, so validate the effective
+    // value after applying precedence as well as at CLI parse time.
+    if (port > std.math.maxInt(u16) - 2) {
+        usageError("effective ServerPort must be between 0 and 65533 (LiteNet uses port+2)", .{});
+    }
+
     // Resolve --game-dir + --world-name → map path when --map not set.
     // Require --game-dir (or serverconfig paths); no absolute Steam default.
     if (map_dir == null) {
@@ -197,6 +230,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 // folder is absent (e.g. serverconfig GameName with no matching save).
                 if (io_fs.dirExistsSimple(candidate)) {
                     map_dir = candidate;
+                } else if (world_name_cli) {
+                    usageError("world '{s}' not found under --game-dir '{s}/Data/Worlds'", .{ wn, root });
                 } else {
                     std.debug.print("zdtd: world '{s}' not found under {s}/Data/Worlds; using flat world\n", .{ wn, root });
                 }
@@ -213,6 +248,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Effective config: loaded file or struct defaults (single source in config.zig).
     const cfg: server_config.Config = cfg_owned orelse .{};
 
+    if (webui_port != 0 and webui_secret.len == 0) {
+        usageError("--webui-port requires --webui-secret (or set env via shell export into argv)", .{});
+    }
+
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, port, .{
         .map_dir = map_dir,
         .game_dir = game_dir,
@@ -220,6 +259,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .config_overrides = config_overrides.items,
         .quests_path = quests_path,
         .admin_port = admin_port,
+        .webui_port = webui_port,
+        .webui_bind = webui_bind,
+        .webui_secret = webui_secret,
         .world_name = resolved_world_name,
         .view_radius = cfg.view_radius,
         .max_players = cfg.max_players,

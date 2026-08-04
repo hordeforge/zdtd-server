@@ -8,6 +8,7 @@
 pub const game = @import("game.zig");
 pub const config = @import("config.zig");
 pub const admin = @import("admin.zig");
+pub const webui = @import("webui.zig");
 pub const serverinfo_tcp = @import("serverinfo_tcp.zig");
 pub const scenarios = @import("scenarios.zig");
 
@@ -18,6 +19,7 @@ test {
     _ = game;
     _ = config;
     _ = admin;
+    _ = webui;
     _ = serverinfo_tcp;
     _ = scenarios;
 }

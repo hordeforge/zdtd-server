@@ -491,19 +491,22 @@ pub const World = struct {
         hdr[13] = 0;
         hdr[14] = 0;
         hdr[15] = 0;
+        // page_allocator for temps: saveChunkSlice runs this from parallel
+        // workers; World.allocator is DebugAllocator/GPA and is not thread-safe.
+        const io_a = std.heap.page_allocator;
         if (c.blocks) |b| {
             const bytes = std.mem.sliceAsBytes(b);
-            var payload = try self.allocator.alloc(u8, hdr.len + c.heights.len + bytes.len);
-            defer self.allocator.free(payload);
+            const payload = try io_a.alloc(u8, hdr.len + c.heights.len + bytes.len);
+            defer io_a.free(payload);
             @memcpy(payload[0..hdr.len], &hdr);
             @memcpy(payload[hdr.len..][0..c.heights.len], &c.heights);
             @memcpy(payload[hdr.len + c.heights.len ..], bytes);
-            try io_fs.writeFile(self.allocator, path, payload);
+            try io_fs.writeFile(io_a, path, payload);
         } else {
             var payload: [16 + 256]u8 = undefined;
             @memcpy(payload[0..16], &hdr);
             @memcpy(payload[16..], &c.heights);
-            try io_fs.writeFile(self.allocator, path, payload[0 .. 16 + c.heights.len]);
+            try io_fs.writeFile(io_a, path, payload[0 .. 16 + c.heights.len]);
         }
     }
 

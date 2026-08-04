@@ -37,7 +37,10 @@ The operating principles behind every rule below. When in doubt, these decide.
    server.
 5. **Not a mod host.** zdtd is a research clone, not a Unity host for mods. No
    IModApi, Harmony, or `Mods/` loading. The connect mod is a test harness only,
-   never a product; client tooling stays join / automation.
+   never a product; client tooling stays join / automation. **Hardcoding policy
+   (ADR 0010):** stock content → game data (XML/AssignIds); server policy →
+   config (`serverconfig` / `zdtd.toml`); sim/wire → Zig systems with
+   data-driven parameters + native plugins (ADR 0005). No script VM in core.
 6. **Correctness and security first, then minimalism, then style.** Server is
    authoritative and validates at trust boundaries; make illegal states
    unrepresentable; apply YAGNI and **Zig Zen** (intent, edge cases, one obvious

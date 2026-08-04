@@ -3,8 +3,10 @@
 **Status:** design / proposed (see [ADR 0005](adr/0005-native-plugin-api.md))  
 **Not:** stock `IModApi`, Harmony, or `Mods/` XML.  
 **Related:** [ADR 0003](adr/0003-no-stock-mod-host.md), [ADR 0004](adr/0004-server-authoritative-c2s.md),
-TODO P4 (authority), plugin implementation gated on playability polish,
-mach notes in [ADR 0006](adr/0006-steal-from-mach.md).
+[ADR 0010](adr/0010-data-config-zig-plugins.md) (data/config/Zig layers; **Wasm guest**
+as future sandboxed mod API behind this host), TODO P4 (authority), plugin
+implementation gated on playability polish, mach notes in
+[ADR 0006](adr/0006-steal-from-mach.md).
 
 ## Goals
 
@@ -49,7 +51,11 @@ process start
 ```
 
 Static plugins: comptime or link-time table in `build.zig` / `src/plugin/registry.zig`.  
-Dynamic: optional `zdtd_plugin_v1` entry points (P5.2 only after static is proven).
+Dynamic native: optional `zdtd_plugin_v1` entry points (only after static is proven).  
+**Wasm guests (later):** same hooks and `SimCommand` queue; engine runs modules with
+fuel + memory limits; no raw `*Game`, no package byte injection (ADR 0010).
+Implement Wasm **after** the native hook table works with at least one in-tree
+Zig plugin.
 
 ## Host surface (narrow)
 

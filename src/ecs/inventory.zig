@@ -4,6 +4,8 @@ const std = @import("std");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const c = @import("components.zig");
+const items = @import("../assets/items.zig");
+const assignids = @import("../assets/assignids_comptime.zig");
 
 pub const Op = enum(u8) {
     list = 0,
@@ -42,7 +44,6 @@ fn maxStackFor(w: *const World, item_id: u16) u16 {
 
 /// Offline stack caps (no ItemTable). Production wires `World.stack_fn` → items.stackFor.
 pub fn maxStackBuiltin(item_id: u16) u16 {
-    const items = @import("../assets/items.zig");
     for (items.builtin_defs) |d| {
         if (d.id == item_id) return if (d.stack == 0) 1 else d.stack;
     }
@@ -51,12 +52,10 @@ pub fn maxStackBuiltin(item_id: u16) u16 {
 
 /// Offline place map: ECS item id → block id. Tests / no AssignIds only.
 /// Production uses `itemToBlockResolved` via World.place_fn.
-const assignids = @import("../assets/assignids_comptime.zig");
 pub const place_wood_block_id: u16 = assignids.frame_shapes_cube;
 pub const place_cobble_block_id: u16 = assignids.cobblestone_shapes_cube;
 
 pub fn itemToBlock(item_id: u16) u16 {
-    const items = @import("../assets/items.zig");
     const name = items.builtinStockName(item_id) orelse return 0;
     if (std.mem.eql(u8, name, "resourceWood")) return place_wood_block_id;
     if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable"))
@@ -71,7 +70,6 @@ pub fn itemToBlockResolved(
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
     ctx: ?*anyopaque,
 ) u16 {
-    const items = @import("../assets/items.zig");
     const name = item_name orelse items.builtinStockName(item_id) orelse return 0;
     if (id_by_name(ctx, name)) |id| return id;
     if (std.mem.eql(u8, name, "resourceWood")) {
@@ -84,12 +82,11 @@ pub fn itemToBlockResolved(
 }
 
 pub fn builtinStockNameFallback(item_id: u16) ?[]const u8 {
-    return @import("../assets/items.zig").builtinStockName(item_id);
+    return items.builtinStockName(item_id);
 }
 
 /// Offline armor pin (ECS id 11 / armor* names). Production uses World.is_armor_fn.
 pub fn isArmorOffline(item_id: u16) bool {
-    const items = @import("../assets/items.zig");
     if (items.builtinStockName(item_id)) |n| {
         if (std.mem.startsWith(u8, n, "armor")) return true;
     }

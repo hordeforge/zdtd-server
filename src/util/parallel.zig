@@ -128,6 +128,16 @@ const Pool = struct {
     fn run(self: *Pool, total: usize, work: WorkFn, ctx: *anyopaque) void {
         if (total == 0) return;
         self.ensureStarted();
+
+        // Own the dispatch slot for the whole call (serial or parallel). Nested
+        // forRanges from a worker, or a second thread, must not touch
+        // jobs/outstanding or start a second parallel wave.
+        if (self.in_run.swap(true, .acquire)) {
+            work(ctx, 0, total);
+            return;
+        }
+        defer self.in_run.store(false, .release);
+
         const workers = if (self.worker_n == 0) 1 else self.worker_n + 1;
         if (builtin.single_threaded or workers <= 1 or total < min_parallel_items or self.worker_n == 0) {
             work(ctx, 0, total);
@@ -140,15 +150,6 @@ const Pool = struct {
             work(ctx, 0, total);
             return;
         }
-
-        if (self.in_run.swap(true, .acquire)) {
-            // A parallel dispatch is already in flight (nested forRanges from a
-            // work callback, or a second thread): sharing jobs/outstanding
-            // would corrupt both runs, so run this one serially.
-            work(ctx, 0, total);
-            return;
-        }
-        defer self.in_run.store(false, .release);
 
         const iop = self.io();
         self.mutex.lockUncancelable(iop);

@@ -41,6 +41,11 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 # or: --quests assets/fixtures/quests.xml
 # names: Navezgane, Pregen06k01, Pregen06k02, Pregen08k01, Pregen08k02
 
+# Operator web UI (WU0; loopback + secret; docs/WEBUI.md):
+#   zdtd --port 27002 --world worlds/zdtd_default \
+#     --webui-port 8080 --webui-secret change-me
+#   curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/
+
 # loadgen joins LiteNet (ServerPort+2), not the TCP info port:
 #   7dtd-loadgen --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
 ```

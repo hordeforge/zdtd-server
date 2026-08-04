@@ -1,13 +1,12 @@
 //! Prefab sign libraries (*_signs.xml under Data/Prefabs) for NetPackageSignDataResponse.
+//! Catalog data only; the wire encode lives in wire/stock_sign.zig.
 //! Minimal SignData: guid + name + next_* ids + zero layers (stops client "Failed to
 //! retrieve sign data" for missing library guids; full layer paint is later).
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
-const binary = @import("../wire/binary.zig");
 
 pub const max_signs: usize = 4096;
-pub const max_batch_payload: usize = 48 * 1024;
 
 pub const SignEntry = struct {
     /// Prefab library id (filename without `_signs.xml`).
@@ -195,69 +194,6 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8) !?Catalog {
     return null;
 }
 
-/// Encode minimal SignData (zero layers).
-pub fn writeSignData(w: *binary.Writer, e: SignEntry) !void {
-    try w.writeBytes(&e.guid);
-    try w.writeString(e.name);
-    try w.writeI64(e.modified_ticks);
-    try w.writeI32(e.next_poly);
-    try w.writeI32(e.next_text);
-    try w.writeI32(e.next_noise);
-    try w.writeI32(e.next_group);
-    try w.writeI32(0); // layer count
-}
-
-/// One NetPackageSignDataResponse body: isLastBatch + dataLen + data.
-/// `data` layout: u32 size_marker (includes 4 + payload), then (library, SignData)* .
-pub fn buildSignDataResponseBatch(
-    buf: []u8,
-    entries: []const SignEntry,
-    start: usize,
-    is_last: bool,
-) !struct { body: []u8, next: usize } {
-    if (buf.len < 32) return error.Overflow;
-    // Reserve: bool(1) + i32 dataLen(4) + u32 size(4) + payload
-    const data_start: usize = 1 + 4;
-    const size_off = data_start;
-    const payload_off = size_off + 4;
-    if (payload_off >= buf.len) return error.Overflow;
-
-    var w: binary.Writer = .{ .buf = buf, .pos = payload_off };
-    var i = start;
-    while (i < entries.len) : (i += 1) {
-        const before = w.pos;
-        writeSignEntry(&w, entries[i]) catch {
-            w.pos = before;
-            break;
-        };
-        // keep under max_batch_payload for the data blob
-        if (w.pos - data_start > max_batch_payload and i > start) {
-            w.pos = before;
-            break;
-        }
-    }
-    // if nothing fit and we have entries left, force one
-    if (i == start and start < entries.len) {
-        w.pos = payload_off;
-        try writeSignEntry(&w, entries[start]);
-        i = start + 1;
-    }
-
-    const end_pos = w.pos;
-    const size_incl: u32 = @intCast(end_pos - size_off); // includes the u32 size field
-    std.mem.writeInt(u32, buf[size_off..][0..4], size_incl, .little);
-
-    const data_len: i32 = @intCast(end_pos - data_start);
-    buf[0] = if (is_last and i >= entries.len) 1 else 0;
-    std.mem.writeInt(i32, buf[1..5], data_len, .little);
-    return .{ .body = buf[0..end_pos], .next = i };
-}
-
-fn writeSignEntry(w: *binary.Writer, e: SignEntry) !void {
-    try w.writeString(e.library);
-    try writeSignData(w, e);
-}
-
 test "guid net order" {
     var g: [16]u8 = undefined;
     try guidFromHyphenString("00112233-4455-6677-8899-aabbccddeeff", &g);
@@ -273,18 +209,3 @@ test "guid net order" {
     try std.testing.expectEqual(@as(u8, 0xaa), g[10]);
 }
 
-test "sign batch empty layers" {
-    var g: [16]u8 = .{0} ** 16;
-    g[0] = 1;
-    const e = [_]SignEntry{.{
-        .library = "house_01",
-        .name = "Front",
-        .guid = g,
-    }};
-    var buf: [4096]u8 = undefined;
-    const r = try buildSignDataResponseBatch(&buf, &e, 0, true);
-    try std.testing.expect(r.body[0] == 1); // last
-    try std.testing.expectEqual(@as(usize, 1), r.next);
-    const dlen = std.mem.readInt(i32, r.body[1..5], .little);
-    try std.testing.expect(dlen > 4);
-}

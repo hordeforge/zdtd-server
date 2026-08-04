@@ -18,6 +18,7 @@ const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
 const assets_signs = @import("../assets/signs.zig");
+const stock_sign = @import("../wire/stock_sign.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
@@ -37,6 +38,7 @@ const biomes_mod = @import("../world/biomes.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
 const admin_mod = @import("admin.zig");
+const webui_mod = @import("webui.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
 const workstations_mod = @import("../world/workstations.zig");
@@ -72,6 +74,10 @@ pub const InitOptions = struct {
     quests_path: ?[]const u8 = null,
     view_radius: i32 = 7,
     admin_port: u16 = 0,
+    /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
+    webui_port: u16 = 0,
+    webui_bind: []const u8 = "127.0.0.1",
+    webui_secret: []const u8 = "",
     world_name: ?[]const u8 = null,
     /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
     max_players: u16 = 8,
@@ -159,8 +165,8 @@ fn eqAny(s: []const u8, alts: []const []const u8) bool {
 /// console, which is a separate trust boundary.
 fn isPlayerConsoleCommand(verb: []const u8) bool {
     return eqAny(verb, &.{
-        "help", "commands", "?", "gettime", "gt", "listplayers", "lp",
-        "listents", "le", "say", "s", "version", "dm", "cm",
+        "help",        "commands",  "?",   "gettime", "gt",      "listplayers", "lp",
+        "listents",    "le",        "say", "s",       "version", "dm",          "cm",
         "settempunit", "debugmenu",
     });
 }
@@ -302,6 +308,7 @@ pub const Game = struct {
     world_name: []const u8 = "zdtd",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
+    webui: webui_mod.Server = .{},
     /// Stock ServerPort: TCP GameServerInfo. LiteNet listens on info_port+2.
     info_port: u16 = 0,
     info_tcp: serverinfo_tcp.Provider = .{},
@@ -824,6 +831,25 @@ pub const Game = struct {
                 std.debug.print("zdtd: admin console 127.0.0.1:{d}\n", .{self.admin.port});
             }
         }
+        if (opts.webui_port != 0) {
+            self.webui.listen(.{
+                .port = opts.webui_port,
+                .bind_host = opts.webui_bind,
+                .secret = opts.webui_secret,
+            }) catch |err| {
+                std.debug.print("zdtd: warning: webui on {s}:{d} failed: {}\n", .{
+                    opts.webui_bind,
+                    opts.webui_port,
+                    err,
+                });
+            };
+            if (self.webui.enabled()) {
+                std.debug.print(
+                    "zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n",
+                    .{ opts.webui_bind, self.webui.port },
+                );
+            }
+        }
         if (opts.world_name) |wn| self.world_name = wn;
 
         const sp = self.world.primarySpawn();
@@ -1084,14 +1110,14 @@ pub const Game = struct {
         while (start < self.signs.entries.len) {
             const last_chance = start;
             // Probe how many fit, then send with correct is_last.
-            const probe = try assets_signs.buildSignDataResponseBatch(
+            const probe = try stock_sign.buildSignDataResponseBatch(
                 &self.body_buf,
                 self.signs.entries,
                 start,
                 false,
             );
             const is_last = probe.next >= self.signs.entries.len;
-            const batch = try assets_signs.buildSignDataResponseBatch(
+            const batch = try stock_sign.buildSignDataResponseBatch(
                 &self.body_buf,
                 self.signs.entries,
                 start,
@@ -1137,6 +1163,7 @@ pub const Game = struct {
         self.traders.deinit();
         self.sleepers.deinit();
         self.admin.deinit();
+        self.webui.deinit();
         self.info_tcp.stop();
         self.world.deinit();
         self.net.deinit();
@@ -1378,6 +1405,11 @@ pub const Game = struct {
         // One read may carry several newline-separated commands (piped input).
         var it = std.mem.tokenizeAny(u8, chunk, "\r\n");
         while (it.next()) |line| self.runAdminLine(line);
+    }
+
+    fn pollWebui(self: *Game) void {
+        // Non-blocking HTTP; at most one request per poll call (WU0).
+        self.webui.poll();
     }
 
     /// Collects console output lines into a scratch buffer for one reply.
@@ -5470,6 +5502,9 @@ pub const Game = struct {
             var info_n: u32 = 0;
             while (info_n < 8) : (info_n += 1) self.info_tcp.poll();
             self.pollAdmin();
+            // A few webui polls per tick (accept + serve); work stays off sim sections.
+            var web_n: u32 = 0;
+            while (web_n < 4) : (web_n += 1) self.pollWebui();
         }
 
         const dt: f32 = 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second));

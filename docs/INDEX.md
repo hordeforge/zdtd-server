@@ -47,6 +47,14 @@ wins**. Refresh inventory docs when closing work.
 | [PLUGIN_API.md](PLUGIN_API.md) | Native plugin design (proposed) |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 
+## Ops / UI
+
+| Doc | Role |
+|---|---|
+| [APM.md](APM.md) | Native metrics harness |
+| [WEBUI.md](WEBUI.md) | Operator web UI design (HTMX + Alpine; design only) |
+| [AUTHORITY.md](AUTHORITY.md) | C2S gates (admin/webui must not bypass) |
+
 ## Agent prompts
 
 | Doc | Role |

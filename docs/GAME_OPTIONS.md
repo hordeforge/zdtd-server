@@ -12,7 +12,7 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 
 | Source | Role |
 |---|---|
-| CLI (`--port`, `--admin-port`, `--world-name`, …) | Highest; overrides matching file keys |
+| CLI (`--port`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
 
@@ -52,6 +52,16 @@ Startup prints a one-line effective summary (`password=set|open`, never the secr
 | `GameName` / `GameWorld` | zdtd / empty | string | world identity / stock map folder under `--game-dir` |
 | `AdminPort` | 0 | u16 | unauthenticated admin TCP on 127.0.0.1; 0 = off |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
+
+### Web UI (CLI only for WU0; not serverconfig yet)
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--webui-port` | 0 | HTTP ops UI; 0 = off. Requires `--webui-secret`. Design: [WEBUI.md](WEBUI.md) |
+| `--webui-bind` | `127.0.0.1` | Loopback default; `0.0.0.0` is opt-in (firewall required) |
+| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / `?token=`; refuse listen if port set and secret empty |
+
+`/healthz` is unauthenticated liveness. All other routes need the secret (WU0).
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the

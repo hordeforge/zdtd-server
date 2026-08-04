@@ -1,10 +1,9 @@
 //! Stock game config asset loaders (quests, blocks, items, …).
 //!
 //! Dependency direction: may import util and pure ecs types (QuestKind,
-//! InvSlot, Kind) for catalog → sim mapping. Must not import world or server.
-//! Wire body builders belong in wire/; do not grow assets → wire encode surface
-//! (signs.zig still uses wire/binary for SignData batch encode; prefer moving
-//! that encode into wire when next touched).
+//! InvSlot, Kind) for catalog → sim mapping. Must not import world, server,
+//! or wire. Wire body builders belong in wire/ (SignData batch encode lives
+//! in wire/stock_sign.zig).
 
 pub const xml_util = @import("xml_util.zig");
 pub const unity_hash = @import("unity_hash.zig");
@@ -56,5 +55,4 @@ test {
     _ = paths;
     _ = xml_patch;
     _ = blocks_nim;
-    _ = @import("../util/io_fs.zig");
 }

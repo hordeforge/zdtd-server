@@ -14,8 +14,10 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0007](0007-player-inventory-c2s-trust.md) | Player inventory C2S trust (interim) | accepted |
 | [0008](0008-serialize-once-interest.md) | Serialize-once interest fan-out | accepted |
 | [0009](0009-dynamic-package-ids.md) | Dynamic package name → id maps | accepted |
+| [0010](0010-data-config-zig-plugins.md) | Stock data + config + Zig systems; Wasm guest mods later | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),
+[HARDCODE_AUDIT.md](../HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0005),
 [INDEX.md](../INDEX.md).

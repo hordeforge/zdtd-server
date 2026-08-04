@@ -4,8 +4,17 @@
 
 const std = @import("std");
 
+/// `std.Io.Threaded` bookkeeping only. Always page_allocator so concurrent
+/// callers (parallel chunk save, overlapping FS helpers) never share a
+/// DebugAllocator/GPA with Threaded.init. Payload/list buffers still use the
+/// caller allocator where the API returns owned memory.
+fn ioThreaded() std.Io.Threaded {
+    return std.Io.Threaded.init(std.heap.page_allocator, .{});
+}
+
 pub fn mkdirPath(allocator: std.mem.Allocator, rel: []const u8) void {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     // Best-effort: parent may already exist.
@@ -17,7 +26,8 @@ pub fn mkdirPathSimple(rel: []const u8) void {
 }
 
 pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []const u8) !void {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     if (std.mem.lastIndexOfScalar(u8, rel_path, '/')) |sl| {
@@ -32,7 +42,7 @@ pub fn writeFileSimple(rel_path: []const u8, data: []const u8) !void {
 
 /// List file basenames in `dir_path`. Caller frees each name and the slice.
 pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]const u8 {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
@@ -53,7 +63,7 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
 
 /// Read entire file. Caller frees.
 pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     return try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .unlimited);
@@ -61,7 +71,8 @@ pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 
 /// Read up to `buf.len` bytes into `buf`. Returns slice of bytes read.
 pub fn readFileInto(allocator: std.mem.Allocator, path: []const u8, buf: []u8) ![]u8 {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     return try std.Io.Dir.cwd().readFile(io, path, buf);
@@ -69,7 +80,8 @@ pub fn readFileInto(allocator: std.mem.Allocator, path: []const u8, buf: []u8) !
 
 /// True if path can be opened for reading as a file.
 pub fn fileExists(allocator: std.mem.Allocator, path: []const u8) bool {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
@@ -84,7 +96,8 @@ pub fn fileExistsSimple(path: []const u8) bool {
 
 /// True if path is an existing directory (or can be opened as one).
 pub fn dirExists(allocator: std.mem.Allocator, path: []const u8) bool {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return false;
@@ -98,7 +111,8 @@ pub fn dirExistsSimple(path: []const u8) bool {
 
 /// Best-effort delete; ignores missing path.
 pub fn deleteFile(allocator: std.mem.Allocator, path: []const u8) void {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     std.Io.Dir.cwd().deleteFile(io, path) catch {};
@@ -110,7 +124,8 @@ pub fn deleteFileSimple(path: []const u8) void {
 
 /// Read symlink target into `buf`. Returns slice of `buf` or error.
 pub fn readLinkAbsolute(allocator: std.mem.Allocator, absolute_path: []const u8, buf: []u8) ![]u8 {
-    var threaded = std.Io.Threaded.init(allocator, .{});
+    _ = allocator;
+    var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     const n = try std.Io.Dir.readLinkAbsolute(io, absolute_path, buf);
