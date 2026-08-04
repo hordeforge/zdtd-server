@@ -125,6 +125,23 @@ pub const ItemTable = struct {
     }
 
     /// True if item is ItemActionEat consumable (or builtin food/medicine).
+    /// True if absolute stock type maps to an eatable def (or food*/drink* name).
+    pub fn isEatStockType(self: *const ItemTable, stock_type: i32) bool {
+        if (stock_type == 0) return false;
+        const eid = self.ecsIdFromStockType(stock_type);
+        if (eid != 0 and self.isEat(eid)) return true;
+        // Name from parallel stock arrays when reverse id is 0.
+        for (self.stock_types, 0..) |st, i| {
+            if (st != stock_type) continue;
+            if (i >= self.stock_names.len) break;
+            const n = self.stock_names[i];
+            if (n.len >= 4 and (std.mem.startsWith(u8, n, "food") or std.mem.startsWith(u8, n, "drink")))
+                return true;
+            break;
+        }
+        return false;
+    }
+
     pub fn isEat(self: *const ItemTable, item_id: u16) bool {
         if (self.byId(item_id)) |d| {
             if (d.is_eat) return true;

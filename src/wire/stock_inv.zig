@@ -682,16 +682,19 @@ pub fn applyPlayerInventoryBody(
 /// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
 /// equipment ItemValue array, bag stacks (each gated by a bool).
 /// Best-effort count of eatable units in a PlayerInventory body (toolbelt+bag).
+/// `is_eat_stock` is keyed by absolute stock type (not ECS id) so reverse failures
+/// still see foodCanChili etc. `first_ecs` is reverse(first stock type) when possible.
 pub fn countEatableInPlayerInventoryBody(
     body: []const u8,
     reverse: ?ReverseResolver,
     ctx: ?*anyopaque,
-    is_eat: *const fn (ctx: ?*anyopaque, item_id: u16) bool,
-) struct { total: u32, first_id: u16 } {
+    is_eat_stock: *const fn (ctx: ?*anyopaque, stock_type: i32) bool,
+) struct { total: u32, first_stock: i32, first_ecs: u16 } {
     var r: binary.Reader = .{ .data = body };
     var total: u32 = 0;
-    var first_id: u16 = 0;
-    const has_tb = r.readBool() catch return .{ .total = 0, .first_id = 0 };
+    var first_stock: i32 = 0;
+    var first_ecs: u16 = 0;
+    const has_tb = r.readBool() catch return .{ .total = 0, .first_stock = 0, .first_ecs = 0 };
     if (has_tb) {
         var slots: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
         const n = readItemStackList(&r, slots[0..]) catch 0;
@@ -699,29 +702,31 @@ pub fn countEatableInPlayerInventoryBody(
         while (i < n) : (i += 1) {
             const s = slots[i];
             if (s.type_id == 0 or s.count == 0) continue;
-            const eid: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
-            if (eid == 0) continue;
-            if (!is_eat(ctx, eid)) continue;
+            if (!is_eat_stock(ctx, s.type_id)) continue;
             total += s.count;
-            if (first_id == 0) first_id = eid;
+            if (first_stock == 0) {
+                first_stock = s.type_id;
+                if (reverse) |rv| first_ecs = rv(ctx, s.type_id);
+            }
         }
     }
-    const has_bag = r.readBool() catch return .{ .total = total, .first_id = first_id };
+    const has_bag = r.readBool() catch return .{ .total = total, .first_stock = first_stock, .first_ecs = first_ecs };
     if (has_bag) {
-        _ = r.readByte() catch return .{ .total = total, .first_id = first_id };
-        const bag_n = r.readU16() catch return .{ .total = total, .first_id = first_id };
+        _ = r.readByte() catch return .{ .total = total, .first_stock = first_stock, .first_ecs = first_ecs };
+        const bag_n = r.readU16() catch return .{ .total = total, .first_stock = first_stock, .first_ecs = first_ecs };
         var i: usize = 0;
         while (i < bag_n) : (i += 1) {
             const s = readItemStack(&r) catch break;
             if (s.type_id == 0 or s.count == 0) continue;
-            const eid: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
-            if (eid == 0) continue;
-            if (!is_eat(ctx, eid)) continue;
+            if (!is_eat_stock(ctx, s.type_id)) continue;
             total += s.count;
-            if (first_id == 0) first_id = eid;
+            if (first_stock == 0) {
+                first_stock = s.type_id;
+                if (reverse) |rv| first_ecs = rv(ctx, s.type_id);
+            }
         }
     }
-    return .{ .total = total, .first_id = first_id };
+    return .{ .total = total, .first_stock = first_stock, .first_ecs = first_ecs };
 }
 
 fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {

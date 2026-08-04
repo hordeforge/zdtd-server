@@ -986,6 +986,19 @@ pub const Game = struct {
         c.move_y = y;
         c.move_z = z;
         c.move_tick = self.tick_n;
+        // Pressure plate / tripwire: step on foot cell or body cell.
+        self.tryActivateTriggerAtPlayer(x, y, z);
+    }
+
+    /// Actuate power-grid trigger nodes under the player (foot + body). Fail closed
+    /// inside electric.activateTriggerAt (must be is_trigger + powered).
+    fn tryActivateTriggerAtPlayer(self: *Game, x: f32, y: f32, z: f32) void {
+        const bx: i32 = @intFromFloat(@floor(x));
+        const by: i32 = @intFromFloat(@floor(y));
+        const bz: i32 = @intFromFloat(@floor(z));
+        // Foot cell (block under feet) then body cell (plate at standing height).
+        _ = self.sim.power.activateTriggerAt(bx, by - 1, bz);
+        _ = self.sim.power.activateTriggerAt(bx, by, bz);
     }
 
     fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
@@ -1085,8 +1098,10 @@ pub const Game = struct {
         var id_ctx: IdCtx = .{ .t = &g.maxdamage };
         const resolved = invsys.itemToBlockResolved(item_id, iname, IdCtx.lookup, &id_ctx);
         if (resolved != 0) return resolved;
-        if (g.maxdamage.id_by_name.count() > 0) return 0;
-        return invsys.itemToBlock(item_id);
+        // Offline map for known placeables when dump misses the shape name.
+        const offline = invsys.itemToBlock(item_id);
+        if (offline != 0) return offline;
+        return 0;
     }
 
     /// ECS fuel hook: items.xml FuelValue (0 = not a fuel item).
@@ -1203,31 +1218,12 @@ pub const Game = struct {
         c.deco_streamed_n += 1;
     }
 
-    /// Stream DecoObjects (plants/trees) around spawn. Uses AssignIds idByName;
-    /// if dump lacks tree names, send empty firstPackage only (fail closed).
+    /// DecoUpdate: firstPackage=true allocates DecoManager.loadedDecos. Object
+    /// payloads currently NRE DecoManager.Read on V3.1.0 client (see connect log).
+    /// Fail closed: empty first package only until deco wire matches client Read.
     fn sendDecoAroundSpawn(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, first: bool) !void {
-        const ids = self.decoTreeIds();
-        var objs: [48]packages.stock_deco.DecoObj = undefined;
-        var n: usize = 0;
-        if (ids.ok) {
-            n = packages.stock_deco.generateAroundIds(
-                &objs,
-                wx - 48,
-                wz - 48,
-                wx + 48,
-                wz + 48,
-                decoHeightAt,
-                self,
-                29,
-                ids.oak,
-                ids.dead,
-            );
-        }
         if (first) {
-            const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, true, objs[0..n]);
-            try self.sendGame(peer, "NetPackageDecoUpdate", body);
-        } else if (n > 0) {
-            const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, false, objs[0..n]);
+            const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, true, &.{});
             try self.sendGame(peer, "NetPackageDecoUpdate", body);
         }
         for (&self.clients) |*cl| {
@@ -1243,32 +1239,14 @@ pub const Game = struct {
             }
             break;
         }
-        std.debug.print("zdtd: DecoUpdate first={} objs={d} oak={d}\n", .{ first, n, ids.oak });
+        if (first) std.debug.print("zdtd: DecoUpdate first=true objs=0 (suppressed; avoid DecoManager.Read NRE)\n", .{});
     }
 
-    /// Incremental deco for one newly streamed terrain chunk (never firstPackage).
+    /// Incremental deco suppressed (same NRE as sendDecoAroundSpawn). Mark only.
     fn sendDecoForTerrainChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
+        _ = self;
+        _ = peer;
         if (clientHasDeco(c, packages.makeChunkKey(cx, cz))) return;
-        const ids = self.decoTreeIds();
-        if (ids.ok) {
-            var objs: [16]packages.stock_deco.DecoObj = undefined;
-            const n = packages.stock_deco.generateAroundIds(
-                &objs,
-                cx * 16,
-                cz * 16,
-                cx * 16 + 16,
-                cz * 16 + 16,
-                decoHeightAt,
-                self,
-                31,
-                ids.oak,
-                ids.dead,
-            );
-            if (n > 0) {
-                const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, false, objs[0..n]);
-                try self.sendGame(peer, "NetPackageDecoUpdate", body);
-            }
-        }
         clientAddDeco(c, packages.makeChunkKey(cx, cz));
     }
 
@@ -2038,14 +2016,18 @@ pub const Game = struct {
                 \\  give <slot> <item> [count]  tele <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
                 \\  kill <id>  killall|ka  spawnentity|se <slot|entityId> <class>
-                \\  save  saveworld|sa  shutdown  quit
+                \\  save  saveworld|sa  shutdown  quit|exit
                 \\
             ),
             .unknown => self.adminReply("unknown command. 'help' for list.\n"),
             .bad_args => |verb| {
-                var eb: [96]u8 = undefined;
-                const s = std.fmt.bufPrint(&eb, "bad arguments to '{s}'. 'help' for usage.\n", .{verb}) catch
-                    "bad arguments. 'help' for usage.\n";
+                var eb: [128]u8 = undefined;
+                const s = if (admin_mod.usageFor(verb)) |u|
+                    std.fmt.bufPrint(&eb, "bad arguments to '{s}'. usage: {s}\n", .{ verb, u }) catch
+                        "bad arguments. 'help' for usage.\n"
+                else
+                    std.fmt.bufPrint(&eb, "bad arguments to '{s}'. 'help' for usage.\n", .{verb}) catch
+                        "bad arguments. 'help' for usage.\n";
                 self.adminReply(s);
             },
             .status => {
@@ -2613,7 +2595,15 @@ pub const Game = struct {
     }
 
     /// Process pending UDP events (acks free window; data delivered to onData).
+    /// Reentrant calls (sendGame / pump_fn mid-onData) only drain control so the
+    /// reliable window can free without nested onData corrupting join SM state.
     fn pollNetOnce(self: *Game) void {
+        if (self.pumping) {
+            self.net.drainControl(&self.recv_buf, 24);
+            return;
+        }
+        self.pumping = true;
+        defer self.pumping = false;
         var n: u32 = 0;
         while (n < 24) : (n += 1) {
             const ev = self.net.poll(&self.recv_buf) catch |err| {
@@ -2896,9 +2886,11 @@ pub const Game = struct {
     }
 
     fn peerIpKey(peer: *const ln_peer.Peer) u32 {
-        // sockaddr_in: family u16, port u16, addr u32 at offset 4 (linux).
-        const bytes: *const [16]u8 = @ptrCast(&peer.addr);
-        return std.mem.readInt(u32, bytes[4..8], .big);
+        // Host-order IPv4 key for ban/rate tables (loopback = 0x7f000001).
+        return switch (peer.addr) {
+            .ip4 => |a| std.mem.readInt(u32, &a.bytes, .big),
+            .ip6 => 0, // IPv6 ban/rate not implemented; skip throttle
+        };
     }
 
     /// Stock ~500ms/IP; return true if join should be rejected.
@@ -2952,9 +2944,7 @@ pub const Game = struct {
 
     fn pumpAcks(ctx: ?*anyopaque) void {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
-        if (self.pumping) return; // no reentrant flood when onData sends mid-pump
-        self.pumping = true;
-        defer self.pumping = false;
+        // pollNetOnce reentrancy: control-only drain when already pumping.
         self.pollNetOnce();
     }
 
@@ -3211,17 +3201,23 @@ pub const Game = struct {
             std.debug.print("zdtd: WorldInitInfoRequest -> empty entity={d}\n", .{c.entity_id});
             return;
         }
-        // createWorld posts DynamicClientArrive. Stock then DoSpawn → RequestToSpawnPlayer;
-        // that package often fails our envelope parse (seen as unparsed ~102B). Treat
-        // DynamicClientArrive as the spawn trigger and send the join bundle (PlayerId…).
+        // createWorld posts DynamicClientArrive. Prefer RequestToSpawnPlayer for the
+        // join bundle. Re-sending WorldInitInfo after PlayerId restarts createWorld
+        // mid-session and leaves the stock client on "Creating player".
         if (std.mem.eql(u8, name, "NetPackageDynamicClientArrive")) {
-            const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
-            try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
-            std.debug.print("zdtd: DynamicClientArrive -> WorldInitInfo empty entity={d}\n", .{c.entity_id});
-            if (!c.entered and c.entity_id > 0) {
+            if (c.entered) {
+                // Already in-world; stock uses this as a late notify only.
+                return;
+            }
+            // Fallback spawn path when RequestToSpawnPlayer never arrives / fails parse.
+            if (c.entity_id > 0) {
                 c.view_radius = if (c.view_radius < 1) self.view_radius else c.view_radius;
                 try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
-                std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn) entity={d}\n", .{c.entity_id});
+                std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
+            } else {
+                const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
+                try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
+                std.debug.print("zdtd: DynamicClientArrive -> WorldInitInfo empty (pre-spawn) entity={d}\n", .{c.entity_id});
             }
             return;
         }
@@ -3400,27 +3396,24 @@ pub const Game = struct {
                 after_total += sl.count;
                 if (first_eat_id == 0) first_eat_id = sl.item_id;
             }
+            // Body-side eatable count by stock type (reverse-independent).
             const body_eat = packages.stock_inv.countEatableInPlayerInventoryBody(
                 body,
                 reverseItemType,
                 self,
                 struct {
-                    fn isEat(ctx: ?*anyopaque, item_id: u16) bool {
+                    fn isEatStock(ctx: ?*anyopaque, stock_type: i32) bool {
                         const g: *Game = @ptrCast(@alignCast(ctx.?));
-                        return g.items.isEat(item_id);
+                        return g.items.isEatStockType(stock_type);
                     }
-                }.isEat,
+                }.isEatStock,
             );
-            // Prefer body-side count when reverse left ECS empty but wire had food.
-            if (after_total == 0 and body_eat.total > 0) {
-                after_total = body_eat.total;
-            }
-            if (first_eat_id == 0) first_eat_id = body_eat.first_id;
+            if (first_eat_id == 0 and body_eat.first_ecs != 0) first_eat_id = body_eat.first_ecs;
 
             if (self.sim.mask[ps].health and c.entity_id > 0) {
                 var ate_any = false;
                 var units_left: u32 = 4;
-                // Path A: per-id loss within this package.
+                // Path A: per-id loss within this package (ECS before → after).
                 for (before[0..bn]) |e| {
                     if (units_left == 0) break;
                     var after_n: u32 = 0;
@@ -3439,12 +3432,32 @@ pub const Game = struct {
                         units_left -= 1;
                     }
                 }
-                // Path B: aggregate drop vs last_eatable / baseline.
+                // Path B: ECS aggregate drop vs baseline.
                 if (!ate_any and baseline_total > after_total and units_left > 0) {
                     var lost = baseline_total - after_total;
                     if (lost > units_left) lost = units_left;
                     var eid: u16 = first_eat_id;
                     if (eid == 0 and bn > 0) eid = before[0].id;
+                    if (eid == 0 and body_eat.first_ecs != 0) eid = body_eat.first_ecs;
+                    if (eid == 0) {
+                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
+                    }
+                    if (eid == 0) eid = 2;
+                    var u: u32 = 0;
+                    while (u < lost) : (u += 1) {
+                        const props = eatProps(@ptrCast(self), eid);
+                        const r = invsys.applyEatProps(&self.sim, ps, props);
+                        if (!r.ate) break;
+                        ate_any = true;
+                        units_left -= 1;
+                    }
+                }
+                // Path C: body stock-type count dropped vs last_eatable (primary live path).
+                if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
+                    var lost = c.last_eatable_units - body_eat.total;
+                    if (lost > units_left) lost = units_left;
+                    var eid: u16 = body_eat.first_ecs;
+                    if (eid == 0 and first_eat_id != 0) eid = first_eat_id;
                     if (eid == 0) {
                         if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
                     }
@@ -3461,38 +3474,20 @@ pub const Game = struct {
                         units_left -= 1;
                     }
                 }
-                // Path C: body reported fewer eatables than last_eatable (seed via body).
-                if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
-                    var lost = c.last_eatable_units - body_eat.total;
-                    if (lost > units_left) lost = units_left;
-                    var eid: u16 = body_eat.first_id;
-                    if (eid == 0) {
-                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
-                    }
-                    if (eid == 0) eid = 2;
-                    var u: u32 = 0;
-                    while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), eid);
-                        const r = invsys.applyEatProps(&self.sim, ps, props);
-                        if (!r.ate) break;
-                        ate_any = true;
-                        units_left -= 1;
-                    }
-                }
                 if (ate_any) {
                     const h = self.sim.health[ps];
-                    std.debug.print("zdtd: ItemActionEat stack-loss food={d:.1} before={d} after={d} last={d} body_eat={d}\n", .{
-                        h.food, before_total, after_total, c.last_eatable_units, body_eat.total,
+                    std.debug.print("zdtd: ItemActionEat stack-loss food={d:.1} before={d} after={d} last={d} body_eat={d} stock0={d}\n", .{
+                        h.food, before_total, after_total, c.last_eatable_units, body_eat.total, body_eat.first_stock,
                     });
                     try self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max);
-                } else if (before_total != after_total or body_eat.total != c.last_eatable_units) {
-                    std.debug.print("zdtd: PI eatable before={d} after={d} last={d} body={d} body_eat={d}\n", .{
-                        before_total, after_total, c.last_eatable_units, body.len, body_eat.total,
+                } else if (body_eat.total != c.last_eatable_units or before_total != after_total) {
+                    std.debug.print("zdtd: PI eatable before={d} after={d} last={d} body={d} body_eat={d} stock0={d}\n", .{
+                        before_total, after_total, c.last_eatable_units, body.len, body_eat.total, body_eat.first_stock,
                     });
                 }
             }
-            // Track max of ECS and body so seed push sticks even if reverse drops.
-            c.last_eatable_units = @max(after_total, body_eat.total);
+            // Body-driven baseline so seed→eat works even when reverse leaves ECS empty.
+            c.last_eatable_units = body_eat.total;
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageHoldingItem")) {
@@ -3637,6 +3632,7 @@ pub const Game = struct {
                 if (!self.sim.mask[ps].inventory) break :blk 0;
                 break :blk self.sim.inventory[ps].slots[tx.a].item_id;
             };
+            const ledger_before = self.sim.inv_ledger.total;
             if (tx.op == @intFromEnum(invsys.Op.craft)) {
                 r = .{ .ok = self.tryCraft(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
             } else {
@@ -3677,6 +3673,9 @@ pub const Game = struct {
                     r.ok = false;
                 }
             }
+            // Refunds via give() also append; count all ledger appends for this C2S.
+            const ledger_delta = self.sim.inv_ledger.total -% ledger_before;
+            if (ledger_delta != 0) self.harness.counters.add(.inv_ledger_events, ledger_delta);
             var head_buf: [16]u8 = undefined;
             const head = try packages.buildInvTxResponseHead(&head_buf, r.ok, r.dropped_entity);
             // Stock inventory (toolbelt 10 + bag 45 + equip) needs ~0.5–3 KiB.
@@ -4709,6 +4708,8 @@ pub const Game = struct {
 
     fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
         // Snap to solid surface (callers may pass raw primarySpawn Y that floats above DTM).
+        // sy is intentionally ignored: DTM surface is authoritative for join/respawn.
+        _ = sy;
         const surf = self.spawnSurface(sx, sz);
         const sx2 = surf.x;
         const sy2 = surf.y;
@@ -4808,12 +4809,13 @@ pub const Game = struct {
                 try self.sendSpawnArea(peer, sx2, sz2, r);
             }
             // Stock multiplayer join uses EnterMultiplayer (4), not NewGame (0).
+            // Position must match PDF / surface snap (sx2/sy2/sz2), not raw caller Y.
             const spawned = try packages.buildSpawnedBody(
                 self.body_buf[256..384],
                 @intFromEnum(packages.RespawnType.enter_multiplayer),
-                sx,
-                sy,
-                sz,
+                sx2,
+                sy2,
+                sz2,
                 eid,
             );
             try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
@@ -4823,13 +4825,13 @@ pub const Game = struct {
             const spawned = try packages.buildSpawnedBody(
                 self.body_buf[256..384],
                 @intFromEnum(packages.RespawnType.died),
-                sx,
-                sy,
-                sz,
+                sx2,
+                sy2,
+                sz2,
                 eid,
             );
             try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
-            if (packages.buildEntityTeleportBody(&self.body_buf, eid, @floatFromInt(sx), @floatFromInt(sy), @floatFromInt(sz), 0, 0, 0, true)) |tb| {
+            if (packages.buildEntityTeleportBody(&self.body_buf, eid, @as(f32, @floatFromInt(sx2)), @as(f32, @floatFromInt(sy2)) + 0.08, @as(f32, @floatFromInt(sz2)), 0, 0, 0, true)) |tb| {
                 try self.sendGame(peer, "NetPackageEntityTeleport", tb);
             } else |_| {}
             try self.sendHoldingOnly(peer, c);
@@ -5297,6 +5299,9 @@ pub const Game = struct {
             return false;
         }
         if (self.sim.mask[ps].dirty) self.sim.dirty[ps].inv = true;
+        const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
+        const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
+        self.sim.inv_ledger.record(p, out_id, d, .craft);
         // Quest craft progress when objective matches recipe name.
         systems.questOnCraft(&self.sim, peer_slot, recipe.name);
         return true;
@@ -6545,14 +6550,14 @@ pub const Game = struct {
             self.net.next_local_id += 1;
             p.authenticated = false;
             p.capture = capture;
-            var storage: std.os.linux.sockaddr.storage = undefined;
-            const in_ptr: *std.os.linux.sockaddr.in = @ptrCast(@alignCast(&storage));
-            in_ptr.* = .{
-                .family = std.os.linux.AF.INET,
-                .port = std.mem.nativeToBig(u16, @intCast(10000 + @as(i32, p.local_id))),
-                .addr = std.mem.nativeToBig(u32, 0x7f000001),
+            const fake_port: u16 = @intCast(10000 + @as(u16, @intCast(p.local_id)));
+            const addr: @import("../litenet/udp_socket.zig").IpAddress = .{
+                .ip4 = .{
+                    .bytes = .{ 127, 0, 0, 1 },
+                    .port = fake_port,
+                },
             };
-            p.setAddr(&storage, @sizeOf(std.os.linux.sockaddr.in));
+            p.setAddr(&addr);
             peer_ptr = p;
             break;
         }
