@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q; Food +5 gate) · 33/33 C2S · core loop playable · WebUI WU0–WU2 · phase_gate + movement envelope · static plugins + P3 Res/Query/Cmd. Open: full chili +15 S2C proof, IsSpawned lag, deco content (DecoManager.Read NRE). Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q) · 33/33 C2S · WebUI/http · phase_gate + movement · plugins + P3 ECS · evidence ring + throttle. Open: chili full +15 proof on live client, deco objects ([DECO_NRE.md](docs/DECO_NRE.md)), IsSpawned soak. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ### Freeze (core playable)
 
@@ -20,6 +20,7 @@ Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE
 
 Infrastructure and authority surface already in tree (do not re-open as gaps):
 
+- [x] **Review follow-ups**: STATUS/TODO hygiene; eat near-max soft so Food S2C rises; double PlayerSpawned on join; `evidence` ring + admin dump; flood counters; [DECO_NRE.md](docs/DECO_NRE.md)
 - [x] **WebUI HTTP** WU0–WU2 (`server/webui.zig`): dashboard, `/api/apm.json`, POST `/api/cmd`, CSRF, cookie login
 - [x] **`util/tcp_listen`**: std.Io.net listen for admin / GSI / webui (no raw linux accept loops in callers)
 - [x] **`phase_gate.zig`**: per-package connecting|joined|playing matrix + `phase_rejects`
@@ -67,7 +68,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Parity polish (client-visible)
 
-- [ ] Deco trees: keep open; **blocked on DecoManager.Read NRE RE** (empty firstPackage only; object payloads crash V3.1.0 client)
+- [ ] Deco trees: **blocked on DecoManager.Read NRE** (empty firstPackage only). RE plan: [docs/DECO_NRE.md](docs/DECO_NRE.md)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
@@ -534,7 +535,8 @@ disjoint writes*, not "everything lock-free."
 - [ ] **Path / sleeper / TE loot as job batches**  
   Jobs helper + pool; results applied serially in phase order.
 
-- [ ] **Parallel chunk save** (have first cut) - extend to async flush without
+- [x] **Parallel chunk save (first cut)** - `store.saveChunkSlice` + `parallel.forRanges`
+- [ ] **Async chunk flush** - extend save without hitch on large dirty sets
   blocking tick; double-buffer dirty set.
 
 - [ ] **Read-mostly snapshots**  
@@ -548,7 +550,8 @@ disjoint writes*, not "everything lock-free."
   Cross-shard entity migrate is a product decision, not a default.
 - [ ] **Lock-free queues** at net edges (C2S parsed packets in, S2C frames out)
   if contention shows; keep sim apply single-threaded.
-- [ ] **SIMD** on hot SoA columns (distance checks, mask scans) after profiles
+- [x] **SIMD packing** - `stock_chunk.zig` `@Vector` uniform/pack helpers
+- [ ] **SIMD distance/mask scans** on SoA AI/interest after profiles
   say so; micro-opts second to interest/encode structure.
 - [ ] **io_uring / recvmmsg batching** on Linux UDP path when packet rate binds.
 
@@ -699,15 +702,13 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 - [x] **Per-peer movement ledger** - last accepted pos + tick + envelope rejects (full sample ring still optional)  
 - [x] **Combat ledger** - last_damage_ns + damage_burst rate gate
 - [x] **Inv ledger** - cause-tagged ring (`ecs/inv_ledger.zig`; InvTx/craft/loot/give)
-- [ ] **Evidence JSONL** - schema version, time, peer/entity pseudonym, detector
-  id, severity, observed vs bound, action; no raw packets, no secrets, no IP by
-  default (hash/pseudonym); optional hash chain later  
+- [x] **Evidence ring + JSONL lines** - `server/evidence.zig` ring; admin `evidence` dump; phase/movement record; file append optional later
 - [x] **Admin visibility** - `guardstats` dumps phase/ownership/bounds/movement/
   decode rejects; webui Errors panel; kick rule id when Enforce exists still open  
 
 **P4.3 - Soft / availability (Observe, then throttle)**
 
-- [ ] Flood / churn signals (reconnect rate, malformed decode rate)  
+- [x] Flood / churn signals (first cut) - `reconnects`, `c2s_malformed`, evidence flood det
 - [ ] Weak farming/efficiency signals: record only, never kick  
 - [ ] Global load shed: drop soft observes and defer non-essential streams  
 

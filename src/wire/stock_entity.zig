@@ -11,12 +11,8 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
 
+/// EntityClass hashes: single source `assets/unity_hash.zig` (Unity Mono GetHashCode).
 const unity_hash = @import("../assets/unity_hash.zig");
-
-/// EntityClass.list keys are `name.GetHashCode()` (Unity Mono / .NET string hash),
-/// not XML order and not modern randomized .NET hashes. Implementation:
-/// `assets/unity_hash.zig` (re-exported here for stable wire API).
-pub const unityStringHash = unity_hash.unityStringHash;
 
 pub const class_player_male = unity_hash.class_player_male;
 pub const class_player_female = unity_hash.class_player_female;

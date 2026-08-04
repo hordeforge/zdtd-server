@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-05  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **434** total (use `zig build test` only; do not run the cached test binary with Zig's `--listen=-` IPC by hand)  
+**Unit tests:** `zig build test` → **~440+** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -26,7 +26,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
 | Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md) |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
-| Unit tests | **PASS** | 434/434 as of 2026-08-05 (`zig build test` / direct test binary). Inventory place wood + craft scenarios green (`PASS inventory`, `PASS craft+explosion+lock`). |
+| Unit tests | **PASS** | 2026-08-05 wave: inventory place wood + craft scenarios green; snapshot/EAI/evidence/webui http added (run `zig build test` for exact count). |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |

@@ -23,7 +23,7 @@ tree + scorecard. Complementary to idiomatic Zig / `std.Io` migration.
 | `Game` orchestration | `server/game.zig` | domain (large) | main | server |
 | LiteNet UDP | `litenet/udp_socket` | `std.Io.net` + thin posix | listen/tick | litenet |
 | admin / GSI / webui TCP | `util/tcp_listen` | `IpAddress.listen` + poll/accept4 | optional ports | util/server |
-| `util/clock` / `apm/clock` | monotonic time | `posix.system.clock_gettime` (vDSO) | metrics/tick | util |
+| `util/clock` only | monotonic time | `posix.system.clock_gettime` (vDSO) | metrics/tick | util |
 
 Deleted this pass: `util/owned_arena.zig` (zero production call sites; only
 pulled into assets test root). `linux_fs` module: already absent (no file).

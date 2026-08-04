@@ -135,6 +135,7 @@ pub const Command = union(enum) {
     status,
     /// Dump C2S authority reject counters (phase/ownership/bounds/movement/decode).
     guardstats,
+    evidence,
     /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
     apm,
     save,
@@ -202,6 +203,7 @@ pub fn parseCommand(line: []const u8) Command {
         return if (it.next() == null) .help else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "guardstats") or std.mem.eql(u8, cmd, "gs")) return if (it.next() == null) .guardstats else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "evidence") or std.mem.eql(u8, cmd, "ev")) return if (it.next() == null) .evidence else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "kick")) {
@@ -359,6 +361,11 @@ test "parse inv" {
 test "parse guardstats" {
     try std.testing.expect(parseCommand("guardstats") == .guardstats);
     try std.testing.expect(parseCommand("gs") == .guardstats);
+}
+
+test "parse evidence" {
+    try std.testing.expect(parseCommand("evidence") == .evidence);
+    try std.testing.expect(parseCommand("ev") == .evidence);
 }
 
 test "parse apm" {

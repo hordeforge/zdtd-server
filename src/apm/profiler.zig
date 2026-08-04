@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const metrics = @import("metrics.zig");
-const clock = @import("clock.zig");
+const clock = @import("../util/clock.zig");
 
 pub const Section = enum(u8) {
     tick_total,

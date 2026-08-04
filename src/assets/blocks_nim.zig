@@ -1,6 +1,6 @@
 //! Prefab `.blocks.nim` local-id → block name table (Prefab name mapping).
 //! Catalog/asset parse (not world store). Use when TTS types are local indices
-//! rather than AssignIds. world/root re-exports for stable import paths.
+//! rather than AssignIds. Import `assets/blocks_nim.zig` only (not world).
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");

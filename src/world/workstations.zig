@@ -2,7 +2,7 @@
 //! Slots mirror TileEntityWorkstation arrays; craft tick advances the queue.
 //!
 //! Domain types (`QueueItem`, slot/queue caps) live here so `wire/stock_te`
-//! can import them without a world → wire cycle. Wire re-exports the same
+//! can import them without a world → wire cycle. Wire imports these types only.
 //! symbols for encode/decode callers.
 
 const std = @import("std");

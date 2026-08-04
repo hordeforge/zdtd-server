@@ -3,7 +3,7 @@
 const std = @import("std");
 const metrics = @import("metrics.zig");
 const profiler = @import("profiler.zig");
-const clock = @import("clock.zig");
+const clock = @import("../util/clock.zig");
 
 /// Instantaneous load gauges (not cumulative). Filled by the game before dump.
 pub const OpsGauges = struct {

@@ -4,7 +4,7 @@
 //! New join/tick/C2S behavior lands in `game.zig` (or extracted helpers beside
 //! it: `phase_gate`, `movement`, `c2s_text`); keep stock package bodies in
 //! `wire/` (via packages facade), sim rules in `ecs/`, map IO in `world/`.
-//! Mono clock is `util/clock` (not apm/clock).
+//! Mono clock: `util/clock` only.
 
 pub const game = @import("game.zig");
 pub const config = @import("config.zig");
@@ -17,6 +17,7 @@ pub const scenarios = @import("scenarios.zig");
 pub const phase_gate = @import("phase_gate.zig");
 pub const movement = @import("movement.zig");
 pub const c2s_text = @import("c2s_text.zig");
+pub const evidence = @import("evidence.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -34,4 +35,5 @@ test {
     _ = phase_gate;
     _ = movement;
     _ = c2s_text;
+    _ = evidence;
 }

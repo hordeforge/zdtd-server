@@ -168,7 +168,7 @@ test "deco plant/tree runtime block ids" {
     try std.testing.expectEqual(@as(u32, 24651), tree_winter_evergreen);
 }
 
-/// WorldChunkCache.MakeChunkKey(x, z). Shared with packages.makeChunkKey (re-export).
+/// WorldChunkCache.MakeChunkKey(x, z). Canonical definition; packages.makeChunkKey aliases this.
 pub fn makeChunkKey(cx: i32, cz: i32) i64 {
     const x = @as(i64, cx) & 0xFFFFFF;
     const z = @as(i64, cz) & 0xFFFFFF;

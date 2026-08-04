@@ -47,6 +47,7 @@ const server_config = @import("config.zig");
 const phase_gate = @import("phase_gate.zig");
 const movement = @import("movement.zig");
 const c2s_text = @import("c2s_text.zig");
+const evidence_mod = @import("evidence.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
 const plugin_mod = @import("../plugin/root.zig");
@@ -309,6 +310,8 @@ pub const Game = struct {
     plugins: plugin_mod.PluginHost = .{},
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},
+    /// P4 observe ring (admin `evidence` dumps JSONL lines).
+    evidence: evidence_mod.Ring = .{},
     tick_n: u64 = 0,
     running: bool = true,
     challenge_counter: u64 = 1,
@@ -1145,6 +1148,7 @@ pub const Game = struct {
             return .{ .x = x, .y = y, .z = z, .applied = true };
         }
         self.harness.counters.inc(.movement_rejects);
+        self.noteEvidence(peer.local_id, entity_id, .movement, .strong, movement.max_horizontal_speed_mps, movement.max_horizontal_speed_mps);
         // Rubber-band / speed-hack signal: counter always; log rate-limited so a
         // sticky client does not flood stderr while first/100th stay visible.
         const n = self.harness.counters.get(.movement_rejects);
@@ -2155,7 +2159,7 @@ pub const Game = struct {
         switch (cmd) {
             .help => self.adminReply(
                 \\commands:
-                \\  status  guardstats  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
+                \\  status  guardstats  evidence  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
                 \\  gettime|gt  settime|st <day|night|ticks|D H M>
                 \\  give <slot> <itemId> [count]  tele|tp <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
@@ -2206,16 +2210,24 @@ pub const Game = struct {
                 self.adminReply(s);
             },
             .guardstats => {
-                var sb: [320]u8 = undefined;
-                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d}\n", .{
+                var sb: [384]u8 = undefined;
+                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d} malformed={d} reconnects={d} evidence={d}\n", .{
                     self.harness.counters.get(.phase_rejects),
                     self.harness.counters.get(.ownership_rejects),
                     self.harness.counters.get(.bounds_rejects),
                     self.harness.counters.get(.movement_rejects),
                     self.harness.counters.get(.decode_rejects),
                     self.harness.counters.get(.c2s_throttle),
+                    self.harness.counters.get(.c2s_malformed),
+                    self.harness.counters.get(.reconnects),
+                    self.evidence.total,
                 }) catch return;
                 self.adminReply(s);
+            },
+            .evidence => {
+                var dump: [8192]u8 = undefined;
+                const n = self.evidence.dumpText(&dump);
+                if (n == 0) self.adminReply("evidence empty\n") else self.adminReply(dump[0..n]);
             },
             .apm => {
                 // Full harness dump without waiting for the minute JSON line or --ticks exit.
@@ -3461,6 +3473,7 @@ pub const Game = struct {
             const phase = phase_gate.phaseOf(c.joined, c.entered);
             if (!phase_gate.allowed(phase, name)) {
                 self.harness.counters.inc(.phase_rejects);
+                self.noteEvidence(peer.local_id, c.entity_id, .phase, .hard, 1, 0);
                 // First + every 100th: join-SM bugs show as phase spikes with no log.
                 const n = self.harness.counters.get(.phase_rejects);
                 if (n == 1 or n % 100 == 0) {
@@ -3504,6 +3517,7 @@ pub const Game = struct {
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
             try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
             const surf0 = self.spawnSurface(sp.x, sp.z);
+            const was_joined = c.joined;
             const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return;
             c.entity_id = eid;
             c.joined = true;
@@ -3514,6 +3528,10 @@ pub const Game = struct {
             // after RequestToEnterGame is sent from the client.
             self.refreshInfoPlayers();
             self.harness.counters.inc(.join_ok);
+            if (was_joined) {
+                self.harness.counters.inc(.reconnects);
+                self.noteEvidence(peer.local_id, eid, .flood, .info, 1, 0);
+            }
             // Name length only in logs (name stays on admin listplayers / webui).
             std.debug.print("zdtd: PlayerLogin name_len={d} entity={d} body={d}\n", .{ c.name_len, eid, body.len });
             return;
@@ -5122,6 +5140,27 @@ pub const Game = struct {
         return dx * dx + dy * dy + dz * dz <= r * r;
     }
 
+    fn noteEvidence(
+        self: *Game,
+        peer_local: i32,
+        entity_id: i32,
+        det: evidence_mod.Detector,
+        sev: evidence_mod.Severity,
+        observed: f32,
+        bound: f32,
+    ) void {
+        self.evidence.record(.{
+            .tick = self.tick_n,
+            .peer_local = peer_local,
+            .entity_id = entity_id,
+            .detector = det,
+            .severity = sev,
+            .observed = observed,
+            .bound = bound,
+        });
+        self.harness.counters.inc(.evidence_events);
+    }
+
     /// Refill + spend one inv token. False → caller should drop and count throttle.
     fn takeInvToken(self: *Game, c: *Client) bool {
         _ = self;
@@ -5333,13 +5372,25 @@ pub const Game = struct {
             try self.sendQuestNavObjects(peer, c.slot, eid);
             try self.sendHoldingOnly(peer, c);
             try self.sendPlayerVitals(peer, c);
+            // Latch IsSpawned before heavy chunk/entity stream (playtest saw
+            // vitals OK but IsSpawned=false when Spawned arrived late/lost).
+            {
+                const spawned_early = try packages.buildSpawnedBody(
+                    self.body_buf[256..384],
+                    @intFromEnum(packages.RespawnType.enter_multiplayer),
+                    sx2,
+                    sy2,
+                    sz2,
+                    eid,
+                );
+                try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned_early);
+            }
             try self.sendStockEntitySpawns(peer, c, sx, sz);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
             }
-            // Stock multiplayer join uses EnterMultiplayer (4), not NewGame (0).
-            // Position must match PDF / surface snap (sx2/sy2/sz2), not raw caller Y.
+            // Confirm Spawned after stream (EnterMultiplayer; pos = surface snap).
             const spawned = try packages.buildSpawnedBody(
                 self.body_buf[256..384],
                 @intFromEnum(packages.RespawnType.enter_multiplayer),

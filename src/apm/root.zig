@@ -1,13 +1,12 @@
 //! zdtd-native metrics + profiling harness.
 //! Not 7dtd-apm (stock Mono). This is first-class instrumentation inside the Zig process.
 //!
-//! Dependency direction: metrics layer on util (clock re-export). Must not
-//! import server, wire, ecs, world, assets, or litenet.
+//! Dependency direction: metrics on util/clock only (no clock re-export). Must not
+//! import server, wire, ecs, world, assets, or litenet. Time: `util/clock`.
 
 pub const metrics = @import("metrics.zig");
 pub const profiler = @import("profiler.zig");
 pub const report = @import("report.zig");
-pub const clock = @import("clock.zig");
 
 pub const Counters = metrics.Counters;
 pub const CounterId = metrics.CounterId;
@@ -41,5 +40,4 @@ test {
     _ = metrics;
     _ = profiler;
     _ = report;
-    _ = clock;
 }

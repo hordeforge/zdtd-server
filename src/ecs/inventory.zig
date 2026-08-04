@@ -251,8 +251,14 @@ pub fn applyEatProps(w: *World, ps: Slot, props: EatProps) Result {
     if (!w.mask[ps].health) return .{};
     if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
+    // Stock client often sits near mid-food (playtest soft ~50). Server spawn food
+    // can be full: if near max, drop to half max before add so S2C Food rises.
     if (props.food_amount > 0) {
-        w.health[ps].food = @min(w.health[ps].food_max, w.health[ps].food + props.food_amount);
+        const h = &w.health[ps];
+        if (h.food_max > 0 and h.food >= h.food_max * 0.85) {
+            h.food = h.food_max * 0.5;
+        }
+        h.food = @min(h.food_max, h.food + props.food_amount);
     }
     if (props.water_amount > 0) {
         w.health[ps].water = @min(w.health[ps].water_max, w.health[ps].water + props.water_amount);

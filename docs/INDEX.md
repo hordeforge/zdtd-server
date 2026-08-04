@@ -68,6 +68,7 @@ wins**. Refresh inventory docs when closing work.
 | [PROMPTS/review-simd.md](PROMPTS/review-simd.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
 | [PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md) | ECS ownership vs world/session; SoA columns; systems vs stranded game.zig |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http + thin posix residuals |
+| [DECO_NRE.md](DECO_NRE.md) | DecoManager.Read NRE block; RE plan before re-enabling trees |
 
 ## Scale (parked until M11)
 

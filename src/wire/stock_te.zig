@@ -20,16 +20,15 @@ const containers = @import("../world/containers.zig");
 const workstations = @import("../world/workstations.zig");
 
 // Domain caps/types owned by world/workstations (avoids world → wire cycle).
-// Re-exported so existing `stock_te.QueueItem` / `max_ws_*` callers stay stable.
-pub const max_ws_slots: usize = workstations.max_ws_slots;
-pub const max_ws_queue: usize = workstations.max_ws_queue;
-pub const QueueItem = workstations.QueueItem;
+// Wire uses these names as aliases for TE encode only; world is the owner.
+const max_ws_slots: usize = workstations.max_ws_slots;
+const max_ws_queue: usize = workstations.max_ws_queue;
+const QueueItem = workstations.QueueItem;
 
 /// GetStableHashCode("TEFeatureStorage"): matches Extensions.GetStableHashCode.
 pub const feature_hash_storage: i32 = 731446478;
 
-/// Re-export: implementation lives in assets/unity_hash.zig (catalog leaf).
-pub const getStableHashCode = @import("../assets/unity_hash.zig").getStableHashCode;
+const unity_hash = @import("../assets/unity_hash.zig");
 
 fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
     // stock chunk: 16×256×16; y is full world y in ToWorldPos (chunk Y * 256)
@@ -232,7 +231,7 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
         const feat_payload_len = feat_size - 4;
         if (pr.remaining() < feat_payload_len) return error.EndOfStream;
         const feat_start = pr.pos;
-        if (hash == feature_hash_storage or hash == getStableHashCode("TEFeatureStorage")) {
+        if (hash == feature_hash_storage or hash == unity_hash.getStableHashCode("TEFeatureStorage")) {
             try parseStorageFeature(&pr, &out);
         } else {
             pr.pos += feat_payload_len;
@@ -555,8 +554,8 @@ test "workstation te body roundtrip" {
 }
 
 test "stable hash TEFeatureStorage" {
-    try std.testing.expectEqual(@as(i32, 731446478), getStableHashCode("TEFeatureStorage"));
-    try std.testing.expectEqual(feature_hash_storage, getStableHashCode("TEFeatureStorage"));
+    try std.testing.expectEqual(@as(i32, 731446478), unity_hash.getStableHashCode("TEFeatureStorage"));
+    try std.testing.expectEqual(feature_hash_storage, unity_hash.getStableHashCode("TEFeatureStorage"));
 }
 
 test "storage te encode decode roundtrip" {

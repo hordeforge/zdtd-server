@@ -3,7 +3,7 @@
 //! Decision: docs/adr/0009-dynamic-package-ids.md. Tick model: ticks_per_second / tick_ns.
 //!
 //! Leaf module at src root (shared by wire/frame, server tick, main CLI). Also
-//! re-exported as `wire.protocol` via wire/root.zig for package discovery.
+//! Import this module directly (`@import("protocol.zig")`); not via wire.
 
 const std = @import("std");
 
