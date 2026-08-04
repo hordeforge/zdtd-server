@@ -22,6 +22,11 @@ pub const Transform = struct {
 pub const Health = struct {
     hp: f32 = 0,
     max_hp: f32 = 0,
+    /// PlayerEntityStats Food/Water (0..max). Zombies leave at 0.
+    food: f32 = 0,
+    food_max: f32 = 100,
+    water: f32 = 0,
+    water_max: f32 = 100,
 };
 
 pub const NetworkId = struct {

@@ -35,6 +35,14 @@ pub const Result = struct {
     refuel_amount: f32 = 0,
     /// Item consumed for refuel (refund if generator missing / full).
     refuel_item_id: u16 = 0,
+    /// ItemActionEat: true when food/water/hp were applied (Game S2C stats).
+    ate: bool = false,
+    food: f32 = 0,
+    food_max: f32 = 100,
+    water: f32 = 0,
+    water_max: f32 = 100,
+    hp: f32 = 0,
+    max_hp: f32 = 100,
 };
 
 fn maxStackFor(w: *const World, item_id: u16) u16 {
@@ -168,29 +176,71 @@ pub fn drop(w: *World, peer: usize, slot: u16, qty: u16) Result {
     return .{ .ok = true, .dropped_entity = bag };
 }
 
-/// Use consumable in slot (food=2, medicine=4): remove 1, heal a bit.
-pub fn use(w: *World, peer: usize, slot: u16) bool {
-    const ps = w.playerByPeer(peer) orelse return false;
-    if (!w.mask[ps].inventory or !w.mask[ps].health) return false;
-    if (slot >= c.max_inv_slots) return false;
-    const s = w.inventory[ps].slots[slot];
-    if (s.count == 0) return false;
-    const heal: f32 = switch (s.item_id) {
-        2 => 10, // food
-        4 => 25, // medicine
-        else => return false,
+/// ItemActionEat / consumable use (stock DecHoldingItem + effect cvars).
+/// `item_eat` resolves is_eat / food / water / hp from items.xml when set.
+pub const EatResolver = *const fn (ctx: ?*anyopaque, item_id: u16) EatProps;
+pub const EatProps = struct {
+    is_eat: bool = false,
+    food_amount: f32 = 0,
+    food_health: f32 = 0,
+    water_amount: f32 = 0,
+};
+
+fn defaultEatProps(item_id: u16) EatProps {
+    // Offline builtins when Game has not wired items.xml.
+    return switch (item_id) {
+        2 => .{ .is_eat = true, .food_amount = 15, .food_health = 7 },
+        4 => .{ .is_eat = true, .food_health = 25 },
+        else => .{},
     };
-    _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return false;
-    w.health[ps].hp = @min(w.health[ps].max_hp, w.health[ps].hp + heal);
-    if (w.mask[ps].dirty) w.dirty[ps].hp = true;
+}
+
+/// Use consumable in slot: remove 1, apply Food/Water/HP (ItemActionEat.consume).
+pub fn use(w: *World, peer: usize, slot: u16) bool {
+    return useEx(w, peer, slot, null, null).ok;
+}
+
+pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*anyopaque) Result {
+    const ps = w.playerByPeer(peer) orelse return .{};
+    if (!w.mask[ps].inventory or !w.mask[ps].health) return .{};
+    if (slot >= c.max_inv_slots) return .{};
+    const s = w.inventory[ps].slots[slot];
+    if (s.count == 0 or s.item_id == 0) return .{};
+    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
+    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
+        return .{};
+    _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
+    // Food / water (PlayerEntityStats). Cap at max.
+    if (props.food_amount > 0) {
+        w.health[ps].food = @min(w.health[ps].food_max, w.health[ps].food + props.food_amount);
+    }
+    if (props.water_amount > 0) {
+        w.health[ps].water = @min(w.health[ps].water_max, w.health[ps].water + props.water_amount);
+    }
+    if (props.food_health > 0) {
+        w.health[ps].hp = @min(w.health[ps].max_hp, w.health[ps].hp + props.food_health);
+        if (w.mask[ps].dirty) w.dirty[ps].hp = true;
+    }
     markInv(w, ps);
-    return true;
+    return .{
+        .ok = true,
+        .ate = true,
+        .food = w.health[ps].food,
+        .food_max = w.health[ps].food_max,
+        .water = w.health[ps].water,
+        .water_max = w.health[ps].water_max,
+        .hp = w.health[ps].hp,
+        .max_hp = w.health[ps].max_hp,
+    };
 }
 
 pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const cs = w.slotOfNetId(container_net) orelse return false;
+    // Players carry the inventory mask too: without this, any peer in range could
+    // open another player's bag and take/put through it.
+    if (w.mask[cs].player) return false;
     if (!w.mask[cs].loot_bag and !w.mask[cs].inventory) return false;
     if (w.mask[ps].transform and w.mask[cs].transform) {
         const dx = w.transform[ps].x - w.transform[cs].x;
@@ -226,8 +276,12 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
     if (cont_slot >= c.max_inv_slots) return false;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
     if (!w.inventory[ps].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id))) {
-        // refund container
-        _ = w.inventory[cs].putInSlot(cont_slot, taken, maxStackFor(w, taken.item_id));
+        // Refund must not fail: putInSlot rejects over-max stacks (container slots
+        // are filled by paths that never clamp), which would delete the items.
+        if (!w.inventory[cs].putInSlot(cont_slot, taken, maxStackFor(w, taken.item_id))) {
+            const dst = &w.inventory[cs].slots[cont_slot];
+            if (dst.count == 0 or dst.item_id == 0) dst.* = taken else dst.count +|= taken.count;
+        }
         return false;
     }
     // empty bag despawn
@@ -314,12 +368,26 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
 /// Apply inventory op. `entity_id` used for open; for place, a=slot and entity_id packs x|y in low/high?
 /// Place uses a=slot, b=y, qty unused, entity_id = (x & 0xffff) | (z << 16) signed mid.
 pub fn applyTransaction(w: *World, peer: usize, op: Op, a: u16, b: u16, qty: u16, entity_id: i32) Result {
+    return applyTransactionEx(w, peer, op, a, b, qty, entity_id, null, null);
+}
+
+pub fn applyTransactionEx(
+    w: *World,
+    peer: usize,
+    op: Op,
+    a: u16,
+    b: u16,
+    qty: u16,
+    entity_id: i32,
+    eat_resolve: ?EatResolver,
+    eat_ctx: ?*anyopaque,
+) Result {
     return switch (op) {
         .list => .{ .ok = true },
         .move => .{ .ok = move(w, peer, a, b, qty) },
         .drop => drop(w, peer, a, qty),
         .set_hold => .{ .ok = setHolding(w, peer, a) },
-        .use => .{ .ok = use(w, peer, a) },
+        .use => useEx(w, peer, a, eat_resolve, eat_ctx),
         .open => .{ .ok = openContainer(w, peer, entity_id) },
         .close => blk: {
             closeContainer(w, peer);
@@ -360,14 +428,27 @@ test "move and drop and use" {
         }
     }
     w.health[ps].hp = 50;
+    w.health[ps].food = 40;
+    w.health[ps].food_max = 100;
     try std.testing.expect(use(&w, 0, food_slot));
-    try std.testing.expect(w.health[ps].hp >= 59.9);
+    try std.testing.expect(w.health[ps].hp >= 56.9); // +7 foodHealth
+    try std.testing.expect(w.health[ps].food >= 54.9); // +15 foodAmount
     try std.testing.expect(setHolding(&w, 0, 0));
     const r = drop(&w, 0, 0, 1);
     try std.testing.expect(r.ok);
     try std.testing.expect(r.dropped_entity > 0);
     try std.testing.expect(openContainer(&w, 0, r.dropped_entity));
     try std.testing.expect(takeFromContainer(&w, 0, 0, 0));
+}
+
+test "open container refuses another player's inventory" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const victim = w.spawnPlayer(1, 70, 1, 1).?;
+    try std.testing.expect(!openContainer(&w, 0, victim));
 }
 
 test "craft op reserved" {

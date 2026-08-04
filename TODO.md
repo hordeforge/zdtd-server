@@ -34,10 +34,12 @@ Score: **pass=81 fail=2**. CGO gate **PASS**. Seed-Y + void-rescue RelPos + fixt
 
 | Case | Symptom | Likely owner |
 |---|---|---|
-| `power/*` place suite | intermittent type=0 when client floats | mesh float late-suite; FixtureSeedOrigin + void rescue help but not 100% |
-| `combat/zombie_target_has_health` | intermittent no EntityAlive | spawn/clear timing |
+| `power/*` place suite | intermittent type=0 when client floats | **mitigated 2026-08-04:** void rescue surface-8; SetBlock reach clamps vertical dy to ±12 so mesh float does not fail horizontal place |
+| `combat/zombie_target_has_health` | intermittent no EntityAlive | **mitigated 2026-08-04:** admin spawnentity surface Y + clear known_entities so ECD re-sends |
 
 Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** + **ranged_shot** (04i: force stack dec + SetHeldMeta). Peak score **81/83**.
+
+**Server ItemActionEat (2026-08-04):** `useEx` / InvTx `Op.use` + PlayerInventory stack-loss detect; items.xml `$foodAmountAdd`/`foodHealthAmount`/`$waterAmountAdd` + Action0 Class=Eat; S2C `EntityStatChanged` food/water/hp. Scenario `ItemActionEat via InvTx` PASS.
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
@@ -129,6 +131,9 @@ Do not adopt third-party ECS cores.
 Core loop and parity landings. Do not re-open without new evidence.
 
 ### Recent (2026-08-04)
+- [x] **Playtest flake mitigations**: void rescue threshold surface-8; `withinEditReach` vertical clamp; admin/console spawnentity at DTM surface + force ECD via known_entities unset
+- [x] **ADR 0010** data/config/Zig + Wasm guest roadmap; WebUI WU0 skeleton
+- [x] **WebUI WU1**: tick snapshot + status/players/apm partials + `/api/apm.json` + cookie login
 - [x] **P4.0 authority spine**: `ZdtdAuthorityMode` observe|correct (default correct) in config → Game; `docs/AUTHORITY.md` formalizes join phase, C2S bounds, ownership, interest no self-echo
 - [x] **EAI grid A\***: `path.aStarToward` (Manhattan, capped expand) + `World.solid_fn` body-height probe from block store; chase replans ~0.35s; unit tests around wall; greedy fallback
 - [x] **M11.2 serialize-once interest**: entity-outer encode/frame once, fan-out framed PosAndRot (+ zombie Speeds/AliveFlags); dirty clear via `interest.clearAfterReplicate`; named chunk stream caps

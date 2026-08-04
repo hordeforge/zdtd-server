@@ -31,6 +31,14 @@ pub const ItemDef = struct {
     entity_damage: f32 = 0,
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
+    /// ItemActionEat (Action0 Class=Eat) or name prefix food/drink.
+    is_eat: bool = false,
+    /// $foodAmountAdd from effect_group (PlayerEntityStats.Food gain).
+    food_amount: f32 = 0,
+    /// foodHealthAmount from effect_group (HP gain on eat).
+    food_health: f32 = 0,
+    /// $waterAmountAdd from effect_group (PlayerEntityStats.Water gain).
+    water_amount: f32 = 0,
 };
 
 pub const ItemTable = struct {
@@ -103,6 +111,47 @@ pub const ItemTable = struct {
     pub fn fuelValueFor(self: *const ItemTable, item_id: u16) f32 {
         if (self.byId(item_id)) |d| {
             if (d.fuel_value > 0) return d.fuel_value;
+        }
+        return 0;
+    }
+
+    /// True if item is ItemActionEat consumable (or builtin food/medicine).
+    pub fn isEat(self: *const ItemTable, item_id: u16) bool {
+        if (self.byId(item_id)) |d| {
+            if (d.is_eat) return true;
+            if (d.food_amount > 0 or d.water_amount > 0) return true;
+            // Name heuristic for stock food*/drink* without parsed Action0.
+            if (d.name.len >= 4 and (std.mem.startsWith(u8, d.name, "food") or std.mem.startsWith(u8, d.name, "drink")))
+                return true;
+        }
+        // Builtin offline ids.
+        return item_id == 2 or item_id == 4;
+    }
+
+    pub fn foodAmountFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| {
+            if (d.food_amount > 0) return d.food_amount;
+            if (d.is_eat or (d.name.len >= 4 and std.mem.startsWith(u8, d.name, "food"))) return 15;
+        }
+        if (item_id == 2) return 15;
+        return 0;
+    }
+
+    pub fn foodHealthFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| {
+            if (d.food_health > 0) return d.food_health;
+            if (item_id == 4 or std.mem.eql(u8, d.name, "medicine")) return 25;
+            if (d.is_eat) return 7;
+        }
+        if (item_id == 2) return 7;
+        if (item_id == 4) return 25;
+        return 0;
+    }
+
+    pub fn waterAmountFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| {
+            if (d.water_amount > 0) return d.water_amount;
+            if (d.name.len >= 5 and std.mem.startsWith(u8, d.name, "drink")) return 20;
         }
         return 0;
     }
@@ -185,13 +234,70 @@ fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!void
     pos.* += s.len;
 }
 
+/// Action0/1 Class property equals `want` (ItemActionEat → Class="Eat").
+fn itemActionClassIs(body: []const u8, want: []const u8) bool {
+    // Prefer nested <property class="Action0"> ... Class=Eat
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.indexOfPos(u8, body, i, "<property") orelse break;
+        const cn = xml.attr(body, pi, "class") orelse {
+            i = pi + 9;
+            continue;
+        };
+        if (!(std.mem.startsWith(u8, cn, "Action"))) {
+            i = pi + 9;
+            continue;
+        }
+        // Find end of this property class block: next </property> after nested props.
+        const rest = body[pi..];
+        // Search Class value within next 400 bytes of this Action block.
+        const window = if (rest.len > 500) rest[0..500] else rest;
+        if (xml.propertyValue(window, "Class")) |cls| {
+            if (std.mem.eql(u8, cls, want)) return true;
+        }
+        i = pi + 9;
+    }
+    return false;
+}
+
+/// First effect_group ModifyCVar add for cvar name (e.g. $foodAmountAdd).
+fn firstCvarAdd(body: []const u8, cvar: []const u8) ?f32 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.indexOfPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.indexOfPos(u8, body, ti, "/>") orelse (std.mem.indexOfPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const cv = xml.attr(win, 0, "cvar") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, cv, cvar)) {
+            i = ti + 10;
+            continue;
+        }
+        const op = xml.attr(win, 0, "operation") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!(std.mem.eql(u8, op, "add") or std.mem.eql(u8, op, "set"))) {
+            i = ti + 10;
+            continue;
+        }
+        if (xml.attr(win, 0, "value")) |v| {
+            return xml.parseF32(v);
+        }
+        i = ti + 10;
+    }
+    return null;
+}
+
 /// Builtin ECS catalog (stable small ids for sim/save).
 pub const builtin_defs = [_]ItemDef{
     .{ .id = 0, .name = "none", .stack = 0 },
     .{ .id = 1, .name = "scrap", .stack = 60000, .stock_type = 0 },
-    .{ .id = 2, .name = "food", .stack = 50 },
+    .{ .id = 2, .name = "food", .stack = 50, .is_eat = true, .food_amount = 15, .food_health = 7 },
     .{ .id = 3, .name = "ammo", .stack = 150 },
-    .{ .id = 4, .name = "medicine", .stack = 10 },
+    .{ .id = 4, .name = "medicine", .stack = 10, .food_health = 25 },
     .{ .id = 5, .name = "tool", .stack = 1 },
     .{ .id = 6, .name = "dukeCoin", .stack = 60000 },
     .{ .id = 7, .name = "wood", .stack = 60000 },
@@ -249,6 +355,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_edmgs.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
+    var stock_is_eat: std.ArrayList(bool) = .empty;
+    defer stock_is_eat.deinit(allocator);
+    var stock_food_amt: std.ArrayList(f32) = .empty;
+    defer stock_food_amt.deinit(allocator);
+    var stock_food_hp: std.ArrayList(f32) = .empty;
+    defer stock_food_hp.deinit(allocator);
+    var stock_water_amt: std.ArrayList(f32) = .empty;
+    defer stock_water_amt.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -288,6 +402,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 fuel = xml.parseF32(v) orelse 0;
             }
             try stock_fuels.append(allocator, fuel);
+            // ItemActionEat: Action0 Class=Eat + effect_group cvars.
+            const body = clean[ii..item_end];
+            var is_eat = itemActionClassIs(body, "Eat");
+            const food_amt: f32 = firstCvarAdd(body, "$foodAmountAdd") orelse 0;
+            const food_hp: f32 = firstCvarAdd(body, "foodHealthAmount") orelse 0;
+            const water_amt: f32 = firstCvarAdd(body, "$waterAmountAdd") orelse 0;
+            if (!is_eat and (food_amt > 0 or water_amt > 0)) is_eat = true;
+            if (!is_eat and (std.mem.startsWith(u8, name, "food") or std.mem.startsWith(u8, name, "drink")))
+                is_eat = true;
+            try stock_is_eat.append(allocator, is_eat);
+            try stock_food_amt.append(allocator, food_amt);
+            try stock_food_hp.append(allocator, food_hp);
+            try stock_water_amt.append(allocator, water_amt);
             try stock_stacks.append(allocator, stack);
             try stock_names.append(allocator, try arena.dupe(u8, name));
             try stock_types.append(allocator, next_stock);
@@ -310,6 +437,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.econ = stock_econs.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
+                def.is_eat = stock_is_eat.items[idx];
+                def.food_amount = stock_food_amt.items[idx];
+                def.food_health = stock_food_hp.items[idx];
+                def.water_amount = stock_water_amt.items[idx];
                 // Prefer stock name so byName("casinoCoin") works without alias walk.
                 def.name = n;
                 break;

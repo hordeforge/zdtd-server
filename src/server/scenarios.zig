@@ -918,6 +918,48 @@ test "scenario gas can refuel generator via InvTx place" {
     );
 }
 
+test "scenario ItemActionEat via InvTx use applies food and hp" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_eat");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_eat", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const inv = @import("../ecs/inventory.zig");
+
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.health[ps].hp = 50;
+    g.sim.health[ps].food = 40;
+    g.sim.health[ps].food_max = 100;
+    // Clear starter kit; give one food (ecs id 2 = foodCanBeef).
+    g.sim.inventory[ps] = .{};
+    try std.testing.expect(inv.give(&g.sim, c.slot, 2, 1));
+    const food_slot: u16 = blk: {
+        for (g.sim.inventory[ps].slots, 0..) |s, i| {
+            if (s.item_id == 2 and s.count > 0) break :blk @intCast(i);
+        }
+        return error.TestUnexpectedResult;
+    };
+    var txb: [32]u8 = undefined;
+    const use_req = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.use), food_slot, 0, 0, -1);
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", use_req));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[food_slot].count);
+    try std.testing.expect(g.sim.health[ps].food >= 54.9);
+    try std.testing.expect(g.sim.health[ps].hp >= 56.9);
+    // S2C EntityStatChanged food/health should have been sent.
+    const st_id = packages.idOf("NetPackageEntityStatChanged").?;
+    try std.testing.expect(cap.findPkgId(st_id) != null);
+    std.debug.print("PASS ItemActionEat: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
+}
+
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) void {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch return;

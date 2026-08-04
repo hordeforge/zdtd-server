@@ -255,6 +255,12 @@ pub const World = struct {
     }
 
     pub fn spawnPlayer(self: *World, x: f32, y: f32, z: f32, peer_slot: i32) ?NetId {
+        // One live entity per peer slot. Without this a reconnect leaves the old
+        // body alive and playerByPeer keeps returning it, so sim state (inventory,
+        // quests) and net state (Client.entity_id) drift onto two entities.
+        if (peer_slot >= 0) {
+            if (self.playerByPeer(@intCast(peer_slot))) |old| self.destroy(old);
+        }
         const s = self.spawnBase(.player, x, y, z, 100) orelse return null;
         self.mask[s].player = true;
         self.mask[s].journal = true;
@@ -264,6 +270,11 @@ pub const World = struct {
         self.journal[s] = .{};
         self.wallet[s] = .{};
         self.inventory[s] = .{};
+        // PlayerEntityStats defaults (stock full bar on fresh spawn).
+        self.health[s].food = 100;
+        self.health[s].food_max = 100;
+        self.health[s].water = 100;
+        self.health[s].water_max = 100;
         // Starter kit by stock item name → ECS id (items.builtinStockName reverse).
         // Production may refill via Game after items.xml load.
         const starter = [_]struct { u16, u16 }{

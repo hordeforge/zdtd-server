@@ -145,3 +145,16 @@ src/wire/packages.zig    builders/parsers (+ native helpers)
 src/server/game.zig      package handlers + IdMapping join
 ```
 
+## ItemActionEat (server)
+
+Stock clients eat via local `ItemActionEat.consume` then C2S `NetPackagePlayerInventory`
+(ADR 0007). zdtd also accepts InvTx `Op.use` for tools/tests.
+
+| Path | Behavior |
+|---|---|
+| InvTx `use` | `inventory.useEx` → take 1, Food/Water/HP, `EntityStatChanged` S2C |
+| PlayerInventory apply | before/after eatable stack counts; each unit lost applies same props (cap 4/push) |
+| Props | items.xml Action0 Class=Eat + `$foodAmountAdd` / `foodHealthAmount` / `$waterAmountAdd`; builtins food=15/7, medicine hp=25 |
+
+ECS: `Health.food` / `food_max` / `water` / `water_max` (player spawn 100).
+
