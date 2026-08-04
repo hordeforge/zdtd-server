@@ -228,6 +228,8 @@ const Client = struct {
     move_tick: u64 = 0,
     /// Running total of eatable units last seen (cross-package stack-loss).
     last_eatable_units: u32 = 0,
+    /// Once: soft warn when streamed_n crosses ~80% of max_streamed_chunks.
+    stream_cap_warned: bool = false,
 };
 
 pub const Game = struct {
@@ -2981,7 +2983,7 @@ pub const Game = struct {
         peer.sendReliable(&self.net.sock, &ch) catch |err| {
             self.harness.counters.inc(.net_send_errors);
             self.harness.counters.inc(.join_fail);
-            std.debug.print("zdtd: challenge send failed: {}\n", .{err});
+            std.debug.print("zdtd: challenge send failed local_id={d} error={s}\n", .{ peer.local_id, @errorName(err) });
             return;
         };
         std.debug.print("zdtd: peer connected local_id={d} → challenge sent\n", .{peer.local_id});
@@ -3000,7 +3002,7 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackagePackageIds", body);
                 // Immediate resend once so PackageIds is not lost before first ack.
                 peer.resendPending(&self.net.sock) catch {};
-                std.debug.print("zdtd: challenge ok → PackageIds maps={d}\n", .{packages.default_mappings.len});
+                std.debug.print("zdtd: challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
                 // Replay any game payload that raced ahead of the challenge echo.
                 if (c.preauth_len > 0) {
                     const saved = c.preauth_buf[0..c.preauth_len];
@@ -3008,7 +3010,7 @@ pub const Game = struct {
                     try self.dispatchGamePayload(c, peer, saved);
                 }
             } else if (wire_frame.isChallenge(payload)) {
-                std.debug.print("zdtd: challenge mismatch (len={d})\n", .{payload.len});
+                std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d}\n", .{ peer.local_id, payload.len });
             } else if (payload.len > 0 and payload.len <= c.preauth_buf.len) {
                 @memcpy(c.preauth_buf[0..payload.len], payload);
                 c.preauth_len = payload.len;
@@ -3091,15 +3093,10 @@ pub const Game = struct {
 
     fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
         if (id >= packages.default_mappings.len) {
-            std.debug.print("zdtd: unmapped pkg id={d} body={d}\n", .{ id, body.len });
+            std.debug.print("zdtd: unmapped package local_id={d} package_id={d} body_len={d}\n", .{ peer.local_id, id, body.len });
             return;
         }
         const name = packages.default_mappings[id];
-        // Quiet high-frequency packages (animation floods the log + reliable window).
-        const quiet = std.mem.eql(u8, name, "NetPackageEntityAnimationData") or std.mem.eql(u8, name, "NetPackageEntityPosAndRot") or std.mem.eql(u8, name, "NetPackageEntityRelPosAndRot") or std.mem.eql(u8, name, "NetPackageHoldingItem") or std.mem.eql(u8, name, "NetPackageEntitySpeeds") or std.mem.eql(u8, name, "NetPackageEntityAliveFlags") or std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackageAddRemoveBuff") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings");
-        if (!quiet) {
-            std.debug.print("zdtd: pkg {s} body={d} entity={d} joined={}\n", .{ name, body.len, c.entity_id, c.joined });
-        }
         const sp = self.world.primarySpawn();
 
         // Phase gate: connecting/joined (pre-enter) only join-SM packages.
@@ -3196,6 +3193,9 @@ pub const Game = struct {
         // worldInfoCo: after createWorld, client sends WorldInitInfoRequest and waits for
         // worldInitInfoReceived (set by ProcessPackage of WorldInitInfo).
         if (std.mem.eql(u8, name, "NetPackageWorldInitInfoRequest")) {
+            // Same hang class as DynamicClientArrive: WorldInitInfo after enter can
+            // restart createWorld and leave the client on Creating player.
+            if (c.entered) return;
             const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
             try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
             std.debug.print("zdtd: WorldInitInfoRequest -> empty entity={d}\n", .{c.entity_id});
@@ -3206,7 +3206,8 @@ pub const Game = struct {
         // mid-session and leaves the stock client on "Creating player".
         if (std.mem.eql(u8, name, "NetPackageDynamicClientArrive")) {
             if (c.entered) {
-                // Already in-world; stock uses this as a late notify only.
+                // Already in-world. Stock DynamicClientArrive is dynamic-mesh
+                // inventory reconcile (not implemented); join SM must not re-answer.
                 return;
             }
             // Fallback spawn path when RequestToSpawnPlayer never arrives / fails parse.
@@ -3432,46 +3433,46 @@ pub const Game = struct {
                         units_left -= 1;
                     }
                 }
-                // Path B: ECS aggregate drop vs baseline.
+                // Path B: ECS aggregate drop vs baseline (only with known eat id).
                 if (!ate_any and baseline_total > after_total and units_left > 0) {
                     var lost = baseline_total - after_total;
                     if (lost > units_left) lost = units_left;
                     var eid: u16 = first_eat_id;
                     if (eid == 0 and bn > 0) eid = before[0].id;
                     if (eid == 0 and body_eat.first_ecs != 0) eid = body_eat.first_ecs;
-                    if (eid == 0) {
-                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
-                    }
-                    if (eid == 0) eid = 2;
-                    var u: u32 = 0;
-                    while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), eid);
-                        const r = invsys.applyEatProps(&self.sim, ps, props);
-                        if (!r.ate) break;
-                        ate_any = true;
-                        units_left -= 1;
+                    if (eid != 0 and self.items.isEat(eid)) {
+                        var u: u32 = 0;
+                        while (u < lost) : (u += 1) {
+                            const props = eatProps(@ptrCast(self), eid);
+                            const r = invsys.applyEatProps(&self.sim, ps, props);
+                            if (!r.ate) break;
+                            ate_any = true;
+                            units_left -= 1;
+                        }
                     }
                 }
                 // Path C: body stock-type count dropped vs last_eatable (primary live path).
+                // Require a resolved eatable ecs id. Do not invent chili/beef/id=2 props
+                // for unknown multi-unit losses (drop/trade false-eat under ADR 0007).
                 if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
                     var lost = c.last_eatable_units - body_eat.total;
                     if (lost > units_left) lost = units_left;
                     var eid: u16 = body_eat.first_ecs;
                     if (eid == 0 and first_eat_id != 0) eid = first_eat_id;
-                    if (eid == 0) {
-                        if (self.items.byStockName("foodCanChili")) |st| eid = self.items.ecsIdFromStockType(st);
-                    }
-                    if (eid == 0) {
-                        if (self.items.byStockName("foodCanBeef")) |st| eid = self.items.ecsIdFromStockType(st);
-                    }
-                    if (eid == 0) eid = 2;
-                    var u: u32 = 0;
-                    while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), eid);
-                        const r = invsys.applyEatProps(&self.sim, ps, props);
-                        if (!r.ate) break;
-                        ate_any = true;
-                        units_left -= 1;
+                    if (eid == 0 and bn > 0) eid = before[0].id;
+                    if (eid != 0 and self.items.isEat(eid)) {
+                        var u: u32 = 0;
+                        while (u < lost) : (u += 1) {
+                            const props = eatProps(@ptrCast(self), eid);
+                            const r = invsys.applyEatProps(&self.sim, ps, props);
+                            if (!r.ate) break;
+                            ate_any = true;
+                            units_left -= 1;
+                        }
+                    } else if (lost > 0) {
+                        std.debug.print("zdtd: PI eatable drop skipped (no eat eid) lost={d} last={d} body_eat={d} stock0={d}\n", .{
+                            lost, c.last_eatable_units, body_eat.total, body_eat.first_stock,
+                        });
                     }
                 }
                 if (ate_any) {
@@ -3537,6 +3538,15 @@ pub const Game = struct {
                 // Stock ItemDropServer → EntityItem (class "item"), not death bag.
                 try self.broadcastItemDropSpawn(dropped, d.stack, c.entity_id, d.client_instance_id);
                 try self.sendHoldingEcho(peer, c);
+                // Rebaseline eatable units so Path C does not treat drop as eat.
+                if (self.sim.mask[ps].inventory) {
+                    var eat_n: u32 = 0;
+                    for (self.sim.inventory[ps].slots) |sl| {
+                        if (sl.count == 0 or sl.item_id == 0) continue;
+                        if (self.items.isEat(sl.item_id)) eat_n += sl.count;
+                    }
+                    c.last_eatable_units = eat_n;
+                }
             }
             return;
         }
@@ -5747,12 +5757,14 @@ pub const Game = struct {
         const base_x = cx * 16;
         const base_z = cz * 16;
         var found: u32 = 0;
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                var y: i32 = 0;
-                while (y < world_store.y_dim) : (y += 1) {
+        // y outermost so idx advances contiguously (y stride is 1 KiB; the old
+        // y-inner order made all 65k reads cache misses across a 256 KiB array).
+        var y: i32 = 0;
+        while (y < world_store.y_dim) : (y += 1) {
+            var lz: i32 = 0;
+            while (lz < 16) : (lz += 1) {
+                var lx: i32 = 0;
+                while (lx < 16) : (lx += 1) {
                     const idx = @as(usize, @intCast(lx + lz * 16 + y * 256));
                     const id: u16 = @truncate(blocks[idx]);
                     if (id == 0 or !self.isStorageBlockId(id)) continue;
@@ -5835,7 +5847,7 @@ pub const Game = struct {
         return false;
     }
 
-    fn clientAddStreamed(c: *Client, key: i64) void {
+    fn clientAddStreamed(self: *Game, c: *Client, key: i64) void {
         if (clientHasStreamed(c, key)) return;
         if (c.streamed_n >= max_streamed_chunks_cap) {
             // drop oldest
@@ -5845,6 +5857,14 @@ pub const Game = struct {
         }
         c.streamed[c.streamed_n] = key;
         c.streamed_n += 1;
+        const warn_at = @max(@as(usize, 1), (self.max_streamed_chunks * 4) / 5);
+        if (!c.stream_cap_warned and c.streamed_n >= warn_at) {
+            c.stream_cap_warned = true;
+            std.debug.print(
+                "zdtd: peer {d} stream queue near capacity n={d}/{d} (warn>={d})\n",
+                .{ c.slot, c.streamed_n, self.max_streamed_chunks, warn_at },
+            );
+        }
     }
 
     fn clientRemoveStreamed(c: *Client, key: i64) void {
@@ -5880,7 +5900,7 @@ pub const Game = struct {
                 const cx = t.pos.x + dx;
                 const cz = t.pos.z + dz;
                 try self.sendSpawnChunk(peer, cx, cz);
-                if (client_ptr) |cl| clientAddStreamed(cl, packages.makeChunkKey(cx, cz));
+                if (client_ptr) |cl| self.clientAddStreamed(cl, packages.makeChunkKey(cx, cz));
                 // Let ACKs land between multi-chunk sends.
                 self.pollNetOnce();
             }
@@ -5952,7 +5972,7 @@ pub const Game = struct {
                 const cx = packages.extractChunkKeyX(key);
                 const cz = packages.extractChunkKeyZ(key);
                 try self.sendSpawnChunk(peer, cx, cz);
-                clientAddStreamed(c, key);
+                self.clientAddStreamed(c, key);
                 // Plants/trees for the newly visible terrain chunk (fixed-size clients need S2C).
                 // On failure deco is not marked (sendDecoForTerrainChunk); log so silent
                 // missing trees are visible. Do not bulk-retry all streamed keys: join
@@ -6082,6 +6102,8 @@ pub const Game = struct {
         var obs_px: [max_clients]f32 = .{0} ** max_clients;
         var obs_pz: [max_clients]f32 = .{0} ** max_clients;
         for (&self.clients, 0..) |*cl, ci| {
+            // Empty/joining slots have no entity; skip before the net-id lookup.
+            if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
             if (self.sim.slotOfNetId(cl.entity_id)) |si| {
                 obs_px[ci] = self.sim.transform[si].x;
                 obs_pz[ci] = self.sim.transform[si].z;
@@ -6371,10 +6393,12 @@ pub const Game = struct {
             const snap = self.harness.snapshot();
             var report_buf: [4096]u8 = undefined;
             var report_writer: std.Io.Writer = .fixed(&report_buf);
+            var report_ok = true;
             apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
+                report_ok = false;
                 std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
             };
-            std.debug.print("{s}", .{report_writer.buffered()});
+            if (report_ok) std.debug.print("{s}", .{report_writer.buffered()});
             // Instantaneous ops gauges (not cumulative counters): who is online
             // and how many peers LiteNet still holds when the snapshot fires.
             var entered_n: u32 = 0;

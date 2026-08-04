@@ -10,11 +10,11 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-04):** **346/346** unit · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804p) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-04q):** unit ItemActionEat scenarios green · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q; Food +5 gate) · 33/33 C2S · core loop playable. Open: full chili +15 S2C proof, IsSpawned lag, deco content. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ### Freeze (core playable)
 
-Core join/CGO/demo **83/83**, strict eat, hard generator_fuel, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat parity, or animator human soak reopens work.
+Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE fixture, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat (+15 chili S2C), or animator human soak reopens work.
 
 ---
 
@@ -28,22 +28,22 @@ Core join/CGO/demo **83/83**, strict eat, hard generator_fuel, V3.1.0 pin: **fre
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [x] Phase C: persist multi-phase rejoin in orchestrator (`7dtd-playtest` suite `persist`: setup → saveworld → restart → rejoin)
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-04p: **83 pass / 0 fail** strict eat + hard generator_fuel; version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-04q: **83 pass / 0 fail** stackDrop + Food +5.1; power TE hard; version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
 
 Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
-Score: **pass=83 fail=0** (20260804p). CGO PASS. Strict eat (no force-dec) + generator_fuel hard TE closed.
+Score: **pass=83 fail=0** (20260804q). CGO PASS. Strict eat stackDrop + Food ≥+5 (04q 50.0→55.1; full +15 open). generator_fuel = Power TE present (not fuel SoC).
 
 | Case | Symptom | Likely owner |
 |---|---|---|
 | `power/*` place suite | intermittent type=0 when client floats | **mitigated 2026-08-04:** void rescue surface-8; SetBlock reach clamps vertical dy to ±12 so mesh float does not fail horizontal place |
 | `combat/zombie_target_has_health` | intermittent no EntityAlive | **mitigated 2026-08-04:** admin spawnentity surface Y + clear known_entities so ECD re-sends |
 
-Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** strict (04p: InstantAction + Food rise, no force-dec) + **ranged_shot**; **generator_fuel** hard TE. Peak score **83/83** (20260804p).
+Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** strict (04q: stackDrop + Food ≥+5, no force-dec) + **ranged_shot**; **generator_fuel** Power TE hard. Peak **83/83** (20260804q).
 
-**Server ItemActionEat (2026-08-04p):** `useEx` / InvTx `Op.use` + PlayerInventory stack-loss Paths A/B/C (`last_eatable_units`, body-side count); PreferenceTracker skip so bag parse does not abort; high-id XML `is_eat`/food props; S2C `EntityStatChanged`. Playtest strict eat PASS food0=50.0 food=50.6 stackDrop+foodRise.
+**Server ItemActionEat (2026-08-04q):** InvTx use + PI stack-loss (Paths A/B/C; Path C needs resolved eat eid; ItemDrop rebaselines last_eatable). PreferenceTracker skip; high-id `is_eat`. Unit: food 40→55. Live playtest: food0=50.0 food=55.1 (+5.1; full chili +15 S2C not proven in orch log). Join: no WorldInitInfo after enter.
 
 Closed this campaign: dig/place, loot pickup, craft, CGO, weather underrun, kill/respawn, V3.1.0 pin.
 
@@ -395,7 +395,7 @@ knoedel/Flecs/zentig full stacks.
 
 From **knoedel / Bevy shape** (already listed, kept):
 
-- [ ] **Typed resources** - `Res`/`ResMut` helpers over `World` fields  
+- [x] **Typed resources** - `Res`/`ResMut` over power/director/ledger/commands (`src/ecs/res.zig`)
 - [ ] **System locals** - named tick/join scratch; no hidden statics  
 - [x] **Query helpers** - SoA mask `forEachAlive` / `forEachWith` / `forEachKind` (`src/ecs/query.zig`)  
 - [ ] **Explicit schedules** - ordered phases only; parallel *inside* phase  
@@ -409,7 +409,7 @@ From **mr_ecs** (high value for dedi):
   stable for wire; internal slot gen prevents stale AI/target pointers  
 - [x] **Fixed capacities + soft warnings** - entity + cmd buffer warn once past ~80%
   (`warn_ratio`); hard cap still fail-closed / drop  
-- [ ] Soft warnings for stream queues (same pattern)
+- [x] Soft warnings for stream queues (~80% of max_streamed_chunks per client)
 - [ ] **Chunk-style parallel for** - iterate contiguous SoA ranges / interest cells
   with optional `std.Io` or pool; same as extending `forRanges`  
 - [ ] **Cmd profiling zones** - name deferred batches in apm/tracy-style sections  
