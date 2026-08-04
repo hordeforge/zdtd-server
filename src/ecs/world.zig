@@ -174,7 +174,12 @@ pub const World = struct {
         if (!self.net_map_init) return;
         // Pre-sized at init; insert failure only if map allocator is exhausted.
         // Fall back: slotOfNetId still walks SoA when map misses.
-        self.net_to_slot.put(id, slot) catch {};
+        self.net_to_slot.put(id, slot) catch {
+            std.debug.print(
+                "zdtd: net_to_slot put failed id={d} slot={d} (OOM? using linear lookup)\n",
+                .{ id, slot },
+            );
+        };
     }
 
     fn spawnBase(self: *World, kind: Kind, x: f32, y: f32, z: f32, hp: f32) ?Slot {

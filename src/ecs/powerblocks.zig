@@ -141,6 +141,25 @@ pub const Registry = struct {
         return .{ w, mf, opf, opc, ops };
     }
 
+    /// Sort parallel columns by block id so HashMap insertion order cannot
+    /// leak into registry index order (DST / stable dumps when iterating by n).
+    fn sortById(r: *Registry) void {
+        if (r.n <= 1) return;
+        var i: usize = 1;
+        while (i < r.n) : (i += 1) {
+            var j = i;
+            while (j > 0 and r.ids[j] < r.ids[j - 1]) : (j -= 1) {
+                std.mem.swap(u16, &r.ids[j], &r.ids[j - 1]);
+                std.mem.swap(electric.NodeKind, &r.kinds[j], &r.kinds[j - 1]);
+                std.mem.swap(f32, &r.watts[j], &r.watts[j - 1]);
+                std.mem.swap(f32, &r.max_fuel[j], &r.max_fuel[j - 1]);
+                std.mem.swap(f32, &r.output_per_fuel[j], &r.output_per_fuel[j - 1]);
+                std.mem.swap(f32, &r.output_per_charge[j], &r.output_per_charge[j - 1]);
+                std.mem.swap(f32, &r.output_per_stack[j], &r.output_per_stack[j - 1]);
+            }
+        }
+    }
+
     /// `table` must expose idByName, wattsByName, classByName, and power_class_by_name iterator.
     pub fn build(table: anytype) Registry {
         var r: Registry = .{};
@@ -159,7 +178,10 @@ pub const Registry = struct {
                 const p = propsFromTable(table, name);
                 r.push(id, kind, p[0], p[1], p[2], p[3], p[4]);
             }
-            if (r.n > 0) return r;
+            if (r.n > 0) {
+                r.sortById();
+                return r;
+            }
         }
         // Offline fallback: resolve known names if Class map empty.
         const fallback = [_]struct { []const u8, electric.NodeKind }{
@@ -182,6 +204,7 @@ pub const Registry = struct {
                 r.push(id, e[1], p[0], p[1], p[2], p[3], p[4]);
             }
         }
+        r.sortById();
         return r;
     }
 

@@ -10,6 +10,8 @@ const stock_te = @import("wire/stock_te.zig");
 const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
 const admin = @import("server/admin.zig");
+const zdtd_config = @import("server/zdtd_config.zig");
+const xml_util = @import("assets/xml_util.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 
@@ -197,7 +199,7 @@ const binary_corpus = [_][]const u8{
     &.{ 0xff, 0xff, 0xff, 0xff, 0x0f }, // max-ish 7-bit
     &.{ 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f }, // overlong / overflow shift
     &.{ 5, 'h', 'e', 'l', 'l', 'o' },
-    &.{ 0x00 }, // empty string
+    &.{0x00}, // empty string
 };
 
 test "fuzz binary .NET string reader" {
@@ -330,6 +332,85 @@ fn fuzzMapXml(_: void, smith: *std.testing.Smith) !void {
     var pts: [16]dtm.SpawnPoint = undefined;
     const n = dtm.parseSpawnPoints(input, &pts);
     try std.testing.expect(n <= pts.len);
+}
+
+const toml_corpus = [_][]const u8{
+    "",
+    "[stream]\nmax_streamed_chunks = 100\nstream_radius_min = 5\n",
+    "[authority]\nmode = \"observe\"\ninterest_range_blocks = 120.5\n",
+    "[authority]\nmode = 'single'\n# comment\n",
+    "[feature]\nwire_chunks = yes\n",
+    "[unclosed\n",
+    "key_outside_section = 1\n",
+    "[stream]\nmax_streamed_chunks = 999999999999999999999999\n",
+    "[stream]\nmax_streamed_chunks = \"7\"\n",
+    "[stream]\r\nstream_radius_min = -3\r\n",
+    "[stream]\nchunk_adds_per_stream_tick = 1 # trailing comment\n",
+    "[ authority ]\nmode=\n",
+    "=\n[]\nx",
+};
+
+test "fuzz zdtd.toml config parser" {
+    try std.testing.fuzz({}, fuzzTomlConfig, .{ .corpus = &toml_corpus });
+}
+
+fn fuzzTomlConfig(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    var f = zdtd_config.parse(std.testing.allocator, input) catch return;
+    defer f.deinit();
+    if (f.authority.mode) |m| try std.testing.expect(m.len <= input.len);
+}
+
+const asset_xml_corpus = [_][]const u8{
+    "",
+    "<quest id=\"a\" difficulty=\"1\"><property name=\"name_key\" value=\"v\"/></quest>",
+    "<property force_prob=\"wrong\" name = 'ServerPort' value = \"27002\"/>",
+    "<!-- unclosed comment",
+    "<!-- c --><block name=\"stone\"/>",
+    "<block name=\"a\">body</block>",
+    "<block ><block /></block>",
+    // truncated open tag / dangling quote / stray equals
+    "<property name=\"x\"",
+    "<property name='a' value='",
+    "a = = \"v\" b=c d",
+    "<property\x00name='a' value='b'/>",
+    "<property name=\"65536\" value=\"1e39\"/>",
+};
+
+test "fuzz asset XML attribute scanner" {
+    try std.testing.fuzz({}, fuzzAssetXml, .{ .corpus = &asset_xml_corpus });
+}
+
+fn fuzzAssetXml(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+
+    const clean = xml_util.stripComments(std.testing.allocator, input) catch return;
+    defer std.testing.allocator.free(clean);
+    try std.testing.expect(clean.len <= input.len);
+
+    if (xml_util.attr(input, 0, "name")) |v| {
+        try std.testing.expect(v.len <= input.len);
+    }
+    if (xml_util.propertyValue(input, "value")) |v| {
+        try std.testing.expect(v.len <= input.len);
+    }
+    var i: usize = 0;
+    while (xml_util.nextElement(input, i, "<block", "</block>")) |el| {
+        try std.testing.expect(el.next_i <= input.len);
+        // Scan must always advance or the caller loops forever.
+        try std.testing.expect(el.next_i > i);
+        try std.testing.expect(el.body.len <= input.len);
+        i = el.next_i;
+    }
+    _ = xml_util.parseU16(input);
+    _ = xml_util.parseU32(input);
+    _ = xml_util.parseF32(input);
 }
 
 const cog_corpus = [_][]const u8{

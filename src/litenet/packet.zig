@@ -120,9 +120,17 @@ pub fn writeNetString(buf: []u8, s: []const u8) ![]u8 {
 
 /// Connect-key equality for ServerPassword (stock ConnectionRequestCheck).
 /// Missing/malformed key only matches an empty server password.
+/// Content compare is constant-time when lengths match (reduces online guessing leaks).
 pub fn connectKeyMatches(data: []const u8, server_password: []const u8) bool {
     const key = readNetString(data) orelse return server_password.len == 0;
-    return std.mem.eql(u8, key, server_password);
+    return constantTimeEql(key, server_password);
+}
+
+fn constantTimeEql(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    var diff: u8 = 0;
+    for (a, b) |x, y| diff |= x ^ y;
+    return diff == 0;
 }
 
 pub fn writeConnectAccept(buf: []u8, connect_time: i64, connect_num: u8, local_peer_id: i32) ![]u8 {

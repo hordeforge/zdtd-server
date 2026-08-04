@@ -390,19 +390,28 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
                 io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
                 const cp = ".zdtd_cfg_cache/materials.xml";
                 if (io_fs.writeFile(allocator, cp, merged)) |_| {
-                    tbl.mergeMaterialsXml(allocator, cp) catch {};
-                } else |_| {
-                    tbl.mergeMaterialsXml(allocator, mp) catch {};
+                    mergeMaterialsLogged(&tbl, allocator, cp);
+                } else |err| {
+                    std.debug.print("zdtd: materials.xml cache write failed: {s}; using base path\n", .{@errorName(err)});
+                    mergeMaterialsLogged(&tbl, allocator, mp);
                 }
             } else {
-                tbl.mergeMaterialsXml(allocator, mp) catch {};
+                mergeMaterialsLogged(&tbl, allocator, mp);
             }
         } else {
-            tbl.mergeMaterialsXml(allocator, mp) catch {};
+            mergeMaterialsLogged(&tbl, allocator, mp);
         }
-        tbl.resolveMaterialMaxDamage(allocator) catch {};
+        tbl.resolveMaterialMaxDamage(allocator) catch |err| {
+            std.debug.print("zdtd: resolveMaterialMaxDamage failed: {s}\n", .{@errorName(err)});
+        };
     }
     return tbl;
+}
+
+fn mergeMaterialsLogged(tbl: *Table, allocator: std.mem.Allocator, path: []const u8) void {
+    tbl.mergeMaterialsXml(allocator, path) catch |err| {
+        std.debug.print("zdtd: merge materials.xml failed: {s} ({s})\n", .{ @errorName(err), path });
+    };
 }
 
 test "load blocks.xml MaxDamage when present" {

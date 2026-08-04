@@ -17,8 +17,12 @@ pub fn mkdirPath(allocator: std.mem.Allocator, rel: []const u8) void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    // Best-effort: parent may already exist.
-    std.Io.Dir.cwd().createDirPath(io, rel) catch {};
+    // createDirPath is idempotent for existing dirs; surface real failures
+    // (permission, full disk) so later writes are not mysterious.
+    std.Io.Dir.cwd().createDirPath(io, rel) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => std.debug.print("zdtd: mkdir '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
+    };
 }
 
 pub fn mkdirPathSimple(rel: []const u8) void {
@@ -109,13 +113,16 @@ pub fn dirExistsSimple(path: []const u8) bool {
     return dirExists(std.heap.page_allocator, path);
 }
 
-/// Best-effort delete; ignores missing path.
+/// Best-effort delete; ignores missing path. Other failures are logged.
 pub fn deleteFile(allocator: std.mem.Allocator, path: []const u8) void {
     _ = allocator;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    std.Io.Dir.cwd().deleteFile(io, path) catch {};
+    std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => std.debug.print("zdtd: delete '{s}' failed: {s}\n", .{ path, @errorName(err) }),
+    };
 }
 
 pub fn deleteFileSimple(path: []const u8) void {

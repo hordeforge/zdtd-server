@@ -251,7 +251,7 @@ an RE task under `../7dtd-research`, implementation under `src/world/`.
 
 - **Pure `(seed,pos)` => chunk-parallel + shardable** (verified LOD/statelessness,
   3-0; Distant Horizons, binary-greedy-meshing). Generate chunks on a worker
-  pool; cache RAM -> `.zch2` disk -> (planet scale) object store. Any shard
+  pool; cache RAM -> ZCH3 `.zch` disk -> (planet scale) object store. Any shard
   regenerates any cell identically, no cross-shard coordination.
 - **Coarse-cell density + interpolation** (section 2) is the main throughput
   lever.

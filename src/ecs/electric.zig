@@ -343,6 +343,18 @@ pub const PowerGrid = struct {
         var qh: usize = 0;
         var qt: usize = 0;
 
+        // Resolve wire endpoints to node indices once up front; indexOfId is a
+        // linear scan, and doing it inside the BFS made the flood
+        // O(nodes x wires x nodes) per tick.
+        const no_node: u16 = std.math.maxInt(u16);
+        var wire_ai: [max_wires]u16 = undefined;
+        var wire_bi: [max_wires]u16 = undefined;
+        var wi: usize = 0;
+        while (wi < self.wire_n) : (wi += 1) {
+            wire_ai[wi] = if (self.indexOfId(self.wires[wi].a)) |v| @intCast(v) else no_node;
+            wire_bi[wi] = if (self.indexOfId(self.wires[wi].b)) |v| @intCast(v) else no_node;
+        }
+
         i = 0;
         while (i < self.node_n) : (i += 1) {
             // Generators need fuel (or zero capacity = infinite for tests that zero it).
@@ -358,14 +370,13 @@ pub const PowerGrid = struct {
         }
 
         while (qh < qt) {
-            const u = queue[qh];
+            const u: u16 = @intCast(queue[qh]);
             qh += 1;
-            const uid = self.nodes[u].id;
             var w: usize = 0;
             while (w < self.wire_n) : (w += 1) {
-                const wire = self.wires[w];
-                const other_id: u16 = if (wire.a == uid) wire.b else if (wire.b == uid) wire.a else continue;
-                const oi = self.indexOfId(other_id) orelse continue;
+                const other: u16 = if (wire_ai[w] == u) wire_bi[w] else if (wire_bi[w] == u) wire_ai[w] else continue;
+                if (other == no_node) continue;
+                const oi: usize = other;
                 if (visited[oi]) continue;
                 if (!self.nodes[oi].on and self.nodes[oi].kind != .relay) continue;
                 visited[oi] = true;

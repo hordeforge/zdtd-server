@@ -161,13 +161,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
 }
 
 fn clampU8(v: ?u16, lo: u16, hi: u16, dflt: u8) u8 {
-    const x = v orelse return dflt;
-    return @intCast(std.math.clamp(x, lo, hi));
+    return @intCast(clampRange(v, lo, hi, dflt));
 }
 
 fn clampRange(v: ?u16, lo: u16, hi: u16, dflt: u16) u16 {
     const x = v orelse return dflt;
-    return std.math.clamp(x, lo, hi);
+    if (x < lo or x > hi) {
+        const c = std.math.clamp(x, lo, hi);
+        std.debug.print("zdtd: serverconfig value {d} out of range [{d}..{d}]; using {d}\n", .{ x, lo, hi, c });
+        return c;
+    }
+    return x;
 }
 
 test "parse config fixture" {

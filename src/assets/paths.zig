@@ -41,7 +41,12 @@ pub fn readConfigXml(
     const base = io_fs.readFileAll(allocator, path) catch return null;
     errdefer allocator.free(base);
     if (override_dirs.len == 0) return base;
-    const merged = xml_patch.applyOverrideDirs(allocator, base, file_name, override_dirs) catch {
+    const merged = xml_patch.applyOverrideDirs(allocator, base, file_name, override_dirs) catch |err| {
+        // Patches are optional; keep base so a bad override does not blank the catalog.
+        std.debug.print(
+            "zdtd: config overrides for {s} failed: {s}; using unpatched base\n",
+            .{ file_name, @errorName(err) },
+        );
         return base;
     };
     allocator.free(base);
@@ -76,19 +81,43 @@ pub fn tryLoadConfigPatched(
     if (override_dirs.len == 0) {
         var path_buf: [2048]u8 = undefined;
         const path = resolveConfigXml(&path_buf, file_name, game_dir, config_dir) orelse return null;
-        return loadFn(allocator, path) catch null;
+        return loadFn(allocator, path) catch |err| {
+            logCatalogLoadFail(file_name, path, err);
+            return null;
+        };
     }
     const merged = try readConfigXml(allocator, file_name, game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
     if (loadFromBytes) |lbytes| {
-        return lbytes(allocator, merged) catch null;
+        return lbytes(allocator, merged) catch |err| {
+            logCatalogLoadFail(file_name, "(patched bytes)", err);
+            return null;
+        };
     }
     // Cache patched XML next to cwd (not tmpfs /tmp).
     io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
     var cache_path_buf: [512]u8 = undefined;
     const cache_path = std.fmt.bufPrint(&cache_path_buf, ".zdtd_cfg_cache/{s}", .{file_name}) catch return null;
-    io_fs.writeFile(allocator, cache_path, merged) catch return null;
-    return loadFn(allocator, cache_path) catch null;
+    io_fs.writeFile(allocator, cache_path, merged) catch |err| {
+        std.debug.print("zdtd: write config cache {s} failed: {s}\n", .{ cache_path, @errorName(err) });
+        return null;
+    };
+    return loadFn(allocator, cache_path) catch |err| {
+        logCatalogLoadFail(file_name, cache_path, err);
+        return null;
+    };
+}
+
+/// Missing / empty catalogs are expected without a full game install. Parse, I/O, and
+/// OOM failures must not look like "catalog absent".
+fn logCatalogLoadFail(file_name: []const u8, path: []const u8, err: anyerror) void {
+    switch (err) {
+        error.FileNotFound, error.OpenFailed => {},
+        else => std.debug.print(
+            "zdtd: load {s} failed: {s} ({s})\n",
+            .{ file_name, @errorName(err), path },
+        ),
+    }
 }
 
 test "resolveConfigXml prefers config_dir" {

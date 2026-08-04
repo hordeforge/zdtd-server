@@ -1,9 +1,17 @@
 //! Re-export of process mono clock (implementation lives in util/clock.zig).
 //! Kept so existing `apm/clock` and `apm.clock` import paths stay stable.
+//! Virtual-clock APIs are re-exported so sim harnesses can inject time via either path.
 
-pub const monoNs = @import("../util/clock.zig").monoNs;
-pub const sleepNs = @import("../util/clock.zig").sleepNs;
+const impl = @import("../util/clock.zig");
+
+pub const monoNs = impl.monoNs;
+pub const sleepNs = impl.sleepNs;
+pub const isVirtual = impl.isVirtual;
+pub const enableVirtual = impl.enableVirtual;
+pub const disableVirtual = impl.disableVirtual;
+pub const setVirtualNs = impl.setVirtualNs;
+pub const advanceNs = impl.advanceNs;
 
 test {
-    _ = @import("../util/clock.zig");
+    _ = impl;
 }

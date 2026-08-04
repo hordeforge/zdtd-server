@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-03):** **239/239** unit · stock join green · playtest-zdtd demo **pass=78 fail=5** (was 75/8) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-04):** **306/306** unit · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804j) · 33/33 C2S · core loop playable. Open work is **depth + scale**, not join. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ---
 
@@ -405,7 +405,7 @@ From **ecez**:
 - [ ] **Optional Tracy/ztracy markers** behind build flag; map onto `src/apm/`
   sections first, Tracy second  
 - [ ] **Sim snapshot bytes (ezby-like)** - deterministic dump of SoA + resources for
-  regression tests / replay; not a second save format for `.zch2`  
+  regression tests / replay; not a second save format for ZCH3 `.zch`  
 
 From **zig-ecs (Entt)**:
 

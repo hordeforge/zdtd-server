@@ -64,6 +64,15 @@ pub const ItemTable = struct {
     }
 
     pub fn byId(self: *const ItemTable, id: u16) ?ItemDef {
+        // defs layout: builtins at [0..13) with id == index, XML items appended
+        // with sequential ids from 100. Probe the computed slot; scan on miss.
+        const guess: usize = if (id < builtin_defs.len)
+            id
+        else if (id >= 100)
+            builtin_defs.len + @as(usize, id - 100)
+        else
+            self.defs.len;
+        if (guess < self.defs.len and self.defs[guess].id == id) return self.defs[guess];
         for (self.defs) |d| if (d.id == id) return d;
         return null;
     }

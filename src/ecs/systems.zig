@@ -9,6 +9,7 @@ const c = @import("components.zig");
 const quest = @import("quest.zig");
 const path_mod = @import("path.zig");
 const parallel = @import("../util/parallel.zig");
+const rng_util = @import("../util/rng.zig");
 
 pub const full_ai_dist_sq: f32 = 64.0 * 64.0;
 pub const mid_ai_dist_sq: f32 = 225.0;
@@ -89,6 +90,11 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
 }
 
+/// Deferred damage accumulates as fixed-point (dmg_scale) to stay atomic-friendly.
+fn fpDamage(fp: u32) f32 {
+    return @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
+}
+
 fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
     var applied: u32 = 0;
     var i: Slot = 0;
@@ -96,7 +102,7 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         const fp = dmg_fp[i];
         if (fp == 0) continue;
         if (!w.alive[i] or !w.mask[i].health) continue;
-        const amount: f32 = @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
+        const amount = fpDamage(fp);
         if (w.kind[i] == .trader) continue;
         w.health[i].hp -= amount;
         applied += 1;
@@ -121,7 +127,7 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
     s.ready_turn_in = false;
     if (w.catalog.byId(s.def_id)) |d| {
         if (w.mask[ps].wallet) {
-            w.wallet[ps].coins = std.math.add(u32, w.wallet[ps].coins, d.reward_coin) catch std.math.maxInt(u32);
+            w.wallet[ps].coins +|= d.reward_coin;
         }
     }
     w.completed_quests +%= 1;
@@ -188,7 +194,7 @@ fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef
 fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: quest.PhaseKind, n: u16) void {
     const spec = currentPhaseSpec(d, s) orelse return;
     if (spec.kind != kind) return;
-    s.progress = std.math.add(u16, s.progress, n) catch std.math.maxInt(u16);
+    s.progress +|= n;
     if (s.progress >= spec.required) advancePhaseGraph(w, ps, s, d);
 }
 
@@ -242,7 +248,7 @@ pub fn questOnZombieKilled(w: *World, peer_slot: usize) void {
             continue;
         }
         if (d.kind != .kill_zombies) continue;
-        s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
+        s.progress +|= 1;
         markProgress(w, ps, s, d);
     }
 }
@@ -294,7 +300,7 @@ pub fn questOnFetchItem(w: *World, peer_slot: usize, count: u16) void {
             continue;
         }
         if (d.kind != .fetch_item) continue;
-        s.progress = std.math.add(u16, s.progress, count) catch std.math.maxInt(u16);
+        s.progress +|= count;
         markProgress(w, ps, s, d);
     }
 }
@@ -319,7 +325,7 @@ pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
             if (std.mem.indexOf(u8, recipe_name, d.name) == null and std.mem.indexOf(u8, d.name, recipe_name) == null)
                 continue;
         }
-        s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
+        s.progress +|= 1;
         markProgress(w, ps, s, d);
     }
 }
@@ -348,7 +354,7 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
             if (d.phases.len > 0) {
                 bumpPhase(w, ps, s, d, .stay_within, 1);
             } else {
-                s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
+                s.progress +|= 1;
                 markProgress(w, ps, s, d);
             }
         }
@@ -509,7 +515,6 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             }
             stock.entries[e].count -= qty;
             w.wallet[ps].coins -= cost;
-            if (w.mask[ps].inventory and w.mask[ps].dirty) w.dirty[ps].inv = true;
         } else {
             const gain: u32 = @as(u32, stock.entries[e].sell) * qty;
             if (gain > std.math.maxInt(u16)) return false;
@@ -727,11 +732,8 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
     if (id != .wander) return;
     // Deterministic per-entity xorshift32 so streams differ per entity and the
     // direction varies each pass (a constant hash would drift one way forever).
-    if (ai.wander_rng == 0) ai.wander_rng = @bitCast(w.network_id[s].id | 1);
-    var r = ai.wander_rng;
-    r ^= r << 13;
-    r ^= r >> 17;
-    r ^= r << 5;
+    if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(w.network_id[s].id).state;
+    const r = rng_util.xorshift32Step(ai.wander_rng);
     ai.wander_rng = r;
     const ox: f32 = @floatFromInt(@as(i32, @intCast(r % 17)) - 8);
     const oz: f32 = @floatFromInt(@as(i32, @intCast((r / 17) % 17)) - 8);
@@ -944,6 +946,9 @@ const TurretCtx = struct {
     w: *World,
     dt: f32,
     dmg_fp: []u32,
+    /// Alive zombie slots with transform, snapshotted once per tick so each
+    /// turret does not rescan all entity slots.
+    zombies: []const Slot,
 
     fn work(ctx: TurretCtx, begin: usize, end: usize) void {
         var i: usize = begin;
@@ -960,10 +965,7 @@ const TurretCtx = struct {
             var best_id: i32 = -1;
             var best_slot: ?Slot = null;
             var best_d: f32 = t.range * t.range;
-            var j: Slot = 0;
-            while (j < max_entities) : (j += 1) {
-                if (!ctx.w.alive[j] or !ctx.w.mask[j].kind or ctx.w.kind[j] != .zombie) continue;
-                if (!ctx.w.mask[j].transform) continue;
+            for (ctx.zombies) |j| {
                 const dx = ctx.w.transform[j].x - ctx.w.transform[s].x;
                 const dz = ctx.w.transform[j].z - ctx.w.transform[s].z;
                 const d = dx * dx + dz * dz;
@@ -999,7 +1001,16 @@ pub const TurretTick = struct {
 
 pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
-    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..] };
+    var zombie_slots: [max_entities]Slot = undefined;
+    var zn: usize = 0;
+    var zj: Slot = 0;
+    while (zj < max_entities) : (zj += 1) {
+        if (w.alive[zj] and w.mask[zj].kind and w.kind[zj] == .zombie and w.mask[zj].transform) {
+            zombie_slots[zn] = zj;
+            zn += 1;
+        }
+    }
+    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn] };
     parallel.forRanges(max_entities, ctx, TurretCtx.work);
     var out: TurretTick = .{};
     var i: Slot = 0;
@@ -1008,7 +1019,7 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (fp == 0) continue;
         if (!w.alive[i] or !w.mask[i].health) continue;
         if (w.kind[i] != .zombie) continue;
-        const amount: f32 = @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
+        const amount = fpDamage(fp);
         w.health[i].hp -= amount;
         if (w.health[i].hp <= 0) {
             const x = if (w.mask[i].transform) w.transform[i].x else 0;
@@ -1085,7 +1096,9 @@ pub fn tickAll(w: *World, dt: f32) struct {
     const dr = systemDirector(w, dt);
     const hits = systemZombieAi(w, dt);
     systemVehicles(w, dt);
-    systemPower(w);
+    // Power resolves once per tick in Game.step (power.tick with real daylight);
+    // an extra resolve here doubled the grid BFS and forced daylight=true, so
+    // turrets read solar as powered at night. Turrets use last tick's resolve.
     const tk = systemTurrets(w, dt);
     var de_ids: [8]i32 = .{0} ** 8;
     const de_n = systemDespawnFar(w, de_ids[0..]);

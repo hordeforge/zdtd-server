@@ -11,6 +11,8 @@ wins**. Refresh inventory docs when closing work.
 | Doc | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | What works now (gates + shipped surface) |
+| [RELEASES.md](RELEASES.md) | Version, compatibility, support, and release policy |
+| [../CHANGELOG.md](../CHANGELOG.md) | Consumer-visible changes and migrations |
 | [../TODO.md](../TODO.md) | Open backlog first; shipped log below the fold |
 | [MISSING_FEATURES.md](MISSING_FEATURES.md) | Gap inventory (honest PARTIAL sections) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7–M16 phases (post-playable stack) |
@@ -83,7 +85,7 @@ wins**. Refresh inventory docs when closing work.
 ## Milestone snapshot (2026-08-04)
 
 ```text
-Core playable loop     DONE (playtest 77/83, 0 NRE; residuals in STATUS)
+Core playable loop     DONE (playtest 83/83, 0 NRE; soft residuals in STATUS)
 M7–M10 core            DONE
 M11 interest/scale     PARTIAL (open 1.0 scale gate)
 M12–M15 depth/ops      PARTIAL (honest gaps in MISSING)

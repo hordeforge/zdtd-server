@@ -71,6 +71,7 @@ pub const Server = struct {
                     &packet.reject_invalid_password,
                 );
                 self.sock.sendTo(rej, &src, src_len) catch {};
+                std.debug.print("zdtd: connect rejected (bad password) remote_peer_id={d}\n", .{req.peer_id});
                 return .none;
             }
             const p = try self.allocPeer(&src, src_len, req);

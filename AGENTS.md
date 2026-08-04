@@ -129,7 +129,7 @@ The operating principles behind every rule below. When in doubt, these decide.
     queues (chunks, deco, entity spawn) stay under named caps so one peer
     cannot stall the 50 ms tick or OOM the process.
 19. **Persist through the store.** Block/TE/player mutations that must survive
-    restart go through `world/*` / save paths (e.g. `.zch2`, player data), not
+    restart go through `world/*` / save paths (e.g. ZCH3 `.zch`, player data), not
     only in-memory interest caches. A green join test is not proof of persist.
 20. **Deterministic sim inputs.** Tick order for systems that touch the same
     data is stable. RNG for loot/AI/director uses explicit seeded state, not
@@ -198,7 +198,7 @@ stock client (EAC off) when practical. Unit green alone is not enough.
 
 ```text
 src/main.zig           CLI, DebugAllocator, construct Game, run loop
-src/protocol.zig       package id resolution helpers
+src/protocol.zig       wire constants (challenge, tick rate; package ids live in wire/)
 src/server/game.zig    join SM, tick orchestration, interest, send path
 src/server/*           admin TCP, GSI, config, multi-system scenarios
 src/ecs/*              SoA world, systems, inventory, quests, interest
@@ -211,7 +211,7 @@ src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 assets/fixtures/       offline XML for tests
 tests/                 extra fixtures / harnesses when present
 docs/                  STATUS, gaps, plan, APM, wire/map/system notes
-worlds/                local save overlays (.zch2, player data)
+worlds/                local save overlays (ZCH3 `.zch`, player data)
 ```
 
 | Concern | Lives in | Does not live in |
@@ -401,7 +401,7 @@ heap), dealloc always succeeds (`defer`). Full review rubric:
 - Sending play packages before join SM allows them; accepting illegal phase C2S
 - Self-echo of movement / full state the stock server would not send
 - Unbounded chunk/entity/stream queues or unchecked slot/coord indices
-- In-memory-only world edits that should hit `.zch2` / player save
+- In-memory-only world edits that should hit ZCH3 `.zch` / player save
 - Unseeded or hidden RNG on loot/AI/director tick paths
 - Invented type-id or hash spaces parallel to stock catalogs
 - Truncated or zero-padded wire bodies when encode fails

@@ -59,10 +59,21 @@ terrain:u16[256]       // surface y * 256 packing (stock-ish)
 Empty air layers set `present=0` (common for sky). Encoder builds this from
 `Chunk.blockAt` / heights. Decoder optional for custom clients.
 
-## Disk
+## Disk (world overlay)
 
-`.zch2` on disk: magic ZCH2 + heights + optional full 65536×u16 columns.
-See `src/world/store.zig`.
+Per-chunk `.zch` under `--world` (see [ADR 0011](adr/0011-custom-zch-world-overlay.md)):
+
+```text
+'Z''C''H''3' | cx:i32 | cz:i32 | flags[4]
+heights:u8[256]
+if flags[0]: blocks:u32[65536]          // full rawData
+if flags[1]: textures:u64[65536]        // textureFull paint (optional)
+if flags[2]: dens:u8[65536] + dens_set  // TTS density + bitset (optional)
+```
+
+Legacy: ZCH2 u16 type-only loads heights only (blocks regen). Pre-paint ZCH3
+files (flags[1]/[2]=0) remain valid. In-memory paint is co-owned with the cell
+(`setBlock` clears texture/density; `setBlockTexDens` re-applies).
 
 ## Stock network encoder (default S→C)
 

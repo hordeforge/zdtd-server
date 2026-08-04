@@ -18,16 +18,38 @@ need_cmd() {
 need_cmd "$ZIG"
 need_cmd sed
 need_cmd grep
+need_cmd head
+need_cmd tr
 
 manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)
 source_version=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
 min_zig=$(sed -n 's/^[[:space:]]*\.minimum_zig_version = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)
-toolchain_zig=$(sed -n '1{s/[[:space:]]//g;p;}' .zigversion)
+toolchain_zig=$(tr -d '[:space:]' < .zigversion)
 stock_wire=$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
 
 if [[ -z "$manifest_version" || -z "$source_version" ]]; then
   echo "release-check: could not read product version" >&2
   exit 1
+fi
+
+# Product versions are SemVer 2.0.0. Keep this stricter than Zig's package
+# parser so malformed versions cannot reach tags, changelog headings, or
+# operator-visible --version output.
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+\.)*[0-9A-Za-z-]+)?(\+([0-9A-Za-z-]+\.)*[0-9A-Za-z-]+)?$'
+if [[ ! "$source_version" =~ $semver_re ]]; then
+  echo "release-check: src/version.zig product '$source_version' is not SemVer 2.0.0" >&2
+  exit 1
+fi
+if [[ "$source_version" == *-* ]]; then
+  prerelease="${source_version#*-}"
+  prerelease="${prerelease%%+*}"
+  IFS=. read -r -a prerelease_ids <<< "$prerelease"
+  for prerelease_id in "${prerelease_ids[@]}"; do
+    if [[ "$prerelease_id" =~ ^[0-9]+$ && "$prerelease_id" == 0[0-9]* ]]; then
+      echo "release-check: numeric prerelease identifier '$prerelease_id' has a leading zero" >&2
+      exit 1
+    fi
+  done
 fi
 
 if [[ "$manifest_version" != "$source_version" ]]; then
@@ -103,15 +125,28 @@ fi
 
 # Release gate (docs/RELEASES.md): a v* tag on HEAD must equal the product
 # version, and the changelog must already contain that version's section.
+# Explicit -l + pattern so we never enter create-tag mode on odd git versions.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-  head_tag=$(git tag --points-at HEAD 'v*' | head -n1)
-  if [[ -n "$head_tag" ]]; then
+  # Prefer annotated/lightweight tags that point exactly at HEAD.
+  mapfile -t head_tags < <(git tag -l 'v*' --points-at HEAD 2>/dev/null || true)
+  if ((${#head_tags[@]} > 1)); then
+    echo "release-check: multiple v* tags point at HEAD: ${head_tags[*]}" >&2
+    exit 1
+  fi
+  if ((${#head_tags[@]} == 1)); then
+    head_tag="${head_tags[0]}"
     if [[ "$head_tag" != "v$source_version" ]]; then
       echo "release-check: HEAD tag $head_tag != v$source_version (src/version.zig)" >&2
       exit 1
     fi
-    if ! grep -Eq "^## \[$source_version\]" CHANGELOG.md; then
-      echo "release-check: CHANGELOG.md missing '## [$source_version]' section for tag $head_tag" >&2
+    if ! grep -Eq "^## \[$source_version\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+      echo "release-check: CHANGELOG.md missing dated '## [$source_version] - YYYY-MM-DD' section for tag $head_tag" >&2
+      exit 1
+    fi
+    # A dirty tree can build bytes that never existed at the immutable tag
+    # while still reporting the tag's product version.
+    if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+      echo "release-check: tagged release $head_tag must be built from a clean worktree" >&2
       exit 1
     fi
   fi

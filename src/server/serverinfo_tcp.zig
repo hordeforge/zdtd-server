@@ -20,27 +20,49 @@ pub const ServerInfo = struct {
     server_version: []const u8 = "V 3.1.0",
     world_size: i32 = 6144,
     eac_enabled: bool = false,
+    /// Stock IsPasswordProtected (ServerPassword set).
+    password_protected: bool = false,
 };
+
+/// Strip CR/LF/`;` so operator-supplied names cannot inject extra GSI key lines.
+fn gsiSafe(s: []const u8, scratch: []u8) []const u8 {
+    const n = @min(s.len, scratch.len);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const c = s[i];
+        scratch[i] = switch (c) {
+            '\r', '\n', ';' => '_',
+            else => c,
+        };
+    }
+    return scratch[0..n];
+}
 
 /// Build GameServerInfo.ToString(true): `Key:Value;\r\n` … trailing `\r\n`.
 /// Includes the keys stock NetworkClientLiteNetLib / connect dialog use.
 pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
     const max_players = @max(0, info.max_players);
     const current_players = @max(0, @min(info.current_players, max_players));
+    var gn: [64]u8 = undefined;
+    var gh: [64]u8 = undefined;
+    var ln: [64]u8 = undefined;
+    var ipb: [64]u8 = undefined;
+    var ver: [32]u8 = undefined;
     return std.fmt.bufPrint(
         buf,
-        "GameType:7DTD;\r\nGameName:{s};\r\nGameMode:Survival;\r\nGameHost:{s};\r\nLevelName:{s};\r\nIP:{s};\r\nServerVersion:{s};\r\nPort:{d};\r\nCurrentPlayers:{d};\r\nMaxPlayers:{d};\r\nFreePlayerSlots:{d};\r\nWorldSize:{d};\r\nIsDedicated:True;\r\nIsPasswordProtected:False;\r\nEACEnabled:{s};\r\nAllowCrossplay:False;\r\nArchitecture64:True;\r\nIsPublic:True;\r\n\r\n",
+        "GameType:7DTD;\r\nGameName:{s};\r\nGameMode:Survival;\r\nGameHost:{s};\r\nLevelName:{s};\r\nIP:{s};\r\nServerVersion:{s};\r\nPort:{d};\r\nCurrentPlayers:{d};\r\nMaxPlayers:{d};\r\nFreePlayerSlots:{d};\r\nWorldSize:{d};\r\nIsDedicated:True;\r\nIsPasswordProtected:{s};\r\nEACEnabled:{s};\r\nAllowCrossplay:False;\r\nArchitecture64:True;\r\nIsPublic:True;\r\n\r\n",
         .{
-            info.game_name,
-            info.game_host,
-            info.level_name,
-            info.ip,
-            info.server_version,
+            gsiSafe(info.game_name, &gn),
+            gsiSafe(info.game_host, &gh),
+            gsiSafe(info.level_name, &ln),
+            gsiSafe(info.ip, &ipb),
+            gsiSafe(info.server_version, &ver),
             info.info_port,
             current_players,
             max_players,
             max_players - current_players,
             info.world_size,
+            if (info.password_protected) "True" else "False",
             if (info.eac_enabled) "True" else "False",
         },
     );
@@ -151,8 +173,21 @@ test "info text has Port and CRLF records" {
     try std.testing.expect(std.mem.indexOf(u8, t, "EACEnabled:False;") != null);
     try std.testing.expect(std.mem.indexOf(u8, t, "AllowCrossplay:False;") != null);
     try std.testing.expect(std.mem.indexOf(u8, t, "IsDedicated:True;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, t, "IsPasswordProtected:False;") != null);
     try std.testing.expect(std.mem.indexOf(u8, t, "\r\n") != null);
     try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
+}
+
+test "info text advertises password and sanitizes GSI fields" {
+    var buf: [1024]u8 = undefined;
+    const pw = try buildInfoText(&buf, .{ .password_protected = true });
+    try std.testing.expect(std.mem.indexOf(u8, pw, "IsPasswordProtected:True;") != null);
+
+    const inj = try buildInfoText(&buf, .{ .level_name = "evil;\r\nInjected:1", .info_port = 27015 });
+    // CR/LF/; must not create a new GSI key line; still one Port: record (info_port).
+    try std.testing.expect(std.mem.indexOf(u8, inj, "\r\nInjected:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, inj, "LevelName:evil") != null);
+    try std.testing.expect(std.mem.indexOf(u8, inj, "Port:27015;") != null);
 }
 
 test "info text clamps player counts" {

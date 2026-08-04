@@ -9,6 +9,7 @@ const protocol = @import("protocol.zig");
 const apm = @import("apm/root.zig");
 const world_store = @import("world/store.zig");
 const server_config = @import("server/config.zig");
+const zdtd_config = @import("server/zdtd_config.zig");
 const io_fs = @import("util/io_fs.zig");
 const version = @import("version.zig");
 
@@ -25,9 +26,9 @@ const help_text =
     \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
     \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
     \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
-    \\  --webui-port N        HTTP ops UI (0 = off; requires --webui-secret; see docs/WEBUI.md)
+    \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
     \\  --webui-bind ADDR     webui bind (default 127.0.0.1; 0.0.0.0 needs firewall)
-    \\  --webui-secret STR    shared secret (Bearer / X-Zdtd-Secret / ?token=)
+    \\  --webui-secret STR    shared secret (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
     \\  --quests PATH         explicit quests.xml
     \\  --config-dir DIR      stock Data/Config dir (XML assets)
     \\  --config-overrides DIR  dir of xpath patch XMLs (repeatable; filename order)
@@ -38,21 +39,31 @@ const help_text =
     \\  -h, --help            show this help
     \\
     \\Value forms: --flag VALUE or --flag=VALUE
-    \\Precedence: CLI flags override matching serverconfig.xml keys.
+    \\Precedence: CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
+    \\            --serverconfig keys > code defaults. See docs/GAME_OPTIONS.md.
     \\
     \\Examples:
     \\  zdtd --port 27002 --world worlds/zdtd_default
     \\  zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
     \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
     \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
-    \\  zdtd --webui-port 8080 --webui-secret change-me
+    \\  ZDTD_WEBUI_SECRET=… zdtd --webui-port 8080
     \\  zdtd --worldgen-seed 42 --once
+    \\
+    \\Exit codes: 0 success, 1 runtime error (config load, startup), 2 usage error.
     \\
 ;
 
 fn usageError(comptime fmt: []const u8, fmt_args: anytype) noreturn {
     std.debug.print("zdtd: " ++ fmt ++ "\nzdtd: try 'zdtd --help'\n", fmt_args);
     std.process.exit(2);
+}
+
+/// Runtime (non-usage) startup failure: the CLI was fine, the environment was
+/// not. No "--help" hint; exit 1 so scripts can tell it from a usage error.
+fn fatal(comptime fmt: []const u8, fmt_args: anytype) noreturn {
+    std.debug.print("zdtd: " ++ fmt ++ "\n", fmt_args);
+    std.process.exit(1);
 }
 
 /// Help and version go to stdout (not stderr) so operators can pipe them.
@@ -69,13 +80,13 @@ fn printStdout(comptime fmt: []const u8, fmt_args: anytype) void {
     };
 }
 
-/// Resolve a value for `--flag` or `--flag=value`. Rejects empty `--flag=`.
+/// Resolve a value for `--flag` or `--flag=value`. Rejects empty values in
+/// both forms (`--flag=` and `--flag ""`).
 fn flagValue(it: *std.process.Args.Iterator, flag: []const u8, inline_val: ?[]const u8) []const u8 {
-    if (inline_val) |v| {
-        if (v.len == 0) usageError("option '{s}' requires a value", .{flag});
-        return v;
-    }
-    return it.next() orelse usageError("option '{s}' requires a value", .{flag});
+    const v = inline_val orelse it.next() orelse
+        usageError("option '{s}' requires a value", .{flag});
+    if (v.len == 0) usageError("option '{s}' requires a value", .{flag});
+    return v;
 }
 
 fn flagInt(comptime T: type, flag: []const u8, s: []const u8, base: u8) T {
@@ -91,9 +102,55 @@ fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
     return .{ .name = a, .value = null };
 }
 
+const known_flags = [_][]const u8{
+    "--port",             "--world",         "--map",        "--game-dir",
+    "--world-name",       "--serverconfig",  "--admin-port", "--webui-port",
+    "--webui-bind",       "--webui-secret",  "--quests",     "--config-dir",
+    "--config-overrides", "--worldgen-seed", "--ticks",      "--once",
+    "--version",          "--help",
+};
+
+/// Levenshtein distance, capped by buffer size (flags are short).
+fn editDistance(a: []const u8, b: []const u8) usize {
+    var prev: [40]usize = undefined;
+    var cur: [40]usize = undefined;
+    if (a.len >= prev.len or b.len >= prev.len) return a.len + b.len;
+    for (0..b.len + 1) |j| prev[j] = j;
+    for (0..a.len) |i| {
+        cur[0] = i + 1;
+        for (0..b.len) |j| {
+            const cost: usize = if (a[i] == b[j]) 0 else 1;
+            cur[j + 1] = @min(prev[j] + cost, @min(cur[j] + 1, prev[j + 1] + 1));
+        }
+        @memcpy(prev[0 .. b.len + 1], cur[0 .. b.len + 1]);
+    }
+    return prev[b.len];
+}
+
+/// Nearest known flag within edit distance 2, for typo hints.
+fn suggestFlag(name: []const u8) ?[]const u8 {
+    var best: ?[]const u8 = null;
+    var best_d: usize = 3;
+    for (known_flags) |f| {
+        const d = editDistance(name, f);
+        if (d < best_d) {
+            best_d = d;
+            best = f;
+        }
+    }
+    return best;
+}
+
 fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 {
     if (cli_name) |name| return name;
     return if (config_name.len > 0) config_name else null;
+}
+
+fn isLoopbackBind(host: []const u8) bool {
+    return std.mem.eql(u8, host, "127.0.0.1") or
+        std.mem.eql(u8, host, "localhost") or
+        std.mem.eql(u8, host, "::1") or
+        std.mem.eql(u8, host, "[::1]");
 }
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -118,6 +175,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var webui_port: u16 = 0;
     var webui_bind: []const u8 = "127.0.0.1";
     var webui_secret: []const u8 = "";
+    var webui_secret_cli = false;
     var max_ticks: u64 = 0;
     var once = false;
     var ticks_cli = false;
@@ -165,6 +223,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             webui_bind = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--webui-secret")) {
             webui_secret = flagValue(&it, name, inline_val);
+            webui_secret_cli = true;
         } else if (std.mem.eql(u8, name, "--worldgen-seed")) {
             worldgen_seed = flagInt(u64, name, flagValue(&it, name, inline_val), 0);
         } else if (std.mem.eql(u8, name, "--ticks")) {
@@ -185,6 +244,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
             printStdout("{s}", .{help_text});
             return;
         } else if (std.mem.startsWith(u8, a, "-")) {
+            if (suggestFlag(name)) |s| {
+                usageError("unknown option '{s}' (did you mean '{s}'?)", .{ name, s });
+            }
             usageError("unknown option '{s}'", .{name});
         } else {
             usageError("unexpected argument '{s}' (zdtd takes options only, not positionals)", .{a});
@@ -201,7 +263,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (serverconfig_path) |scp| {
         // Explicit path: fail fast (do not silently run with defaults).
         cfg_owned = server_config.loadFromPath(gpa, scp) catch |err| {
-            usageError("cannot load --serverconfig '{s}': {s}", .{ scp, @errorName(err) });
+            fatal("cannot load --serverconfig '{s}': {s}", .{ scp, @errorName(err) });
         };
         if (cfg_owned) |c| {
             if (!port_cli) port = c.port;
@@ -248,11 +310,36 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Effective config: loaded file or struct defaults (single source in config.zig).
     const cfg: server_config.Config = cfg_owned orelse .{};
 
-    if (webui_port != 0 and webui_secret.len == 0) {
-        usageError("--webui-port requires --webui-secret (or set env via shell export into argv)", .{});
+    // CLI > env ZDTD_WEBUI_SECRET (prefer env: not visible in process listings).
+    if (webui_secret.len == 0) {
+        if (std.process.Environ.getPosix(init.environ, "ZDTD_WEBUI_SECRET")) |env_secret| {
+            if (env_secret.len > 0) webui_secret = env_secret;
+        }
+    } else if (webui_secret_cli) {
+        std.debug.print(
+            "zdtd: warning: --webui-secret is visible in process listings; prefer env ZDTD_WEBUI_SECRET\n",
+            .{},
+        );
     }
 
-    const g = try game_mod.Game.createWithOptions(gpa, world_dir, port, .{
+    if (webui_port == 0 and (webui_secret_cli or !std.mem.eql(u8, webui_bind, "127.0.0.1"))) {
+        std.debug.print(
+            "zdtd: warning: --webui-bind/--webui-secret have no effect without --webui-port\n",
+            .{},
+        );
+    }
+    if (webui_port != 0 and webui_secret.len == 0) {
+        usageError("--webui-port requires --webui-secret or non-empty env ZDTD_WEBUI_SECRET", .{});
+    }
+    if (webui_port != 0 and !isLoopbackBind(webui_bind)) {
+        std.debug.print(
+            "zdtd: warning: webui bind {s} is not loopback; firewall and a strong secret required\n",
+            .{webui_bind},
+        );
+    }
+
+    // InitOptions: serverconfig defaults, then zdtd.toml (world > CWD), CLI-resolved fields last.
+    var init_opts: game_mod.InitOptions = .{
         .map_dir = map_dir,
         .game_dir = game_dir,
         .config_dir = config_dir,
@@ -292,22 +379,59 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .land_claim_offline_durability_modifier = cfg.land_claim_offline_durability_modifier,
         .worldgen_seed = worldgen_seed,
         .authority_mode = cfg.authority_mode,
-    });
+    };
+
+    var toml_path_buf: [1024]u8 = undefined;
+    const world_toml = std.fmt.bufPrint(&toml_path_buf, "{s}/zdtd.toml", .{world_dir}) catch null;
+    const toml_path: ?[]const u8 = blk: {
+        if (world_toml) |wt| {
+            if (io_fs.fileExistsSimple(wt)) break :blk wt;
+        }
+        if (io_fs.fileExistsSimple("zdtd.toml")) break :blk "zdtd.toml";
+        break :blk null;
+    };
+    var toml_owned: ?zdtd_config.File = null;
+    defer if (toml_owned) |*tf| tf.deinit();
+    if (toml_path) |tp| {
+        toml_owned = zdtd_config.loadFromPath(gpa, tp) catch |err| {
+            fatal("cannot load zdtd.toml '{s}': {s}", .{ tp, @errorName(err) });
+        };
+        if (toml_owned) |*tf| {
+            zdtd_config.applyToInitOptions(tf, &init_opts);
+            if (tf.authority.mode) |mode_s| {
+                if (server_config.AuthorityMode.parse(mode_s)) |am| {
+                    init_opts.authority_mode = am;
+                } else {
+                    std.debug.print(
+                        "zdtd: zdtd.toml authority.mode '{s}' unknown (use observe|permissive|correct); keeping {s}\n",
+                        .{ mode_s, @tagName(init_opts.authority_mode) },
+                    );
+                }
+            }
+            zdtd_config.sanitizeInitOptions(&init_opts);
+            std.debug.print("zdtd: loaded {s}\n", .{tp});
+        }
+    }
+
+    const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| {
+        fatal("cannot start server: {s} (world '{s}', port {d})", .{ @errorName(err), world_dir, port });
+    };
     defer {
         g.deinit();
         gpa.destroy(g);
     }
 
-    // Effective config summary (password never printed).
+    // Effective config summary (password / webui secret never printed).
     std.debug.print(
-        "zdtd: config port={d} max_players={d} view_radius={d} admin_port={d} password={s} authority={s}\n",
+        "zdtd: config port={d} max_players={d} view_radius={d} admin_port={d} password={s} authority={s} wire_chunks={s}\n",
         .{
             port,
             g.max_players,
             g.view_radius,
             admin_port,
-            if (cfg.password.len > 0) "set" else "open",
-            @tagName(cfg.authority_mode),
+            if (init_opts.password.len > 0) "set" else "open",
+            @tagName(init_opts.authority_mode),
+            if (g.wire_chunks) "on" else "off",
         },
     );
 
@@ -450,6 +574,15 @@ test "splitFlag bare and equals forms" {
     try std.testing.expectEqualStrings("", empty.value.?);
 }
 
+test "typo suggestion finds nearest flag" {
+    try std.testing.expectEqualStrings("--port", suggestFlag("--prot").?);
+    try std.testing.expectEqualStrings("--ticks", suggestFlag("--tick").?);
+    try std.testing.expectEqualStrings("--world", suggestFlag("-world").?);
+    try std.testing.expect(suggestFlag("--zzzzzzzz") == null);
+    try std.testing.expectEqual(@as(usize, 0), editDistance("--map", "--map"));
+    try std.testing.expectEqual(@as(usize, 2), editDistance("ab", "ba"));
+}
+
 test "explicit world name overrides serverconfig game name" {
     try std.testing.expectEqualStrings("CliWorld", resolveWorldName("CliWorld", "ConfigWorld").?);
     try std.testing.expectEqualStrings("ConfigWorld", resolveWorldName(null, "ConfigWorld").?);
@@ -465,6 +598,7 @@ test "server port must leave room for LiteNet offset" {
 
 test "integration world persist + damage + packages" {
     const dir = "worlds/zdtd_itest";
+    io_fs.deleteFileSimple("worlds/zdtd_itest/c_0_0.zch");
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple(dir);
 

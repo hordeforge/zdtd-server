@@ -12,6 +12,10 @@ if ! command -v "$ZIG" >/dev/null 2>&1; then
   echo "auto_join: missing Zig compiler '$ZIG'" >&2
   exit 127
 fi
+if ! command -v rg >/dev/null 2>&1; then
+  echo "auto_join: missing required tool: rg (ripgrep)" >&2
+  exit 127
+fi
 if [[ ! -x "$LOADGEN" ]]; then
   echo "auto_join: missing loadgen (build sibling 7dtd-loadgen first): $LOADGEN" >&2
   exit 2
@@ -48,9 +52,5 @@ if [[ "$ready" -ne 1 ]]; then
 fi
 # LiteNet = ServerPort+2
 "$LOADGEN" --join --host 127.0.0.1 --port $((PORT + 2)) --count 1 --actions 5 --timeout 30000 --no-spawn-zombies | tee "$WORLD/loadgen.log"
-if ! command -v rg >/dev/null 2>&1; then
-  echo "auto_join: missing required tool: rg (ripgrep)" >&2
-  exit 127
-fi
 rg -q "PASS joined" "$WORLD/loadgen.log"
 echo "auto_join OK"

@@ -13,6 +13,7 @@ const world_store = @import("../world/store.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
 const parallel_util = @import("../util/parallel.zig");
+const rng_util = @import("../util/rng.zig");
 const protocol = @import("../protocol.zig");
 const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
@@ -380,7 +381,15 @@ pub const Game = struct {
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
             .air_drop_interval_hours = opts.air_drop_frequency,
             .authority_mode = opts.authority_mode,
-            .max_streamed_chunks = @min(opts.max_streamed_chunks, max_streamed_chunks_cap),
+            .max_streamed_chunks = blk: {
+                if (opts.max_streamed_chunks > max_streamed_chunks_cap) {
+                    std.debug.print(
+                        "zdtd: max_streamed_chunks={d} exceeds compile cap {d}; clamping\n",
+                        .{ opts.max_streamed_chunks, max_streamed_chunks_cap },
+                    );
+                }
+                break :blk @min(opts.max_streamed_chunks, max_streamed_chunks_cap);
+            },
             .chunk_stream_radius_min = opts.chunk_stream_radius_min,
             .chunk_stream_radius_max = opts.chunk_stream_radius_max,
             .chunk_adds_per_stream_tick = opts.chunk_adds_per_stream_tick,
@@ -476,12 +485,16 @@ pub const Game = struct {
             self.maxdamage.deinit();
             self.maxdamage = md;
             self.maxdamage.tryMergeBundledAssignIds(allocator);
-            self.maxdamage.resolveMaterialMaxDamage(allocator) catch {};
+            self.maxdamage.resolveMaterialMaxDamage(allocator) catch |err| {
+                std.debug.print("zdtd: resolveMaterialMaxDamage failed: {s}\n", .{@errorName(err)});
+            };
             if (self.world.prefabs) |*pf| {
                 if (pf.prefabs_root.len > 0) {
                     var nim_path: [2048]u8 = undefined;
                     if (std.fmt.bufPrint(&nim_path, "{s}/POIs/abandoned_house_01.blocks.nim", .{pf.prefabs_root})) |p| {
-                        self.maxdamage.mergeNim(allocator, p) catch {};
+                        self.maxdamage.mergeNim(allocator, p) catch |err| {
+                            std.debug.print("zdtd: mergeNim {s} failed: {s}\n", .{ p, @errorName(err) });
+                        };
                     } else |_| {}
                 }
             }
@@ -494,6 +507,18 @@ pub const Game = struct {
         } else {
             self.maxdamage.tryMergeBundledAssignIds(allocator);
             std.debug.print("zdtd: assignids-only names={d}\n", .{self.maxdamage.id_by_name.count()});
+        }
+        // A05: live terrain type ids from AssignIds (World.terrain_ids; pins remain offline defaults).
+        {
+            const TerrCtx = struct {
+                t: *const assets_maxdamage.Table,
+                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+                    return self_t.t.idByName(name);
+                }
+            };
+            var terr_ctx: TerrCtx = .{ .t = &self.maxdamage };
+            self.world.resolveTerrainIds(TerrCtx.lookup, &terr_ctx);
         }
         {
             const IdCtx = struct {
@@ -824,6 +849,7 @@ pub const Game = struct {
                 .server_version = "V 3.1.0",
                 .world_size = 6144,
                 .eac_enabled = false,
+                .password_protected = self.password.len > 0,
             }) catch |err| {
                 std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
             };
@@ -849,10 +875,11 @@ pub const Game = struct {
                 });
             };
             if (self.webui.enabled()) {
-                std.debug.print(
-                    "zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n",
-                    .{ opts.webui_bind, self.webui.port },
-                );
+                self.webui.setAdminHandler(self, Game.webuiAdminThunk);
+                std.debug.print("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
+                    opts.webui_bind,
+                    self.webui.port,
+                });
             }
         }
         if (opts.world_name) |wn| self.world_name = wn;
@@ -1228,7 +1255,7 @@ pub const Game = struct {
         return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
     }
 
-    /// Record layout (v1): magic ZPV1 | n:u32 | records…
+    /// Record layout (v2): magic ZPV2 | n:u32 | records…
     /// each: name_len:u8 | name | x,y,z f32 | coins u32 | inv_n u8 | (item u16, count u16)*inv_n
     /// Merge-write: offline players' existing records are carried over, not erased.
     fn savePlayers(self: *Game) !void {
@@ -1240,7 +1267,7 @@ pub const Game = struct {
         var old_count: u32 = 0;
         if (io_fs.readFileAll(self.allocator, path)) |old_data| {
             defer self.allocator.free(old_data);
-            if (old_data.len >= 8 and old_data[0] == 'Z' and old_data[1] == 'P' and old_data[3] == '2') {
+            if (old_data.len >= 8 and std.mem.eql(u8, old_data[0..4], "ZPV2")) {
                 old_count = std.mem.readInt(u32, old_data[4..8], .little);
                 old_len = @min(old_data.len - 8, old_recs.len);
                 @memcpy(old_recs[0..old_len], old_data[8..][0..old_len]);
@@ -1486,6 +1513,9 @@ pub const Game = struct {
     /// Writes in-place into webui.snap (no large stack frame).
     pub fn fillWebuiSnap(self: *Game) void {
         if (!self.webui.enabled()) return;
+        // Browser partials poll at >= 2s; rebuilding the snapshot (7 entity
+        // scans + histogram percentiles) every tick is 10x wasted work.
+        if (self.tick_n % 10 != 0) return;
         const s = &self.webui.snap;
         // Zero in place (avoid stack temp Snapshot which overflows step's frame).
         @memset(std.mem.asBytes(s), 0);
@@ -1620,7 +1650,9 @@ pub const Game = struct {
         var cmdbuf: [512]u8 = undefined;
         const cmd = packages.parseConsoleCmd(body, &cmdbuf);
         if (cmd.len == 0) return;
-        std.debug.print("zdtd: console cmd from slot={d}: {s}\n", .{ c.slot, cmd });
+        // Log verb only: args may include player names, chat text, or coords.
+        const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
+        std.debug.print("zdtd: console cmd from slot={d}: {s}\n", .{ c.slot, cmd[0..verb_end] });
 
         var out: ConsoleOut = .{};
         var it = std.mem.tokenizeAny(u8, cmd, " ");
@@ -1850,6 +1882,15 @@ pub const Game = struct {
         if (clk.bloodmoon_frequency == 0) return 999;
         const next = ((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency;
         return next - clk.day;
+    }
+
+    fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
+        const self: *Game = @ptrCast(@alignCast(ctx));
+        self.admin_reply_len = 0;
+        self.admin_reply_sink = out;
+        self.runAdminLine(line);
+        self.admin_reply_sink = null;
+        return self.admin_reply_len;
     }
 
     fn runAdminLine(self: *Game, line: []const u8) void {
@@ -2181,9 +2222,16 @@ pub const Game = struct {
 
     fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
         // Drop clients whose LiteNet peer died (disconnect / timeout).
+        // Same log/counter as reapStalePeers: whichever sweep wins the race,
+        // the disconnect still shows up in the server log.
         for (&self.clients) |*c| {
             if (c.peer) |p| {
                 if (!p.alive) {
+                    self.harness.counters.inc(.stale_peers_reaped);
+                    std.debug.print(
+                        "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
+                        .{ p.local_id, c.slot, c.entity_id },
+                    );
                     self.clearLocksForPeer(c.slot);
                     c.* = .{};
                 }
@@ -2202,8 +2250,11 @@ pub const Game = struct {
             if (c.peer == null) {
                 c.* = .{ .peer = peer, .slot = i };
                 self.challenge_counter += 1;
+                // Both halves from the join counter (golden-ratio mix on the high
+                // half). No wall-clock: challenge bytes are seed-stable for DST
+                // replay of the join path. Still unique per accept order.
                 std.mem.writeInt(u64, c.challenge[0..8], self.challenge_counter, .little);
-                std.mem.writeInt(u64, c.challenge[8..16], clock.monoNs(), .little);
+                std.mem.writeInt(u64, c.challenge[8..16], self.challenge_counter *% 0x9E3779B97F4A7C15, .little);
                 return c;
             }
         }
@@ -2685,6 +2736,14 @@ pub const Game = struct {
         return std.mem.readInt(u32, bytes[4..8], .big);
     }
 
+    /// Pseudonym for stdout only. Ban/rate-limit still use the real `peerIpKey`.
+    /// Project policy: no raw IP in logs by default (see TODO evidence redaction).
+    fn ipLogTag(ip: u32) u32 {
+        var b: [4]u8 = undefined;
+        std.mem.writeInt(u32, &b, ip, .little);
+        return @truncate(std.hash.Wyhash.hash(0x7a647464, &b));
+    }
+
     /// Stock ~500ms/IP; return true if join should be rejected.
     fn joinRateLimited(self: *Game, ip: u32) bool {
         if (ip == 0) return false;
@@ -2757,14 +2816,14 @@ pub const Game = struct {
         peer.pump_ctx = self;
         const ip = peerIpKey(peer);
         if (self.isBanned(ip)) {
-            std.debug.print("zdtd: ban reject ip={x} local_id={d}\n", .{ ip, peer.local_id });
+            std.debug.print("zdtd: ban reject ip_tag={x:0>8} local_id={d}\n", .{ ipLogTag(ip), peer.local_id });
             self.harness.counters.inc(.join_fail);
             peer.alive = false;
             c.* = .{};
             return;
         }
         if (self.joinRateLimited(ip)) {
-            std.debug.print("zdtd: join rate-limit ip={x} local_id={d}\n", .{ ip, peer.local_id });
+            std.debug.print("zdtd: join rate-limit ip_tag={x:0>8} local_id={d}\n", .{ ipLogTag(ip), peer.local_id });
             self.harness.counters.inc(.join_fail);
             peer.alive = false;
             c.* = .{};
@@ -2817,8 +2876,9 @@ pub const Game = struct {
         var pkgs: [16]wire_frame.Package = undefined;
         const n = wire_frame.parseChannelPayload(payload, &pkgs);
         if (n == 0 and payload.len > 0) {
-            var hex: [40]u8 = undefined;
-            const show = @min(payload.len, 16);
+            // Frame header only (8 bytes): avoid dumping string fields (names, etc.).
+            var hex: [24]u8 = undefined;
+            const show = @min(payload.len, 8);
             var hi: usize = 0;
             var bi: usize = 0;
             while (bi < show and hi + 2 <= hex.len) : (bi += 1) {
@@ -2877,6 +2937,7 @@ pub const Game = struct {
             .server_version = "V 3.1.0",
             .world_size = 6144,
             .eac_enabled = false,
+            .password_protected = self.password.len > 0,
         };
         return try serverinfo_tcp.buildInfoText(buf, info);
     }
@@ -2945,7 +3006,8 @@ pub const Game = struct {
             // after RequestToEnterGame is sent from the client.
             self.refreshInfoPlayers();
             self.harness.counters.inc(.join_ok);
-            std.debug.print("zdtd: PlayerLogin name={s} entity={d} body={d}\n", .{ c.name[0..c.name_len], eid, body.len });
+            // Name length only in logs (name stays on admin listplayers / webui).
+            std.debug.print("zdtd: PlayerLogin name_len={d} entity={d} body={d}\n", .{ c.name_len, eid, body.len });
             return;
         }
         // Stock: StartAsClient starts config-wait coroutine, then RequestToEnterGame.
@@ -3599,8 +3661,20 @@ pub const Game = struct {
         // client's action completes instead of hanging.
         if (std.mem.eql(u8, name, "NetPackageGameEventRequest")) {
             if (packages.buildGameEventResponse(&self.body_buf, body)) |resp| {
-                self.sendGame(peer, "NetPackageGameEventResponse", resp) catch {};
-            } else |_| {}
+                self.sendGame(peer, "NetPackageGameEventResponse", resp) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    std.debug.print(
+                        "zdtd: GameEventResponse send failed slot={d}: {s}\n",
+                        .{ c.slot, @errorName(err) },
+                    );
+                };
+            } else |err| {
+                self.harness.counters.inc(.encode_errors);
+                std.debug.print(
+                    "zdtd: GameEventResponse encode failed slot={d}: {s}\n",
+                    .{ c.slot, @errorName(err) },
+                );
+            }
             return;
         }
         // Quest-spawned enemy: client asks server to spawn from a quest group.
@@ -3639,7 +3713,12 @@ pub const Game = struct {
         }
         // In-game console (F1): execute a set of server commands for the sender.
         if (std.mem.eql(u8, name, "NetPackageConsoleCmdServer")) {
-            self.handleConsoleCmd(peer, c, body) catch {};
+            self.handleConsoleCmd(peer, c, body) catch |err| {
+                std.debug.print(
+                    "zdtd: console cmd failed slot={d}: {s}\n",
+                    .{ c.slot, @errorName(err) },
+                );
+            };
             return;
         }
         // Prefab editor volume: not part of the play path under EAC-off; drop.
@@ -4941,7 +5020,7 @@ pub const Game = struct {
     fn broadcastDirtyWorkstations(self: *Game) !void {
         for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
             if (!u or !w.dirty) continue;
-            w.dirty = false;
+            // Keep dirty until encode+broadcast succeed so a failed send retries next tick.
             var fuel: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
             var input: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
             var tools: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
@@ -4967,14 +5046,29 @@ pub const Game = struct {
                     .is_burning = w.is_burning,
                     .burn_time_left = w.burn_time_left,
                 },
-            ) catch continue;
+            ) catch |err| {
+                self.harness.counters.inc(.encode_errors);
+                std.debug.print(
+                    "zdtd: workstation TE encode failed at ({d},{d},{d}): {s}\n",
+                    .{ w.x, w.y, w.z, @errorName(err) },
+                );
+                continue;
+            };
             self.broadcastNear(
                 "NetPackageTileEntity",
                 body,
                 @floatFromInt(w.x),
                 @floatFromInt(w.z),
                 self.interest_range,
-            ) catch {};
+            ) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print(
+                    "zdtd: workstation TE broadcast failed at ({d},{d},{d}): {s}\n",
+                    .{ w.x, w.y, w.z, @errorName(err) },
+                );
+                continue;
+            };
+            w.dirty = false;
         }
     }
 
@@ -5100,17 +5194,11 @@ pub const Game = struct {
             const spanx: i32 = @max(1, vol.x1 - vol.x0);
             const spanz: i32 = @max(1, vol.z1 - vol.z0);
             const cy: f32 = @floatFromInt(vol.y0 + 1);
-            var rng: u32 = seed;
+            var prng = rng_util.XorShift32.init(seed);
             var n: u8 = 0;
             while (n < count and n < 8) : (n += 1) {
-                rng ^= rng << 13;
-                rng ^= rng >> 17;
-                rng ^= rng << 5;
-                const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(rng % @as(u32, @intCast(spanx)))));
-                rng ^= rng << 13;
-                rng ^= rng >> 17;
-                rng ^= rng << 5;
-                const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(rng % @as(u32, @intCast(spanz)))));
+                const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
+                const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
                 _ = self.sim.spawnSleeperClass(ox, cy, oz, def.max_hp, def.hash, def.loot_list);
             }
         }
@@ -5531,7 +5619,17 @@ pub const Game = struct {
                 try self.sendSpawnChunk(peer, cx, cz);
                 clientAddStreamed(c, key);
                 // Plants/trees for the newly visible terrain chunk (fixed-size clients need S2C).
-                self.sendDecoForTerrainChunk(c, peer, cx, cz) catch {};
+                // On failure deco is not marked (sendDecoForTerrainChunk); log so silent
+                // missing trees are visible. Do not bulk-retry all streamed keys: join
+                // flood marks terrain streamed without per-chunk deco, and a full-view
+                // resend would flood the reliable window.
+                self.sendDecoForTerrainChunk(c, peer, cx, cz) catch |err| {
+                    self.harness.counters.inc(.stream_errors);
+                    std.debug.print(
+                        "zdtd: deco stream failed cx={d} cz={d}: {s}\n",
+                        .{ cx, cz, @errorName(err) },
+                    );
+                };
                 added += 1;
             }
         }
@@ -5776,12 +5874,14 @@ pub const Game = struct {
     }
 
     fn clearDeadKnownEntities(self: *Game) void {
+        // One alive-bitset build + word-wise AND per client, instead of a
+        // per-slot × per-client unset sweep (512×64 every tick).
+        var alive_bits = std.StaticBitSet(ecs.max_entities).initEmpty();
         var j: ecs.Slot = 0;
         while (j < ecs.max_entities) : (j += 1) {
-            if (!self.sim.alive[j]) {
-                for (&self.clients) |*kc| kc.known_entities.unset(j);
-            }
+            if (self.sim.alive[j]) alive_bits.set(j);
         }
+        for (&self.clients) |*kc| kc.known_entities.setIntersection(alive_bits);
     }
 
     pub fn step(self: *Game) !void {
@@ -5846,7 +5946,10 @@ pub const Game = struct {
             // Workstation burn/craft at 2Hz; dirty stations re-broadcast state.
             if (self.tick_n % 10 == 0) {
                 self.workstations.tickAllResolved(0.5, reverseItemType, self);
-                self.broadcastDirtyWorkstations() catch {};
+                self.broadcastDirtyWorkstations() catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
+                };
             }
             // Power fuel/SoC/timers every tick (props from blocks.xml via registry).
             const daylight = !self.sim.director.clock.isNight();

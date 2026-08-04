@@ -208,4 +208,3 @@ test "guid net order" {
     try std.testing.expectEqual(@as(u8, 0x88), g[8]);
     try std.testing.expectEqual(@as(u8, 0xaa), g[10]);
 }
-

@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** 239/239 · stock join: green (0 NRE) · core play loop: **yes** (automated playtest 77/83, residuals in STATUS) · full stock parity: **partial** (gaps below)
+**Tests:** 306/306 · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -31,18 +31,18 @@ This document is deliberately exhaustive. Status labels:
 | Package catalog | 190 names; 33/33 C2S | many S2C bodies shallow | editor/EAC/platform | play path covered |
 | Terrain wire | stock Chunk.write + upper24 + DTM | dens residual, deco suppressed | full .ttc | POI textured; CGO green |
 | Prefab TTS | types + density/TE/water/texture planes | part_* skip policy | name remap if tables diverge | houses from real TTS |
-| Block world | columns + SetBlock + .zch2 + land claim | multi/meta depth | stability, falling | dig/build/persist |
+| Block world | columns + SetBlock + ZCH3 (.zch) + land claim | multi/meta depth | stability, falling | dig/build/persist |
 | Inventory / TE / loot | PDF, TE, workstation sim, loot ECD bag, InvTx | lock contention depth | RecipeQueue C2S beyond TE | chest/craft/loot work |
 | Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task, grid A* | AI task depth | navmesh, more EAI tasks | fight/loot visible |
 | Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders | biomes.xml, vehicles.xml | gamestages, buffs | tables load |
-| Persistence | `.zch2`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
+| Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
 | Admin / browser | admin TCP (kick/ban/give/tele/kill/…) + console | full telnet surface | Steam browser | ops usable |
 
 **Honest bottom line:** core stock loop is playable under EAC-off (join, move,
 dig/build, fight, death/respawn, loot, craft + workstation, trade, persist;
-automated playtest 77/83). Remaining work is **depth and scale**, not join.
+automated playtest pass=83 fail=0). Remaining work is **depth and scale**, not join.
 Prefer missing over fakes. Best PARTIAL write-ups: §5.2.1 EAI, §6.1 quests,
 electrical gaps, vehicle physics, blood-moon FX.
 
@@ -268,11 +268,11 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
 | RWG / procedural gen | MISSING | baked maps only today; design WORLDGEN.md = **on-the-fly** per-chunk stream gen (MC density + WFC tiles; not static full bake; not stock RWG host) |
-| Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + .zch2 |
+| Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
 | Density / stability / shape / paint | PARTIAL | density channel; stability/falling MISSING |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
 | Stock `NetPackageChunk` blob | HAVE | `stock_chunk.zig` + upper24; live CGO |
-| `.ttc` region files | MISSING | custom `.zch2` + blockmeta |
+| `.ttc` region files | MISSING | custom ZCH3 `.zch` + blockmeta |
 | RegionFileRaw headers / sectors | MISSING | RE partial |
 | Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
@@ -541,7 +541,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Item | Status |
 |---|---|
 | `.zch` height overlay | HAVE |
-| Full chunk block save | HAVE (`.zch2` columns) |
+| Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
 | Stock region `.ttc` | MISSING |
 | Player profile / inventory save | HAVE (players.zsv v2 quality/meta + journal) |
 | Bedroll / last logout pos | PARTIAL (logout pos; bedroll ownership MISSING) |
@@ -779,5 +779,5 @@ payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md`
 and `experimental-delta.md`.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
-`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 239/239.
+`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 306/306.
 

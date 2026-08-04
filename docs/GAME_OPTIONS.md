@@ -13,12 +13,15 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 | Source | Role |
 |---|---|
 | CLI (`--port`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
+| Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
+| `<world>/zdtd.toml` then CWD `zdtd.toml` | zdtd stream/authority/feature tunables; first existing file wins; **fatal** if present but unreadable |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
 
-Startup prints a one-line effective summary (`password=set|open`, never the secret).
+Startup prints a one-line effective summary (`password=set|open`, never secrets).
 `AdminPort` binds **127.0.0.1 only** (no auth on the console).
 `ServerMaxPlayerCount` is applied to GSI ads and soft join capacity (capped at 64).
+Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 
 ## Applied to the sim
 
@@ -53,15 +56,28 @@ Startup prints a one-line effective summary (`password=set|open`, never the secr
 | `AdminPort` | 0 | u16 | unauthenticated admin TCP on 127.0.0.1; 0 = off |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
 
-### Web UI (CLI only for WU0; not serverconfig yet)
+### Web UI (CLI / env for WU0; not serverconfig yet)
 
-| Flag | Default | Notes |
+| Flag / env | Default | Notes |
 |---|---|---|
-| `--webui-port` | 0 | HTTP ops UI; 0 = off. Requires `--webui-secret`. Design: [WEBUI.md](WEBUI.md) |
-| `--webui-bind` | `127.0.0.1` | Loopback default; `0.0.0.0` is opt-in (firewall required) |
-| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / `?token=`; refuse listen if port set and secret empty |
+| `--webui-port` | 0 | HTTP ops UI; 0 = off. Requires a secret. Design: [WEBUI.md](WEBUI.md) |
+| `--webui-bind` | `127.0.0.1` | Loopback default; non-loopback logs a warning (firewall required) |
+| `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / `?token=`; visible in `ps` (prefer env) |
+| `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty |
 
 `/healthz` is unauthenticated liveness. All other routes need the secret (WU0).
+
+### zdtd.toml (operator tunables)
+
+Template: [`zdtd.toml.example`](../zdtd.toml.example). Loaded from
+`<world>/zdtd.toml` if present, else CWD `zdtd.toml`. Parser:
+`src/server/zdtd_config.zig`. Unknown keys warn and are ignored.
+
+| Section | Keys (subset) | Effect |
+|---|---|---|
+| `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, period ticks, … | Chunk stream caps (clamped to compile cap 169) |
+| `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
+| `[feature]` | `wire_chunks` | Stream NetPackageChunk (default true) |
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the

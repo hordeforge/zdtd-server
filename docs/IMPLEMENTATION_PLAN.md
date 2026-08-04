@@ -180,7 +180,7 @@ Holding: item_id / slot index
 #### M10.1 Full chunk store
 - Store block ids (and later density) per column or sections.  
 - Heightmap derived or stored.  
-- Migrate `.zch` → `.zch2` / custom region with version header.  
+- Writable overlay is ZCH3 (`.zch`: heights + u32 rawData + optional paint/density). ZCH2 u16 blocks load heights-only.  
 
 #### M10.2 Parallel save (already started)
 - Dirty bit per chunk; save only dirty.  
@@ -448,7 +448,7 @@ Not feature-complete 7DTD; **playable**. Status vs 2026-07-23 evidence:
 | 1 | Stock client EAC-off joins Navezgane, stands, walks | **MET** (11/11 playtest, 0 NRE) |
 | 2 | Two players / bots see each other; chat | **MET** (loadgen + stock concurrent) |
 | 3 | Zombies spawn, damage, die; loot | **MET** (ECD bag; path still greedy) |
-| 4 | Dig/build real ids; persists restart | **MET** (.zch2 + blockmeta) |
+| 4 | Dig/build real ids; persists restart | **MET** (ZCH3 `.zch` + blockmeta) |
 | 5 | Inventory hotbar use + place | **MET** |
 | 6 | Trader quest path (journal + offers + trade) | **MET** first cut (full obj graphs PARTIAL) |
 | 7 | 32 bots stable 30 min; apm budgets | **OPEN** (2-bot green; M11) |

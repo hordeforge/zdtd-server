@@ -135,4 +135,3 @@ test "parse water pos" {
     try std.testing.expectEqual(@as(i32, -192), s.points[1].x);
     try std.testing.expect(s.waterYNear(1855, 1406, 5).? == 77);
 }
-

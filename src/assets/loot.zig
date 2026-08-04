@@ -74,15 +74,15 @@ pub const LootTable = struct {
         };
     }
 
-    pub fn groupByName(self: *const LootTable, name: []const u8) ?LootGroup {
-        for (self.groups) |g| {
+    pub fn groupByName(self: *const LootTable, name: []const u8) ?*const LootGroup {
+        for (self.groups) |*g| {
             if (std.mem.eql(u8, g.name, name)) return g;
         }
         return null;
     }
 
-    pub fn containerByName(self: *const LootTable, name: []const u8) ?LootContainer {
-        for (self.containers) |c| {
+    pub fn containerByName(self: *const LootTable, name: []const u8) ?*const LootContainer {
+        for (self.containers) |*c| {
             if (std.mem.eql(u8, c.name, name)) return c;
         }
         return null;

@@ -82,8 +82,8 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Control | Default |
 |---|---|
 | Bind | `127.0.0.1` only (`--webui-bind 0.0.0.0` explicit opt-in) |
-| Auth | Shared secret header or login form → httpOnly session cookie (HMAC) |
-| CSRF | SameSite cookie + POST token on mutating forms |
+| Auth | Shared secret header or `/login?token=`; cookie is HMAC session token (not the secret) |
+| CSRF | SameSite cookie + form field = HMAC session token (secret accepted for API tools) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
 | Rate limit | Per-IP cmd rate (reuse join-style throttle ideas) |
 | Audit log | Append-only ops log: who/when/cmd (file under world dir) |
@@ -218,7 +218,7 @@ curl -sS http://127.0.0.1:8080/healthz
 - [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML)
 - [x] Auto-refresh 2s via small inline poller (no CDN; `hx-get` attributes)
 - [x] `GET /api/apm.json` for scripts
-- [x] Cookie login: `/login?token=SECRET` → `Set-Cookie: zdtd_webui=…`
+- [x] Cookie login: `/login?token=SECRET` → `Set-Cookie: zdtd_webui=<HMAC session>` (not the secret)
 - [x] APM counters include tick_overruns / encode_errors / join / pkg / section means
 
 **Exit:** browser or curl with secret sees live tick/players/apm.
@@ -233,10 +233,10 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 
 ### WU2 — Commands
 
-- [ ] Shared command parse path (admin TCP + web POST)
-- [ ] `POST /api/cmd` → queue → drain on tick
-- [ ] Console partial with response lines
-- [ ] CSRF + session cookie
+- [x] Shared command parse path (admin TCP + web POST)
+- [x] `POST /api/cmd` runs through the bounded admin command handler
+- [x] Console partial with response lines
+- [x] CSRF + session cookie
 - [ ] Ops audit log file
 
 **Exit:** give/kick/settime from browser matches admin TCP semantics.

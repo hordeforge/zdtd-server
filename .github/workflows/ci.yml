@@ -56,14 +56,30 @@ jobs:
 
       - name: Smoke-test release binary
         run: |
-          expected=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig)
-          test "$(zig-out/bin/zdtd --version 2>&1)" = "zdtd $expected"
+          set -euo pipefail
+          product=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig)
+          wire=$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig)
+          test -n "$product" && test -n "$wire"
+          # Must match src/main.zig --version format (product + stock wire).
+          test "$(zig-out/bin/zdtd --version 2>&1)" = "zdtd $product (stock wire $wire)"
+          # Operator artifact must be stripped (make release uses -Dstrip=true).
+          # Prefer `file`; fall back to absence of .debug_* sections via readelf.
+          if command -v file >/dev/null 2>&1; then
+            file zig-out/bin/zdtd | grep -q 'stripped'
+          else
+            ! readelf -S zig-out/bin/zdtd | grep -q '[[:space:]]\.debug_'
+          fi
+          test -f zig-out/bin/zdtd.sha256
+          # Sidecar hash must match the binary we ship.
+          (cd zig-out/bin && sha256sum -c zdtd.sha256)
 
       - name: Upload release binary
         if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: zdtd-linux-x86_64-${{ github.sha }}
-          path: zig-out/bin/zdtd
+          path: |
+            zig-out/bin/zdtd
+            zig-out/bin/zdtd.sha256
           if-no-files-found: error
           retention-days: 14

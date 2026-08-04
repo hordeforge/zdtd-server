@@ -379,7 +379,6 @@ test "parse decoration line" {
     try std.testing.expect(max_h >= 61);
 }
 
-
 test "tts size read abandoned_house if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
     if (!fileExists(p)) return error.SkipZigTest;

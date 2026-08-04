@@ -184,6 +184,20 @@ const Pool = struct {
 
 var global_pool: Pool = .{};
 
+/// When true, forRanges always runs serially on the calling thread.
+/// Use under deterministic simulation so interleaving cannot depend on the OS
+/// scheduler. Production leaves this false (default).
+var force_serial: std.atomic.Value(bool) = .init(false);
+
+/// Force serial forRanges (deterministic sim / DST). Pair with clock.enableVirtual.
+pub fn setForceSerial(on: bool) void {
+    force_serial.store(on, .release);
+}
+
+pub fn isForceSerial() bool {
+    return force_serial.load(.acquire);
+}
+
 /// Process-wide mutex usable without threading an `std.Io` through callers
 /// (Zig 0.16 dropped `std.Thread.Mutex`; `std.Io.Mutex` needs an io for the
 /// contended futex path, which the pool's `Threaded` provides). No-op in
@@ -205,6 +219,7 @@ pub const IoMutex = struct {
 
 /// Run `work(ctx, begin, end)` over `[0, total)` in parallel when beneficial.
 /// `work` must be thread-safe for disjoint ranges.
+/// When setForceSerial(true), always serial (slot order 0..total).
 pub fn forRanges(
     total: usize,
     ctx: anytype,
@@ -219,6 +234,10 @@ pub fn forRanges(
         }
     };
     var ctx_local = ctx;
+    if (force_serial.load(.acquire)) {
+        work(ctx_local, 0, total);
+        return;
+    }
     global_pool.run(total, Wrapper.entry, @ptrCast(&ctx_local));
 }
 
@@ -247,6 +266,22 @@ test "forRanges serial when small" {
 
 test "forRanges parallel covers all" {
     if (builtin.single_threaded) return;
+    var hits: [64]u8 = .{0} ** 64;
+    const Ctx = struct {
+        hits: []u8,
+        fn work(ctx: @This(), begin: usize, end: usize) void {
+            var i = begin;
+            while (i < end) : (i += 1) ctx.hits[i] = 1;
+        }
+    };
+    forRanges(64, Ctx{ .hits = hits[0..] }, Ctx.work);
+    for (hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
+}
+
+test "forRanges force serial covers all" {
+    defer setForceSerial(false);
+    setForceSerial(true);
+    try std.testing.expect(isForceSerial());
     var hits: [64]u8 = .{0} ** 64;
     const Ctx = struct {
         hits: []u8,

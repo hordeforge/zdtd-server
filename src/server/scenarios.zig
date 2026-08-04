@@ -334,7 +334,7 @@ test "scenario synthetic DTM fixture always runs" {
     // Tiny 32×32 DTM on disk → loadStockMap path without Steam tree.
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_fixture_map");
-    writeFixtureMap("worlds/zdtd_fixture_map");
+    try writeFixtureMap("worlds/zdtd_fixture_map");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -361,20 +361,20 @@ test "scenario synthetic DTM fixture always runs" {
     );
 }
 
-fn writeFixtureMap(dir: []const u8) void {
+fn writeFixtureMap(dir: []const u8) !void {
     // map_info.xml
     const info =
         \\<MapInfo>
         \\  <property name="HeightMapSize" value="32,32" />
         \\</MapInfo>
     ;
-    writeFileAt(dir, "map_info.xml", info);
+    try writeFileAt(dir, "map_info.xml", info);
     const spawns =
         \\<spawnpoints>
         \\  <spawnpoint position="1,80,2" rotation="0,0,0" />
         \\</spawnpoints>
     ;
-    writeFileAt(dir, "spawnpoints.xml", spawns);
+    try writeFileAt(dir, "spawnpoints.xml", spawns);
     // dtm.raw 32*32 u16 LE; default 70*256, cell (16,16)=80*256
     var raw: [32 * 32 * 2]u8 = undefined;
     var i: usize = 0;
@@ -382,7 +382,7 @@ fn writeFixtureMap(dir: []const u8) void {
         std.mem.writeInt(u16, raw[i * 2 ..][0..2], 70 * 256, .little);
     }
     std.mem.writeInt(u16, raw[(16 * 32 + 16) * 2 ..][0..2], 80 * 256, .little);
-    writeFileAt(dir, "dtm.raw", &raw);
+    try writeFileAt(dir, "dtm.raw", &raw);
 }
 
 test "scenario stock fixture quests.xml load" {
@@ -959,7 +959,6 @@ test "scenario ItemActionEat via InvTx use applies food and hp" {
     std.debug.print("PASS ItemActionEat: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
 }
 
-
 test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp" {
     // Stock client path (ADR 0007): DecHoldingItem locally then C2S PlayerInventory.
     io_fs.mkdirPathSimple("worlds");
@@ -1009,9 +1008,8 @@ test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp"
     std.debug.print("PASS ItemActionEat PlayerInventory: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
 }
 
-
-fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) void {
+fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch return;
-    io_fs.writeFileSimple(path, data) catch {};
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });
+    try io_fs.writeFileSimple(path, data);
 }

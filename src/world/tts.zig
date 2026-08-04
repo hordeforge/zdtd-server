@@ -350,7 +350,7 @@ test "tts load abandoned_house block types if present" {
     // Density + damage planes on stock v19.
     try std.testing.expectEqual(t.types.len, t.density.len);
     try std.testing.expectEqual(t.types.len, t.damage.len);
-    try std.testing.expect(t.density[0] == 0x80 or t.density.len > 0);
+    try std.testing.expectEqual(@as(u8, 0x80), t.density[0]);
     // Prefab TE list after density/damage/texture (abandoned_house has sleepers/loot).
     try std.testing.expect(t.tile_entities.len >= 1);
 }

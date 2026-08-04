@@ -19,13 +19,15 @@ That is **not** sibling `7dtd-apm` (stock Mono dedi).
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
 death/respawn, loot, craft/workstation, trade, persist; automated playtest
-77/83 (residuals listed in STATUS).
+**pass=83 fail=0** (20260804j; soft residuals in STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 | Doc | Role |
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | What works now |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
+| [docs/RELEASES.md](docs/RELEASES.md) | Version, compatibility, support, and release policy |
+| [CHANGELOG.md](CHANGELOG.md) | Consumer-visible changes and migrations |
 | [TODO.md](TODO.md) | Open backlog |
 | [docs/MISSING_FEATURES.md](docs/MISSING_FEATURES.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7–M16 (post-playable) |
@@ -94,8 +96,8 @@ No network fetch: the package has no Zig dependencies. Override the compiler wit
 cd zdtd
 make                 # Debug binary → zig-out/bin/zdtd
 make test
-make check           # version pin + build + test + fuzz corpus + wire lint
-make release         # ReleaseSafe + strip (operator binary)
+make check           # pin + lint + build + test + fuzz (serial; safe under -j)
+make release         # ReleaseSafe + strip + zig-out/bin/zdtd.sha256
 # or: zig build / zig build test / zig build -Doptimize=ReleaseSafe -Dstrip=true
 ```
 

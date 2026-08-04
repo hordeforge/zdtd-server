@@ -9,8 +9,14 @@ const clock = @import("../util/clock.zig");
 
 /// Max assembled user message. Mixed-surface stock chunks + texture planes can exceed 128 KiB.
 pub const max_payload: usize = 524288;
-/// Pending retransmit slots (each fragment is one slot). Large POI chunk ≈ 80–150 parts.
-const pending_cap: usize = 1024;
+/// Pending retransmit slots. allocPending caps in-flight at window_size, so
+/// more slots than the window can never be used (fragments beyond it retry
+/// via the WindowFull pump loop). max_sequence % window_size == 0 keeps
+/// consecutive in-window seqs on distinct slots across wrap.
+const pending_cap: usize = packet.window_size;
+comptime {
+    std.debug.assert(packet.max_sequence % pending_cap == 0);
+}
 /// One pending slot holds one MTU-sized channeled/fragment datagram.
 const pending_bytes: usize = packet.max_packet_size;
 const max_frag_parts: usize = 512;

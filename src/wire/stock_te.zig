@@ -42,7 +42,6 @@ fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
     };
 }
 
-
 fn writeOuterTeHeader(w: *binary.Writer, handle: u8, world_x: i32, world_y: i32, world_z: i32, te_block_id: i32, pay_len: usize) !void {
     try w.writeByte(handle);
     try w.writeI32(world_x);
@@ -174,17 +173,13 @@ fn writeStorageFeature(
     // empty locks for count bits
     try w.write7BitEncodedInt(@intCast(count)); // length in bits
     if (count > 0) {
-        const nbytes = (@as(usize, @intCast(count)) + 7) / 8;
-        var zeros: [16]u8 = .{0} ** 16;
-        const nwrite = @min(nbytes, zeros.len);
-        // may need more for 54 slots: 7 bytes
-        if (nbytes <= zeros.len) {
-            try w.writeBytes(zeros[0..nbytes]);
-        } else {
-            var big: [32]u8 = .{0} ** 32;
-            try w.writeBytes(big[0..nbytes]);
+        const zeros: [32]u8 = .{0} ** 32;
+        var left = (@as(usize, @intCast(count)) + 7) / 8;
+        while (left > 0) {
+            const chunk = @min(left, zeros.len);
+            try w.writeBytes(zeros[0..chunk]);
+            left -= chunk;
         }
-        _ = nwrite;
     }
 }
 
@@ -339,8 +334,9 @@ pub const WorkstationSlots = struct {
 };
 
 fn writeWsStackArray(w: *binary.Writer, slots: []const stock_inv.StockSlot) !void {
-    try w.writeByte(@intCast(@min(slots.len, 255)));
-    for (slots) |s| try stock_inv.writeItemStack(w, s);
+    const n = @min(slots.len, 255);
+    try w.writeByte(@intCast(n));
+    for (slots[0..n]) |s| try stock_inv.writeItemStack(w, s);
 }
 
 /// RecipeQueueItem.Write without a Recipe blob (server-side queue echo keeps

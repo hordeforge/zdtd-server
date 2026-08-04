@@ -40,7 +40,8 @@ fn inflatePayload(src: []const u8) ?[]const u8 {
     else
         .raw;
     const containers = [_]flate.Container{ first, .zlib, .raw, .gzip };
-    for (containers) |container| {
+    for (containers, 0..) |container, i| {
+        if (i > 0 and container == first) continue; // sniffed pick already tried
         var in: std.Io.Reader = .fixed(src);
         var out: std.Io.Writer = .fixed(&inflate_storage);
         var dec: flate.Decompress = .init(&in, container, &.{});

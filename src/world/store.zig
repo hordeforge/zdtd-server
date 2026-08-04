@@ -1,6 +1,7 @@
 //! Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch).
-//! v3 magic ZCH3: heights + optional u32 rawData blocks. ZCH2 u16 type-only is
-//! accepted on load for heights only (blocks regenerate from DTM+TTS).
+//! v3 magic ZCH3: heights + optional u32 rawData + optional texture/density
+//! channels (flags in header). ZCH2 u16 type-only is accepted on load for
+//! heights only (blocks regenerate from DTM+TTS). See ADR 0011.
 
 const std = @import("std");
 const dtm = @import("dtm.zig");
@@ -29,12 +30,34 @@ pub const chunk_size: i32 = 16;
 pub const y_dim: i32 = 256;
 pub const sea_level: u8 = 64;
 // Stock AssignIds via bundled dump (never terrainFiller=2 as painted surface).
+// Module pins = offline/test defaults. Live server prefers World.terrain_ids
+// resolved once via maxdamage.idByName (HARDCODE A05).
 pub const block_air: u16 = assignids.air;
 pub const block_stone: u16 = assignids.terr_stone;
 pub const block_bedrock: u16 = assignids.terr_bedrock;
 pub const block_dirt: u16 = assignids.terr_dirt;
 pub const block_water: u16 = assignids.water;
 pub const blocks_per_chunk: usize = 16 * 256 * 16; // 65536
+
+/// Runtime terrain type ids (AssignIds names). Defaults match module pins.
+pub const TerrainIds = struct {
+    air: u16 = block_air,
+    stone: u16 = block_stone,
+    bedrock: u16 = block_bedrock,
+    dirt: u16 = block_dirt,
+    water: u16 = block_water,
+    forest_ground: u16 = assignids.terr_forest_ground,
+
+    /// Resolve from live idByName dump. Missing names keep pin defaults (fail closed).
+    pub fn resolve(self: *TerrainIds, lookup: *const fn (ctx: ?*anyopaque, name: []const u8) ?u16, ctx: ?*anyopaque) void {
+        if (lookup(ctx, "air")) |id| self.air = id;
+        if (lookup(ctx, "terrStone")) |id| self.stone = id;
+        if (lookup(ctx, "terrBedrock")) |id| self.bedrock = id;
+        if (lookup(ctx, "terrDirt")) |id| self.dirt = id;
+        if (lookup(ctx, "water")) |id| self.water = id;
+        if (lookup(ctx, "terrForestGround")) |id| self.forest_ground = id;
+    }
+};
 
 pub const ChunkPos = struct {
     x: i32,
@@ -224,7 +247,15 @@ pub const Chunk = struct {
         if (y < 0 or y >= y_dim) return;
         try self.ensureBlocks(allocator);
         const b = self.blocks.?;
-        b[blockIndex(lx, y, lz)] = raw;
+        const idx = blockIndex(lx, y, lz);
+        b[idx] = raw;
+        // Paint/density are co-owned with the cell: a plain type/raw write must
+        // drop stale TTS or prior paint so dig/place cannot leave orphan texture.
+        // setBlockTexDens re-applies paint after this call.
+        if (self.textures) |t| t[idx] = 0;
+        if (self.dens_set) |set| {
+            set[idx / 8] &= ~(@as(u8, 1) << @intCast(idx % 8));
+        }
         // Incremental surface height: heights and blocks stay consistent (both
         // writers are ensureBlocks and this), so a full column rescan is only
         // needed when the surface block itself is cleared to air.
@@ -263,6 +294,8 @@ pub const World = struct {
     /// flat | baked | dem | proc. loadStockMap sets baked; --worldgen-seed sets proc.
     terrain_source: TerrainSource = .flat,
     worldgen: ?worldgen_mod.WorldGen = null,
+    /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
+    terrain_ids: TerrainIds = .{},
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
         io_fs.mkdirPath(allocator, world_dir);
@@ -271,6 +304,42 @@ pub const World = struct {
             .world_dir = try allocator.dupe(u8, world_dir),
             .allocator = allocator,
         };
+    }
+
+    /// Prefer dump ids over module pins. Call after AssignIds merge.
+    pub fn resolveTerrainIds(self: *World, lookup: *const fn (ctx: ?*anyopaque, name: []const u8) ?u16, ctx: ?*anyopaque) void {
+        const before = self.terrain_ids;
+        self.terrain_ids.resolve(lookup, ctx);
+        if (before.air != self.terrain_ids.air or
+            before.stone != self.terrain_ids.stone or
+            before.dirt != self.terrain_ids.dirt or
+            before.water != self.terrain_ids.water or
+            before.bedrock != self.terrain_ids.bedrock)
+        {
+            std.debug.print(
+                "zdtd: terrain ids resolved air={d} stone={d} bedrock={d} dirt={d} water={d} (pins were {d}/{d}/{d}/{d}/{d})\n",
+                .{
+                    self.terrain_ids.air,
+                    self.terrain_ids.stone,
+                    self.terrain_ids.bedrock,
+                    self.terrain_ids.dirt,
+                    self.terrain_ids.water,
+                    before.air,
+                    before.stone,
+                    before.bedrock,
+                    before.dirt,
+                    before.water,
+                },
+            );
+        }
+    }
+
+    pub fn isAirId(self: *const World, id: u16) bool {
+        return id == self.terrain_ids.air;
+    }
+
+    pub fn isWaterId(self: *const World, id: u16) bool {
+        return id == self.terrain_ids.water;
     }
 
     /// Enable on-the-fly procedural terrain (W0). Clears baked map backends.
@@ -382,6 +451,20 @@ pub const World = struct {
                 gop.value_ptr.deinitBlocks();
                 _ = self.chunks.remove(k);
             }
+            // Disk load first: a v3 save with blocks is authoritative for every
+            // channel regen would produce, so skip the full terrain+TTS rebuild.
+            // Heights-only / v2 saves still regen, then re-load to keep edits.
+            const LoadState = enum { none, heights_only, full };
+            var load_state: LoadState = .none;
+            if (self.loadChunk(gop.value_ptr)) {
+                load_state = if (gop.value_ptr.blocks != null) .full else .heights_only;
+            } else |err| {
+                if (err != error.FileNotFound) std.debug.print(
+                    "zdtd: chunk ({d},{d}) load failed: {s}; regenerated\n",
+                    .{ pos.x, pos.z, @errorName(err) },
+                );
+            }
+            if (load_state == .full) return gop.value_ptr;
             if (self.terrain_source == .proc) {
                 if (self.worldgen) |*wg| {
                     wg.fillHeights(pos.x, pos.z, &gop.value_ptr.heights);
@@ -404,13 +487,16 @@ pub const World = struct {
                         a: std.mem.Allocator,
                         base_x: i32,
                         base_z: i32,
+                        failed: u32 = 0,
                         fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
                             const pc: *@This() = @ptrCast(@alignCast(ctx.?));
                             const lx = wx - pc.base_x;
                             const lz = wz - pc.base_z;
                             if (lx < 0 or lx >= 16 or lz < 0 or lz >= 16) return;
                             if (wy < 0 or wy >= y_dim) return;
-                            pc.c.setBlockTexDens(pc.a, lx, wy, lz, raw, tex, dens) catch {};
+                            pc.c.setBlockTexDens(pc.a, lx, wy, lz, raw, tex, dens) catch {
+                                pc.failed +%= 1;
+                            };
                         }
                     };
                     var pc: PaintCtx = .{
@@ -420,18 +506,20 @@ pub const World = struct {
                         .base_z = pos.z * 16,
                     };
                     pf.applyTtsPaintToChunk(pos.x, pos.z, PaintCtx.put, &pc);
+                    if (pc.failed > 0) {
+                        std.debug.print(
+                            "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",
+                            .{ pc.failed, pos.x, pos.z },
+                        );
+                    }
                 }
                 if (self.water) |*wt| {
                     wt.applyToChunkHeights(pos.x, pos.z, &gop.value_ptr.heights);
                 }
             }
-            // Player edits / first-touch cache win over regen.
-            self.loadChunk(gop.value_ptr) catch |err| {
-                if (err != error.FileNotFound) std.debug.print(
-                    "zdtd: chunk ({d},{d}) load failed: {s}; regenerated\n",
-                    .{ pos.x, pos.z, @errorName(err) },
-                );
-            };
+            // Player edits / first-touch cache win over regen (heights-only or
+            // v2 saves restore heights again after regen filled blocks).
+            if (load_state == .heights_only) self.loadChunk(gop.value_ptr) catch {};
         }
         return gop.value_ptr;
     }
@@ -466,20 +554,26 @@ pub const World = struct {
     }
 
     pub fn isSolidWorld(self: *World, x: i32, y: i32, z: i32) !bool {
-        const t = worldToChunk(x, z);
-        const c = try self.getOrCreate(t.pos);
-        return c.isSolid(t.lx, y, t.lz);
+        const id = try self.blockWorld(x, y, z);
+        return id != self.terrain_ids.air and id != self.terrain_ids.water;
     }
 
     fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
         return try std.fmt.bufPrint(buf, "{s}/c_{d}_{d}.zch", .{ self.world_dir, pos.x, pos.z });
     }
 
+    /// dens_set bitset bytes for one chunk (blocks_per_chunk bits).
+    const dens_set_bytes: usize = (blocks_per_chunk + 7) / 8;
+
     pub fn saveChunk(self: *World, c: *const Chunk) !void {
         var path_buf: [512]u8 = undefined;
         const path = try self.chunkPath(c.pos, &path_buf);
-        // v3: magic ZCH3, pos, heights, has_blocks u8, optional blocks as u32 rawData.
+        // v3: magic ZCH3 | pos | flags | heights | optional channels.
+        // flags: [12]=blocks u32, [13]=textures u64, [14]=densities+bitset.
         // (v2 ZCH2 was u16 type-only; discarded on load so rotation/meta is not lost.)
+        const has_blocks = c.blocks != null;
+        const has_textures = c.textures != null;
+        const has_densities = c.densities != null and c.dens_set != null;
         var hdr: [16]u8 = undefined;
         hdr[0] = 'Z';
         hdr[1] = 'C';
@@ -487,27 +581,49 @@ pub const World = struct {
         hdr[3] = '3';
         std.mem.writeInt(i32, hdr[4..8], c.pos.x, .little);
         std.mem.writeInt(i32, hdr[8..12], c.pos.z, .little);
-        hdr[12] = if (c.blocks != null) 1 else 0;
-        hdr[13] = 0;
-        hdr[14] = 0;
+        hdr[12] = if (has_blocks) 1 else 0;
+        hdr[13] = if (has_textures) 1 else 0;
+        hdr[14] = if (has_densities) 1 else 0;
         hdr[15] = 0;
         // page_allocator for temps: saveChunkSlice runs this from parallel
         // workers; World.allocator is DebugAllocator/GPA and is not thread-safe.
         const io_a = std.heap.page_allocator;
-        if (c.blocks) |b| {
-            const bytes = std.mem.sliceAsBytes(b);
-            const payload = try io_a.alloc(u8, hdr.len + c.heights.len + bytes.len);
-            defer io_a.free(payload);
-            @memcpy(payload[0..hdr.len], &hdr);
-            @memcpy(payload[hdr.len..][0..c.heights.len], &c.heights);
-            @memcpy(payload[hdr.len + c.heights.len ..], bytes);
-            try io_fs.writeFile(io_a, path, payload);
-        } else {
+        var total: usize = hdr.len + c.heights.len;
+        if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
+        if (has_textures) total += blocks_per_chunk * @sizeOf(u64);
+        if (has_densities) total += blocks_per_chunk + dens_set_bytes;
+        if (!has_blocks and !has_textures and !has_densities) {
             var payload: [16 + 256]u8 = undefined;
             @memcpy(payload[0..16], &hdr);
             @memcpy(payload[16..], &c.heights);
             try io_fs.writeFile(io_a, path, payload[0 .. 16 + c.heights.len]);
+            return;
         }
+        const payload = try io_a.alloc(u8, total);
+        defer io_a.free(payload);
+        var o: usize = 0;
+        @memcpy(payload[o..][0..hdr.len], &hdr);
+        o += hdr.len;
+        @memcpy(payload[o..][0..c.heights.len], &c.heights);
+        o += c.heights.len;
+        if (c.blocks) |b| {
+            const bytes = std.mem.sliceAsBytes(b);
+            @memcpy(payload[o..][0..bytes.len], bytes);
+            o += bytes.len;
+        }
+        if (c.textures) |t| {
+            const bytes = std.mem.sliceAsBytes(t);
+            @memcpy(payload[o..][0..bytes.len], bytes);
+            o += bytes.len;
+        }
+        if (has_densities) {
+            @memcpy(payload[o..][0..blocks_per_chunk], c.densities.?[0..blocks_per_chunk]);
+            o += blocks_per_chunk;
+            @memcpy(payload[o..][0..dens_set_bytes], c.dens_set.?[0..dens_set_bytes]);
+            o += dens_set_bytes;
+        }
+        std.debug.assert(o == total);
+        try io_fs.writeFile(io_a, path, payload);
     }
 
     pub fn loadChunk(self: *World, c: *Chunk) !void {
@@ -523,18 +639,49 @@ pub const World = struct {
         if (data.len < 12) return error.ReadFailed;
         if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {
             const has_blocks = data[12] == 1;
+            // hdr[13]/[14] are 0 on pre-paint ZCH3 files (backward compatible).
+            const has_textures = data[3] == '3' and data[13] == 1;
+            const has_densities = data[3] == '3' and data[14] == 1;
             if (data.len < 16 + c.heights.len) return error.ReadFailed;
             @memcpy(&c.heights, data[16..][0..c.heights.len]);
+            var o: usize = 16 + c.heights.len;
             if (has_blocks) {
                 if (data[3] == '3') {
                     try c.ensureBlocks(self.allocator);
                     const b = c.blocks.?;
                     const bytes = std.mem.sliceAsBytes(b);
-                    const off = 16 + c.heights.len;
-                    if (data.len < off + bytes.len) return error.ReadFailed;
-                    @memcpy(bytes, data[off..][0..bytes.len]);
+                    if (data.len < o + bytes.len) return error.ReadFailed;
+                    @memcpy(bytes, data[o..][0..bytes.len]);
+                    o += bytes.len;
                 }
                 // ZCH2 u16 type-only: keep heights only; blocks regenerate from DTM+TTS.
+            }
+            if (has_textures) {
+                const tex_bytes = blocks_per_chunk * @sizeOf(u64);
+                if (data.len < o + tex_bytes) return error.ReadFailed;
+                if (c.textures == null) {
+                    const t = try self.allocator.alloc(u64, blocks_per_chunk);
+                    c.textures = t;
+                    c.allocator = self.allocator;
+                }
+                const dest = std.mem.sliceAsBytes(c.textures.?);
+                @memcpy(dest, data[o..][0..tex_bytes]);
+                o += tex_bytes;
+            }
+            if (has_densities) {
+                if (data.len < o + blocks_per_chunk + dens_set_bytes) return error.ReadFailed;
+                if (c.densities == null) {
+                    const p = try self.allocator.alloc(u8, blocks_per_chunk);
+                    c.densities = p;
+                    c.allocator = self.allocator;
+                }
+                if (c.dens_set == null) {
+                    const bits = try self.allocator.alloc(u8, dens_set_bytes);
+                    c.dens_set = bits;
+                }
+                @memcpy(c.densities.?[0..blocks_per_chunk], data[o..][0..blocks_per_chunk]);
+                o += blocks_per_chunk;
+                @memcpy(c.dens_set.?[0..dens_set_bytes], data[o..][0..dens_set_bytes]);
             }
         } else {
             // v1: 12-byte hdr then heights.
@@ -576,7 +723,11 @@ pub const World = struct {
             fn work(ctx: @This(), begin: usize, end: usize) void {
                 var i = begin;
                 while (i < end) : (i += 1) {
-                    ctx.world.saveChunk(ctx.chunks[i]) catch {
+                    ctx.world.saveChunk(ctx.chunks[i]) catch |err| {
+                        std.debug.print(
+                            "zdtd: chunk ({d},{d}) save failed: {s}\n",
+                            .{ ctx.chunks[i].pos.x, ctx.chunks[i].pos.z, @errorName(err) },
+                        );
                         _ = ctx.failed.store(1, .monotonic);
                         continue;
                     };
@@ -638,6 +789,38 @@ test "flat world set dig persist" {
     // Full columns must reload so dig/build is authoritative after restart.
     try std.testing.expectEqual(block_dirt, try w2.blockWorld(5, 70, 5));
     try std.testing.expectEqual(block_stone, try w2.blockWorld(6, 71, 5));
+}
+
+test "paint clear on setBlock and ZCH3 texture density roundtrip" {
+    const dir = "worlds/zdtd_paint_persist";
+    io_fs.deleteFileSimple("worlds/zdtd_paint_persist/c_0_0.zch");
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple(dir);
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    // Paint a cell, then plain dig must drop orphan texture/density.
+    try c.setBlockTexDens(w.allocator, 3, 40, 4, block_dirt, 0x61, 12);
+    try std.testing.expectEqual(@as(u64, 0x61), c.texAt(3, 40, 4));
+    try std.testing.expectEqual(@as(?u8, 12), c.densAt(3, 40, 4));
+    try c.setBlock(w.allocator, 3, 40, 4, block_air);
+    try std.testing.expectEqual(@as(u64, 0), c.texAt(3, 40, 4));
+    try std.testing.expectEqual(@as(?u8, null), c.densAt(3, 40, 4));
+    // Repaint and persist; reload must restore channels (hdr flags 13/14).
+    try c.setBlockTexDens(w.allocator, 3, 40, 4, block_stone, 0x0b0b0b0b0b0b, 7);
+    try c.setBlockTexDens(w.allocator, 1, 10, 2, block_dirt, 0x22, 3);
+    try w.saveAll();
+
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    const c2 = try w2.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(block_stone, c2.blockAt(3, 40, 4));
+    try std.testing.expectEqual(@as(u64, 0x0b0b0b0b0b0b), c2.texAt(3, 40, 4));
+    try std.testing.expectEqual(@as(?u8, 7), c2.densAt(3, 40, 4));
+    try std.testing.expectEqual(block_dirt, c2.blockAt(1, 10, 2));
+    try std.testing.expectEqual(@as(u64, 0x22), c2.texAt(1, 10, 2));
+    try std.testing.expectEqual(@as(?u8, 3), c2.densAt(1, 10, 2));
 }
 
 test "stock map heights via DTM if Navezgane present" {

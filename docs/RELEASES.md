@@ -56,8 +56,11 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
    those values with a `v` prefix.
 3. Run `make check`, loadgen join smoke, and the stock-client playtest against
    the stock wire version named in `src/version.zig`.
-4. Move Unreleased entries to a dated version section and restore an empty
-   Unreleased section.
+4. Move Unreleased entries to a `## [MAJOR.MINOR.PATCH] - YYYY-MM-DD` section
+   and restore an empty Unreleased section.
 5. Build the release from the tag and smoke-test `zdtd --version` plus startup
    against a copy of a previous-version world. Never replace an existing tag or
    artifact; publish a new patch version for a bad release.
+
+The release check rejects malformed SemVer, mismatched or multiple version tags,
+undated release notes, and tagged builds made from a dirty worktree.

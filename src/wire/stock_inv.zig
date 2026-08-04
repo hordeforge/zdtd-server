@@ -285,19 +285,7 @@ fn skipEntityStats(r: *binary.Reader, is_player: bool) binary.ReadError!void {
 }
 
 fn skipBag(r: *binary.Reader) binary.ReadError!void {
-    const bag_ver = try r.readByte();
-    const bag_n = try r.readU16();
-    var i: u16 = 0;
-    while (i < bag_n) : (i += 1) {
-        _ = try readItemStack(r);
-    }
-    const has_locked = try r.readBool();
-    if (has_locked) try skipPackedBoolArray(r);
-    if (bag_ver >= 1) {
-        _ = try r.readBool(); // touched
-        const has_prefs = try r.readBool();
-        if (has_prefs) return error.EndOfStream; // unsupported
-    }
+    return skipBagApply(r, null, null, null);
 }
 
 fn skipPlayerProfile(r: *binary.Reader) binary.ReadError!void {
@@ -453,9 +441,10 @@ fn applyEquipmentWrite(
     while (ui < unlocked) : (ui += 1) _ = try r.readI32();
 }
 
+/// Parse a Bag blob; apply stacks into `inv` when non-null, skip otherwise.
 fn skipBagApply(
     r: *binary.Reader,
-    inv: *components.Inventory,
+    inv: ?*components.Inventory,
     reverse: ?ReverseResolver,
     ctx: ?*anyopaque,
 ) binary.ReadError!void {
@@ -464,19 +453,19 @@ fn skipBagApply(
     var i: usize = 0;
     while (i < bag_n) : (i += 1) {
         const s = try readItemStack(r);
-        if (i < components.inv_bag_count) {
-            inv.slots[components.inv_bag_start + i] = toEcs(s, reverse, ctx);
-        }
+        if (inv) |v| if (i < components.inv_bag_count) {
+            v.slots[components.inv_bag_start + i] = toEcs(s, reverse, ctx);
+        };
     }
-    while (i < components.inv_bag_count) : (i += 1) {
-        inv.slots[components.inv_bag_start + i] = .{};
-    }
+    if (inv) |v| while (i < components.inv_bag_count) : (i += 1) {
+        v.slots[components.inv_bag_start + i] = .{};
+    };
     const has_locked = try r.readBool();
     if (has_locked) try skipPackedBoolArray(r);
     if (bag_ver >= 1) {
-        _ = try r.readBool();
+        _ = try r.readBool(); // touched
         const has_prefs = try r.readBool();
-        if (has_prefs) return error.EndOfStream;
+        if (has_prefs) return error.EndOfStream; // unsupported
     }
 }
 

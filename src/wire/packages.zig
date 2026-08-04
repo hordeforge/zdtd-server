@@ -1493,7 +1493,6 @@ pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_c
     };
 }
 
-
 pub fn buildHoldingBodyResolved(
     buf: []u8,
     entity_id: i32,
@@ -1747,7 +1746,6 @@ test "inventory data request stock layout and not-found response" {
     try std.testing.expect(ok.len > resp.len);
 }
 
-
 /// Live overrides for persistent GameStats.Write fields (stock defaults otherwise).
 /// RE: EnumGameStats + initPropertyDecl bPersistent filter (sandbox-options §6.1).
 /// There is **no** current-day field in the net blob; HUD day comes from
@@ -1935,7 +1933,6 @@ test "weather body five biomes is 115" {
     const body = try buildWeatherBody(&buf, biomes[0..]);
     try std.testing.expectEqual(@as(usize, 115), body.len);
 }
-
 
 /// Stock NetPackageChunkRemove: chunkKey i64 (WorldChunkCache.MakeChunkKey).
 pub fn buildChunkRemoveBody(buf: []u8, cx: i32, cz: i32) ![]u8 {

@@ -1,0 +1,26 @@
+# zdtd operator tunables (Bucket B), not stock serverconfig.
+# Copy to <world>/zdtd.toml (preferred) or CWD as zdtd.toml.
+# Precedence: CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
+#             --serverconfig > code defaults. See docs/GAME_OPTIONS.md.
+#
+# Do not put stock MaxFuel / block ids / biome colors here (those load from
+# game Data/Config). Unknown keys are ignored with a startup warning.
+
+[stream]
+# max_streamed_chunks = 169
+# chunk_adds_per_stream_tick = 8
+# stream_radius_min = 7
+# stream_radius_max = 9
+# chunk_stream_period_ticks = 5
+# motion_replicate_period_ticks = 2
+# spawn_area_radius_max = 8
+
+[authority]
+# interest_range_blocks = 160.0
+# max_edit_range_blocks = 96.0
+# max_claimed_damage = 200
+# peer_stale_ms = 3000
+# mode = "correct"   # observe | permissive | correct
+
+[feature]
+# wire_chunks = true

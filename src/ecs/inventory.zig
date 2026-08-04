@@ -158,11 +158,11 @@ pub fn drop(w: *World, peer: usize, slot: u16, qty: u16) Result {
     const ps = w.playerByPeer(peer) orelse return .{};
     if (!w.mask[ps].inventory or !w.mask[ps].transform) return .{};
     if (slot >= c.max_inv_slots) return .{};
+    const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(slot, if (qty == 0) w.inventory[ps].slots[slot].count else qty) orelse return .{};
     const t = w.transform[ps];
     const bag = w.spawnLootBag(t.x + 0.5, t.y, t.z + 0.5, taken.item_id, taken.count) orelse {
-        // refund
-        _ = w.inventory[ps].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id));
+        restoreTaken(&w.inventory[ps], slot, taken, holding_before);
         return .{};
     };
     // fix quality/meta on bag first slot
@@ -282,14 +282,10 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
     if (cont_slot >= c.max_inv_slots) return false;
+    const holding_before = w.inventory[cs].holding;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
     if (!w.inventory[ps].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id))) {
-        // Refund must not fail: putInSlot rejects over-max stacks (container slots
-        // are filled by paths that never clamp), which would delete the items.
-        if (!w.inventory[cs].putInSlot(cont_slot, taken, maxStackFor(w, taken.item_id))) {
-            const dst = &w.inventory[cs].slots[cont_slot];
-            if (dst.count == 0 or dst.item_id == 0) dst.* = taken else dst.count +|= taken.count;
-        }
+        restoreTaken(&w.inventory[cs], cont_slot, taken, holding_before);
         return false;
     }
     // empty bag despawn
@@ -316,9 +312,10 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
     if (player_slot >= c.max_inv_slots) return false;
+    const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(player_slot, if (qty == 0) w.inventory[ps].slots[player_slot].count else qty) orelse return false;
     if (!w.inventory[cs].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id))) {
-        _ = w.inventory[ps].addItemStacked(taken.item_id, taken.count, maxStackFor(w, taken.item_id));
+        restoreTaken(&w.inventory[ps], player_slot, taken, holding_before);
         return false;
     }
     markInv(w, ps);
@@ -420,6 +417,21 @@ fn markInv(w: *World, ps: Slot) void {
     if (w.mask[ps].dirty) w.dirty[ps].inv = true;
 }
 
+/// Roll back a take from a known slot without re-stacking or losing quality/meta.
+/// The sim is single-threaded, so only the remainder of that same stack can occupy it.
+fn restoreTaken(inv: *c.Inventory, slot: u16, taken: c.InvSlot, holding_before: u16) void {
+    const dst = &inv.slots[slot];
+    if (dst.count == 0) {
+        dst.* = taken;
+    } else {
+        std.debug.assert(dst.item_id == taken.item_id);
+        std.debug.assert(dst.quality == taken.quality);
+        std.debug.assert(dst.meta == taken.meta);
+        dst.count +|= taken.count;
+    }
+    inv.holding = holding_before;
+}
+
 test "move and drop and use" {
     const WorldT = @import("world.zig").World;
     var w: WorldT = .{};
@@ -457,6 +469,28 @@ test "open container refuses another player's inventory" {
     _ = w.spawnPlayer(0, 70, 0, 0);
     const victim = w.spawnPlayer(1, 70, 1, 1).?;
     try std.testing.expect(!openContainer(&w, 0, victim));
+}
+
+test "failed container put restores exact source stack and holding slot" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    const bag = w.spawnLootBag(1, 70, 1, 3, 1).?;
+    try std.testing.expect(openContainer(&w, 0, bag));
+    const cs = w.slotOfNetId(bag).?;
+
+    w.inventory[ps].slots[0] = .{ .item_id = 11, .count = 2, .quality = 6, .meta = 321 };
+    w.inventory[ps].holding = 0;
+    for (w.inventory[cs].slots[0..c.inv_equip_start]) |*s| {
+        s.* = .{ .item_id = 3, .count = maxStackBuiltin(3), .quality = 1 };
+    }
+
+    try std.testing.expect(!putIntoContainer(&w, 0, 0, 0));
+    try std.testing.expectEqual(c.InvSlot{ .item_id = 11, .count = 2, .quality = 6, .meta = 321 }, w.inventory[ps].slots[0]);
+    try std.testing.expectEqual(@as(u16, 0), w.inventory[ps].holding);
 }
 
 test "craft op reserved" {

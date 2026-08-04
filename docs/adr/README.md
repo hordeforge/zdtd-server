@@ -15,9 +15,14 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0008](0008-serialize-once-interest.md) | Serialize-once interest fan-out | accepted |
 | [0009](0009-dynamic-package-ids.md) | Dynamic package name → id maps | accepted |
 | [0010](0010-data-config-zig-plugins.md) | Stock data + config + Zig systems; Wasm guest mods later | accepted |
+| [0011](0011-custom-zch-world-overlay.md) | Custom ZCH world overlay (not stock region saves) | accepted |
+| [0012](0012-single-threaded-tick.md) | Single-threaded 20 TPS tick + bounded parallel helpers | accepted |
+| [0013](0013-clean-room-litenet.md) | Clean-room LiteNet stack (no stock LiteNetLib runtime) | accepted |
+| [0014](0014-missing-beats-fake.md) | Missing beats fake (stock wire/content fidelity) | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),
 [HARDCODE_AUDIT.md](../HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
+[WIRE_CHUNK.md](../WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0005),
 [INDEX.md](../INDEX.md).
