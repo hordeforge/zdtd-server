@@ -2805,21 +2805,22 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
             const p = packages.parsePosAndRotBody(body) catch return;
             if (p.entity_id == c.entity_id) {
-                // Ground clamp: client falls through uncollided mesh (void / holes).
-                // Snap when more than ~2 blocks below DTM surface (not only y<-4).
+                // Void rescue only. Aggressive surface snap (y < surface-2) desynced
+                // client mesh vs server height, broke jump_motor and late place suites.
+                // Deep fall / true void still teleports to DTM surface + 0.9.
                 const gx: i32 = @intFromFloat(@floor(p.x));
                 const gz: i32 = @intFromFloat(@floor(p.z));
                 const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
                 const surface: f32 = @floatFromInt(h_u16);
-                // Entity feet should sit slightly above the top solid (surface block).
                 const min_y = surface + 0.9;
-                if (p.y < min_y - 2.0 or p.y < -1.0) {
+                const deep_void = p.y < -1.0 or p.y < surface - 24.0;
+                if (deep_void) {
                     const ny = min_y;
                     self.sim.setPos(p.entity_id, p.x, ny, p.z, 0);
                     if (packages.buildEntityTeleportBody(&self.body_buf, p.entity_id, p.x, ny, p.z, 0, 0, 0, true)) |tb| {
                         try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                     } else |_| {}
-                    std.debug.print("zdtd: ground clamp entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ p.entity_id, p.y, surface, ny });
+                    std.debug.print("zdtd: void rescue entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ p.entity_id, p.y, surface, ny });
                     systems.questTickGoto(&self.sim, c.slot, p.x, ny, p.z);
                     systems.questTickStayWithin(&self.sim, c.slot, p.x, p.z);
                     return;
@@ -2891,6 +2892,7 @@ pub const Game = struct {
             return;
         }
         // Stock vanilla C→S: client pushes inventory sections (toolbelt/bag/equip).
+        // Interim client-trust (ADR 0007): overwrite local player ECS; no S2C echo.
         if (std.mem.eql(u8, name, "NetPackagePlayerInventory")) {
             const ps = self.sim.playerByPeer(c.slot) orelse return;
             if (!self.sim.mask[ps].inventory) return;
