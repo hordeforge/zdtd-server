@@ -33,7 +33,7 @@ tick loop
 `packages_encoded`, `packages_broadcast`, `join_ok`, `join_fail`,
 `net_poll_errors`, `net_payload_errors`, `net_send_errors`,
 `reliable_window_drops`, `persistence_errors`, `stale_peers_reaped`,
-`stream_errors`, …
+`stream_errors`, `tick_overruns`, `encode_errors`, …
 
 Extend the enum as features land. Prefer append-only ids for stable JSON keys.
 

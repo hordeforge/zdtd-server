@@ -10,8 +10,8 @@ const binary = @import("binary.zig");
 const components = @import("../ecs/components.zig");
 
 /// Matches Block.ItemsStartHere after static init (MAX_BLOCKS).
-/// Same pin as assets/items.zig `items_start_here` (catalog + wire agree).
-pub const items_start_here: i32 = 65536;
+/// Single source: assets/items.zig (catalog owns the pin; wire re-exports).
+pub const items_start_here: i32 = @import("../assets/items.zig").items_start_here;
 
 /// ItemValue.CurrentSaveVersion in V3.0.1.
 pub const item_value_save_version: u8 = 9;
@@ -19,8 +19,10 @@ pub const item_value_save_version: u8 = 9;
 /// Inventory.PUBLIC_SLOTS_PLAYMODE.
 pub const toolbelt_slots: usize = 10;
 
-/// EntityPlayer bag size: CarryCapacity base is 45 (Awake EffectManager base
-/// f32 45 → Bag.ctor). ldc.i4.s 99 in Awake is the PassiveEffects enum, not size.
+/// EntityPlayer bag size on the wire: CarryCapacity base is 45 (Awake
+/// EffectManager base f32 45 → Bag.ctor). ECS stores only
+/// `components.inv_bag_count` (32); apply truncates, encode pads empties.
+/// ldc.i4.s 99 in Awake is the PassiveEffects enum, not size.
 pub const bag_slots: usize = 45;
 
 /// Equipment.m_slots length in ctor.

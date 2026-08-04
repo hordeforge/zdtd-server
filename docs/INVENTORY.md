@@ -1,18 +1,25 @@
 # Inventory system (ECS)
 
 zdtd inventory is **SoA component data** on player (and loot bag) entities, driven by
-`src/ecs/inventory.zig` systems. **S→C player inventory** uses stock V3.0.1 wire
-(`src/wire/stock_inv.zig`) so a vanilla client can parse toolbelt/bag/equipment for UI.
+`src/ecs/inventory.zig` systems. Stock wire encode lives in `src/wire/stock_inv.zig`.
+
+**Authority (interim):** after join, player hold inventory is **client-trusting**
+via C2S `NetPackagePlayerInventory` / player `NetPackageBag` (overwrite ECS).
+No S2C PlayerInventory echo (stock rejects that direction). Join PDF +
+`players.zsv` still seed/restore from server. Full server-authoritative inv is
+the target (ADR 0004) with exception [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
+See [AUTHORITY.md](AUTHORITY.md).
 
 ## Slot layout
 
 | Range | Role |
 |---|---|
 | 0-9 | Toolbelt (holding index must be here) |
-| 10-41 | Bag |
-| 42-46 | Equipment (armor / accessories; reserved) |
+| 10-41 | Bag (**32** ECS slots; stock bag is **45**; excess C2S indices truncated) |
+| 42-46 | Equipment (5 ECS armor slots; stock equipment array is wider on the wire) |
 
-`holding = 0xFFFF` means empty hands.
+`holding = 0xFFFF` means empty hands. Wire encode pads bag to stock `bag_slots`
+(45) with empties when building PDF/Bag bodies.
 
 ## Component
 
@@ -50,10 +57,10 @@ Stack limits: tools/weapons 1, ammo 150, food/med 50, default 60000.
 
 | Package | Direction | Body |
 |---|---|---|
-| `NetPackagePlayerInventory` | **both** | **stock**: bool toolbelt + `WriteItemStack`; bool bag + `Bag.Write`; bool equip + `WriteItemValueArray` + cosmetics; bool drag. Client→server applies sections into ECS and echoes snap. |
-| `NetPackageHoldingItem` | **both** | **stock**: entity_id i32, `ItemStack.Write`, holding index u8. C→S updates hold; rebroadcast except sender. |
+| `NetPackagePlayerInventory` | **C→S only** | **stock**: bool toolbelt + `WriteItemStack`; bool bag + `Bag.Write`; bool equip + `WriteItemValueArray` + cosmetics; bool drag. Apply into ECS; **no** S2C echo. |
+| `NetPackageHoldingItem` | **both** | **stock**: entity_id i32, `ItemStack.Write`, holding index u8. C→S updates hold; rebroadcast except sender (S2C echo path). |
 | `NetPackageItemDrop` | C→S | **stock**: ItemStack + drop/motion vectors + lifetime + entityId + clientInstanceId + relative bool → loot bag |
-| `NetPackageBag` | **both** | entityId i32, u16 blob_len, `Bag.Write`. C→S applies bag; S→C on inv sync and loot spawn. |
+| `NetPackageBag` | **C→S (player hold)**; loot contents ride ECD `bag` on EntitySpawn | entityId i32 + `Bag.Write`. Player bag C2S applies; S2C Bag removed (IL dir=1). |
 | `NetPackageDropItemsContainer` | C→S | droppedBy i32, entity class string, Vector3, item stacks → multi-item loot bag |
 | `NetPackageTileEntity` | **both** | V3.1.0 outer: handle + pos + **teBlockId:i32** + **len:i32** + composite/storage payload; ZTE1 still accepted as bridge. |
 
@@ -95,6 +102,9 @@ Starter kit: stone axe (8), food×5 (2), wood×20 (7). Full inventory + holding 
 give <peer_slot> <item_id> <count>
 ```
 
+Drops a loot bag at the player (pickup is client-authoritative). Direct ECS
+slot writes would be overwritten by the next PlayerInventory C2S.
+
 ## Items (builtin)
 
 | id | name | notes |
@@ -117,6 +127,8 @@ give <peer_slot> <item_id> <count>
 
 ## Remaining gaps
 
+- **Server-authoritative inv** (ADR 0004 target): craft/TE/loot grant without client clobber; cause ledger (P4).
+- Expand ECS bag to stock 45 and equip width if persist/UI need full depth.
 - Multi-feature composite TEs (lockable, sign) and persistency stream mode.
 - Matching stock **block ids** so the client already has a composite TE at that cell (needs stock chunks + blocks.xml).
 - Full ItemValue mods/stats on write; full items.xml IdMapping blob.

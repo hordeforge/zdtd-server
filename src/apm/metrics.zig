@@ -21,6 +21,10 @@ pub const CounterId = enum(u16) {
     persistence_errors,
     stale_peers_reaped,
     stream_errors,
+    /// Main loop fell behind the 50 ms tick budget (run path only).
+    tick_overruns,
+    /// Package body encode failed (omit/skip path; not a send error).
+    encode_errors,
     _,
 };
 

@@ -2000,8 +2000,7 @@ test "game event response echoes request name and approves" {
     try std.testing.expectEqual(@as(u8, 1), try pr.readByte()); // Approved
 }
 
-test "game event response never crashes on truncated request" {
-    // Client-controlled body: must not panic on any prefix length.
+test "game event response rejects a truncated name and defaults a truncated tail" {
     var full: [64]u8 = undefined;
     var fw: binary.Writer = .{ .buf = &full };
     try fw.writeString("ev");
@@ -2010,10 +2009,24 @@ test "game event response never crashes on truncated request" {
     try fw.writeString("y");
     const complete = fw.written();
     var out: [128]u8 = undefined;
-    var len: usize = 0;
+
+    try std.testing.expectError(error.EndOfStream, buildGameEventResponse(&out, complete[0..0]));
+    try std.testing.expectError(error.EndOfStream, buildGameEventResponse(&out, complete[0..2]));
+
+    var len: usize = 3;
     while (len <= complete.len) : (len += 1) {
-        // Either builds a valid response or errors cleanly; never UB.
-        _ = buildGameEventResponse(&out, complete[0..len]) catch {};
+        const response = try buildGameEventResponse(&out, complete[0..len]);
+        var r: binary.Reader = .{ .data = response };
+        var name: [8]u8 = undefined;
+        var extra: [8]u8 = undefined;
+        var tag: [8]u8 = undefined;
+        try std.testing.expectEqualStrings("ev", try r.readString(&name));
+        _ = try r.readI32();
+        _ = try r.readString(&extra);
+        _ = try r.readString(&tag);
+        try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+        try std.testing.expectEqual(@as(i32, 0), try r.readI32());
+        try std.testing.expectEqual(@as(usize, 0), r.remaining());
     }
 }
 

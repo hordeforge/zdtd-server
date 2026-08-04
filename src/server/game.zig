@@ -2166,17 +2166,21 @@ pub const Game = struct {
     fn pollNetOnce(self: *Game) void {
         var n: u32 = 0;
         while (n < 24) : (n += 1) {
-            const ev = self.net.poll(&self.recv_buf) catch {
+            const ev = self.net.poll(&self.recv_buf) catch |err| {
                 self.harness.counters.inc(.net_poll_errors);
+                std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
                 break;
             };
             switch (ev) {
                 // Best-effort: one bad peer must not stop the poll loop.
                 .none => break,
-                .connected => |p| self.onConnected(p) catch |e| std.debug.print(
-                    "zdtd: onConnected failed: {s}\n",
-                    .{@errorName(e)},
-                ),
+                .connected => |p| self.onConnected(p) catch |e| {
+                    self.harness.counters.inc(.join_fail);
+                    std.debug.print(
+                        "zdtd: onConnected failed local_id={d}: {s}\n",
+                        .{ p.local_id, @errorName(e) },
+                    );
+                },
                 .data => |d| self.onData(d.peer, d.payload) catch |err| {
                     self.harness.counters.inc(.net_payload_errors);
                     std.debug.print("zdtd: payload failed local_id={d} error={s}\n", .{ d.peer.local_id, @errorName(err) });
@@ -2416,6 +2420,10 @@ pub const Game = struct {
             const p = c.peer orelse continue;
             if (!p.alive) {
                 self.harness.counters.inc(.stale_peers_reaped);
+                std.debug.print(
+                    "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
+                    .{ p.local_id, c.slot, c.entity_id },
+                );
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
                 continue;
@@ -2423,6 +2431,10 @@ pub const Game = struct {
             if (p.last_recv_ns == 0) continue;
             if (now -% p.last_recv_ns > stale_ns) {
                 self.harness.counters.inc(.stale_peers_reaped);
+                std.debug.print(
+                    "zdtd: peer reaped stale local_id={d} slot={d} entity={d} idle_ms={d}\n",
+                    .{ p.local_id, c.slot, c.entity_id, (now -% p.last_recv_ns) / 1_000_000 },
+                );
                 p.alive = false;
                 p.authenticated = false;
                 for (&p.pending) |*slot| slot.used = false;
@@ -2497,7 +2509,16 @@ pub const Game = struct {
     }
 
     fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
-        const c = self.clientFor(peer) orelse return;
+        const c = self.clientFor(peer) orelse {
+            // Full or no free slot: reject without taking down the tick loop.
+            self.harness.counters.inc(.join_fail);
+            std.debug.print(
+                "zdtd: join rejected (no client slot) local_id={d} max_players={d}\n",
+                .{ peer.local_id, self.max_players },
+            );
+            peer.alive = false;
+            return;
+        };
         peer.pump_fn = &pumpAcks;
         peer.pump_ctx = self;
         const ip = peerIpKey(peer);
@@ -5240,8 +5261,12 @@ pub const Game = struct {
         if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
             for (&self.clients) |*cl| {
                 if (!cl.joined or !cl.entered or cl.peer == null) continue;
-                self.streamChunksForClient(cl) catch {
+                self.streamChunksForClient(cl) catch |err| {
                     self.harness.counters.inc(.stream_errors);
+                    std.debug.print(
+                        "zdtd: chunk stream failed slot={d} entity={d}: {s}\n",
+                        .{ cl.slot, cl.entity_id, @errorName(err) },
+                    );
                 };
             }
         }
@@ -5308,7 +5333,9 @@ pub const Game = struct {
                         cl.known_entities.set(i);
                     }
                     self.harness.counters.inc(.packages_encoded);
-                } else |_| {}
+                } else |_| {
+                    self.harness.counters.inc(.encode_errors);
+                }
             }
 
             const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
@@ -5412,16 +5439,28 @@ pub const Game = struct {
             defer sn.end();
             var polls: u32 = 0;
             while (polls < 64) : (polls += 1) {
+                // Socket-level poll failures are process-fatal (bound UDP is dead).
+                // Per-peer connect/payload failures must not take down the dedi.
                 const ev = self.net.poll(&self.recv_buf) catch |err| {
                     self.harness.counters.inc(.net_poll_errors);
+                    std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
                     return err;
                 };
                 switch (ev) {
                     .none => break,
-                    .connected => |p| try self.onConnected(p),
+                    .connected => |p| self.onConnected(p) catch |e| {
+                        self.harness.counters.inc(.join_fail);
+                        std.debug.print(
+                            "zdtd: onConnected failed local_id={d}: {s}\n",
+                            .{ p.local_id, @errorName(e) },
+                        );
+                    },
                     .data => |d| self.onData(d.peer, d.payload) catch |err| {
                         self.harness.counters.inc(.net_payload_errors);
-                        return err;
+                        std.debug.print(
+                            "zdtd: payload failed local_id={d} error={s}\n",
+                            .{ d.peer.local_id, @errorName(err) },
+                        );
                     },
                 }
             }
@@ -5529,6 +5568,27 @@ pub const Game = struct {
                 return;
             };
             std.debug.print("{s}", .{report_writer.buffered()});
+            // Instantaneous ops gauges (not cumulative counters): who is online
+            // and how many peers LiteNet still holds when the snapshot fires.
+            var entered_n: u32 = 0;
+            var peers_alive: u32 = 0;
+            for (&self.clients) |cl| {
+                if (cl.entered) entered_n += 1;
+            }
+            for (&self.net.peers) |p| {
+                if (p.alive) peers_alive += 1;
+            }
+            std.debug.print(
+                "zdtd: ops tick={d} joined={d} entered={d} peers_alive={d} zombies={d} chunks={d}\n",
+                .{
+                    self.tick_n,
+                    self.countJoined(),
+                    entered_n,
+                    peers_alive,
+                    self.sim.countKind(.zombie),
+                    self.world.chunks.count(),
+                },
+            );
         }
     }
 
@@ -5638,7 +5698,20 @@ pub const Game = struct {
         while (self.running) {
             try self.step();
             const now = clock.monoNs();
-            if (next_t > now) clock.sleepNs(next_t - now);
+            if (next_t > now) {
+                clock.sleepNs(next_t - now);
+            } else {
+                // Fell behind the 50 ms budget: count for apm; rate-limit log.
+                self.harness.counters.inc(.tick_overruns);
+                const overruns = self.harness.counters.get(.tick_overruns);
+                if (overruns == 1 or overruns % 100 == 0) {
+                    const late_us = (now -% next_t) / 1000;
+                    std.debug.print(
+                        "zdtd: tick overrun n={d} late_us={d} (budget={d}us)\n",
+                        .{ overruns, late_us, tick_ns / 1000 },
+                    );
+                }
+            }
             next_t += tick_ns;
             if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;
         }

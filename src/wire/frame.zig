@@ -175,3 +175,25 @@ test "compressed zlib package stream parses" {
     try std.testing.expectEqual(@as(u16, 42), pkgs[0].id);
     try std.testing.expectEqualStrings("hello", pkgs[0].body);
 }
+
+test "channel parser rejects malformed envelope and package lengths" {
+    var pkgs: [2]Package = undefined;
+
+    var envelope: [32]u8 = @splat(0);
+    envelope[0] = 0;
+    std.mem.writeInt(u16, envelope[7..9], 1, .little);
+
+    std.mem.writeInt(i32, envelope[1..5], -1, .little);
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..9], &pkgs));
+
+    std.mem.writeInt(i32, envelope[1..5], 6, .little);
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..14], &pkgs));
+
+    std.mem.writeInt(i32, envelope[1..5], 6, .little);
+    std.mem.writeInt(i32, envelope[9..13], 1, .little);
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..15], &pkgs));
+
+    envelope[6] = 1;
+    std.mem.writeInt(i32, envelope[9..13], 2, .little);
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..15], &pkgs));
+}

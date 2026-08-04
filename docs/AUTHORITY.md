@@ -6,9 +6,11 @@ Backlog depth: [TODO.md](../TODO.md) P4 section.
 
 ## Principle
 
-Sim owns world blocks, inventory, TE contents, entity HP/alive, quests, locks,
-and time. C2S is a **request**: validate → apply or reject → broadcast the
-**result**. Never apply client world/inv blobs blindly (AGENTS rule 15).
+Sim owns world blocks, TE contents, entity HP/alive, quests, locks, and time.
+**Target** ownership of player inventory is the same; **today** the stock UI
+path still trusts C2S hold/bag pushes (see below). C2S is a **request**:
+validate → apply or reject → broadcast the **result**. Never apply client
+**world** blobs blindly (AGENTS rule 15). Inventory: [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
 
 ## Mode config
 
@@ -34,7 +36,8 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 | **Join phase** | `game.handlePackage` | Unjoined peers: only login/config packages; play C2S dropped. |
 | **C2S bounds** | SetBlock / Explosion / TE / DamageEntity | Reach ~96 blocks; damage strength cap 200; fatal damage vs NPC only. |
 | **Ownership** | Bag / InvTx / player entity id | No cross-player inv writes; editor must be local player slot. |
-| **Interest / no self-echo** | `replicate` / scenarios | Motion and entity updates go to observers; sender does not get own PosAndRot echo. |
+| **Player inv (interim)** | PlayerInventory / player Bag C2S | **Client-trusting apply** into ECS (ADR 0007). No S2C PlayerInventory echo. Admin `give` = loot bag drop. |
+| **Interest / no self-echo** | `replicate` / scenarios | Motion and entity updates go to observers; sender does not get own PosAndRot echo. Serialize-once: ADR 0008. |
 | **Rate / lock** | join IP throttle; lock channels | ~500 ms join gap (loopback exempt); TE lock holder deny + stale release. |
 | **Land claim** | SetBlock | Non-owner edits inside claim denied. |
 | **PvP** | DamageEntity | `PlayerKillingMode` 0 drops player→player damage. |
@@ -55,6 +58,10 @@ evidence JSONL) plug into this path without a second world.
 
 ## Related
 
+- [adr/0004-server-authoritative-c2s.md](adr/0004-server-authoritative-c2s.md) principle
+- [adr/0007-player-inventory-c2s-trust.md](adr/0007-player-inventory-c2s-trust.md) inv interim
+- [adr/0008-serialize-once-interest.md](adr/0008-serialize-once-interest.md) interest fan-out
+- [INVENTORY.md](INVENTORY.md) slot layout and wire directions
 - [GAME_OPTIONS.md](GAME_OPTIONS.md) for stock serverconfig knobs
 - [PLUGIN_API.md](PLUGIN_API.md) hooks must not bypass these gates
 - Sibling `7dtd-server-guard` is Harmony-on-stock only; outcomes reimplemented here

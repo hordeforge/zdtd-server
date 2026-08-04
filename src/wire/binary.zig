@@ -221,6 +221,17 @@ test "7bit int rejects overlong encoding without overflowing shift" {
     try std.testing.expectError(error.Overflow, read7BitEncodedInt(&r));
 }
 
+test "string readers reject overlong length prefixes" {
+    const overlong = [_]u8{ 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 };
+    var buf: [1]u8 = undefined;
+
+    var read: Reader = .{ .data = &overlong };
+    try std.testing.expectError(error.InvalidString, read.readString(&buf));
+
+    var skip: Reader = .{ .data = &overlong };
+    try std.testing.expectError(error.InvalidString, skip.skipString());
+}
+
 test "string readers reject truncation and preserve cursor at payload" {
     var truncated: Reader = .{ .data = &.{ 3, 'a', 'b' } };
     var buf: [3]u8 = undefined;

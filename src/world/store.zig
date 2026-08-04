@@ -1,4 +1,6 @@
-//! Authoritative block world: 16×256×16 columns, DTM heights, .zch2 disk.
+//! Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch).
+//! v3 magic ZCH3: heights + optional u32 rawData blocks. ZCH2 u16 type-only is
+//! accepted on load for heights only (blocks regenerate from DTM+TTS).
 
 const std = @import("std");
 const dtm = @import("dtm.zig");

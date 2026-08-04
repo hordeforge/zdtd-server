@@ -87,6 +87,11 @@ fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
     return .{ .name = a, .value = null };
 }
 
+fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 {
+    if (cli_name) |name| return name;
+    return if (config_name.len > 0) config_name else null;
+}
+
 pub fn main(init: std.process.Init.Minimal) !void {
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -201,12 +206,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    const resolved_world_name: ?[]const u8 = blk: {
-        if (cfg_owned) |c| {
-            if (c.world_name.len > 0) break :blk c.world_name;
-        }
-        break :blk world_name;
-    };
+    const resolved_world_name = resolveWorldName(
+        if (world_name_cli) world_name else null,
+        if (cfg_owned) |c| c.world_name else if (world_name) |name| name else "",
+    );
     // Effective config: loaded file or struct defaults (single source in config.zig).
     const cfg: server_config.Config = cfg_owned orelse .{};
 
@@ -402,6 +405,19 @@ test "splitFlag bare and equals forms" {
     const empty = splitFlag("--world=");
     try std.testing.expectEqualStrings("--world", empty.name);
     try std.testing.expectEqualStrings("", empty.value.?);
+}
+
+test "explicit world name overrides serverconfig game name" {
+    try std.testing.expectEqualStrings("CliWorld", resolveWorldName("CliWorld", "ConfigWorld").?);
+    try std.testing.expectEqualStrings("ConfigWorld", resolveWorldName(null, "ConfigWorld").?);
+    try std.testing.expect(resolveWorldName(null, "") == null);
+}
+
+test "server port must leave room for LiteNet offset" {
+    try std.testing.expectError(
+        error.InvalidPort,
+        game_mod.Game.create(std.testing.allocator, "worlds/unused_invalid_port", 65534),
+    );
 }
 
 test "integration world persist + damage + packages" {

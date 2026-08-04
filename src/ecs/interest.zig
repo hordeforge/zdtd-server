@@ -1,5 +1,6 @@
 //! Spatial interest: grid cells → nearby players for replication.
 //! M11: dirty gating helpers for serialize-once fan-out (encode once, memcpy per peer).
+//! Decision: docs/adr/0008-serialize-once-interest.md.
 
 const std = @import("std");
 const World = @import("world.zig").World;

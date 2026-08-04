@@ -120,7 +120,9 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
     s.active = false;
     s.ready_turn_in = false;
     if (w.catalog.byId(s.def_id)) |d| {
-        if (w.mask[ps].wallet) w.wallet[ps].coins +%= d.reward_coin;
+        if (w.mask[ps].wallet) {
+            w.wallet[ps].coins = std.math.add(u32, w.wallet[ps].coins, d.reward_coin) catch std.math.maxInt(u32);
+        }
     }
     w.completed_quests +%= 1;
 }
@@ -186,7 +188,7 @@ fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef
 fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: quest.PhaseKind, n: u16) void {
     const spec = currentPhaseSpec(d, s) orelse return;
     if (spec.kind != kind) return;
-    s.progress +%= n;
+    s.progress = std.math.add(u16, s.progress, n) catch std.math.maxInt(u16);
     if (s.progress >= spec.required) advancePhaseGraph(w, ps, s, d);
 }
 
@@ -240,7 +242,7 @@ pub fn questOnZombieKilled(w: *World, peer_slot: usize) void {
             continue;
         }
         if (d.kind != .kill_zombies) continue;
-        s.progress +%= 1;
+        s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
         markProgress(w, ps, s, d);
     }
 }
@@ -292,7 +294,7 @@ pub fn questOnFetchItem(w: *World, peer_slot: usize, count: u16) void {
             continue;
         }
         if (d.kind != .fetch_item) continue;
-        s.progress +%= count;
+        s.progress = std.math.add(u16, s.progress, count) catch std.math.maxInt(u16);
         markProgress(w, ps, s, d);
     }
 }
@@ -317,7 +319,7 @@ pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
             if (std.mem.indexOf(u8, recipe_name, d.name) == null and std.mem.indexOf(u8, d.name, recipe_name) == null)
                 continue;
         }
-        s.progress +%= 1;
+        s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
         markProgress(w, ps, s, d);
     }
 }
@@ -346,7 +348,7 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
             if (d.phases.len > 0) {
                 bumpPhase(w, ps, s, d, .stay_within, 1);
             } else {
-                s.progress +%= 1;
+                s.progress = std.math.add(u16, s.progress, 1) catch std.math.maxInt(u16);
                 markProgress(w, ps, s, d);
             }
         }
@@ -1263,6 +1265,29 @@ test "quest kill complete on journal component" {
     questOnZombieKilled(&w, 0);
     try std.testing.expect(!questHasActive(&w, 0, 1));
     try std.testing.expectEqual(@as(u32, 25), questCoins(&w, 0));
+}
+
+test "quest progress and coin rewards saturate instead of wrapping" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 22,
+        .kind = .fetch_item,
+        .title = "Large fetch",
+        .target_count = std.math.maxInt(u16),
+        .reward_coin = 10,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const ps = w.playerByPeer(0).?;
+    w.wallet[ps].coins = std.math.maxInt(u32) - 5;
+    questFindActive(&w, 0, 22).?.progress = std.math.maxInt(u16) - 5;
+
+    questOnFetchItem(&w, 0, 10);
+
+    try std.testing.expect(!questHasActive(&w, 0, 22));
+    try std.testing.expectEqual(std.math.maxInt(u32), questCoins(&w, 0));
 }
 
 test "quest phase graph goto then kill then turn-in at trader" {

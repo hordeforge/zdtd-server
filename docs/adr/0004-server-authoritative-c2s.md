@@ -11,10 +11,18 @@ shapes; authority is about *who decides state*, not inventing packages.
 
 ## Decision
 
-- Sim owns world, inv, TE, HP, quests, locks, time.
+- Sim owns world, TE, HP, quests, locks, time, and **target** ownership of
+  inventory (see interim exception below).
 - C2S is validate → apply or reject → broadcast **result**.
 - Phase gates, bounds, ownership, and rate limits sit on the apply path.
 - Prefer missing feature over fake S2C; never teach clients to invent world data.
+
+### Interim exception (documented)
+
+**Player hold inventory** (`NetPackagePlayerInventory`, player `NetPackageBag`)
+is client-trusting until full InvTx/craft/TE authority can correct the stock UI
+without wedge. See [ADR 0007](0007-player-inventory-c2s-trust.md). World blocks,
+TE contents, damage, phase gates, and land claim remain server-authoritative.
 
 ## Consequences
 
@@ -22,3 +30,5 @@ shapes; authority is about *who decides state*, not inventing packages.
 - Plugin hooks (ADR 0005) observe or vote on requests; they do not bypass
   validation or write raw wire without builders.
 - Aligns with native guard work (TODO P4).
+- Do not assume inventory C2S is fully hardened; read ADR 0007 before changing
+  give/persist/loot paths.

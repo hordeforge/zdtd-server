@@ -1,5 +1,6 @@
 //! Wire constants from research/docs/protocol.md (V3.x loadgen golden; wire pin V3.1.0).
 //! Package IDs are dynamic (PackageIds map); never hard-code across builds.
+//! Decision: docs/adr/0009-dynamic-package-ids.md. Tick model: ticks_per_second / tick_ns.
 //!
 //! Leaf module at src root (shared by wire/frame, server tick, main CLI). Also
 //! re-exported as `wire.protocol` via wire/root.zig for package discovery.
