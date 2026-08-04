@@ -3175,18 +3175,8 @@ pub const Game = struct {
                     var u: u32 = 0;
                     while (u < lost) : (u += 1) {
                         const props = eatProps(@ptrCast(self), e.id);
-                        if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
-                            break;
-                        if (props.food_amount > 0) {
-                            self.sim.health[ps].food = @min(self.sim.health[ps].food_max, self.sim.health[ps].food + props.food_amount);
-                        }
-                        if (props.water_amount > 0) {
-                            self.sim.health[ps].water = @min(self.sim.health[ps].water_max, self.sim.health[ps].water + props.water_amount);
-                        }
-                        if (props.food_health > 0) {
-                            self.sim.health[ps].hp = @min(self.sim.health[ps].max_hp, self.sim.health[ps].hp + props.food_health);
-                            if (self.sim.mask[ps].dirty) self.sim.dirty[ps].hp = true;
-                        }
+                        const r = invsys.applyEatProps(&self.sim, ps, props);
+                        if (!r.ate) break;
                         ate_any = true;
                         units_left -= 1;
                     }

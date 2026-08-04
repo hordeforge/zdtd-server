@@ -24,20 +24,20 @@ blobs. Prefer leaving a gap open over shipping a fake.
 - [x] Playtest v0.3: telnet fixtures, day clock, look pitch, zombie nearby, JUnit, fresh-save; demo **pass=30 fail=0 skip=15**
 - [x] Phase B partial: kill/spawn/death/respawn pass on zdtd demo (2026-08-03); residual dig/block-dmg/loot-pickup/craft/trader
 - [ ] Phase C: persist multi-phase rejoin in orchestrator
-- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **81 pass / 2 fail** peak (20260804h); 20260804i **76/7** (eat+ranged PASS; power float flake) (kill/spawn/respawn PASS); version pin V3.1.0
+- [x] Optional: run demo against zdtd (`make playtest-zdtd`) 2026-08-03: latest **83 pass / 0 fail** (20260804j) (kill/spawn/respawn PASS); version pin V3.1.0
 
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
 
 Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
-Score: **pass=81 fail=2**. CGO gate **PASS**. Seed-Y + void-rescue RelPos + fixture clamp closed dig/place/block_dmg/power.
+Score: **pass=83 fail=0** (20260804j). CGO PASS. Residual soft: generator_fuel soft-pass without TE; playtest eat may force-dec after 2s if InstantAction no-ops.
 
 | Case | Symptom | Likely owner |
 |---|---|---|
 | `power/*` place suite | intermittent type=0 when client floats | **mitigated 2026-08-04:** void rescue surface-8; SetBlock reach clamps vertical dy to ±12 so mesh float does not fail horizontal place |
 | `combat/zombie_target_has_health` | intermittent no EntityAlive | **mitigated 2026-08-04:** admin spawnentity surface Y + clear known_entities so ECD re-sends |
 
-Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** + **ranged_shot** (04i: force stack dec + SetHeldMeta). Peak score **81/83**.
+Closed fixtures: dig/place/block_dmg/explosion (04h); **eat_food_consume** + **ranged_shot** (04i: force stack dec + SetHeldMeta). Peak score **83/83** (20260804j).
 
 **Server ItemActionEat (2026-08-04):** `useEx` / InvTx `Op.use` + PlayerInventory stack-loss detect; items.xml `$foodAmountAdd`/`foodHealthAmount`/`$waterAmountAdd` + Action0 Class=Eat; S2C `EntityStatChanged` food/water/hp. Scenario `ItemActionEat via InvTx` PASS.
 

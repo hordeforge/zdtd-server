@@ -960,6 +960,56 @@ test "scenario ItemActionEat via InvTx use applies food and hp" {
 }
 
 
+test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp" {
+    // Stock client path (ADR 0007): DecHoldingItem locally then C2S PlayerInventory.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_eat_pi");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_eat_pi", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const inv = @import("../ecs/inventory.zig");
+
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.health[ps].hp = 50;
+    g.sim.health[ps].food = 40;
+    g.sim.health[ps].food_max = 100;
+    g.sim.inventory[ps] = .{};
+    try std.testing.expect(inv.give(&g.sim, c.slot, 2, 2)); // two food
+    // Client-style: one unit consumed locally (count 2 -> 1), push PlayerInventory.
+    var inv_copy = g.sim.inventory[ps];
+    // Find food slot and dec
+    for (&inv_copy.slots) |*s| {
+        if (s.item_id == 2 and s.count > 0) {
+            s.count -= 1;
+            break;
+        }
+    }
+    var stock_body: [8192]u8 = undefined;
+    const body = try packages.buildInventoryBodyStock(&stock_body, &inv_copy);
+    var fb: [9000]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackagePlayerInventory", body));
+    try std.testing.expectEqual(@as(u16, 1), blk: {
+        var n: u16 = 0;
+        for (g.sim.inventory[ps].slots) |s| {
+            if (s.item_id == 2) n += s.count;
+        }
+        break :blk n;
+    });
+    try std.testing.expect(g.sim.health[ps].food >= 54.9);
+    try std.testing.expect(g.sim.health[ps].hp >= 56.9);
+    const st_id = packages.idOf("NetPackageEntityStatChanged").?;
+    try std.testing.expect(cap.findPkgId(st_id) != null);
+    std.debug.print("PASS ItemActionEat PlayerInventory: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
+}
+
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) void {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch return;

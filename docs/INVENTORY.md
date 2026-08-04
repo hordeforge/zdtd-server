@@ -153,7 +153,7 @@ Stock clients eat via local `ItemActionEat.consume` then C2S `NetPackagePlayerIn
 | Path | Behavior |
 |---|---|
 | InvTx `use` | `inventory.useEx` → take 1, Food/Water/HP, `EntityStatChanged` S2C |
-| PlayerInventory apply | before/after eatable stack counts; each unit lost applies same props (cap 4/push) |
+| PlayerInventory apply | before/after eatable stack counts; each unit lost calls `applyEatProps` (cap 4/push); scenario `ItemActionEat via PlayerInventory stack-loss` |
 | Props | items.xml Action0 Class=Eat + `$foodAmountAdd` / `foodHealthAmount` / `$waterAmountAdd`; builtins food=15/7, medicine hp=25 |
 
 ECS: `Health.food` / `food_max` / `water` / `water_max` (player spawn 100).

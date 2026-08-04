@@ -200,17 +200,12 @@ pub fn use(w: *World, peer: usize, slot: u16) bool {
     return useEx(w, peer, slot, null, null).ok;
 }
 
-pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*anyopaque) Result {
-    const ps = w.playerByPeer(peer) orelse return .{};
-    if (!w.mask[ps].inventory or !w.mask[ps].health) return .{};
-    if (slot >= c.max_inv_slots) return .{};
-    const s = w.inventory[ps].slots[slot];
-    if (s.count == 0 or s.item_id == 0) return .{};
-    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
+/// Apply one consumable unit's Food/Water/HP (no inventory take). Shared by InvTx use
+/// and PlayerInventory stack-loss detect (ADR 0007 stock client path).
+pub fn applyEatProps(w: *World, ps: Slot, props: EatProps) Result {
+    if (!w.mask[ps].health) return .{};
     if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
-    _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-    // Food / water (PlayerEntityStats). Cap at max.
     if (props.food_amount > 0) {
         w.health[ps].food = @min(w.health[ps].food_max, w.health[ps].food + props.food_amount);
     }
@@ -221,7 +216,6 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
         w.health[ps].hp = @min(w.health[ps].max_hp, w.health[ps].hp + props.food_health);
         if (w.mask[ps].dirty) w.dirty[ps].hp = true;
     }
-    markInv(w, ps);
     return .{
         .ok = true,
         .ate = true,
@@ -232,6 +226,20 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
         .hp = w.health[ps].hp,
         .max_hp = w.health[ps].max_hp,
     };
+}
+
+pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*anyopaque) Result {
+    const ps = w.playerByPeer(peer) orelse return .{};
+    if (!w.mask[ps].inventory or !w.mask[ps].health) return .{};
+    if (slot >= c.max_inv_slots) return .{};
+    const s = w.inventory[ps].slots[slot];
+    if (s.count == 0 or s.item_id == 0) return .{};
+    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
+    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
+        return .{};
+    _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
+    markInv(w, ps);
+    return applyEatProps(w, ps, props);
 }
 
 pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
