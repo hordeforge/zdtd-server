@@ -161,8 +161,13 @@ pub const Peer = struct {
     /// Extra user payloads from LiteNet Merged packets (multiple game msgs per UDP).
     extra_buf: [assemble_cap]u8 = undefined,
     extra_used: usize = 0,
-    extra_q: [8]struct { off: u32, len: u32 } = undefined,
+    /// Merged/drain mailbox slots. 8 was too small: one join burst merges far
+    /// more C2S packages than that between polls, and an overflow silently lost
+    /// a reliable package (see pushExtra).
+    extra_q: [64]struct { off: u32, len: u32 } = undefined,
     extra_n: u8 = 0,
+    /// Payloads dropped because the mailbox was full. Must stay 0 in practice.
+    extra_drops: u32 = 0,
 
     pub fn setAddr(self: *Peer, addr: *const udp.IpAddress) void {
         self.addr = addr.*;
@@ -359,9 +364,22 @@ pub const Peer = struct {
     /// Copy a user payload into the peer extra queue (survives the recv buffer
     /// being overwritten). Used by Merged multipacket handling and by
     /// Server.drainControl so mid-send ACK drains do not drop game packages.
+    /// No room for another queued payload (slot count or byte budget). Callers
+    /// that own the socket must stop consuming datagrams instead of pushing.
+    pub fn extraFull(self: *const Peer) bool {
+        return self.extra_n >= self.extra_q.len or
+            self.extra_used + packet.max_single_user > self.extra_buf.len;
+    }
+
     pub fn pushExtra(self: *Peer, user: []const u8) void {
-        if (self.extra_n >= self.extra_q.len) return;
-        if (self.extra_used + user.len > self.extra_buf.len) return;
+        // A drop here is silent data loss of an already-ACKed reliable package,
+        // so it is counted, not ignored. Callers should gate on extraFull().
+        if (self.extra_n >= self.extra_q.len or
+            self.extra_used + user.len > self.extra_buf.len)
+        {
+            self.extra_drops +%= 1;
+            return;
+        }
         const off: u32 = @intCast(self.extra_used);
         const dst = self.extra_buf[self.extra_used..][0..user.len];
         // `user` may already point into extra_buf, so this cannot be @memcpy:

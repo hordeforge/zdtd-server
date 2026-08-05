@@ -5256,7 +5256,13 @@ pub const Game = struct {
         const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
         const surface: f32 = @floatFromInt(h_u16);
         const min_y = surface + 0.9;
-        if (!(y < -1.0 or y < surface - 8.0)) return null;
+        // ONLY true void (below the world floor). A surface-relative trigger is
+        // wrong: being far under the column surface is normal play (mining, POI
+        // basements, ravines, caves). The old `y < surface - 8` yanked a
+        // sprinting player 9 blocks into the air on Navezgane terrain
+        // (playtest core/sprint_motor: hopMax 38.86 m between samples) and would
+        // have made digging down impossible.
+        if (!(y < -1.0)) return null;
         self.sim.setPos(entity_id, x, min_y, z, 0);
         if (do_teleport) {
             if (packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, min_y, z, 0, 0, 0, true)) |tb| {

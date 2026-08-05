@@ -92,9 +92,25 @@ pub const Server = struct {
     /// Drain inbound acks/pings without delivering game payloads (used mid-send).
     /// Game user payloads are copied into the peer extra queue so a later
     /// poll() delivers them; never drop login/challenge bytes while joining.
+    /// True when any live peer's extra mailbox cannot take another payload.
+    /// drainControl must stop consuming datagrams then: see the note there.
+    fn anyExtraFull(self: *Server) bool {
+        for (&self.peers) |*p| {
+            if (p.alive and p.extraFull()) return true;
+        }
+        return false;
+    }
+
     pub fn drainControl(self: *Server, buf: []u8, max_n: u32) void {
         var i: u32 = 0;
         while (i < max_n) : (i += 1) {
+            // Never consume a datagram we cannot queue. handlePacket ACKs the
+            // packet, so a silent pushExtra drop loses a reliable package for
+            // good (the client does not retransmit an ACKed one). That is how a
+            // join-critical NetPackageRequestToSpawnPlayer went missing during
+            // the chunk burst and left the client on "Creating player." forever.
+            // Leaving it in the socket buffer costs nothing: the next poll reads it.
+            if (self.anyExtraFull()) break;
             var src: udp.IpAddress = undefined;
             const n = self.sock.recvFrom(buf, &src) catch break;
             if (n == 0) break;
