@@ -10,6 +10,7 @@ const command = @import("command.zig");
 const inv_ledger = @import("inv_ledger.zig");
 const locals_mod = @import("locals.zig");
 const observers_mod = @import("observers.zig");
+const group = @import("group.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -75,8 +76,10 @@ pub const World = struct {
     entity_count: u16 = 0,
     /// Per-slot reincarnation counter (generation-counted handles).
     slot_gen: [max_entities]u32 = .{0} ** max_entities,
-    /// Per-kind live counts (spawnBase ++, destroy --). O(1) countKind for apm.
-    kind_count: [@typeInfo(Kind).@"enum".fields.len]u16 = .{0} ** @typeInfo(Kind).@"enum".fields.len,
+    /// Cached per-kind dense slot lists (spawnBase inserts, destroy removes),
+    /// kept slot-ascending so group iteration equals the open View scan. Owns
+    /// the per-kind live count too, so countKind is O(1) off the same fact.
+    kind_groups: group.Groups = .{},
     /// Once: soft warning when entity_count crosses entity_warn_at.
     entity_cap_warned: bool = false,
     /// Slots freed since the last beginTick. allocSlot avoids these so a slot
@@ -121,6 +124,10 @@ pub const World = struct {
     /// Unset → open grid (tests / headless). Game wires world.isSolidWorld at body y.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32) bool = null,
+    /// A* replans issued this tick. Atomic: the AI phase runs on parallel
+    /// workers. Cleared by beginTick and surfaced as TickResult.path_replans
+    /// (ecs must not import apm; see the note on commands_applied).
+    path_replans: std.atomic.Value(u32) = .init(0),
     /// Optional item_id → placeable block id (AssignIds). Null → inventory offline map.
     place_ctx: ?*anyopaque = null,
     place_fn: ?*const fn (?*anyopaque, u16) u16 = null,
@@ -222,7 +229,7 @@ pub const World = struct {
     pub fn destroy(self: *World, slot: Slot) void {
         if (slot >= max_entities or !self.alive[slot]) return;
         const death_id: NetId = if (self.mask[slot].network_id) self.network_id[slot].id else 0;
-        // Capture kind before mask clear for kind_count.
+        // Capture kind before mask clear for the kind group.
         const had_kind = self.mask[slot].kind;
         const kind_val = self.kind[slot];
         // Mark dead before notifying: a listener that cascades into destroy()
@@ -230,6 +237,9 @@ pub const World = struct {
         self.alive[slot] = false;
         self.freed_this_tick[slot] = true;
         self.any_freed_this_tick = true;
+        // Drop from the group here too, so a death listener iterating a group
+        // sees exactly what alive[] already tells it: this slot is gone.
+        if (had_kind) self.kind_groups.remove(kind_val, slot);
         self.observers.fireDeath(self, slot, death_id);
         if (self.mask[slot].player) {
             const peer_slot = self.player[slot].peer_slot;
@@ -250,15 +260,24 @@ pub const World = struct {
         self.mask[slot] = .{};
         self.dirty[slot] = .{};
         if (self.entity_count > 0) self.entity_count -= 1;
-        if (had_kind) {
-            const ki = @intFromEnum(kind_val);
-            if (self.kind_count[ki] > 0) self.kind_count[ki] -= 1;
+    }
+
+    /// Un-kill a slot that is still populated (respawn of a dead player whose
+    /// entity was never destroyed). The single sanctioned way to set alive[]
+    /// back to true: raw writes would drift the kind group. Idempotent.
+    pub fn reviveSlot(self: *World, slot: Slot) void {
+        if (slot >= max_entities or !self.mask[slot].kind) return;
+        if (!self.alive[slot]) {
+            self.alive[slot] = true;
+            self.entity_count +%= 1;
         }
+        self.kind_groups.insert(self.kind[slot], slot);
     }
 
     /// Clear tick locals at the start of each sim frame (schedule / tickAll).
     pub fn beginTick(self: *World) void {
         @memset(&self.freed_this_tick, false);
+        self.path_replans.store(0, .monotonic);
         // any_freed_this_tick stays set until replicate reconciles known_entities:
         // net poll / admin may destroy before beginTick, sim after it.
         self.locals.clear();
@@ -332,7 +351,7 @@ pub const World = struct {
         self.next_net_id += 1;
         self.alive[s] = true;
         self.entity_count +%= 1;
-        self.kind_count[@intFromEnum(kind)] +%= 1;
+        self.kind_groups.insert(kind, s);
         if (!self.entity_cap_warned and self.entity_count >= entity_warn_at) {
             self.entity_cap_warned = true;
             std.debug.print(
@@ -602,7 +621,8 @@ pub const World = struct {
             // every later net-id lookup: give/kill/tele all "miss").
             if (self.kind[s] == .player) {
                 self.health[s].hp = 0;
-                self.alive[s] = true;
+                self.reviveSlot(s); // no-op here (slot was never removed), but
+                // keeps every alive[] = true in the repo on one path.
                 return .{ .killed = true };
             }
             self.destroy(s);
@@ -636,7 +656,7 @@ pub const World = struct {
     }
 
     pub fn countKind(self: *const World, kind: Kind) u32 {
-        return self.kind_count[@intFromEnum(kind)];
+        return self.kind_groups.count(kind);
     }
 
     /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.

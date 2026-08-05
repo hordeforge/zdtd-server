@@ -135,6 +135,9 @@ pub const Command = union(enum) {
     status,
     /// Dump C2S authority reject counters (phase/ownership/bounds/movement/decode).
     guardstats,
+    /// Clear guard quarantine bits + any armed policy kick on a peer slot
+    /// (operator escape hatch for a false positive).
+    guardclear: usize,
     evidence,
     /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
     apm,
@@ -193,6 +196,8 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "spawnentity") or std.mem.eql(u8, verb, "se"))
         return "spawnentity <slot|entityId> <class>";
     if (std.mem.eql(u8, verb, "wipeplayer")) return "wipeplayer <name>";
+    if (std.mem.eql(u8, verb, "guardclear") or std.mem.eql(u8, verb, "gc"))
+        return "guardclear <slot>";
     return null;
 }
 
@@ -203,6 +208,12 @@ pub fn parseCommand(line: []const u8) Command {
         return if (it.next() == null) .help else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "guardstats") or std.mem.eql(u8, cmd, "gs")) return if (it.next() == null) .guardstats else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "guardclear") or std.mem.eql(u8, cmd, "gc")) {
+        const p = it.next() orelse return .{ .bad_args = cmd };
+        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .guardclear = peer };
+    }
     if (std.mem.eql(u8, cmd, "evidence") or std.mem.eql(u8, cmd, "ev")) return if (it.next() == null) .evidence else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
@@ -366,6 +377,17 @@ test "parse guardstats" {
 test "parse evidence" {
     try std.testing.expect(parseCommand("evidence") == .evidence);
     try std.testing.expect(parseCommand("ev") == .evidence);
+}
+
+test "parse guardclear" {
+    const gc = parseCommand("guardclear 3");
+    try std.testing.expect(gc == .guardclear);
+    try std.testing.expectEqual(@as(usize, 3), gc.guardclear);
+    try std.testing.expect(parseCommand("gc 0") == .guardclear);
+    try std.testing.expect(parseCommand("guardclear") == .bad_args);
+    try std.testing.expect(parseCommand("guardclear x") == .bad_args);
+    try std.testing.expect(parseCommand("guardclear 1 2") == .bad_args);
+    try std.testing.expectEqualStrings("guardclear <slot>", usageFor("guardclear").?);
 }
 
 test "parse apm" {

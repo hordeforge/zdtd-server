@@ -1118,3 +1118,103 @@ fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });
     try io_fs.writeFileSimple(path, data);
 }
+
+/// Fire two distinct Strong detectors on one peer: speedhack movement
+/// (surface .none) then a dead-actor DamageEntity claim (surface .damage).
+fn tripTwoStrongSignals(g: *game_mod.Game, c: anytype) !void {
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+
+    const seed = try packages.buildPosAndRotBody(&body, c.entity_id, 100, 71, 100, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", seed));
+    g.tick_n += 20;
+    // 500 m in ~1 s: movement / strong.
+    const hack = try packages.buildPosAndRotBody(&body, c.entity_id, 600, 71, 100, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", hack));
+
+    // Dead actor claiming damage: bounds / strong / damage.
+    const ps = g.sim.slotOfNetId(c.entity_id) orelse return error.MissingEntity;
+    g.sim.health[ps].hp = 0;
+    const dmg = try packages.buildDamageBody(&body, c.entity_id + 1000, 0, 0, 50, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+}
+
+test "scenario guard policy: two distinct strong signals log-only by default" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_guard_log");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_log", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Defaults are the safe rung: nothing enforced, nothing quarantined.
+    try std.testing.expectEqual(false, g.guard.enforce);
+    try std.testing.expectEqual(true, g.guard.dry_run);
+
+    try tripTwoStrongSignals(g, c);
+
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.guard_would_kicks));
+    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.guard_kicks));
+    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.guard_quarantines));
+    // Peer stays connected and unrestricted under the default ladder.
+    try std.testing.expect(c.peer != null);
+    try std.testing.expectEqual(@as(u64, 0), c.guard.kick_at_tick);
+    try std.testing.expectEqual(false, c.guard.quarantine.any());
+    std.debug.print("PASS guard policy log-only: would_kicks=1, peer still connected\n", .{});
+}
+
+test "scenario guard policy: quarantine denies only the abused surface" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_guard_quar");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_quar", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Quarantine rung on; kick rung stays off (enforce=false, dry_run=true).
+    g.guard = .{ .quarantine = true };
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    try tripTwoStrongSignals(g, c);
+
+    // The tripping event was attributed to `.damage`, so only that bit is set.
+    try std.testing.expectEqual(true, c.guard.quarantine.no_damage);
+    try std.testing.expectEqual(false, c.guard.quarantine.no_setblock);
+    try std.testing.expectEqual(false, c.guard.quarantine.no_container);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.guard_quarantines));
+    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.guard_kicks));
+    try std.testing.expect(c.peer != null);
+
+    // A further DamageEntity is dropped at the top of the handler: the
+    // quarantine counter moves and the downstream bounds reject never runs.
+    const q_before = g.harness.counters.get(.quarantine_rejects);
+    const b_before = g.harness.counters.get(.bounds_rejects);
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const dmg = try packages.buildDamageBody(&body, c.entity_id + 1000, 0, 0, 50, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+    try std.testing.expectEqual(q_before + 1, g.harness.counters.get(.quarantine_rejects));
+    try std.testing.expectEqual(b_before, g.harness.counters.get(.bounds_rejects));
+
+    // SetBlock is not quarantined, so it still reaches the normal handler.
+    const q_after = g.harness.counters.get(.quarantine_rejects);
+    const sb = try packages.buildSetBlockBody(&body, 5000, 60, 5000, 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", sb));
+    try std.testing.expectEqual(q_after, g.harness.counters.get(.quarantine_rejects));
+
+    // Operator escape hatch (admin `guardclear <slot>`) resets the bits.
+    c.guard.quarantine = .{};
+    try std.testing.expectEqual(false, c.guard.quarantine.any());
+    std.debug.print("PASS guard policy quarantine: no_damage only, damage C2S denied\n", .{});
+}

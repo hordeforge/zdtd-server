@@ -50,6 +50,37 @@ pub const CounterId = enum(u16) {
     reconnects,
     /// Evidence JSONL lines written (observe).
     evidence_events,
+    /// Guard policy set one or more quarantine bits on a peer.
+    guard_quarantines,
+    /// Guard policy sent PlayerDenied and armed the delayed drop.
+    guard_kicks,
+    /// Guard policy gate tripped but the kick rung was off / dry-run / observe.
+    guard_would_kicks,
+    /// C2S dropped because the peer is quarantined on that surface.
+    quarantine_rejects,
+    /// Weak evidence records dropped while the load-shed valve was open.
+    load_shed_drops,
+    /// Chunk payloads handed to the background flusher.
+    chunk_flush_queued,
+    /// Chunk payloads written by the background flusher.
+    chunk_flush_written,
+    /// Background chunk writes that failed (see also persistence_errors).
+    chunk_flush_errors,
+    /// Async submits that fell back to an inline write (queue full / shutdown).
+    chunk_flush_sync,
+    /// Times a reader or eviction blocked on a queued chunk write.
+    chunk_flush_waits,
+    /// Chunk-coverage samples summed across snapshot rebuilds (divide by the
+    /// terrain_snap section count for the mean window size).
+    terrain_snap_chunks,
+    /// Path probes that fell through the snapshot to the locked hook.
+    terrain_snap_misses,
+    /// Sleeper volumes tested per scan pass.
+    sleeper_volumes_scanned,
+    /// Cells walked by the one-time storage-TE chunk scan.
+    te_scan_cells,
+    /// A* replans issued by the AI phase (evidence for a deferred path phase).
+    path_replans,
     _,
 };
 

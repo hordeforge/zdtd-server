@@ -27,6 +27,44 @@ pub const Snapshot = struct {
     }
 };
 
+/// Widest decimal rendering of a u64 (no separators).
+const u64_digits: usize = 20;
+
+/// Worst-case bytes `writeText` / `writeJsonLine` can emit, derived from the
+/// enum field names. Call sites size their fixed buffers from these so adding a
+/// counter or section can never silently truncate a dump.
+fn textBound() usize {
+    var n: usize = "zdtd-apm snapshot wall_ns=\n".len + u64_digits + "counters:\n".len +
+        "sections (count mean_ns p50_ns p99_ns max_ns):\n".len;
+    for (@typeInfo(metrics.CounterId).@"enum".fields) |f| {
+        if (f.name[0] == '_') continue;
+        n += 2 + f.name.len + 1 + u64_digits + 1;
+    }
+    for (@typeInfo(profiler.Section).@"enum".fields) |f| {
+        if (f.name[0] == '_') continue;
+        n += 2 + f.name.len + 5 * (1 + u64_digits) + 1;
+    }
+    return n;
+}
+
+fn jsonBound() usize {
+    var n: usize = "{\"type\":\"zdtd_apm\",\"wall_ns\":,\"counters\":{},\"sections\":{}}\n".len + u64_digits +
+        ",\"ops\":{\"tick\":,\"joined\":,\"entered\":,\"peers_alive\":,\"zombies\":,\"chunks\":}".len + 6 * u64_digits;
+    for (@typeInfo(metrics.CounterId).@"enum".fields) |f| {
+        if (f.name[0] == '_') continue;
+        n += 1 + 2 + f.name.len + 1 + u64_digits;
+    }
+    for (@typeInfo(profiler.Section).@"enum".fields) |f| {
+        if (f.name[0] == '_') continue;
+        n += 1 + 2 + f.name.len + 1 +
+            "{\"count\":,\"mean_ns\":,\"p50_ns\":,\"p99_ns\":,\"max_ns\":}".len + 5 * u64_digits;
+    }
+    return n;
+}
+
+pub const max_text_bytes: usize = textBound();
+pub const max_json_bytes: usize = jsonBound();
+
 pub fn writeText(s: *const Snapshot, w: *std.Io.Writer) !void {
     try w.print("zdtd-apm snapshot wall_ns={d}\n", .{s.wall_ns});
     try w.print("counters:\n", .{});
@@ -96,7 +134,7 @@ test "report text non-empty" {
     s.profiler.begin(.tick_total);
     s.profiler.end(.tick_total);
     s.captureWall();
-    var buf: [1024]u8 = undefined;
+    var buf: [max_text_bytes]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try writeText(&s, &w);
     const text = w.buffered();
@@ -113,11 +151,46 @@ test "report json includes ops when set" {
     s.counters.inc(.ticks);
     s.ops = .{ .tick = 42, .joined = 2, .entered = 1, .peers_alive = 2, .zombies = 5, .chunks = 16 };
     s.captureWall();
-    var buf: [2048]u8 = undefined;
+    var buf: [max_json_bytes]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try writeJsonLine(&s, &w);
     const line = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, line, "\"type\":\"zdtd_apm\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, line, "\"ops\":{\"tick\":42") != null);
     try std.testing.expect(std.mem.indexOf(u8, line, "\"joined\":2") != null);
+}
+
+test "text and json dumps fit their comptime bounds at max values" {
+    // Saturate every counter and section so the bound is exercised, not the
+    // typical short output. Adding a counter/section must keep this passing.
+    var s: Snapshot = .{};
+    s.wall_ns = std.math.maxInt(u64);
+    s.ops = .{
+        .tick = std.math.maxInt(u64),
+        .joined = std.math.maxInt(u32),
+        .entered = std.math.maxInt(u32),
+        .peers_alive = std.math.maxInt(u32),
+        .zombies = std.math.maxInt(u32),
+        .chunks = std.math.maxInt(u32),
+    };
+    inline for (@typeInfo(metrics.CounterId).@"enum".fields) |f| {
+        if (comptime f.name[0] != '_') s.counters.add(@enumFromInt(f.value), std.math.maxInt(u64));
+    }
+    inline for (@typeInfo(profiler.Section).@"enum".fields) |f| {
+        if (comptime f.name[0] != '_') {
+            s.profiler.hist[f.value].observe(std.math.maxInt(u32));
+        }
+    }
+    var tbuf: [max_text_bytes]u8 = undefined;
+    var tw: std.Io.Writer = .fixed(&tbuf);
+    try writeText(&s, &tw);
+    var jbuf: [max_json_bytes]u8 = undefined;
+    var jw: std.Io.Writer = .fixed(&jbuf);
+    try writeJsonLine(&s, &jw);
+    // Every named section must appear (none skipped for count==0).
+    inline for (@typeInfo(profiler.Section).@"enum".fields) |f| {
+        if (comptime f.name[0] != '_') {
+            try std.testing.expect(std.mem.indexOf(u8, jw.buffered(), "\"" ++ f.name ++ "\"") != null);
+        }
+    }
 }

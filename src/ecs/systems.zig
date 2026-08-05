@@ -8,6 +8,7 @@ const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
 const path_mod = @import("path.zig");
+const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 
@@ -47,9 +48,12 @@ const PlayerSnap = struct {
 
 fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap) usize {
     var n: usize = 0;
-    var j: Slot = 0;
-    while (j < max_entities and n < out.len) : (j += 1) {
-        if (!w.alive[j] or !w.mask[j].player or !w.mask[j].transform) continue;
+    // Cached player group instead of a 512-slot scan; it is slot-ascending, so
+    // the first 64 entries are the same 64 in the same order (nearest-player
+    // tie-breaks depend on it). Nothing here spawns or destroys.
+    for (query.groupSlice(w, .player)) |j| {
+        if (n >= out.len) break;
+        if (!w.mask[j].player or !w.mask[j].transform) continue;
         out[n] = .{
             .id = w.network_id[j].id,
             .slot = j,
@@ -605,6 +609,10 @@ const zombie_tasks = [_]Task{
     // continuous so approach_attack can preempt via isBestTask continuous yield.
     .{ .id = .territorial, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     .{ .id = .approach_spot, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
+    // EAILook: MutexBits=1 (.ctor, asm.il:429876); no Init override so
+    // executeDelay is the EAIBase::Init default 0.5 and IsContinuous the
+    // EAIBase default true (asm.il:424579).
+    .{ .id = .look, .priority = 2, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
     .{ .id = .wander, .priority = 2, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
 };
 
@@ -621,6 +629,30 @@ const destroy_area_rng_mod: u32 = 16;
 /// EAITaskList.executeDelayScale base (asm.il:437541, IL_0028 ldc.r4 0.85).
 /// The stock GameRandom jitter blended on top is dropped (simplification).
 const execute_delay_scale: f32 = 0.85;
+
+/// EAILook::Continue re-picks a yaw every 14 ticks at 20 Hz (asm.il:429984).
+const look_turn_interval_s: f32 = 14.0 / 20.0;
+/// SeekYaw target = rotation.y + RandomFloat*120 - 60 (asm.il:429995-430000).
+const look_yaw_range_deg: f32 = 120.0;
+/// Entity::SeekYaw yawSlowAt argument passed by EAILook (asm.il:430000).
+const look_yaw_slow_at_deg: f32 = 35.0;
+/// EntityClass.MaxTurnSpeed for zombieTemplateMale (entityclasses.xml:668).
+/// Pinned: World.EntityClass carries no per-class turn speed yet.
+const look_turn_speed_deg: f32 = 250.0;
+/// Utils::FastMax floor inside SeekYaw's slowdown branch (asm.il:399597).
+const look_turn_speed_min_deg: f32 = 20.0;
+/// EAIWander lookMin/lookMax defaults (asm.il:438410 / :438413).
+const wander_look_min_s: f32 = 0.5;
+const wander_look_max_s: f32 = 5.0;
+/// EAIApproachSpot::Reset lookTime = 5 + RandomFloat*3 (asm.il:424395/424401).
+const spot_look_base_s: f32 = 5.0;
+const spot_look_rand_s: f32 = 3.0;
+/// EAIWander::Continue bails once time > 30 s (asm.il:438343).
+const wander_time_max_s: f32 = 30.0;
+/// Stock's Continue also bails on navigator.noPathAndNotPlanningOne() (path
+/// finished, asm.il:438347). zdtd has no navigator on wander, so "arrived"
+/// is the stepToward no-op radius (d2 < 0.04) expressed as a distance.
+const wander_arrive: f32 = 0.2;
 
 fn taskById(id: c.TaskId) ?Task {
     for (zombie_tasks) |t| {
@@ -661,8 +693,61 @@ fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
 /// the pure fallback: wander whenever no player is sensed. It yields to chase
 /// only through priority + MutexBits, never through this gate. Spot also wins
 /// over wander via table order when has_spot (same priority/mutex).
-fn wanderCanExecute(np_id: i32, np_d2: f32) bool {
+fn wanderCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    // EAIWander::CanExecute returns false while lookTime > 0 (asm.il:438181):
+    // Look and Wander are mutually exclusive by data, not only by MutexBits.
+    if (ai.look_time > 0) return false;
     return !(np_id >= 0 and np_d2 < sense_dist_sq);
+}
+
+/// EAIWander::Continue (asm.il:438318) is a real override distinct from
+/// CanExecute: stop on the 30 s cap and when the path is finished. The stun and
+/// moveHelper.BlockedTime bails have no zdtd equivalent.
+fn wanderContinue(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    if (!wanderCanExecute(ai, np_id, np_d2)) return false;
+    if (ai.wander_time > wander_time_max_s) return false;
+    const dx = ai.wander_tx - w.transform[s].x;
+    const dz = ai.wander_tz - w.transform[s].z;
+    return dx * dx + dz * dz > wander_arrive * wander_arrive;
+}
+
+/// EAILook::CanExecute (asm.il:429881): `lookTime > 0 && !Jumping`. zdtd has no
+/// jumping, so the gate reduces to the owed-time test.
+fn lookCanExecute(ai: *const c.ZombieAi) bool {
+    return ai.look_time > 0;
+}
+
+/// EAILook::Continue (asm.il:430007): false once waitTicks runs out. The stun
+/// bail and the IsAlert double-drain are not modeled (no stun; Approach always
+/// preempts Look before it could be alert).
+fn lookContinue(ai: *const c.ZombieAi) bool {
+    return ai.look_wait > 0;
+}
+
+fn wrap360(deg: f32) f32 {
+    const r = @mod(deg, 360.0);
+    return if (r < 0) r + 360.0 else r;
+}
+
+/// Entity::SeekYaw (asm.il:399475) speed law, applied per tick instead of via
+/// stock's yawSeekAngle/yawSeekTimeMax slew: normalize both angles, wrap the
+/// delta into [-180,180], and slow quadratically inside `slow_at` with a
+/// 20 deg/s floor. Returns the new yaw in [0,360).
+fn seekYawStep(cur_deg: f32, target_deg: f32, max_turn_deg: f32, slow_at_deg: f32, dt: f32) f32 {
+    const cur = wrap360(cur_deg);
+    const tgt = wrap360(target_deg);
+    var delta = tgt - cur;
+    if (delta < -180.0) delta += 360.0;
+    if (delta > 180.0) delta -= 360.0;
+    const mag = @abs(delta);
+    if (mag == 0) return tgt;
+    var speed = max_turn_deg;
+    if (mag < slow_at_deg and slow_at_deg > 0) {
+        const f = mag / slow_at_deg;
+        speed = @max(max_turn_deg * f * f, look_turn_speed_min_deg);
+    }
+    const step = @min(speed * dt, mag);
+    return wrap360(cur + std.math.sign(delta) * step);
 }
 
 const AiCtx = struct {
@@ -737,8 +822,11 @@ const AiCtx = struct {
             // executing task when it is no longer best or its Continue() fails.
             if (ai.active_task != .none) {
                 const t = taskById(ai.active_task).?;
-                if (!(isBestTask(t, ai.active_task) and canExecute(ctx.w, s, ai.active_task, ai, np))) {
+                if (!(isBestTask(t, ai.active_task) and canContinue(ctx.w, s, ai.active_task, ai, np))) {
                     ai.decision_cd = t.execute_delay * execute_delay_scale;
+                    // EAIBase::Reset fires on this exact path (asm.il:437713,
+                    // IL_006F): a finished Wander / ApproachSpot seeds lookTime.
+                    resetTask(ai.active_task, ai, ctx.w.network_id[s].id);
                     ai.active_task = .none;
                 }
             }
@@ -756,6 +844,10 @@ const AiCtx = struct {
                         break;
                     }
                 }
+                // Preemption: stock removes the loser from executingTasks via the
+                // same Reset path, so a Wander cut short by Approach still seeds
+                // the look-around that plays once the chase ends.
+                if (chosen != ai.active_task) resetTask(ai.active_task, ai, ctx.w.network_id[s].id);
                 ai.active_task = chosen;
                 ai.decision_cd = (taskById(chosen) orelse zombie_tasks[0]).execute_delay * execute_delay_scale;
                 startTask(chosen, ctx.w, s, ai);
@@ -769,6 +861,7 @@ const AiCtx = struct {
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                .look => lookUpdate(ctx.w, s, ai, ctx.dt),
                 .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
                 .none => {
                     if (ai.state != .sleep) ai.state = .idle;
@@ -786,7 +879,7 @@ const AiCtx = struct {
     }
 };
 
-/// Dispatch to a task's CanExecute gate (Continue() == CanExecute for both).
+/// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     return switch (id) {
         .break_block => breakBlockCanExecute(ai, np.id, np.d2),
@@ -794,9 +887,49 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
         .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2),
         .approach_spot => approachSpotCanExecute(ai),
-        .wander => wanderCanExecute(np.id, np.d2),
+        .look => lookCanExecute(ai),
+        .wander => wanderCanExecute(ai, np.id, np.d2),
         .none => false,
     };
+}
+
+/// Dispatch to a task's Continue() gate (stop pass, step 1). EAIBase::Continue
+/// defaults to CanExecute (asm.il:424569); Wander and Look are the two tasks
+/// with real overrides, and they are exactly the two whose start state must be
+/// allowed to run down instead of being re-tested against the start condition.
+fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
+    return switch (id) {
+        .wander => wanderContinue(w, s, ai, np.id, np.d2),
+        .look => lookContinue(ai),
+        else => canExecute(w, s, id, ai, np),
+    };
+}
+
+/// EAIBase::Reset, invoked by EAITaskList::OnUpdateTasks on the same path that
+/// clears isExecuting and reloads executeTime (asm.il:437713, IL_006F). Only
+/// four sites in the whole assembly write EAIManager::lookTime; two of them are
+/// the Reset hooks below, and they are what produce the wander/look-around
+/// cycle. Every other task inherits the empty EAIBase::Reset.
+fn resetTask(id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void {
+    switch (id) {
+        .wander => {
+            // EAIWander::Reset (asm.il:438383): lookTime = RandomRange(0.5, 5).
+            ai.look_time = wander_look_min_s + rngFrac(ai, rng_seed) * (wander_look_max_s - wander_look_min_s);
+            ai.wander_time = 0;
+        },
+        // EAIApproachSpot::Reset (asm.il:424395): lookTime = 5 + rand*3.
+        .approach_spot => ai.look_time = spot_look_base_s + rngFrac(ai, rng_seed) * spot_look_rand_s,
+        else => {},
+    }
+}
+
+/// Advance the per-entity xorshift stream and return a value in [0,1). Stock's
+/// EAIBase::get_Random is the entity's single shared GameRandom, so reusing the
+/// one wander stream for every task draw matches it.
+fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
+    if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(rng_seed).state;
+    ai.wander_rng = rng_util.xorshift32Step(ai.wander_rng);
+    return @as(f32, @floatFromInt(ai.wander_rng % 10000)) / 10000.0;
 }
 
 /// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
@@ -833,6 +966,7 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
     const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
     const gxi: i32 = @intFromFloat(@floor(ai.path_goal_x));
     const gzi: i32 = @intFromFloat(@floor(ai.path_goal_z));
+    _ = w.path_replans.fetchAdd(1, .monotonic);
     var p: path_mod.Path = .{};
     path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
     const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
@@ -904,20 +1038,54 @@ fn territorialUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) vo
     chaseAlongPath(w, s, ai, ai.home_x, ai.home_z, cspd * ai.active_scale, dt);
 }
 
-/// EAIBase::Start hook. Only Wander has meaningful state to seed: it picks a
-/// fresh destination (EAIWander::Start). Runs on every re-eval that selects the
-/// task so a continuously-wandering zombie keeps drifting in new directions.
+/// EAIBase::Start hook. Wander picks a fresh destination and zeroes its run
+/// timer (EAIWander::Start, asm.il:438289); Look latches the owed seconds and
+/// stops the mover (EAILook::Start, asm.il:429903). Runs on every re-eval that
+/// selects the task so a continuously-wandering zombie keeps drifting.
 fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
-    if (id != .wander) return;
-    // Deterministic per-entity xorshift32 so streams differ per entity and the
-    // direction varies each pass (a constant hash would drift one way forever).
-    if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(w.network_id[s].id).state;
-    const r = rng_util.xorshift32Step(ai.wander_rng);
-    ai.wander_rng = r;
-    const ox: f32 = @floatFromInt(@as(i32, @intCast(r % 17)) - 8);
-    const oz: f32 = @floatFromInt(@as(i32, @intCast((r / 17) % 17)) - 8);
-    ai.wander_tx = w.transform[s].x + ox;
-    ai.wander_tz = w.transform[s].z + oz;
+    switch (id) {
+        .wander => {
+            // Deterministic per-entity xorshift32 so streams differ per entity and
+            // the direction varies each pass (a constant hash would drift one way).
+            if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(w.network_id[s].id).state;
+            const r = rng_util.xorshift32Step(ai.wander_rng);
+            ai.wander_rng = r;
+            const ox: f32 = @floatFromInt(@as(i32, @intCast(r % 17)) - 8);
+            const oz: f32 = @floatFromInt(@as(i32, @intCast((r / 17) % 17)) - 8);
+            ai.wander_tx = w.transform[s].x + ox;
+            ai.wander_tz = w.transform[s].z + oz;
+            ai.wander_time = 0;
+        },
+        .look => {
+            ai.look_wait = ai.look_time;
+            ai.look_time = 0;
+            ai.look_turn_cd = 0;
+            ai.look_yaw = w.transform[s].yaw;
+            // moveHelper.Stop().
+            ai.has_path = false;
+            ai.path_wp_valid = false;
+            ai.path_blocked = false;
+        },
+        else => {},
+    }
+}
+
+/// EAILook::Continue turn branch (asm.il:429975-430001): stand still and slew
+/// body yaw toward a fresh +/-60 deg pick every 0.7 s, draining the owed time.
+/// The lookAtTicks / SetLookPosition head-aim half is not ported: zdtd
+/// replicates body yaw only (NetPackageEntityPosAndRot).
+fn lookUpdate(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
+    ai.state = .idle;
+    ai.alert = false;
+    ai.target_id = -1;
+    ai.look_wait -= dt;
+    ai.look_turn_cd -= dt;
+    if (ai.look_turn_cd <= 0) {
+        ai.look_turn_cd = look_turn_interval_s;
+        const f = rngFrac(ai, w.network_id[s].id);
+        ai.look_yaw = w.transform[s].yaw + f * look_yaw_range_deg - look_yaw_range_deg * 0.5;
+    }
+    w.transform[s].yaw = seekYawStep(w.transform[s].yaw, ai.look_yaw, look_turn_speed_deg, look_yaw_slow_at_deg, dt);
 }
 
 /// EAIApproachAndAttackTarget::Update: grid A* toward the sensed player when a
@@ -974,6 +1142,7 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
     const gzi: i32 = @intFromFloat(@floor(gz));
     const need_replan = ai.path_replan_cd <= 0 or !ai.path_wp_valid;
     if (need_replan) {
+        _ = w.path_replans.fetchAdd(1, .monotonic);
         var p: path_mod.Path = .{};
         path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
         // Greedy fallback may fill waypoints along a wall without reaching the goal.
@@ -1037,6 +1206,8 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.has_path = false;
     ai.path_wp_valid = false;
     ai.path_blocked = false;
+    // EAIWander::Update (asm.il:438366): accumulate run time for the 30 s cap.
+    ai.wander_time += dt;
     stepToward(w, s, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
 }
 
@@ -1252,14 +1423,15 @@ pub const TurretTick = struct {
 pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     if (w.countKind(.turret) == 0) return .{};
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    // Filtered copy of the cached zombie group (ascending, so target selection
+    // ties break identically to the old full scan). The parallel workers below
+    // never spawn or destroy, so the slice stays valid for the whole phase.
     var zombie_slots: [max_entities]Slot = undefined;
     var zn: usize = 0;
-    var zj: Slot = 0;
-    while (zj < max_entities) : (zj += 1) {
-        if (w.alive[zj] and w.mask[zj].kind and w.kind[zj] == .zombie and w.mask[zj].transform) {
-            zombie_slots[zn] = zj;
-            zn += 1;
-        }
+    for (query.groupSlice(w, .zombie)) |zj| {
+        if (!w.mask[zj].transform) continue;
+        zombie_slots[zn] = zj;
+        zn += 1;
     }
     // One O(node_n) pass here replaces an O(node_n) scan per turret per tick.
     var powered: [max_entities]bool = .{false} ** max_entities;
@@ -1323,9 +1495,14 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps);
     var n: u8 = 0;
-    var i: Slot = 0;
-    while (i < max_entities and n < out_ids.len) : (i += 1) {
-        if (!w.alive[i] or w.kind[i] != .zombie or !w.mask[i].transform) continue;
+    // This loop destroys, so it walks a snapshot of the zombie group rather
+    // than the live group (same ascending order, so the capped out_ids picks
+    // the same ids as the old open scan).
+    var zombies: [max_entities]Slot = undefined;
+    const zn = query.copyKindInto(w, .zombie, &zombies);
+    for (zombies[0..zn]) |i| {
+        if (n >= out_ids.len) break;
+        if (!w.alive[i] or !w.mask[i].transform) continue;
         // Sleepers stay (POI volumes re-trigger on approach otherwise).
         if (w.mask[i].sleeper) continue;
         if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
@@ -1437,6 +1614,115 @@ test "isBestTask: approach preempts wander, wander cannot preempt approach" {
     try std.testing.expect(isBestTask(wander, .wander));
     try std.testing.expect(isBestTask(spot, .approach_spot));
     try std.testing.expect(isBestTask(territorial, .territorial));
+    // Look (priority 2, mutex 0b01, continuous) sits with the movement group:
+    // Approach preempts it (higher-priority continuous yields), it cannot
+    // preempt Approach, and it is incompatible with Wander/Spot both ways.
+    const look = taskById(.look).?;
+    try std.testing.expect(isBestTask(approach, .look));
+    try std.testing.expect(!isBestTask(look, .approach_attack));
+    try std.testing.expect(!isBestTask(wander, .look));
+    try std.testing.expect(!isBestTask(look, .wander));
+    try std.testing.expect(!isBestTask(look, .approach_spot));
+    try std.testing.expect(isBestTask(look, .none));
+    try std.testing.expect(isBestTask(look, .look));
+}
+
+test "seekYawStep: wrap, per-tick clamp, slowdown floor, exact snap" {
+    // Far from target: full MaxTurnSpeed, clamped to speed*dt per tick.
+    const a = seekYawStep(0, 180, 250, 35, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), a, 0.001);
+    // Shortest arc across the 0/360 seam: 350 -> 60 turns +70, not -290, and
+    // the 12.5 deg step wraps the result back into [0,360).
+    const b = seekYawStep(350, 60, 250, 35, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), b, 0.001);
+    // And the other way: 10 -> 300 turns -70, wrapping below zero.
+    const cc = seekYawStep(10, 300, 250, 35, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 357.5), cc, 0.001);
+    // Negative input yaw (stepToward writes atan2 in [-180,180]) normalizes.
+    try std.testing.expectApproxEqAbs(@as(f32, 350.0), seekYawStep(-10, -10, 250, 35, 0.05), 0.001);
+    // Inside slow_at the speed is max_turn*(d/slow_at)^2: d=17.5 -> 250*0.25=62.5.
+    const d = seekYawStep(0, 17.5, 250, 35, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.125), d, 0.001);
+    // Deep inside slow_at the 20 deg/s floor takes over: d=1 -> 250*(1/35)^2
+    // = 0.204 < 20, so speed 20 and a 0.05 s step of 1.0 exactly reaches it.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), seekYawStep(0, 1, 250, 35, 0.05), 0.001);
+    // Never overshoot: a step larger than the remaining delta snaps exactly.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), seekYawStep(0, 0.5, 250, 35, 1.0), 0.001);
+    // Zero delta is a no-op, not an oscillation.
+    try std.testing.expectApproxEqAbs(@as(f32, 90.0), seekYawStep(90, 90, 250, 35, 0.05), 0.001);
+}
+
+test "system zombie looks around after reaching its wander destination" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    // Snap the destination onto the entity: stock's noPathAndNotPlanningOne
+    // (path finished) branch of EAIWander::Continue.
+    w.zombie_ai[zs].wander_tx = w.transform[zs].x;
+    w.zombie_ai[zs].wander_tz = w.transform[zs].z;
+    _ = systemZombieAi(&w, 0.05);
+    // Continue() failed -> task stopped -> EAIWander::Reset seeded lookTime.
+    try std.testing.expectEqual(c.TaskId.none, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.zombie_ai[zs].look_time >= wander_look_min_s);
+    try std.testing.expect(w.zombie_ai[zs].look_time <= wander_look_max_s);
+    // Wander is data-blocked while lookTime > 0, so the next pass picks Look.
+    var t: f32 = 0;
+    while (t < 8.0 and w.zombie_ai[zs].active_task != .look) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.look, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(@as(f32, 0), w.zombie_ai[zs].look_time);
+    try std.testing.expect(w.zombie_ai[zs].look_wait > 0);
+}
+
+test "system zombie look holds position, turns yaw, then wander resumes" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    // Seed the look directly (what Wander/ApproachSpot Reset does).
+    w.zombie_ai[zs].look_time = 3.0;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.look, w.zombie_ai[zs].active_task);
+    const x0 = w.transform[zs].x;
+    const z0 = w.transform[zs].z;
+    var yaw_prev = w.transform[zs].yaw;
+    var yaw_moved = false;
+    var t: f32 = 0;
+    while (t < 3.0 and w.zombie_ai[zs].active_task == .look) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (@abs(w.transform[zs].yaw - yaw_prev) > 0.001) yaw_moved = true;
+        yaw_prev = w.transform[zs].yaw;
+    }
+    try std.testing.expect(yaw_moved);
+    // Look does not move the entity (moveHelper.Stop()).
+    try std.testing.expectEqual(x0, w.transform[zs].x);
+    try std.testing.expectEqual(z0, w.transform[zs].z);
+    try std.testing.expectEqual(c.AiState.idle, w.zombie_ai[zs].state);
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+    // Owed time spent -> Continue() fails -> Wander is selectable again.
+    t = 0;
+    while (t < 10.0 and w.zombie_ai[zs].active_task != .wander) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
+}
+
+test "system zombie approach_spot arrival seeds a 5-8 s look" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].has_spot = true;
+    w.zombie_ai[zs].spot_x = 0.5;
+    w.zombie_ai[zs].spot_z = 0;
+    var t: f32 = 0;
+    while (t < 5.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].has_spot);
+    // One more pass: CanExecute fails, EAIApproachSpot::Reset runs.
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].look_time >= spot_look_base_s);
+    try std.testing.expect(w.zombie_ai[zs].look_time <= spot_look_base_s + spot_look_rand_s);
 }
 
 test "system zombie chases" {

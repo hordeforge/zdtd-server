@@ -109,7 +109,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageChunkClusterInfo` | P2 |
 | `NetPackageWorldInfo` / game mode / seed | HAVE (fixedSizeCC closes overlay gate) |
 | `NetPackageBiomeIntensity` | PARTIAL (interleaved in chunk path) |
-| `NetPackageDecoUpdate` / deco reset | PARTIAL (empty firstPackage only; trees suppressed for AssignIds skew; generateAroundIds kept) |
+| `NetPackageDecoUpdate` / deco reset | PARTIAL (join-time tree burst around spawn, ids via `idByName` fail-closed, `[feature] deco_trees` kill switch. Client has ONE deco window: `loadedDecos` is nulled at the end of `OnWorldLoaded`, so nothing outside the join view square is ever decorated. Density/species are not biome-driven; server does not mirror the client's `addDistantDecorationBlocks` writeback. `DecoResetWorldChunk` on view unload removed (not stock). See [DECO_NRE.md](DECO_NRE.md)) |
 | `NetPackageWater*` (if any in build) | P2 |
 | `NetPackageDynamicMesh` | P3 / skip headless |
 
@@ -269,7 +269,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
-| RWG / procedural gen | MISSING | baked maps only today; design WORLDGEN.md = **on-the-fly** per-chunk stream gen (MC density + WFC tiles; not static full bake; not stock RWG host) |
+| RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
 | Density / stability / shape / paint | PARTIAL | density channel; stability/falling MISSING |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
@@ -320,8 +320,9 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
 | Party / allies | PARTIAL (echo first cut; PlatformUserId MISSING) |
 | Spatial hash for queries | MISSING (broadcastNear radius only) |
-| Dense free-list compaction | PARTIAL (scan free slots) |
-| NetId → slot map (O(1)) | MISSING (linear scan) |
+| Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
+| Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate + dirty-clear + interest still O(512)) |
+| NetId → slot map (O(1)) | HAVE (`World.net_to_slot`; documented linear fallback only when the map is degraded) |
 | Interest-aware tick budgets | MISSING |
 
 #### 5.2.1 EAI task graphs (PARTIAL)
@@ -332,11 +333,31 @@ ordered task table with `{priority, MutexBits, executeDelay, continuous}` per
 task, "best task" selection by priority + mutex overlap, per-task re-eval
 timer, and Start/Update/CanExecute/Continue hooks. The winning task is
 projected onto the coarse `ZombieAi.state` enum so all downstream replication
-stays unchanged. Two real tasks are registered:
-ApproachAndAttackTarget (chase+melee, MutexBits=3, executeDelay=0.1,
-non-continuous; asm.il:421798) and Wander (MutexBits=1, continuous;
-asm.il:438104). Chase preempts wander on sensing a player; wander resumes when
-the target is lost (mutex release), exactly reproducing stock's emergent order.
+stays unchanged.
+
+Seven real tasks are registered in the comptime `zombie_tasks` table, in the
+stock zombie AITask order: BreakBlock, DestroyArea, ApproachAndAttackTarget
+(chase+melee, MutexBits=3, executeDelay=0.1, non-continuous; asm.il:421798),
+Territorial, ApproachSpot, Look (MutexBits=1, executeDelay 0.5 from the
+EAIBase::Init default, continuous; asm.il:429858), and Wander (MutexBits=1,
+continuous; asm.il:438104). Chase preempts wander on sensing a player; wander
+resumes when the target is lost (mutex release), exactly reproducing stock's
+emergent order.
+
+`Reset()` and a `Continue() != CanExecute()` split are both modeled, because
+Look needs them: `EAITaskList::OnUpdateTasks` calls `action.Reset()` on the same
+path that clears `isExecuting` (asm.il:437713, IL_006F), and only two Reset
+overrides in the whole assembly seed `EAIManager.lookTime` -
+`EAIWander::Reset` (RandomRange(0.5, 5), asm.il:438383) and
+`EAIApproachSpot::Reset` (5 + rand\*3, asm.il:424395). Wander's own
+`Continue()` (asm.il:438318) is a real override that stops on the 30 s cap and
+on "path finished"; before Look landed, zdtd reused CanExecute for both, so
+wander never terminated on arrival. The resulting loop is stock's: wander until
+the destination is reached (or preempted by a chase), then stand still and slew
+body yaw (`Entity::SeekYaw`, asm.il:399475) toward a fresh +/-60 deg pick every
+0.7 s (asm.il:429984-430001) for the owed 0.5-5 s (5-8 s after an investigate
+spot), then wander again. Only body yaw is involved, which zdtd already
+replicates via `NetPackageEntityPosAndRot`.
 
 Honest gaps:
 
@@ -345,23 +366,72 @@ Honest gaps:
   store); falls back to straight `stepToward` without a solid hook. Caps
   expansions (~96) and replan interval (~0.35 s) for the 20 TPS budget. No
   navmesh, no vertical climb/jump, no stock pathCounter/relocateTicks fidelity.
-- **Four task types are real.** ApproachAndAttackTarget, ApproachSpot
-  (`has_spot`/`spot_x`/`spot_z`, priority below chase, above wander; clears on
-  arrive), Wander, and EAIBreakBlock (asm.il:425121): when chase A* finds no
-  detour, `path_blocked` selects BreakBlock (mutex 0, holds `.chase` so
-  `Game.tickZombieBlockDamage` chews cover). Still missing: EAIDestroyArea,
-  EAIApproachDistraction (:423700, noiseSeekDist), EAITerritorial (:437973),
-  and Look/Dodge/Leap/RangedAttack/RunAway. (There is no EAISeekSmell class in
-  stock; do not add one.)
+- **Five EAI tasks stay unimplemented, each on a hard missing dependency.**
+  - *EAIDodge* (asm.il:426512): CanExecute reads the target's
+    `avatarController.IsAnimationToDodge()` and Start calls
+    `StartAnimationDodge` - client animator state the server does not have.
+    Independently dead data: no entity in stock `entityclasses.xml` or
+    `npc.xml` declares a Dodge AITask.
+  - *EAILeap* (asm.il:429498, MutexBits 3, executeDelay 1+rand): needs
+    `jumpMaxDistance`, `moveHelper.BlockedFlags`, `navigator.getPath()`,
+    `BodyDamage::IsAnyLegMissing`, a capsule `Physics.Raycast` (mask
+    0x40810000) and `moveHelper.StartJump`. zdtd has no vertical movement
+    integration (see "MoveHelper physics / collision" above). Users:
+    zombieSpider, animalMountainLion.
+  - *EAIRangedAttackTarget* (asm.il:433404, MutexBits 0b1011, cooldown 3,
+    attackDuration 20, minRange 4, maxRange 25): sequences anim states then
+    calls `UseHoldingItem`/`IsHoldingItemInUse`; the projectile comes from the
+    held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
+    Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
+  - *EAIRunawayWhenHurt / EAIRunawayFromEntity* (asm.il:434936, :434510, base
+    :434098): both need `GetRevengeTarget()`. `NetPackageDamageEntity`
+    (`src/server/game.zig`) calls `sim.damage(entity_id, amount)` with no
+    attacker, and `ZombieAi` has no revenge field. These tasks also appear only
+    on animal classes, and zdtd runs animals on the zombie table.
+  - *EAIApproachDistraction* (asm.il:423700): needs `EntityAlive.distraction`
+    to be a dropped `EntityItem` whose `ItemClass.IsEatDistraction` is true,
+    plus `AINoiseSeekDist` (8 for zombieTemplateMale). zdtd has no dropped-item
+    entity carrying item-class flags.
+
+  (There is no EAISeekSmell class in stock; do not add one.)
+- **Look is body-yaw only.** `EAILook::Continue`'s `lookAtTicks` / 40-tick
+  `SetLookPosition` branch (asm.il:430022-430072) aims the head/eye rig; zdtd
+  replicates body yaw only, so only the `turnTicks`/SeekYaw branch is ported.
+  Look's `IsAlert` double-drain of waitTicks and its `bodyDamage.CurrentStun`
+  bail (asm.il:429937-429978) are also dropped: Approach always preempts Look
+  before it could be alert, and there is no stun model.
+- **SeekYaw is per-tick, not the stock two-phase slew.** Stock stores
+  `yawSeekAngle`/`yawSeekAngleEnd`/`yawSeekTimeMax` and interpolates inside
+  `Entity`'s own update; `seekYawStep` applies the same speed law (quadratic
+  slowdown inside 35 deg, 20 deg/s floor) directly per tick. Same endpoint and
+  same rate law, different integration. `MaxTurnSpeed` is pinned to the
+  zombieTemplateMale value 250 deg/s because `World.EntityClass` carries no
+  per-class turn speed; stock values span 100-420 across classes.
 - **No data-driven per-class task graphs.** Stock builds the list from
   `entityclasses.xml` `AITask-N`/`AITarget-N` strings via
-  `EAIManager::ParseTasks`/`CreateInstance` (asm.il:430620). No such XML is on
-  hand, so priority/MutexBits/executeDelay/continuous are hardcoded in the
-  comptime `zombie_tasks` table to mirror the stock zombie ordering.
+  `EAIManager::ParseTasks`/`CreateInstance` (asm.il:430620), and
+  `EAITaskList::AddTask` (asm.il:430495) uses the 1-based list index as the
+  priority. The stock dedicated-server config ships that XML
+  (`Data/Config/entityclasses.xml`); zombieTemplateMale's list is
+  `BreakBlock | DestroyArea | Territorial | ApproachDistraction |
+  ApproachAndAttackTarget | ApproachSpot | Look | Wander`, i.e. priorities
+  1..8 in that order. Parsing it per class is unimplemented for scope reasons,
+  not for lack of data: priority/MutexBits/executeDelay/continuous are
+  hardcoded in the comptime `zombie_tasks` table. That table compresses
+  priorities to {1,1,1,2,2,2,2} (same pairwise `isBestTask` relations for the
+  implemented subset), orders Territorial *after* Approach, and adds a "no
+  sensed player" clause to `territorialCanExecute` that stock's
+  `EAITerritorial::CanExecute` (asm.il:437973, home distance only) does not
+  have - in stock, Territorial (priority 3) genuinely preempts a chase.
 - **Single-task executing set.** `executingTasks` is collapsed to one
   `active_task` TaskId. Exact for the current table (BreakBlock mutex 0 can
-  switch with Approach via table order; movement tasks still exclusive), but a
-  continuous non-conflicting task (e.g. EAILook) would need a task bitset.
+  switch with Approach via table order; movement tasks including Look are all
+  mutex 0b01 and therefore exclusive anyway), but a continuous
+  non-conflicting task would need a task bitset.
+- **Ultra-far LOD bypasses selection.** Beyond `full_ai_dist_sq * 4` the work
+  loop forces `active_task = .wander` without consulting CanExecute, so distant
+  zombies never look around and a pending `look_time` sits unconsumed until
+  they come back in range.
 - **Sensing collapsed.** The stock `targetTasks` list
   (EAISetNearestEntityAsTarget / corpse / SetAsTargetIfHurt sorter,
   asm.il:430171) is folded into the existing single-nearest-player sense
@@ -571,12 +641,15 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Velocity packages | MISSING |
 | Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |
 | entityId → connection map O(1) | MISSING |
-| NetId → slot hashmap | MISSING (linear scan) |
+| NetId → slot hashmap | HAVE (`World.net_to_slot`; linear fallback only when the map is degraded) |
 | Parallel AI / turrets / save | HAVE |
-| Persistent thread pool | MISSING (spawn/join per forRanges) |
-| Async region I/O | MISSING |
-| Path worker pool | MISSING |
+| Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
+| Async region I/O | PARTIAL (`world/chunk_flush.zig` behind `[perf] async_chunk_flush`, default off: one joined writer thread, per-key FIFO, `waitKey` gate on read/evict. Encode stays on the tick thread; still one file per chunk, no stock-style region file) |
+| Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; caps at 256 chunks / radius 2 per player, tail falls back to the locked hook) |
+| Path worker pool | MISSING (A* already runs inside the parallel AI batch; a *deferred* solve phase is deliberately not built because a per-tick solve budget delays replans by a tick and changes sim outcomes. `path_replans` counter ships as the evidence. docs/SCALE_ARCHITECTURE.md) |
+| TE loot / prefab-storage scan as a job batch | MISSING (`te_scan` section + `te_scan_cells` counter ship as evidence; the `found >= 32` early return makes an exactly-equivalent parallel scan fiddly) |
 | Metrics apm harness | HAVE (`src/apm/`) |
+| Tracy zones over apm sections | PARTIAL (`-Dtracy` + operator-supplied `-Dtracy-src`; 12 `Section` zones + per-tick frame mark only. No plots/locks/alloc/GPU zones, nothing inside ecs job workers, and CI never builds the on path. `docs/APM.md`) |
 | 128-bot scale bench harness | MISSING (loadgen mixed 2-bot green; 128 open) |
 
 ---
@@ -595,6 +668,28 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Graceful shutdown save | HAVE (save tick + deinit persist) |
 | Docker / systemd unit | MISSING |
 | Config hot reload | MISSING |
+| Guard policy (weak signals / quarantine / dry-run kick) | HAVE (`server/guard_policy.zig`; see gaps below) |
+
+### Guard policy honest gaps (P4)
+
+Landed: severity ladder with a structural "weak signals never kick" property,
+per-peer tick-windowed gates (2 distinct Strong or N Hard), per-surface
+quarantine bits enforced at 5 C2S sites, an IL-grounded `NetPackagePlayerDenied`
+kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
+`[authority] guard_*` switches. Full contract in
+[AUTHORITY.md](AUTHORITY.md#guard-policy-p4).
+
+| Gap | Why it stays a gap |
+|---|---|
+| Efficiency detectors (aimbot / ESP / rotation time series) | Stock wire is too coarse and zdtd does not sample rotation. Only the block-destroy-rate weak signal exists, and it is record-only. |
+| Quarantine persistence across reconnect | Bits live on the client slot, which is reset to `.{}` on disconnect. Persisting them needs a `players.zsv` schema change. Reconnect churn is a `.flood` signal; the kick gate is the answer, not faked persistence. |
+| Ban ladder / ban duration / appeal path | `NetPackagePlayerDenied.banUntil` is always 0 and the IP ban list stays operator-only. `EacViolation`/`EacBan` are never emitted (no EAC integration; explicit non-goal). |
+| Forensic evidence trail | The ring is global, 64 entries, and ring writes are deduplicated per (detector, surface) per window. `evidence` is a sample; the counts that drove a decision live in the per-peer state and the apm counters. |
+| Load shed under the virtual clock | Only the real-time `run()` overrun branch arms it, so `--ticks` / scenario runs never exercise it end to end. Only its predicate is unit-tested. It is a coarse availability valve, not a scheduler. |
+| Kick message delivery | Best-effort. zdtd has no stock `ConnectionManager` teardown (ModEvents, AuthorizationManager, save-on-disconnect). A lost reliable send leaves the client to time out with no reason string. |
+| Weak-signal thresholds | `weak_break_rate_per_window = 900` is a heuristic; nothing in the IL defines a legitimate harvest rate. Tuning knob, not detection ground truth. |
+| serverconfig.xml properties for the policy | Deliberately absent. The switches are Bucket B (zdtd.toml `[authority]`) so there is one obvious way to set them. |
+| webui mirror of the policy line | Not extended in this pass; only admin `guardstats` shows the rungs and per-slot bits. |
 
 ---
 
@@ -629,7 +724,7 @@ Do not plan these as product features of zdtd:
 **P0 join/play gate: CLOSED** (STATUS 2026-07-23). Do not re-open from stale rows.
 
 ### P1: Depth the client still notices
-1. Deco/AssignIds pin (V3.0.1 dump or negotiate) so trees can return.  
+1. Deco: trees ship in the join burst (idByName + kill switch). Remaining: `blocks` NameIdMapping so ids can be negotiated instead of trusted, biome-driven density, mirroring deco into the server world store, and a live-client playtest.  
 2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  

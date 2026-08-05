@@ -7,6 +7,8 @@
 pub const metrics = @import("metrics.zig");
 pub const profiler = @import("profiler.zig");
 pub const report = @import("report.zig");
+/// Optional Tracy zone markers; no-op and zero-sized unless `-Dtracy=true`.
+pub const tracy = @import("tracy.zig");
 
 pub const Counters = metrics.Counters;
 pub const CounterId = metrics.CounterId;
@@ -40,4 +42,5 @@ test {
     _ = metrics;
     _ = profiler;
     _ = report;
+    _ = tracy;
 }

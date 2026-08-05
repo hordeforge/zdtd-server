@@ -68,6 +68,10 @@ pub const TaskId = enum(u8) {
     approach_attack,
     territorial,
     approach_spot,
+    /// EAILook (asm.il:429858). Stand still and turn body yaw for the seconds
+    /// Wander/ApproachSpot Reset() owed. Sits between ApproachSpot and Wander
+    /// exactly as in the stock zombie AITask list (entityclasses.xml:562-571).
+    look,
     wander,
 };
 
@@ -106,6 +110,17 @@ pub const ZombieAi = struct {
     /// Per-entity xorshift state for wander decisions (0 = unseeded; first
     /// decision seeds from net id so streams differ per entity).
     wander_rng: u32 = 0,
+    /// EAIManager.lookTime (asm.il:429886): seconds of look-around owed, seeded
+    /// by EAIWander::Reset (asm.il:438383) and EAIApproachSpot::Reset (:424395).
+    look_time: f32 = 0,
+    /// EAILook.waitTicks / 20 (asm.il:429903): seconds left in the active look.
+    look_wait: f32 = 0,
+    /// EAILook.turnTicks / 20 (asm.il:429984): seconds until the next yaw pick.
+    look_turn_cd: f32 = 0,
+    /// Entity::SeekYaw target angle in degrees (asm.il:429995).
+    look_yaw: f32 = 0,
+    /// EAIWander.time (asm.il:438366): seconds the current wander has run.
+    wander_time: f32 = 0,
 };
 
 pub const VehicleKind = enum(u8) {

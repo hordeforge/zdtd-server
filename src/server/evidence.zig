@@ -20,7 +20,19 @@ pub const Detector = enum(u8) {
     decode = 5,
     throttle = 6,
     flood = 7,
+    /// Weak (record-only) block-destroy rate. Never actionable by construction.
+    farming = 8,
     other = 255,
+};
+
+/// Which C2S surface produced the event. Maps 1:1 to the guard quarantine bits,
+/// so a signal can deny only the surface it was observed on. `.none` is an
+/// unattributed signal (movement, phase, flood) and quarantines every surface.
+pub const Surface = enum(u8) {
+    none = 0,
+    damage = 1,
+    container = 2,
+    block = 3,
 };
 
 pub const Event = struct {
@@ -29,6 +41,7 @@ pub const Event = struct {
     entity_id: i32 = -1,
     detector: Detector = .other,
     severity: Severity = .info,
+    surface: Surface = .none,
     observed: f32 = 0,
     bound: f32 = 0,
 };
@@ -48,12 +61,13 @@ pub const Ring = struct {
 
     /// Format one event as JSONL into buf (no trailing newline).
     pub fn formatEvent(ev: Event, buf: []u8) ![]const u8 {
-        return std.fmt.bufPrint(buf, "{{\"v\":1,\"tick\":{d},\"peer\":{d},\"ent\":{d},\"det\":\"{s}\",\"sev\":\"{s}\",\"obs\":{d:.3},\"bound\":{d:.3}}}", .{
+        return std.fmt.bufPrint(buf, "{{\"v\":1,\"tick\":{d},\"peer\":{d},\"ent\":{d},\"det\":\"{s}\",\"sev\":\"{s}\",\"surf\":\"{s}\",\"obs\":{d:.3},\"bound\":{d:.3}}}", .{
             ev.tick,
             ev.peer_local,
             ev.entity_id,
             @tagName(ev.detector),
             @tagName(ev.severity),
+            @tagName(ev.surface),
             ev.observed,
             ev.bound,
         });

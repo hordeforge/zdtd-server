@@ -706,7 +706,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         try g.world.saveAll();
         const snap = g.harness.snapshot();
-        var buf: [2048]u8 = undefined;
+        var buf: [apm.report.max_text_bytes]u8 = undefined;
         var w: std.Io.Writer = .fixed(&buf);
         apm.report.writeText(&snap, &w) catch |err|
             std.debug.print("zdtd: apm report truncated: {s}\n", .{@errorName(err)});

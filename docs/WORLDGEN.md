@@ -14,8 +14,8 @@ realistic terrain, generated on demand per 16-wide chunk, as a pure function of
 real-DEM streamer (`src/world/dem.zig`, Copernicus GLO-30); see the blend policy
 below.
 
-Status: **W0/W1 landed** (`src/world/noise.zig`, `src/world/worldgen.zig`,
-`TerrainSource.proc` in `store.zig`, `--worldgen-seed`). W2+ still design.
+Status: **W0/W1/W2 landed** (`src/world/noise.zig`, `src/world/worldgen.zig`,
+`TerrainSource.proc` in `store.zig`, `--worldgen-seed`). W2b+ still design.
 Each section tags verified research vs reasoned inference (deep-research
 2026-07-23, 24/25 claims confirmed by 3-vote adversarial verification).
 
@@ -130,6 +130,41 @@ World_generation / Noise_settings):
     interpolation, not 4096 full evaluations.
 - **Y range:** 16-aligned, like Minecraft's `min_y=-64, height=384` (both
   divisible by 16). zdtd's ~256 Y fits the same sectioned model (verified, 3-0).
+
+### What W2 actually shipped
+
+`src/world/worldgen.zig` implements this section for a single biome:
+
+- `columnTarget(x, z)` is the `cache_2d`: the W1 2D shaping stack (continental
+  fBm + ridged + domain-warped detail), clamped to
+  `[min_surface + margin, max_surface - margin]` = `[48, 164]`.
+- `cellDensity` = `clamp((target - y) / squash, -1, 1) + 0.85 * clamp(fbm3, -1, 1)`
+  with `squash = 28` and the noise stretched vertically (`y_scale = 2.0`,
+  4 octaves at frequency 0.02). Both clamps are load-bearing: with weight < 1
+  they make "solid well below target, air well above" a hard guarantee, and
+  `margin = squash + cell_h = 36` is that guaranteed band's half-width.
+- `interpolated`: cell size **4 x 8 x 4** blocks, so 5x5x33 = **825** fBm samples
+  per chunk instead of 65536, trilinearly interpolated per block by one shared
+  `trilerp`.
+- The coarse grid is snapped in **world** coordinates (`@divFloor(wx, 4)`), and
+  16 is a multiple of 4, so adjacent chunks share sample planes exactly. A chunk
+  fill is bit-identical to the standalone `density(wx, wy, wz)` oracle, which
+  makes "no seams across chunk borders" structural, not incidental, and testable.
+- Heights are the topmost solid block, matching stock `Chunk::RecalcHeightAt`
+  (asm.il:1104654), so overhangs are representable in the existing heightmap.
+- Parameters were picked from measurement, not taste: at `squash = 12`,
+  `y_scale = 0.5`, frequency 0.01 the field degenerates to a heightmap (0%
+  overhang columns). The shipped values give **12.4%** of columns more than one
+  solid run.
+- Cost: **126 us/chunk** ReleaseFast, **1.7 ms/chunk** Debug (a naive per-block
+  3D field is ~5.5 ms). At `chunk_adds_per_stream_tick = 8` that is ~1 ms/tick
+  release, ~14 ms/tick Debug. Watch it via the apm `chunk_gen` section; the fix
+  for Debug-with-many-clients is W2b (async workers), not a raised cap.
+
+Not in W2 (honest gaps): fluids and aquifers, so a density dip below sea level
+is a dry pit (section 4 / W4); biome climate (W3); carved caves (W4); POIs (W5).
+Surface material is applied per column from its topmost solid block, so overhang
+shelves and cave ceilings expose stone; run-aware surfacing belongs with W3.
 
 ## 3. Biomes: multi-axis climate
 

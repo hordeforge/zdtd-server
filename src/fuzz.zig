@@ -417,6 +417,7 @@ const toml_corpus = [_][]const u8{
     "[authority]\nmode = \"observe\"\ninterest_range_blocks = 120.5\n",
     "[authority]\nmode = 'single'\n# comment\n",
     "[feature]\nwire_chunks = yes\n",
+    "[feature]\ndeco_trees = off\n",
     "[unclosed\n",
     "key_outside_section = 1\n",
     "[stream]\nmax_streamed_chunks = 999999999999999999999999\n",

@@ -23,9 +23,39 @@ max_claimed_damage = 200
 peer_stale_ms = 3000
 # mode = "correct"   # observe | permissive | correct
 
+# P4 guard policy (docs/AUTHORITY.md). Defaults are log-only: a tripped gate
+# only prints "guard would kick" and bumps guard_would_kicks. Both enforcement
+# rungs additionally require mode = "correct".
+# guard_enforce = false        # master switch for the kick rung
+# guard_dry_run = true         # with enforce: simulate the kick, do not drop
+# guard_quarantine = false     # allow per-surface C2S denial bits
+# guard_load_shed = true       # shed weak evidence + deferrable broadcasts on overrun
+# guard_window_ticks = 1200    # counting window (1200 = 60 s at 20 TPS)
+# guard_strong_distinct = 2    # distinct Strong detectors in a window that trip
+# guard_hard_repeat = 25       # Hard events in a window that trip
+
 [feature]
 wire_chunks = true
+# Join-time deco trees (single DecoUpdate burst around spawn). Set false to send
+# the empty firstPackage only (bald world) when the client's block AssignIds may
+# differ from the bundled V3.1.4 dump, e.g. a modded or other-version client.
+deco_trees = true
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]
 # name = "default"
+
+# Performance switches (docs/SCALE_ARCHITECTURE.md). All default OFF. Each one
+# trades a documented property, so turn one on only after its always-on apm
+# section shows the cost it removes (save_encode / save_flush_wait,
+# terrain_snap, sleeper_scan).
+# [perf]
+# async_chunk_flush = false  # write chunk saves on a background thread
+#                            # (encode stays on the tick). Auto-disabled under
+#                            # forced-serial / DST, where io_fs write-fault
+#                            # injection must still see the error return.
+# terrain_snapshot = false   # per-tick read-only terrain blocked snapshot; the
+#                            # A* inner loop then skips the global terrain lock.
+#                            # Behaviour-identical (misses use the locked hook).
+# job_batches = false        # run the sleeper-volume player test in parallel.
+#                            # Spawns stay serial in volume order (seed is vi).

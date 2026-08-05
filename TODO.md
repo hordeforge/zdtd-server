@@ -10,7 +10,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q) · 33/33 C2S · WebUI/http · phase_gate + movement · plugins + P3 ECS · evidence ring + throttle. Open: chili full +15 proof on live client, deco objects ([DECO_NRE.md](docs/DECO_NRE.md)), IsSpawned soak. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q) · 33/33 C2S · WebUI/http · phase_gate + movement · plugins + P3 ECS · evidence ring + throttle. Open: chili full +15 proof on live client, deco objects **live-client playtest** (join burst implemented, [DECO_NRE.md](docs/DECO_NRE.md)), IsSpawned soak. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
 
 ### Freeze (core playable)
 
@@ -76,7 +76,8 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] EAI BreakBlock task (path_blocked → hold chase for block damage)
 - [x] EAI ApproachSpot task (`has_spot` / spot_x,z; below chase, above wander)
 - [x] EAI DestroyArea + Territorial (home leash 32 m; destroy_area reuses break_block chew)
-- [ ] EAI residual (Look, Dodge, Leap, RangedAttack, …); see MISSING §5.2.1
+- [x] EAI Look task + `Reset()` hook + `Continue()`/`CanExecute()` split (wander→look→wander cycle, `Entity::SeekYaw` body yaw)
+- [ ] EAI residual: Dodge (client animator only, and unreferenced by stock XML), Leap (jump physics + BodyDamage limbs + raycast), RangedAttack (item actions + projectiles), RunAway* (attacker attribution + per-class task lists), ApproachDistraction (dropped EntityItem with ItemClass flags); see MISSING §5.2.1
 - [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
 - [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
 - [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
@@ -101,6 +102,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Per-package phase matrix (`src/server/phase_gate.zig`; connecting|joined|playing; aggregate `phase_rejects`)
 - [x] Movement envelope first cut (`src/server/movement.zig`; soft 20 m/s clamp + `movement_rejects`; observe counts only)
 - [x] Inv cause ledger first cut (`ecs/inv_ledger.zig` ring + apm `inv_ledger_events`); evidence JSONL still open
+- [x] Guard policy P4 (`src/server/guard_policy.zig`): weak signals, load shed, quarantine bits, dry-run kick
 
 ### Parked / rejected (not near-term research-clone work)
 
@@ -118,7 +120,7 @@ Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plug
 - [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
 - [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
 - [x] Hardcode A10–A12 / B13 (class AI floors, vehicle held drive, named tick periods)
-- [ ] Hardcode residual: A08/A22 deco pin labels (trees still suppressed empty firstPackage; same DecoManager.Read block)
+- [x] Hardcode A08: deco trees ship in the join `DecoUpdate` burst; ids via `Game.decoTreeIds` (`idByName`, fail closed to empty firstPackage), `[feature] deco_trees` kill switch, per-chunk deco path deleted (client nulls `loadedDecos` after `OnWorldLoaded`). A22 residual open: no `blocks` NameIdMapping, so id skew on a modded/other-version client is undetectable. Not stock density/biome species; server does not mirror the client deco writeback; needs a live-client playtest. See [DECO_NRE.md](docs/DECO_NRE.md)
 - [x] Native static plugin host skeleton (ADR 0005) + `sample_hello` (`src/plugin/`; no dynlib/Wasm)
 - [x] Gamemode = config pack + static plugin flag (`modes/default.toml` + `mode.zig`; `--mode` / `[mode] name`; sample_plugin only)
 - Wasm / dynlib: see **Parked / rejected** above (not open near-term checkboxes).
@@ -131,12 +133,12 @@ Design hub: [docs/WORLDGEN.md](docs/WORLDGEN.md). **Not** stock RWG C# host and
 terrain + optional WFC tiles for settlements. Baked Navezgane/Pregen stay
 alternate backends.
 
-**W0/W1 shipped.** W2–W7 remain open as a **multi-milestone** track (not one PR);
-unpark density after core demo depth + M11 unless prioritized.
+**W0/W1/W2 shipped.** W2b–W7 remain open as a **multi-milestone** track (not one
+PR); unpark the rest after core demo depth + M11 unless prioritized.
 
 - [x] **W0** `World` terrain source `proc`; empty world dir join; demand gen in `getOrCreate` + existing stream ring (proof: explore forever without prebake)
 - [x] **W1** OpenSimplex2 + fBm/ridged + domain warp in Zig; determinism tests
-- [ ] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged (multi-milestone)
+- [x] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged (5×5×33 coarse grid, cell 4×8×4, world-snapped so chunk borders cannot seam; overhangs measured 12.4% of columns; 126 µs/chunk ReleaseFast, 1.7 ms Debug; apm `chunk_gen`). Fluids/biomes/caves/POI stay W3–W5
 - [ ] **W2b** Async gen workers + prefetch ring + apm; tick never blocks on bulk gen (multi-milestone)
 - [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names (multi-milestone)
 - [ ] **W4** Caves (cheese/spaghetti/noodle) + aquifers (multi-milestone)
@@ -160,6 +162,7 @@ Do not adopt third-party ECS cores.
 Core loop and parity landings. Do not re-open without new evidence.
 
 ### Recent (2026-08-04)
+- [x] **EAI Look + Reset/Continue split**: ported `EAILook` (asm.il:429858) as the seventh `zombie_tasks` cell, in the stock zombie AITask position between ApproachSpot and Wander (`entityclasses.xml` zombieTemplateMale, `EAITaskList::AddTask` priority == 1-based index, asm.il:430495). Look is not cosmetic: it is Wander's partner. Implementing it forced two missing stock mechanisms - a per-task `Reset()` hook (`EAITaskList::OnUpdateTasks` IL_006F, asm.il:437713) and a `Continue()` distinct from `CanExecute()` (`EAIBase::Continue` defaults to CanExecute, asm.il:424569). `EAIWander::Reset` seeds `lookTime = RandomRange(0.5, 5)` (asm.il:438383) and `EAIApproachSpot::Reset` seeds `5 + rand*3` (asm.il:424395); those are the only two Reset sites in the assembly that write `lookTime`. `EAIWander::Continue` (asm.il:438318) stops on the 30 s cap and on path-finished, which zdtd previously never did (wander ran forever). `EAIWander::CanExecute` is data-blocked while `lookTime > 0` (asm.il:438181). Look's Start latches the owed seconds and stops the mover (asm.il:429903); its Update slews body yaw via a port of `Entity::SeekYaw`'s speed law (asm.il:399475: quadratic slowdown inside 35 deg, 20 deg/s floor, MaxTurnSpeed 250 from entityclasses.xml) toward a fresh +/-60 deg pick every 0.7 s (asm.il:429984-430001). New: `c.TaskId.look`, five `ZombieAi` fields (`look_time`/`look_wait`/`look_turn_cd`/`look_yaw`/`wander_time`), `seekYawStep`, `canContinue`, `resetTask`, `rngFrac` (reuses the existing per-entity xorshift, as stock reuses one GameRandom per entity). +4 tests (453 total). Gaps documented (MISSING §5.2.1): head/eye `SetLookPosition` aim, alert double-drain, stun bail, per-class MaxTurnSpeed, per-tick vs two-phase slew, ultra-far LOD bypass, and the five residual tasks (Dodge/Leap/RangedAttack/RunAway*/ApproachDistraction) with the hard dependency each is blocked on. Also corrected §5.2.1's false claim that `entityclasses.xml` is "not on hand" - it ships with the dedicated server; per-class parsing is a scope gap, not a data gap.
 - [x] **ECS/SoA review prompt** `docs/PROMPTS/review-ecs-soa.md`; phase_gate + movement envelope; plugin host + query/command
 - [x] **EAI BreakBlock**; eat soften near-max; wood→frameShapes place; deco empty firstPackage (no Read NRE)
 - [x] **WebUI WU2**: POST `/api/cmd` + console UI + CSRF; expanded Snapshot (entity census, all apm counters, p99/max, policy knobs)
@@ -440,16 +443,29 @@ From **mr_ecs** (high value for dedi):
 From **ecez**:
 
 - [x] **Storage subset / capability** - `SimView` inv/transform mutators (`src/ecs/sim_view.zig`)
-- [ ] **Optional Tracy/ztracy markers** behind build flag; map onto `src/apm/`
-  sections first, Tracy second  
+- [x] **Optional Tracy/ztracy markers** - `-Dtracy` maps one Tracy zone onto every
+  `src/apm/` `Section` scope plus one frame mark per tick (`src/apm/tracy.zig`);
+  zero-sized and unlinked when off. Tracy stays operator-supplied via
+  `-Dtracy-src` (not vendored, no zig.zon dep, not in `make check`); only
+  zones + frame marks are mapped (no plots/locks/alloc/GPU). See `docs/APM.md`.  
 - [x] **Sim snapshot bytes (census)** - `ecs/snapshot.zig` writeCensus (entity counts + net ids); full SoA dump later
   regression tests / replay; not a second save format for ZCH3 `.zch`  
 
 From **zig-ecs (Entt)**:
 
-- [ ] **View vs cached Group** - default open mask scan (View); optional maintained
-  dense list of alive zombies/players/turrets updated on spawn/despawn (Group)
-  to skip full-capacity scans as `max_entities` grows  
+- [x] **View vs cached Group** - `src/ecs/group.zig`: `World.kind_groups`, one
+  slot-ascending dense alive list per `Kind` (7 KB, no heap), inserted in
+  `spawnBase` / removed in `destroy` / idempotent `World.reviveSlot`. Ascending
+  order = byte-identical to the open View scan, so wiring is a pure speedup.
+  `countKind` reads the group (old `kind_count` deleted). Query face in
+  `query.zig`: `groupSlice` / `forEachKindGroup` / `copyKindInto`. Wired into
+  `snapshotPlayers`, `systemTurrets` zombie list, `systemDespawnFar`,
+  `tickZombieBlockDamage`, `broadcastVehiclePositions`. Open: no all-kinds alive
+  group, so the replicate pass / motion dirty-clear / `clearDeadKnownEntities` /
+  `interest.markNearbyDirty` stay O(capacity); no mask groups (`mask.zombie_ai`
+  is mutated after spawn), so `systemZombieAi` stays an open scan; no owning
+  group (rejected, fixed slots); still no spatial hash. View stays the default
+  and the documented fallback for loops that spawn/destroy while iterating.  
 - [x] **`each` packed args** - `query.each` / `eachKind` with make+packed pointers  
 
 From **Flecs / zflecs** (ideas only, no C dep):
@@ -532,16 +548,40 @@ disjoint writes*, not "everything lock-free."
 - [x] **AI LOD** - lodScale + ultra-far wander sleep (4× full_ai); path chew still full
   unloaded cells, path requests as jobs with per-tick solve budget.
 
-- [ ] **Path / sleeper / TE loot as job batches**  
-  Jobs helper + pool; results applied serially in phase order.
+- [~] **Path / sleeper / TE loot as job batches**  
+  **Done:** sleeper-volume scan is a `jobs.forSlotRange` batch behind
+  `[perf] job_batches` (parallel AABB test, serial `vi`-ascending apply so the
+  spawn seed is unchanged); `sleeper_scan` section + `sleeper_volumes_scanned`
+  counter are always on.  
+  **Open (gap):** deferred path-solve phase. A* already runs inside the parallel
+  AI batch (`systems.zig` `AiCtx.work`) and writes only its own slot, so a
+  separate phase buys a per-tick solve budget, not parallelism, and that budget
+  delays some replans by a tick, i.e. changes sim outcomes. Needs `path_replans`
+  + `sim_entities` p99 evidence *and* an accepted determinism baseline change.  
+  **Open (gap):** TE loot batch. `loot.rollContainer` is pure and parallelisable
+  but costs microseconds; the measurable cost is the up-to-65536-cell scan in
+  `Game.ensurePrefabStorageInChunk`, whose `found >= 32` early return makes an
+  exactly-equivalent parallel version fiddly. `te_scan` section +
+  `te_scan_cells` counter ship now; refactor only if they show it.
 
 - [x] **Parallel chunk save (first cut)** - `store.saveChunkSlice` + `parallel.forRanges`
-- [ ] **Async chunk flush** - extend save without hitch on large dirty sets
-  blocking tick; double-buffer dirty set.
+- [x] **Async chunk flush** - `world/chunk_flush.zig` behind `[perf] async_chunk_flush`
+  (default off). Encode on the tick thread, write on one joined background
+  thread; the queued payloads are the double buffer (`Chunk.dirty` clears at
+  encode time). `waitKey` gates `loadChunk` / `evictOneChunk` (stock
+  `IsChunkSavedAndDormant`, asm.il:1182993); `World.deinit` drains and joins.
+  Off under forced-serial so DST write-fault injection keeps seeing the error
+  return. **Gap:** encode itself stays on the tick (`save_encode` section);
+  incremental / region-file encode is a separate item.
 
-- [ ] **Read-mostly snapshots**  
-  For interest and AI: copy player positions (already) and optionally a
-  compact spatial index once per tick; workers read snapshot only.
+- [x] **Read-mostly snapshots**  
+  `world/terrain_snapshot.zig` behind `[perf] terrain_snapshot` (default off):
+  one blocked bit per column for chunks around each player, rebuilt on the tick
+  thread before the AI phase, so the A* inner-loop predicate no longer takes the
+  process-global `Game.terrain_mu`. Built with `chunks.getPtr` only, so hits are
+  byte-identical and misses take today's locked path (including its on-demand
+  chunk generation). **Gap:** window caps at `max_chunks = 256` at radius 2;
+  widely separated players truncate the tail (`terrain_snap_misses` measures it).
 
 ### Far-term / only with evidence
 
@@ -704,22 +744,39 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 - [x] **Inv ledger** - cause-tagged ring (`ecs/inv_ledger.zig`; InvTx/craft/loot/give)
 - [x] **Evidence ring + JSONL lines** - `server/evidence.zig` ring; admin `evidence` dump; phase/movement record; file append optional later
 - [x] **Admin visibility** - `guardstats` dumps phase/ownership/bounds/movement/
-  decode rejects; webui Errors panel; kick rule id when Enforce exists still open  
+  decode rejects plus a second policy line (rungs, gate outcomes, per-slot
+  quarantine bits); webui Errors panel; webui policy mirror still open  
 
 **P4.3 - Soft / availability (Observe, then throttle)**
 
 - [x] Flood / churn signals (first cut) - `reconnects`, `c2s_malformed`, evidence flood det
-- [ ] Weak farming/efficiency signals: record only, never kick  
-- [ ] Global load shed: drop soft observes and defer non-essential streams  
+- [x] Weak farming signal: per-peer block-destroy rate → `Detector.farming` at
+  `.soft`; `guard_policy.evaluate` returns `.none` for info/soft *before* any
+  counter moves, so a weak signal is structurally unable to kick (unit-tested).
+  Efficiency/aimbot/ESP signals stay a documented non-goal (wire too coarse)
+- [x] Global load shed: `Game.shed_until_tick` armed by the `run()` overrun
+  branch (2 s hold); drops info/soft evidence (`load_shed_drops`) and defers
+  weather + vehicle-position broadcasts. Chunk stream, motion replicate,
+  WorldTime and every Hard gate are never shed. Open: only the real-time loop
+  arms it, so `--ticks`/scenario runs never exercise it end to end
 
 **P4.4 - Enforce (only after dry-run)**
 
-- [ ] Quarantine flags: no damage dealt / no container / no setblock (separate
-  bits)  
-- [ ] Kick after policy gates (2 independent Strong or repeated Hard + opt-in)  
-- [ ] Dry-run mode: log “would kick” until operator enables  
-- [x] Scenario tests: speedhack PosAndRot → `movement_rejects` + clamp (dupe
-  inv / wrong entity id / phase violation still open)  
+- [x] Quarantine flags: `guard_policy.Quarantine{no_damage,no_container,no_setblock}`
+  attributed via the new `evidence.Surface`; enforced at DamageEntity, SetBlock,
+  ExplosionInitiate, TileEntity (storage + workstation) and locking LockRequest;
+  `quarantine_rejects` apm + admin `guardclear <slot>`. Session-scoped (a slot
+  reset on disconnect clears them); persistence is an honest gap
+- [x] Kick after policy gates: 2 distinct Strong detectors or N repeated Hard in
+  a tick window → stock `NetPackagePlayerDenied` (ModDecision 0x10) + a 10-tick
+  delayed drop matching `GameUtils.disconnectLater(0.5f)`. Requires
+  `guard_enforce=true`, `guard_dry_run=false` and Correct mode. No ban ladder,
+  `banUntil` always 0
+- [x] Dry-run mode: default. Gate trips log `guard would kick` + `guard_would_kicks`
+  until the operator opts in (zdtd.toml `[authority] guard_*`)
+- [x] Scenario tests: speedhack PosAndRot → `movement_rejects` + clamp; guard
+  policy log-only default and quarantine surface isolation
+  (`scenarios.zig`); dupe inv / wrong entity id / phase violation still open  
 
 ### What not to port from server-guard
 

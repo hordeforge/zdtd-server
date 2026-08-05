@@ -200,6 +200,15 @@ pub fn isForceSerial() bool {
     return force_serial.load(.acquire);
 }
 
+/// The pool's process-lifetime `std.Io`, for modules that need a Condition (not
+/// just a mutex) without standing up a second `Threaded`. Must not be called in
+/// single-threaded builds: the pool never initializes `Threaded` there.
+pub fn poolIo() std.Io {
+    std.debug.assert(!builtin.single_threaded);
+    global_pool.ensureStarted();
+    return global_pool.io();
+}
+
 /// Process-wide mutex usable without threading an `std.Io` through callers
 /// (Zig 0.16 dropped `std.Thread.Mutex`; `std.Io.Mutex` needs an io for the
 /// contended futex path, which the pool's `Threaded` provides). No-op in

@@ -93,7 +93,9 @@ enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck. `make 
 additionally requires `sha256sum`.
 
 No network fetch: the package has no Zig dependencies. Override the compiler with
-`ZIG=/path/to/zig` if needed.
+`ZIG=/path/to/zig` if needed. The optional `-Dtracy` profiling build links an
+operator-supplied Tracy checkout (`-Dtracy-src=PATH`); it is opt-in, never
+fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 
 ```bash
 cd zdtd

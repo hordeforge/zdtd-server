@@ -200,6 +200,37 @@ stock clients ──LiteNet UDP──► gateway tier (Zig)
 4. **Thread-per-core shards** (`util/parallel.zig` → pinned workers), then N
    shards, then multi-gateway.
 
+## `[perf]` switches (zdtd.toml, all default off)
+
+Each switch trades a documented property, so each ships with an always-on apm
+section/counter that must show the cost before the switch is worth flipping.
+Status here; operator surface in `zdtd.toml.example`, metric names in
+docs/APM.md.
+
+| Switch | What it changes | Evidence to check first | Known gap |
+|---|---|---|---|
+| `async_chunk_flush` | `store.saveChunk` hands the encoded payload to one joined background writer (`world/chunk_flush.zig`) instead of writing inline. Encode stays on the tick thread. | `save_encode` vs `save_io` histograms; `chunk_flush_sync` (queue-full fallbacks) | Encode is still on the tick (~850 KiB memcpy per fully populated chunk). `io_fs.injectWriteFailures` cannot observe async writes, so the switch is force-disabled under `parallel.isForceSerial()` (DST, offline `Game`, scenarios). |
+| `terrain_snapshot` | `Game.pathSolidAt` answers from a per-tick blocked-bit table (`world/terrain_snapshot.zig`) instead of taking the process-global `terrain_mu` for every A* neighbour probe. | `sim_entities` p99; `terrain_snap` rebuild cost; `terrain_snap_misses` | Window caps at `max_chunks = 256` chunks (radius 2 per player); the truncated tail falls back to the locked hook. A worker `getOrCreate` miss can still evict a chunk the snapshot answers for; the snapshot is a copy so nothing dangles, but the regenerated chunk is not *provably* identical in every eviction order. |
+| `job_batches` | Sleeper-volume player test runs as a `jobs.forSlotRange` batch. Spawns still apply serially in ascending volume index (the spawn seed is derived from `vi`). | `sleeper_scan` histogram; `sleeper_volumes_scanned` | Only the sleeper scan. See below for the two batches that stayed unimplemented. |
+
+### Deliberately not built (and why)
+
+- **Deferred path-solve phase** (gather requests → parallel solve → apply next
+  phase). A* already runs inside the parallel AI batch and writes only its own
+  slot, so a separate phase adds a per-tick *solve budget*, not parallelism, and
+  any budget delays some replans by a tick, which changes sim outcomes. The
+  contention win it was supposed to deliver is exactly what `terrain_snapshot`
+  delivers with no behaviour change. `path_replans` (TickResult → counter) is the
+  number that would have to justify the determinism baseline change.
+- **TE loot as a job batch.** `assets/loot.zig` `rollContainer` is pure and
+  parallelisable but costs microseconds. The real cost in that path is the
+  up-to-65536-cell scan in `Game.ensurePrefabStorageInChunk`, and an
+  exactly-equivalent parallel version must gather candidates from block ids only
+  (never `containers.get`, which the serial apply mutates), apply in scan order,
+  stop at `found >= 32`, and fall back to the serial scan on gather overflow, or
+  the early return that skips the prefab TE list diverges. `te_scan` /
+  `te_scan_cells` ship now; the refactor waits on them.
+
 ## Reuse vs build
 
 | Reuse (all of it) | Build |

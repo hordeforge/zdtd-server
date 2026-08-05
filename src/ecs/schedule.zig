@@ -27,6 +27,9 @@ pub const TickResult = struct {
     despawned_ids: [8]i32 = .{0} ** 8,
     despawned_n: u8 = 0,
     commands_applied: u32 = 0,
+    /// A* replans this tick. Evidence for the deferred path-solve phase gap
+    /// (docs/SCALE_ARCHITECTURE.md); not used by the sim itself.
+    path_replans: u32 = 0,
 };
 
 /// Run full sim tick: beginTick → director → ai → vehicles → turrets →
@@ -59,6 +62,7 @@ pub fn run(w: *World, dt: f32) TickResult {
         .loot_n = tk.loot_n,
         .despawned_n = de_n,
         .commands_applied = cmd.applied,
+        .path_replans = w.path_replans.load(.monotonic),
     };
     @memcpy(out.killed_ids[0..tk.killed_n], tk.killed_ids[0..tk.killed_n]);
     @memcpy(out.loot_bag_ids[0..tk.loot_n], tk.loot_bag_ids[0..tk.loot_n]);

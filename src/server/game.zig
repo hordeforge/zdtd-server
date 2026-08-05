@@ -35,6 +35,8 @@ const assets_progression = @import("../assets/progression.zig");
 const assets_vehicles = @import("../assets/vehicles.zig");
 const assets_storage_pairs = @import("../assets/storage_pairs.zig");
 const biomes_mod = @import("../world/biomes.zig");
+const terrain_snapshot = @import("../world/terrain_snapshot.zig");
+const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
 const admin_mod = @import("admin.zig");
@@ -48,6 +50,7 @@ const phase_gate = @import("phase_gate.zig");
 const movement = @import("movement.zig");
 const c2s_text = @import("c2s_text.zig");
 const evidence_mod = @import("evidence.zig");
+const guard_policy = @import("guard_policy.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
 const plugin_mod = @import("../plugin/root.zig");
@@ -150,6 +153,11 @@ pub const InitOptions = struct {
     /// Stream NetPackageChunk on join/tick. Default on: stock clients need server chunks
     /// (no client-side generation workarounds). Loadgen can still parse stock bodies.
     wire_chunks: bool = true,
+    /// Send deco tree objects in the join DecoUpdate burst. Off = stock-safe empty
+    /// firstPackage (bald world). Kill switch for a modded / other-version client
+    /// whose AssignIds ids differ from our bundled dump: a mismatched block id
+    /// throws inside the client world-load coroutine, not just missing trees.
+    deco_trees: bool = true,
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim below.
     game_difficulty: u8 = 2,
@@ -180,6 +188,8 @@ pub const InitOptions = struct {
     worldgen_seed: ?u64 = null,
     /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
     authority_mode: AuthorityMode = .correct,
+    /// P4 guard policy switches (zdtd.toml [authority] guard_*). Log-only default.
+    guard: guard_policy.Policy = .{},
 
     // zdtd stream/authority tunables (Bucket B). Single source: default_* below.
     // Full file surface (zdtd.toml) still open; fields are the single source for hot path.
@@ -196,9 +206,18 @@ pub const InitOptions = struct {
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
+
+    // [perf] switches (zdtd.toml). All default off; each is gated on apm
+    // evidence from the always-on sections/counters that ship with them.
+    /// Write chunk saves from a background thread (encode stays on the tick).
+    async_chunk_flush: bool = false,
+    /// Per-tick read-only terrain blocked snapshot for the A* inner loop.
+    terrain_snapshot: bool = false,
+    /// Run the sleeper-volume player test as a parallel job batch.
+    job_batches: bool = false,
 };
 
-// Compile-time array bound for Client.streamed / deco_streamed (must cover max config).
+// Compile-time array bound for Client.streamed (must cover max config).
 const max_streamed_chunks_cap: usize = 169;
 /// Default stream/authority values (also InitOptions / Game field defaults).
 pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
@@ -238,6 +257,13 @@ const sanitizePlayerName = c2s_text.sanitizePlayerName;
 const chatMsgOk = c2s_text.chatMsgOk;
 const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
 
+/// Runtime AssignIds block ids for the join-time deco burst (see `decoTreeIds`).
+const DecoTreeIds = struct { oak: u16, dead: u16 };
+/// Deco placement sparsity: one candidate cell in `deco_every_n`. Not stock
+/// density (stock drives it from biome m_DistantDecoBlocks + Perlin noise);
+/// deliberate, deterministic, and cheap enough for one 15×15-chunk join pass.
+const deco_every_n: u32 = 29;
+
 /// A placed land-claim block: protects blocks within land_claim_size around the
 /// keystone for its owner. Owner is the player entity id that placed it.
 const LandClaim = struct {
@@ -267,14 +293,9 @@ const Client = struct {
     /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
     streamed: [max_streamed_chunks_cap]i64 = undefined,
     streamed_n: usize = 0,
-    /// Terrain chunks for which we already sent incremental DecoUpdate objects.
-    deco_streamed: [max_streamed_chunks_cap]i64 = undefined,
-    deco_streamed_n: usize = 0,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),
-    /// True after firstPackage DecoUpdate (client OnWorldLoaded needs this once).
-    deco_first_sent: bool = false,
     /// Game payload arrived before challenge echo (stock/loadgen can race). Replay after auth.
     preauth_buf: [512]u8 = undefined,
     preauth_len: usize = 0,
@@ -298,6 +319,12 @@ const Client = struct {
     /// Combat ledger: last DamageEntity mono ns + short burst count.
     last_damage_ns: u64 = 0,
     damage_burst: u8 = 0,
+    /// P4 guard policy state (windowed detector counts, quarantine bits, kick
+    /// arm tick). Cleared for free by `clients[slot] = .{}` on kick/disconnect.
+    guard: guard_policy.PeerState = .{},
+    /// Weak block-destroy-rate signal: window start tick + destroys in window.
+    farm_window_tick: u64 = 0,
+    farm_breaks: u16 = 0,
 };
 
 pub const Game = struct {
@@ -312,6 +339,11 @@ pub const Game = struct {
     harness: apm.Harness = .{},
     /// P4 observe ring (admin `evidence` dumps JSONL lines).
     evidence: evidence_mod.Ring = .{},
+    /// P4 guard policy switches (zdtd.toml [authority]). Default log-only.
+    guard: guard_policy.Policy = .{},
+    /// Load-shed valve: weak evidence + deferrable broadcasts are dropped while
+    /// `tick_n < shed_until_tick`. Armed only by the real-time run() overrun branch.
+    shed_until_tick: u64 = 0,
     tick_n: u64 = 0,
     running: bool = true,
     challenge_counter: u64 = 1,
@@ -340,6 +372,17 @@ pub const Game = struct {
     /// rehash on another thread would invalidate it.
     // ponytail: one global lock; shard per chunk-key if AI pathing contends.
     terrain_mu: parallel_util.IoMutex = .{},
+    /// Read-only per-tick terrain blocked bits. When on, `pathSolidAt` answers
+    /// hits without `terrain_mu`; misses fall through to the locked hook.
+    terrain_snap: terrain_snapshot.Snapshot = .{},
+    /// [perf] terrain_snapshot: rebuild + serve the snapshot.
+    terrain_snapshot_on: bool = false,
+    /// [perf] job_batches: parallel sleeper-volume test pass.
+    job_batches: bool = false,
+    /// Last-sampled flusher totals, so counters get per-tick deltas.
+    flush_seen: struct { queued: u64 = 0, written: u64 = 0, errors: u64 = 0, sync: u64 = 0, waits: u64 = 0 } = .{},
+    /// Last-sampled snapshot miss total (same delta sampling).
+    snap_misses_seen: u64 = 0,
     /// PlayerKillingMode from serverconfig (0 = PvP off).
     pvp_mode: u8 = 3,
     /// Gameplay multipliers/settings from serverconfig (percent unless noted).
@@ -418,6 +461,8 @@ pub const Game = struct {
     info_port: u16 = 0,
     info_tcp: serverinfo_tcp.Provider = .{},
     wire_chunks: bool = true,
+    /// See InitOptions.deco_trees.
+    deco_trees: bool = true,
     /// Set on PlayerData receipt; flushed on the periodic save tick (not per packet).
     players_dirty: bool = false,
     /// Last blood-moon-music state broadcast (edge-triggered).
@@ -470,6 +515,9 @@ pub const Game = struct {
             .view_radius = opts.view_radius,
             .max_players = max_pl,
             .wire_chunks = opts.wire_chunks,
+            .deco_trees = opts.deco_trees,
+            .terrain_snapshot_on = opts.terrain_snapshot,
+            .job_batches = opts.job_batches,
             .password = opts.password,
             .pvp_mode = opts.player_killing_mode,
             .xp_multiplier = opts.xp_multiplier,
@@ -482,6 +530,7 @@ pub const Game = struct {
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
             .air_drop_interval_hours = opts.air_drop_frequency,
             .authority_mode = opts.authority_mode,
+            .guard = opts.guard,
             .max_streamed_chunks = blk: {
                 if (opts.max_streamed_chunks > max_streamed_chunks_cap) {
                     std.debug.print(
@@ -546,6 +595,9 @@ pub const Game = struct {
             self.sleepers.deinit();
             self.world.deinit();
         }
+        // [perf] async_chunk_flush. Offline Game (port 0) runs force-serial, so
+        // World.asyncEnabled() keeps writes inline there regardless.
+        self.world.async_flush = opts.async_chunk_flush;
         try self.sim.ensureNetMap(allocator);
         // Back the ECS vehicle-physics ground hook with the real block store.
         self.sim.ground_ctx = self;
@@ -1148,7 +1200,7 @@ pub const Game = struct {
             return .{ .x = x, .y = y, .z = z, .applied = true };
         }
         self.harness.counters.inc(.movement_rejects);
-        self.noteEvidence(peer.local_id, entity_id, .movement, .strong, movement.max_horizontal_speed_mps, movement.max_horizontal_speed_mps);
+        self.noteEvidence(c, peer.local_id, entity_id, .movement, .strong, .none, movement.max_horizontal_speed_mps, movement.max_horizontal_speed_mps);
         // Rubber-band / speed-hack signal: counter always; log rate-limited so a
         // sticky client does not flood stderr while first/100th stay visible.
         const n = self.harness.counters.get(.movement_rejects);
@@ -1193,6 +1245,12 @@ pub const Game = struct {
     /// Uses heightmap top + 1 as body y (same surface band as heightAtWorld).
     fn pathSolidAt(ctx: ?*anyopaque, wx: i32, wz: i32) bool {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
+        // Snapshot hit: same bit the locked path below would compute, without
+        // taking the process-global terrain lock from an AI worker. A miss
+        // falls through so the on-demand chunk generation side effect is kept.
+        if (g.terrain_snapshot_on) {
+            if (g.terrain_snap.solid(wx, wz)) |blocked| return blocked;
+        }
         const t = world_store.World.worldToChunk(wx, wz);
         g.terrain_mu.lock();
         defer g.terrain_mu.unlock();
@@ -1313,55 +1371,105 @@ pub const Game = struct {
         }
     }
 
-    fn clientHasDeco(c: *const Client, key: i64) bool {
-        var i: usize = 0;
-        while (i < c.deco_streamed_n) : (i += 1) {
-            if (c.deco_streamed[i] == key) return true;
-        }
-        return false;
+    /// Runtime AssignIds ids for the two deco species we place (hardcode A08/A22).
+    /// Fail closed: null when either name is missing from the live map or resolves
+    /// to air. A block id the client cannot resolve does not degrade, it throws
+    /// inside the client world-load coroutine: `DecoManager.addLoadedDecoration` →
+    /// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
+    /// (asm.il 1262497), and `DecoChunk.UpdateModels` calls
+    /// `Dictionary<string,_>.TryGetValue(GetModelName())` which is null for a null
+    /// Block. Both leave the player stuck loading, which is worse than no trees.
+    fn decoTreeIds(self: *const Game) ?DecoTreeIds {
+        const oak = self.maxdamage.idByName("treeOakSml01") orelse return null;
+        const dead = self.maxdamage.idByName("treeDeadTree02") orelse return null;
+        if (oak == 0 or dead == 0) return null;
+        return .{ .oak = oak, .dead = dead };
     }
 
-    fn clientAddDeco(c: *Client, key: i64) void {
-        if (clientHasDeco(c, key)) return;
-        if (c.deco_streamed_n >= max_streamed_chunks_cap) {
-            var i: usize = 1;
-            while (i < c.deco_streamed_n) : (i += 1) c.deco_streamed[i - 1] = c.deco_streamed[i];
-            c.deco_streamed_n -= 1;
-        }
-        c.deco_streamed[c.deco_streamed_n] = key;
-        c.deco_streamed_n += 1;
+    /// `stock_deco` height callback over the live chunk store. Unreadable columns
+    /// return 0, which `generateAroundIds` skips (fail closed, no fabricated deco).
+    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
+        const w: *world_store.World = @ptrCast(@alignCast(ctx orelse return 0));
+        return w.heightWorld(wx, wz) catch 0;
     }
 
-    /// DecoUpdate: firstPackage=true allocates DecoManager.loadedDecos. Object
-    /// payloads currently NRE DecoManager.Read on V3.1.0 client (see connect log).
-    /// Fail closed: empty first package only until deco wire matches client Read.
-    fn sendDecoAroundSpawn(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, first: bool) !void {
-        if (first) {
+    /// Join-time deco burst, mirroring stock `DecoManager.SendDecosToClient`
+    /// (asm.il 1263272), which is called from exactly one site in the assembly:
+    /// `GameManager.RequestToEnterGame` right after `NetPackageWorldInfo`.
+    ///
+    /// This is the ONLY window. `DecoManager.Read` (asm.il 1260645) allocates
+    /// `loadedDecos` only when `_resetExisting` (= firstPackage) is true and then
+    /// unconditionally `loadedDecos.Add(...)`; the client drains that set and sets
+    /// it to null at the end of `OnWorldLoaded` (IL_04aa, asm.il 1259485) and never
+    /// refills it. So after world load a `firstPackage=false` package with objects
+    /// NREs, and a `firstPackage=true` package with objects is silently dropped.
+    /// There is no post-join deco path: whatever we do not cover here stays bald
+    /// for the session (the same package also marks every client DecoChunk
+    /// `isDecorated`, and a fixed-size client generates no deco locally).
+    fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+        const ids: DecoTreeIds = blk: {
+            if (self.deco_trees) {
+                if (self.decoTreeIds()) |v| break :blk v;
+            }
+            // Empty firstPackage is still required: the `isDecorated` marking loop
+            // sits inside the `loadedDecos != null` branch, so without it the
+            // client keeps retrying local generation it cannot do.
             const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, true, &.{});
             try self.sendGame(peer, "NetPackageDecoUpdate", body);
-        }
-        for (&self.clients) |*cl| {
-            if (cl.peer != peer) continue;
-            cl.deco_first_sent = cl.deco_first_sent or first;
-            const t = world_store.World.worldToChunk(wx, wz);
-            var dz: i32 = -3;
-            while (dz <= 3) : (dz += 1) {
-                var dx: i32 = -3;
-                while (dx <= 3) : (dx += 1) {
-                    clientAddDeco(cl, packages.makeChunkKey(t.pos.x + dx, t.pos.z + dz));
+            std.debug.print(
+                "zdtd: DecoUpdate first=true objs=0 (deco_trees={s}; tree ids unresolved)\n",
+                .{if (self.deco_trees) "on" else "off"},
+            );
+            return;
+        };
+        const deco = packages.stock_deco;
+        const t = world_store.World.worldToChunk(wx, wz);
+        const r = self.decoRadiusFor(c);
+        var chunk_objs: [deco.chunk_cells]deco.DecoObj = undefined;
+        var pw = try deco.PackageWriter.init(&self.body_buf, deco.zdtd_decos_per_package);
+        var total: usize = 0;
+        var dz: i32 = -r;
+        while (dz <= r) : (dz += 1) {
+            var dx: i32 = -r;
+            while (dx <= r) : (dx += 1) {
+                const n = deco.generateForTerrainChunkIds(
+                    &chunk_objs,
+                    t.pos.x + dx,
+                    t.pos.z + dz,
+                    decoHeightAt,
+                    &self.world,
+                    deco_every_n,
+                    ids.oak,
+                    ids.dead,
+                );
+                for (chunk_objs[0..n]) |o| {
+                    if (pw.full()) {
+                        try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+                        self.pollNetOnce();
+                    }
+                    try pw.push(o);
+                    total += 1;
                 }
             }
-            break;
         }
-        if (first) std.debug.print("zdtd: DecoUpdate first=true objs=0 (suppressed; avoid DecoManager.Read NRE)\n", .{});
+        // Always send a final package, even with 0 objects: the client needs at
+        // least one firstPackage=true to allocate + drain + mark decorated.
+        try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+        std.debug.print(
+            "zdtd: DecoUpdate objs={d} pkgs={d} r={d} oak={d} dead={d}\n",
+            .{ total, pw.sent, r, ids.oak, ids.dead },
+        );
     }
 
-    /// Incremental deco suppressed (same NRE as sendDecoAroundSpawn). Mark only.
-    fn sendDecoForTerrainChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
-        _ = self;
-        _ = peer;
-        if (clientHasDeco(c, packages.makeChunkKey(cx, cz))) return;
-        clientAddDeco(c, packages.makeChunkKey(cx, cz));
+    /// Chunk radius covered by the join deco burst. Same clamp as
+    /// `streamChunksForClient` so we only touch chunks the join streams anyway
+    /// (heightWorld getOrCreate must not become an unbounded world-gen burst).
+    fn decoRadiusFor(self: *const Game, c: *const Client) i32 {
+        var r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else c.view_radius;
+        if (r < self.chunk_stream_radius_min) r = self.chunk_stream_radius_min;
+        if (r > self.chunk_stream_radius_max) r = self.chunk_stream_radius_max;
+        while (r > 1 and @as(usize, @intCast((2 * r + 1) * (2 * r + 1))) > self.max_streamed_chunks) r -= 1;
+        return r;
     }
 
     fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
@@ -1409,6 +1517,15 @@ pub const Game = struct {
         // Shutdown persist is best-effort; do not fail deinit on disk errors.
         self.savePlayers() catch |e| logPersistErr(self, "save players", e);
         self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+        {
+            // Land the shutdown save before anything else tears down. World.deinit
+            // would also drain, but doing it here keeps the wait in the histogram
+            // and surfaces any async write errors through sampleFlushCounters.
+            const fs = apm.profiler.scope(&self.harness.prof, .save_flush_wait);
+            defer fs.end();
+            self.world.flushWait();
+        }
+        self.sampleFlushCounters();
         self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.land_claims_n = 0;
@@ -2159,7 +2276,7 @@ pub const Game = struct {
         switch (cmd) {
             .help => self.adminReply(
                 \\commands:
-                \\  status  guardstats  evidence  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
+                \\  status  guardstats  evidence  guardclear|gc <slot>  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
                 \\  gettime|gt  settime|st <day|night|ticks|D H M>
                 \\  give <slot> <itemId> [count]  tele|tp <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
@@ -2223,6 +2340,16 @@ pub const Game = struct {
                     self.evidence.total,
                 }) catch return;
                 self.adminReply(s);
+                self.adminReplyGuardPolicy();
+            },
+            .guardclear => |peer| {
+                if (peer >= max_clients or self.clients[peer].peer == null) {
+                    self.adminReply("no player in slot\n");
+                    return;
+                }
+                self.clients[peer].guard.quarantine = .{};
+                self.clients[peer].guard.kick_at_tick = 0;
+                self.adminReply("guard cleared\n");
             },
             .evidence => {
                 var dump: [8192]u8 = undefined;
@@ -2232,7 +2359,7 @@ pub const Game = struct {
             .apm => {
                 // Full harness dump without waiting for the minute JSON line or --ticks exit.
                 const snap = self.harness.snapshot();
-                var ab: [2048]u8 = undefined;
+                var ab: [apm.report.max_text_bytes]u8 = undefined;
                 var w: std.Io.Writer = .fixed(&ab);
                 apm.report.writeText(&snap, &w) catch |err| {
                     std.debug.print("zdtd: admin apm dump failed: {s}\n", .{@errorName(err)});
@@ -2265,10 +2392,7 @@ pub const Game = struct {
                     self.adminReply("no player in slot\n");
                     return;
                 }
-                self.clients[peer].peer.?.alive = false;
-                self.clearLocksForPeer(peer);
-                self.clients[peer] = .{};
-                self.refreshInfoPlayers();
+                self.dropClientSlot(peer);
                 self.adminReply("kicked\n");
             },
             .ban => |peer| {
@@ -2276,12 +2400,8 @@ pub const Game = struct {
                     self.adminReply("no player in slot\n");
                     return;
                 }
-                const p = self.clients[peer].peer.?;
-                self.banIp(peerIpKey(p));
-                p.alive = false;
-                self.clearLocksForPeer(peer);
-                self.clients[peer] = .{};
-                self.refreshInfoPlayers();
+                self.banIp(peerIpKey(self.clients[peer].peer.?));
+                self.dropClientSlot(peer);
                 self.adminReply("banned\n");
             },
             .unban => |ip| {
@@ -2295,10 +2415,7 @@ pub const Game = struct {
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined or cl.name_len != nm.len) continue;
                     if (!std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
-                    if (cl.peer) |p| p.alive = false;
-                    self.clearLocksForPeer(i);
-                    self.clients[i] = .{};
-                    self.refreshInfoPlayers();
+                    self.dropClientSlot(i);
                     kicked += 1;
                 }
                 const removed = self.wipePlayerRecordsByName(nm) catch |e| {
@@ -2657,8 +2774,8 @@ pub const Game = struct {
     /// (worldInfoCo blocks until isLastBatch=true).
     fn isDroppablePackage(pkg_name: []const u8) bool {
         // NOT droppable: NetPackageDecoUpdate. DecoManager.Read only allocates
-        // loadedDecos on firstPackage=true; dropping that one NREs every later
-        // incremental deco on the client.
+        // loadedDecos on firstPackage=true; dropping that one NREs every
+        // continuation package, and deco is sent exactly once per session.
         const names = [_][]const u8{
             "NetPackageChunk",
             "NetPackageChunkRemove",
@@ -2799,9 +2916,9 @@ pub const Game = struct {
         if (mult == 0) return;
         // Damage per bite before scaling (2Hz cadence).
         const base_bite: u32 = 10;
-        var s: ecs.Slot = 0;
-        while (s < ecs.max_entities) : (s += 1) {
-            if (!self.sim.alive[s] or self.sim.kind[s] != .zombie) continue;
+        // Cached zombie group: this pass only damages blocks, never spawns or
+        // destroys entities, so the slice stays valid for the whole loop.
+        for (ecs.groupSlice(&self.sim, .zombie)) |s| {
             const ai = self.sim.zombie_ai[s];
             if (ai.state != .attack and ai.state != .chase) continue;
             const tgt = self.sim.slotOfNetId(ai.target_id) orelse continue;
@@ -3473,7 +3590,7 @@ pub const Game = struct {
             const phase = phase_gate.phaseOf(c.joined, c.entered);
             if (!phase_gate.allowed(phase, name)) {
                 self.harness.counters.inc(.phase_rejects);
-                self.noteEvidence(peer.local_id, c.entity_id, .phase, .hard, 1, 0);
+                self.noteEvidence(c, peer.local_id, c.entity_id, .phase, .hard, .none, 1, 0);
                 // First + every 100th: join-SM bugs show as phase spikes with no log.
                 const n = self.harness.counters.get(.phase_rejects);
                 if (n == 1 or n % 100 == 0) {
@@ -3530,7 +3647,7 @@ pub const Game = struct {
             self.harness.counters.inc(.join_ok);
             if (was_joined) {
                 self.harness.counters.inc(.reconnects);
-                self.noteEvidence(peer.local_id, eid, .flood, .info, 1, 0);
+                self.noteEvidence(c, peer.local_id, eid, .flood, .info, .none, 1, 0);
             }
             // Name length only in logs (name stays on admin listplayers / webui).
             std.debug.print("zdtd: PlayerLogin name_len={d} entity={d} body={d}\n", .{ c.name_len, eid, body.len });
@@ -3555,9 +3672,9 @@ pub const Game = struct {
             try self.sendGameStats(peer);
             // NetPackageWeather: only after client WeatherManager.InitPackages (post-enter).
             // Early send → NCSimple "parsed 2 vs expected 117" and disconnect.
-            // Fixed-size clients only apply grass/trees from S2C deco (no local random gen).
-            // firstPackage=true before/during OnWorldLoaded marks deco chunks decorated.
-            try self.sendDecoAroundSpawn(peer, sp.x, sp.z, true);
+            // Fixed-size clients only apply trees from S2C deco (no local random gen),
+            // and this is the client's only deco window (see sendDecoAroundSpawn).
+            try self.sendDecoAroundSpawn(c, peer, sp.x, sp.z);
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageAuthConfirmation")) {
@@ -3621,7 +3738,9 @@ pub const Game = struct {
                 // Respawn heal/teleport only when actually dead; a live player
                 // resending RequestToSpawn must not get a free heal + escape.
                 if (!self.sim.alive[si] or self.sim.health[si].hp <= 0) {
-                    self.sim.alive[si] = true;
+                    // Only sanctioned un-kill: a raw alive[] write would leave
+                    // the cached kind group out of sync.
+                    self.sim.reviveSlot(si);
                     self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
                     self.sim.transform[si] = .{
                         .x = @as(f32, @floatFromInt(surf.x)),
@@ -3983,6 +4102,7 @@ pub const Game = struct {
         }
         // Stock composite storage TE and/or zdtd ZTE1 bridge.
         if (std.mem.eql(u8, name, "NetPackageTileEntity")) {
+            if (self.quarantineDenies(c, .container)) return;
             if (stock_te.parseStorageTeBody(body)) |parsed| {
                 // Reach: TE writes must be near the acting player (cross-map chest
                 // overwrite + container-store fill guard).
@@ -3991,8 +4111,10 @@ pub const Game = struct {
                 const tdx = @as(f32, @floatFromInt(parsed.world_x)) - op.x;
                 const tdy = @as(f32, @floatFromInt(parsed.world_y)) - op.y;
                 const tdz = @as(f32, @floatFromInt(parsed.world_z)) - op.z;
-                if (tdx * tdx + tdy * tdy + tdz * tdz > self.max_edit_range * self.max_edit_range) {
+                const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
+                if (te_d2 > self.max_edit_range * self.max_edit_range) {
                     self.harness.counters.inc(.bounds_rejects);
+                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(te_d2), self.max_edit_range);
                     return;
                 }
                 const pos: containers_mod.PosKey = .{ .x = parsed.world_x, .y = parsed.world_y, .z = parsed.world_z };
@@ -4014,8 +4136,10 @@ pub const Game = struct {
                 const wdx = @as(f32, @floatFromInt(ws.world_x)) - wp.x;
                 const wdy = @as(f32, @floatFromInt(ws.world_y)) - wp.y;
                 const wdz = @as(f32, @floatFromInt(ws.world_z)) - wp.z;
-                if (wdx * wdx + wdy * wdy + wdz * wdz > self.max_edit_range * self.max_edit_range) {
+                const ws_d2 = wdx * wdx + wdy * wdy + wdz * wdz;
+                if (ws_d2 > self.max_edit_range * self.max_edit_range) {
                     self.harness.counters.inc(.bounds_rejects);
+                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(ws_d2), self.max_edit_range);
                     return;
                 }
                 if (self.workstations.getOrCreate(ws.world_x, ws.world_y, ws.world_z)) |st| {
@@ -4465,6 +4589,7 @@ pub const Game = struct {
         }
         if (std.mem.eql(u8, name, "NetPackageDamageEntity")) {
             const d = packages.parseDamageHead(body) catch return;
+            if (self.quarantineDenies(c, .damage)) return;
             if (!self.takeDamageToken(c)) {
                 self.harness.counters.inc(.c2s_throttle);
                 return;
@@ -4475,11 +4600,13 @@ pub const Game = struct {
             const actor_slot = self.sim.playerByPeer(c.slot) orelse return;
             if (!self.sim.alive[actor_slot] or self.sim.health[actor_slot].hp <= 0) {
                 self.harness.counters.inc(.bounds_rejects);
+                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
                 return;
             }
             const target_slot = self.sim.slotOfNetId(d.entity_id) orelse return;
             if (!self.sim.alive[target_slot]) {
                 self.harness.counters.inc(.bounds_rejects);
+                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
                 return;
             }
             if (!self.sim.mask[actor_slot].transform or !self.sim.mask[target_slot].transform) return;
@@ -4488,8 +4615,10 @@ pub const Game = struct {
             const damage_dx = target_pos.x - actor_pos.x;
             const damage_dy = target_pos.y - actor_pos.y;
             const damage_dz = target_pos.z - actor_pos.z;
-            if (damage_dx * damage_dx + damage_dy * damage_dy + damage_dz * damage_dz > self.interest_range * self.interest_range) {
+            const damage_d2 = damage_dx * damage_dx + damage_dy * damage_dy + damage_dz * damage_dz;
+            if (damage_d2 > self.interest_range * self.interest_range) {
                 self.harness.counters.inc(.bounds_rejects);
+                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, @sqrt(damage_d2), self.interest_range);
                 return;
             }
             const was_zombie = blk: {
@@ -4550,6 +4679,9 @@ pub const Game = struct {
         // Stock loot UI lock: channel + optional TE pos; stale auto-release.
         if (std.mem.eql(u8, name, "NetPackageLockRequest")) {
             if (packages.parseLockRequest(body)) |req| {
+                // Deny acquiring a container lock while quarantined; always let
+                // an unlock through so a quarantined peer cannot pin a channel.
+                if (req.locking and self.quarantineDenies(c, .container)) return;
                 const ch: usize = @min(@as(usize, req.channel), self.lock_channel.len - 1);
                 // Stale holder on this channel before grant check.
                 if (self.lock_channel[ch] >= 0 and self.lock_granted_ns[ch] != 0) {
@@ -4630,6 +4762,7 @@ pub const Game = struct {
             // Stock: C2S is a request. Apply, then S2C authoritative result bodies
             // (absolute BlockValue.damage or air). Never rely on raw C2S echo alone
             // when the server mutates damage/break (RE blocks.md §4-5).
+            if (self.quarantineDenies(c, .block)) return;
             if (!self.takeBlockToken(c)) {
                 self.harness.counters.inc(.c2s_throttle);
                 return;
@@ -4655,6 +4788,7 @@ pub const Game = struct {
                 // Vertical clamp: mesh float must not fail power/dig suite (type=0).
                 if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
                     self.harness.counters.inc(.bounds_rejects);
+                    self.noteEvidence(c, peer.local_id, editor_ent, .bounds, .strong, .block, 0, self.max_edit_range);
                     // Observe and Correct both count; rate-limit log so reach spam
                     // (float mesh, lag) does not flood, first/100th stay actionable.
                     const rejects = self.harness.counters.get(.bounds_rejects);
@@ -4680,6 +4814,7 @@ pub const Game = struct {
                     out_dmg = 0;
                     self.clearBlockHp(b.x, b.y, b.z);
                     mutated = true;
+                    if (cur_id != 0) self.noteBlockBreak(c);
                 } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                     // Stock DamageBlock: wire damage is absolute BlockValue.damage
                     // (d = old + points). Client may send absolute after local apply
@@ -4703,6 +4838,7 @@ pub const Game = struct {
                         }
                     }
                     if (abs >= max_hp) {
+                        self.noteBlockBreak(c);
                         place_id = 0;
                         out_dmg = 0;
                         self.clearBlockHp(b.x, b.y, b.z);
@@ -4776,9 +4912,11 @@ pub const Game = struct {
         // C2S explosion: apply sphere dig + ExplosionClient to peers.
         if (std.mem.eql(u8, name, "NetPackageExplosionInitiate")) {
             const ex = packages.parseExplosionInitiate(body) catch return;
+            if (self.quarantineDenies(c, .block)) return;
             // Only accept from joined players; ignore entity_id spoof if mismatch.
             if (ex.entity_id > 0 and c.entity_id > 0 and ex.entity_id != c.entity_id) {
                 self.harness.counters.inc(.ownership_rejects);
+                self.noteEvidence(c, peer.local_id, ex.entity_id, .ownership, .strong, .block, @floatFromInt(ex.entity_id), @floatFromInt(c.entity_id));
                 return;
             }
             if (!self.takeBlockToken(c)) {
@@ -4796,8 +4934,10 @@ pub const Game = struct {
                 const dx = ex.wx - bp.x;
                 const dy = ex.wy - bp.y;
                 const dz = ex.wz - bp.z;
-                if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
+                const ex_d2 = dx * dx + dy * dy + dz * dz;
+                if (ex_d2 > self.max_edit_range * self.max_edit_range) {
                     self.harness.counters.inc(.bounds_rejects);
+                    self.noteEvidence(c, peer.local_id, ex.entity_id, .bounds, .strong, .block, @sqrt(ex_d2), self.max_edit_range);
                     return;
                 }
             } else return;
@@ -5140,25 +5280,222 @@ pub const Game = struct {
         return dx * dx + dy * dy + dz * dz <= r * r;
     }
 
+    /// Single choke point for detector evidence: records into the ring and runs
+    /// the P4 guard policy (docs/AUTHORITY.md). `surf` attributes the signal to a
+    /// C2S surface so quarantine can deny only what was abused.
     fn noteEvidence(
         self: *Game,
+        c: *Client,
         peer_local: i32,
         entity_id: i32,
         det: evidence_mod.Detector,
         sev: evidence_mod.Severity,
+        surf: evidence_mod.Surface,
         observed: f32,
         bound: f32,
     ) void {
-        self.evidence.record(.{
-            .tick = self.tick_n,
-            .peer_local = peer_local,
-            .entity_id = entity_id,
-            .detector = det,
-            .severity = sev,
-            .observed = observed,
-            .bound = bound,
-        });
-        self.harness.counters.inc(.evidence_events);
+        // Load shed drops weak records first; Strong/Hard always reach the gates.
+        if (self.loadShedding() and (sev == .info or sev == .soft)) {
+            self.harness.counters.inc(.load_shed_drops);
+            return;
+        }
+        const out = guard_policy.evaluate(
+            &c.guard,
+            self.guard,
+            self.tick_n,
+            det,
+            sev,
+            surf,
+            self.authorityCorrects(),
+        );
+        if (out.record) {
+            self.evidence.record(.{
+                .tick = self.tick_n,
+                .peer_local = peer_local,
+                .entity_id = entity_id,
+                .detector = det,
+                .severity = sev,
+                .surface = surf,
+                .observed = observed,
+                .bound = bound,
+            });
+            self.harness.counters.inc(.evidence_events);
+        }
+        switch (out.action) {
+            .none => {},
+            .quarantine => self.applyQuarantine(c, out.bits, det),
+            .would_kick => {
+                self.harness.counters.inc(.guard_would_kicks);
+                std.debug.print(
+                    "zdtd: guard would kick slot={d} det={s} surf={s} strong={d} hard={d}\n",
+                    .{ c.slot, @tagName(det), @tagName(surf), @popCount(c.guard.strong_mask), c.guard.hard_n },
+                );
+            },
+            .kick => self.armPolicyKick(c, det),
+        }
+    }
+
+    /// Second `guardstats` line: policy rungs, gate outcomes, and the slots that
+    /// currently hold quarantine bits. Bounded by max_clients (64).
+    fn adminReplyGuardPolicy(self: *Game) void {
+        var sb: [512]u8 = undefined;
+        const s = std.fmt.bufPrint(
+            &sb,
+            "policy enforce={d} dry_run={d} quarantine={d} load_shed={d} mode={s} window={d} strong_distinct={d} hard_repeat={d} quarantines={d} kicks={d} would_kicks={d} q_rejects={d} shed_drops={d} shed={d}\n",
+            .{
+                @intFromBool(self.guard.enforce),
+                @intFromBool(self.guard.dry_run),
+                @intFromBool(self.guard.quarantine),
+                @intFromBool(self.guard.load_shed),
+                @tagName(self.authority_mode),
+                self.guard.window_ticks,
+                self.guard.strong_distinct,
+                self.guard.hard_repeat,
+                self.harness.counters.get(.guard_quarantines),
+                self.harness.counters.get(.guard_kicks),
+                self.harness.counters.get(.guard_would_kicks),
+                self.harness.counters.get(.quarantine_rejects),
+                self.harness.counters.get(.load_shed_drops),
+                @intFromBool(self.loadShedding()),
+            },
+        ) catch return;
+        self.adminReply(s);
+
+        var qb: [512]u8 = undefined;
+        var pos: usize = 0;
+        for (&self.clients, 0..) |*cl, i| {
+            const q = cl.guard.quarantine;
+            if (!q.any() and cl.guard.kick_at_tick == 0) continue;
+            const line = std.fmt.bufPrint(qb[pos..], "  slot={d} no_damage={d} no_container={d} no_setblock={d} kick_at={d}\n", .{
+                i,
+                @intFromBool(q.no_damage),
+                @intFromBool(q.no_container),
+                @intFromBool(q.no_setblock),
+                cl.guard.kick_at_tick,
+            }) catch break;
+            pos += line.len;
+        }
+        if (pos > 0) self.adminReply(qb[0..pos]);
+    }
+
+    /// True while the tick-budget valve is open (set by the run() overrun branch).
+    fn loadShedding(self: *const Game) bool {
+        return self.tick_n < self.shed_until_tick;
+    }
+
+    fn applyQuarantine(self: *Game, c: *Client, bits: guard_policy.Quarantine, det: evidence_mod.Detector) void {
+        var changed = false;
+        if (bits.no_damage and !c.guard.quarantine.no_damage) {
+            c.guard.quarantine.no_damage = true;
+            changed = true;
+        }
+        if (bits.no_container and !c.guard.quarantine.no_container) {
+            c.guard.quarantine.no_container = true;
+            changed = true;
+        }
+        if (bits.no_setblock and !c.guard.quarantine.no_setblock) {
+            c.guard.quarantine.no_setblock = true;
+            changed = true;
+        }
+        if (!changed) return;
+        self.harness.counters.inc(.guard_quarantines);
+        std.debug.print(
+            "zdtd: guard quarantine slot={d} det={s} damage={} container={} setblock={}\n",
+            .{
+                c.slot,
+                @tagName(det),
+                c.guard.quarantine.no_damage,
+                c.guard.quarantine.no_container,
+                c.guard.quarantine.no_setblock,
+            },
+        );
+    }
+
+    /// Stock kick wire: PlayerDenied then a delayed drop (GameUtils
+    /// ::KickPlayerForClientInfo + disconnectLater(0.5f), asm.il:1918548-1918583).
+    fn armPolicyKick(self: *Game, c: *Client, det: evidence_mod.Detector) void {
+        if (c.guard.kick_at_tick != 0) return;
+        c.guard.kick_at_tick = self.tick_n + guard_policy.kick_delay_ticks;
+        self.harness.counters.inc(.guard_kicks);
+        if (c.peer) |p| {
+            var denied: [64]u8 = undefined;
+            if (packages.buildPlayerDeniedBody(&denied, .mod_decision, 0, 0, "zdtd guard policy")) |body| {
+                self.sendGame(p, "NetPackagePlayerDenied", body) catch
+                    self.harness.counters.inc(.net_send_errors);
+            } else |_| self.harness.counters.inc(.encode_errors);
+        }
+        std.debug.print(
+            "zdtd: guard kick armed slot={d} det={s} strong={d} hard={d} drop_tick={d}\n",
+            .{ c.slot, @tagName(det), @popCount(c.guard.strong_mask), c.guard.hard_n, c.guard.kick_at_tick },
+        );
+    }
+
+    /// Drop armed policy kicks once the stock 0.5 s grace has elapsed.
+    /// Bounded by max_clients per tick.
+    fn reapPolicyKicks(self: *Game) void {
+        for (&self.clients, 0..) |*cl, i| {
+            if (cl.guard.kick_at_tick == 0) continue;
+            if (self.tick_n < cl.guard.kick_at_tick) continue;
+            if (cl.peer == null) {
+                cl.guard.kick_at_tick = 0;
+                continue;
+            }
+            self.dropClientSlot(i);
+        }
+    }
+
+    /// Shared peer teardown for admin kick/ban/wipeplayer and the guard policy.
+    /// Resetting the slot to `.{}` also clears guard/quarantine state.
+    fn dropClientSlot(self: *Game, slot: usize) void {
+        if (self.clients[slot].peer) |p| p.alive = false;
+        self.clearLocksForPeer(slot);
+        self.clients[slot] = .{};
+        self.refreshInfoPlayers();
+    }
+
+    /// Quarantine check at a C2S trust boundary. Observe mode records the flag
+    /// but never denies (docs/AUTHORITY.md mode table).
+    fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) bool {
+        if (!self.authorityCorrects()) return false;
+        const q = c.guard.quarantine;
+        const denied = switch (surf) {
+            .none => false,
+            .damage => q.no_damage,
+            .container => q.no_container,
+            .block => q.no_setblock,
+        };
+        if (!denied) return false;
+        self.harness.counters.inc(.quarantine_rejects);
+        const n = self.harness.counters.get(.quarantine_rejects);
+        if (n == 1 or n % 100 == 0) {
+            std.debug.print(
+                "zdtd: quarantine deny n={d} slot={d} surface={s}\n",
+                .{ n, c.slot, @tagName(surf) },
+            );
+        }
+        return true;
+    }
+
+    /// Weak (record-only) block-destroy rate. Soft by construction, so
+    /// `guard_policy.evaluate` can never turn it into a quarantine or a kick.
+    fn noteBlockBreak(self: *Game, c: *Client) void {
+        if (c.farm_window_tick == 0 or self.tick_n -% c.farm_window_tick >= self.guard.window_ticks) {
+            c.farm_window_tick = self.tick_n;
+            c.farm_breaks = 0;
+        }
+        c.farm_breaks +|= 1;
+        if (c.farm_breaks != guard_policy.weak_break_rate_per_window) return;
+        const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
+        self.noteEvidence(
+            c,
+            peer_local,
+            c.entity_id,
+            .farming,
+            .soft,
+            .block,
+            @floatFromInt(c.farm_breaks),
+            @floatFromInt(guard_policy.weak_break_rate_per_window),
+        );
     }
 
     /// Refill + spend one inv token. False → caller should drop and count throttle.
@@ -6037,39 +6374,109 @@ pub const Game = struct {
     }
 
     /// Wake prefab sleeper volumes near players; spawn class groups once.
-    fn tickSleeperVolumes(self: *Game) void {
-        if (self.sleepers.volumes.len == 0) return;
-        // Collect player positions.
-        var px: [max_clients]f32 = undefined;
-        var py: [max_clients]f32 = undefined;
-        var pz: [max_clients]f32 = undefined;
+    /// Push the background flusher's atomic totals into apm counters as
+    /// per-tick deltas. `world` cannot import `apm` (src/world/root.zig), so the
+    /// tick thread samples instead.
+    fn sampleFlushCounters(self: *Game) void {
+        const f = &self.world.flush;
+        const q = f.queued.load(.monotonic);
+        const w = f.written.load(.monotonic);
+        const e = f.errors.load(.monotonic);
+        const s = self.world.sync_fallbacks.load(.monotonic);
+        const wt = f.waits.load(.monotonic);
+        self.harness.counters.add(.chunk_flush_queued, q -| self.flush_seen.queued);
+        self.harness.counters.add(.chunk_flush_written, w -| self.flush_seen.written);
+        self.harness.counters.add(.chunk_flush_errors, e -| self.flush_seen.errors);
+        self.harness.counters.add(.chunk_flush_sync, s -| self.flush_seen.sync);
+        self.harness.counters.add(.chunk_flush_waits, wt -| self.flush_seen.waits);
+        // Async writes fail off-tick, so persistence_errors would otherwise
+        // never see them (saveAll returns before the write happens).
+        self.harness.counters.add(.persistence_errors, e -| self.flush_seen.errors);
+        self.flush_seen = .{ .queued = q, .written = w, .errors = e, .sync = s, .waits = wt };
+    }
+
+    /// Joined players with a transform, in client-slot order. Returns the count.
+    fn gatherPlayerPositions(
+        self: *Game,
+        px: *[max_clients]f32,
+        py: *[max_clients]f32,
+        pz: *[max_clients]f32,
+    ) usize {
         var pn: usize = 0;
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.entity_id <= 0) continue;
-            if (self.sim.slotOfNetId(cl.entity_id)) |si| {
-                if (!self.sim.mask[si].transform) continue;
-                if (pn >= px.len) break;
-                px[pn] = self.sim.transform[si].x;
-                py[pn] = self.sim.transform[si].y;
-                pz[pn] = self.sim.transform[si].z;
-                pn += 1;
-            }
+            const si = self.sim.slotOfNetId(cl.entity_id) orelse continue;
+            if (!self.sim.mask[si].transform) continue;
+            if (pn >= px.len) break;
+            px[pn] = self.sim.transform[si].x;
+            py[pn] = self.sim.transform[si].y;
+            pz[pn] = self.sim.transform[si].z;
+            pn += 1;
         }
-        if (pn == 0) return;
+        return pn;
+    }
 
-        var vi: usize = 0;
-        while (vi < self.sleepers.volumes.len) : (vi += 1) {
-            var vol = &self.sleepers.volumes[vi];
-            if (vol.triggered) continue;
-            var hit = false;
-            var p: usize = 0;
-            while (p < pn) : (p += 1) {
-                if (self.sleepers.contains(vi, px[p], py[p], pz[p])) {
-                    hit = true;
-                    break;
+    /// Pure AABB test of every untriggered volume against every player.
+    /// Writes one byte per volume so worker ranges never share a byte, and only
+    /// reads `*const Store` plus the const player arrays. Serial and parallel
+    /// passes produce the identical `hit` array.
+    const SleeperScanCtx = struct {
+        sl: *const sleepers_mod.Store,
+        px: []const f32,
+        py: []const f32,
+        pz: []const f32,
+        hit: []u8,
+
+        fn work(ctx: SleeperScanCtx, begin: usize, end: usize) void {
+            var vi = begin;
+            while (vi < end) : (vi += 1) {
+                if (ctx.sl.volumes[vi].triggered) continue;
+                var p: usize = 0;
+                while (p < ctx.px.len) : (p += 1) {
+                    if (ctx.sl.contains(vi, ctx.px[p], ctx.py[p], ctx.pz[p])) {
+                        ctx.hit[vi] = 1;
+                        break;
+                    }
                 }
             }
-            if (!hit) continue;
+        }
+    };
+
+    fn tickSleeperVolumes(self: *Game) void {
+        if (self.sleepers.volumes.len == 0) return;
+        var px: [max_clients]f32 = undefined;
+        var py: [max_clients]f32 = undefined;
+        var pz: [max_clients]f32 = undefined;
+        const pn = self.gatherPlayerPositions(&px, &py, &pz);
+        if (pn == 0) return;
+
+        // Parallel test, serial apply in volume-index order: the spawn seed is
+        // derived from `vi`, so the apply loop must stay serial and ascending.
+        var hit: [sleepers_mod.max_volumes]u8 = undefined;
+        const vn = @min(self.sleepers.volumes.len, hit.len);
+        @memset(hit[0..vn], 0);
+        {
+            const sc = apm.profiler.scope(&self.harness.prof, .sleeper_scan);
+            defer sc.end();
+            const ctx = SleeperScanCtx{
+                .sl = &self.sleepers,
+                .px = px[0..pn],
+                .py = py[0..pn],
+                .pz = pz[0..pn],
+                .hit = hit[0..vn],
+            };
+            if (self.job_batches and vn >= parallel_util.min_parallel_items) {
+                jobs.forSlotRange(vn, ctx, SleeperScanCtx.work);
+            } else {
+                SleeperScanCtx.work(ctx, 0, vn);
+            }
+        }
+        self.harness.counters.add(.sleeper_volumes_scanned, vn);
+
+        var vi: usize = 0;
+        while (vi < vn) : (vi += 1) {
+            if (hit[vi] == 0) continue;
+            var vol = &self.sleepers.volumes[vi];
             vol.triggered = true;
             self.sleepers.trigger_count += 1;
 
@@ -6252,7 +6659,14 @@ pub const Game = struct {
     }
 
     fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
-        const ch = try self.world.getOrCreate(.{ .x = cx, .z = cz });
+        // Resident miss = disk load or procedural gen (worldgen W2 runs here,
+        // on the tick, bounded by chunk_adds_per_stream_tick). world/ may not
+        // import apm, so the scope lives at this call site.
+        const ch = blk: {
+            const gs = apm.profiler.scope(&self.harness.prof, .chunk_gen);
+            defer gs.end();
+            break :blk try self.world.getOrCreate(.{ .x = cx, .z = cz });
+        };
         // After TTS paint, create storage TEs for known chest block ids (loot fill once).
         self.ensurePrefabStorageInChunk(ch, cx, cz);
         // Prefer biomes.png color→id mode; fallback height band. Cached on the
@@ -6326,6 +6740,14 @@ pub const Game = struct {
     fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
         if (ch.te_scanned) return;
         const blocks = ch.blocks orelse return;
+        // Always-on evidence for the "TE loot as a job batch" gap: the loot roll
+        // is microseconds, this up-to-65536-cell walk is where the time goes.
+        const ts = apm.profiler.scope(&self.harness.prof, .te_scan);
+        var cells: u64 = 0;
+        defer {
+            ts.end();
+            self.harness.counters.add(.te_scan_cells, cells);
+        }
         const base_x = cx * 16;
         const base_z = cz * 16;
         var found: u32 = 0;
@@ -6341,6 +6763,7 @@ pub const Game = struct {
             while (lz < 16) : (lz += 1) {
                 var lx: i32 = 0;
                 while (lx < 16) : (lx += 1) {
+                    cells += 1;
                     const idx = @as(usize, @intCast(lx + lz * 16 + y * 256));
                     const id: u16 = @truncate(blocks[idx]);
                     if (id == 0) continue;
@@ -6469,8 +6892,6 @@ pub const Game = struct {
             if (cl.peer == peer) {
                 client_ptr = cl;
                 cl.streamed_n = 0;
-                cl.deco_streamed_n = 0;
-                // keep deco_first_sent if already sent on enter
                 break;
             }
         }
@@ -6540,10 +6961,16 @@ pub const Game = struct {
                 if (!keep) {
                     const rb = try packages.buildChunkRemoveBody(self.body_buf[0..16], cx, cz);
                     try self.sendGame(peer, "NetPackageChunkRemove", rb);
-                    // Stock also clears deco for unloaded world chunks.
-                    if (packages.stock_deco.buildDecoResetWorldChunk(self.body_buf[16..32], cx, cz)) |db| {
-                        self.sendGame(peer, "NetPackageDecoResetWorldChunk", db) catch {};
-                    } else |_| {}
+                    // Stock never sends this on view unload: DecoManager.ResetDecosForWorldChunk
+                    // is only broadcast from RegionFileManager chunk deletion and the C2S
+                    // reset handler (asm.il 1186504 / 807955). With join-time deco objects
+                    // live it would run RestoreGeneratedDecos over our trees on every walk-away,
+                    // and they can never be resent (single window). Only send when we sent none.
+                    if (!self.deco_trees) {
+                        if (packages.stock_deco.buildDecoResetWorldChunk(self.body_buf[16..32], cx, cz)) |db| {
+                            self.sendGame(peer, "NetPackageDecoResetWorldChunk", db) catch {};
+                        } else |_| {}
+                    }
                     clientRemoveStreamed(c, key);
                     // do not advance i: swap-remove put a new key at i
                 } else {
@@ -6568,21 +6995,10 @@ pub const Game = struct {
                     try self.sendSpawnChunk(peer, cx, cz);
                     self.clientAddStreamed(c, key);
                     in_view.set(bit);
-                    // Plants/trees for the newly visible terrain chunk (fixed-size clients need S2C).
-                    // On failure deco is not marked (sendDecoForTerrainChunk); log so silent
-                    // missing trees are visible. Do not bulk-retry all streamed keys: join
-                    // flood marks terrain streamed without per-chunk deco, and a full-view
-                    // resend would flood the reliable window.
-                    self.sendDecoForTerrainChunk(c, peer, cx, cz) catch |err| {
-                        self.harness.counters.inc(.stream_errors);
-                        const n = self.harness.counters.get(.stream_errors);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: deco stream failed cx={d} cz={d} n={d}: {s}\n",
-                                .{ cx, cz, n, @errorName(err) },
-                            );
-                        }
-                    };
+                    // No per-chunk deco: the client drains and nulls DecoManager.loadedDecos
+                    // at the end of OnWorldLoaded, so a post-join DecoUpdate either NREs
+                    // (firstPackage=false) or is silently discarded (firstPackage=true).
+                    // Deco ships once, at RequestToEnterGame (sendDecoAroundSpawn).
                     added += 1;
                 }
             }
@@ -6922,6 +7338,8 @@ pub const Game = struct {
             // step has no host-runtime latency, but it still consumes one
             // stock tick for deadlines, retries, and stale-state checks.
             sc.end();
+            // One server tick = one Tracy frame (no-op unless -Dtracy=true).
+            apm.tracy.frameMark();
             if (completed and clock.isVirtual()) util_sim.advanceTick();
         }
         self.tick_n += 1;
@@ -6960,6 +7378,8 @@ pub const Game = struct {
             }
             // Drop silent peers (client quit) so we stop flooding a stuck window.
             self.reapStalePeers();
+            // Guard-policy kicks land 0.5 s after PlayerDenied (stock parity).
+            self.reapPolicyKicks();
             // Drain several TCP info queries per tick (browser / connect dialog).
             var info_n: u32 = 0;
             while (info_n < 8) : (info_n += 1) self.info_tcp.poll();
@@ -6973,7 +7393,25 @@ pub const Game = struct {
         {
             const se = apm.profiler.scope(&self.harness.prof, .sim_entities);
             defer se.end();
+            // Rebuild before tickAll: AI workers read it lock-free, and nothing
+            // mutates blocks between here and the end of the AI phase.
+            if (self.terrain_snapshot_on) {
+                const ts = apm.profiler.scope(&self.harness.prof, .terrain_snap);
+                var px: [max_clients]f32 = undefined;
+                var py: [max_clients]f32 = undefined;
+                var pz: [max_clients]f32 = undefined;
+                const pn = self.gatherPlayerPositions(&px, &py, &pz);
+                const covered = self.terrain_snap.rebuild(&self.world, px[0..pn], pz[0..pn]);
+                ts.end();
+                self.harness.counters.add(.terrain_snap_chunks, covered);
+            }
             const r = systems.tickAll(&self.sim, dt);
+            self.harness.counters.add(.path_replans, r.path_replans);
+            if (self.terrain_snapshot_on) {
+                const now = self.terrain_snap.misses.load(.monotonic);
+                self.harness.counters.add(.terrain_snap_misses, now -| self.snap_misses_seen);
+                self.snap_misses_seen = now;
+            }
             // Prefab sleeper volumes (every ~0.5s).
             if (self.tick_n % 10 == 0) self.tickSleeperVolumes();
             // Air drops + zombie block damage at 2Hz.
@@ -7029,7 +7467,9 @@ pub const Game = struct {
             if (self.tick_n % 20 == 0) {
                 const tb = try packages.buildWorldTimeBody(self.body_buf[0..16], r.world_time);
                 try self.broadcast("NetPackageWorldTime", tb);
-                try self.broadcastWeather();
+                // Weather is cosmetic and safe to defer under load; WorldTime is not
+                // (clients drive day/night and blood-moon state off it).
+                if (!self.loadShedding()) try self.broadcastWeather();
                 // Blood-moon horde music trigger (single bool; drives client
                 // audio + tension on day-7 nights).
                 const bm = self.sim.director.bloodmoon_active;
@@ -7039,7 +7479,7 @@ pub const Game = struct {
                     try self.broadcast("NetPackageBloodmoonMusic", bm_body);
                 }
             }
-            if (self.tick_n % 5 == 0) try self.broadcastVehiclePositions();
+            if (self.tick_n % 5 == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
             if (self.tick_n % 10 == 0) try self.broadcastTurretSync();
             // Null on_tick hooks are a branch only (sample_hello is enable-only).
             self.plugins.onTick();
@@ -7050,7 +7490,13 @@ pub const Game = struct {
         if (self.tick_n % 100 == 0) {
             const ss = apm.profiler.scope(&self.harness.prof, .save_io);
             defer ss.end();
-            self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+            {
+                // saveAll = encode (+ inline write when sync). Split out so the
+                // async-flush decision has an encode-vs-write histogram.
+                const es = apm.profiler.scope(&self.harness.prof, .save_encode);
+                defer es.end();
+                self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
+            }
             self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             if (self.players_dirty) {
@@ -7058,6 +7504,7 @@ pub const Game = struct {
                 self.savePlayers() catch |e| logPersistErr(self, "save players", e);
             }
         }
+        self.sampleFlushCounters();
 
         // One parseable line per minute gives unbounded production runs a
         // bounded-cost health signal without per-packet label cardinality.
@@ -7081,7 +7528,7 @@ pub const Game = struct {
                 .zombies = @intCast(@min(self.sim.countKind(.zombie), std.math.maxInt(u32))),
                 .chunks = @intCast(@min(self.world.chunks.count(), std.math.maxInt(u32))),
             };
-            var report_buf: [4096]u8 = undefined;
+            var report_buf: [apm.report.max_json_bytes]u8 = undefined;
             var report_writer: std.Io.Writer = .fixed(&report_buf);
             var report_ok = true;
             apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
@@ -7170,9 +7617,8 @@ pub const Game = struct {
         // Stock NetPackageVehiclePositions: count:i32, then (entityId:i32 + Vector3:f32*3)*count
         var o: usize = 4;
         var n: i32 = 0;
-        var i: ecs.Slot = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!self.sim.alive[i] or !self.sim.mask[i].vehicle) continue;
+        for (ecs.groupSlice(&self.sim, .vehicle)) |i| {
+            if (!self.sim.mask[i].vehicle) continue;
             if (o + 16 > 1024) break;
             std.mem.writeInt(i32, self.body_buf[o..][0..4], self.sim.network_id[i].id, .little);
             o += 4;
@@ -7206,6 +7652,10 @@ pub const Game = struct {
             } else {
                 // Fell behind the 50 ms budget: count for apm; rate-limit log.
                 self.harness.counters.inc(.tick_overruns);
+                // Availability valve: hold weak evidence + deferrable broadcasts
+                // for 2 s. Chunk streaming, motion replicate, WorldTime and every
+                // Hard gate keep running.
+                if (self.guard.load_shed) self.shed_until_tick = self.tick_n + guard_policy.shed_hold_ticks;
                 const overruns = self.harness.counters.get(.tick_overruns);
                 if (overruns == 1 or overruns % 100 == 0) {
                     const late_us = (now -% next_t) / 1000;
@@ -7470,4 +7920,93 @@ test "offline steps replay same world_time for same seed" {
         t_b = g.sim.director.clock.worldTimeBits();
     }
     try std.testing.expectEqual(t_a, t_b);
+}
+
+test "sleeper scan job batch matches the serial pass" {
+    var vols: [64]sleepers_mod.Volume = undefined;
+    for (&vols, 0..) |*v, i| {
+        const x: i32 = @intCast(i * 10);
+        v.* = .{ .x0 = x, .y0 = 0, .z0 = 0, .x1 = x + 4, .y1 = 8, .z1 = 4 };
+    }
+    vols[3].triggered = true;
+    var st: sleepers_mod.Store = .{ .volumes = vols[0..] };
+    const px = [_]f32{ 1, 31, 101 };
+    const py = [_]f32{ 1, 1, 1 };
+    const pz = [_]f32{ 1, 1, 1 };
+    var serial: [vols.len]u8 = .{0} ** vols.len;
+    var batched: [vols.len]u8 = .{0} ** vols.len;
+
+    const base = Game.SleeperScanCtx{ .sl = &st, .px = &px, .py = &py, .pz = &pz, .hit = serial[0..] };
+    Game.SleeperScanCtx.work(base, 0, vols.len);
+    var par = base;
+    par.hit = batched[0..];
+    // 64 >= parallel.min_parallel_items, so this really fans out.
+    jobs.forSlotRange(vols.len, par, Game.SleeperScanCtx.work);
+
+    try std.testing.expectEqualSlices(u8, serial[0..], batched[0..]);
+    try std.testing.expectEqual(@as(u8, 1), serial[0]);
+    // Already triggered: never re-tested, never re-spawned.
+    try std.testing.expectEqual(@as(u8, 0), serial[3]);
+    try std.testing.expectEqual(@as(u8, 1), serial[10]);
+}
+
+test "terrain snapshot hit equals the locked pathSolidAt result" {
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_snap", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+    const b = ch.blocks orelse return error.NoBlocks;
+    // Body-height obstruction without moving `heights` (setBlock would raise it).
+    const y: i32 = @as(i32, ch.heightAt(2, 3)) + 1;
+    b[@intCast(2 + 3 * 16 + y * 256)] = world_store.block_stone;
+
+    // Baseline: snapshot off, the locked hook answers.
+    g.terrain_snapshot_on = false;
+    const want_blocked = Game.pathSolidAt(g, 2, 3);
+    const want_open = Game.pathSolidAt(g, 5, 5);
+    try std.testing.expect(want_blocked);
+    try std.testing.expect(!want_open);
+
+    const px = [_]f32{0};
+    const pz = [_]f32{0};
+    try std.testing.expectEqual(@as(usize, 1), g.terrain_snap.rebuild(&g.world, &px, &pz));
+    g.terrain_snapshot_on = true;
+    try std.testing.expectEqual(want_blocked, Game.pathSolidAt(g, 2, 3));
+    try std.testing.expectEqual(want_open, Game.pathSolidAt(g, 5, 5));
+    try std.testing.expectEqual(@as(u64, 0), g.terrain_snap.misses.load(.monotonic));
+
+    // Outside the window: falls through to the locked hook (identical answer),
+    // which still generates the chunk on demand exactly as before.
+    const before = g.world.chunks.count();
+    _ = Game.pathSolidAt(g, 4000, 4000);
+    try std.testing.expectEqual(@as(u64, 1), g.terrain_snap.misses.load(.monotonic));
+    try std.testing.expectEqual(before + 1, g.world.chunks.count());
+}
+
+test "[perf] switches run on the live step path" {
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/perf_switches", 0, .{
+        .enable_sample_plugin = false,
+        .async_chunk_flush = true,
+        .terrain_snapshot = true,
+        .job_batches = true,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(g.terrain_snapshot_on);
+    try std.testing.expect(g.job_batches);
+    try std.testing.expect(g.world.async_flush);
+    // Offline Game runs force-serial, so the flush must stay inline there.
+    try std.testing.expect(!g.world.asyncEnabled());
+
+    try g.world.setBlockWorld(4, 70, 4, world_store.block_stone);
+    var i: u32 = 0;
+    while (i < 3) : (i += 1) try g.step();
+    // Snapshot rebuild is on the live path, not dead code.
+    try std.testing.expect(g.harness.prof.histOf(.terrain_snap).count >= 3);
 }

@@ -34,7 +34,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A03 | `maxStackFor` uses `World.stack_fn` → `ItemTable.stackFor`; builtin only when id missing. |
 | A04 | Armor via name prefix `armor*` (`isArmorOffline` + `is_armor_fn`); not bare `item_id == 11`. |
 | A06 | Biome IdCtx: comptime assignids pins only when `id_by_name.count() == 0`. |
-| A08/A22 | Deco trees already resolve via `idByName` (`decoTreeIds`); fail closed if miss. Pins remain in `stock_deco` for offline labels. |
+| A08/A22 | Deco trees resolve via `Game.decoTreeIds` → `maxdamage.idByName("treeOakSml01"/"treeDeadTree02")`; null (or id 0) falls back to the empty firstPackage. Pins remain in `stock_deco` for offline labels only. |
 | A09 | `maxDamageForBlock`: drop deco pin HP table when maxdamage loaded; generic 100 / offline bands offline only. |
 | A15 | game-dir + still-builtin **warn** for loot, entitygroups, blocks, quests (plus existing items/recipes/entities). |
 | A17 | `ecsIdFromItemName` 6/7 aliases only when `items.source == .builtin`. |
@@ -55,7 +55,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A05 | `world/store.zig` `block_*` pins | P0 | **Open** | Module aliases still comptime pins; used by flat gen + tests. Safe while dump matches pin version; full resolve-at-init deferred |
 | A06 | IdCtx terr* fallback | P1 | **Fixed** | Dump non-empty → no pin |
 | A07 | biome_layers defaults | P1 | Open P2 | Pre-XML defaults; XML path resolves |
-| A08 | stock_deco pins | P0 | **Partial** | Live deco uses idByName; module pins for labels/offline |
+| A08 | stock_deco pins | P0 | **Fixed** | Live deco send resolves ids via `Game.decoTreeIds` (idByName, fail closed); module pins are offline/test labels |
 | A09 | maxDamageForBlock | P1 | **Fixed** | |
 | A10 | class_table scrap | P1 | **Fixed** | Offline loot_list = EntityLootContainerRegular; spawn uses class loot_list; Game.setClassDef from entityclasses |
 | A11 | AI attack/chase floors | P1 | **Fixed** | class_table speeds/damage from XML; module consts only when field 0 |
@@ -69,7 +69,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A19 | trader_wallet 5000 | P2 | Open → B | |
 | A20 | quest reward_coin | P2 | Open | |
 | A21 | director / gamestages | P2 | Open | |
-| A22 | deco version skew | P0 | **Partial** | Fail closed + dump pin doc |
+| A22 | deco version skew | P0 | **Partial** | Fail closed on missing *name* + `[feature] deco_trees` kill switch. Cannot detect a client that computed a different id for the same name (no `blocks` NameIdMapping sent): see DECO_NRE.md gap 2 |
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
 | A24 | NONE loaders | P2 | Open | When feature lands |
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |
@@ -104,7 +104,7 @@ CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
      >  --serverconfig keys  >  code defaults (InitOptions / default_*)
 ```
 
-Parsed today: `[stream]`, `[authority]`, `[feature]`. Keys under `[sim]`, `[net]`,
+Parsed today: `[stream]`, `[authority]`, `[feature]`, `[perf]`. Keys under `[sim]`, `[net]`,
 `[ai]`, `[caps]`, `[apm]` in the draft below are residual (unknown-key warn if present).
 
 ```toml
@@ -191,7 +191,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 ### P0
 
 1. ~~**A05**~~ **Done:** `World.terrain_ids` + `resolveTerrainIds` after AssignIds merge; module pins remain offline/test defaults; `isSolidWorld` uses live ids.
-2. **A08/A22** deco module numeric pins remain for labels; live stream is idByName. Document dump version skew suppress.
+2. ~~**A08**~~ **Done:** `Game.decoTreeIds` resolves the two deco species via `idByName` and fails closed to the empty firstPackage; module pins are offline labels. **A22 residual:** id skew against a modded / non-V3.1.x client is undetectable without a `blocks` NameIdMapping; mitigated by `[feature] deco_trees`.
 
 ### P1
 

@@ -247,6 +247,24 @@ pub fn fbm2(n: *const Noise, x: f32, y: f32, p: FbmParams) f32 {
     return sum / norm;
 }
 
+/// 3D fBm. Exact mirror of `fbm2` (same octave loop, same `sum/norm`), so a
+/// density field built on it stays a pure function of (seed, x, y, z).
+pub fn fbm3(n: *const Noise, x: f32, y: f32, z: f32, p: FbmParams) f32 {
+    var amp: f32 = 1;
+    var freq = p.frequency;
+    var sum: f32 = 0;
+    var norm: f32 = 0;
+    var o: u32 = 0;
+    while (o < p.octaves) : (o += 1) {
+        sum += n.noise3(x * freq, y * freq, z * freq) * amp;
+        norm += amp;
+        amp *= p.gain;
+        freq *= p.lacunarity;
+    }
+    if (norm == 0) return 0;
+    return sum / norm;
+}
+
 /// Ridged multifractal: `1 - abs(noise)` per octave (mountains). Output ~[0, 1].
 pub fn ridged2(n: *const Noise, x: f32, y: f32, p: FbmParams) f32 {
     var amp: f32 = 1;
@@ -292,6 +310,24 @@ test "noise determinism same seed and coords" {
         warpedFbm2(&a, 10, 20, 4.0, p, p),
         warpedFbm2(&b, 10, 20, 4.0, p, p),
     );
+}
+
+test "fbm3 determinism and finiteness" {
+    const a = Noise.init(0xBEEF);
+    const b = Noise.init(0xBEEF);
+    const p: FbmParams = .{ .octaves = 4, .frequency = 0.02, .gain = 0.5 };
+    var x: f32 = -40;
+    while (x <= 40) : (x += 11.3) {
+        var y: f32 = 0;
+        while (y <= 256) : (y += 37) {
+            const v = fbm3(&a, x, y, x * 0.5 - 7, p);
+            try std.testing.expectEqual(v, fbm3(&b, x, y, x * 0.5 - 7, p));
+            try std.testing.expect(std.math.isFinite(v));
+            try std.testing.expect(@abs(v) < 2.5);
+        }
+    }
+    // Zero octaves is defined (no NaN from an empty normalization).
+    try std.testing.expectEqual(@as(f32, 0), fbm3(&a, 1, 2, 3, .{ .octaves = 0 }));
 }
 
 test "noise different seeds differ" {

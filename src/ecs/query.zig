@@ -122,7 +122,168 @@ pub fn forEachParallelKind(
     jobs.forSlotRange(max_entities, Ctx{ .outer = ctx, .world = w, .k = kind }, Ctx.range);
 }
 
+// ---------------------------------------------------------------------------
+// Group face (cached dense per-Kind lists, see group.zig).
+//
+// View (everything above) is the default: an open `0..max_entities` scan that
+// is always correct, including while the loop body spawns or destroys.
+// Group is the cached alternative: same slots, same ascending order, but O(live)
+// instead of O(capacity). It is only valid while nothing spawns or destroys.
+// A loop that mutates the world must use `copyKindInto` or stay on the View.
+// ---------------------------------------------------------------------------
+
+/// Ascending alive slots of `kind`. Invalidated by the next spawn/destroy.
+pub fn groupSlice(w: *const World, kind: Kind) []const Slot {
+    return w.kind_groups.slice(kind);
+}
+
+/// Group walk that re-reads the length and re-checks `alive` each step, so a
+/// body that destroys stays memory-safe. Visit order/completeness under such
+/// mutation is unspecified: use `copyKindInto` when the body mutates.
+pub fn forEachKindGroup(
+    w: *World,
+    kind: Kind,
+    ctx: anytype,
+    comptime f: fn (@TypeOf(ctx), *World, Slot) void,
+) void {
+    var i: usize = 0;
+    while (i < w.kind_groups.count(kind)) : (i += 1) {
+        const s = w.kind_groups.slice(kind)[i];
+        if (!w.alive[s]) continue;
+        f(ctx, w, s);
+    }
+}
+
+/// Snapshot the kind group into `out` (ascending). Returns the count written,
+/// capped at `out.len`. For loops that spawn or destroy while iterating.
+pub fn copyKindInto(w: *const World, kind: Kind, out: []Slot) usize {
+    const src = w.kind_groups.slice(kind);
+    const n = @min(src.len, out.len);
+    @memcpy(out[0..n], src[0..n]);
+    return n;
+}
+
 const std = @import("std");
+
+/// Open View scan collecting alive slots of `kind`; the reference order the
+/// group must reproduce.
+fn viewCollect(w: *const World, kind: Kind, out: []Slot) usize {
+    var n: usize = 0;
+    var i: Slot = 0;
+    while (i < max_entities and n < out.len) : (i += 1) {
+        if (!w.alive[i] or !w.mask[i].kind or w.kind[i] != kind) continue;
+        out[n] = i;
+        n += 1;
+    }
+    return n;
+}
+
+fn expectGroupsMatchView(w: *const World) !void {
+    var view_buf: [max_entities]Slot = undefined;
+    var total: usize = 0;
+    inline for (@typeInfo(Kind).@"enum".fields) |fld| {
+        const k: Kind = @enumFromInt(fld.value);
+        const n = viewCollect(w, k, &view_buf);
+        try std.testing.expectEqualSlices(Slot, view_buf[0..n], groupSlice(w, k));
+        try std.testing.expectEqual(@as(u32, @intCast(n)), w.countKind(k));
+        total += n;
+    }
+    try std.testing.expectEqual(@as(usize, w.entity_count), total);
+}
+
+test "kind groups match the open View scan under spawn/destroy churn" {
+    var w: World = .{};
+    defer w.deinit();
+    var prng = std.Random.DefaultPrng.init(0x5EED_1234);
+    const rnd = prng.random();
+    var op: usize = 0;
+    while (op < 2000) : (op += 1) {
+        switch (rnd.uintLessThan(u8, 6)) {
+            0 => _ = w.spawnZombie(rnd.float(f32) * 100, 70, rnd.float(f32) * 100, 40),
+            1 => _ = w.spawnPlayer(0, 70, 0, @intCast(rnd.uintLessThan(u8, 8))),
+            2 => _ = w.spawnLootBag(1, 70, 1, 1, 1),
+            3 => _ = w.spawnTurret(2, 70, 2),
+            4 => _ = w.spawnAnimal(3, 70, 3, 30, 0, ""),
+            else => {
+                const s: Slot = rnd.uintLessThan(Slot, max_entities);
+                if (w.alive[s]) w.destroy(s);
+            },
+        }
+        if (op % 37 == 0) w.beginTick(); // exercise slot recycle
+        try expectGroupsMatchView(&w);
+    }
+}
+
+test "recycled slot appears exactly once, in the new kind only" {
+    var w: World = .{};
+    defer w.deinit();
+    var i: usize = 0;
+    while (i < 5) : (i += 1) _ = w.spawnZombie(@floatFromInt(i), 70, 0, 40);
+    w.beginTick();
+    w.destroy(2);
+    try std.testing.expectEqualSlices(Slot, &.{ 0, 1, 3, 4 }, groupSlice(&w, .zombie));
+    w.beginTick(); // clears freed_this_tick so slot 2 is reusable
+    _ = w.spawnTurret(0, 70, 0);
+    try std.testing.expectEqualSlices(Slot, &.{ 0, 1, 3, 4 }, groupSlice(&w, .zombie));
+    try std.testing.expectEqualSlices(Slot, &.{2}, groupSlice(&w, .turret));
+    try expectGroupsMatchView(&w);
+}
+
+test "reviveSlot is idempotent and never duplicates" {
+    var w: World = .{};
+    defer w.deinit();
+    const id = w.spawnPlayer(0, 70, 0, 0).?;
+    const s = w.slotOfNetId(id).?;
+    w.reviveSlot(s);
+    w.reviveSlot(s);
+    try std.testing.expectEqualSlices(Slot, &.{s}, groupSlice(&w, .player));
+    try std.testing.expectEqual(@as(u32, 1), w.countKind(.player));
+    // A destroyed slot has a cleared mask: reviving it stays a no-op.
+    w.destroy(s);
+    w.reviveSlot(s);
+    try std.testing.expectEqual(@as(usize, 0), groupSlice(&w, .player).len);
+    try std.testing.expectEqual(@as(u16, 0), w.entity_count);
+}
+
+test "forEachKindGroup visits the same slots as forEachKind" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnZombie(0, 70, 0, 40);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    _ = w.spawnZombie(1, 70, 0, 40);
+    _ = w.spawnZombie(2, 70, 0, 40);
+    w.destroy(2);
+    const Acc = struct {
+        buf: [max_entities]Slot = undefined,
+        n: usize = 0,
+        fn add(self: *@This(), _: *World, s: Slot) void {
+            self.buf[self.n] = s;
+            self.n += 1;
+        }
+    };
+    var view: Acc = .{};
+    var grp: Acc = .{};
+    forEachKind(&w, .zombie, &view, Acc.add);
+    forEachKindGroup(&w, .zombie, &grp, Acc.add);
+    try std.testing.expectEqualSlices(Slot, view.buf[0..view.n], grp.buf[0..grp.n]);
+}
+
+test "copyKindInto snapshots ascending and caps at out.len" {
+    var w: World = .{};
+    defer w.deinit();
+    var i: usize = 0;
+    while (i < 4) : (i += 1) _ = w.spawnZombie(@floatFromInt(i), 70, 0, 40);
+    var out: [max_entities]Slot = undefined;
+    try std.testing.expectEqual(@as(usize, 4), copyKindInto(&w, .zombie, &out));
+    try std.testing.expectEqualSlices(Slot, &.{ 0, 1, 2, 3 }, out[0..4]);
+    var small: [2]Slot = undefined;
+    try std.testing.expectEqual(@as(usize, 2), copyKindInto(&w, .zombie, &small));
+    try std.testing.expectEqualSlices(Slot, &.{ 0, 1 }, &small);
+    // The snapshot stays usable while the loop destroys through it.
+    const n = copyKindInto(&w, .zombie, &out);
+    for (out[0..n]) |s| w.destroy(s);
+    try std.testing.expectEqual(@as(usize, 0), groupSlice(&w, .zombie).len);
+}
 
 test "forEachKind counts zombies" {
     var w: World = .{};

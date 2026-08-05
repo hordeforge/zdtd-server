@@ -13,6 +13,7 @@ const parallel = @import("../util/parallel.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const io_fs = @import("../util/io_fs.zig");
+const chunk_flush = @import("chunk_flush.zig");
 
 /// How missing chunks are filled on first touch (on-the-fly, not full-map bake).
 pub const TerrainSource = enum {
@@ -225,6 +226,19 @@ pub const Chunk = struct {
         self.blocks = b;
     }
 
+    /// Materialize blocks AND heights from the procedural 3D density field
+    /// (worldgen W2). Unlike `ensureBlocksWithStack` this cannot derive blocks
+    /// from heights: the field has overhangs, so heights fall out of the fill.
+    /// `generateChunkBlocks` writes all 65536 cells, so the plane is never
+    /// cleared here (one memset owner, not two).
+    pub fn generateProc(self: *Chunk, allocator: std.mem.Allocator, wg: *const worldgen_mod.WorldGen) !void {
+        if (self.blocks != null) return;
+        self.allocator = allocator;
+        const b = try allocator.alloc(u32, blocks_per_chunk);
+        self.blocks = b;
+        wg.generateChunkBlocks(self.pos.x, self.pos.z, &self.heights, b);
+    }
+
     /// Block type id (low 16 of rawData).
     pub fn blockAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u16 {
         return @truncate(self.rawAt(lx, y, lz));
@@ -299,6 +313,14 @@ pub const World = struct {
     worldgen: ?worldgen_mod.WorldGen = null,
     /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
     terrain_ids: TerrainIds = .{},
+    /// Hand chunk writes to the background flusher ([perf] async_chunk_flush).
+    /// Default off: every existing save-then-reload path stays synchronous.
+    async_flush: bool = false,
+    /// Background writer. Idle (no thread) until the first async submit.
+    flush: chunk_flush.Flusher = .{},
+    /// Async submits that fell back to an inline write (queue full / shutdown).
+    /// Atomic: saveChunk runs on parallel workers.
+    sync_fallbacks: std.atomic.Value(u64) = .init(0),
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
         io_fs.mkdirPath(allocator, world_dir);
@@ -420,6 +442,9 @@ pub const World = struct {
     }
 
     pub fn deinit(self: *World) void {
+        // Drain and join the writer *before* freeing chunks / world_dir: a
+        // detached or still-running writer would lose queued saves at exit.
+        self.flush.deinit();
         var it = self.chunks.iterator();
         while (it.next()) |e| e.value_ptr.deinitBlocks();
         if (self.heightmap) |*hm| hm.deinit();
@@ -456,6 +481,9 @@ pub const World = struct {
         const c = self.chunks.getPtr(victim) orelse return error.NoEvictionCandidate;
         // Never discard a resident chunk unless its latest state reached disk.
         // The caller can reject the new chunk request and retry later.
+        // Eviction goes through the same FIFO as every other write (the queue
+        // preserves submit order per key), so an older queued payload can never
+        // land after this one.
         try self.saveChunk(c);
         c.deinitBlocks();
         _ = self.chunks.remove(victim);
@@ -489,9 +517,10 @@ pub const World = struct {
             if (load_state == .full) return gop.value_ptr;
             if (self.terrain_source == .proc) {
                 if (self.worldgen) |*wg| {
-                    wg.fillHeights(pos.x, pos.z, &gop.value_ptr.heights);
-                    // Single-biome dirt/stone/bedrock (AssignIds pins via defaultStack).
-                    try gop.value_ptr.ensureBlocksWithStack(self.allocator, biome_layers.defaultStack());
+                    // 3D density field: blocks first, heights derived from the
+                    // topmost solid cell (overhangs cannot come from a column
+                    // fill). Single-biome materials via defaultStack pins.
+                    try gop.value_ptr.generateProc(self.allocator, wg);
                 }
             } else {
                 if (self.heightmap) |*hm| {
@@ -541,6 +570,9 @@ pub const World = struct {
             }
             // Player edits / first-touch cache win over regen (heights-only or
             // v2 saves restore heights again after regen filled blocks).
+            // Note: for a legacy ZCH2/v2 proc save the restored heights can
+            // disagree with the density-derived plane (overhangs are not
+            // expressible in a heightmap). Pre-existing; v3 saves carry blocks.
             if (load_state == .heights_only) self.loadChunk(gop.value_ptr) catch |err| {
                 std.debug.print(
                     "zdtd: chunk ({d},{d}) edit re-load failed: {s}\n",
@@ -621,12 +653,13 @@ pub const World = struct {
         return error.ReadFailed;
     }
 
-    pub fn saveChunk(self: *World, c: *const Chunk) !void {
-        var path_buf: [512]u8 = undefined;
-        const path = try self.chunkPath(c.pos, &path_buf);
-        // v3: magic ZCH3 | pos | flags | heights | optional channels.
-        // flags: [12]=blocks u32, [13]=textures u64, [14]=densities+bitset.
-        // (v2 ZCH2 was u16 type-only; discarded on load so rotation/meta is not lost.)
+    /// Serialize one chunk into a fresh `a`-owned buffer (the whole file image).
+    /// v3: magic ZCH3 | pos | flags | heights | optional channels.
+    /// flags: [12]=blocks u32, [13]=textures u64, [14]=densities+bitset.
+    /// (v2 ZCH2 was u16 type-only; discarded on load so rotation/meta is not lost.)
+    /// Callers pass `std.heap.page_allocator`: this runs from parallel workers
+    /// and World.allocator is a DebugAllocator/GPA, which is not thread-safe.
+    pub fn encodeChunk(c: *const Chunk, a: std.mem.Allocator) ![]u8 {
         const has_blocks = c.blocks != null;
         const has_textures = c.textures != null;
         const has_densities = c.densities != null and c.dens_set != null;
@@ -641,22 +674,12 @@ pub const World = struct {
         hdr[13] = if (has_textures) 1 else 0;
         hdr[14] = if (has_densities) 1 else 0;
         hdr[15] = 0;
-        // page_allocator for temps: saveChunkSlice runs this from parallel
-        // workers; World.allocator is DebugAllocator/GPA and is not thread-safe.
-        const io_a = std.heap.page_allocator;
         var total: usize = hdr.len + c.heights.len;
         if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
         if (has_textures) total += blocks_per_chunk * @sizeOf(u64);
         if (has_densities) total += blocks_per_chunk + dens_set_bytes;
-        if (!has_blocks and !has_textures and !has_densities) {
-            var payload: [16 + 256]u8 = undefined;
-            @memcpy(payload[0..16], &hdr);
-            @memcpy(payload[16..], &c.heights);
-            try io_fs.writeFile(io_a, path, payload[0 .. 16 + c.heights.len]);
-            return;
-        }
-        const payload = try io_a.alloc(u8, total);
-        defer io_a.free(payload);
+        const payload = try a.alloc(u8, total);
+        errdefer a.free(payload);
         var o: usize = 0;
         @memcpy(payload[o..][0..hdr.len], &hdr);
         o += hdr.len;
@@ -679,10 +702,50 @@ pub const World = struct {
             o += dens_set_bytes;
         }
         std.debug.assert(o == total);
+        return payload;
+    }
+
+    /// True when chunk writes may be handed to the background flusher.
+    /// Force-serial (DST, offline `Game`, scenarios) always writes inline so
+    /// `io_fs.injectWriteFailures` replay keeps observing the error return.
+    pub fn asyncEnabled(self: *const World) bool {
+        return self.async_flush and chunk_flush.Flusher.available() and !parallel.isForceSerial();
+    }
+
+    pub fn saveChunk(self: *World, c: *const Chunk) !void {
+        var path_buf: [512]u8 = undefined;
+        const path = try self.chunkPath(c.pos, &path_buf);
+        const io_a = std.heap.page_allocator;
+        const payload = try encodeChunk(c, io_a);
+        if (self.asyncEnabled()) {
+            const owned_path = io_a.dupe(u8, path) catch {
+                defer io_a.free(payload);
+                return io_fs.writeFile(io_a, path, payload);
+            };
+            self.flush.submit(c.pos.hash(), owned_path, payload) catch {
+                // Queue full or shut down: write inline rather than drop.
+                defer io_a.free(owned_path);
+                defer io_a.free(payload);
+                _ = self.sync_fallbacks.fetchAdd(1, .monotonic);
+                return io_fs.writeFile(io_a, path, payload);
+            };
+            return;
+        }
+        defer io_a.free(payload);
         try io_fs.writeFile(io_a, path, payload);
     }
 
+    /// Block until nothing is queued or in flight for this world's chunks.
+    pub fn flushWait(self: *World) void {
+        self.flush.waitAll();
+    }
+
     pub fn loadChunk(self: *World, c: *Chunk) !void {
+        // An evict-then-reload of a key whose payload is still queued would read
+        // stale bytes. Stock guards the same case: RegionFileManager
+        // ::IsChunkSavedAndDormant (asm.il:1182993) returns false while the key
+        // is in chunksToSave or equals chunkKeyCurrentlySaved.
+        self.flush.waitKey(c.pos.hash());
         var path_buf: [512]u8 = undefined;
         const path = try self.chunkPath(c.pos, &path_buf);
         const data = io_fs.readFileAll(self.allocator, path) catch |err| switch (err) {
@@ -863,13 +926,18 @@ test "proc worldgen getOrCreate heights from seed" {
     if (h_surf + 1 < y_dim) {
         try std.testing.expectEqual(block_air, c.blockAt(0, @intCast(h_surf + 1), 0));
     }
-    // Same seed regenerates identical heights after cache drop.
+    // Same seed regenerates an identical heights AND block plane after a drop.
+    const plane = try std.testing.allocator.dupe(u32, c.blocks.?);
+    defer std.testing.allocator.free(plane);
+    const heights_before = c.heights;
     if (w.chunks.fetchRemove(ChunkPos.hash(.{ .x = 2, .z = -1 }))) |kv| {
         var dead = kv.value;
         dead.deinitBlocks();
     }
     const c2 = try w.getOrCreate(.{ .x = 2, .z = -1 });
     try std.testing.expectEqual(h0, c2.heightAt(5, 7));
+    try std.testing.expectEqualSlices(u8, &heights_before, &c2.heights);
+    try std.testing.expectEqualSlices(u32, plane, c2.blocks.?);
 }
 
 test "flat world set dig persist" {
@@ -1003,4 +1071,67 @@ test "stock map heights via DTM if Navezgane present" {
         "PASS stock-map: Navezgane dtm={d}x{d} height(-273,449)={d} spawn=({d},{d},{d}) prefabs={d}\n",
         .{ w.heightmap.?.width, w.heightmap.?.height, h, sp.x, sp.y, sp.z, n_pref },
     );
+}
+
+test "async flush round-trips a save into a fresh World" {
+    if (!chunk_flush.Flusher.available()) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.async_flush = true;
+    try std.testing.expect(w.asyncEnabled());
+    try w.setBlockWorld(5, 70, 5, block_dirt);
+    try w.setBlockWorld(6, 71, 5, block_stone);
+    try w.saveAll();
+    w.flushWait();
+    try std.testing.expect(w.flush.written.load(.monotonic) >= 1);
+    try std.testing.expectEqual(@as(u64, 0), w.flush.errors.load(.monotonic));
+
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    try std.testing.expectEqual(block_dirt, try w2.blockWorld(5, 70, 5));
+    try std.testing.expectEqual(block_stone, try w2.blockWorld(6, 71, 5));
+}
+
+test "asyncEnabled is false under force-serial (DST keeps the sync path)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.async_flush = true;
+    parallel.setForceSerial(true);
+    defer parallel.setForceSerial(false);
+    try std.testing.expect(!w.asyncEnabled());
+    // Injected write failures still surface as an error return on this path.
+    try w.setBlockWorld(1, 70, 1, block_stone);
+    io_fs.injectWriteFailures(1);
+    defer io_fs.injectWriteFailures(0);
+    try std.testing.expectError(error.DiskQuota, w.saveChunk(w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?));
+}
+
+test "evict then reload of a queued key reads the newest bytes" {
+    if (!chunk_flush.Flusher.available()) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.async_flush = true;
+
+    _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = 2, .z = 0 });
+    try w.setBlockWorld(16 + 4, 90, 4, block_stone); // chunk (1,0)
+    const key1 = ChunkPos.hash(.{ .x = 1, .z = 0 });
+    // Evict (1,0): its payload goes on the queue, then the chunk is freed.
+    try w.evictOneChunk(ChunkPos.hash(.{ .x = 2, .z = 0 }));
+    try std.testing.expect(w.chunks.get(key1) == null);
+    // Reload must wait on the queued write, never read a stale/absent file.
+    try std.testing.expectEqual(block_stone, try w.blockWorld(16 + 4, 90, 4));
 }

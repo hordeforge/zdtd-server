@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const guard_policy = @import("guard_policy.zig");
 
 pub const Stream = struct {
     max_streamed_chunks: ?usize = null,
@@ -23,10 +24,34 @@ pub const Authority = struct {
     max_claimed_damage: ?i32 = null,
     peer_stale_ms: ?u64 = null,
     mode: ?[]const u8 = null,
+    /// P4 guard policy (src/server/guard_policy.zig). Defaults are log-only:
+    /// enforce/quarantine off, dry_run on. See docs/AUTHORITY.md.
+    guard_enforce: ?bool = null,
+    guard_dry_run: ?bool = null,
+    guard_quarantine: ?bool = null,
+    guard_load_shed: ?bool = null,
+    guard_window_ticks: ?u64 = null,
+    guard_strong_distinct: ?u32 = null,
+    guard_hard_repeat: ?u32 = null,
 };
 
 pub const Feature = struct {
     wire_chunks: ?bool = null,
+    /// Join-time deco tree objects. Off falls back to the empty firstPackage
+    /// (bald world) for clients whose block AssignIds differ from our dump.
+    deco_trees: ?bool = null,
+};
+
+/// Performance switches (docs/SCALE_ARCHITECTURE.md). All default off: each one
+/// trades a documented behaviour property (write timing, lock removal, worker
+/// fan-out) and is gated until apm shows the cost it removes.
+pub const Perf = struct {
+    /// Hand chunk writes to a background writer thread (encode stays on tick).
+    async_chunk_flush: ?bool = null,
+    /// Per-tick read-only terrain blocked snapshot for the A* inner loop.
+    terrain_snapshot: ?bool = null,
+    /// Run the sleeper-volume player test as a parallel job batch.
+    job_batches: ?bool = null,
 };
 
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
@@ -38,6 +63,7 @@ pub const File = struct {
     stream: Stream = .{},
     authority: Authority = .{},
     feature: Feature = .{},
+    perf: Perf = .{},
     mode: Mode = .{},
     /// Arena owning any string slices from parse.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
@@ -146,6 +172,20 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
             f.authority.max_claimed_damage = try parseI32(val);
         } else if (std.mem.eql(u8, key, "peer_stale_ms")) {
             f.authority.peer_stale_ms = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "guard_enforce")) {
+            f.authority.guard_enforce = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "guard_dry_run")) {
+            f.authority.guard_dry_run = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "guard_quarantine")) {
+            f.authority.guard_quarantine = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "guard_load_shed")) {
+            f.authority.guard_load_shed = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "guard_window_ticks")) {
+            f.authority.guard_window_ticks = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "guard_strong_distinct")) {
+            f.authority.guard_strong_distinct = try parseU32(val);
+        } else if (std.mem.eql(u8, key, "guard_hard_repeat")) {
+            f.authority.guard_hard_repeat = try parseU32(val);
         } else if (std.mem.eql(u8, key, "mode")) {
             const mode = stripQuotes(val);
             if (!std.ascii.eqlIgnoreCase(mode, "observe") and
@@ -161,6 +201,18 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
     } else if (std.mem.eql(u8, section, "feature")) {
         if (std.mem.eql(u8, key, "wire_chunks")) {
             f.feature.wire_chunks = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "deco_trees")) {
+            f.feature.deco_trees = try parseBool(val);
+        } else {
+            return unknownKey(section, key);
+        }
+    } else if (std.mem.eql(u8, section, "perf")) {
+        if (std.mem.eql(u8, key, "async_chunk_flush")) {
+            f.perf.async_chunk_flush = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "terrain_snapshot")) {
+            f.perf.terrain_snapshot = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "job_batches")) {
+            f.perf.job_batches = try parseBool(val);
         } else {
             return unknownKey(section, key);
         }
@@ -226,7 +278,21 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.authority.max_edit_range_blocks) |v| opts.max_edit_range = v;
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
+    if (f.authority.guard_enforce) |v| opts.guard.enforce = v;
+    if (f.authority.guard_dry_run) |v| opts.guard.dry_run = v;
+    if (f.authority.guard_quarantine) |v| opts.guard.quarantine = v;
+    if (f.authority.guard_load_shed) |v| opts.guard.load_shed = v;
+    if (f.authority.guard_window_ticks) |v| opts.guard.window_ticks = v;
+    // Saturate the width here; guard.clamp() logs and repairs the range.
+    if (f.authority.guard_strong_distinct) |v|
+        opts.guard.strong_distinct = @intCast(@min(v, @as(u32, std.math.maxInt(u8))));
+    if (f.authority.guard_hard_repeat) |v|
+        opts.guard.hard_repeat = @intCast(@min(v, @as(u32, std.math.maxInt(u16))));
     if (f.feature.wire_chunks) |v| opts.wire_chunks = v;
+    if (f.feature.deco_trees) |v| opts.deco_trees = v;
+    if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
+    if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
+    if (f.perf.job_batches) |v| opts.job_batches = v;
 }
 
 /// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
@@ -289,6 +355,7 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
     }
+    opts.guard.clamp();
 }
 
 test "parse stream and authority" {
@@ -301,8 +368,15 @@ test "parse stream and authority" {
         \\interest_range_blocks = 120.5
         \\peer_stale_ms = 4000
         \\mode = "observe"
+        \\guard_enforce = true
+        \\guard_dry_run = false
+        \\guard_quarantine = yes
+        \\guard_window_ticks = 600
+        \\guard_strong_distinct = 3
+        \\guard_hard_repeat = 40
         \\[feature]
         \\wire_chunks = false
+        \\deco_trees = no
         \\[mode]
         \\name = "default"
     ;
@@ -313,8 +387,46 @@ test "parse stream and authority" {
     try std.testing.expectApproxEqAbs(@as(f32, 120.5), f.authority.interest_range_blocks.?, 0.01);
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
+    try std.testing.expectEqual(true, f.authority.guard_enforce.?);
+    try std.testing.expectEqual(false, f.authority.guard_dry_run.?);
+    try std.testing.expectEqual(true, f.authority.guard_quarantine.?);
+    try std.testing.expectEqual(@as(u64, 600), f.authority.guard_window_ticks.?);
+    try std.testing.expectEqual(@as(u32, 3), f.authority.guard_strong_distinct.?);
+    try std.testing.expectEqual(@as(u32, 40), f.authority.guard_hard_repeat.?);
     try std.testing.expectEqual(false, f.feature.wire_chunks.?);
+    try std.testing.expectEqual(false, f.feature.deco_trees.?);
     try std.testing.expectEqualStrings("default", f.mode.name.?);
+}
+
+test "applyToInitOptions deco_trees only when set" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        spawn_area_radius_max: i32 = 8,
+        interest_range: f32 = 160,
+        max_edit_range: f32 = 96,
+        max_claimed_damage: i32 = 200,
+        peer_stale_ms: u64 = 3000,
+        wire_chunks: bool = true,
+        deco_trees: bool = true,
+        async_chunk_flush: bool = false,
+        terrain_snapshot: bool = false,
+        job_batches: bool = false,
+        guard: guard_policy.Policy = .{},
+    };
+    var o: Opts = .{};
+    var none = try parse(std.testing.allocator, "[feature]\nwire_chunks = false\n");
+    defer none.deinit();
+    applyToInitOptions(&none, &o);
+    try std.testing.expectEqual(true, o.deco_trees);
+    var off = try parse(std.testing.allocator, "[feature]\ndeco_trees = false\n");
+    defer off.deinit();
+    applyToInitOptions(&off, &o);
+    try std.testing.expectEqual(false, o.deco_trees);
 }
 
 test "loadFromPath rejects oversized file" {
@@ -379,6 +491,7 @@ test "sanitizeInitOptions repairs bad radii" {
         max_edit_range: f32 = 96,
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
+        guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{
         .max_streamed_chunks = 0,
@@ -406,6 +519,7 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         max_edit_range: f32 = std.math.nan(f32),
         interest_range: f32 = std.math.inf(f32),
         peer_stale_ms: u64 = 3000,
+        guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{};
     sanitizeInitOptions(&o);
@@ -426,8 +540,112 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         max_edit_range: f32 = 96,
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
+        guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{ .max_streamed_chunks = 999 };
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(max_streamed_chunks_cap, o.max_streamed_chunks);
+}
+
+test "guard policy merges from [authority] and clamps" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        spawn_area_radius_max: i32 = 8,
+        interest_range: f32 = 160,
+        max_edit_range: f32 = 96,
+        max_claimed_damage: i32 = 200,
+        peer_stale_ms: u64 = 3000,
+        wire_chunks: bool = true,
+        deco_trees: bool = true,
+        async_chunk_flush: bool = false,
+        terrain_snapshot: bool = false,
+        job_batches: bool = false,
+        guard: guard_policy.Policy = .{},
+    };
+    var o: Opts = .{};
+    // Default: log-only ladder, nothing denies.
+    try std.testing.expectEqual(false, o.guard.enforce);
+    try std.testing.expectEqual(true, o.guard.dry_run);
+
+    var f = try parse(std.testing.allocator,
+        \\[authority]
+        \\guard_enforce = true
+        \\guard_dry_run = false
+        \\guard_load_shed = false
+        \\guard_window_ticks = 0
+        \\guard_strong_distinct = 99999
+        \\guard_hard_repeat = 0
+    );
+    defer f.deinit();
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(true, o.guard.enforce);
+    try std.testing.expectEqual(false, o.guard.dry_run);
+    try std.testing.expectEqual(false, o.guard.load_shed);
+    // Untouched key keeps its default.
+    try std.testing.expectEqual(false, o.guard.quarantine);
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(u64, 1), o.guard.window_ticks);
+    try std.testing.expectEqual(guard_policy.detector_slots, o.guard.strong_distinct);
+    try std.testing.expectEqual(@as(u16, 1), o.guard.hard_repeat);
+}
+
+test "parse rejects unknown guard key and bad bool" {
+    try std.testing.expectError(
+        error.UnknownTomlKey,
+        parse(std.testing.allocator, "[authority]\nguard_enfroce = true\n"),
+    );
+    try std.testing.expectError(
+        error.BadTomlBool,
+        parse(std.testing.allocator, "[authority]\nguard_enforce = maybe\n"),
+    );
+}
+
+test "[perf] switches default off and merge only when set" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        spawn_area_radius_max: i32 = 8,
+        interest_range: f32 = 160,
+        max_edit_range: f32 = 96,
+        max_claimed_damage: i32 = 200,
+        peer_stale_ms: u64 = 3000,
+        wire_chunks: bool = true,
+        deco_trees: bool = true,
+        async_chunk_flush: bool = false,
+        terrain_snapshot: bool = false,
+        job_batches: bool = false,
+        guard: guard_policy.Policy = .{},
+    };
+    var o: Opts = .{};
+    var none = try parse(std.testing.allocator, "[perf]\njob_batches = true\n");
+    defer none.deinit();
+    applyToInitOptions(&none, &o);
+    try std.testing.expectEqual(false, o.async_chunk_flush);
+    try std.testing.expectEqual(false, o.terrain_snapshot);
+    try std.testing.expectEqual(true, o.job_batches);
+
+    var all = try parse(std.testing.allocator,
+        \\[perf]
+        \\async_chunk_flush = true
+        \\terrain_snapshot = yes
+        \\
+    );
+    defer all.deinit();
+    applyToInitOptions(&all, &o);
+    try std.testing.expectEqual(true, o.async_chunk_flush);
+    try std.testing.expectEqual(true, o.terrain_snapshot);
+
+    try std.testing.expectError(
+        error.UnknownTomlKey,
+        parse(std.testing.allocator, "[perf]\nnope = true\n"),
+    );
 }
