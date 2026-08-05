@@ -6664,7 +6664,15 @@ pub const Game = struct {
         );
     }
 
-    fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
+    /// Returns false when the chunk was soft-dropped on a full reliable window.
+    /// The caller must then leave the key out of `c.streamed`: the stream tick
+    /// only sends keys it does not already hold, so recording a dropped chunk
+    /// leaves a permanent hole. A hole anywhere in the player's 2-chunk mesh
+    /// halo pins that chunk at NeedsRegeneration, so the client never builds a
+    /// collision mesh under the player. It then free-falls, Origin's downward
+    /// ray fails every frame, and RespawnProgress.WaitingForCollider never
+    /// clears: the join hangs on "Creating player".
+    fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool {
         // Resident miss = disk load or procedural gen (worldgen W2 runs here,
         // on the tick, bounded by chunk_adds_per_stream_tick). world/ may not
         // import apm, so the scope lives at this call site.
@@ -6729,11 +6737,14 @@ pub const Game = struct {
         const before_out = self.harness.counters.get(.net_packets_out);
         try self.sendGame(peer, "NetPackageChunk", body);
         const after_out = self.harness.counters.get(.net_packets_out);
-        if (after_out == before_out) {
+        const delivered = after_out != before_out;
+        if (!delivered) {
             std.debug.print("zdtd: FAILED NetPackageChunk cx={d} cz={d} body={d}\n", .{ cx, cz, body.len });
+            return false;
         }
         // Storage TEs in this column (placed chests, loot containers).
         try self.sendContainersInChunk(peer, cx, cz);
+        return true;
     }
 
     /// Scan painted columns for known storage AssignIds; create + roll loot once.
@@ -6897,7 +6908,6 @@ pub const Game = struct {
         for (&self.clients) |*cl| {
             if (cl.peer == peer) {
                 client_ptr = cl;
-                cl.streamed_n = 0;
                 break;
             }
         }
@@ -6907,8 +6917,16 @@ pub const Game = struct {
             while (dx <= r) : (dx += 1) {
                 const cx = t.pos.x + dx;
                 const cz = t.pos.z + dz;
-                try self.sendSpawnChunk(peer, cx, cz);
-                if (client_ptr) |cl| self.clientAddStreamed(cl, packages.makeChunkKey(cx, cz));
+                // Re-sending a chunk the client already holds costs reliable
+                // window the missing chunks need, and the client logs
+                // "chunk already loaded" for every one.
+                if (client_ptr) |cl| {
+                    if (clientHasStreamed(cl, packages.makeChunkKey(cx, cz))) continue;
+                }
+                const delivered = try self.sendSpawnChunk(peer, cx, cz);
+                if (delivered) {
+                    if (client_ptr) |cl| self.clientAddStreamed(cl, packages.makeChunkKey(cx, cz));
+                }
                 // Let ACKs land between multi-chunk sends.
                 self.pollNetOnce();
             }
@@ -6998,7 +7016,7 @@ pub const Game = struct {
                     const key = packages.makeChunkKey(cx, cz);
                     // Cap path / race: bitset miss but list still holds key.
                     if (clientHasStreamed(c, key)) continue;
-                    try self.sendSpawnChunk(peer, cx, cz);
+                    if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
                     self.clientAddStreamed(c, key);
                     in_view.set(bit);
                     // No per-chunk deco: the client drains and nulls DecoManager.loadedDecos
