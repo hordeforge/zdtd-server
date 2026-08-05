@@ -133,8 +133,10 @@ const Sampler = struct {
             while (dz < 2) : (dz += 1) {
                 var dx: usize = 0;
                 while (dx < 2) : (dx += 1) {
-                    c[dx + dz * 2 + dy * 4] = self.samples[(xi + dx) +
-                        (zi + dz) * samples_x + (yi + dy) * samples_x * samples_x];
+                    c[dx + dz * 2 + dy * 4] = self.samples[
+                        (xi + dx) +
+                            (zi + dz) * samples_x + (yi + dy) * samples_x * samples_x
+                    ];
                 }
             }
         }

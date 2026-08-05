@@ -363,7 +363,18 @@ pub const Peer = struct {
         if (self.extra_n >= self.extra_q.len) return;
         if (self.extra_used + user.len > self.extra_buf.len) return;
         const off: u32 = @intCast(self.extra_used);
-        @memcpy(self.extra_buf[self.extra_used..][0..user.len], user);
+        const dst = self.extra_buf[self.extra_used..][0..user.len];
+        // `user` may already point into extra_buf, so this cannot be @memcpy:
+        // handlePacket's Merged branch pushes then pops, and popExtra reclaims
+        // extra_used to 0 once the queue drains, so Server.drainControl re-pushes
+        // a slice that overlaps dst (exactly, for a single-payload Merged).
+        if (dst.ptr != user.ptr) {
+            if (@intFromPtr(dst.ptr) < @intFromPtr(user.ptr)) {
+                std.mem.copyForwards(u8, dst, user);
+            } else {
+                std.mem.copyBackwards(u8, dst, user);
+            }
+        }
         self.extra_used += user.len;
         self.extra_q[self.extra_n] = .{ .off = off, .len = @intCast(user.len) };
         self.extra_n += 1;
@@ -584,6 +595,32 @@ test "pushExtra copies payload for later popExtra (mid-send mailbox)" {
     const got = peer.popExtra() orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, got);
     try std.testing.expect(peer.popExtra() == null);
+}
+
+test "pushExtra accepts a slice that already lives in extra_buf (no alias UB)" {
+    // Live join repro: a Merged datagram reaches Server.drainControl, handlePacket
+    // pushes the sub-payload then returns popExtra(), and popExtra resets
+    // extra_used to 0 when the queue drains. drainControl re-pushes that slice,
+    // so src and dst are the SAME extra_buf bytes. @memcpy there panics with
+    // "arguments alias" (seen live: chunk stream never started after join).
+    var peer: Peer = .{};
+    const payload = [_]u8{ 9, 8, 7, 6, 5 };
+    peer.pushExtra(&payload);
+    const popped = peer.popExtra() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), peer.extra_used); // reclaimed
+    try std.testing.expectEqual(popped.ptr, peer.extra_buf[0..].ptr); // aliases buf
+    peer.pushExtra(popped); // must not panic and must preserve the bytes
+    const again = peer.popExtra() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u8, &payload, again);
+
+    // Same-buffer re-push at a non-zero destination (queue not drained).
+    var p2: Peer = .{};
+    p2.pushExtra(&[_]u8{ 1, 2, 3 });
+    p2.pushExtra(&payload);
+    const first = p2.popExtra() orelse return error.TestUnexpectedResult;
+    p2.pushExtra(first);
+    try std.testing.expectEqualSlices(u8, &payload, p2.popExtra().?);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3 }, p2.popExtra().?);
 }
 
 // Lives here (not fuzz.zig) for access to the private takeFragment/processAck

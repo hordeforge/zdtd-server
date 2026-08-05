@@ -130,10 +130,19 @@ now only sent when `deco_trees` is off (no objects in flight to disturb).
    `BiomeDefinition.m_DistantDecoBlocks`, Perlin resource noise, per-biome
    probability and occupied-map rejection (1000 attempts per 128×128 deco chunk).
    Plausible deterministic trees, not stock-equivalent ones.
-5. **No live proof yet.** Everything above is IL and `blocks.xml` grounded and
-   unit tested, but re-enabling objects still needs a real V3.1.x client join
-   (trees visible, no exception in the client log, world load completes). Record
-   the result in `docs/PLAYTEST_*.md`.
+5. **Live-validated 2026-08-05** against a stock **V3.0.1 b4** client:
+   server `DecoUpdate objs=1488 pkgs=1 r=6 oak=24629 dead=24626`, client
+   `[DECO] read 1488`, **0 exceptions** in the client log, and world load
+   completes (`Chunks: 226 CGO: 90`, past the `viewDist^2-10 = 39` gate). The
+   17 byte `DecoObject` record and the single join-window lifecycle are
+   confirmed on the wire, not just in IL.
+   That run also surfaced an unrelated server crash on the same path: a Merged
+   datagram reaching `Server.drainControl` made `Peer.pushExtra` `@memcpy` a
+   slice onto itself (`popExtra` reclaims `extra_used` to 0 when the queue
+   drains), panicking with "arguments alias" so no chunk ever streamed. Fixed
+   in `litenet/peer.zig` with an overlap-aware copy plus a regression test.
+   Still unproven: a **V3.1.x** client (ids come from the bundled V3.1.4 dump,
+   and there is no client id negotiation, see A22).
 
 ## Block ids used
 
