@@ -502,6 +502,16 @@ test "scenario quest accept kill complete and trader buy" {
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
 
+    // systems.trade first syncs the wallet UP from the client's coin stacks
+    // (inv_coins > wallet => wallet = inv_coins), so a correct buy can still
+    // leave the wallet at or above its pre-trade value and the debit assertion
+    // below would be measuring the sync, not the purchase. Seed the wallet above
+    // any inventory coins so no sync can fire mid-buy.
+    const pslot = g.sim.playerByPeer(c.slot).?;
+    const coin_id = g.items.ecsIdByName("casinoCoin");
+    const inv_coins: u32 = if (coin_id != 0) g.sim.inventory[pslot].countItem(coin_id) else 0;
+    g.sim.wallet[pslot].coins = inv_coins + 1000;
+
     const coins_before = systems.questCoins(&g.sim, c.slot);
     var trade_body: [16]u8 = undefined;
     const tb = try packages.buildTraderTradeBody(&trade_body, te, 2, 1, 0);

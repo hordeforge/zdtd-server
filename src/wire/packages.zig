@@ -1408,7 +1408,14 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     // Spawn overlay waits for CGO >= viewDist^2-10; keep stream ring large enough.
     // Design: docs/adr/0016-fixedsizecc-false-stream-cgo.md
     try wr.writeBool(false);
-    try wr.writeBool(true); // firstTimeJoin
+    // firstTimeJoin=false. GameManager.DoSpawn feeds this straight into
+    // XUiC_SpawnSelectionWindow::Open(ui, bChooseSpawnPosition, bEnteringGame,
+    // bFirstTimeSpawn) (V3.1.0 b14 IL: DoSpawn IL_0021, Open IL_0024). With
+    // true the client parks on the spawn-selection window: the world renders
+    // behind it, but the local player is never added to the world, so
+    // EntityAlive.OnAddedToWorld never runs, IsSpawned stays false and the
+    // client never sends EntityPosAndRot (server saw pos=(?,?,?) forever).
+    try wr.writeBool(false); // firstTimeJoin
     // worldHashesData is raw MemoryStream of: count:i32 + (path:string, crc:u32)*count
     // PrepareWorldHashes writes count=0 when no RWG file CRC table.
     try wr.writeI32(0);
