@@ -285,6 +285,10 @@ const Client = struct {
     joined: bool = false,
     /// True after sendJoinBundle (WorldInfo/PlayerId). Gate tick broadcasts until then.
     entered: bool = false,
+    /// Client's ChunkCache exists (it sent WorldInitInfoRequest, which
+    /// worldInfoCo only does after createWorld). Chunks sent from here on
+    /// are kept, so the tick streamer can start well before the spawn.
+    world_ready: bool = false,
     challenge: [16]u8 = .{0} ** 16,
     slot: usize = 0,
     view_radius: i32 = default_view_radius,
@@ -3698,6 +3702,13 @@ pub const Game = struct {
             const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
             try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
             std.debug.print("zdtd: WorldInitInfoRequest -> empty entity={d}\n", .{c.entity_id});
+            // Stream from here, not at spawn. The client needs collision meshes
+            // for the spawn chunk and its 8 neighbours before
+            // World.IsPositionAvailable succeeds; until then updateRespawn parks
+            // in ClampingToValidWorldPos. OnAddedToWorld meanwhile sets
+            // EntityAlive.bSpawned, and updateRespawn short-circuits to Done on
+            // that, abandoning the sequence before it closes the loading screen.
+            c.world_ready = true;
             return;
         }
         // createWorld posts DynamicClientArrive. Prefer RequestToSpawnPlayer for the
@@ -3718,6 +3729,20 @@ pub const Game = struct {
                 const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
                 try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
                 std.debug.print("zdtd: DynamicClientArrive -> WorldInitInfo empty (pre-spawn) entity={d}\n", .{c.entity_id});
+                // Head start on the spawn area. createWorld posts this package, so
+                // the client's ChunkCache exists and will keep these. The client
+                // needs collision meshes (Chunk.GetAvailable == IsCollisionMeshGenerated)
+                // for the spawn chunk and its 8 neighbours before
+                // World.IsPositionAvailable succeeds; until then updateRespawn parks
+                // in ClampingToValidWorldPos. Meanwhile OnAddedToWorld sets
+                // EntityAlive.bSpawned, and updateRespawn's first line short-circuits
+                // to Done on that, abandoning the sequence before it closes the
+                // loading screen. Streaming only at spawn time loses that race by
+                // ~40s; stock has the area meshed well before the player appears.
+                if (self.wire_chunks) {
+                    const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
+                    try self.sendSpawnArea(peer, sp.x, sp.z, r0);
+                }
             }
             return;
         }
@@ -3772,6 +3797,19 @@ pub const Game = struct {
                 c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return;
             }
             c.joined = true;
+            // Stream the spawn area before the bundle, while the client is still
+            // waiting on its spawn request. NetPackagePlayerId creates the local
+            // player, which opens the spawn-selection window; that window's
+            // updateLoadState returns on `cgo >= viewDist^2 - 10` and stops being
+            // ticked once the loading screen covers it, so a client that spawns
+            // with no displayed chunks stays in WaitingForSpawnWindowToClose
+            // behind the loading screen. Sending here (not inside sendJoinBundle)
+            // keeps the pre-world DynamicClientArrive fallback untouched: chunks
+            // sent before the client's world exists are dropped and wedge the join.
+            if (self.wire_chunks and !c.entered) {
+                const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
+                try self.sendSpawnArea(peer, surf.x, surf.z, r0);
+            }
             // Death-respawn already sent Spawned+stats; still re-send join bundle so the
             // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
             try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
@@ -7169,7 +7207,7 @@ pub const Game = struct {
         // Continuous stock chunk stream around each player (ChunkRemove far keys).
         if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
             for (&self.clients) |*cl| {
-                if (!cl.joined or !cl.entered or cl.peer == null) continue;
+                if (cl.peer == null or !(cl.entered or cl.world_ready)) continue;
                 self.streamChunksForClient(cl) catch |err| {
                     self.harness.counters.inc(.stream_errors);
                     const n = self.harness.counters.get(.stream_errors);

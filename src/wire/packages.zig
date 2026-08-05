@@ -1844,7 +1844,12 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     const payload_start = w.pos;
 
     // propertyList order, bPersistent only (78 decls, 9 skipped). Types: 0=i32 2=string 3=bool.
-    try w.writeI32(0); // GameState
+    // EnumGameState.Running. Not cosmetic: PlayerMoveController.Update runs
+    // updateRespawn() only while GameStats[GameState] == 1, else it calls
+    // stopMoving() and returns. Sending 0 (Loading) freezes the client's
+    // respawn machine in WaitingForSpawnWindowToClose, so the loading screen
+    // is never closed even though the world, player and colliders are live.
+    try w.writeI32(1); // GameState
     try w.writeI32(0); // GameModeId
     try w.writeBool(false); // TimeLimitActive
     try w.writeI32(0); // TimeLimitThisRound
