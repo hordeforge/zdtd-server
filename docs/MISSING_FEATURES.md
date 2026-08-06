@@ -109,7 +109,8 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageChunkClusterInfo` | P2 |
 | `NetPackageWorldInfo` / game mode / seed | HAVE (fixedSizeCC closes overlay gate) |
 | `NetPackageBiomeIntensity` | PARTIAL (interleaved in chunk path) |
-| `NetPackageDecoUpdate` / deco reset | PARTIAL (join-time tree burst around spawn, ids via `idByName` fail-closed, `[feature] deco_trees` kill switch. Client has ONE deco window: `loadedDecos` is nulled at the end of `OnWorldLoaded`, so nothing outside the join view square is ever decorated. Density/species are not biome-driven; server does not mirror the client's `addDistantDecorationBlocks` writeback. `DecoResetWorldChunk` on view unload removed (not stock). See [DECO_NRE.md](DECO_NRE.md)) |
+| `NetPackageDecoUpdate` / deco reset | PARTIAL (join-time burst around spawn. Species and density are biome-driven: biomes.xml `<decorations>` filtered by resolved `IsDistantDecoration`, sampled with stock's `decorateChunkRandom` shape (128x128 deco chunks, 1000 attempts, `prob * 0.125f * 16f`). Placed deco is mirrored into the block store (`[feature] deco_mirror`) with stock's `ischild`/parent packing for multiblocks. Client still has ONE deco window: `loadedDecos` is nulled at the end of `OnWorldLoaded`, so nothing outside the join view square is ever decorated. Residuals: deterministic PRNG instead of `GameRandom`, no `CheckOreNoiseAt`, rotation always 0, subbiome noise not evaluated. `DecoResetWorldChunk` on view unload removed (not stock). See [DECO_NRE.md](DECO_NRE.md)) |
+| `NetPackageIdMapping` "blocks" | HAVE (full AssignIds dump sent before the config files, in the stock slot; envelope raw-deflated like `NetConnectionAbs::Compress`. All-or-nothing with `[feature] block_id_mapping` kill switch. Needs one live V3.1.x client run to confirm) |
 | `NetPackageWater*` (if any in build) | P2 |
 | `NetPackageDynamicMesh` | P3 / skip headless |
 
@@ -724,7 +725,7 @@ Do not plan these as product features of zdtd:
 **P0 join/play gate: CLOSED** (STATUS 2026-07-23). Do not re-open from stale rows.
 
 ### P1: Depth the client still notices
-1. Deco: trees ship in the join burst (idByName + kill switch). Remaining: `blocks` NameIdMapping so ids can be negotiated instead of trusted, biome-driven density, mirroring deco into the server world store, and a live-client playtest.  
+1. Deco: `blocks` NameIdMapping, biome-driven density and the world-store mirror all ship. Remaining: a live-client playtest (client log must show "Received mapping data for: blocks" then "Block IDs with mapping" and a sane block-id total), and the one-shot join window is still the only deco window.  
 2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  

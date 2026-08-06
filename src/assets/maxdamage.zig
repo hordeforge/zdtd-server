@@ -23,6 +23,17 @@ pub const bundled_assignids_rel_paths = [_][]const u8{
     "../assets/fixtures/assignids_v314.txt",
 };
 
+/// blocks.xml `MultiBlockDim` (x,y,z). 1x1x1 is the single-block default.
+pub const Dim = struct {
+    x: u8 = 1,
+    y: u8 = 1,
+    z: u8 = 1,
+
+    pub fn isMulti(self: Dim) bool {
+        return self.x > 1 or self.y > 1 or self.z > 1;
+    }
+};
+
 pub const Table = struct {
     /// name → MaxDamage
     by_name: std.StringHashMapUnmanaged(u16) = .{},
@@ -52,6 +63,12 @@ pub const Table = struct {
     material_max: std.StringHashMapUnmanaged(u16) = .{},
     /// block name → material id (from blocks.xml Material property).
     block_material: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// block name → resolved `IsDistantDecoration` (blocks.xml property, after
+    /// the Extends chain). Only `true` entries are stored; absent means false,
+    /// so an unparsed or unknown name fails closed out of the deco tables.
+    distant_deco: std.StringHashMapUnmanaged(void) = .{},
+    /// block name → resolved `MultiBlockDim` (absent means 1x1x1, single block).
+    multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -71,6 +88,8 @@ pub const Table = struct {
             self.power_output_per_stack_by_name = .{};
             self.material_max = .{};
             self.block_material = .{};
+            self.distant_deco = .{};
+            self.multi_block_dim = .{};
             ap.deinit();
             child.destroy(ap);
             self.arena_ptr = null;
@@ -97,6 +116,41 @@ pub const Table = struct {
     /// Runtime AssignIds id for a stock block name (from dump / .nim), else null.
     pub fn idByName(self: *const Table, name: []const u8) ?u16 {
         return self.id_by_name.get(name);
+    }
+
+    /// Rows in the loaded AssignIds map. Zero means no dump: callers that
+    /// negotiate ids with the client must refuse to send in that case.
+    pub fn idNameCount(self: *const Table) u32 {
+        return self.id_by_name.count();
+    }
+
+    /// Read-only walk over every AssignIds row, in hash order. Shape matches what
+    /// `wire/stock_nameid.zig` consumes; the table must not be mutated while one
+    /// of these is live.
+    pub const IdNameIter = struct {
+        inner: std.StringHashMapUnmanaged(u16).Iterator,
+
+        pub fn next(self: *IdNameIter) ?struct { id: u16, name: []const u8 } {
+            const e = self.inner.next() orelse return null;
+            return .{ .id = e.value_ptr.*, .name = e.key_ptr.* };
+        }
+    };
+
+    pub fn idNameIterator(self: *const Table) IdNameIter {
+        return .{ .inner = self.id_by_name.iterator() };
+    }
+
+    /// blocks.xml `IsDistantDecoration` after Extends resolution. This is the
+    /// exact filter `BiomeDefinition::AddDecoBlock` uses to build the biome's
+    /// `m_DistantDecoBlocks` list (asm.il 1249700-1249740), which is the only
+    /// list `DecoManager::decorateChunkRandom` samples from.
+    pub fn isDistantDeco(self: *const Table, name: []const u8) bool {
+        return self.distant_deco.contains(name);
+    }
+
+    /// blocks.xml `MultiBlockDim` after Extends resolution; 1x1x1 when unset.
+    pub fn multiBlockDim(self: *const Table, name: []const u8) Dim {
+        return self.multi_block_dim.get(name) orelse .{};
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -288,6 +342,53 @@ pub const Table = struct {
     }
 };
 
+/// blocks.xml `MultiBlockDim="x,y,z"`. Zero or missing components make the block
+/// single, not degenerate: a 0-wide multiblock would emit no child cells at all.
+fn parseDim(s: []const u8) ?Dim {
+    var it = std.mem.splitScalar(u8, s, ',');
+    var v: [3]u8 = .{ 1, 1, 1 };
+    for (&v) |*slot| {
+        const part = std.mem.trim(u8, it.next() orelse return null, " \t");
+        const n = std.fmt.parseInt(u8, part, 10) catch return null;
+        if (n == 0) return null;
+        slot.* = n;
+    }
+    if (it.next() != null) return null;
+    return .{ .x = v[0], .y = v[1], .z = v[2] };
+}
+
+/// `StringParsers::ParseBool` accepts true/false plus 1/0 (asm.il 91775).
+fn parseBool(s: []const u8) ?bool {
+    if (std.ascii.eqlIgnoreCase(s, "true") or std.mem.eql(u8, s, "1")) return true;
+    if (std.ascii.eqlIgnoreCase(s, "false") or std.mem.eql(u8, s, "0")) return false;
+    return null;
+}
+
+/// Own (not inherited) deco facts for one `<block>`; null = "ask the parent".
+const DecoFacts = struct {
+    extends: ?[]const u8 = null,
+    distant: ?bool = null,
+    dim: ?Dim = null,
+};
+
+/// Resolve one block's inherited facts by walking `Extends`. Stock chains are
+/// two or three deep (treeOakSml01 → treeMaster); the hop cap only exists so a
+/// modded cycle cannot spin forever.
+fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) DecoFacts {
+    const max_hops: usize = 16;
+    var out: DecoFacts = .{};
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse break;
+        if (out.distant == null) out.distant = f.distant;
+        if (out.dim == null) out.dim = f.dim;
+        if (out.distant != null and out.dim != null) break;
+        cur = f.extends orelse break;
+    }
+    return out;
+}
+
 fn bodyHasStorage(body: []const u8) bool {
     // LootList property or CompositeTileEntity class → storage TE candidate.
     if (xml.propertyValue(body, "LootList") != null) return true;
@@ -320,6 +421,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var block_material: std.StringHashMapUnmanaged([]const u8) = .{};
+    // Own facts first; Extends chains are resolved in a second pass because a
+    // child can appear before its parent in the file.
+    var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .{};
     var i: usize = 0;
     while (i < clean.len) {
         const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
@@ -373,8 +477,31 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "OutputPerStack")) |ops| {
             if (xml.parseF32(ops)) |v| try power_output_per_stack_by_name.put(arena, kn, v);
         }
+        var facts: DecoFacts = .{};
+        if (xml.propertyValue(body, "Extends")) |ext| {
+            facts.extends = try arena.dupe(u8, ext);
+        }
+        if (xml.propertyValue(body, "IsDistantDecoration")) |dd| {
+            facts.distant = parseBool(dd);
+        }
+        if (xml.propertyValue(body, "MultiBlockDim")) |md| {
+            facts.dim = parseDim(md);
+        }
+        try own_facts.put(arena, kn, facts);
         i = body_end;
     }
+
+    var distant_deco: std.StringHashMapUnmanaged(void) = .{};
+    var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
+    var fit = own_facts.iterator();
+    while (fit.next()) |e| {
+        const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
+        if (r.distant orelse false) try distant_deco.put(arena, e.key_ptr.*, {});
+        if (r.dim) |d| {
+            if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
+        }
+    }
+    own_facts.deinit(arena);
 
     return .{
         .by_name = by_name,
@@ -388,6 +515,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .power_output_per_charge_by_name = power_output_per_charge_by_name,
         .power_output_per_stack_by_name = power_output_per_stack_by_name,
         .block_material = block_material,
+        .distant_deco = distant_deco,
+        .multi_block_dim = multi_block_dim,
         .arena_ptr = arena_holder,
     };
 }
@@ -447,6 +576,105 @@ test "load blocks.xml MaxDamage when present" {
     const nim = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
     try t.mergeNim(std.testing.allocator, nim);
     try std.testing.expect(t.by_id.count() > 0);
+}
+
+test "deco facts follow Extends chains and fail closed" {
+    const xml_src =
+        \\<blocks>
+        \\<block name="treeMaster">
+        \\  <property name="Shape" value="DistantDecoTree" />
+        \\  <property name="IsDistantDecoration" value="true" />
+        \\</block>
+        \\<block name="treeOakSml01">
+        \\  <property name="Extends" value="treeMaster" />
+        \\  <property name="MultiBlockDim" value="1,7,1" />
+        \\</block>
+        \\<block name="treeGrassMaster">
+        \\  <property name="IsDecoration" value="true" />
+        \\</block>
+        \\<block name="treeShortGrass">
+        \\  <property name="Extends" value="treeGrassMaster" param1="CustomIcon" />
+        \\</block>
+        \\<block name="resourceRock01">
+        \\  <property name="Extends" value="treeMaster" />
+        \\  <property name="IsDistantDecoration" value="false" />
+        \\  <property name="MultiBlockDim" value="3,2,3" />
+        \\</block>
+        \\<block name="loopA"><property name="Extends" value="loopB" /></block>
+        \\<block name="loopB"><property name="Extends" value="loopA" /></block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_deco.xml";
+    try io_fs.writeFile(std.testing.allocator, path, xml_src);
+    defer io_fs.deleteFile(std.testing.allocator, path);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+
+    try std.testing.expect(t.isDistantDeco("treeMaster"));
+    // Inherited through Extends, which is how every stock tree gets the flag.
+    try std.testing.expect(t.isDistantDeco("treeOakSml01"));
+    // Grass is the reason the filter exists: prob .85 but not distant deco.
+    try std.testing.expect(!t.isDistantDeco("treeShortGrass"));
+    // An explicit false on the child beats the parent's true.
+    try std.testing.expect(!t.isDistantDeco("resourceRock01"));
+    // Unknown names must answer false, never inherit anything.
+    try std.testing.expect(!t.isDistantDeco("noSuchBlock"));
+    // A modded Extends cycle terminates instead of spinning.
+    try std.testing.expect(!t.isDistantDeco("loopA"));
+
+    try std.testing.expectEqual(Dim{ .x = 1, .y = 7, .z = 1 }, t.multiBlockDim("treeOakSml01"));
+    try std.testing.expectEqual(Dim{ .x = 3, .y = 2, .z = 3 }, t.multiBlockDim("resourceRock01"));
+    try std.testing.expectEqual(Dim{}, t.multiBlockDim("treeMaster"));
+    try std.testing.expectEqual(Dim{}, t.multiBlockDim("noSuchBlock"));
+}
+
+test "MultiBlockDim parse rejects malformed dims" {
+    try std.testing.expectEqual(Dim{ .x = 1, .y = 7, .z = 1 }, parseDim("1,7,1").?);
+    try std.testing.expectEqual(Dim{ .x = 3, .y = 2, .z = 3 }, parseDim(" 3 , 2 , 3 ").?);
+    try std.testing.expectEqual(@as(?Dim, null), parseDim("1,7"));
+    try std.testing.expectEqual(@as(?Dim, null), parseDim("1,7,1,1"));
+    try std.testing.expectEqual(@as(?Dim, null), parseDim("0,7,1"));
+    try std.testing.expectEqual(@as(?Dim, null), parseDim("1,x,1"));
+    try std.testing.expectEqual(@as(?Dim, null), parseDim(""));
+    try std.testing.expect(!(Dim{}).isMulti());
+    try std.testing.expect((Dim{ .x = 1, .y = 2, .z = 1 }).isMulti());
+}
+
+test "stock blocks.xml deco facts when present" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    try std.testing.expect(t.isDistantDeco("treeOakSml01"));
+    try std.testing.expect(t.isDistantDeco("treeDeadTree02"));
+    try std.testing.expect(t.isDistantDeco("treeCactus01"));
+    // High-probability biome entries that the filter must drop.
+    try std.testing.expect(!t.isDistantDeco("treeShortGrass"));
+    try std.testing.expect(!t.isDistantDeco("treeTallGrassDiagonal"));
+    try std.testing.expect(!t.isDistantDeco("plantShrub"));
+    try std.testing.expectEqual(Dim{ .x = 1, .y = 7, .z = 1 }, t.multiBlockDim("treeOakSml01"));
+}
+
+test "AssignIds rows are walkable for id negotiation" {
+    var t = Table.empty();
+    defer t.deinit();
+    try std.testing.expectEqual(@as(u32, 0), t.idNameCount());
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    if (t.idNameCount() == 0) return error.SkipZigTest;
+    try std.testing.expectEqual(@as(u16, 24629), t.idByName("treeOakSml01").?);
+    var it = t.idNameIterator();
+    var n: u32 = 0;
+    var saw_oak = false;
+    while (it.next()) |e| {
+        try std.testing.expect(e.name.len > 0);
+        if (std.mem.eql(u8, e.name, "treeOakSml01")) {
+            saw_oak = true;
+            try std.testing.expectEqual(@as(u16, 24629), e.id);
+        }
+        n += 1;
+    }
+    try std.testing.expectEqual(t.idNameCount(), n);
+    try std.testing.expect(saw_oak);
 }
 
 test "materials.xml MaxDamage fills hayBaleSquare" {

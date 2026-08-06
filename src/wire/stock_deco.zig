@@ -140,88 +140,220 @@ pub const PackageWriter = struct {
     }
 };
 
-/// Deterministic sparse tree placement from surface heights in a world XZ window.
-/// `height_at(wx,wz)` returns surface Y (block top / standing height base); 0 or
-/// out-of-range skips the cell. `every_n`: place when hash % every_n == 0 (lower
-/// = denser). Tree ids are caller-supplied (runtime AssignIds), never pinned:
-/// an id the client cannot resolve NREs inside its world-load coroutine
-/// (DecoManager.TryAddToOccupiedMap IL_0008 derefs Block::isMultiBlock unguarded).
-pub fn generateAroundIds(
-    out: []DecoObj,
-    wx0: i32,
-    wz0: i32,
-    wx1: i32,
-    wz1: i32,
+/// World cells per terrain chunk side.
+pub const chunk_side: i32 = 16;
+
+/// DecoChunk side in world cells (`ldc.i4 0x80` at `DecoManager::decorateChunkRandom`
+/// IL_0032/IL_003a, asm.il 1265917).
+pub const deco_chunk_side: i32 = 128;
+
+/// Placement attempts per deco chunk (`ldc.i4 0x3e8` at IL_0259). Fixed, not a
+/// density knob: density comes from the per-biome probabilities.
+pub const attempts_per_deco_chunk: u32 = 1000;
+
+/// One `<decoration type="block">` row that survived the `IsDistantDecoration`
+/// filter, with its biomes.xml `prob` unscaled.
+pub const Species = struct {
+    block_id: u16,
+    prob: f32,
+};
+
+pub const max_species: usize = 12;
+
+/// A biome's distant-decoration list, in XML order. The sampler walks it last to
+/// first, exactly like `decorateChunkRandom` walks `m_DistantDecoBlocks`
+/// (asm.il 1266052-1266179).
+pub const SpeciesList = struct {
+    n: u8 = 0,
+    items: [max_species]Species = undefined,
+
+    pub fn slice(self: *const SpeciesList) []const Species {
+        return self.items[0..self.n];
+    }
+};
+
+/// World callbacks the sampler needs. `height_at` returns the surface block Y
+/// (0 or out-of-range skips the cell, so an unreadable column places nothing).
+/// `species_at` returns the biome's distant-deco list for a world XZ; an empty
+/// list means the cell places nothing, never a fabricated fallback species.
+pub const Sampler = struct {
     height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u16,
-    ctx: ?*anyopaque,
-    every_n: u32,
-    oak_id: u32,
-    dead_id: u32,
-) usize {
-    const step: u32 = if (every_n < 3) 3 else every_n;
-    var n: usize = 0;
-    var wz = wz0;
-    while (wz < wz1 and n < out.len) : (wz += 1) {
-        var wx = wx0;
-        while (wx < wx1 and n < out.len) : (wx += 1) {
-            const h = mix(wx, wz);
-            if (h % step != 0) continue;
-            const y: i32 = height_at(ctx, wx, wz);
-            if (y < 2 or y >= 250) continue;
-            // Only DistantDecoTree + Model blocks (CreateGameObject isinst DistantDeco).
-            const kind = h % 7;
-            const block: u32 = if (kind <= 2) oak_id else dead_id;
-            // Place on surface: block y often surface+1 for plants
-            const by = y + 1;
-            out[n] = .{
-                .x = wx,
-                .y = by,
-                .z = wz,
-                .real_y = @floatFromInt(by),
-                .block_raw = block,
-            };
-            n += 1;
+    species_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) SpeciesList,
+    ctx: ?*anyopaque = null,
+};
+
+/// World XZ half-open rectangle the caller is willing to have decorated.
+pub const Window = struct {
+    x0: i32,
+    z0: i32,
+    x1: i32,
+    z1: i32,
+
+    pub fn contains(self: Window, wx: i32, wz: i32) bool {
+        return wx >= self.x0 and wx < self.x1 and wz >= self.z0 and wz < self.z1;
+    }
+};
+
+/// Per-deco-chunk occupancy, one bit per cell. Stands in for the stock
+/// `DecoOccupiedMap`: `decorateChunkRandom` rejects a draw when `Get(x,z) > 2` or
+/// when `CheckArea(x-2, z-2, 6, 5, 5)` finds anything (asm.il 1265997-1266006),
+/// i.e. a 5x5 keep-out square anchored two cells back. zdtd tracks placement, not
+/// the stock EnumDecoOccupied grades (they come from BigDecorationRadius, which
+/// no server-side data carries), so the spacing is reproduced and the grading is
+/// not. Deliberate: too-close trees look worse than slightly-too-sparse ones.
+const Occupancy = struct {
+    const side: usize = @intCast(deco_chunk_side);
+    bits: [side * side / 8]u8 = @splat(0),
+
+    fn idx(lx: i32, lz: i32) usize {
+        return @as(usize, @intCast(lz)) * side + @as(usize, @intCast(lx));
+    }
+
+    fn get(self: *const Occupancy, lx: i32, lz: i32) bool {
+        if (lx < 0 or lz < 0 or lx >= deco_chunk_side or lz >= deco_chunk_side) return false;
+        const i = idx(lx, lz);
+        return self.bits[i / 8] & (@as(u8, 1) << @intCast(i % 8)) != 0;
+    }
+
+    fn set(self: *Occupancy, lx: i32, lz: i32) void {
+        const i = idx(lx, lz);
+        self.bits[i / 8] |= @as(u8, 1) << @intCast(i % 8);
+    }
+
+    /// Stock's `CheckArea(x - 2, z - 2, _, 5, 5)`.
+    fn areaBusy(self: *const Occupancy, lx: i32, lz: i32) bool {
+        var dz: i32 = 0;
+        while (dz < 5) : (dz += 1) {
+            var dx: i32 = 0;
+            while (dx < 5) : (dx += 1) {
+                if (self.get(lx - 2 + dx, lz - 2 + dz)) return true;
+            }
         }
+        return false;
+    }
+};
+
+/// Deterministic replacement for stock's `GameRandom`. Stock reseeds per deco
+/// chunk from the world seed; zdtd needs the same property (a chunk decorates the
+/// same way on every join and on every restart) but not the same stream, since
+/// GameRandom's algorithm is not reproduced anywhere in zdtd.
+const Rng = struct {
+    s: u64,
+
+    fn init(seed: u64, dcx: i32, dcz: i32) Rng {
+        var s = seed;
+        s ^= @as(u64, @bitCast(@as(i64, dcx))) *% 0x9e3779b97f4a7c15;
+        s ^= @as(u64, @bitCast(@as(i64, dcz))) *% 0xc2b2ae3d27d4eb4f;
+        // A zero state would emit zeros forever.
+        return .{ .s = if (s == 0) 0x853c49e6748fea9b else s };
+    }
+
+    fn next(self: *Rng) u64 {
+        self.s +%= 0x9e3779b97f4a7c15;
+        var z = self.s;
+        z = (z ^ (z >> 30)) *% 0xbf58476d1ce4e5b9;
+        z = (z ^ (z >> 27)) *% 0x94d049bb133111eb;
+        return z ^ (z >> 31);
+    }
+
+    /// Uniform in [lo, hi], matching `GameRandom::RandomRange(int, int)` bounds
+    /// as `decorateChunkRandom` uses it: `RandomRange(x0, x1 - 1)`.
+    fn range(self: *Rng, lo: i32, hi: i32) i32 {
+        if (hi <= lo) return lo;
+        const span: u64 = @intCast(hi - lo + 1);
+        return lo + @as(i32, @intCast(self.next() % span));
+    }
+
+    /// Uniform in [0, 1), matching `GameRandom::RandomFloat`.
+    fn float(self: *Rng) f32 {
+        return @as(f32, @floatFromInt(self.next() >> 40)) / 16777216.0;
+    }
+};
+
+/// Deco chunk covering a world cell.
+pub fn worldToDecoChunk(w: i32) i32 {
+    return @divFloor(w, deco_chunk_side);
+}
+
+/// Decorate one 128x128 deco chunk, clipped to `window`.
+///
+/// Shape follows `DecoManager::decorateChunkRandom` (asm.il 1265917-1266235):
+/// 1000 attempts, each drawing x in [cx*128, cx*128+127] and z likewise, rejected
+/// by the occupancy keep-out, then walking the cell's biome species list last to
+/// first and accepting the first whose roll satisfies
+/// `RandomFloat <= prob * 0.125f * 16f` (IL_00f4-IL_010d). The accepted block
+/// lands at `y = terrainHeight + 1` with `realY` equal to it (IL_0211-IL_021a).
+///
+/// Deviations, both deliberate: no `GameUtils::CheckOreNoiseAt` gate (zdtd has no
+/// server-side resource Perlin, and every `checkresource` row in stock biomes.xml
+/// is a `type="prefab"` row we do not send anyway), and rotation is always 0
+/// (stock rolls `BiomeBlockDecoration::GetRandomRotation`, but a rotated
+/// multiblock changes the child-cell offsets the world mirror has to write).
+pub fn generateForDecoChunk(
+    out: []DecoObj,
+    dcx: i32,
+    dcz: i32,
+    seed: u64,
+    window: Window,
+    sampler: Sampler,
+) usize {
+    var occ: Occupancy = .{};
+    var rng: Rng = .init(seed, dcx, dcz);
+    const wx0 = dcx * deco_chunk_side;
+    const wz0 = dcz * deco_chunk_side;
+    var n: usize = 0;
+    var attempt: u32 = 0;
+    while (attempt < attempts_per_deco_chunk) : (attempt += 1) {
+        // Draw every attempt even when the output is full or the cell is out of
+        // window, so clipping cannot change the placement of the cells we keep.
+        const wx = rng.range(wx0, wx0 + deco_chunk_side - 1);
+        const wz = rng.range(wz0, wz0 + deco_chunk_side - 1);
+        const lx = wx - wx0;
+        const lz = wz - wz0;
+        // One roll per species slot, always drawn: stock rolls once per species it
+        // walks, and drawing a fixed count keeps the stream (and therefore the
+        // placement) independent of how long a given biome's list happens to be.
+        var rolls: [max_species]f32 = undefined;
+        for (&rolls) |*r| r.* = rng.float();
+        if (occ.get(lx, lz) or occ.areaBusy(lx, lz)) continue;
+
+        // Species resolution reads the static biome map, so it is safe outside the
+        // window; the height lookup is not (it would generate chunks the join
+        // never streams). Doing the roll and the occupancy mark first keeps the
+        // layout independent of how big a window the caller asked for: the same
+        // cell decorates the same way for a near and a far view radius.
+        const list = sampler.species_at(sampler.ctx, wx, wz);
+        var picked: ?Species = null;
+        var i: usize = list.n;
+        while (i > 0) {
+            i -= 1;
+            if (rolls[i] <= list.items[i].prob * 0.125 * 16.0) {
+                picked = list.items[i];
+                break;
+            }
+        }
+        const sp = picked orelse continue;
+        // Stock marks the occupied map before resolving terrain height too
+        // (TryAddToOccupiedMap at IL_01ea, GetTerrainHeightAt at IL_01fa).
+        occ.set(lx, lz);
+        if (!window.contains(wx, wz)) continue;
+
+        const h: i32 = sampler.height_at(sampler.ctx, wx, wz);
+        if (h < 2 or h >= 250) continue;
+        const by = h + 1;
+        // Full output buffer must not change what the earlier objects were: a
+        // later join with a bigger buffer decorates the chunk identically.
+        if (n >= out.len) continue;
+        out[n] = .{
+            .x = wx,
+            .y = by,
+            .z = wz,
+            .real_y = @floatFromInt(by),
+            .block_raw = sp.block_id,
+        };
+        n += 1;
     }
     return n;
-}
-
-/// World cells per terrain chunk side; `out` must hold `chunk_cells` objects.
-pub const chunk_side: i32 = 16;
-pub const chunk_cells: usize = 16 * 16;
-
-/// Deco for one terrain chunk (16×16 world cells at chunk cx,cz).
-pub fn generateForTerrainChunkIds(
-    out: []DecoObj,
-    cx: i32,
-    cz: i32,
-    height_at: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u16,
-    ctx: ?*anyopaque,
-    every_n: u32,
-    oak_id: u32,
-    dead_id: u32,
-) usize {
-    const wx0 = cx * chunk_side;
-    const wz0 = cz * chunk_side;
-    return generateAroundIds(
-        out,
-        wx0,
-        wz0,
-        wx0 + chunk_side,
-        wz0 + chunk_side,
-        height_at,
-        ctx,
-        every_n,
-        oak_id,
-        dead_id,
-    );
-}
-
-fn mix(x: i32, z: i32) u32 {
-    var h: u32 = @bitCast(x *% 374761393 +% z *% 668265263);
-    h ^= h >> 13;
-    h *%= 1274126177;
-    return h;
 }
 
 test "vector3i pack roundtrip bits" {
@@ -324,52 +456,159 @@ test "PackageWriter rejects undersized buffer and bad cap" {
     try std.testing.expectError(error.TooManyDecos, pw.push(o));
 }
 
-fn flatHeight(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-    _ = wx;
-    _ = wz;
-    const h: *const u16 = @ptrCast(@alignCast(ctx.?));
-    return h.*;
+/// Test world: one flat height everywhere and one species list everywhere.
+const TestWorld = struct {
+    height: u16 = 40,
+    list: SpeciesList = .{},
+
+    fn heightAt(ctx: ?*anyopaque, _: i32, _: i32) u16 {
+        const self: *const TestWorld = @ptrCast(@alignCast(ctx.?));
+        return self.height;
+    }
+
+    fn speciesAt(ctx: ?*anyopaque, _: i32, _: i32) SpeciesList {
+        const self: *const TestWorld = @ptrCast(@alignCast(ctx.?));
+        return self.list;
+    }
+
+    fn sampler(self: *TestWorld) Sampler {
+        return .{ .height_at = heightAt, .species_at = speciesAt, .ctx = self };
+    }
+};
+
+fn twoSpecies() SpeciesList {
+    var l: SpeciesList = .{};
+    l.items[0] = .{ .block_id = 100, .prob = 0.06 };
+    l.items[1] = .{ .block_id = 200, .prob = 0.07 };
+    l.n = 2;
+    return l;
 }
 
-test "generateAroundIds is deterministic and only emits supplied ids" {
-    var h: u16 = 40;
-    var a: [512]DecoObj = undefined;
-    var b: [512]DecoObj = undefined;
-    const na = generateAroundIds(&a, 0, 0, 48, 48, flatHeight, &h, 29, 100, 200);
-    const nb = generateAroundIds(&b, 0, 0, 48, 48, flatHeight, &h, 29, 100, 200);
+const full_window: Window = .{ .x0 = -1_000_000, .z0 = -1_000_000, .x1 = 1_000_000, .z1 = 1_000_000 };
+
+test "deco chunk sampling is deterministic and only emits supplied ids" {
+    var w: TestWorld = .{ .list = twoSpecies() };
+    var a: [attempts_per_deco_chunk]DecoObj = undefined;
+    var b: [attempts_per_deco_chunk]DecoObj = undefined;
+    const na = generateForDecoChunk(&a, -2, 3, 12345, full_window, w.sampler());
+    const nb = generateForDecoChunk(&b, -2, 3, 12345, full_window, w.sampler());
     try std.testing.expectEqual(na, nb);
     try std.testing.expect(na > 0);
     try std.testing.expectEqualSlices(DecoObj, a[0..na], b[0..nb]);
-    var saw_oak = false;
-    var saw_dead = false;
+    // A different seed must place differently, or a restart replays one layout.
+    var c: [attempts_per_deco_chunk]DecoObj = undefined;
+    const nc = generateForDecoChunk(&c, -2, 3, 999, full_window, w.sampler());
+    try std.testing.expect(nc != na or !std.mem.eql(u8, std.mem.asBytes(&a[0]), std.mem.asBytes(&c[0])));
+
+    var saw_a = false;
+    var saw_b = false;
     for (a[0..na]) |o| {
         try std.testing.expect(o.block_raw == 100 or o.block_raw == 200);
-        saw_oak = saw_oak or o.block_raw == 100;
-        saw_dead = saw_dead or o.block_raw == 200;
+        saw_a = saw_a or o.block_raw == 100;
+        saw_b = saw_b or o.block_raw == 200;
         try std.testing.expectEqual(deco_state_active, o.state);
-        // Placed one above the surface, realYPos == block Y (stock: (int)(y+0.5)).
-        try std.testing.expectEqual(@as(i32, h + 1), o.y);
+        // One above the surface, realYPos == block Y (stock: (int)(y + 1 + 0.5)).
+        try std.testing.expectEqual(@as(i32, w.height + 1), o.y);
         try std.testing.expectEqual(@as(f32, @floatFromInt(o.y)), o.real_y);
+        // Inside the deco chunk it was asked to decorate.
+        try std.testing.expect(o.x >= -256 and o.x < -128);
+        try std.testing.expect(o.z >= 384 and o.z < 512);
     }
-    try std.testing.expect(saw_oak and saw_dead);
+    try std.testing.expect(saw_a and saw_b);
 }
 
-test "generateAroundIds skips unusable surface heights" {
-    var h: u16 = 0;
-    var out: [64]DecoObj = undefined;
-    try std.testing.expectEqual(@as(usize, 0), generateAroundIds(&out, 0, 0, 64, 64, flatHeight, &h, 29, 1, 2));
-    h = 251;
-    try std.testing.expectEqual(@as(usize, 0), generateAroundIds(&out, 0, 0, 64, 64, flatHeight, &h, 29, 1, 2));
+test "deco density tracks the biome probabilities" {
+    var w: TestWorld = .{ .list = twoSpecies() };
+    var out: [attempts_per_deco_chunk]DecoObj = undefined;
+    const n = generateForDecoChunk(&out, 0, 0, 7, full_window, w.sampler());
+    // p(accept) per attempt = 1 - (1 - .07*2)(1 - .06*2) ~= .243, minus the
+    // keep-out rejections. Wide band: this asserts the probabilities drive the
+    // count at all, not a tuned constant.
+    try std.testing.expect(n > 80 and n < 243);
+
+    // Ten times the probability must place materially more.
+    var dense: SpeciesList = .{};
+    dense.items[0] = .{ .block_id = 100, .prob = 0.6 };
+    dense.items[1] = .{ .block_id = 200, .prob = 0.7 };
+    dense.n = 2;
+    w.list = dense;
+    const nd = generateForDecoChunk(&out, 0, 0, 7, full_window, w.sampler());
+    try std.testing.expect(nd > n);
+
+    // Zero probability places nothing, and neither does an empty list.
+    var zero: SpeciesList = .{};
+    zero.items[0] = .{ .block_id = 100, .prob = 0 };
+    zero.n = 1;
+    w.list = zero;
+    try std.testing.expectEqual(@as(usize, 0), generateForDecoChunk(&out, 0, 0, 7, full_window, w.sampler()));
+    w.list = .{};
+    try std.testing.expectEqual(@as(usize, 0), generateForDecoChunk(&out, 0, 0, 7, full_window, w.sampler()));
 }
 
-test "generateForTerrainChunkIds stays inside its chunk" {
-    var h: u16 = 40;
-    var out: [chunk_side * chunk_side]DecoObj = undefined;
-    const n = generateForTerrainChunkIds(&out, -3, 5, flatHeight, &h, 17, 11, 12);
-    for (out[0..n]) |o| {
-        try std.testing.expect(o.x >= -48 and o.x < -32);
-        try std.testing.expect(o.z >= 80 and o.z < 96);
+test "deco sampling skips unusable surface heights" {
+    var w: TestWorld = .{ .height = 0, .list = twoSpecies() };
+    var out: [attempts_per_deco_chunk]DecoObj = undefined;
+    try std.testing.expectEqual(@as(usize, 0), generateForDecoChunk(&out, 0, 0, 1, full_window, w.sampler()));
+    w.height = 251;
+    try std.testing.expectEqual(@as(usize, 0), generateForDecoChunk(&out, 0, 0, 1, full_window, w.sampler()));
+}
+
+test "window clipping drops outside cells without moving the kept ones" {
+    var w: TestWorld = .{ .list = twoSpecies() };
+    var all: [attempts_per_deco_chunk]DecoObj = undefined;
+    var half: [attempts_per_deco_chunk]DecoObj = undefined;
+    const n_all = generateForDecoChunk(&all, 0, 0, 42, full_window, w.sampler());
+    const clip: Window = .{ .x0 = 0, .z0 = 0, .x1 = 64, .z1 = 128 };
+    const n_half = generateForDecoChunk(&half, 0, 0, 42, clip, w.sampler());
+    try std.testing.expect(n_half > 0 and n_half < n_all);
+    for (half[0..n_half]) |o| try std.testing.expect(clip.contains(o.x, o.z));
+    // Every clipped object is also in the unclipped run, at the same spot.
+    for (half[0..n_half]) |o| {
+        var found = false;
+        for (all[0..n_all]) |o2| {
+            if (std.meta.eql(o, o2)) found = true;
+        }
+        try std.testing.expect(found);
     }
+}
+
+test "keep-out spacing holds and the attempt cap bounds the output" {
+    var dense: SpeciesList = .{};
+    dense.items[0] = .{ .block_id = 100, .prob = 1.0 };
+    dense.n = 1;
+    var w: TestWorld = .{ .list = dense };
+    var out: [attempts_per_deco_chunk]DecoObj = undefined;
+    const n = generateForDecoChunk(&out, 0, 0, 3, full_window, w.sampler());
+    try std.testing.expect(n > 0);
+    try std.testing.expect(n <= attempts_per_deco_chunk);
+    // 5x5 keep-out: no two objects may sit within 2 cells on both axes.
+    for (out[0..n], 0..) |a, i| {
+        for (out[0..n], 0..) |b, j| {
+            if (i == j) continue;
+            const dx = if (a.x > b.x) a.x - b.x else b.x - a.x;
+            const dz = if (a.z > b.z) a.z - b.z else b.z - a.z;
+            try std.testing.expect(dx > 2 or dz > 2);
+        }
+    }
+}
+
+test "output buffer overflow does not change what fits" {
+    var w: TestWorld = .{ .list = twoSpecies() };
+    var big: [attempts_per_deco_chunk]DecoObj = undefined;
+    var small: [8]DecoObj = undefined;
+    const n_big = generateForDecoChunk(&big, 5, -7, 11, full_window, w.sampler());
+    const n_small = generateForDecoChunk(&small, 5, -7, 11, full_window, w.sampler());
+    try std.testing.expectEqual(small.len, n_small);
+    try std.testing.expect(n_big > n_small);
+    try std.testing.expectEqualSlices(DecoObj, big[0..n_small], small[0..n_small]);
+}
+
+test "deco chunk mapping is floor division" {
+    try std.testing.expectEqual(@as(i32, 0), worldToDecoChunk(0));
+    try std.testing.expectEqual(@as(i32, 0), worldToDecoChunk(127));
+    try std.testing.expectEqual(@as(i32, 1), worldToDecoChunk(128));
+    try std.testing.expectEqual(@as(i32, -1), worldToDecoChunk(-1));
+    try std.testing.expectEqual(@as(i32, -2), worldToDecoChunk(-129));
 }
 
 test "deco plant/tree runtime block ids" {

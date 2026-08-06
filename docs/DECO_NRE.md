@@ -93,13 +93,34 @@ now only sent when `deco_trees` is off (no objects in flight to disturb).
 
 ## What ships
 
-- `Game.sendDecoAroundSpawn(c, peer, wx, wz)` at `RequestToEnterGame`: resolve ids
-  → generate per terrain chunk over the join view square → stream through
-  `stock_deco.PackageWriter` (first `true`, continuations `false`).
+- `Game.sendBlockIdMapping(peer)` at `RequestToEnterGame`, immediately **before**
+  `sendLocalConfigFiles`: the full AssignIds dump as a `blocks` `NameIdMapping`,
+  so the client's `Block::AssignIds` uses our ids instead of computing its own.
+  Same slot stock uses (`'<RequestToEnterGame>d__195'::MoveNext` IL_01e3,
+  asm.il 1872978), because the client only runs `AssignIds` after the ConfigFile
+  package (`'<LoadBlocks>d__16'::MoveNext` IL_0058, asm.il 2014542).
+  Kill switch: `[feature] block_id_mapping = false`.
+- `Game.sendDecoAroundSpawn(c, peer, wx, wz)` at `RequestToEnterGame`: iterate the
+  128x128 deco chunks intersecting the join view square, run
+  `stock_deco.generateForDecoChunk` on each, mirror every placed object into the
+  block store, stream through `stock_deco.PackageWriter` (first `true`,
+  continuations `false`).
+- Species and density come from biomes.xml. `assets/biome_layers.zig` parses each
+  biome's own `<decorations>` group (the one outside `<subbiome>`, which is what
+  `IBiomeProvider::GetBiomeOrSubAt` resolves to for most cells), keeps only
+  `type="block"` rows whose block resolves *and* carries `IsDistantDecoration`
+  after `Extends` resolution, and stores `prob` unscaled. That filter is what
+  keeps grass out: `treeShortGrass` sits at prob .85 but extends
+  `treeGrassMaster`, which does not set the flag.
 - Covered window = the same chunk radius `streamChunksForClient` uses
   (`view_radius` clamped to `chunk_stream_radius_{min,max}` and to
   `max_streamed_chunks`), so `heightWorld`'s `getOrCreate` only touches chunks the
-  join streams anyway. Default r=6..7 → ~1.5k objects, one package, ~25 KiB.
+  join streams anyway. Objects are capped at `deco_objects_per_join` (8192).
+- The mirror (`world/deco_mirror.zig`, `[feature] deco_mirror`) writes each object
+  through `Chunk.setBlockDecoRaw`, which deliberately does **not** move the
+  terrain surface height: `heights` feeds spawn placement, void rescue, movement
+  validation and the deco height callback itself, and a 7 tall tree would push the
+  column surface to the treetop.
 - Kill switch: `[feature] deco_trees = false` → today's empty firstPackage.
 
 ## Honest gaps
@@ -110,26 +131,43 @@ now only sent when `deco_trees` is off (no objects in flight to disturb).
    `loadedDecos != null` branch, IL_04b1..IL_0528) while `decorateChunkRandom`
    early-returns on a fixed-size world (asm.il 1261400). Sending the whole
    6144×6144 map at this density would be ~1.3M objects / ~22 MB at join.
-2. **No client id negotiation.** Ids come from the bundled V3.1.4 AssignIds dump,
-   not the connected client. `idByName` fails closed only when the *name* is
-   absent from our dump; it cannot detect that a modded / different-version client
-   computed a different id for the same name. On skew the client throws inside its
-   world-load coroutine. zdtd sends no `blocks` `NameIdMapping` (it sends the
-   `blocks` config with payload length -1 → `EClientFileState.LoadLocal`), and
-   adding one is a separate change. Use the kill switch on non-V3.1.x clients.
-3. **Server does not mirror the client writeback.** `ChunkCluster::LightChunk` →
-   `addDistantDecorationBlocks` (asm.il 1122638) pulls
-   `DecoManager.GetDecorationsOnChunk` and `SetBlockRaw`s the tree into the
-   client's chunk. The zdtd world store has air there, so client-side collision
-   and harvest targets exist that the server does not know about
-   (`treeOakSml01` is `MultiBlockDim 1,7,1`, `BigDecorationRadius 4`;
-   `treeDeadTree02` is single-block). Mirroring deco into the world store is a
-   larger separate change.
-4. **Density / species are not stock.** `generateAroundIds` is a deterministic
-   xorshift hash over two species. Stock drives placement from
-   `BiomeDefinition.m_DistantDecoBlocks`, Perlin resource noise, per-biome
-   probability and occupied-map rejection (1000 attempts per 128×128 deco chunk).
-   Plausible deterministic trees, not stock-equivalent ones.
+2. **Id negotiation is unproven on a live client.** The `blocks` mapping ships and
+   is byte-checked against `NameIdMapping::SaveToWriter` / `LoadFromReader`, but
+   no zdtd test can catch a wrong outcome: encode and decode share code, and the
+   failure mode is silent. `LoadFromArray` swallows every exception
+   (asm.il 1178553), leaves `Block.nameIdMapping` non-null, and
+   `assignIdsFromMapping` + `assignLeftOverBlocks` then renumber whatever the blob
+   failed to name, with no client-side error. The builder is therefore
+   all-or-nothing: any validation failure, an empty dump, or a compressed frame
+   that does not fit skips the package and leaves the old LoadLocal behaviour.
+   Validation still needs a live V3.1.x run reading the client log for
+   "Received mapping data for: blocks", then "Block IDs with mapping", then a sane
+   "Block IDs total {0}, terr {1}, last {2}".
+   Sizes measured from the bundled dump: 24808 rows, 953,013 raw bytes,
+   ~260 KB after raw deflate (~198 reliable fragments). The frame is built in
+   `body_buf` (512 KiB), not `send_buf` (256 KiB), for headroom.
+3. **The mirror is not the full stock writeback.** `world/deco_mirror.zig` matches
+   `addDistantDecorationBlocks` for what zdtd can represent: single blocks into
+   air only, multiblock parent plus `ischild` children with negated parent
+   offsets, skip when the anchor is already a decoration. It does not write
+   stability 15 (no stability plane) and does not re-apply density explicitly
+   (the cell's density is simply left alone, which is what
+   `SetDensityRaw(previous)` amounts to). Rotation is always 0, so the child
+   offsets are the axis-aligned `MultiBlockDim` box.
+4. **Sampling is stock-shaped, not stock-identical.** `generateForDecoChunk`
+   reproduces the 128x128 deco chunk, the 1000 attempts, the 5x5 keep-out, the
+   last-to-first species walk and the `prob * 0.125f * 16f` accept rule. It does
+   not reproduce `GameRandom` (a splitmix64 seeded from world seed + deco chunk
+   coords stands in), does not evaluate `CheckOreNoiseAt` (no server-side resource
+   Perlin, and every `checkresource` row in stock biomes.xml is a `type="prefab"`
+   row zdtd does not send anyway), does not grade occupancy by
+   `BigDecorationRadius`, and does not evaluate subbiome noise.
+   Consequence worth knowing before an operator files a bug: this is materially
+   **sparser** than the old flat `deco_every_n = 29`. Stock's main-biome
+   distant-deco probabilities are tiny (pine_forest's own group has
+   `treeJuniper4m` at prob .001), because stock's dense forests come from the
+   world generator baking trees into chunks, not from `decorateChunkRandom`.
+   The burst now shows what biomes.xml actually asks for.
 5. **Live-validated 2026-08-05** against a stock **V3.0.1 b4** client:
    server `DecoUpdate objs=1488 pkgs=1 r=6 oak=24629 dead=24626`, client
    `[DECO] read 1488`, **0 exceptions** in the client log, and world load
@@ -156,6 +194,7 @@ Dump ids: `treeOakSml01` 24629, `treeDeadTree02` 24626
 
 ## A08/A22 pin labels
 
-`Game.decoTreeIds` is the live path and uses runtime `idByName` only. The numeric
-constants in `stock_deco.zig` / `assignids_comptime.zig` are offline/test labels
-(CI-checked against the dump) and are never sent.
+`Game.decoSpeciesAt` is the live path: biome map → biomes.xml `<decorations>` →
+runtime `idByName`, never a pinned constant. The numeric constants in
+`stock_deco.zig` / `assignids_comptime.zig` are offline/test labels (CI-checked
+against the dump) and are never sent.

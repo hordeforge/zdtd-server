@@ -40,6 +40,13 @@ wire_chunks = true
 # the empty firstPackage only (bald world) when the client's block AssignIds may
 # differ from the bundled V3.1.4 dump, e.g. a modded or other-version client.
 deco_trees = true
+# Write the join deco burst into the server block store, so collision and harvest
+# agree with what the client renders. False leaves deco render-only.
+deco_mirror = true
+# Send the full "blocks" NameIdMapping before the config files, so the client
+# assigns block ids from our AssignIds dump instead of its own blocks.xml. Set
+# false for a modded client whose block set differs from ours.
+block_id_mapping = true
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]
