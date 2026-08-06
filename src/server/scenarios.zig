@@ -65,6 +65,53 @@ test "scenario two-peer motion: B receives A PosAndRot" {
     );
 }
 
+test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_relpos");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_relpos", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    try std.testing.expect(ca.entity_id > 0);
+    try std.testing.expect(cb.entity_id > 0);
+
+    // A moves through the relative package (the dominant stock motion path).
+    // Body layout per the RelPos arm: eid i32 | 7 bytes pad | dx/dy/dz i16.
+    var rel: [32]u8 = undefined;
+    @memset(&rel, 0);
+    std.mem.writeInt(i32, rel[0..4], ca.entity_id, .little);
+    std.mem.writeInt(i16, rel[11..13], 32, .little); // dx = 32 * 0.03125 = 1.0
+    var frame_buf: [128]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageEntityRelPosAndRot", rel[0..20]);
+    try g.injectFramed(ca, framed);
+
+    cap_a.clear();
+    cap_b.clear();
+    try g.replicateNow();
+
+    // B must see A's new position on the next replicate (dirty relay), not
+    // only on the 5-tick heartbeat; A must not echo its own motion.
+    const pos_id = packages.idOf("NetPackageEntityPosAndRot").?;
+    const b_body = cap_b.findPkgIdEntity(pos_id, ca.entity_id);
+    try std.testing.expect(b_body != null);
+    if (b_body) |bb| {
+        const parsed = try packages.parsePosAndRotBody(bb);
+        try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
+    }
+    try std.testing.expect(cap_a.findPkgIdEntity(pos_id, ca.entity_id) == null);
+    std.debug.print("PASS relpos-motion: B received PosAndRot relay for A after RelPos inject\n", .{});
+}
+
 test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_sc_dmg");

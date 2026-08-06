@@ -1763,16 +1763,21 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             const y = if (w.mask[i].transform) w.transform[i].y else 0;
             const z = if (w.mask[i].transform) w.transform[i].z else 0;
             const zid: i32 = if (w.mask[i].network_id) w.network_id[i].id else -1;
+            // Same drop_prob roll as player kills (class_id LootDropProb);
+            // read before destroy, which clears the mask.
+            const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
             w.destroy(i);
             out.kills += 1;
             if (zid > 0 and out.killed_n < out.killed_ids.len) {
                 out.killed_ids[out.killed_n] = zid;
                 out.killed_n += 1;
             }
-            if (w.spawnLootBag(x, y, z, 1, 5)) |lid| {
-                if (out.loot_n < out.loot_bag_ids.len) {
-                    out.loot_bag_ids[out.loot_n] = lid;
-                    out.loot_n += 1;
+            if (w.rollLootDrop(zid, drop_prob)) {
+                if (w.spawnLootBag(x, y, z, 1, 5)) |lid| {
+                    if (out.loot_n < out.loot_bag_ids.len) {
+                        out.loot_bag_ids[out.loot_n] = lid;
+                        out.loot_n += 1;
+                    }
                 }
             }
         }

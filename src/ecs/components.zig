@@ -318,6 +318,13 @@ pub const Journal = struct {
         }
         return false;
     }
+
+    pub fn anyActive(self: *const Journal) bool {
+        for (self.slots) |s| {
+            if (s.active and !s.completed) return true;
+        }
+        return false;
+    }
 };
 
 pub const Wallet = struct {

@@ -4917,6 +4917,10 @@ pub const Game = struct {
                         .z = @as(f32, @floatFromInt(surf.z)),
                         .yaw = 0,
                     };
+                    // Raw column writes bypass the markDirty funnel; raise the
+                    // bits so hp/pos relays reach in-range peers instead of
+                    // waiting for the 5-tick heartbeat.
+                    self.sim.markDirty(si, .{ .pos = true, .hp = true });
                     if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
                         try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                     } else |_| {}
@@ -4977,7 +4981,12 @@ pub const Game = struct {
                 systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
                 return;
             }
-            self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
+            // Keep the stored facing: the absolute package's rotation is not
+            // parsed into the column, so passing 0 would fabricate a north
+            // facing on every move (RelPos preserves it). setPos marks dirty.
+            var yaw: f32 = 0;
+            if (self.sim.slotOfNetId(p.entity_id)) |si| yaw = self.sim.transform[si].yaw;
+            self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
             self.noteAcceptedMove(c, env.x, env.y, env.z);
             systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
             systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
@@ -5005,10 +5014,30 @@ pub const Game = struct {
                             return;
                         }
                         if (self.sim.mask[ps].inventory and self.sim.mask[bs].inventory) {
+                            // Same transfer rule as systems.collectLootNear: only a
+                            // full deposit destroys the bag; a partial one restores
+                            // the player inventory and keeps the bag alive so the
+                            // rest is not silently deleted.
+                            const inventory_before = self.sim.inventory[ps];
+                            var transferred = true;
                             for (self.sim.inventory[bs].slots) |slot| {
                                 if (slot.count == 0 or slot.item_id == 0) continue;
-                                _ = self.sim.depositItem(ps, slot.item_id, slot.count);
+                                if (!self.sim.depositItem(ps, slot.item_id, slot.count)) {
+                                    transferred = false;
+                                    break;
+                                }
                             }
+                            if (!transferred) {
+                                self.sim.inventory[ps] = inventory_before;
+                                return;
+                            }
+                            for (self.sim.inventory[bs].slots) |slot| {
+                                if (slot.count == 0 or slot.item_id == 0) continue;
+                                const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
+                                const p: u16 = if (c.slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(c.slot);
+                                self.sim.inv_ledger.record(p, slot.item_id, d, .loot);
+                            }
+                            self.sim.markDirty(ps, .{ .inv = true });
                         }
                     }
                     if (self.sim.alive[bs]) self.sim.destroy(bs);
@@ -5564,6 +5593,10 @@ pub const Game = struct {
                 self.sim.transform[idx].x = env.x;
                 self.sim.transform[idx].y = env.y;
                 self.sim.transform[idx].z = env.z;
+                // RelPos bypasses setPos, so raise the dirty bit through the
+                // markDirty funnel or the replicate pass (dirty-bits candidate
+                // set) would relay this mover only on the 5-tick heartbeat.
+                self.sim.markDirty(idx, .{ .pos = true });
                 // RelPos can walk Y into void without absolute PosAndRot; re-snap.
                 if (try self.rescueDeepVoid(peer, eid, env.x, env.y, env.z, true)) |ry| {
                     self.noteAcceptedMove(c, env.x, ry, env.z);
@@ -5618,7 +5651,9 @@ pub const Game = struct {
                 self.noteAcceptedMove(c, env.x, ny, env.z);
                 return;
             }
-            self.sim.setPos(p.entity_id, env.x, env.y, env.z, 0);
+            var yaw: f32 = 0;
+            if (self.sim.slotOfNetId(p.entity_id)) |si| yaw = self.sim.transform[si].yaw;
+            self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
             self.noteAcceptedMove(c, env.x, env.y, env.z);
             // Clamped: the owner already got a correction; peers pick the true
             // position up on the next motion pass rather than the raw claim.
@@ -5813,21 +5848,32 @@ pub const Game = struct {
             return;
         }
         // Quest-spawned enemy: client asks server to spawn from a quest group.
-        // Body: playerEntityId i32 | groupName str | count i32. Spawn `count`
-        // default zombies near the player (full gamestage group roll deferred).
+        // Body: playerEntityId i32 | groupName str | count i32. Stock only
+        // honors this while the player runs a quest whose def names the group;
+        // the group catalog is not modeled yet, so the gate is: an active quest
+        // of any def (fail closed), the shared block token, and the entity cap.
         if (std.mem.eql(u8, name, "NetPackageQuestEntitySpawn")) {
+            if (!self.takeBlockToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             var r: wire_binary.Reader = .{ .data = body };
             _ = r.readI32() catch return; // player entity id
             var gname: [64]u8 = undefined;
             _ = r.readString(&gname) catch return;
             const cnt = r.readI32() catch 1;
             const ps = self.sim.playerByPeer(c.slot) orelse return;
+            if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
+                self.harness.counters.inc(.c2s_rejects);
+                return;
+            }
             const t = self.sim.transform[ps];
             const zdef = self.entities.defaultZombie();
             var k: i32 = 0;
             while (k < cnt and k < 8) : (k += 1) {
                 const ang = @as(f32, @floatFromInt(k)) * 1.4;
-                _ = self.sim.spawnZombieClass(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zdef.hash, zdef.loot_list);
+                // Stop at the entity cap instead of spinning on null spawns.
+                if (self.sim.spawnZombieClass(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zdef.hash, zdef.loot_list) == null) break;
             }
             return;
         }
@@ -6535,6 +6581,12 @@ pub const Game = struct {
             const x = std.mem.readInt(i32, body[0..4], .little);
             const y = std.mem.readInt(i32, body[4..8], .little);
             const z = std.mem.readInt(i32, body[8..12], .little);
+            // Same rate gate as SetBlock: a spam loop must not plant turrets
+            // faster than the bucket refills and drain the entity table.
+            if (!self.takeBlockToken(c)) {
+                self.harness.counters.inc(.c2s_throttle);
+                return;
+            }
             // Client-chosen coordinates: same reach + claim gate as SetBlock, so a
             // spam loop cannot plant turrets map-wide and drain the entity table.
             if (!self.placeAllowed(c, x, y, z)) return;

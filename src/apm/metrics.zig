@@ -46,6 +46,8 @@ pub const CounterId = enum(u16) {
     c2s_throttle,
     /// Malformed decode / unexpected package body (flood signal).
     c2s_malformed,
+    /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
+    c2s_rejects,
     /// Peer reconnects after prior join (churn signal).
     reconnects,
     /// Evidence JSONL lines written (observe).

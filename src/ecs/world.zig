@@ -624,6 +624,19 @@ pub const World = struct {
         return id;
     }
 
+    /// Deterministic per-entity loot drop roll, shared by player damage and
+    /// turret kills. Stock uses the world GameRandom; the net id is stable
+    /// within a run, so the same inputs give the same outcomes. drop_prob is
+    /// clamped to [0,1] at load; >= 1 always drops.
+    pub fn rollLootDrop(self: *const World, net_id: i32, drop_prob: f32) bool {
+        _ = self;
+        if (drop_prob >= 1.0) return true;
+        var h: u64 = @intCast(net_id);
+        h = h *% 1103515245 +% 12345;
+        h = (h >> 16) ^ h;
+        return h % 1000 < @as(u64, @intFromFloat(drop_prob * 1000));
+    }
+
     pub fn spawnLootBag(self: *World, x: f32, y: f32, z: f32, item_id: u16, count: u16) ?NetId {
         const s = self.spawnBase(.loot_bag, x, y, z, 1) orelse return null;
         self.mask[s].loot_bag = true;
@@ -724,16 +737,9 @@ pub const World = struct {
                 const drop_prob = if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0;
                 const nid = self.network_id[s].id;
                 self.destroy(s);
-                if (drop_prob < 1.0) {
-                    // Deterministic per-entity roll (stock uses the world
-                    // GameRandom; the net id is stable within a run). zPackReg
-                    // is a 4% bag: most kills drop nothing, like stock.
-                    var h: u64 = @intCast(nid);
-                    h = h *% 1103515245 +% 12345;
-                    h = (h >> 16) ^ h;
-                    if (h % 1000 >= @as(u64, @intFromFloat(drop_prob * 1000))) {
-                        return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name };
-                    }
+                if (!self.rollLootDrop(nid, drop_prob)) {
+                    // zPackReg is a 4% bag: most kills drop nothing, like stock.
+                    return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name };
                 }
                 const loot = self.spawnLootBag(x, y, z, 1, 5);
                 return .{

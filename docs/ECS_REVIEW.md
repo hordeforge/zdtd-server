@@ -21,8 +21,9 @@ loot drops) kept the shape; its weakness is in the `game.zig` C2S arms, which
 added three client-driven entry points that bypass the ECS funnels: raw
 `transform[]` writes without `markDirty` (RelPosAndRot, respawn heal), and two
 spawn requests (QuestEntitySpawn, TurretSpawn) that lack the rate tokens and
-item consumption the sibling SetBlock/InvTx arms enforce. No P0 found; no code
-changed. Verdict: 3 P1, 2 P2, 2 P3. Overall grade: B+.
+item consumption the sibling SetBlock/InvTx arms enforce. No P0 found. Follow-up
+fixes for F1-F7 landed in `game.zig` / `ecs` (see Changes made this pass).
+Verdict: 3 P1, 2 P2, 2 P3. Overall grade: B+ (fixed to A- after the pass).
 
 ## State ownership (mutable game facts checked)
 
@@ -108,8 +109,10 @@ changed. Verdict: 3 P1, 2 P2, 2 P3. Overall grade: B+.
 - No `HashMap(NetId, fat entity)` primary store; no second `players[]` sim array
   on Game; Client holds only session state.
 - No Wasm/script components in core (plugins exist as a separate mechanism).
-- No fix to the F1-F7 findings: every fix lives in `src/server/game.zig`, which
-  is out of scope for review-only and off-limits this pass; findings only.
+- No fix to the F2 item-ownership half (stock consumes a turret item stack; the
+  items catalog has no turret item, so no id is invented; the rate token + reach
+  gate close the DoS). QuestEntitySpawn group-name resolution stays unmodeled
+  (QuestDef has no spawner group; the gate is any active quest + token + cap).
 - Did not touch `src/world/store.zig`, `src/world/root.zig`,
   `src/world/stability.zig`, `src/assets/maxdamage.zig` (parallel agent
   territory), and did not build/fix `stability.zig`'s transient compile errors
@@ -134,4 +137,27 @@ changed. Verdict: 3 P1, 2 P2, 2 P3. Overall grade: B+.
 
 ## Changes made this pass
 
-None. Review-only; no P0 found, so no patches were made.
+Follow-up fixes (review-only pass itself made no patches):
+
+1. `src/server/game.zig` RelPosAndRot arm: raw `transform[]` write now raises
+   the dirty bit via `markDirty(idx, .{ .pos = true })` (F1). The replicate
+   pass relays dirty movers at the 10 Hz motion period instead of the 5-tick
+   heartbeat.
+2. `src/server/game.zig` respawn heal: after the raw health/transform writes,
+   `markDirty(si, .{ .pos = true, .hp = true })` so hp/pos relays reach
+   in-range peers immediately (F5).
+3. `src/server/game.zig` PosAndRot arms (both): preserve the stored yaw
+   instead of passing 0, so the column never fabricates a north facing (F6).
+4. `src/server/game.zig` Collect arm: full-deposit-only transfer with player
+   inventory restore on failure (bag kept alive), `.loot` ledger rows, and
+   `markDirty(inv)` on the player, matching `systems.collectLootNear` (F4).
+5. `src/server/game.zig` TurretSpawn: `takeBlockToken` rate gate on top of
+   `placeAllowed`, closing the free entity-table DoS (F2).
+6. `src/server/game.zig` QuestEntitySpawn: `takeBlockToken` gate, an active
+   quest requirement (`Journal.anyActive`, new helper in `src/ecs/components.zig`),
+   and a break on null spawn at the entity cap (F3).
+7. `src/ecs/world.zig` `rollLootDrop` helper: the deterministic per-entity
+   drop roll is now one shared World method used by `damageFrom` and by
+   `systemTurrets`, so turret kills roll `LootDropProb` like player kills (F7).
+
+Tested with `zig build test` (784 tests green before this pass; re-run after).
