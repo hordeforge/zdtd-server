@@ -56,8 +56,11 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       and non-negative CalcNextDay jitter.
 - [x] **World integrity (T8 part)**: land claims removed with the keystone and
       expire offline (`LandClaimExpiryDays`), owner online tracked, block repair
-      takes the lower wire damage as new absolute. Stability/collapse remains
-      open (large subsystem; client-side collapse already desyncs).
+      takes the lower wire damage as new absolute. **Stability shipped**: the
+      per-block byte plane and falling-block trigger live in
+      `src/world/stability.zig`; a SetBlock that cuts a support fells the chain.
+      Remaining: `EntityFallingBlock` visual entities and per-chunk persistence
+      of the plane (stock does not persist it either).
 - [x] **C2S (T10)**: `NetPackagePlayerDisconnect` handled on the quit path (own
       entity only, immediate save + slot teardown); parity 0 unhandled dir=1.
 - [x] **Plugins (T9)**: zwasm v2 Wasm runtime (`src/plugin/wasm.zig`). `[plugin]

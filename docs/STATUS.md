@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-06  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **758** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly). Recount after large ECS/webui waves.
+**Unit tests:** `zig build test` → **788** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -63,11 +63,21 @@ observable, on the live stock client:
 - **World integrity (T8, part):** land claims now disappear with their keystone
   (`removeClaimAt`) and offline claims expire past `LandClaimExpiryDays`;
   `markClaimsForEntity` tracks owner online state; block repair takes the lower
-  wire damage as the new absolute (repair heals instead of weakening). Claim
-  persistence, the client lpBlocks overlay and the stability plane remain open.
+  wire damage as the new absolute (repair heals instead of weakening). The
+  **stability plane shipped**: `src/world/stability.zig` ports the stock
+  per-block byte plane (15 full / 1 cap / 0 falls) and a C2S SetBlock that cuts
+  a support fells the dependency chain with client-visible collapse broadcasts.
+  Claim persistence and the client lpBlocks overlay remain open.
 - **C2S (T10):** `NetPackagePlayerDisconnect` handled on the quit path (own
   entity only, immediate save + slot teardown). Parity coverage is now **0
   unhandled dir=1** (70 handled in game.zig). 775 total.
+- **Review passes (prompts dir):** the abstraction and ecs-soa reviews ran and
+  landed findings (`docs/ABSTRACTION_REVIEW.md`, `docs/ECS_REVIEW.md`); the
+  ecs-soa follow-up fixes are in: RelPosAndRot raises the dirty bit so movers
+  relay at the motion period instead of the heartbeat, the loot-bag Collect arm
+  restores on partial deposit and records ledger causes, QuestEntitySpawn and
+  TurretSpawn gained rate/quest gates, PosAndRot preserves the stored yaw, and
+  turret kills roll `LootDropProb` like player kills. 788 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 - **Visual round (stock client, 2026-08-06):** the automated playtest

@@ -96,7 +96,7 @@ run and is a snapshot, not a live inventory.
 | [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | [ZIG_REVIEW.md](ZIG_REVIEW.md) |
 | [prompts/abstractions-review.md](prompts/abstractions-review.md) | [ABSTRACTION_REVIEW.md](ABSTRACTION_REVIEW.md) |
 | [prompts/simd-review.md](prompts/simd-review.md) | [SIMD_REVIEW.md](SIMD_REVIEW.md) |
-| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | (folded into [ECS.md](ECS.md)) |
+| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | [ECS_REVIEW.md](ECS_REVIEW.md) |
 | [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) |
 
 ## Scale (parked until M11 numbers exist)

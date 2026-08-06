@@ -141,9 +141,9 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 19 | 19 | 13 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, no collapse |
+| [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **99** | **150** | **96** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **100** | **150** | **95** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -352,11 +352,14 @@ area and the concrete work.
     activity has zero consequence and the only threat between blood moons is a
     2-zombie drip every 45 s.
 
-24. **World: add the stability plane and falling blocks.**
-    The server has no stability model at all, while the stock client still runs
-    its own `StabilityCalculator` (`ChunkStabilityEnabled` is non-persistent and
-    defaults true, asm.il:1919743), so a structure can collapse client-side and
-    desync from the authoritative server.
+24. ~~**World: add the stability plane and falling blocks.**~~
+    **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
+    per-block byte plane (15 full / 1 non-support cap / 0 falls), reset +
+    distribute on first touch, and the incremental removal/placement paths
+    from `StabilityCalculator`/`ChannelCalculator` (RE: `../7dtd-research/docs/stability.md`).
+    A C2S SetBlock that removes a support block fells the dependency chain and
+    broadcasts the collapse; placing re-spreads from supported neighbours.
+    Support/ignore membership resolves from the block tables, not hardcoded.
 
 25. **Net: count and log unhandled C2S packages, then close the list.**
     35 packages the stock client genuinely sends fall off the end of
@@ -2681,18 +2684,18 @@ counter and land claims are each broken in specific, noticeable ways.
   Placing or removing a water source does nothing.
   *Anchors:* `src/wire/packages.zig:247-248`
 
-- **Block stability plane / structural support** `MISSING`
-  The chunk store has no stability plane at all. The server never computes support,
-  never marks a block unstable and never queues a fall. Worth noting: the stock
-  client **does** run its own `StabilityCalculator` (`ChunkCluster::Init` builds one
-  whenever `GetGameManager() != null`, and `ChunkStabilityEnabled` is
-  `bPersistent=false` with default true so it is not in the GameStats blob), so an
-  unsupported structure can collapse client-side and desync from the authoritative
-  server plane. The stock algorithm is now derived
-  (`../7dtd-research/docs/stability.md`, dumps + commit 989b9e3): per-block byte
-  plane, 15 full / 0 falls, spread rules, removal recompute, falling-block pump.
-  *Anchors:* `src/world/deco_mirror.zig:19-22`, `asm.il:1125631-1125637`,
-  `asm.il:1919743`, `asm.il:1095834-1095844`, `../7dtd-research/docs/stability.md`
+- **Block stability plane / structural support** `WORKS` `(2026-08-06)`
+  `src/world/stability.zig` ports the stock model: per-block byte plane (15 full
+  support, 1 cap for non-support, 0 is the only value that falls), reset +
+  distribute on first touch, and incremental removal/placement recompute.
+  `Game.stabilityAfterSetBlock` runs it on every C2S SetBlock: a removed support
+  block fells the recursed dependency chain and the caller removes + broadcasts
+  the fallen blocks; a placed block takes support from its neighbours and
+  re-spreads. Support/ignore membership comes from the maxdamage block tables.
+  Known gaps: a placed block that would fall instantly still stands until a
+  support change under it (stock seeds 15 everywhere too, so this matches stock);
+  no `EntityFallingBlock` visual entity (the client collapses locally).
+  *Anchors:* `src/world/stability.zig`, `../7dtd-research/docs/stability.md`
 
 - **Structural collapse / falling blocks** `MISSING`
   No falling-block entity, no `AddFallingBlock` equivalent, no `LetBlocksFall`. Cut
@@ -3669,7 +3672,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
 | RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
-| Density / stability / shape / paint | PARTIAL | density channel; stability/falling MISSING |
+| Density / stability / shape / paint | PARTIAL | density channel; stability plane WORKS (support/falling per `stability.zig`) |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
 | Stock `NetPackageChunk` blob | HAVE | `stock_chunk.zig` + upper24; live CGO |
 | `.ttc` region files | MISSING | custom ZCH3 `.zch` + blockmeta |

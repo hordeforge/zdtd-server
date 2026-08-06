@@ -69,6 +69,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (`save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan`
   sections and the matching counters) so operators can see whether it is worth
   turning on. See `zdtd.toml.example` and `docs/SCALE_ARCHITECTURE.md`.
+- Block stability and structural collapse: `src/world/stability.zig` ports the
+  stock per-block byte plane (15 full support, 1 cap on non-support blocks, 0
+  is the only value that falls). A chunk computes the plane once on first touch
+  (reset + distribute, matching stock seed semantics); a C2S SetBlock that
+  removes a support block fells the recursed dependency chain and the server
+  removes and broadcasts the fallen blocks, while a placement takes support
+  from its neighbours and re-spreads. Support and ignore membership resolve
+  from the block tables, not a hardcoded list. See
+  `../7dtd-research/docs/stability.md` for the RE ground.
 
 ### Fixed
 
@@ -80,6 +89,19 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   block. Prefab files older than format 18 are converted from the old
   `BlockValueV3` bit layout first, which covers 568 of Navezgane's 1559
   placements.
+- The ecs-soa review follow-up fixes are in: relative motion raises the dirty
+  bit so the replicate pass relays it at the motion period instead of the
+  5-tick heartbeat; respawn heal marks hp/pos dirty; the loot-bag Collect arm
+  restores the player inventory on a partial deposit and records ledger causes
+  instead of deleting the remainder; `QuestEntitySpawn` is gated on an active
+  quest and the shared block token, and `TurretSpawn` on the block token, so
+  neither can drain the entity table; the absolute PosAndRot arm preserves the
+  stored yaw instead of fabricating north; turret kills roll `LootDropProb`
+  like player kills (`World.rollLootDrop`).
+- A stability removal now reports the recursed dependency chain as fallen
+  (digging out a support column drops the structure above it), and the
+  stability tests build their world with explicit air above the surface so
+  biome-layer regen cannot smuggle extra blocks into the fixture.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
