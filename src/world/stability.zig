@@ -486,7 +486,10 @@ test "stability: terrain supports a column; cutting the base fells it" {
     }
     // First touch computes the plane for the column's chunk.
     const t = store.World.worldToChunk(2, 2);
-    const c = blk: { const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }; break :blk w.chunks.getPtr(p.hash()).?; };
+    const c = blk: {
+        const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
+        break :blk w.chunks.getPtr(p.hash()).?;
+    };
     try ensureComputed(w, c, gpa, null, testFacts);
     // Column base sits on terrain (15) and the blocks above inherit support.
     try testing.expectEqual(@as(u8, stability_full), c.stabilityAt(2, 60, 2));
@@ -520,7 +523,10 @@ test "stability: overhang beyond support falls after the support goes" {
     w.setBlockWorld(10, 61, 10, 1) catch unreachable;
     w.setBlockWorld(11, 61, 10, 1) catch unreachable;
     const t = store.World.worldToChunk(10, 10);
-    const c = blk: { const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }; break :blk w.chunks.getPtr(p.hash()).?; };
+    const c = blk: {
+        const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
+        break :blk w.chunks.getPtr(p.hash()).?;
+    };
     try ensureComputed(w, c, gpa, null, testFacts);
     // The overhang keeps the base's stability (sideways spread at the same level).
     try testing.expectEqual(@as(u8, stability_full), c.stabilityAt(11, 61, 10));
@@ -550,7 +556,10 @@ test "stability: non-support blocks cap at 1 and never carry support" {
     w.setBlockWorld(4, 60, 4, 2) catch unreachable;
     w.setBlockWorld(4, 61, 4, 1) catch unreachable;
     const t = store.World.worldToChunk(4, 4);
-    const c = blk: { const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }; break :blk w.chunks.getPtr(p.hash()).?; };
+    const c = blk: {
+        const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
+        break :blk w.chunks.getPtr(p.hash()).?;
+    };
     try ensureComputed(w, c, gpa, null, testFacts);
     // The non-support block caps at 1; the block above it is stable (15).
     try testing.expectEqual(@as(u8, 1), c.stabilityAt(4, 60, 4));
