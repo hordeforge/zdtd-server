@@ -8,6 +8,31 @@ const io_fs = @import("../util/io_fs.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
 const tts = @import("tts.zig");
 
+/// Quest-facing data from the prefab's `<name>.xml` (stock PrefabManager keeps
+/// the same per-POI index): the QuestTags activity list and the DifficultyTier
+/// used to filter quest POI assignment.
+pub const QuestData = struct {
+    /// Stock QuestTags value ("clear, fetch, infested"), "" when absent.
+    tags: []const u8 = "",
+    /// Stock DifficultyTier (1..6), 0 when absent.
+    tier: u8 = 0,
+};
+
+/// City parts (driveways, roads, sewer caps, ...) are never quest POIs.
+pub fn isPart(name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "part_");
+}
+
+/// Read the `value="..."` attribute of a `<property name="X" value="Y"/>` tag
+/// whose name attribute contains `needle`. Returns a slice into `raw`.
+fn propertyValueAfter(raw: []const u8, needle: []const u8) ?[]const u8 {
+    const ni = std.mem.indexOf(u8, raw, needle) orelse return null;
+    const vi = std.mem.indexOfPos(u8, raw, ni, "value=\"") orelse return null;
+    const start = vi + 7;
+    const end = std.mem.indexOfScalarPos(u8, raw, start, '"') orelse return null;
+    return raw[start..end];
+}
+
 /// Runtime block id for a stock block name (AssignIds space), null when the
 /// install has no such block. Supplied by the server from its AssignIds table.
 pub const IdLookup = struct {
@@ -48,6 +73,9 @@ pub const Index = struct {
     prefabs_root: []const u8 = "",
     /// Lazy .tts block cache keyed by decoration name (stable name_storage slices).
     tts_cache: std.StringHashMap(tts.TtsBlocks),
+    /// Lazy QuestTags/DifficultyTier cache keyed by decoration name (tags owned
+    /// by self.allocator; absent prefabs are cached with empty tags).
+    quest_cache: std.StringHashMap(QuestData),
     /// Runtime AssignIds resolver for the `.blocks.nim` remap; without it the
     /// prefab-local ids are stamped raw (offline / no id table).
     id_lookup: ?IdLookup = null,
@@ -56,6 +84,11 @@ pub const Index = struct {
         var it = self.tts_cache.iterator();
         while (it.next()) |e| e.value_ptr.deinit();
         self.tts_cache.deinit();
+        var qit = self.quest_cache.iterator();
+        while (qit.next()) |e| {
+            if (e.value_ptr.tags.len != 0) self.allocator.free(e.value_ptr.tags);
+        }
+        self.quest_cache.deinit();
         self.allocator.free(self.items);
         self.allocator.free(self.name_storage);
         if (self.prefabs_root.len != 0) self.allocator.free(self.prefabs_root);
@@ -215,6 +248,31 @@ pub const Index = struct {
         return self.tts_cache.getPtr(name);
     }
 
+    /// QuestTags + DifficultyTier from the prefab's `<name>.xml`, cached (lazy
+    /// like the tts cache; a missing XML or missing attrs caches empty data).
+    pub fn questData(self: *Index, name: []const u8) ?QuestData {
+        if (self.quest_cache.get(name)) |qd| return qd;
+        var qd: QuestData = .{};
+        var path_buf: [2048]u8 = undefined;
+        if (self.findPrefabPath(name, ".xml", &path_buf)) |path| {
+            const raw = io_fs.readFileAll(self.allocator, path) catch null;
+            if (raw) |content| {
+                defer self.allocator.free(content);
+                if (propertyValueAfter(content, "name=\"QuestTags\"")) |v| {
+                    qd.tags = self.allocator.dupe(u8, v) catch "";
+                }
+                if (propertyValueAfter(content, "name=\"DifficultyTier\"")) |v| {
+                    qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
+                }
+            }
+        }
+        self.quest_cache.put(name, qd) catch {
+            if (qd.tags.len != 0) self.allocator.free(qd.tags);
+            return null;
+        };
+        return self.quest_cache.get(name);
+    }
+
     /// Paint stock .tts blocks into world for decorations overlapping this chunk.
     /// Policy: paint full POIs always; paint `part_*` only when volume <= 24^3
     /// (skip huge RWG clutter parts). Ids come out of `getTtsBlocks` already
@@ -317,6 +375,7 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
             .items = try allocator.alloc(Decoration, 0),
             .name_storage = try allocator.alloc(u8, 0),
             .tts_cache = std.StringHashMap(tts.TtsBlocks).init(allocator),
+            .quest_cache = std.StringHashMap(QuestData).init(allocator),
         };
     }
 
@@ -381,6 +440,7 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
         .items = items,
         .name_storage = names,
         .tts_cache = std.StringHashMap(tts.TtsBlocks).init(allocator),
+        .quest_cache = std.StringHashMap(QuestData).init(allocator),
     };
     if (prefabs_data_dir) |root| {
         idx.prefabs_root = try allocator.dupe(u8, root);
@@ -737,4 +797,25 @@ test "prefab type ids remap through blocks.nim into runtime ids" {
         // The defect: those cells used to be stamped with the local id.
         try std.testing.expect(changed > 0);
     }
+}
+
+test "quest data and part filter from the stock install" {
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
+    var idx = try parseXml(std.testing.allocator,
+        \\<prefabs><decoration type="model" name="AAA_utility_waterworks" position="0,0,0" rotation="0" /></prefabs>
+    , root);
+    defer idx.deinit();
+    const qd = idx.questData("AAA_utility_waterworks").?;
+    try std.testing.expect(qd.tier == 1);
+    try std.testing.expect(std.mem.indexOf(u8, qd.tags, "fetch") != null);
+    try std.testing.expect(std.mem.indexOf(u8, qd.tags, "infested") != null);
+    // Cached negative: a name with no POI XML returns empty data, not an error.
+    const none = idx.questData("part_5m_water_tower").?;
+    try std.testing.expect(none.tags.len == 0 and none.tier == 0);
+    // City parts are never quest POIs; real POIs are.
+    try std.testing.expect(isPart("part_5m_water_tower"));
+    try std.testing.expect(isPart("part_driveway_01"));
+    try std.testing.expect(!isPart("AAA_utility_waterworks"));
+    try std.testing.expect(!isPart("house_old_01"));
 }

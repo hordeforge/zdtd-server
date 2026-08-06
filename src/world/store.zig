@@ -6,6 +6,7 @@
 const std = @import("std");
 const dtm = @import("dtm.zig");
 const prefabs_mod = @import("prefabs.zig");
+pub const prefabs = prefabs_mod;
 const water_mod = @import("water.zig");
 const biomes_mod = @import("biomes.zig");
 const worldgen_mod = @import("worldgen.zig");

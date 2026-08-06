@@ -583,7 +583,10 @@ because the per-objective Write shapes are wrong.
   tierLevel, asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing
   from a tier-1 list). Remaining: the 8-offer cap, the `quest_`/`tier` name
   filter dropping `intro_buried_supplies`, and fabricated QuestLocation
-  tx/ty/tz + POIName.
+  tx/ty/tz + POIName. The location fabrication is downstream of quest-POI
+  selection (QuestPrefabManager tag/tier matching, blocked on RE per the POI
+  rect row below); prefab QuestTags + DifficultyTier are now parsed and ready
+  for the selector.
   *Anchors:* `src/server/game.zig:6435`, `:5345`, `:5383`, `:6276`
 
 - **Trader quest ACCEPT** `WORKS`
@@ -1404,10 +1407,16 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/ecs/poi_lock.zig:19`, `:90`, `:115`, `asm.il:1001892-1002045`
 
 - **POI rect lookup for quests** `PARTIAL`
-  Returns the prefab AABB (correct and rotation-independent) but iterates all 1559
-  decorations linearly per query and does not exclude `part_*`, so a driveway or a
-  city sign can be returned as the POI a quest is anchored to.
-  *Anchors:* `src/server/game.zig:1455`, `src/world/prefabs.zig:66`
+  Returns the prefab AABB (correct and rotation-independent); `part_*` city
+  parts are now excluded, so a driveway or sign can no longer be the POI a
+  quest anchors to. The prefab Index also parses each POI's `QuestTags` +
+  `DifficultyTier` (`questData`). Still linear over all decorations per query,
+  and the POI a quest lands in is chosen from the fabricated `quests.xml`
+  coordinates, not stock's tag/tier/biome selection: QuestPrefabManager
+  (`PoiTag`, `QuestTags` filter, tier range) is not yet reversed in
+  `../7dtd-research/docs/quests-challenges.md`.
+  *Anchors:* `src/server/game.zig:1738`, `src/world/prefabs.zig:66`, `:224`,
+  `Data/Prefabs/POIs/AAA_utility_waterworks.xml`
 
 - **Sleeper volume parse** `WORKS`
   Parses the '#'-separated volume list and both `SleeperVolumeGroup` forms with

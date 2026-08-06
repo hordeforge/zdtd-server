@@ -1739,6 +1739,9 @@ pub const Game = struct {
         const wx: i32 = @intFromFloat(@floor(x));
         const wz: i32 = @intFromFloat(@floor(z));
         for (pf.items, 0..) |d, i| {
+            // City parts (driveways, roads) are never quest POIs (GAP: a quest
+            // anchored to a driveway or sign rect was not the POI stock means).
+            if (world_store.prefabs.isPart(d.name)) continue;
             const b = pf.boundsXZ(i);
             if (wx < b.x0 or wx >= b.x1 or wz < b.z0 or wz >= b.z1) continue;
             return .{
