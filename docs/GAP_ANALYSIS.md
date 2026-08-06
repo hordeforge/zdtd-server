@@ -125,7 +125,8 @@ replication CPU work.
 
 The per-area tables and the scorecard **have** been rescored against the code at
 head `2768e30` (2026-08-06): rows verified as landed carry a `(2026-08-06)` tag
-next to their state. Totals moved from 74/160/111 to 82/159/104.
+next to their state. Totals moved from 74/160/111 to 100/150/95 (current
+scorecard; the per-area headers match the row counts).
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
@@ -137,9 +138,9 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
-| [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
+| [POIs and prefabs](#7-pois-and-prefabs) | 11 | 14 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 10 | 15 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
@@ -382,7 +383,7 @@ implemented, no trader-accepted quest is ever recorded server-side, and any
 journal write for a `tier1_*` quest will make the stock client mark it Failed
 because the per-objective Write shapes are wrong.
 
-**12 WORKS · 18 PARTIAL · 6 MISSING**
+**15 WORKS · 17 PARTIAL · 4 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -922,7 +923,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**1 WORKS · 18 PARTIAL · 8 MISSING**
+**4 WORKS · 15 PARTIAL · 8 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `PARTIAL`
   `isBloodMoonNight` tests `day % bloodmoon_frequency == 0`; 0 disables. Stock
@@ -1171,7 +1172,7 @@ files and reach a stock client, but they are built from the wrong block ids
 rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
 can walk into every POI but none of them is the building TFP authored.
 
-**7 WORKS · 16 PARTIAL · 9 MISSING**
+**11 WORKS · 14 PARTIAL · 7 MISSING**
 
 - **prefabs.xml decoration parse** `WORKS`
   Reads all 1559 `<decoration>` elements with rotation mod 4 and
@@ -1442,7 +1443,7 @@ behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
 gamestage, no wandering hordes, and no screamers.
 
-**15 WORKS · 20 PARTIAL · 14 MISSING**
+**15 WORKS · 21 PARTIAL · 13 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -1827,7 +1828,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**7 WORKS · 16 PARTIAL · 12 MISSING**
+**10 WORKS · 15 PARTIAL · 10 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -2437,12 +2438,12 @@ and server-to-client XP/level pushes do not exist.
 ## 11. World systems
 
 **Headline.** A player can walk, dig, build and persist on real Navezgane terrain
-with POIs, day/night and weather, but the world is visually bald and dry (3 deco
-objects per join, no water anywhere), terrain is stepped rather than smooth,
-nothing ever collapses, and block repair, block-rotation persistence, the HUD day
-counter and land claims are each broken in specific, noticeable ways.
+with POIs, day/night and weather; lakes fill from water_info sources, claims
+expire, repair heals and supports collapse, but the world is visually bald (3
+deco objects per join), terrain is stepped rather than smooth, and block-rotation
+persistence and the HUD day counter each have specific, noticeable gaps.
 
-**15 WORKS · 22 PARTIAL · 14 MISSING**
+**20 WORKS · 19 PARTIAL · 12 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
