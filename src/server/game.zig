@@ -1574,7 +1574,7 @@ pub const Game = struct {
         const z3 = self.sim.spawnSleeperClass(sx + 30, sy, sz - 40, zdef.max_hp + 10, zdef.hash, zdef.loot_list);
         const adef = self.entities.defaultAnimal();
         _ = self.sim.spawnAnimal(sx - 20, sy, sz - 25, adef.max_hp, adef.hash, adef.loot_list);
-        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"))) |trader_id| {
+        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"), self.trader_wallet_dukes)) |trader_id| {
             self.fillTraderFromXml(trader_id);
         }
         {
@@ -3676,7 +3676,7 @@ pub const Game = struct {
                         );
                     }
                     if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
-                        break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm));
+                        break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm), self.trader_wallet_dukes);
                     }
                     if (def.kind == .animal) {
                         break :blk self.sim.spawnAnimal(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
@@ -6362,7 +6362,7 @@ pub const Game = struct {
                         const n = self.stockEntries(ts, &ent_buf);
                         const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
                             .trader_id = self.sim.network_id[ts].id,
-                            .available_money = self.trader_wallet_dukes,
+                            .available_money = self.traderMoney(ts),
                             .entries = ent_buf[0..n],
                         });
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
@@ -6969,7 +6969,7 @@ pub const Game = struct {
             self.body_buf[0..4096],
             eid,
             eid, // trader id (stock TraderID is a traders.xml index; entity id is a safe placeholder)
-            self.trader_wallet_dukes,
+            self.traderMoney(s),
             entries[0..n],
         );
         try self.sendGame(peer, "NetPackageTraderData", body);
@@ -8111,7 +8111,7 @@ pub const Game = struct {
                 .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [16]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);
-                    break :blk .{ .trader_id = nid, .available_money = self.trader_wallet_dukes, .entries = ent_buf[0..n] };
+                    break :blk .{ .trader_id = nid, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
                 } else null,
             });
             try self.sendGame(peer, "NetPackageEntitySpawn", body);
@@ -8386,6 +8386,17 @@ pub const Game = struct {
         return true;
     }
 
+    /// Live trader AvailableMoney for the wire: stock debits it when buying
+    /// from the player and credits it when selling to them. Uninitialized
+    /// traders (wallet_default 0) fall back to the config default.
+    fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
+        if (self.sim.mask[s].trader_stock) {
+            const m = self.sim.trader_stock[s];
+            if (m.wallet_default != 0) return m.wallet;
+        }
+        return self.trader_wallet_dukes;
+    }
+
     /// Parse a stock "H:MM" hour string to minutes after midnight; null if malformed.
     fn traderMinutes(v: []const u8) ?u32 {
         const colon = std.mem.indexOfScalar(u8, v, ':') orelse return null;
@@ -8506,7 +8517,7 @@ pub const Game = struct {
 
         // Joel's trader_info (1) fills a different list: some (item, count)
         // pair among the first entries differs from Jen's.
-        const joel_id = g.sim.spawnTrader("npcTraderJoel", 100, 70, 100, 1).?;
+        const joel_id = g.sim.spawnTrader("npcTraderJoel", 100, 70, 100, 1, 5000).?;
         g.fillTraderFromXml(joel_id);
         const kslot = g.sim.slotOfNetId(joel_id).?;
         const a = &g.sim.trader_stock[jslot];
@@ -8525,10 +8536,10 @@ pub const Game = struct {
         try std.testing.expect(g.traderIsOpen(jslot));
         g.sim.director.clock.hours = 3.0;
         try std.testing.expect(!g.traderIsOpen(jslot));
-        const vend_id = g.sim.spawnTrader("vending", 110, 70, 110, 4).?;
+        const vend_id = g.sim.spawnTrader("vending", 110, 70, 110, 4, 5000).?;
         const vslot = g.sim.slotOfNetId(vend_id).?;
         try std.testing.expect(g.traderIsOpen(vslot));
-        const unk_id = g.sim.spawnTrader("Trader", 120, 70, 120, 0).?;
+        const unk_id = g.sim.spawnTrader("Trader", 120, 70, 120, 0, 5000).?;
         const uslot = g.sim.slotOfNetId(unk_id).?;
         try std.testing.expect(g.traderIsOpen(uslot));
     }
@@ -9956,7 +9967,7 @@ pub const Game = struct {
                     .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                         var ent_buf: [16]packages.TraderStockEntry = undefined;
                         const n = self.stockEntries(i, &ent_buf);
-                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.trader_wallet_dukes, .entries = ent_buf[0..n] };
+                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
                     } else null,
                 })) |spb| {
                     // EntitySpawn is join-critical for first sight; use sendGame.

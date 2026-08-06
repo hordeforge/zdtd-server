@@ -539,6 +539,11 @@ pub const TraderStock = struct {
     name: []const u8 = "Trader",
     /// traders.xml `<trader_info>` id for this trader (0 = generic/default).
     trader_info_id: u16 = 0,
+    /// Live AvailableMoney (stock debits it when buying from the player and
+    /// credits it when selling to them; the wire TraderData shows this).
+    wallet: i32 = 0,
+    /// Restock target the wallet regrows toward (initial spawn amount).
+    wallet_default: i32 = 0,
     entries: [max_stock]StockEntry = defaultStock(),
     n: usize = 5,
 };

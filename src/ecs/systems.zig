@@ -672,11 +672,18 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             }
             stock.entries[e].count -= qty;
             w.wallet[ps].coins -= cost;
+            // Stock credits the trader's AvailableMoney with the sale (the
+            // wire TraderData shows the live balance). Clamp at i32 max.
+            stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
         } else {
             const gain: u32 = @as(u32, stock.entries[e].sell) * qty;
             if (gain > std.math.maxInt(u16)) return false;
             if (w.wallet[ps].coins > std.math.maxInt(u32) - gain) return false;
             if (stock.entries[e].count > std.math.maxInt(u16) - qty) return false;
+            // Stock debits the trader's AvailableMoney when buying from the
+            // player and refuses the sale once the money runs out
+            // (TraderInfo money pool; TraderBuyLimit is a separate row).
+            if (stock.wallet < 0 or gain > @as(u32, @intCast(stock.wallet))) return false;
             // Take goods from inv when selling.
             if (w.mask[ps].inventory) {
                 const inventory_before = w.inventory[ps];
@@ -690,6 +697,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             }
             stock.entries[e].count += qty;
             w.wallet[ps].coins += gain;
+            stock.wallet -= @intCast(gain);
         }
         return true;
     }
@@ -709,6 +717,8 @@ pub fn traderRestock(w: *World) void {
                 stock.entries[e].count +%= @min(10, 50 - stock.entries[e].count);
             }
         }
+        // The money pool regenerates toward its spawn default each restock.
+        if (stock.wallet < stock.wallet_default) stock.wallet = stock.wallet_default;
     }
 }
 
@@ -2713,7 +2723,7 @@ test "failed trader buy leaves wallet stock and inventory unchanged" {
     var w: World = .{};
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
-    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 50_000).?;
     const ps = w.playerByPeer(0).?;
     const ts = w.slotOfNetId(trader_id).?;
     for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |*slot, i| {
@@ -2727,6 +2737,51 @@ test "failed trader buy leaves wallet stock and inventory unchanged" {
     try std.testing.expectEqual(@as(u32, 100), w.wallet[ps].coins);
     try std.testing.expectEqual(@as(u16, 2), w.trader_stock[ts].entries[0].count);
     try std.testing.expectEqualSlices(c.InvSlot, &inventory_before.slots, &w.inventory[ps].slots);
+}
+
+test "trader wallet debits on sell, credits on buy and refuses overdraft" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    // Trader starts with 500 dukes; the stock entry buys goods at 100 each.
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |*slot, i| {
+        slot.* = .{ .item_id = @intCast(i + 100), .count = 60000 };
+    }
+    w.inventory[ps].slots[0] = .{ .item_id = 99, .count = 100, .quality = 1 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 2, .price = 10, .sell = 100 };
+    try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
+
+    // Sell 4 at 100 each: 400 of the trader's 500 dukes go to the player.
+    try std.testing.expect(trade(&w, 0, trader_id, 99, 4, 1, 6));
+    try std.testing.expectEqual(@as(i32, 100), w.trader_stock[ts].wallet);
+    try std.testing.expectEqual(@as(u32, 400), w.wallet[ps].coins);
+
+    // A 5th sale spends the last 100 dukes exactly (gain == wallet is legal).
+    try std.testing.expect(trade(&w, 0, trader_id, 99, 1, 1, 6));
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[ts].wallet);
+    try std.testing.expectEqual(@as(u32, 500), w.wallet[ps].coins);
+
+    // With the pool empty the trader refuses to buy: nothing moves.
+    const coins_before = w.wallet[ps].coins;
+    const wallet_before = w.trader_stock[ts].wallet;
+    const inv_before = w.inventory[ps];
+    try std.testing.expect(!trade(&w, 0, trader_id, 99, 1, 1, 6));
+    try std.testing.expectEqual(wallet_before, w.trader_stock[ts].wallet);
+    try std.testing.expectEqual(coins_before, w.wallet[ps].coins);
+    try std.testing.expectEqualSlices(c.InvSlot, &inv_before.slots, &w.inventory[ps].slots);
+
+    // Buying from the trader credits its money pool back up.
+    try std.testing.expect(trade(&w, 0, trader_id, 99, 1, 0, 6));
+    try std.testing.expectEqual(@as(i32, 10), w.trader_stock[ts].wallet);
+
+    // Restock regenerates the pool toward the spawn default.
+    w.trader_stock[ts].wallet = 0;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
 }
 
 test "zombie melee marks the victim hp dirty so replication can see it" {

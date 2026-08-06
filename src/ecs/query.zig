@@ -319,7 +319,7 @@ test "forEachAlive visits all" {
     var w: World = .{};
     defer w.deinit();
     _ = w.spawnZombie(0, 70, 0, 40);
-    _ = w.spawnTrader("t", 1, 70, 1, 0);
+    _ = w.spawnTrader("t", 1, 70, 1, 0, 50_000);
     var n: u32 = 0;
     forEachAlive(&w, &n, struct {
         fn f(ctx: *u32, _: *World, _: Slot) void {
