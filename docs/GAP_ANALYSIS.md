@@ -134,7 +134,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 14 | 17 | 5 | 36 | Real `quests.xml` loads; template-derived defs non-empty; accept-marker wiring open |
+| [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
@@ -143,7 +143,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; lakes wet, no POI water, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **91** | **156** | **98** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **92** | **156** | **97** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -295,12 +295,13 @@ area and the concrete work.
     wiring (accept currently rides SharedQuest; the trader-offer list still
     re-offers accepted quests).
 
-16. **Quests: honour the real accept path.** Stock signals acceptance with
-    `NPCQuestList` `eventType=RemoveQuest(1)` carrying `tierLevel` and
-    `removeIndex` (asm.il:827849). zdtd ignores it and instead auto-accepts the
-    first entry of a hardcoded `trader_jen_quests` list on `TraderData` open, so
-    the server journal never matches what the player took
-    (`src/server/game.zig:5326`, `:5364`).
+16. **DONE 2026-08-06.** Quests: honour the real accept path. Stock signals
+    acceptance with `NPCQuestList` `eventType=RemoveQuest(1)` carrying
+    `tierLevel` and `removeIndex` (asm.il:827849). The handler now accepts the
+    matching offer into the journal and re-sends the list without it;
+    `buildTraderQuestOffers` excludes active quests. The blind first-entry
+    auto-accept on `TraderData` open stays for the loadgen/sim path but skips
+    already-active quests.
 
 17. **DONE 2026-08-06.** Entities / blood moon / progression: parse `gamestages.xml`.
     It is only a filename in `xml_patch.zig:99`. Without it `GroupGenericZombie`
@@ -545,15 +546,15 @@ because the per-objective Write shapes are wrong.
   POIName is the quest id string. `tierLevel` is echoed but never used to filter.
   *Anchors:* `src/server/game.zig:6435`, `:5345`, `:5383`, `:6276`
 
-- **Trader quest ACCEPT** `MISSING`
+- **Trader quest ACCEPT** `WORKS`
   Stock signals acceptance with `NPCQuestList eventType=RemoveQuest(1)` carrying
-  `tierLevel` plus `removeIndex`. zdtd's handler reacts only to `fetch_list` and
-  `reset_quests`; `remove_quest` falls through. The only server-side accepts are
-  the blind first-entry accept on `TraderData` open and `SharedQuest`. The
-  persisted journal, the rally/POI-lock bookkeeping and the next login's PDF all
-  refer to the wrong quest.
-  *Anchors:* `src/server/game.zig:5326`, `:5333`, `:5364`,
-  `asm.il:827849-827902`
+  `tierLevel` plus `removeIndex`. The handler now accepts the matching offer
+  (tier-filtered, non-active, `removeIndex`'th) into the journal and re-sends
+  the list without it; `buildTraderQuestOffers` excludes active quests, so the
+  client stops offering an accepted quest. The scenario drives FetchList then
+  RemoveQuest and asserts the journal entry plus the one-shorter list.
+  *Anchors:* `src/server/game.zig` NPCQuestList remove_quest branch,
+  `buildTraderQuestOffers`, `asm.il:827849-827902`
 
 - **NetPackageQuestEvent parse/build and rally handshake** `PARTIAL`
   The head and per-event tails are parsed with bounds checks; TryRallyMarker is

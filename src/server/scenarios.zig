@@ -724,6 +724,70 @@ test "scenario quest accept kill complete and trader buy" {
     );
 }
 
+test "scenario trader RemoveQuest accepts and drops the quest from offers" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_qaccept");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_qaccept", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // A persisted save from an earlier run may carry accepted quests; clear the
+    // journal so the offer baseline is deterministic across runs.
+    g.sim.journal[g.sim.playerByPeer(c.slot).?] = .{};
+    var te: i32 = -1;
+    var si: usize = 0;
+    while (si < 512) : (si += 1) {
+        if (g.sim.alive[@intCast(si)] and g.sim.mask[@intCast(si)].trader) {
+            te = g.sim.network_id[@intCast(si)].id;
+            break;
+        }
+    }
+    try std.testing.expect(te > 0);
+    const qid = packages.idOf("NetPackageNPCQuestList").?;
+    // FetchList first: baseline offer count (accepted quests already excluded).
+    cap.clear();
+    var fb: [16]u8 = undefined;
+    std.mem.writeInt(i32, fb[0..4], te, .little);
+    std.mem.writeInt(i32, fb[4..8], c.entity_id, .little);
+    fb[8] = 0; // fetch_list
+    std.mem.writeInt(i32, fb[9..13], 1, .little); // tier 1 (fixture quests are tier 1)
+    var fbuf: [256]u8 = undefined;
+    var rdbg: [128]u8 = undefined;
+    const rhe = std.fmt.bufPrint(&rdbg, "{x}", .{fb[0..13]}) catch "";
+    std.debug.print("zdtd: req body {s}\n", .{rhe});
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
+    const before = cap.findPkgId(qid) orelse return error.TestUnexpectedResult;
+    const before_count = std.mem.readInt(i32, before[13..17], .little);
+    try std.testing.expect(before_count >= 1);
+    // RemoveQuest: accept offer index 0 at tier 1 (stock accept marker).
+    cap.clear();
+    var rb: [16]u8 = undefined;
+    std.mem.writeInt(i32, rb[0..4], te, .little);
+    std.mem.writeInt(i32, rb[4..8], c.entity_id, .little);
+    rb[8] = 1; // remove_quest
+    std.mem.writeInt(i32, rb[9..13], 1, .little);
+    rb[13] = 0; // index 0
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", rb[0..14]));
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var has_active = false;
+    for (g.sim.journal[ps].slots) |q| {
+        if (q.active) has_active = true;
+    }
+    try std.testing.expect(has_active);
+    // The re-sent list is one shorter: the accepted quest is no longer offered.
+    const after = cap.findPkgId(qid) orelse return error.TestUnexpectedResult;
+    const after_count = std.mem.readInt(i32, after[13..17], .little);
+    try std.testing.expectEqual(before_count - 1, after_count);
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_sc_veh");

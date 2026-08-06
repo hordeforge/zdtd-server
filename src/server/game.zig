@@ -6133,19 +6133,54 @@ pub const Game = struct {
                 .player_entity_id = c.entity_id,
                 .event_type = .fetch_list,
             };
-            if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
-                var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                var tx: f32 = 0;
-                var ty: f32 = 70;
-                var tz: f32 = 0;
-                if (self.sim.slotOfNetId(head.npc_entity_id)) |ni| {
-                    if (self.sim.mask[ni].transform) {
-                        tx = self.sim.transform[ni].x;
-                        ty = self.sim.transform[ni].y;
-                        tz = self.sim.transform[ni].z;
+            var tx: f32 = 0;
+            var ty: f32 = 70;
+            var tz: f32 = 0;
+            if (self.sim.slotOfNetId(head.npc_entity_id)) |ni| {
+                if (self.sim.mask[ni].transform) {
+                    tx = self.sim.transform[ni].x;
+                    ty = self.sim.transform[ni].y;
+                    tz = self.sim.transform[ni].z;
+                }
+            }
+            if (head.event_type == .remove_quest) {
+                // Stock accept marker (asm.il 827746-827975): the client took
+                // the removeIndex'th offer, filtered by DifficultyTier and
+                // non-active quests. Accept it into the journal and re-send the
+                // list without it, so the client stops offering it.
+                if (self.sim.catalog.listById("trader_jen_quests")) |list| {
+                    var idx: u32 = 0;
+                    for (list.entries) |qid| {
+                        const d = self.sim.catalog.byId(qid) orelse continue;
+                        if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+                        if (d.difficulty_tier != head.tier_level) continue;
+                        const ps = self.sim.playerByPeer(c.slot) orelse break;
+                        if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
+                        if (idx == head.remove_index) {
+                            _ = systems.questAccept(&self.sim, c.slot, qid);
+                            break;
+                        }
+                        idx += 1;
                     }
                 }
-                const on = self.buildTraderQuestOffers("trader_jen_quests", tx, ty, tz, &offers);
+                var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
+                const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
+                const body_out = try packages.buildNpcQuestListFetch(
+                    self.body_buf[0..2048],
+                    head.npc_entity_id,
+                    if (head.player_entity_id != 0) head.player_entity_id else c.entity_id,
+                    head.tier_level,
+                    offers[0..on],
+                );
+                try self.sendGame(peer, "NetPackageNPCQuestList", body_out);
+                return;
+            }
+            if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
+                var hdbg: [256]u8 = undefined;
+                const hhex = std.fmt.bufPrint(&hdbg, "{x}", .{body[0..@min(body.len, 20)]}) catch "";
+                std.debug.print("zdtd: fetch head tier={d} npc={d} body={s}\n", .{ head.tier_level, head.npc_entity_id, hhex });
+                var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
+                const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
                     self.body_buf[0..2048],
                     head.npc_entity_id,
@@ -6183,7 +6218,7 @@ pub const Game = struct {
                     tz = self.sim.transform[ni].z;
                 }
             }
-            const on = self.buildTraderQuestOffers("trader_jen_quests", tx, ty, tz, &offers);
+            const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
             const qbody = try packages.buildNpcQuestListFetch(
                 self.body_buf[512..2560],
                 npc_id,
@@ -7335,21 +7370,33 @@ pub const Game = struct {
         return n;
     }
 
-    /// Build trader FetchList offers from a quest_list id (stock quest names only).
+    /// Build trader FetchList offers from a quest_list id (stock quest names
+    /// only). A quest already active in the player's journal is not re-offered:
+    /// stock removes it from the NPCQuestList on accept (the accept marker).
     fn buildTraderQuestOffers(
         self: *Game,
         list_id: []const u8,
+        peer_slot: usize,
         trader_x: f32,
         trader_y: f32,
         trader_z: f32,
         out: []packages.stock_quest.QuestPacketEntry,
     ) usize {
-        const list = self.sim.catalog.listById(list_id) orelse return 0;
+        const list = self.sim.catalog.listById(list_id) orelse {
+            std.debug.print("zdtd: offers list null\n", .{});
+            return 0;
+        };
+        const ps = self.sim.playerByPeer(peer_slot) orelse {
+            std.debug.print("zdtd: offers ps null\n", .{});
+            return 0;
+        };
         var n: usize = 0;
         for (list.entries) |qid| {
             if (n >= out.len) break;
             const d = self.sim.catalog.byId(qid) orelse continue;
             if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+            if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
+            std.debug.print("zdtd: offer {d} '{s}'\n", .{ qid, d.name });
             out[n] = .{
                 .quest_id = d.name,
                 .loc_x = d.tx,

@@ -53,7 +53,9 @@ observable, on the live stock client:
 - **Quests (T6, parser + wire kinds):** `template=` inheritance resolves in a
   two-pass (67 derived quests parse non-empty), and per-objective Write shapes
   flow into the journal wire (TreasureChest/POIStayWithin kinds) so the join
-  PDF no longer trips `ValidateSizeMarker`. Three new tests; 768 total.
+  PDF no longer trips `ValidateSizeMarker`. The stock accept marker
+  (`NPCQuestList RemoveQuest` with tier + index) is wired and the offer list
+  excludes active quests. Five new tests; 769 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

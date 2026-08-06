@@ -48,9 +48,9 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       generation; the chunk water channel carries the full static mass.
 - [x] **Progression (T5)**: `players.zsv` v3 persists level/XP/food/water/buffs
       across restarts (server-side ledger; ZPV2 still read; wipeplayer v3-aware).
-- [x] **Quests (T6 part)**: `template=` inheritance (67 derived defs non-empty)
-      and per-objective Write kinds on the journal wire (TreasureChest/
-      POIStayWithin); accept-marker wiring and `<variable>` remain open.
+- [x] **Quests (T6)**: `template=` inheritance, per-objective Write kinds, and
+      the stock accept marker (`NPCQuestList RemoveQuest`; offers exclude active
+      quests). `<variable>` display-param substitution remains open.
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.
