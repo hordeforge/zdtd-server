@@ -174,6 +174,15 @@ pub const Peer = struct {
     /// Delivered reassembled user payload (valid until next handlePacket).
     deliver_buf: [assemble_cap]u8 = undefined,
     deliver_len: usize = 0,
+    /// Out-of-order reliable payload hold (ordered delivery). Slots indexed by
+    /// seq % window_size; hold_len[i] > 0 means a payload for that seq is
+    /// buffered awaiting the gap to fill. Non-fragmented C2S only: a
+    /// fragmented message's parts always flow into reassembly, and the
+    /// completed message delivers on completion (its payload lives in
+    /// deliver_buf, which cannot be parked here). Bounded by the window; when
+    /// a slot is busy the payload falls back to on-first-sight delivery.
+    hold_len: [packet.window_size]u16 = .{0} ** packet.window_size,
+    hold_data: [packet.window_size][packet.max_single_user]u8 = undefined,
     /// Extra user payloads from LiteNet Merged packets (multiple game msgs per UDP).
     extra_buf: [assemble_cap]u8 = undefined,
     extra_used: usize = 0,
@@ -444,6 +453,32 @@ pub const Peer = struct {
         return self.extra_buf[e.off..][0..e.len];
     }
 
+    /// Buffer an out-of-order non-fragmented payload for ordered delivery.
+    /// False when the slot for this seq is busy (hold full) or the payload is
+    /// oversized: the caller falls back to on-first-sight delivery.
+    fn holdPayload(self: *Peer, seq: u16, payload: []const u8) bool {
+        if (payload.len > packet.max_single_user) return false;
+        const i: usize = seq % packet.window_size;
+        if (self.hold_len[i] != 0) return false;
+        @memcpy(self.hold_data[i][0..payload.len], payload);
+        self.hold_len[i] = @intCast(payload.len);
+        return true;
+    }
+
+    /// After delivering the next-in-order payload, release every held payload
+    /// whose seq is now contiguous, routing them through the extra mailbox (the
+    /// current handlePacket already has a return value).
+    fn drainHeldOrdered(self: *Peer) void {
+        while (true) {
+            const i: usize = self.remote_seq_next % packet.window_size;
+            if (self.hold_len[i] == 0) break;
+            const payload = self.hold_data[i][0..self.hold_len[i]];
+            self.hold_len[i] = 0;
+            self.remote_seq_next = @intCast((@as(u32, self.remote_seq_next) + 1) % packet.max_sequence);
+            self.pushExtra(payload);
+        }
+    }
+
     pub fn handlePacket(self: *Peer, sock: *udp.Socket, raw: []const u8) !?[]const u8 {
         if (raw.len < 1) return null;
         self.last_recv_ns = clock.monoNs();
@@ -493,14 +528,30 @@ pub const Peer = struct {
                 self.must_ack = true;
                 try self.flushAcks(sock);
                 if (already) return null;
-                // Deliver on first sight (ordered hold buffer deferred; retransmits deduped).
+                // Ordered delivery: a packet for the next expected seq delivers
+                // now and releases any held successors; a newer packet within
+                // the window is held until its gap fills (WAN reordering must
+                // not apply SetBlock / inventory transactions out of order).
+                // Fragmented messages deliver on completion (parts flow into
+                // reassembly; the completed payload lives in deliver_buf and
+                // cannot be parked in the hold).
                 if (info.seq == self.remote_seq_next) {
                     self.remote_seq_next = @intCast((@as(u32, self.remote_seq_next) + 1) % packet.max_sequence);
-                } else if (relSeq(@as(i32, info.seq) - @as(i32, self.remote_seq_next)) > 0) {
-                    // Gap: still deliver so login/motion is not dropped if a prior control pkt was skipped.
+                    self.drainHeldOrdered();
+                    if (info.fragmented) return self.takeFragment(info);
+                    return info.user;
                 }
-                if (!info.fragmented) return info.user;
-                return self.takeFragment(info);
+                const rel = relSeq(@as(i32, info.seq) - @as(i32, self.remote_seq_next));
+                if (rel > 0 and rel < @as(i32, @intCast(packet.window_size))) {
+                    if (info.fragmented) return self.takeFragment(info);
+                    if (self.holdPayload(info.seq, info.user)) return null;
+                    // Hold full: fall back to on-first-sight so a flood of
+                    // reordered packets cannot wedge the channel.
+                    return info.user;
+                }
+                // Stale (already delivered / sender slid past) or outside the
+                // holdable window: drop rather than stall the channel.
+                return null;
             },
             .ack => {
                 self.processAck(raw);
@@ -767,4 +818,43 @@ test "two interleaved fragmented messages reassemble independently" {
     try std.testing.expect(full_a != null);
     if (full_a) |fa| try std.testing.expectEqualStrings("AAAABBBBCCCC", fa);
     try std.testing.expectEqual(@as(u32, 0), peer.asm_drops);
+}
+
+test "out-of-order reliable payloads deliver in sequence" {
+    // WAN reordering: seq 1 and 2 arrive before the expected 0. They must be
+    // held, not delivered, so SetBlock / inventory transactions stay ordered;
+    // when 0 arrives it delivers and 1, 2 drain through the extra mailbox.
+    var peer: Peer = .{};
+    peer.alive = true;
+    peer.conn_num = 0;
+    var sock: udp.Socket = .{};
+    _ = try sock.openAndBind(0); // real socket so the ACK flush can send
+    defer sock.close();
+    var dst: udp.IpAddress = .{ .ip4 = .loopback(34567) };
+    peer.setAddr(&dst);
+    var b1: [64]u8 = undefined;
+    const p1 = try packet.writeChanneled(&b1, 1, 2, 0, "one");
+    const r1 = try peer.handlePacket(&sock, p1);
+    try std.testing.expect(r1 == null);
+    var b2: [64]u8 = undefined;
+    const p2 = try packet.writeChanneled(&b2, 2, 2, 0, "two");
+    const r2 = try peer.handlePacket(&sock, p2);
+    try std.testing.expect(r2 == null);
+    var b0: [64]u8 = undefined;
+    const p0 = try packet.writeChanneled(&b0, 0, 2, 0, "zero");
+    const r0 = try peer.handlePacket(&sock, p0);
+    try std.testing.expect(r0 != null);
+    if (r0) |u| try std.testing.expectEqualStrings("zero", u);
+    const e1 = peer.popExtra();
+    try std.testing.expect(e1 != null);
+    if (e1) |u| try std.testing.expectEqualStrings("one", u);
+    const e2 = peer.popExtra();
+    try std.testing.expect(e2 != null);
+    if (e2) |u| try std.testing.expectEqualStrings("two", u);
+    try std.testing.expect(peer.popExtra() == null);
+    // Stale retransmit of an already-delivered seq is dropped, not delivered.
+    var b0b: [64]u8 = undefined;
+    const p0b = try packet.writeChanneled(&b0b, 0, 2, 0, "zero-again");
+    const r0b = try peer.handlePacket(&sock, p0b);
+    try std.testing.expect(r0b == null);
 }

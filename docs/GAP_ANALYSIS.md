@@ -3052,13 +3052,16 @@ persists so little that a restart visibly damages a built base.
   set.
   *Anchors:* `src/litenet/udp_socket.zig:21-27`, `asm.il:852304-852310`
 
-- **Reliable-ordered channel and ack bitmap** `PARTIAL`
+- **Reliable-ordered channel and ack bitmap** `WORKS` `(2026-08-07)`
   window_size 64, max_sequence 32768, ack payload 9 bytes, channel byte 2 (LiteNet
   channelNumber 0 plus DeliveryMethod.ReliableOrdered=2, confirmed by
-  `NetworkServerLiteNetLib::SendData`). The gap: inbound delivery is on-first-sight,
-  not ordered. The hold buffer is deferred and the gap branch deliberately delivers
-  out of order, so on a reordering WAN path C2S packages (SetBlock, inventory
-  transactions) are applied in the wrong order.
+  `NetworkServerLiteNetLib::SendData`). Inbound delivery is now ordered: a
+  non-fragmented payload for a seq ahead of the expected next is held in a
+  window-bounded hold buffer (falling back to on-first-sight when the hold is
+  full), and the in-order packet delivers then drains every now-contiguous
+  held payload through the extra mailbox, so WAN reordering no longer applies
+  SetBlock / inventory transactions out of order. Fragmented messages deliver
+  on completion as before (their payload lives in the reassembly buffer).
   *Anchors:* `src/litenet/packet.zig:24-25`, `:236-249`,
   `src/litenet/peer.zig:436-469`, `:551-565`, `asm.il:854255-854262`
 
