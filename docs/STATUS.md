@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-05  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **~440+** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
+**Unit tests:** `zig build test` → **~519** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
@@ -107,7 +107,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | HoldingItem, bag, drops | `stock_inv.zig`, `game.zig` | Bag/PlayerInventory C2S-only; S2C echo = HoldingItem |
 | LockRequest grant + TE re-send | `packages.zig`, `game.zig` | always-grant (contention deferred) |
 | Storage TE composite stream | `stock_te.zig` | place + chunk path |
-| Workstation TE (type 12) | `stock_te.zig`, `world/workstations.zig` | ver 50 arrays + queue Recipe parse; 2Hz burn/craft tick, output materialized via items table, dirty S2C re-broadcast; see WIRE_WORKSTATION.md |
+| Workstation TE (type 12) | `stock_te.zig`, `world/workstations.zig` | ver 50 full body (fixed stock array lengths, recipe blobs, CraftCompleteData, lastInput); stock queue orientation, output-full stall and cycle carry; 2Hz burn/craft tick + dirty S2C re-broadcast and lock-grant push; see WIRE_WORKSTATION.md |
 | InvData by Guid, transactional inv | `game.zig`, `containers.zig` | |
 | Death/turret loot DroppedLootContainer ECD | `stock_entity.zig` | loot stacks embedded in ECD `bag` (Bag.Write) |
 
@@ -185,8 +185,8 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
 | P2 | Weather storm SM | Defaults from biomes.xml on join+WorldTime throttle; storm/bloodMoon group SM not simulated |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
-| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
-| P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
+| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks) |
+| P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |

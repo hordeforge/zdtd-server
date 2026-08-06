@@ -23,6 +23,7 @@ const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 const water = @import("world/water.zig");
 const containers = @import("world/containers.zig");
+const workstations = @import("world/workstations.zig");
 const biomes = @import("world/biomes.zig");
 const prefabs = @import("world/prefabs.zig");
 const tts = @import("world/tts.zig");
@@ -212,7 +213,19 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(cont.slot_count <= containers.max_container_slots);
         try std.testing.expect(cont.slot_count >= before);
     } else |_| {}
-    _ = stock_te.parseWorkstationTeBody(input) catch null;
+    if (stock_te.parseWorkstationTeBody(input)) |ws| {
+        // The echo re-emits every count verbatim, so an accepted count that does
+        // not fit our fixed store would read past it.
+        try std.testing.expect(ws.fuel_n <= ws.fuel.len);
+        try std.testing.expect(ws.input_n <= ws.input.len);
+        try std.testing.expect(ws.tools_n <= ws.tools.len);
+        try std.testing.expect(ws.output_n <= ws.output.len);
+        try std.testing.expect(ws.last_input_n <= ws.last_input.len);
+        try std.testing.expect(ws.queue_n <= ws.queue.len);
+        try std.testing.expect(ws.craft_complete_n <= ws.craft_complete.len);
+        try std.testing.expect(ws.melt_n <= ws.melt.len);
+        for (ws.queue[0..ws.queue_n]) |q| try std.testing.expect(q.recipeBlob().len <= workstations.recipe_blob_max);
+    } else |_| {}
 }
 
 const inv_corpus = [_][]const u8{

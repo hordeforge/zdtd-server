@@ -23,7 +23,11 @@ const workstations = @import("../world/workstations.zig");
 // Wire uses these names as aliases for TE encode only; world is the owner.
 const max_ws_slots: usize = workstations.max_ws_slots;
 const max_ws_queue: usize = workstations.max_ws_queue;
+const max_ws_melt: usize = workstations.max_ws_melt;
+const max_craft_complete: usize = workstations.max_craft_complete;
+const last_input_blob_max: usize = workstations.last_input_blob_max;
 const QueueItem = workstations.QueueItem;
+const CraftComplete = workstations.CraftComplete;
 
 /// GetStableHashCode("TEFeatureStorage"): matches Extensions.GetStableHashCode.
 pub const feature_hash_storage: i32 = 731446478;
@@ -209,8 +213,12 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
     _ = try pr.readI32();
     _ = try pr.readI32();
 
-    // outer size marker (we ignore absolute length, stream continues)
-    _ = try pr.readU32();
+    // Outer size marker: FinalizeSizeMarker writes the span from the marker to
+    // the composite's end, so it can never reach past the payload. Checking it
+    // is what keeps a non-composite TE body (a workstation write, whose version
+    // byte lands where the marker starts) from being mistaken for storage.
+    const outer_size = try pr.readU32();
+    if (outer_size < 4 or outer_size - 4 > pr.remaining()) return error.InvalidString;
     const payload_block_id = try pr.readI32();
     // Outer teBlockId is authoritative on V3.1.0; payload still carries blockId.
     if (out.block_id == 0) out.block_id = payload_block_id;
@@ -314,50 +322,92 @@ pub fn applyParsedToContainer(
 }
 
 // --- TileEntityWorkstation (TileEntityType.Workstation = 12, classic TE) ---
-// Network body after handle|worldPos|u16 len:
+// Network body after handle|worldPos|teBlockId|payloadLen. StreamModeWrite
+// ToServer (1) and ToClient (2) are byte-identical (TileEntityWorkstation::write
+// asm.il ~1332990, IL_00cc and IL_018d):
 //   TileEntity.write network: chunkPos Vector3i
-//   version u8 (client V3.1.4 writes 50)
-//   fuel/input/tools/output: u8 count + ItemStack.Write * n
-//   queue: u8 count + RecipeQueueItem.Write * n
-//   craftComplete: i16 count + CraftCompleteData * n (we send 0)
-//   isBurning bool | currentBurnTimeLeft f32 | meltCount u8 + f32*n
-//   isPlayerPlaced bool | lastTickTime-delta u64 (network read adds GameTimer)
+//   version u8 (client V3.1.0 writes 50)
+//   fuel | input | tools | output: u8 count + ItemStack.Write * count
+//   queue: u8 count + RecipeQueueItem.Write * count
+//   craftComplete: i16 count + CraftCompleteData.Write * count
+//   isBurning bool | currentBurnTimeLeft f32 | meltCount u8 + f32 * count
+//   isPlayerPlaced bool | (GameTimer.ticks - lastTickTime) u64
+//   lastInput: u8 count + ItemStack.Write * count
+//
+// Every count is the peer's array *length*, never a used prefix: both
+// readItemStackArray (asm.il ~1333365, IL_0012) and readRecipeStackArray
+// (asm.il ~1333602, IL_0012) reallocate the target array to the received count
+// before the discard gate, so a short count permanently shrinks the client's
+// grid. currentMeltTimesLeft is indexed directly at the received count
+// (TileEntityWorkstation::read asm.il ~1332790, IL_016e) with no bounds check.
 
 pub const workstation_te_version: u8 = 50;
+/// RecipeQueueItem.Version (asm.il ~272640).
+const recipe_queue_item_version: u16 = 2;
+/// CraftCompleteData.Version (asm.il ~272468).
+const craft_complete_version: u16 = 1;
+/// Recipe.ingredients is an unbounded i32 count on the wire.
+const max_recipe_ingredients: i32 = 64;
+/// Longest string we will pull off the wire before rejecting the write.
+const wire_name_max: usize = 256;
 
+/// One workstation's arrays as they must appear on the wire. Every slice length
+/// is emitted verbatim, so callers pass the full stock array, not a used prefix.
 pub const WorkstationSlots = struct {
     fuel: []const stock_inv.StockSlot = &.{},
     input: []const stock_inv.StockSlot = &.{},
     tools: []const stock_inv.StockSlot = &.{},
     output: []const stock_inv.StockSlot = &.{},
+    /// lastInput passes through untouched: the server never reads it, and the
+    /// client uses it only to reset melt timers. `last_input_count` is the array
+    /// length; `last_input` the ItemStack.Write bytes for exactly that many.
+    last_input_count: u8 = 0,
+    last_input: []const u8 = &.{},
     queue: []const QueueItem = &.{},
+    craft_complete: []const CraftComplete = &.{},
+    melt: []const f32 = &.{},
     is_burning: bool = false,
     burn_time_left: f32 = 0,
     is_player_placed: bool = true,
 };
 
 fn writeWsStackArray(w: *binary.Writer, slots: []const stock_inv.StockSlot) !void {
-    const n = @min(slots.len, 255);
-    try w.writeByte(@intCast(n));
-    for (slots[0..n]) |s| try stock_inv.writeItemStack(w, s);
+    if (slots.len > 255) return error.Overflow;
+    try w.writeByte(@intCast(slots.len));
+    for (slots) |s| try stock_inv.writeItemStack(w, s);
 }
 
-/// RecipeQueueItem.Write without a Recipe blob (server-side queue echo keeps
-/// timing fields; client resolves recipe locally from its own queue UI).
+/// RecipeQueueItem.Write (asm.il ~272652). The recipe rides along as the blob the
+/// client sent: `Read` leaves the receiver's Recipe untouched when hasRecipe is
+/// false (asm.il ~272880, IL_0084), which only preserves a recipe that peer
+/// already had, and `HandleRecipeQueue` dereferences it (asm.il ~1331756).
 fn writeQueueItem(w: *binary.Writer, q: QueueItem) !void {
-    try w.writeU16(2);
+    try w.writeU16(recipe_queue_item_version);
     try w.writeI16(q.multiplier);
     try w.writeBool(q.is_crafting);
     try w.writeF32(q.craft_time_left);
-    try w.writeBool(false); // no repair item
-    try w.writeByte(0); // quality
-    try w.writeI32(-1); // startingEntityId
+    try w.writeBool(false); // RepairItem null
+    try w.writeByte(q.quality);
+    try w.writeI32(q.starting_entity_id);
     try w.writeF32(q.one_item_craft_time);
-    try w.writeBool(false); // recipe omitted on echo
+    const blob = q.recipeBlob();
+    try w.writeBool(blob.len != 0);
+    try w.writeBytes(blob);
 }
 
-/// Build NetPackageTileEntity body for a workstation (queue emitted from live state,
-/// capped at 255 items).
+/// CraftCompleteData.Write (asm.il ~272530).
+fn writeCraftComplete(w: *binary.Writer, cc: CraftComplete) !void {
+    try w.writeU16(craft_complete_version);
+    try w.writeI32(cc.crafter_entity_id);
+    try stock_inv.writeItemStack(w, .{ .type_id = cc.item_type, .count = cc.item_count });
+    try w.writeString(cc.recipeName());
+    try w.writeI32(cc.exp_gain);
+    // GiveExp divides by (craftCount + RecipeUsedCount) (asm.il ~528534).
+    try w.writeU16(@max(cc.used_count, 1));
+    try w.writeString(cc.scrappedName());
+}
+
+/// Build NetPackageTileEntity body for a workstation.
 pub fn buildWorkstationTeBody(
     buf: []u8,
     handle: u8,
@@ -367,7 +417,7 @@ pub fn buildWorkstationTeBody(
     te_block_id: i32,
     ws: WorkstationSlots,
 ) ![]u8 {
-    var payload: [4096]u8 = undefined;
+    var payload: [6144]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };
     const lp = localChunkPos(world_x, world_y, world_z);
     try pw.writeI32(lp.x);
@@ -378,14 +428,22 @@ pub fn buildWorkstationTeBody(
     try writeWsStackArray(&pw, ws.input);
     try writeWsStackArray(&pw, ws.tools);
     try writeWsStackArray(&pw, ws.output);
-    try pw.writeByte(@intCast(@min(ws.queue.len, 255)));
+    if (ws.queue.len > 255 or ws.craft_complete.len > std.math.maxInt(i16)) return error.Overflow;
+    try pw.writeByte(@intCast(ws.queue.len));
     for (ws.queue) |q| try writeQueueItem(&pw, q);
-    try pw.writeI16(0); // craftComplete count
+    try pw.writeI16(@intCast(ws.craft_complete.len));
+    for (ws.craft_complete) |cc| try writeCraftComplete(&pw, cc);
     try pw.writeBool(ws.is_burning);
     try pw.writeF32(ws.burn_time_left);
-    try pw.writeByte(0); // meltTimes count
+    if (ws.melt.len > 255) return error.Overflow;
+    try pw.writeByte(@intCast(ws.melt.len));
+    for (ws.melt) |m| try pw.writeF32(m);
     try pw.writeBool(ws.is_player_placed);
-    try pw.writeU64(0); // lastTickTime delta
+    // lastTickTime delta: the receiver stores GameTimer.ticks - delta, so 0 means
+    // "ticked just now" and no catch-up runs on arrival.
+    try pw.writeU64(0);
+    try pw.writeByte(ws.last_input_count);
+    try pw.writeBytes(ws.last_input);
     const pay = pw.written();
 
     var w: binary.Writer = .{ .buf = buf };
@@ -401,51 +459,73 @@ pub const ParsedWorkstation = struct {
     world_z: i32 = 0,
     block_id: i32 = 0,
     fuel: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
-    fuel_n: usize = 0,
+    fuel_n: u8 = 0,
     input: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
-    input_n: usize = 0,
+    input_n: u8 = 0,
     tools: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
-    tools_n: usize = 0,
+    tools_n: u8 = 0,
     output: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
-    output_n: usize = 0,
+    output_n: u8 = 0,
+    last_input: [last_input_blob_max]u8 = [_]u8{0} ** last_input_blob_max,
+    last_input_blob_len: u16 = 0,
+    last_input_n: u8 = 0,
     queue: [max_ws_queue]QueueItem = [_]QueueItem{.{}} ** max_ws_queue,
-    queue_n: usize = 0,
+    queue_n: u8 = 0,
+    craft_complete: [max_craft_complete]CraftComplete = [_]CraftComplete{.{}} ** max_craft_complete,
+    craft_complete_n: u8 = 0,
+    melt: [max_ws_melt]f32 = [_]f32{0} ** max_ws_melt,
+    melt_n: u8 = 0,
     is_burning: bool = false,
     burn_time_left: f32 = 0,
+    is_player_placed: bool = true,
 };
 
-fn readWsStackArray(r: *binary.Reader, out: []stock_inv.StockSlot, out_n: *usize) binary.ReadError!void {
+/// A count wider than our array cannot be echoed back at the same length, and a
+/// short echo would resize the client's grid, so it is rejected outright.
+fn readWsStackArray(r: *binary.Reader, out: []stock_inv.StockSlot, out_n: *u8) binary.ReadError!void {
     const n = try r.readByte();
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const s = try stock_inv.readItemStack(r);
-        if (i < out.len) {
-            out[i] = s;
-            out_n.* = i + 1;
-        }
-    }
+    if (n > out.len) return error.InvalidString;
+    for (out[0..n]) |*s| s.* = try stock_inv.readItemStack(r);
+    out_n.* = n;
 }
 
-/// Recipe.Read (IL): ver u16 | itemValueType i32 | count i32 | isScrap bool |
-/// craftingTime f32 | craftExpGain i32 | craftingArea string | i32 n + ItemStack*n.
+/// lastInput: validate every stack parses, then keep the raw bytes for the echo.
+fn readWsStackBlob(r: *binary.Reader, out: *ParsedWorkstation) binary.ReadError!void {
+    const n = try r.readByte();
+    if (n > max_ws_slots) return error.InvalidString;
+    const start = r.pos;
+    var i: u8 = 0;
+    while (i < n) : (i += 1) _ = try stock_inv.readItemStack(r);
+    const blob = r.data[start..r.pos];
+    if (blob.len > out.last_input.len) return error.InvalidString;
+    @memcpy(out.last_input[0..blob.len], blob);
+    out.last_input_blob_len = @intCast(blob.len);
+    out.last_input_n = n;
+}
+
+/// Recipe.Read (asm.il ~274879): ver u16 | itemValueType i32 | count i32 |
+/// isScrap bool | craftingTime f32 | craftExpGain i32 | craftingArea string |
+/// i32 n + ItemStack * n. Captured verbatim so the echo can re-emit it.
 fn readRecipe(r: *binary.Reader, out: *QueueItem) binary.ReadError!void {
+    const start = r.pos;
     _ = try r.readU16(); // version (client pops it unread)
     out.output_type = try r.readI32();
     out.output_count = try r.readI32();
     _ = try r.readBool(); // isScrap
     out.crafting_time = try r.readF32();
-    _ = try r.readI32(); // craftExpGain
+    out.craft_exp_gain = try r.readI32();
     try r.skipString(); // craftingArea
     const n = try r.readI32();
-    if (n < 0 or n > 64) return error.InvalidString;
+    if (n < 0 or n > max_recipe_ingredients) return error.InvalidString;
     var i: i32 = 0;
     while (i < n) : (i += 1) _ = try stock_inv.readItemStack(r);
+    out.setRecipeBlob(r.data[start..r.pos]);
 }
 
 fn readQueueItem(r: *binary.Reader) binary.ReadError!QueueItem {
     var out: QueueItem = .{};
     const ver = try r.readU16();
-    if (ver != 2) return error.InvalidString;
+    if (ver != recipe_queue_item_version) return error.InvalidString;
     out.multiplier = try r.readI16();
     out.is_crafting = try r.readBool();
     out.craft_time_left = try r.readF32();
@@ -454,16 +534,35 @@ fn readQueueItem(r: *binary.Reader) binary.ReadError!QueueItem {
         _ = try stock_inv.readItemValue(r);
         _ = try r.readU16();
     }
-    _ = try r.readByte(); // quality
-    _ = try r.readI32(); // startingEntityId
+    out.quality = try r.readByte();
+    out.starting_entity_id = try r.readI32();
     out.one_item_craft_time = try r.readF32();
     const has_recipe = try r.readBool();
     if (has_recipe) try readRecipe(r, &out);
     return out;
 }
 
-/// Parse C2S workstation TE write (network mode), including queue entries with
-/// Recipe blobs (output type/count/time captured; ingredients skipped).
+/// CraftCompleteData.Read (asm.il ~272566). The client sends back the entries its
+/// CheckForCraftComplete has not consumed, so this is the acknowledgement path.
+fn readCraftComplete(r: *binary.Reader) binary.ReadError!CraftComplete {
+    var out: CraftComplete = .{};
+    var name: [wire_name_max]u8 = undefined;
+    const ver = try r.readU16();
+    if (ver != craft_complete_version) return error.InvalidString;
+    out.crafter_entity_id = try r.readI32();
+    const item = try stock_inv.readItemStack(r);
+    out.item_type = item.type_id;
+    out.item_count = item.count;
+    out.setRecipeName(try r.readString(name[0..]));
+    out.exp_gain = try r.readI32();
+    out.used_count = try r.readU16();
+    out.setScrappedName(try r.readString(name[0..]));
+    return out;
+}
+
+/// Parse a workstation TE write (network mode) in full. The whole payload must be
+/// consumed: a stock peer always writes exactly this layout, and stopping short
+/// is how a missing trailing field goes unnoticed until a real client throws.
 pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstation {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedWorkstation = .{};
@@ -480,77 +579,183 @@ pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstati
     try readWsStackArray(&pr, out.tools[0..], &out.tools_n);
     try readWsStackArray(&pr, out.output[0..], &out.output_n);
     const qn = try pr.readByte();
-    var qi: u8 = 0;
-    while (qi < qn) : (qi += 1) {
-        const item = try readQueueItem(&pr);
-        if (qi < out.queue.len) {
-            out.queue[qi] = item;
-            out.queue_n = qi + 1;
-        }
-    }
+    if (qn > out.queue.len) return error.InvalidString;
+    for (out.queue[0..qn]) |*q| q.* = try readQueueItem(&pr);
+    out.queue_n = qn;
     const ccn = try pr.readI16();
-    if (ccn != 0) return error.InvalidString; // CraftCompleteData unparsed
+    if (ccn < 0 or ccn > out.craft_complete.len) return error.InvalidString;
+    const ccu: usize = @intCast(ccn);
+    for (out.craft_complete[0..ccu]) |*cc| cc.* = try readCraftComplete(&pr);
+    out.craft_complete_n = @intCast(ccu);
     out.is_burning = try pr.readBool();
     out.burn_time_left = try pr.readF32();
     const mn = try pr.readByte();
-    var mi2: u8 = 0;
-    while (mi2 < mn) : (mi2 += 1) _ = try pr.readF32();
+    if (mn > out.melt.len) return error.InvalidString;
+    for (out.melt[0..mn]) |*m| m.* = try pr.readF32();
+    out.melt_n = mn;
+    out.is_player_placed = try pr.readBool();
+    _ = try pr.readU64(); // lastTickTime delta (we re-time every echo)
+    try readWsStackBlob(&pr, &out);
+    if (pr.remaining() != 0) return error.InvalidString;
     return out;
 }
 
-test "workstation queue item with recipe parses" {
-    var qb: [256]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &qb };
-    try w.writeU16(2);
-    try w.writeI16(3); // multiplier
-    try w.writeBool(true);
-    try w.writeF32(4.5);
-    try w.writeBool(false); // no repair
-    try w.writeByte(0);
-    try w.writeI32(107);
-    try w.writeF32(1.5);
-    try w.writeBool(true); // recipe
-    try w.writeU16(1); // recipe version
-    try w.writeI32(stock_inv.items_start_here + 9); // output type
-    try w.writeI32(2); // output count
-    try w.writeBool(false); // isScrap
-    try w.writeF32(1.5); // craftingTime
-    try w.writeI32(5); // exp
-    try w.writeString("forge");
-    try w.writeI32(1); // one ingredient
-    try stock_inv.writeItemStack(&w, .{ .type_id = stock_inv.items_start_here + 4, .count = 6 });
-    var r: binary.Reader = .{ .data = w.written() };
-    const q = try readQueueItem(&r);
-    try std.testing.expectEqual(@as(i16, 3), q.multiplier);
-    try std.testing.expect(q.is_crafting);
-    try std.testing.expectEqual(stock_inv.items_start_here + 9, q.output_type);
-    try std.testing.expectEqual(@as(i32, 2), q.output_count);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.5), q.crafting_time, 0.01);
-    try std.testing.expectEqual(@as(usize, 0), r.remaining());
-}
+/// A stock-shaped body: ctor array lengths, one fuel and one input stack, a
+/// recipe in the active (last) queue slot and one craft-complete record.
+fn testWorkstationBody(buf: []u8) ![]u8 {
+    var fuel = [_]stock_inv.StockSlot{.{}} ** workstations.stock_fuel_len;
+    fuel[0] = .{ .type_id = stock_inv.items_start_here + 3, .count = 5 };
+    var input = [_]stock_inv.StockSlot{.{}} ** workstations.stock_input_len;
+    input[0] = .{ .type_id = stock_inv.items_start_here + 7, .count = 12 };
+    const tools = [_]stock_inv.StockSlot{.{}} ** workstations.stock_tools_len;
+    const output = [_]stock_inv.StockSlot{.{}} ** workstations.stock_output_len;
+    var last_input_buf: [64]u8 = undefined;
+    var liw: binary.Writer = .{ .buf = &last_input_buf };
+    for (0..workstations.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
+    const melt = [_]f32{ 1.5, 0, 0 };
 
-test "workstation te body roundtrip" {
-    var buf: [1024]u8 = undefined;
-    const fuel = [_]stock_inv.StockSlot{
-        .{ .type_id = stock_inv.items_start_here + 3, .count = 5, .quality = 0 },
+    var blob: [128]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &blob };
+    try bw.writeU16(1); // Recipe.Version
+    try bw.writeI32(stock_inv.items_start_here + 9); // itemValueType
+    try bw.writeI32(2); // count
+    try bw.writeBool(false); // isScrap
+    try bw.writeF32(1.5); // craftingTime
+    try bw.writeI32(5); // craftExpGain
+    try bw.writeString("forge");
+    try bw.writeI32(1); // one ingredient
+    try stock_inv.writeItemStack(&bw, .{ .type_id = stock_inv.items_start_here + 4, .count = 6 });
+
+    var queue = [_]QueueItem{.{}} ** workstations.stock_queue_len;
+    queue[queue.len - 1] = .{
+        .multiplier = 3,
+        .is_crafting = true,
+        .craft_time_left = 1.5,
+        .one_item_craft_time = 1.5,
+        .starting_entity_id = 171,
+        .output_type = stock_inv.items_start_here + 9,
+        .output_count = 2,
+        .craft_exp_gain = 5,
     };
-    const input = [_]stock_inv.StockSlot{
-        .{ .type_id = stock_inv.items_start_here + 7, .count = 12, .quality = 0 },
+    queue[queue.len - 1].setRecipeBlob(bw.written());
+
+    var cc: CraftComplete = .{
+        .crafter_entity_id = 171,
+        .item_type = stock_inv.items_start_here + 9,
+        .item_count = 2,
+        .exp_gain = 5,
+        .used_count = 1,
     };
-    const body = try buildWorkstationTeBody(&buf, 255, 10, 70, 20, 0, .{
+    cc.setRecipeName("meleeToolRepairT0StoneAxe");
+    const ccs = [_]CraftComplete{cc};
+
+    return buildWorkstationTeBody(buf, 255, 10, 70, 20, 1301, .{
         .fuel = fuel[0..],
         .input = input[0..],
+        .tools = tools[0..],
+        .output = output[0..],
+        .last_input_count = workstations.stock_last_input_len,
+        .last_input = liw.written(),
+        .queue = queue[0..],
+        .craft_complete = ccs[0..],
+        .melt = melt[0..],
         .is_burning = true,
         .burn_time_left = 12.5,
     });
+}
+
+test "workstation te body roundtrip keeps stock array lengths" {
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
     const p = try parseWorkstationTeBody(body);
     try std.testing.expectEqual(@as(i32, 10), p.world_x);
-    try std.testing.expectEqual(@as(usize, 1), p.fuel_n);
+    try std.testing.expectEqual(@as(i32, 1301), p.block_id);
+    try std.testing.expectEqual(workstations.stock_fuel_len, p.fuel_n);
+    try std.testing.expectEqual(workstations.stock_input_len, p.input_n);
+    try std.testing.expectEqual(workstations.stock_tools_len, p.tools_n);
+    try std.testing.expectEqual(workstations.stock_output_len, p.output_n);
+    try std.testing.expectEqual(workstations.stock_last_input_len, p.last_input_n);
+    try std.testing.expectEqual(workstations.stock_queue_len, p.queue_n);
+    try std.testing.expectEqual(workstations.stock_melt_len, p.melt_n);
     try std.testing.expectEqual(@as(u16, 5), p.fuel[0].count);
-    try std.testing.expectEqual(@as(usize, 1), p.input_n);
     try std.testing.expectEqual(@as(u16, 12), p.input[0].count);
     try std.testing.expect(p.is_burning);
+    try std.testing.expect(p.is_player_placed);
     try std.testing.expectApproxEqAbs(@as(f32, 12.5), p.burn_time_left, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), p.melt[0], 0.01);
+}
+
+test "workstation queue slot keeps its recipe and identity fields" {
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    const p = try parseWorkstationTeBody(body);
+    const active = p.queue[p.queue_n - 1];
+    try std.testing.expectEqual(@as(i16, 3), active.multiplier);
+    try std.testing.expect(active.is_crafting);
+    try std.testing.expectEqual(@as(i32, 171), active.starting_entity_id);
+    try std.testing.expectEqual(stock_inv.items_start_here + 9, active.output_type);
+    try std.testing.expectEqual(@as(i32, 2), active.output_count);
+    try std.testing.expectEqual(@as(i32, 5), active.craft_exp_gain);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), active.crafting_time, 0.01);
+    try std.testing.expect(active.recipeBlob().len > 0);
+    // Empty slots ride the wire too, and carry no recipe.
+    try std.testing.expectEqual(@as(usize, 0), p.queue[0].recipeBlob().len);
+}
+
+test "workstation craft complete list roundtrips" {
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    const p = try parseWorkstationTeBody(body);
+    try std.testing.expectEqual(@as(u8, 1), p.craft_complete_n);
+    try std.testing.expectEqual(@as(i32, 171), p.craft_complete[0].crafter_entity_id);
+    try std.testing.expectEqual(@as(i32, 5), p.craft_complete[0].exp_gain);
+    try std.testing.expectEqual(@as(u16, 1), p.craft_complete[0].used_count);
+    try std.testing.expectEqual(@as(u16, 2), p.craft_complete[0].item_count);
+    try std.testing.expectEqualStrings("meleeToolRepairT0StoneAxe", p.craft_complete[0].recipeName());
+}
+
+test "workstation encoder drains the payload exactly" {
+    // The check that would have caught the missing trailing lastInput array:
+    // re-encoding the parsed body must reproduce it byte for byte.
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    const p = try parseWorkstationTeBody(body);
+    var again: [8192]u8 = undefined;
+    const re = try buildWorkstationTeBody(&again, p.handle, p.world_x, p.world_y, p.world_z, p.block_id, .{
+        .fuel = p.fuel[0..p.fuel_n],
+        .input = p.input[0..p.input_n],
+        .tools = p.tools[0..p.tools_n],
+        .output = p.output[0..p.output_n],
+        .last_input_count = p.last_input_n,
+        .last_input = p.last_input[0..p.last_input_blob_len],
+        .queue = p.queue[0..p.queue_n],
+        .craft_complete = p.craft_complete[0..p.craft_complete_n],
+        .melt = p.melt[0..p.melt_n],
+        .is_burning = p.is_burning,
+        .burn_time_left = p.burn_time_left,
+        .is_player_placed = p.is_player_placed,
+    });
+    try std.testing.expectEqualSlices(u8, body, re);
+}
+
+test "workstation body truncated before lastInput is rejected" {
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    // Drop the trailing lastInput array (u8 count + 3 empty stacks) and shrink
+    // the declared payload length to match: a stock peer never sends this.
+    const cut = 1 + @as(usize, workstations.stock_last_input_len) * 2;
+    const short = body[0 .. body.len - cut];
+    std.mem.writeInt(i32, short[17..][0..4], @intCast(short.len - 21), .little);
+    try std.testing.expectError(error.EndOfStream, parseWorkstationTeBody(short));
+}
+
+test "workstation array count wider than our store is rejected" {
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    // Byte 21 is the payload's chunkPos start; the fuel count sits after
+    // chunkPos (12) and the version byte (1).
+    body[21 + 13] = @intCast(max_ws_slots + 1);
+    try std.testing.expectError(error.InvalidString, parseWorkstationTeBody(body));
 }
 
 test "stable hash TEFeatureStorage" {
