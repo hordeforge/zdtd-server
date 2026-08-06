@@ -56,6 +56,10 @@ observable, on the live stock client:
   PDF no longer trips `ValidateSizeMarker`. The stock accept marker
   (`NPCQuestList RemoveQuest` with tier + index) is wired and the offer list
   excludes active quests. Five new tests; 769 total.
+- **Blood moon (T7):** the horde now runs stock `IsBloodMoonTime` — dusk on the
+  blood-moon day through dawn of the next, crossing the midnight rollover — and
+  `worldTimeBits` encodes `(day-1)*24000` so the client HUD day, BloodMoonDay
+  and the red moon align. Dusk/dawn follow `CalcDuskDawnHours`. 772 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

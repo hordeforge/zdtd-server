@@ -136,14 +136,14 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
-| [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
+| [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; lakes wet, no POI water, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **92** | **156** | **97** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **95** | **153** | **97** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -254,14 +254,16 @@ area and the concrete work.
     boundary and gives no feedback when an edit is silently rejected
     (`src/server/game.zig:3158-3170`, `:416-417`, `src/wire/stock_inv.zig:846`).
 
-11. **Blood moon / world: fix the night window and the day encoding.**
-    `isBloodMoonNight` gates on `day % freq == 0` while the day rolls at 24:00,
-    so the horde runs 22:00 to midnight plus a phantom 00:00-04:00 window at the
-    wrong end. Stock's `GameUtils::IsBloodMoonTime` (asm.il:1926341) runs dusk on
-    `bmDay` through dawn on `bmDay+1`. Separately, `worldTimeBits` emits
-    `day*24000` where stock's `WorldTimeToDays` is `worldTime/24000 + 1`
-    (asm.il:1925943), so every client HUD day is one high and the red moon lands
-    on the night before the horde (`src/ecs/aidirector.zig:41`, `:63`).
+11. **DONE 2026-08-06.** Blood moon / world: fix the night window and the day
+    encoding. `isBloodMoonNight` mirrors stock `IsBloodMoonTime`: dusk on
+    `bmDay` through dawn on `bmDay+1`, crossing the midnight rollover.
+    `worldTimeBits` emits `(day-1)*24000` (stock `DayTimeToWorldTime`), so the
+    client HUD day and `GameStats.BloodMoonDay` align and the red moon lands on
+    the horde night. `setDayLightLength` implements `CalcDuskDawnHours`
+    (0/24 → (22,4); dusk 22 / DL / 12+DL/2; dawn = clamp(dusk-DL,0,23)).
+    CalcNextDay jitter is non-negative like stock. Unit tests over the window
+    and the wire day; 772 tests green. Still open: BloodMoonDay re-send on day
+    roll (the client keeps a stale value after its first blood moon).
 
 12. **Everywhere: raise or remove the fixed-size caps.**
     64 damaged blocks world-wide, 128 block rotations world-wide (both FIFO with
@@ -931,32 +933,31 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:57`, `src/server/game.zig:6216`,
   `asm.il:412894`, `src/server/config.zig:231`
 
-- **Blood-moon night window (dusk to dawn)** `PARTIAL`
-  Active while `day % freq == 0 AND (hours < 4 or hours >= 22)`. Because the day
-  counter rolls at 24:00 the horde starts at 22:00 and **stops dead at midnight**,
-  and it additionally fires a phantom 00:00-04:00 window at the start of the
-  blood moon day. Stock's `IsBloodMoonTime` is active on `day==bmDay` when
-  `hour>=dusk`, and on `day==bmDay+1` when `hour<dawn`. Two in-game hours of horde
-  instead of six, plus an unexplained horde 22 hours earlier.
-  *Anchors:* `src/ecs/aidirector.zig:37`, `:41`, `asm.il:1926341`,
+- **Blood-moon night window (dusk to dawn)** `WORKS`
+  `isBloodMoonNight` now mirrors stock `IsBloodMoonTime` (asm.il:1926341):
+  active on `day==bmDay` when `hour>=dusk`, and on `day==bmDay+1` when
+  `hour<dawn` — so the horde runs dusk on the blood-moon day through dawn of
+  the next, crossing the midnight rollover. The midnight stop and the phantom
+  pre-dawn window are gone.
+  *Anchors:* `src/ecs/aidirector.zig` `isBloodMoonNight`, `asm.il:1926341`,
   `asm.il:412859`
 
-- **Dusk/dawn hours from DayLightLength** `PARTIAL`
-  zdtd pins `dawn=4.0` and `dusk=4+DayLightLength`. Stock's `CalcDuskDawnHours`
-  has three branches. At the default 18 both give (4,22); any non-default puts the
-  server's blood-moon start and end at a different hour than the client's sky and
-  HUD, which recompute locally.
-  *Anchors:* `src/ecs/aidirector.zig:24`, `asm.il:1926249`, `asm.il:412837`
+- **Dusk/dawn hours from DayLightLength** `WORKS`
+  `setDayLightLength` implements stock `CalcDuskDawnHours` (asm.il:1926249):
+  DayLightLength 0/24 → (dusk 22, dawn 4); dusk starts at 22, clamps to DL when
+  DL > 22, becomes 12 + DL/2 when DL < 18; dawn = clamp(dusk - DL, 0, 23). At
+  the default 18 it still gives (4,22); non-default values now match the
+  client's locally computed sky window.
+  *Anchors:* `src/ecs/aidirector.zig` `setDayLightLength`, `asm.il:1926249`
 
-- **WorldTime day number on the wire** `PARTIAL`
-  `worldTimeBits` emits `day * 24000 + hours * 1000`. Stock's `WorldTimeToDays` is
-  `worldTime / 24000 + 1`, so zdtd's encoding is exactly one day high: a live
-  playtest shows the server on its day 1 at 08:00 and the client HUD reading
-  `day=2 08:15 raw=32264`. `GameStats.BloodMoonDay` carries the **server** day, so
-  the client renders the red moon and the red warning clock on the night **before**
-  the horde.
-  *Anchors:* `src/ecs/aidirector.zig:63`, `src/wire/packages.zig:1459`,
-  `asm.il:1925943`, `~/.cache/zdtd-playtest/report-1785984330.json`
+- **WorldTime day number on the wire** `WORKS`
+  `worldTimeBits` now emits `(day-1) * 24000 + hours*1000` (stock
+  `DayTimeToWorldTime`, asm.il:1926175), so `WorldTimeToDays` (wt/24000 + 1)
+  round-trips the wire day. The client HUD day and `GameStats.BloodMoonDay`
+  align with the server day, so the red moon lands on the horde night.
+  *Anchors:* `src/ecs/aidirector.zig` `worldTimeBits`,
+  `src/server/admin.zig` `dayTimeToWorldTime`, `asm.il:1925943`,
+  `asm.il:1926175`
 
 - **GameStats.BloodMoonDay sent to the client** `PARTIAL`
   Computed and written at the BloodMoonDay slot of the full persistent blob, but

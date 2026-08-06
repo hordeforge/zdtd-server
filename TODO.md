@@ -51,6 +51,9 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
 - [x] **Quests (T6)**: `template=` inheritance, per-objective Write kinds, and
       the stock accept marker (`NPCQuestList RemoveQuest`; offers exclude active
       quests). `<variable>` display-param substitution remains open.
+- [x] **Blood moon (T7)**: horde runs dusk-to-dawn across the rollover
+      (IsBloodMoonTime); WorldTime day encoding `(day-1)*24000`; CalcDuskDawnHours
+      and non-negative CalcNextDay jitter.
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.

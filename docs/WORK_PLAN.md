@@ -242,12 +242,21 @@ plus a scenario driving accept through to completion.
 
 ## T7. Blood moon: fix the night window and the day encoding
 
+**Status: landed 2026-08-06** (772 tests). `isBloodMoonNight` mirrors stock
+`IsBloodMoonTime` (dusk on the scheduled day through dawn of the next, crossing
+the midnight rollover), `worldTimeBits` encodes `(day-1)*24000` so the client
+HUD day / BloodMoonDay / red moon align, `setDayLightLength` implements
+`CalcDuskDawnHours`, and the CalcNextDay jitter is non-negative like stock.
+Unit tests cover the window (dusk, rollover, dawn) and the wire day. Remaining
+for full "done when": the live stock-client observation of the red moon night
+(visual round) and the BloodMoonDay re-send on day roll.
+
 **Why:** the blood moon fires but ends at midnight and the red moon shows on the
 wrong night, so the signature event of the game reads as broken.
 
-**Change:** use the stock `IsBloodMoonTime` window and the
+**Change:** ~~use the stock `IsBloodMoonTime` window and the
 `WorldTimeToDays` / `CalcDuskDawnHours` / `CalcNextDay` maths for the schedule
-and the client-visible day encoding.
+and the client-visible day encoding~~ **DONE**.
 
 **Grounding:** all four helpers are recorded with IL line numbers in
 `../7dtd-research/docs/aidirector.md` (2026-08-06).
