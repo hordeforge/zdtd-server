@@ -688,7 +688,7 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/server/game.zig:6779`, `src/ecs/systems.zig:314`,
   `src/ecs/components.zig:284`, `:274`, `src/server/game.zig:6780`
 
-- **Quest journal persistence (players.zsv v2)** `PARTIAL`
+- **Quest journal persistence (players.zsv ZPV3)** `PARTIAL`
   Stores def_id, quest_code, a flags byte, progress and phase, and re-resolves
   the POI rect on load. The identity stored is the parse-order catalog `def_id`;
   any edit to `quests.xml`, a `--config-overrides` patch or a game update
@@ -2196,7 +2196,7 @@ unvalidated, and durability, mods and repair do not exist.
   `:7421`
 
 - **Player inventory persistence of item state** `PARTIAL`
-  players.zsv v2 stores item_id, count, quality and meta per slot into a 32-entry
+  players.zsv (ZPV3 / legacy ZPV2) stores item_id, count, quality and meta per slot into a 32-entry
   read buffer, while the ECS inventory is 47 slots against the stock wire layout of
   10 + 45 + 12. UseTimes, mods, cosmetics and seed are not stored at all. Slots
   beyond bag index 32 and equipment index 5 are dropped on the C2S apply.
@@ -2496,35 +2496,36 @@ and server-to-client XP/level pushes do not exist.
   `src/wire/stock_inv.zig:413-417`
 
 - **players.zsv persistence: name, position, coins, inventory, journal** `WORKS`
-  ZPV2 merge-write that carries offline records over, refuses to clobber on a
-  corrupt read, patches the header count from what was actually written, and
-  re-resolves quest POI rects on load. Saved on the periodic tick when dirty, on
-  `saveworld`, and on shutdown. Covered by the persist restart scenario.
-  *Anchors:* `src/server/game.zig:1910-2033`, `:2050-2164`, `:9176-9179`,
-  `src/server/scenarios.zig:293-336`
+  **ZPV3** merge-write (ZPV2 still read and upgraded with `prog=0`) that carries
+  offline records over, refuses to clobber on a corrupt read, patches the header
+  count from what was actually written, and re-resolves quest POI rects on load.
+  Saved on the periodic tick when dirty, on `saveworld`, and on shutdown. Covered
+  by the persist restart scenario. Layout: [ADR 0011](adr/0011-custom-zch-world-overlay.md).
+  *Anchors:* `src/server/game.zig` (`savePlayers` / restore path),
+  `src/server/scenarios.zig` (persist restart)
 
-- **Progression persistence across restart or relog** `MISSING`
-  The players.zsv v2 record is name, xyz, coins, inventory, journal. There is no
-  XP, level, skill-point or perk field, and `Client.xp` / `Client.level` are zeroed
-  on disconnect. The join PDF writes progressionData length 0 and PlayerMetaInfo
-  level 0, and the C2S PlayerData parser stops at the Equipment block so the
-  client's own progressionsData is never even read. A player who levels to 20 and
-  reconnects is level 1 with 0 XP and no perks, every time.
-  *Anchors:* `src/server/game.zig:1910-1913`, `:1916-2033`,
-  `src/wire/packages.zig:530-533`, `:538-542`, `src/wire/stock_inv.zig:369-428`,
-  `src/server/game.zig:337-338`
+- **Progression persistence across restart or relog** `WORKS` (server ledger;
+  PDF/wire residuals open)
+  ZPV3 progression tail stores `Client.level` / `Client.xp` (the server-side
+  `awardXp` ledger) and restores them on rejoin. Perk/skill-point spending remains
+  client-owned with no server model; join PDF `progressionData` length and
+  PlayerMetaInfo level may still under-report to the UI relative to the ledger.
+  C2S PlayerData still does not ingest the client's progressionsData blob.
+  *Anchors:* `src/server/game.zig` (ZPV3 tail write/read), STATUS T5,
+  [ADR 0011](adr/0011-custom-zch-world-overlay.md)
 
-- **Buff persistence across restart** `MISSING`
-  The join PDF writes buffData length 0 alongside progressionData and stealthData.
-  There is nothing to persist since no buff state exists.
-  *Anchors:* `src/wire/packages.zig:530-533`, `asm.il:1975508`, `asm.il:1977923`
+- **Buff persistence across restart** `WORKS` (sim store; join PDF residual)
+  Active buffs ride the ZPV3 progression tail (`buff_n` × BuffInstance fields) and
+  are restored into ECS on rejoin. Residual: join PDF may still write buffData
+  length 0 so the client UI can miss restored buffs until a later S2C path.
+  *Anchors:* `src/server/game.zig` (ZPV3 buff tail), `src/ecs` buff slots
 
-- **Vitals persistence (health, food, water)** `MISSING`
-  Not in the players.zsv record, and the join PDF writes `hasEntityStats = false`
-  so no PlayerEntityStats block is sent. The reader can skip an incoming block but
-  never applies it. Every relog resets you to 100/100/100 via `spawnPlayer`.
-  *Anchors:* `src/wire/packages.zig:420`, `src/wire/stock_inv.zig:278-295`,
-  `src/ecs/world.zig:553-556`, `src/server/game.zig:1916-2033`
+- **Vitals persistence (health, food, water)** `PARTIAL`
+  Food/water (and maxes) are in the ZPV3 progression tail and restored into
+  `sim.health`. HP is not in the players.zsv record (spawn/heal path still owns
+  it). Join PDF `hasEntityStats` residual may still omit a full PlayerEntityStats
+  block; survival stats are also pushed on other S2C paths after join.
+  *Anchors:* `src/server/game.zig` (ZPV3 food/water tail), spawn/heal path
 
 - **progression.zig curve-only loader** `PARTIAL`
   `loadFromPath` calls `loadTableFromPath`, discards the result with `_ = t`
@@ -2759,13 +2760,14 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/ecs/aidirector.zig:63-67`, `asm.il:1926175-1926208`,
   `asm.il:1925943-1925956`
 
-- **World clock persistence across restart** `MISSING`
-  Nothing saves or restores `WorldClock.day` / `hours`. Every restart resets the
-  world to day 1, 08:00, wiping the blood-moon schedule and any day-gated quest or
-  loot-respawn progress. The periodic persist path saves only chunks, containers,
-  block meta and players.
-  *Anchors:* `src/server/game.zig:8131-8147`, `:1691-1703`,
-  `src/ecs/aidirector.zig:7-8`
+- **World clock persistence across restart** `WORKS`
+  `clock.zcl` (magic ZCL1, stock-shaped `worldTime` u64) is saved on the periodic
+  save path and at deinit, and restored over the fresh clock at init. The
+  blood-moon calendar derives from the day, so a save keeps its horde schedule.
+  (Duplicate of the blood-moon schedule persistence entry above; kept here so the
+  §world-time residual list does not re-open a shipped store.)
+  *Anchors:* `src/server/game.zig` (`saveClock`/`restoreClock`),
+  `src/ecs/aidirector.zig` (`WorldClock.worldTimeBits`)
 
 - **Blood-moon schedule plus NetPackageBloodmoonMusic** `WORKS`
   Deterministic jitter around each frequency multiple with neighbouring cycles
@@ -3350,14 +3352,15 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/world/store.zig:694-695`, `:702-727`, `:736-780`
 
 - **Player save (players.zsv)** `PARTIAL`
-  ZPV2 records keyed by **login name** (not platform id, so two players with the
-  same name share a save and a rename loses it). Each record holds position, coins,
-  up to ~60 inventory slots and journal quests. Absent: health, stamina, food,
-  water, temperature, buffs, XP and level, skills and perks, equipment/armour,
-  toolbelt-vs-backpack layout, bedroll and spawn point, map exploration, waypoints,
-  kill/death stats, gamestage. Offline records are correctly carried over on
-  merge-write and a corrupt file aborts the save instead of clobbering.
-  *Anchors:* `src/server/game.zig:1744-1864`, `:1885-1960`, `:2600+`
+  **ZPV3** records (ZPV2 still read) keyed by **login name** per ADR 0017 (not
+  platform id, so two players with the same name share a save and a rename loses
+  it). Each record holds position, coins, inventory slots, journal quests, plus a
+  progression tail: level, XP, food/water, active buffs. Still absent: HP/stamina
+  in the file, temperature, skills and perks, equipment/armour layout, bedroll and
+  spawn point, map exploration, waypoints, kill/death stats, gamestage. Offline
+  records are correctly carried over on merge-write and a corrupt file aborts the
+  save instead of clobbering. Layout: [ADR 0011](adr/0011-custom-zch-world-overlay.md).
+  *Anchors:* `src/server/game.zig` (`savePlayers` / restore), STATUS T5
 
 - **Container / loot persistence** `PARTIAL`
   `containers.zct` (ZCT1) persists position, block id, slot count, touched and
@@ -3597,7 +3600,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
 | Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; no whitelist file |
 | `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
-| Reconnect resume | PARTIAL | players.zsv v2 keyed **by login name**, not by identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration; tracked in §10 |
+| Reconnect resume | PARTIAL | players.zsv ZPV3 keyed **by login name** (ADR 0017), not by platform identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration (ZPV4 or flagged extension); tracked in §10 |
 | Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
 
 ---
@@ -3665,7 +3668,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Drop / pickup / bag containers | HAVE (loot ECD bag; Bag C2S-only) |
 | Craft / recipe / unlock | PARTIAL (InvTx + workstation TE + unlock list) |
 | Toolbelt / bag / equipment slots | HAVE |
-| Item quality / mods / durability | PARTIAL (quality/meta in players.zsv v2; mods shallow) |
+| Item quality / mods / durability | PARTIAL (quality/meta in players.zsv ZPV3; mods shallow) |
 | Loot container open/close | HAVE (LockRequest + TE stream) |
 
 #### Blocks / building
@@ -4216,16 +4219,18 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | `.zch` height overlay | HAVE |
 | Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
 | Stock region `.ttc` | MISSING |
-| Player profile / inventory save | HAVE (players.zsv v2 quality/meta + journal) |
+| Player profile / inventory save | HAVE (players.zsv **ZPV3**: quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read) |
 | Bedroll / last logout pos | PARTIAL (logout pos; bedroll ownership MISSING) |
-| Map ownership / claims | PARTIAL (LandClaim keystone + deny) |
-| AIDirector / sleeper save blobs | MISSING |
-| Quest journal save | HAVE (players.zsv v2) |
+| Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
+| AIDirector / sleeper save blobs | MISSING (clock.zcl + weather.zwt ship; full AIDirector blob does not) |
+| Quest journal save | HAVE (players.zsv ZPV3) |
 | Vehicle / turret persistence | MISSING |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | MISSING |
-| Player save key | PARTIAL (login name; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
+| Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
 | Ally relationships | MISSING (in-memory only; stock persists them in PersistentPlayerList) |
+| World clock | HAVE (`clock.zcl` ZCL1) |
+| Weather storm SM | HAVE (`weather.zwt` ZWTH1) |
 
 ---
 

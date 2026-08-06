@@ -2600,6 +2600,9 @@ test "scenario blood moon day re-send fires on the day roll" {
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
+    // The clock now persists (clock.zcl); this scenario deliberately mutates
+    // the day, so start from a fresh calendar each run.
+    io_fs.deleteFile(gpa, "worlds/zdtd_sc_bmday/clock.zcl");
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmday", 0);
     defer {

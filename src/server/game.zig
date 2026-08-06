@@ -1386,7 +1386,6 @@ pub const Game = struct {
                     .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
                 });
                 self.restoreWeather();
-                self.restoreClock();
                 const burnt = bl.stackFor(9);
                 std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
                     bl.default_stack.n,
@@ -1395,6 +1394,9 @@ pub const Game = struct {
                     if (bl.hasDecos()) "yes" else "no",
                 });
             }
+            // Clock restore is independent of the biome-layers load: a world
+            // without stock biome data must still resume its saved day/time.
+            self.restoreClock();
             if (assets_block_textures.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
                 self.block_textures.deinit();
                 self.block_textures = bt;
@@ -11296,12 +11298,6 @@ test "world clock persists across a restart (BM calendar survives)" {
         // Day 5, 12:30 — deinit saves clock.zcl.
         g.sim.director.clock.day = 5;
         g.sim.director.clock.hours = 12.5;
-        std.debug.print("CLOCKDBG before-deinit day={d} hours={d:.2}\n", .{ g.sim.director.clock.day, g.sim.director.clock.hours });
-    }
-    std.debug.print("CLOCKDBG file exists={} size={d}\n", .{ io_fs.fileExistsSimple(dir ++ "/clock.zcl"), if (io_fs.fileExistsSimple(dir ++ "/clock.zcl")) @as(usize, 12) else 0 });
-    var rbuf: [16]u8 = undefined;
-    if (io_fs.readFileInto(std.testing.allocator, dir ++ "/clock.zcl", &rbuf) catch null) |bytes| {
-        if (bytes.len >= 12) std.debug.print("CLOCKDBG file wt={d}\n", .{std.mem.readInt(u64, bytes[4..12], .little)});
     }
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
