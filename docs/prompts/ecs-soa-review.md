@@ -1,5 +1,7 @@
 # Agent prompt: ECS ownership and SoA discipline review (zdtd)
 
+Your goal is to check ECS ownership and SoA discipline: who writes each component, and where layout costs cache misses.
+
 Copy everything below the line into a fresh agent session (or `@` this file).
 
 ---

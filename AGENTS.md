@@ -305,11 +305,11 @@ mapping captures, bit masks, buffer caps, and RE version pins are named module
   re-parse XML every tick.
 - `page_allocator` is not for tick or package work. Tests use
   `std.testing.allocator` (or `DebugAllocator`) so leaks fail CI.
-- Review prompts: [`docs/PROMPTS/review-zig-idiomatic.md`](docs/PROMPTS/review-zig-idiomatic.md)
-  (language/hot path), [`docs/PROMPTS/review-abstractions.md`](docs/PROMPTS/review-abstractions.md)
+- Review prompts: [`docs/prompts/zig-idiomatic-review.md`](docs/prompts/zig-idiomatic-review.md)
+  (language/hot path), [`docs/prompts/abstractions-review.md`](docs/prompts/abstractions-review.md)
   (when to build or delete helpers/layers),
-  [`docs/PROMPTS/review-simd.md`](docs/PROMPTS/review-simd.md) (SIMD on dense loops),
-  [`docs/PROMPTS/review-ecs-soa.md`](docs/PROMPTS/review-ecs-soa.md) (ECS ownership + SoA).
+  [`docs/prompts/simd-review.md`](docs/prompts/simd-review.md) (SIMD on dense loops),
+  [`docs/prompts/ecs-soa-review.md`](docs/prompts/ecs-soa-review.md) (ECS ownership + SoA).
 
 ### Tick path (20 TPS / 50 ms)
 
@@ -364,7 +364,7 @@ When two approaches are correct, pick the one that matches
 cases, readable code, one obvious way, fail at compile time when possible,
 incremental migration off legacy I/O, **memory is a resource** (no hot-path
 heap), dealloc always succeeds (`defer`). Full review rubric:
-[`docs/PROMPTS/review-zig-idiomatic.md`](docs/PROMPTS/review-zig-idiomatic.md).
+[`docs/prompts/zig-idiomatic-review.md`](docs/prompts/zig-idiomatic-review.md).
 
 ### Errors and safety
 

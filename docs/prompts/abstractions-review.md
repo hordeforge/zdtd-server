@@ -1,5 +1,7 @@
 # Agent prompt: when to build abstractions (and how to review them)
 
+Your goal is to judge whether each abstraction earns its keep, and to name the ones that should be inlined away or introduced.
+
 Copy everything below the line into a fresh agent session (or `@` this file).
 
 ---

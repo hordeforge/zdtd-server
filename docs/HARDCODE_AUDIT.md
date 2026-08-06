@@ -1,7 +1,7 @@
 # Hardcode audit (Bucket A / B / OK)
 
 Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
-`docs/PROMPTS/audit-hardcoded-data.md` + systematic `rg` / file reads against
+`docs/prompts/hardcoded-data-review.md` + systematic `rg` / file reads against
 `src/`, stock `Data/Config`, `docs/ASSETS.md`, `docs/GAME_OPTIONS.md`.
 
 ## Executive summary

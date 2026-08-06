@@ -84,7 +84,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan)
 - [x] Power: full trigger TE wire (pressure plate / tripwire gate + `activateTriggerAt` on player step; pulse opens BFS)
 - [x] Workstation RecipeQueue C2S: TileEntity type 12 parse applies queue + burn; tick crafts + dirty rebroadcast
-- [x] Hardcode audit: run `docs/PROMPTS/audit-hardcoded-data.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
+- [x] Hardcode audit: run `docs/prompts/hardcoded-data-review.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
 
 ### M11 multiplayer CPU (1.0 scale gate)
 
@@ -163,7 +163,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 
 ### Recent (2026-08-04)
 - [x] **EAI Look + Reset/Continue split**: ported `EAILook` (asm.il:429858) as the seventh `zombie_tasks` cell, in the stock zombie AITask position between ApproachSpot and Wander (`entityclasses.xml` zombieTemplateMale, `EAITaskList::AddTask` priority == 1-based index, asm.il:430495). Look is not cosmetic: it is Wander's partner. Implementing it forced two missing stock mechanisms - a per-task `Reset()` hook (`EAITaskList::OnUpdateTasks` IL_006F, asm.il:437713) and a `Continue()` distinct from `CanExecute()` (`EAIBase::Continue` defaults to CanExecute, asm.il:424569). `EAIWander::Reset` seeds `lookTime = RandomRange(0.5, 5)` (asm.il:438383) and `EAIApproachSpot::Reset` seeds `5 + rand*3` (asm.il:424395); those are the only two Reset sites in the assembly that write `lookTime`. `EAIWander::Continue` (asm.il:438318) stops on the 30 s cap and on path-finished, which zdtd previously never did (wander ran forever). `EAIWander::CanExecute` is data-blocked while `lookTime > 0` (asm.il:438181). Look's Start latches the owed seconds and stops the mover (asm.il:429903); its Update slews body yaw via a port of `Entity::SeekYaw`'s speed law (asm.il:399475: quadratic slowdown inside 35 deg, 20 deg/s floor, MaxTurnSpeed 250 from entityclasses.xml) toward a fresh +/-60 deg pick every 0.7 s (asm.il:429984-430001). New: `c.TaskId.look`, five `ZombieAi` fields (`look_time`/`look_wait`/`look_turn_cd`/`look_yaw`/`wander_time`), `seekYawStep`, `canContinue`, `resetTask`, `rngFrac` (reuses the existing per-entity xorshift, as stock reuses one GameRandom per entity). +4 tests (453 total). Gaps documented (MISSING §5.2.1): head/eye `SetLookPosition` aim, alert double-drain, stun bail, per-class MaxTurnSpeed, per-tick vs two-phase slew, ultra-far LOD bypass, and the five residual tasks (Dodge/Leap/RangedAttack/RunAway*/ApproachDistraction) with the hard dependency each is blocked on. Also corrected §5.2.1's false claim that `entityclasses.xml` is "not on hand" - it ships with the dedicated server; per-class parsing is a scope gap, not a data gap.
-- [x] **ECS/SoA review prompt** `docs/PROMPTS/review-ecs-soa.md`; phase_gate + movement envelope; plugin host + query/command
+- [x] **ECS/SoA review prompt** `docs/prompts/ecs-soa-review.md`; phase_gate + movement envelope; plugin host + query/command
 - [x] **EAI BreakBlock**; eat soften near-max; wood→frameShapes place; deco empty firstPackage (no Read NRE)
 - [x] **WebUI WU2**: POST `/api/cmd` + console UI + CSRF; expanded Snapshot (entity census, all apm counters, p99/max, policy knobs)
 - [x] **zdtd.toml**: minimal TOML loader + example; stream/authority/feature → InitOptions; sanitize radii
@@ -179,7 +179,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **Weather from biomes.xml**: `biome_layers.Table` parses default weather group ranges → wire params; join + WorldTime throttle send `NetPackageWeather`; deleted hardcoded `defaultWeatherBiomes`
 - [x] **Quest Craft/StayWithin**: `QuestKind`/`PhaseKind` + systems hooks; quests.xml classifiers; nav markers exhaust kinds
 - [x] Craft InvTx path + `questOnCraft` after successful recipe; stay tick on player move
-- [x] Agent prompt `docs/PROMPTS/audit-hardcoded-data.md` expanded (Bucket A/B, stock Config gap list, builtins, absolute paths, ids/enums)
+- [x] Agent prompt `docs/prompts/hardcoded-data-review.md` expanded (Bucket A/B, stock Config gap list, builtins, absolute paths, ids/enums)
 - [x] **Config XML overrides**: `--config-overrides DIR` (repeatable, filename order); xpath set/remove/append subset; `paths`+`xml_patch`+`io_fs` (`std.Io`, no raw syscalls); AGENTS rule 24
 - [x] **Power from blocks.xml**: MaxFuel/OutputPerFuel/OutputPerCharge/OutputPerStack parsed in maxdamage; powerblocks.Resolved.applyToNode; place path applies props; electric tick fuel/SoC/timers; removed default_gen_fuel/battery_cap consts
 - [x] WORLDGEN on-the-fly stream design + TODO W0-W7

@@ -1,5 +1,7 @@
 # Agent prompt: SIMD opportunity review (zdtd / Zig 0.16)
 
+Your goal is to find dense loops where SIMD is a real win, and to reject the ones where it is not.
+
 Copy everything below the line into a fresh agent session (or `@` this file).
 
 ---

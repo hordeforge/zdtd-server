@@ -5,7 +5,7 @@
 | Date | 2026-08-04 |
 | Mode | Fix P0/P1 |
 | Scope | `src/server`, `src/world`, `src/assets`, `src/util`, `src/ecs` (sample hot paths) |
-| Prompt | `docs/PROMPTS/review-zig-idiomatic.md` |
+| Prompt | `docs/prompts/zig-idiomatic-review.md` |
 
 ## Summary counts
 

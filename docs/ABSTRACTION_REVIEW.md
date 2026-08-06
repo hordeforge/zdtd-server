@@ -1,7 +1,7 @@
 # Abstraction review (zdtd)
 
 Scope: full tree under `src/` (util, wire, assets, world, server, ecs, litenet,
-apm). Date: 2026-08-04. Method: `docs/PROMPTS/review-abstractions.md` decision
+apm). Date: 2026-08-04. Method: `docs/prompts/abstractions-review.md` decision
 tree + scorecard. Complementary to idiomatic Zig / `std.Io` migration.
 
 ## Inventory (abstractions in scope)

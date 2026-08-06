@@ -1,5 +1,7 @@
 # Agent prompt: audit hardcoded data vs loaders / config
 
+Your goal is to separate values that belong in stock game XML from values that belong in zdtd config, and to flag anything hardcoded in Zig that is neither.
+
 Copy everything below the line into a fresh agent session (or `@` this file).
 
 ---
