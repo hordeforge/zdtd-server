@@ -124,7 +124,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityAnimationData` | P2 |
 | `NetPackageEntityRagdoll` | P2 |
 | `NetPackageEntityAttach` / detach | P1 (vehicles, seats) |
-| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buffs deferred) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health also replicates from the tick pass whenever `dirty.hp` is set, so AI melee, C2S damage and death reach the client the way `EntityStats::TickWait` polls `Stat.Changed` (asm.il:199393); NPC stats and buffs deferred) |
 | `NetPackageEntityStealth` | P2 |
 | `NetPackageEntityCollect` | P1 (loot) |
 | `NetPackageEntityWaypointList` / map markers | P2 |
@@ -636,7 +636,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Broadcast all transforms | PARTIAL (except owner for PosAndRot; broadcastNear 160) |
 | Spatial interest (chunk/grid) | PARTIAL (radius filter; no cell hash) |
 | Serialize-once shared buffers | MISSING (M11 open) |
-| Dirty flags (POS/ROT/FLAGS/HP) | PARTIAL (spawn dirty + known_entities; full bitset open) |
+| Dirty flags (POS/ROT/FLAGS/HP) | PARTIAL (spawn dirty + known_entities; HP drains into player `EntityStatChanged` each tick; full bitset open) |
 | RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
 | Velocity packages | MISSING |
 | Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |

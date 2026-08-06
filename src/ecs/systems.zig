@@ -117,6 +117,10 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         if (!(amount > 0)) continue;
         w.health[i].hp -= amount;
         applied += 1;
+        // Stock's Stat setter raises Stat.Changed and EntityStats::TickWait
+        // turns that into a stat-change package (asm.il:199393). dirty.hp is
+        // that flag here: without it the victim's client never sees the hit.
+        if (w.mask[i].dirty) w.dirty[i].hp = true;
         if (w.health[i].hp <= 0) {
             // Dead players keep their entity (stock death → respawn flow).
             if (w.kind[i] == .player) {
@@ -2102,4 +2106,42 @@ test "failed trader buy leaves wallet stock and inventory unchanged" {
     try std.testing.expectEqual(@as(u32, 100), w.wallet[ps].coins);
     try std.testing.expectEqual(@as(u16, 2), w.trader_stock[ts].entries[0].count);
     try std.testing.expectEqualSlices(c.InvSlot, &inventory_before.slots, &w.inventory[ps].slots);
+}
+
+test "zombie melee marks the victim hp dirty so replication can see it" {
+    // Regression: applyDeferredDamage used to subtract hp and set nothing, so the
+    // replicate pass had no way to know a player had been hit and the client was
+    // never told. Stock raises Stat.Changed on every stat write and the entity
+    // tick turns that into a stat-change package (asm.il:199393).
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    _ = w.spawnZombie(1, 70, 0, 40).?;
+    const ps = w.slotOfNetId(p).?;
+    w.dirty[ps] = .{};
+    var t: f32 = 0;
+    while (t < 3.0 and w.health[ps].hp >= 100) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.health[ps].hp < 100);
+    try std.testing.expect(w.dirty[ps].hp);
+}
+
+test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
+    // Death must stay replicable: the hp=0 write is what drives the client death
+    // screen, so the dirty bit has to survive the kill branch.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.health[ps].hp = 1;
+    w.dirty[ps] = .{};
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    dmg_fp[ps] = 500; // 5.0 hp
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
+    try std.testing.expect(w.alive[ps]);
+    try std.testing.expect(w.dirty[ps].hp);
+    // A corpse takes no further hits, so nothing re-dirties it.
+    w.dirty[ps].hp = false;
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expect(!w.dirty[ps].hp);
 }
