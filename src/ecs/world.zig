@@ -11,6 +11,7 @@ const inv_ledger = @import("inv_ledger.zig");
 const locals_mod = @import("locals.zig");
 const observers_mod = @import("observers.zig");
 const group = @import("group.zig");
+const path_mod = @import("path.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -120,14 +121,29 @@ pub const World = struct {
     /// physics is skipped and no fake flat floor is invented.
     ground_ctx: ?*anyopaque = null,
     ground_fn: ?*const fn (?*anyopaque, i32, i32) f32 = null,
-    /// Optional solid-cell probe for AI pathing: true = blocked at feet.
-    /// Unset → open grid (tests / headless). Game wires world.isSolidWorld at body y.
-    solid_ctx: ?*anyopaque = null,
-    solid_fn: ?*const fn (?*anyopaque, i32, i32) bool = null,
+    /// Optional one-cell move predicate for AI pathing: returns the feet Y the
+    /// body would stand at in the destination column, or null when the move is
+    /// blocked. Unset → open grid (tests / headless). Game wires
+    /// world.standableWorld, which models step-up, drop and headroom; a plain
+    /// solid-cell bool cannot (see path.StepFn).
+    step_ctx: ?*anyopaque = null,
+    step_fn: ?path_mod.StepFn = null,
     /// A* replans issued this tick. Atomic: the AI phase runs on parallel
     /// workers. Cleared by beginTick and surfaced as TickResult.path_replans
     /// (ecs must not import apm; see the note on commands_applied).
     path_replans: std.atomic.Value(u32) = .init(0),
+    /// Replans refused this tick by the per-tick node budget. Same lifetime and
+    /// clearing as path_replans.
+    path_replans_denied: std.atomic.Value(u32) = .init(0),
+    /// Admission stride for the per-tick A* budget: a zombie may replan only on
+    /// ticks where `(slot + path_tick) % path_stride == 0`. Derived once per
+    /// tick on the main thread from last tick's demand, never from a shared
+    /// countdown: the AI phase runs on parallel ranges, so an atomic budget
+    /// would make chase paths depend on which worker got there first.
+    path_stride: u32 = 1,
+    /// Monotonic tick counter rotating the admission window so every slot gets
+    /// its turn instead of the same ones always winning.
+    path_tick: u32 = 0,
     /// Optional item_id → placeable block id (AssignIds). Null → inventory offline map.
     place_ctx: ?*anyopaque = null,
     place_fn: ?*const fn (?*anyopaque, u16) u16 = null,
@@ -274,10 +290,32 @@ pub const World = struct {
         self.kind_groups.insert(self.kind[slot], slot);
     }
 
+    /// Max A* replans admitted per tick. Each costs at most `path_max_expand`
+    /// node expansions, so this is the tick's pathfinding node ceiling.
+    pub const path_replans_per_tick: u32 = 16;
+    /// Cap on the admission stride: a replan is delayed by at most this many
+    /// ticks (0.4 s at 20 Hz) beyond its own cooldown, whatever the load.
+    pub const path_stride_max: u32 = 8;
+
+    /// Stride that spreads `want` replans over enough ticks to stay under the
+    /// per-tick cap. 1 = admit everyone.
+    fn pathStrideFor(want: u32) u32 {
+        if (want <= path_replans_per_tick) return 1;
+        const s = (want +| (path_replans_per_tick - 1)) / path_replans_per_tick;
+        return @min(s, path_stride_max);
+    }
+
     /// Clear tick locals at the start of each sim frame (schedule / tickAll).
     pub fn beginTick(self: *World) void {
         @memset(&self.freed_this_tick, false);
+        // Budget for this tick from last tick's demand (granted + refused).
+        // Read on the main thread with the AI phase quiesced, so the sum is a
+        // plain deterministic total, not a racy sample.
+        const want = self.path_replans.load(.monotonic) + self.path_replans_denied.load(.monotonic);
+        self.path_stride = pathStrideFor(want);
+        self.path_tick +%= 1;
         self.path_replans.store(0, .monotonic);
+        self.path_replans_denied.store(0, .monotonic);
         // any_freed_this_tick stays set until replicate reconciles known_entities:
         // net poll / admin may destroy before beginTick, sim after it.
         self.locals.clear();
@@ -295,10 +333,19 @@ pub const World = struct {
         return null;
     }
 
-    /// True when cell (wx,wz) blocks horizontal AI movement (optional hook).
-    pub fn isPathSolid(self: *const World, wx: i32, wz: i32) bool {
-        if (self.solid_fn) |f| return f(self.solid_ctx, wx, wz);
-        return false;
+    /// Feet Y after one grid move, or null when blocked (optional hook).
+    /// With no hook the grid is open and flat, so the body keeps its height.
+    pub fn stepTo(self: *const World, fx: i32, fz: i32, fy: i32, tx: i32, tz: i32) ?i32 {
+        if (self.step_fn) |f| return f(self.step_ctx, fx, fz, fy, tx, tz);
+        return fy;
+    }
+
+    /// True when slot `s` may spend A* nodes this tick. Pure function of the
+    /// slot and the tick-constant stride/phase, so the answer does not depend
+    /// on which worker range the slot landed in.
+    pub fn pathBudgetAdmits(self: *const World, s: Slot) bool {
+        if (self.path_stride <= 1) return true;
+        return (@as(u32, s) +% self.path_tick) % self.path_stride == 0;
     }
 
     /// True when handle still points at the same reincarnation of this slot.
@@ -591,7 +638,21 @@ pub const World = struct {
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
+        return self.damageFrom(net_id, amount, -1);
+    }
+
+    /// Damage with the attacker's net id (-1 = unattributed). The attacker is
+    /// EntityAlive.revengeTarget: EAISetAsTargetIfHurt (asm.il:435831) promotes
+    /// it to the attack target, so a zombie shot from behind turns on the
+    /// shooter instead of the nearest player.
+    pub fn damageFrom(self: *World, net_id: NetId, amount: f32, attacker_net_id: NetId) DamageResult {
         const s = self.slotOfNetId(net_id) orelse return .{};
+        if (attacker_net_id >= 0 and attacker_net_id != net_id and
+            self.alive[s] and self.mask[s].zombie_ai and amount > 0)
+        {
+            self.zombie_ai[s].revenge_target = attacker_net_id;
+            self.zombie_ai[s].revenge_time = c.revenge_window_s;
+        }
         if (self.kind[s] == .trader) return .{};
         if (!self.mask[s].health) return .{};
         // Non-positive / NaN must not heal, mark dirty, or re-fire kill side effects.
@@ -715,6 +776,51 @@ test "damage ignores non-positive amount and already-dead players" {
     const ps = w.slotOfNetId(p).?;
     try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
     try std.testing.expect(w.alive[ps]);
+}
+
+test "damageFrom records the attacker as the revenge target" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const p = w.spawnPlayer(5, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = w.damageFrom(z, 3, p);
+    try std.testing.expectEqual(p, w.zombie_ai[zs].revenge_target);
+    try std.testing.expectEqual(c.revenge_window_s, w.zombie_ai[zs].revenge_time);
+    // Unattributed and self-inflicted damage leave the target alone.
+    w.zombie_ai[zs] = .{};
+    _ = w.damage(z, 3);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+    _ = w.damageFrom(z, 3, z);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+    // A zero-damage claim is not an attack.
+    _ = w.damageFrom(z, 0, p);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+}
+
+test "per-tick path budget stride is derived from last tick demand" {
+    var w: World = .{};
+    defer w.deinit();
+    w.path_replans.store(4, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 1), w.path_stride);
+    try std.testing.expectEqual(@as(u32, 0), w.path_replans.load(.monotonic));
+    // Demand above the cap spreads over as many ticks as it takes, up to the
+    // delay ceiling.
+    w.path_replans.store(World.path_replans_per_tick, .monotonic);
+    w.path_replans_denied.store(World.path_replans_per_tick, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 2), w.path_stride);
+    // Every slot is admitted eventually: over `stride` consecutive ticks the
+    // rotating phase covers all of them exactly once.
+    var seen: u32 = 0;
+    var k: u32 = 0;
+    while (k < w.path_stride) : (k += 1) {
+        if (w.pathBudgetAdmits(7)) seen += 1;
+        w.path_tick +%= 1;
+    }
+    try std.testing.expectEqual(@as(u32, 1), seen);
 }
 
 test "net id lookup falls back to authoritative columns when index misses" {

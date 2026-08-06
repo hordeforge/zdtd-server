@@ -301,7 +301,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Animals / special infected / bosses | PARTIAL (animals spawner + cap; bosses MISSING) |
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
-| Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy; no navmesh / vertical) |
+| Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |
 | MoveHelper physics / collision | MISSING |
 | Gravity / swimming / climbing | PARTIAL (void rescue teleport; vehicle gravity) |
 | Line of sight / hearing / smell | MISSING |
@@ -327,6 +327,12 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 
 #### 5.2.1 EAI task graphs (PARTIAL)
 
+IL line numbers in this section are `asm.il` (V3.1.0 b14) unless a citation says
+otherwise. Older EAI citations in this file and in `src/ecs/` were taken from
+`asm_v301.il`, whose numbering is offset by roughly +680 for these classes
+(EAIBreakBlock is asm_v301.il:425121 but asm.il:425801); check which dump you
+are reading before quoting a line.
+
 `AiCtx.work` (`src/ecs/systems.zig`) ports stock's prioritized task-selection
 loop `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874): an
 ordered task table with `{priority, MutexBits, executeDelay, continuous}` per
@@ -335,14 +341,31 @@ timer, and Start/Update/CanExecute/Continue hooks. The winning task is
 projected onto the coarse `ZombieAi.state` enum so all downstream replication
 stays unchanged.
 
-Seven real tasks are registered in the comptime `zombie_tasks` table, in the
-stock zombie AITask order: BreakBlock, DestroyArea, ApproachAndAttackTarget
-(chase+melee, MutexBits=3, executeDelay=0.1, non-continuous; asm.il:421798),
-Territorial, ApproachSpot, Look (MutexBits=1, executeDelay 0.5 from the
-EAIBase::Init default, continuous; asm.il:429858), and Wander (MutexBits=1,
-continuous; asm.il:438104). Chase preempts wander on sensing a player; wander
-resumes when the target is lost (mutex release), exactly reproducing stock's
-emergent order.
+Eight real tasks are registered in the comptime `zombie_tasks` table, in the
+stock AITask order: BreakBlock, DestroyArea, RunawayWhenHurt (MutexBits=1 from
+its .ctor, EAIBase defaults for executeDelay/continuous; asm.il:435616, flee
+distance 20 from `EAIRunAway::.ctor`, asm.il:434801),
+ApproachAndAttackTarget (chase+melee, MutexBits=3, executeDelay=0.1,
+non-continuous; asm.il:421798), Territorial, ApproachSpot, Look (MutexBits=1,
+executeDelay 0.5 from the EAIBase::Init default, continuous; asm.il:429858),
+and Wander (MutexBits=1, continuous; asm.il:438104). Chase preempts wander on
+sensing a player; wander resumes when the target is lost (mutex release),
+exactly reproducing stock's emergent order. RunawayWhenHurt is gated on
+`kind == .animal`, standing in for the fact that only the passive-animal
+classes carry it in `entityclasses.xml` while zdtd runs animals on the zombie
+table.
+
+The head of the stock AITarget list is modeled too. `EAISetAsTargetIfHurt`
+(asm.il:435831; CanExecute ends :436139, Start ends :436169) promotes the
+attacker to the attack target for the 400-tick window `Start` passes to
+`SetAttackTarget` (asm.il:436155). `NetPackageDamageEntity::read` carries
+`attackerEntityId` (asm.il:810693), so `World.damageFrom` records it as the
+revenge target and `applyRevengeTarget` overrides the nearest-player pick while
+it is fresh, keeping CanExecute's "attacker is a different entity type" gate. It
+is applied as a target-selection override rather than a second task table,
+because zdtd collapses the whole AITarget list into `nearestPlayerSnap`. The
+`class=` filter is not modeled: zdtd damage attribution only ever names a player
+or a turret.
 
 `Reset()` and a `Continue() != CanExecute()` split are both modeled, because
 Look needs them: `EAITaskList::OnUpdateTasks` calls `action.Reset()` on the same
@@ -362,10 +385,24 @@ replicates via `NetPackageEntityPosAndRot`.
 Honest gaps:
 
 - **Grid A\* (no navmesh).** Approach replans via `path.aStarToward` on a
-  coarse XZ grid when `World.solid_fn` is set (body-height solid from the block
-  store); falls back to straight `stepToward` without a solid hook. Caps
-  expansions (~96) and replan interval (~0.35 s) for the 20 TPS budget. No
-  navmesh, no vertical climb/jump, no stock pathCounter/relocateTicks fidelity.
+  coarse XZ grid when `World.step_fn` is set. The predicate is a *move* test,
+  not a solid-cell test: `store.Chunk.standableY` returns the feet Y the body
+  would occupy in the destination column, so step-up (1), drop (3) and
+  2-cell headroom are all part of the search, and the followed path carries its
+  Y (entities now walk terrain instead of floating at spawn height). Without a
+  hook the grid is open and flat and movement falls back to straight
+  `stepToward`. One solve fills an 8-cell waypoint buffer that is followed
+  across ticks, so a chase costs roughly one search per 8 m rather than one per
+  metre; replans happen when the buffer empties, the goal leaves its cell, or a
+  blocked path is due for a retry (~0.35 s). A per-tick node budget
+  (`World.path_replans_per_tick` = 16 solves x `path_max_expand` = 96
+  expansions) admits replans by a stride derived from last tick's demand;
+  admission is a pure function of slot and tick number, never a shared atomic,
+  because the AI phase runs on parallel ranges and a countdown would make chase
+  paths depend on worker scheduling. Refused ticks keep walking the buffer and
+  are counted as `path_replans_denied`. Nodes are still keyed on XZ only, so a
+  column reachable at two heights resolves to whichever the search found first.
+  No navmesh, no jump/climb, no stock pathCounter/relocateTicks fidelity.
 - **Five EAI tasks stay unimplemented, each on a hard missing dependency.**
   - *EAIDodge* (asm.il:426512): CanExecute reads the target's
     `avatarController.IsAnimationToDodge()` and Start calls
@@ -383,11 +420,11 @@ Honest gaps:
     calls `UseHoldingItem`/`IsHoldingItemInUse`; the projectile comes from the
     held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
     Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
-  - *EAIRunawayWhenHurt / EAIRunawayFromEntity* (asm.il:434936, :434510, base
-    :434098): both need `GetRevengeTarget()`. `NetPackageDamageEntity`
-    (`src/server/game.zig`) calls `sim.damage(entity_id, amount)` with no
-    attacker, and `ZombieAi` has no revenge field. These tasks also appear only
-    on animal classes, and zdtd runs animals on the zombie table.
+  - *EAIRunawayFromEntity* (asm.il:435190, base EAIRunAway asm.il:434778):
+    needs a fear-source scan over nearby entity classes (`EAIRunAway::FindFleePos`
+    plus the class filter), which zdtd's single nearest-player sense cannot
+    express. Its sibling *EAIRunawayWhenHurt* (asm.il:435616) is implemented:
+    see the revenge-target note below.
   - *EAIApproachDistraction* (asm.il:423700): needs `EntityAlive.distraction`
     to be a dropped `EntityItem` whose `ItemClass.IsEatDistraction` is true,
     plus `AINoiseSeekDist` (8 for zombieTemplateMale). zdtd has no dropped-item
@@ -645,8 +682,8 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Parallel AI / turrets / save | HAVE |
 | Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
 | Async region I/O | PARTIAL (`world/chunk_flush.zig` behind `[perf] async_chunk_flush`, default off: one joined writer thread, per-key FIFO, `waitKey` gate on read/evict. Encode stays on the tick thread; still one file per chunk, no stock-style region file) |
-| Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; caps at 256 chunks / radius 2 per player, tail falls back to the locked hook) |
-| Path worker pool | MISSING (A* already runs inside the parallel AI batch; a *deferred* solve phase is deliberately not built because a per-tick solve budget delays replans by a tick and changes sim outcomes. `path_replans` counter ships as the evidence. docs/SCALE_ARCHITECTURE.md) |
+| Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; one surface Y per column, answering only the surface footing case. Walls and building interiors are out of the body's step/drop band and fall back to the locked hook, as does anything outside the 256-chunk / radius-2 window) |
+| Path worker pool | MISSING (A* already runs inside the parallel AI batch. A *deferred* solve phase is still not built, but the per-tick node budget it was waiting on now exists: `World.pathBudgetAdmits` spreads replans by a slot/tick stride and refused bodies follow their stored waypoint buffer, so a delayed replan no longer means a straight-line chase. `path_replans` / `path_replans_denied` counters ship as the evidence. docs/SCALE_ARCHITECTURE.md) |
 | TE loot / prefab-storage scan as a job batch | MISSING (`te_scan` section + `te_scan_cells` counter ship as evidence; the `found >= 32` early return makes an exactly-equivalent parallel scan fiddly) |
 | Metrics apm harness | HAVE (`src/apm/`) |
 | Tracy zones over apm sections | PARTIAL (`-Dtracy` + operator-supplied `-Dtracy-src`; 12 `Section` zones + per-tick frame mark only. No plots/locks/alloc/GPU zones, nothing inside ecs job workers, and CI never builds the on path. `docs/APM.md`) |
@@ -726,7 +763,7 @@ Do not plan these as product features of zdtd:
 ### P1: Depth the client still notices
 1. Deco: trees ship in the join burst (idByName + kill switch). Remaining: `blocks` NameIdMapping so ids can be negotiated instead of trusted, biome-driven density, mirroring deco into the server world store, and a live-client playtest.  
 2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
-3. Path A* (or better than greedy) + more EAI task types.  
+3. Path A*: DONE. Grid A* over a body-aware step predicate (step-up/drop/headroom), 8-cell waypoint buffer, deterministic per-tick node budget; EAI gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Remaining: navmesh, jump/climb, data-driven per-class task graphs (5.2.1).  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
 5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
 6. Workstation RecipeQueue C2S depth (lock contention shipped).

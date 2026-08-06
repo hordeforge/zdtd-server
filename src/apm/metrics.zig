@@ -81,6 +81,8 @@ pub const CounterId = enum(u16) {
     te_scan_cells,
     /// A* replans issued by the AI phase (evidence for a deferred path phase).
     path_replans,
+    /// A* replans refused by the per-tick node budget.
+    path_replans_denied,
     _,
 };
 

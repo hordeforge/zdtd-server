@@ -29,6 +29,11 @@ const path_replan_interval_s: f32 = 0.35;
 const path_max_expand: usize = 96;
 /// Snap to next waypoint within this distance (blocks).
 const path_wp_arrive: f32 = 0.55;
+/// Manhattan cells the goal may drift from the one the buffer was planned for
+/// before the path is re-solved. One cell of drift leaves the buffered route
+/// pointing the same way, so chasing a walking player does not re-solve on
+/// every block boundary it crosses.
+const path_goal_slack: u32 = 2;
 
 /// Fixed-point damage unit (1.0 hp = 100).
 const dmg_scale: u32 = 100;
@@ -65,7 +70,11 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap) usize {
     return n;
 }
 
-fn nearestPlayerSnap(snaps: []const PlayerSnap, zx: f32, zz: f32) struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 } {
+/// Winner of the AITarget pass: the entity the AITask list treats as "the
+/// player" for this tick (nearest sensed, or the attacker via revenge).
+const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
+
+fn nearestPlayerSnap(snaps: []const PlayerSnap, zx: f32, zz: f32) TargetSnap {
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
     var best_d: f32 = sense_dist_sq;
@@ -84,6 +93,49 @@ fn nearestPlayerSnap(snaps: []const PlayerSnap, zx: f32, zz: f32) struct { id: i
         }
     }
     return .{ .id = best_id, .slot = best_slot, .d2 = best_d, .px = px, .pz = pz };
+}
+
+/// EAISetAsTargetIfHurt (asm.il:435831; CanExecute ends :436139, Start ends
+/// :436169) reduced to a target-selection override. Stock runs it as the head of
+/// the AITarget list, which resolves before the AITask list every tick; zdtd
+/// collapses that list into `nearestPlayerSnap`, so the revenge target is
+/// applied here instead of as a second task table. Kept from CanExecute: the
+/// attacker must still exist and must not share the victim's entity type (a
+/// zombie clawed by another zombie does not retarget). The class= filter
+/// (entityclasses AITarget-1 `class=EntityPlayer`) is not modeled: zdtd damage
+/// attribution only ever carries a player or turret attacker.
+fn applyRevengeTarget(w: *const World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) TargetSnap {
+    if (ai.revenge_time > 0) ai.revenge_time -= dt;
+    if (ai.revenge_time <= 0 or ai.revenge_target < 0) {
+        ai.revenge_target = -1;
+        ai.revenge_time = 0;
+        return np;
+    }
+    const ts = w.slotOfNetId(ai.revenge_target) orelse {
+        ai.revenge_target = -1;
+        ai.revenge_time = 0;
+        return np;
+    };
+    if (!w.alive[ts] or !w.mask[ts].transform) {
+        ai.revenge_target = -1;
+        ai.revenge_time = 0;
+        return np;
+    }
+    if (w.mask[ts].kind and w.mask[s].kind and w.kind[ts] == w.kind[s]) return np;
+    if (ai.revenge_target == np.id) return np;
+    const dx = w.transform[ts].x - w.transform[s].x;
+    const dz = w.transform[ts].z - w.transform[s].z;
+    // Stock's SetAttackTarget bypasses the sense check for the whole window, so
+    // aggro must latch here too or the far-attacker case falls back to wander.
+    ai.alert = true;
+    ai.target_id = ai.revenge_target;
+    return .{
+        .id = ai.revenge_target,
+        .slot = ts,
+        .d2 = dx * dx + dz * dz,
+        .px = w.transform[ts].x,
+        .pz = w.transform[ts].z,
+    };
 }
 
 fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
@@ -605,6 +657,11 @@ const zombie_tasks = [_]Task{
     // mutex 0: compatible with approach so table order can switch when stuck.
     .{ .id = .break_block, .priority = 1, .mutex = 0b00, .execute_delay = 0.2, .continuous = false },
     .{ .id = .destroy_area, .priority = 1, .mutex = 0b00, .execute_delay = 0.25, .continuous = false },
+    // EAIRunawayWhenHurt (asm.il:435616): MutexBits=1 in .ctor (:435629), no
+    // Init override so executeDelay/IsContinuous stay the EAIBase defaults.
+    // Ahead of Approach the way AITask-1 sits ahead of it in a passive-animal
+    // class; its kind gate keeps it out of the zombie list.
+    .{ .id = .runaway, .priority = 1, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
     // continuous so approach_attack can preempt via isBestTask continuous yield.
     .{ .id = .territorial, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
@@ -788,7 +845,9 @@ const AiCtx = struct {
             }
             if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
 
-            const np = nearestPlayerSnap(ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z);
+            // AITarget list before AITask list: a fresh attacker outranks the
+            // nearest sensed player for the revenge window.
+            const np = applyRevengeTarget(ctx.w, s, ai, nearestPlayerSnap(ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
             ai.active_scale = if (np.id >= 0) lodScale(np.d2) else 0.1;
 
             // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
@@ -858,6 +917,7 @@ const AiCtx = struct {
             switch (ai.active_task) {
                 .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
                 .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
+                .runaway => runawayUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
@@ -884,6 +944,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
     return switch (id) {
         .break_block => breakBlockCanExecute(ai, np.id, np.d2),
         .destroy_area => destroyAreaCanExecute(ai, np.id, np.d2),
+        .runaway => runawayCanExecute(w, s, ai),
         .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2),
         .approach_spot => approachSpotCanExecute(ai),
@@ -953,7 +1014,7 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
     }
     ai.state = .chase;
     ai.has_path = true;
-    if (w.solid_fn == null) {
+    if (w.step_fn == null) {
         ai.path_blocked = false;
         return;
     }
@@ -962,23 +1023,11 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
         ai.path_replan_cd -= dt;
         return;
     }
-    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
-    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
-    const gxi: i32 = @intFromFloat(@floor(ai.path_goal_x));
-    const gzi: i32 = @intFromFloat(@floor(ai.path_goal_z));
-    _ = w.path_replans.fetchAdd(1, .monotonic);
-    var p: path_mod.Path = .{};
-    path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
-    const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
-    if (p.next()) |wp| {
-        ai.path_wp_x = wp.x;
-        ai.path_wp_z = wp.z;
-        ai.path_wp_valid = true;
-    } else {
-        ai.path_wp_valid = false;
+    if (!w.pathBudgetAdmits(s)) {
+        _ = w.path_replans_denied.fetchAdd(1, .monotonic);
+        return;
     }
-    ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
-    ai.path_replan_cd = path_replan_interval_s;
+    replanPath(w, s, ai, @intFromFloat(@floor(ai.path_goal_x)), @intFromFloat(@floor(ai.path_goal_z)));
 }
 
 /// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
@@ -1000,6 +1049,55 @@ fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) 
     breakBlockUpdate(w, s, ai, np, dt);
     // Path open: advance rng so random CanExecute gate is not sticky forever.
     if (!ai.path_blocked and ai.wander_rng != 0) ai.wander_rng +%= 1;
+}
+
+/// EAIRunAway::.ctor fleeDistance = 20 (asm.il:434801).
+const flee_distance: f32 = 20.0;
+
+/// EAIRunawayWhenHurt::CanExecute (asm.il:435706): a revenge target is
+/// required, and with the default lowHealthPercent of 1 (.ctor, asm.il:435622)
+/// the health fraction gate is skipped entirely. EAIRunAway::CanExecute then
+/// asks FindFleePos to produce somewhere to run; here that is always the cell
+/// fleeDistance directly away from the attacker, so the gate reduces to "was
+/// hurt recently". Only passive animals carry this task in stock XML
+/// (entityclasses AITask-1 on the animal templates), so kind gates it.
+fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
+    if (!w.mask[s].kind or w.kind[s] != .animal) return false;
+    if (ai.revenge_target < 0 or ai.revenge_time <= 0) return false;
+    return w.slotOfNetId(ai.revenge_target) != null;
+}
+
+/// EAIRunAway::Update: path to the flee position, dropping the task once the
+/// attacker is further than fleeDistance. The stock stuck/retry bookkeeping
+/// (pathTicks, checkedPath, FindRandomPos) has no zdtd equivalent.
+fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
+    const ts = w.slotOfNetId(ai.revenge_target) orelse {
+        ai.revenge_time = 0;
+        ai.state = .idle;
+        return;
+    };
+    ai.state = .wander;
+    ai.alert = false;
+    ai.target_id = -1;
+    const dx = w.transform[s].x - w.transform[ts].x;
+    const dz = w.transform[s].z - w.transform[ts].z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= flee_distance * flee_distance) {
+        // Out of range: the fright is over, release the mutex.
+        ai.revenge_time = 0;
+        ai.clearPath();
+        ai.has_path = false;
+        return;
+    }
+    // Away from the attacker; a body exactly on top of it picks +x arbitrarily
+    // rather than dividing by zero.
+    const inv: f32 = if (d2 > 0.0001) 1.0 / @sqrt(d2) else 0;
+    const fx = w.transform[s].x + (if (inv > 0) dx * inv else 1) * flee_distance;
+    const fz = w.transform[s].z + (if (inv > 0) dz * inv else 0) * flee_distance;
+    ai.path_goal_x = fx;
+    ai.path_goal_z = fz;
+    ai.has_path = true;
+    chaseAlongPath(w, s, ai, fx, fz, cspd * ai.active_scale, dt);
 }
 
 /// EAITerritorial::CanExecute: has home and outside leash; yields to sensed player.
@@ -1026,7 +1124,7 @@ fn territorialUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) vo
     const dz = w.transform[s].z - ai.home_z;
     if (dx * dx + dz * dz <= spot_arrive * spot_arrive) {
         ai.has_path = false;
-        ai.path_wp_valid = false;
+        ai.clearPath();
         ai.path_blocked = false;
         ai.state = .idle;
         return;
@@ -1063,7 +1161,7 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
             ai.look_yaw = w.transform[s].yaw;
             // moveHelper.Stop().
             ai.has_path = false;
-            ai.path_wp_valid = false;
+            ai.clearPath();
             ai.path_blocked = false;
         },
         else => {},
@@ -1105,7 +1203,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     ai.has_path = true;
     if (np.d2 <= attack_range_sq) {
         ai.state = .attack;
-        ai.path_wp_valid = false;
+        ai.clearPath();
         if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
             // A11: HandItem DamageEntity on class_table; module const if 0.
             const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else attack_damage;
@@ -1121,53 +1219,93 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     }
 }
 
-fn pathSolidCb(ctx: ?*anyopaque, x: i32, z: i32) bool {
+fn pathStepCb(ctx: ?*anyopaque, fx: i32, fz: i32, fy: i32, tx: i32, tz: i32) ?i32 {
     const w: *const World = @ptrCast(@alignCast(ctx.?));
-    return w.isPathSolid(x, z);
+    return w.stepTo(fx, fz, fy, tx, tz);
 }
 
-/// Replan A* on a throttle, then step toward the next waypoint (or goal).
-/// When no solid_fn is wired, degenerates to straight-line stepToward.
-/// Sets path_blocked when replan yields no detour and the cell toward goal is solid.
+/// Feet cell the body actually stands in, before searching from it. A zombie
+/// spawned or nudged off its footing would otherwise start the search from a
+/// height with no support and conclude the whole world is sealed. The self-step
+/// probe resolves it inside the same step/drop band the search uses; the ground
+/// hook is the fallback for a body further off than one step.
+fn footingY(w: *World, s: Slot, sx: i32, sz: i32) i32 {
+    const cur: i32 = @intFromFloat(@floor(w.transform[s].y));
+    if (w.stepTo(sx, sz, cur, sx, sz)) |y| return y;
+    if (w.groundY(w.transform[s].x, w.transform[s].z)) |gy| return @intFromFloat(@floor(gy));
+    return cur;
+}
+
+/// One A* solve, refilling the whole waypoint buffer. Sets path_blocked when
+/// the solve could not reach the goal cell (sealed cover → BreakBlock).
+fn replanPath(w: *World, s: Slot, ai: *c.ZombieAi, gxi: i32, gzi: i32) void {
+    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
+    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
+    const sy = footingY(w, s, sx, sz);
+    w.transform[s].y = @floatFromInt(sy);
+    _ = w.path_replans.fetchAdd(1, .monotonic);
+    var p: path_mod.Path = .{};
+    _ = path_mod.aStarToward(&p, sx, sz, sy, gxi, gzi, path_max_expand, w, pathStepCb);
+    // Greedy fallback may fill waypoints along a wall without reaching the goal.
+    const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
+    ai.clearPath();
+    var n: usize = 0;
+    while (n < c.path_wp_max) {
+        const wp = p.next() orelse break;
+        ai.path_wp[n] = .{ .x = wp.x, .z = wp.z, .y = @intCast(std.math.clamp(wp.y, 0, 255)) };
+        n += 1;
+    }
+    ai.path_wp_n = @intCast(n);
+    ai.path_goal_cx = gxi;
+    ai.path_goal_cz = gzi;
+    // BreakBlock when no path to goal (sealed / infinite wall); clear when A* reaches.
+    ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
+    ai.path_replan_cd = path_replan_interval_s;
+}
+
+/// Follow the buffered path, replanning only when it runs dry, the goal cell
+/// moved, or a blocked path is due for a retry. When no step hook is wired,
+/// degenerates to straight-line stepToward.
 fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: f32, dt: f32) void {
-    if (w.solid_fn == null) {
+    if (w.step_fn == null) {
         ai.path_blocked = false;
         stepToward(w, s, gx, gz, speed, dt);
         return;
     }
     if (ai.path_replan_cd > 0) ai.path_replan_cd -= dt;
-    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
-    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
     const gxi: i32 = @intFromFloat(@floor(gx));
     const gzi: i32 = @intFromFloat(@floor(gz));
-    const need_replan = ai.path_replan_cd <= 0 or !ai.path_wp_valid;
-    if (need_replan) {
-        _ = w.path_replans.fetchAdd(1, .monotonic);
-        var p: path_mod.Path = .{};
-        path_mod.aStarToward(&p, sx, sz, gxi, gzi, path_max_expand, w, pathSolidCb);
-        // Greedy fallback may fill waypoints along a wall without reaching the goal.
-        const reaches = p.len > 0 and p.points[p.len - 1].x == gxi and p.points[p.len - 1].z == gzi;
-        if (p.next()) |wp| {
-            ai.path_wp_x = wp.x;
-            ai.path_wp_z = wp.z;
-            ai.path_wp_valid = true;
+    // Reasons to solve again: the buffer is walked out, the goal left the cell
+    // it was planned for, or the path is blocked and destroyed cover may have
+    // opened a route. All of them wait for the throttle, including the spent
+    // buffer: a body boxed in on all four sides gets an empty path every time,
+    // and re-solving that on every tick is exactly what the budget exists to
+    // prevent.
+    const goal_drift = @abs(ai.path_goal_cx - gxi) + @abs(ai.path_goal_cz - gzi);
+    const want = ai.currentWp() == null or goal_drift >= path_goal_slack or ai.path_blocked;
+    if (want and ai.path_replan_cd <= 0) {
+        // Over budget: keep walking the stored path instead of solving. Only a
+        // body whose buffer is also spent falls back to the direct line, so the
+        // budget degrades gracefully rather than snapping every chase straight.
+        if (w.pathBudgetAdmits(s)) {
+            replanPath(w, s, ai, gxi, gzi);
         } else {
-            ai.path_wp_valid = false;
+            _ = w.path_replans_denied.fetchAdd(1, .monotonic);
         }
-        // BreakBlock when no path to goal (sealed / infinite wall); clear when A* reaches.
-        ai.path_blocked = !reaches and (gxi != sx or gzi != sz);
-        ai.path_replan_cd = path_replan_interval_s;
     }
-    if (ai.path_wp_valid) {
-        const tx = @as(f32, @floatFromInt(ai.path_wp_x)) + 0.5;
-        const tz = @as(f32, @floatFromInt(ai.path_wp_z)) + 0.5;
+    // Consume every waypoint already reached, adopting its feet height so the
+    // body follows terrain up and down instead of floating at spawn height.
+    while (ai.currentWp()) |wp| {
+        const tx = @as(f32, @floatFromInt(wp.x)) + 0.5;
+        const tz = @as(f32, @floatFromInt(wp.z)) + 0.5;
         const dx = tx - w.transform[s].x;
         const dz = tz - w.transform[s].z;
-        if (dx * dx + dz * dz < path_wp_arrive * path_wp_arrive) {
-            ai.path_wp_valid = false;
-            ai.path_replan_cd = 0;
-        }
-        stepToward(w, s, tx, tz, speed, dt);
+        if (dx * dx + dz * dz >= path_wp_arrive * path_wp_arrive) break;
+        w.transform[s].y = @floatFromInt(wp.y);
+        ai.path_wp_i += 1;
+    }
+    if (ai.currentWp()) |wp| {
+        stepToward(w, s, @as(f32, @floatFromInt(wp.x)) + 0.5, @as(f32, @floatFromInt(wp.z)) + 0.5, speed, dt);
     } else {
         stepToward(w, s, gx, gz, speed, dt);
     }
@@ -1190,7 +1328,7 @@ fn approachSpotUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) v
     if (dx * dx + dz * dz <= spot_arrive * spot_arrive) {
         ai.has_spot = false;
         ai.has_path = false;
-        ai.path_wp_valid = false;
+        ai.clearPath();
         ai.path_blocked = false;
         ai.state = .idle;
         return;
@@ -1204,7 +1342,7 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.alert = false;
     ai.target_id = -1;
     ai.has_path = false;
-    ai.path_wp_valid = false;
+    ai.clearPath();
     ai.path_blocked = false;
     // EAIWander::Update (asm.il:438366): accumulate run time for the 30 s cap.
     ai.wander_time += dt;
@@ -1742,17 +1880,24 @@ test "system zombie chases" {
     try std.testing.expect(w.zombie_ai[zs].alert);
 }
 
+/// Wall at x=2, z=-2..2: passable everywhere else at the caller's own height.
+fn testWallStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+    if (x == 2 and z >= -2 and z <= 2) return null;
+    return from_y;
+}
+
+/// Infinite wall at x=2: nothing gets past it.
+fn testSealedStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+    if (x == 2) return null;
+    return from_y;
+}
+
 test "system zombie paths around solid wall via A*" {
-    // Wall at x=2, z=-2..2; zombie at 0, player at 4. Straight line blocked.
-    const Wall = struct {
-        fn solid(_: ?*anyopaque, x: i32, z: i32) bool {
-            return x == 2 and z >= -2 and z <= 2;
-        }
-    };
+    // Zombie at 0, player at 4: the straight line is blocked.
     var w: World = .{};
     defer w.deinit();
-    w.solid_fn = Wall.solid;
-    w.solid_ctx = null;
+    w.step_fn = testWallStep;
+    w.step_ctx = null;
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(4, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;
@@ -1763,6 +1908,210 @@ test "system zombie paths around solid wall via A*" {
     // Should have progressed toward the player (around the wall), not stuck at x~1.
     try std.testing.expect(w.transform[zs].x > 2.0);
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+test "chase reuses one solve for many steps instead of replanning per metre" {
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(10, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var replans: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        replans += w.path_replans.load(.monotonic);
+    }
+    // ~9 m of open-field chase: one solve buffers 8 cells, so a handful of
+    // replans, not one per waypoint arrival (which used to reset the throttle).
+    try std.testing.expect(w.transform[zs].x > 7.0);
+    try std.testing.expect(replans <= 4);
+}
+
+test "chase of a walking target stays under the replan throttle" {
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const p = w.spawnPlayer(6, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.slotOfNetId(p).?;
+    var replans: u32 = 0;
+    var ticks: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) {
+        // Player walks away faster than the zombie closes, so the goal cell
+        // moves on most ticks.
+        w.transform[ps].x += 0.15;
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        replans += w.path_replans.load(.monotonic);
+        ticks += 1;
+    }
+    try std.testing.expect(w.transform[zs].x > 4.0);
+    // The throttle is 0.35 s, so 4 s of chase can afford about a dozen solves;
+    // one per tick (80) is what the old waypoint-arrival reset produced.
+    try std.testing.expect(replans <= 14);
+}
+
+test "budget-denied tick still walks the buffered path" {
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    // Far enough that the buffer runs dry while still chasing (a body that
+    // reaches melee range clears its path instead of asking for a new one).
+    _ = w.spawnPlayer(14, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    // Prime the buffer, then close the budget on this slot.
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].currentWp() != null);
+    w.path_stride = 2;
+    w.path_tick = if (zs % 2 == 0) 1 else 0; // (slot + tick) % 2 != 0
+    try std.testing.expect(!w.pathBudgetAdmits(zs));
+    const x0 = w.transform[zs].x;
+    const before = w.path_replans.load(.monotonic);
+    // Long enough to walk the whole buffer dry, so a replan is really wanted.
+    var t: f32 = 0;
+    while (t < 5.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(before, w.path_replans.load(.monotonic));
+    try std.testing.expect(w.path_replans_denied.load(.monotonic) > 0);
+    try std.testing.expect(w.transform[zs].x > x0 + 0.5);
+}
+
+test "path budget stride spreads replans once demand exceeds the cap" {
+    var w: World = .{};
+    defer w.deinit();
+    // No demand: everyone is admitted.
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 1), w.path_stride);
+    w.path_replans.store(World.path_replans_per_tick * 3, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 3), w.path_stride);
+    // Admission is a pure function of slot and tick, never of worker order.
+    var admitted: u32 = 0;
+    var s: Slot = 0;
+    while (s < 30) : (s += 1) {
+        if (w.pathBudgetAdmits(s)) admitted += 1;
+        try std.testing.expectEqual(w.pathBudgetAdmits(s), w.pathBudgetAdmits(s));
+    }
+    try std.testing.expectEqual(@as(u32, 10), admitted);
+    // The stride never grows past the delay cap, whatever the demand.
+    w.path_replans.store(100000, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(World.path_stride_max, w.path_stride);
+}
+
+test "zombie follows the path height instead of floating at spawn y" {
+    // Terrain rising one block per cell east; zombie spawned well above it.
+    const Ramp = struct {
+        fn step(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+            const h: i32 = 60 + @max(x, 0);
+            if (h - from_y > 1) return null;
+            return h;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = Ramp.step;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(5, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Snapped onto the ramp on the first solve, then climbed with it.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expect(w.transform[zs].y >= 61);
+    try std.testing.expect(w.transform[zs].y <= 65);
+}
+
+test "zombie sealed in a box stays inside it" {
+    // 5x5 walled room around the origin, player outside.
+    const Box = struct {
+        fn step(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+            if (x <= -3 or x >= 3 or z <= -3 or z >= 3) return null;
+            return from_y;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = Box.step;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(8, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 6.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(w.transform[zs].x < 3.0);
+        try std.testing.expect(w.transform[zs].x > -3.0);
+    }
+    // Sealed in: the AI must ask for the wall to come down, not walk through it.
+    try std.testing.expect(w.zombie_ai[zs].path_blocked);
+}
+
+test "hurt zombie chases its attacker over the nearer player" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = w.spawnPlayer(3, 70, 0, 0); // near
+    const far = w.spawnPlayer(-20, 70, 0, 1).?;
+    var t: f32 = 0;
+    while (t < 0.5) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].target_id != far);
+    // Shot from behind by the far player: EAISetAsTargetIfHurt retargets.
+    _ = w.damageFrom(z, 5, far);
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(far, w.zombie_ai[zs].target_id);
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    // Walks away from the near player, toward the attacker.
+    t = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.transform[zs].x < -0.2);
+    // The window expires and the nearest-player sense takes over again.
+    w.zombie_ai[zs].revenge_time = 0.04;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+}
+
+test "revenge target ignores a same-kind attacker and a dead one" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const other = w.spawnZombie(6, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    // Zombie-on-zombie: CanExecute's entityType gate rejects it.
+    _ = w.damageFrom(z, 5, other);
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].target_id != other);
+    // Attacker gone: the revenge slot is released instead of chasing a ghost.
+    const p = w.spawnPlayer(30, 70, 0, 0).?;
+    _ = w.damageFrom(z, 5, p);
+    w.destroy(w.slotOfNetId(p).?);
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+}
+
+test "hurt animal runs away from its attacker" {
+    var w: World = .{};
+    defer w.deinit();
+    const a = w.spawnAnimal(0, 70, 0, 30, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    const p = w.spawnPlayer(2, 70, 0, 0).?;
+    _ = w.damageFrom(a, 5, p);
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.runaway, w.zombie_ai[as].active_task);
+    // Fleeing means putting distance between itself and the player at x=2.
+    try std.testing.expect(w.transform[as].x < -0.5);
+    try std.testing.expect(!w.zombie_ai[as].alert);
 }
 
 test "system zombie wanders when no player sensed" {
@@ -1839,16 +2188,10 @@ test "spawn zombie loot_list comes from class_table not scrap" {
 
 test "system zombie break_block when path fully blocked" {
     // Impassable wall sealing zombie from player; A* fails → path_blocked → BreakBlock.
-    const Wall = struct {
-        fn solid(_: ?*anyopaque, x: i32, z: i32) bool {
-            _ = z;
-            return x == 2;
-        }
-    };
     var w: World = .{};
     defer w.deinit();
-    w.solid_fn = Wall.solid;
-    w.solid_ctx = null;
+    w.step_fn = testSealedStep;
+    w.step_ctx = null;
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(4, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;

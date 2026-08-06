@@ -27,6 +27,7 @@ const biomes = @import("world/biomes.zig");
 const prefabs = @import("world/prefabs.zig");
 const tts = @import("world/tts.zig");
 const store = @import("world/store.zig");
+const path_mod = @import("ecs/path.zig");
 
 const packet_corpus = [_][]const u8{
     "",
@@ -1012,4 +1013,78 @@ fn fuzzZchValidate(_: void, smith: *std.testing.Smith) !void {
         const hz = std.mem.readInt(i32, input[8..12], .little);
         _ = store.World.validateChunkBytes(input, .{ .x = hx, .z = hz }) catch {};
     }
+}
+
+/// Terrain the A* fuzz target searches: a deterministic pseudo-random height
+/// field with blocked columns, driven entirely by the fuzzer's seed bytes.
+const FuzzTerrain = struct {
+    seed: u32,
+    blocked_mod: u32,
+
+    fn hash(self: *const FuzzTerrain, x: i32, z: i32) u32 {
+        const ux: u32 = @bitCast(x);
+        const uz: u32 = @bitCast(z);
+        return (ux *% 0x9e3779b1) ^ (uz *% 0x85ebca77) ^ (self.seed *% 0xc2b2ae35);
+    }
+
+    fn heightAt(self: *const FuzzTerrain, x: i32, z: i32) i32 {
+        return 60 + @as(i32, @intCast((self.hash(x, z) >> 8) % 5));
+    }
+
+    fn step(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
+        const self: *const FuzzTerrain = @ptrCast(@alignCast(ctx.?));
+        if (self.blocked_mod != 0 and self.hash(tx, tz) % self.blocked_mod == 0) return null;
+        const h = self.heightAt(tx, tz);
+        if (h > from_y + store.max_step_up or h < from_y - store.max_drop) return null;
+        return h;
+    }
+};
+
+test "fuzz grid A* invariants" {
+    try std.testing.fuzz({}, fuzzAStar, .{});
+}
+
+fn fuzzAStar(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var terrain: FuzzTerrain = .{
+        .seed = smith.value(u32),
+        // 0 = fully open; small values make most of the grid impassable.
+        .blocked_mod = smith.value(u32) % 8,
+    };
+    // Bounded coordinates: the search span is derived from the start/goal
+    // distance, and i32 extremes would only exercise overflow, not pathing.
+    const sx: i32 = @rem(@as(i32, smith.value(i16)), 64);
+    const sz: i32 = @rem(@as(i32, smith.value(i16)), 64);
+    const gx: i32 = @rem(@as(i32, smith.value(i16)), 64);
+    const gz: i32 = @rem(@as(i32, smith.value(i16)), 64);
+    const budget: usize = smith.value(u8);
+    const sy = terrain.heightAt(sx, sz);
+
+    var p: path_mod.Path = .{};
+    const expanded = path_mod.aStarToward(&p, sx, sz, sy, gx, gz, budget, &terrain, FuzzTerrain.step);
+    try std.testing.expect(expanded <= budget);
+    try std.testing.expect(p.len <= path_mod.max_path);
+
+    // Every returned cell must be one grid step from the previous one, and must
+    // be a move the predicate actually allowed from that predecessor.
+    var px = sx;
+    var pz = sz;
+    var py = sy;
+    for (p.points[0..p.len]) |pt| {
+        const d = @abs(pt.x - px) + @abs(pt.z - pz);
+        try std.testing.expectEqual(@as(u32, 1), d);
+        const allowed = FuzzTerrain.step(&terrain, px, pz, py, pt.x, pt.z) orelse
+            return error.PathCrossesBlockedCell;
+        try std.testing.expectEqual(allowed, pt.y);
+        px = pt.x;
+        pz = pt.z;
+        py = pt.y;
+    }
+
+    // Same inputs, same path: the sim runs A* on parallel workers and must not
+    // depend on anything but its arguments.
+    var q: path_mod.Path = .{};
+    const again = path_mod.aStarToward(&q, sx, sz, sy, gx, gz, budget, &terrain, FuzzTerrain.step);
+    try std.testing.expectEqual(expanded, again);
+    try std.testing.expectEqualSlices(path_mod.Point, p.points[0..p.len], q.points[0..q.len]);
 }

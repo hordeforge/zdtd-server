@@ -293,7 +293,41 @@ pub const Chunk = struct {
         const id = self.blockAt(lx, y, lz);
         return id != block_air and id != block_water;
     }
+
+    /// Feet Y a walking body can occupy in column (lx,lz) near `from_y`, or null
+    /// when the column offers no support with headroom in the band
+    /// [from_y - drop, from_y + step_up].
+    ///
+    /// A feet cell `y` is standable when (y-1) is solid and the `body_height`
+    /// cells from y up are clear. Scanning downward from the highest candidate
+    /// picks the first surface a body would actually land on, which is what
+    /// makes a POI floor win over the roof above it. `heightAt` cannot answer
+    /// this: it is by invariant the topmost non-air block of the column, so
+    /// `isSolid(heightAt + 1)` is false for every column by construction.
+    pub fn standableY(self: *const Chunk, lx: i32, lz: i32, from_y: i32, step_up: i32, drop: i32) ?i32 {
+        // Feet at 0 would sit on nothing (y=-1 is outside the world).
+        const top = @min(from_y + step_up, y_dim - body_height);
+        const bottom = @max(from_y - drop, 1);
+        var y = top;
+        while (y >= bottom) : (y -= 1) {
+            if (!self.isSolid(lx, y - 1, lz)) continue;
+            var h: i32 = 0;
+            const clear = while (h < body_height) : (h += 1) {
+                if (self.isSolid(lx, y + h, lz)) break false;
+            } else true;
+            if (clear) return y;
+        }
+        return null;
+    }
 };
+
+/// Cells of vertical clearance a walking body needs (feet + head).
+pub const body_height: i32 = 2;
+/// Highest single-move step up a body takes without jumping (stock zombies
+/// walk up one block).
+pub const max_step_up: i32 = 1;
+/// Deepest single-move drop a body takes voluntarily.
+pub const max_drop: i32 = 3;
 
 pub const World = struct {
     chunks: std.AutoHashMap(u64, Chunk),
@@ -615,6 +649,16 @@ pub const World = struct {
     pub fn isSolidWorld(self: *World, x: i32, y: i32, z: i32) !bool {
         const id = try self.blockWorld(x, y, z);
         return id != self.terrain_ids.air and id != self.terrain_ids.water;
+    }
+
+    /// Feet Y a walking body can occupy at world XZ near `from_y` (module
+    /// step/drop limits), or null when the column is impassable from there.
+    /// Backs the AI step predicate; materializes the chunk like every other
+    /// world probe so on-demand generation stays where it is.
+    pub fn standableWorld(self: *World, x: i32, z: i32, from_y: i32) !?i32 {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        return c.standableY(t.lx, t.lz, from_y, max_step_up, max_drop);
     }
 
     fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
@@ -963,6 +1007,79 @@ test "flat world set dig persist" {
     // Full columns must reload so dig/build is authoritative after restart.
     try std.testing.expectEqual(block_dirt, try w2.blockWorld(5, 70, 5));
     try std.testing.expectEqual(block_stone, try w2.blockWorld(6, 71, 5));
+}
+
+test "standableY answers the walk surface, not the column top" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    const g: i32 = ch.heightAt(0, 0); // flat sea_level surface
+
+    // Flat ground: feet rest one above the surface block.
+    try std.testing.expectEqual(@as(?i32, g + 1), ch.standableY(0, 0, g + 1, max_step_up, max_drop));
+
+    // One-block wall: a body steps up onto it.
+    try ch.setBlock(w.allocator, 1, g + 1, 0, block_stone);
+    try std.testing.expectEqual(@as(?i32, g + 2), ch.standableY(1, 0, g + 1, max_step_up, max_drop));
+
+    // Two-block wall: too high to step, no headroom on top of the first course.
+    try ch.setBlock(w.allocator, 2, g + 1, 0, block_stone);
+    try ch.setBlock(w.allocator, 2, g + 2, 0, block_stone);
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(2, 0, g + 1, max_step_up, max_drop));
+
+    // POI interior: floor at g, roof at g+3. The floor wins over the roof even
+    // though heightAt now reports the roof.
+    try ch.setBlock(w.allocator, 3, g + 3, 0, block_stone);
+    try std.testing.expectEqual(@as(u16, @intCast(g + 3)), ch.heightAt(3, 0));
+    try std.testing.expectEqual(@as(?i32, g + 1), ch.standableY(3, 0, g + 1, max_step_up, max_drop));
+
+    // Crawlspace: roof one block above the floor leaves no headroom.
+    try ch.setBlock(w.allocator, 4, g + 2, 0, block_stone);
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(4, 0, g + 1, max_step_up, max_drop));
+
+    // Drop: dug pit deeper than max_drop is refused, within it is accepted.
+    var y: i32 = g;
+    while (y > g - 2) : (y -= 1) try ch.setBlock(w.allocator, 5, y, 0, block_air);
+    try std.testing.expectEqual(@as(?i32, g - 1), ch.standableY(5, 0, g + 1, max_step_up, max_drop));
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(5, 0, g + 1, max_step_up, 1));
+}
+
+test "standableY clamps at world floor and ceiling" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    // Bedrock floor: the lowest feet cell is 1, so a candidate never probes
+    // support at y = -1 and a zero-height band resolves to nothing.
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(0, 0, 0, 0, 0));
+    try ch.setBlock(w.allocator, 0, 1, 0, block_air);
+    try ch.setBlock(w.allocator, 0, 2, 0, block_air);
+    try std.testing.expectEqual(@as(?i32, 1), ch.standableY(0, 0, 3, 0, 1000));
+    // Ceiling: a candidate needs body_height cells below y_dim.
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(0, 0, y_dim - 1, 0, 0));
+    // Band entirely in open sky reports impassable, not a crash.
+    try std.testing.expectEqual(@as(?i32, null), ch.standableY(0, 0, y_dim - 1, 0, 4));
+}
+
+test "standableWorld crosses chunk borders and refuses a sealed column" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const g: i32 = sea_level;
+    try std.testing.expectEqual(@as(?i32, g + 1), try w.standableWorld(-1, -1, g + 1));
+    var y: i32 = g + 1;
+    while (y <= g + 4) : (y += 1) try w.setBlockWorld(-1, y, -1, block_stone);
+    try std.testing.expectEqual(@as(?i32, null), try w.standableWorld(-1, -1, g + 1));
 }
 
 test "evictOneChunk picks min key (DST)" {

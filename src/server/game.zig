@@ -372,8 +372,8 @@ pub const Game = struct {
     /// rehash on another thread would invalidate it.
     // ponytail: one global lock; shard per chunk-key if AI pathing contends.
     terrain_mu: parallel_util.IoMutex = .{},
-    /// Read-only per-tick terrain blocked bits. When on, `pathSolidAt` answers
-    /// hits without `terrain_mu`; misses fall through to the locked hook.
+    /// Read-only per-tick terrain surface heights. When on, `pathStepAt`
+    /// answers hits without `terrain_mu`; misses fall through to the locked hook.
     terrain_snap: terrain_snapshot.Snapshot = .{},
     /// [perf] terrain_snapshot: rebuild + serve the snapshot.
     terrain_snapshot_on: bool = false,
@@ -602,9 +602,9 @@ pub const Game = struct {
         // Back the ECS vehicle-physics ground hook with the real block store.
         self.sim.ground_ctx = self;
         self.sim.ground_fn = &heightAtWorld;
-        // AI path solid probe: blocked if body-height cell is solid.
-        self.sim.solid_ctx = self;
-        self.sim.solid_fn = &pathSolidAt;
+        // AI path move probe: destination footing, or blocked.
+        self.sim.step_ctx = self;
+        self.sim.step_fn = &pathStepAt;
         self.sim.place_ctx = self;
         self.sim.place_fn = &placeBlockId;
         self.sim.fuel_value_ctx = self;
@@ -1241,23 +1241,25 @@ pub const Game = struct {
         return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
     }
 
-    /// ECS path solid hook: true if body-height cell blocks horizontal move.
-    /// Uses heightmap top + 1 as body y (same surface band as heightAtWorld).
-    fn pathSolidAt(ctx: ?*anyopaque, wx: i32, wz: i32) bool {
+    /// ECS path step hook: feet Y the body would stand at after moving one cell,
+    /// or null when the move is blocked. Models step-up, drop and headroom, so a
+    /// wall, a POI roof and a crawlspace are all impassable while a slope is not.
+    ///
+    /// The old bool form asked `isSolid(heightAt + 1)`, which is false for every
+    /// column by construction: `heights` is maintained as the topmost non-air
+    /// block, so the cell above it is always air and the pathfinder saw an open
+    /// world everywhere.
+    fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
-        // Snapshot hit: same bit the locked path below would compute, without
+        // Snapshot hit: same answer the locked path below would compute, without
         // taking the process-global terrain lock from an AI worker. A miss
         // falls through so the on-demand chunk generation side effect is kept.
         if (g.terrain_snapshot_on) {
-            if (g.terrain_snap.solid(wx, wz)) |blocked| return blocked;
+            if (g.terrain_snap.standable(tx, tz, from_y)) |y| return y;
         }
-        const t = world_store.World.worldToChunk(wx, wz);
         g.terrain_mu.lock();
         defer g.terrain_mu.unlock();
-        const ch = g.world.getOrCreate(t.pos) catch return false;
-        const h: i32 = ch.heightAt(t.lx, t.lz);
-        // Foot cell is air/walkable on surface; block if something solid at body.
-        return ch.isSolid(t.lx, h + 1, t.lz);
+        return g.world.standableWorld(tx, tz, from_y) catch null;
     }
 
     /// ECS place hook: item_id → AssignIds block id (fail closed → 0).
@@ -4638,7 +4640,11 @@ pub const Game = struct {
                     amount *= (1.0 - mit);
                 }
             }
-            const dmg = self.sim.damage(d.entity_id, amount);
+            // Attribute the hit: stock's NetPackageDamageEntity carries
+            // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt
+            // turns it into the victim's attack target. The actor is already
+            // validated above, so use its net id rather than the claimed field.
+            const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
             if (dmg.killed) {
                 // Dead players keep the entity (client runs its own death →
                 // respawn flow); EntityRemove would delete the local player.
@@ -7413,6 +7419,7 @@ pub const Game = struct {
             }
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
+            self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
             if (self.terrain_snapshot_on) {
                 const now = self.terrain_snap.misses.load(.monotonic);
                 self.harness.counters.add(.terrain_snap_misses, now -| self.snap_misses_seen);
@@ -7956,7 +7963,7 @@ test "sleeper scan job batch matches the serial pass" {
     try std.testing.expectEqual(@as(u8, 1), serial[10]);
 }
 
-test "terrain snapshot hit equals the locked pathSolidAt result" {
+test "path step hook sees walls and terrain, and the snapshot agrees" {
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_snap", 0, .{
         .enable_sample_plugin = false,
     });
@@ -7965,32 +7972,66 @@ test "terrain snapshot hit equals the locked pathSolidAt result" {
         std.testing.allocator.destroy(g);
     }
     const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
-    const b = ch.blocks orelse return error.NoBlocks;
-    // Body-height obstruction without moving `heights` (setBlock would raise it).
-    const y: i32 = @as(i32, ch.heightAt(2, 3)) + 1;
-    b[@intCast(2 + 3 * 16 + y * 256)] = world_store.block_stone;
+    const surface: i32 = ch.heightAt(2, 3);
+    const from_y: i32 = surface + 1;
+    // Two-course wall built through the public API: too tall to step onto and
+    // no headroom on the first course.
+    try g.world.setBlockWorld(2, surface + 1, 3, world_store.block_stone);
+    try g.world.setBlockWorld(2, surface + 2, 3, world_store.block_stone);
 
     // Baseline: snapshot off, the locked hook answers.
     g.terrain_snapshot_on = false;
-    const want_blocked = Game.pathSolidAt(g, 2, 3);
-    const want_open = Game.pathSolidAt(g, 5, 5);
-    try std.testing.expect(want_blocked);
-    try std.testing.expect(!want_open);
+    const open_y: i32 = @as(i32, ch.heightAt(5, 5)) + 1;
+    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
+    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
 
     const px = [_]f32{0};
     const pz = [_]f32{0};
     try std.testing.expectEqual(@as(usize, 1), g.terrain_snap.rebuild(&g.world, &px, &pz));
     g.terrain_snapshot_on = true;
-    try std.testing.expectEqual(want_blocked, Game.pathSolidAt(g, 2, 3));
-    try std.testing.expectEqual(want_open, Game.pathSolidAt(g, 5, 5));
-    try std.testing.expectEqual(@as(u64, 0), g.terrain_snap.misses.load(.monotonic));
+    // The wall column is out of the step band: the snapshot misses and the
+    // locked hook still reports it blocked.
+    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
+    try std.testing.expect(g.terrain_snap.misses.load(.monotonic) > 0);
+    // Open terrain is answered lock-free.
+    const before_misses = g.terrain_snap.misses.load(.monotonic);
+    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
+    try std.testing.expectEqual(before_misses, g.terrain_snap.misses.load(.monotonic));
 
-    // Outside the window: falls through to the locked hook (identical answer),
-    // which still generates the chunk on demand exactly as before.
+    // Outside the window: falls through to the locked hook, which still
+    // generates the chunk on demand exactly as before.
     const before = g.world.chunks.count();
-    _ = Game.pathSolidAt(g, 4000, 4000);
-    try std.testing.expectEqual(@as(u64, 1), g.terrain_snap.misses.load(.monotonic));
+    _ = Game.pathStepAt(g, 4000, 4000, from_y, 4001, 4000);
     try std.testing.expectEqual(before + 1, g.world.chunks.count());
+}
+
+test "zombie chases over real terrain and stays on the surface" {
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/path_terrain", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const sp = g.world.primarySpawn();
+    const sx: f32 = @floatFromInt(sp.x);
+    const sy: f32 = @floatFromInt(sp.y);
+    const sz: f32 = @floatFromInt(sp.z);
+    const zid = g.sim.spawnZombie(sx + 8, sy, sz, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    _ = g.sim.spawnPlayer(sx, sy, sz, 0).?;
+    const x0 = g.sim.transform[zs].x;
+    var i: usize = 0;
+    while (i < 40) : (i += 1) try g.step();
+    // Closed on the player: the real step predicate must not read as a sealed
+    // world (the old height+1 probe made every column open, this one must make
+    // open ground passable).
+    try std.testing.expect(g.sim.transform[zs].x < x0 - 1.0);
+    // Feet sit on the column the body is standing over, not at spawn height.
+    const wx: i32 = @intFromFloat(@floor(g.sim.transform[zs].x));
+    const wz: i32 = @intFromFloat(@floor(g.sim.transform[zs].z));
+    const h: i32 = try g.world.heightWorld(wx, wz);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(h + 1)), g.sim.transform[zs].y);
 }
 
 test "[perf] switches run on the live step path" {
