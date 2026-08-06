@@ -268,13 +268,22 @@ pub fn loadBlocks(allocator: std.mem.Allocator, path: []const u8) !TtsBlocks {
     return parseBlocks(allocator, data);
 }
 
-/// Rotate local XZ for prefab rotation 0..3 (matches common stock stamp: origin corner fixed).
+/// Rotate local XZ for prefab rotation 0..3, origin corner fixed.
+///
+/// Stock turns clockwise: Prefab::RotatePointOnY takes the AngleAxis(-90, up)
+/// path (asm.il ~915424), so r=1 maps (x,z) to (sz-1-z, x) and r=3 maps it to
+/// (z, sx-1-x). Turning the other way leaves r=0 and r=2 right but swaps r=1
+/// with r=3, which is 709 of Navezgane's 1559 decorations. The observable cost
+/// is that front doors, garages and driveways face away from their road: for
+/// the 130 decorations carrying POIMarkerType=RoadExit, the stock map lands the
+/// marker within 4 blocks of a road pixel in splat3_processed.png for 129, the
+/// mirrored map for only 94 (and just 6 of 24 at r=1, 6 of 23 at r=3).
 pub fn rotateLocalXZ(x: i32, z: i32, sx: i32, sz: i32, rot: u8) struct { x: i32, z: i32 } {
     return switch (rot & 3) {
         0 => .{ .x = x, .z = z },
-        1 => .{ .x = z, .z = sx - 1 - x },
+        1 => .{ .x = sz - 1 - z, .z = x },
         2 => .{ .x = sx - 1 - x, .z = sz - 1 - z },
-        3 => .{ .x = sz - 1 - z, .z = x },
+        3 => .{ .x = z, .z = sx - 1 - x },
         else => .{ .x = x, .z = z },
     };
 }
@@ -357,7 +366,11 @@ pub fn paintDecoration(
         if (wy < 0 or wy >= 256) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
-        set_block(ctx, wx, wy, wz, rotateRawY(raw, rot), tex, dens);
+        // Stock rotates a block by CalcRotation(rot, 4 - r): BlockShapeNew::RotateY
+        // replaces _rotCount with 4 - _rotCount on the left-turn path
+        // (asm.il ~181926). Using r directly leaves the building internally
+        // coherent but 180 degrees off stock at r=1 and r=3.
+        set_block(ctx, wx, wy, wz, rotateRawY(raw, 4 -% (rot & 3)), tex, dens);
     }
 }
 
@@ -428,4 +441,40 @@ test "rotate local xz quarter turns" {
     const b = rotateLocalXZ(0, 0, 3, 2, 2);
     try std.testing.expectEqual(@as(i32, 2), b.x);
     try std.testing.expectEqual(@as(i32, 1), b.z);
+}
+
+test "rotateLocalXZ turns clockwise like stock" {
+    // Corners of a 4 x 6 prefab under each rotation. Stock's forward map is
+    // r=1 -> (sz-1-z, x) and r=3 -> (z, sx-1-x); mirroring those two is the
+    // defect that pointed 709 of Navezgane's 1559 POIs away from their road.
+    const sx: i32 = 4;
+    const sz: i32 = 6;
+    try std.testing.expectEqual(@as(i32, 0), rotateLocalXZ(0, 0, sx, sz, 0).x);
+    try std.testing.expectEqual(@as(i32, 0), rotateLocalXZ(0, 0, sx, sz, 0).z);
+
+    const r1 = rotateLocalXZ(0, 0, sx, sz, 1);
+    try std.testing.expectEqual(@as(i32, sz - 1), r1.x);
+    try std.testing.expectEqual(@as(i32, 0), r1.z);
+
+    const r2 = rotateLocalXZ(0, 0, sx, sz, 2);
+    try std.testing.expectEqual(@as(i32, sx - 1), r2.x);
+    try std.testing.expectEqual(@as(i32, sz - 1), r2.z);
+
+    const r3 = rotateLocalXZ(0, 0, sx, sz, 3);
+    try std.testing.expectEqual(@as(i32, 0), r3.x);
+    try std.testing.expectEqual(@as(i32, sx - 1), r3.z);
+
+    // Four quarter turns return every cell to itself.
+    var x: i32 = 0;
+    while (x < sx) : (x += 1) {
+        var z: i32 = 0;
+        while (z < sz) : (z += 1) {
+            const a = rotateLocalXZ(x, z, sx, sz, 1);
+            const b = rotateLocalXZ(a.x, a.z, sz, sx, 1);
+            const c = rotateLocalXZ(b.x, b.z, sx, sz, 1);
+            const d = rotateLocalXZ(c.x, c.z, sz, sx, 1);
+            try std.testing.expectEqual(x, d.x);
+            try std.testing.expectEqual(z, d.z);
+        }
+    }
 }
