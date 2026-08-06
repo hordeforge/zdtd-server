@@ -129,6 +129,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `sendGame`, `broadcastExcept` and the replicate fan-out, so 20 Hz position
   spam no longer occupies or retransmits inside the 64-slot reliable window
   shared with chunks and join-critical control traffic.
+- Loot respawn: `LootRespawnDays` (serverconfig, default 7, 0 disables) re-rolls
+  a looted world container on its next open when the interval since its touch
+  day has elapsed; the cycle-varying seed makes each respawn differ while
+  staying deterministic per position and cycle. `touched_day` persists in
+  containers.zct (older saves read 0 and do not respawn immediately), world
+  containers are marked non-player-placed at materialization, and player-placed
+  storage never respawns (stock bPlayerStorage).
 - Inbound fragment reassembly: the peer now holds two assembly slots keyed by
   frag_id instead of one, so a second large C2S message (a Bag plus a
   PlayerInventory during a loot transfer) no longer clears the first assembly

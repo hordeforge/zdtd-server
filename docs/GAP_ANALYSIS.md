@@ -140,11 +140,11 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
 | [POIs and prefabs](#7-pois-and-prefabs) | 11 | 14 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 10 | 15 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 12 | 29 | 11 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **101** | **150** | **94** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **102** | **150** | **93** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1372,10 +1372,16 @@ can walk into every POI but none of them is the building TFP authored.
   `lootcontainer` size attribute: woodenChest 6,2 = 12; playerGunSafe 8,10 = 80.
   *Anchors:* `src/server/game.zig:7404`, `:7428`, `src/world/containers.zig:31`
 
-- **Loot respawn (LootRespawnDays / LootTimer)** `MISSING`
-  No respawn timer and no expiry on the touched flag. The client reports
-  `GamePref.LootRespawnDays = 7` and zdtd never acts on it, so a looted container
-  stays empty forever and there is no reason to revisit a POI.
+- **Loot respawn (LootRespawnDays / LootTimer)** `WORKS` `(2026-08-07)`
+  `serverconfig.xml LootRespawnDays` (default 7, 0 disables) drives a lazy
+  re-roll on open: a looted world container (empty slots, `touched`, not
+  player-placed) whose `touched_day` is at least the interval behind the
+  current day regenerates fresh loot on the next `NetPackageInventoryDataRequest`,
+  with a cycle-varying seed so each respawn differs while staying deterministic
+  per (pos, cycle). `touched_day` persists in ZCT1 (appended, length-detected
+  on load; older saves read 0 and do not respawn immediately). World containers
+  are marked `player_storage=false` at materialization so they are eligible;
+  player-placed storage never respawns (stock `bPlayerStorage`).
   *Anchors:* `src/world/containers.zig:31`, `src/server/game.zig:7445`
 
 - **POI reset / rebuild** `MISSING`
@@ -1869,7 +1875,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**10 WORKS · 15 PARTIAL · 10 MISSING**
+**11 WORKS · 15 PARTIAL · 9 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
