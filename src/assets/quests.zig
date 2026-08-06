@@ -290,31 +290,6 @@ fn sumCoinReward(body: []const u8) u32 {
     return total;
 }
 
-fn isSelfClosingQuestTag(xml_src: []const u8, open_lt: usize) bool {
-    const gt = std.mem.indexOfPos(u8, xml_src, open_lt, ">") orelse return true;
-    return gt > open_lt and xml_src[gt - 1] == '/';
-}
-
-fn parseQuestDef(
-    arena: std.mem.Allocator,
-    open_lt: usize,
-    xml_src: []const u8,
-    numeric_id: u16,
-) !?quest.QuestDef {
-    if (isSelfClosingQuestTag(xml_src, open_lt)) return null;
-    const qid = xml.attr(xml_src, open_lt, "id") orelse return null;
-    const gt = std.mem.indexOfPos(u8, xml_src, open_lt, ">") orelse return null;
-    const close = std.mem.indexOfPos(u8, xml_src, gt + 1, "</quest>") orelse return null;
-    return parseQuestDefBody(
-        arena,
-        qid,
-        xml.attr(xml_src, open_lt, "name_key"),
-        xml.attr(xml_src, open_lt, "category_key"),
-        xml_src[gt + 1 .. close],
-        numeric_id,
-    );
-}
-
 /// Parse one quest's effective body (template content already merged). `qid`
 /// is the quest name; open-tag name_key/category_key attrs pass through for the
 /// rare quests that use them instead of body properties.

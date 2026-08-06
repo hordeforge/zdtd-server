@@ -12,25 +12,47 @@ pub fn eqAny(s: []const u8, alts: []const []const u8) bool {
     return false;
 }
 
-/// Copy `src` into `dst`, dropping C0 controls and DEL. Returns written length.
+/// Copy `src` into `dst`, dropping C0 controls, DEL, and invalid UTF-8 byte
+/// sequences, and never splitting a codepoint at the destination cap. Returns
+/// written length. The name is re-broadcast to every peer and persisted, so the
+/// result must stay valid UTF-8: a byte split inside a multi-byte sequence
+/// would desync what stock .NET clients decode from the name field.
 pub fn sanitizePlayerName(dst: []u8, src: []const u8) usize {
     var w: usize = 0;
-    for (src) |ch| {
-        if (w >= dst.len) break;
-        if (ch < 0x20 or ch == 0x7f) continue;
-        dst[w] = ch;
-        w += 1;
+    var i: usize = 0;
+    while (i < src.len) {
+        const cp_len = std.unicode.utf8ByteSequenceLength(src[i]) catch {
+            i += 1; // not a lead byte: skip the garbage byte
+            continue;
+        };
+        if (i + cp_len > src.len or !std.unicode.utf8ValidateSlice(src[i..][0..cp_len])) {
+            i += 1; // truncated, overlong, surrogate, or out-of-range: skip one byte
+            continue;
+        }
+        if (src[i] < 0x20 or src[i] == 0x7f) {
+            i += cp_len; // C0 control / DEL (multi-byte leads are >= 0xC0): drop, keep scanning
+            continue;
+        }
+        if (w + cp_len > dst.len) break; // cap: stop before splitting a codepoint
+        // In-place callers pass dst == src (c.name sanitized from login.name):
+        // forward copy with w <= i can overlap by < 1 codepoint, so memmove.
+        @memmove(dst[w..][0..cp_len], src[i..][0..cp_len]);
+        w += cp_len;
+        i += cp_len;
     }
     return w;
 }
 
-/// Global chat body bounds: non-empty, length-capped, no C0/DEL (log/UI injection).
+/// Global chat body bounds: non-empty, length-capped, no C0/DEL (log/UI
+/// injection), valid UTF-8. The body is re-broadcast verbatim to every peer, so
+/// malformed sequences must not reach the wire (stock clients decode with
+/// replacement; we fail closed instead).
 pub fn chatMsgOk(msg: []const u8) bool {
     if (msg.len == 0 or msg.len > max_chat_msg_len) return false;
     for (msg) |ch| {
         if (ch < 0x20 or ch == 0x7f) return false;
     }
-    return true;
+    return std.unicode.utf8ValidateSlice(msg);
 }
 
 /// Commands accepted from an ordinary player's F1 console. Administrative and
@@ -85,6 +107,31 @@ test "sanitizePlayerName drops control characters" {
     try std.testing.expectEqualStrings("ABC", tiny[0..nt]);
 }
 
+test "sanitizePlayerName never splits a UTF-8 codepoint at the cap" {
+    // 17 x "é" (2 bytes each) = 34 bytes; the 16-byte-aligned cap must stop at
+    // a codepoint boundary, not leave a dangling continuation byte.
+    var buf: [32]u8 = undefined;
+    const n = sanitizePlayerName(&buf, "é" ** 17);
+    try std.testing.expectEqual(@as(usize, 32), n);
+    try std.testing.expectEqualStrings("é" ** 16, buf[0..n]);
+    // CJK: 3-byte codepoints; a 4-byte cap keeps exactly one full codepoint.
+    var tiny: [4]u8 = undefined;
+    const nt = sanitizePlayerName(&tiny, "名前");
+    try std.testing.expectEqual(@as(usize, 3), nt);
+    try std.testing.expectEqualStrings("名", tiny[0..nt]);
+}
+
+test "sanitizePlayerName drops invalid UTF-8 sequences" {
+    var buf: [32]u8 = undefined;
+    // Stray continuation byte, truncated lead, overlong encoding, and a
+    // UTF-16 surrogate half (ED A0 80) are all rejected, not copied.
+    const n = sanitizePlayerName(&buf, "A\xFFB\xC3\xC0\xAF\xED\xA0\x80C");
+    try std.testing.expectEqualStrings("ABC", buf[0..n]);
+    // Valid non-ASCII content still passes through untouched.
+    const n2 = sanitizePlayerName(&buf, "Émile-海");
+    try std.testing.expectEqualStrings("Émile-海", buf[0..n2]);
+}
+
 test "chatMsgOk length and control bounds" {
     try std.testing.expect(chatMsgOk("hello"));
     try std.testing.expect(!chatMsgOk(""));
@@ -92,4 +139,11 @@ test "chatMsgOk length and control bounds" {
     try std.testing.expect(!chatMsgOk("x" ** (max_chat_msg_len + 1)));
     try std.testing.expect(chatMsgOk("x" ** max_chat_msg_len));
     try std.testing.expect(!chatMsgOk("del\x7f"));
+}
+
+test "chatMsgOk rejects malformed UTF-8 before broadcast" {
+    try std.testing.expect(chatMsgOk("héllo 海"));
+    try std.testing.expect(!chatMsgOk("bad\xFFbyte"));
+    try std.testing.expect(!chatMsgOk("trunc\xC3"));
+    try std.testing.expect(!chatMsgOk("\xED\xA0\x80surrogate"));
 }

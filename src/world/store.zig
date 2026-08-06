@@ -883,9 +883,12 @@ pub const World = struct {
         const path = try self.chunkPath(c.pos, &path_buf);
         const data = io_fs.readFileAll(self.allocator, path) catch |err| switch (err) {
             // No file = never saved; caller regenerates. Other errors mean an
-            // existing save could not be read.
+            // existing save could not be read; keep the specific error so the
+            // caller's log tells the operator why (permission, I/O, is-a-dir).
+            // Collapsing to OpenFailed here would mislabel those as the same
+            // "no persist file" sentinel the other loaders use for fresh worlds.
             error.FileNotFound => return error.FileNotFound,
-            else => return error.OpenFailed,
+            else => |e| return e,
         };
         defer self.allocator.free(data);
         if (data.len < 12) return error.ReadFailed;

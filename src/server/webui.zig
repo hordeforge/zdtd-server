@@ -1205,12 +1205,12 @@ fn loginHintHtml(bad_token: bool) []const u8 {
         \\<!DOCTYPE html>
         \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         \\<title>Sign in · zdtd</title>
-        \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8e8e8;background:#1a1a1a}main{max-width:36rem}
-        \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff;text-decoration:underline}
-        \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
-        \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#7eb8ff;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
-        \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}
-        \\.err{color:#ff8a8a;margin:0.75rem 0}
+        \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
+        \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
+        \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
+        \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
+        \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
+        \\.err{color:#ff8585;margin:0.75rem 0}
         \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:MarkText;background:Mark}}
         \\</style></head>
         \\<body><main><h1>zdtd webui</h1>
@@ -1228,11 +1228,11 @@ fn loginHintHtml(bad_token: bool) []const u8 {
     \\<!DOCTYPE html>
     \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     \\<title>Sign in · zdtd</title>
-    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8e8e8;background:#1a1a1a}main{max-width:36rem}
-    \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff;text-decoration:underline}
-    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
-    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#7eb8ff;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
-    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}
+    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
+    \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
+    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
+    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
+    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
     \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
     \\</style></head>
     \\<body><main><h1>zdtd webui</h1>
@@ -1253,12 +1253,12 @@ fn loginLockoutHtml() []const u8 {
     \\<!DOCTYPE html>
     \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     \\<title>Sign in · zdtd</title>
-    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8e8e8;background:#1a1a1a}main{max-width:36rem}
-    \\code{background:#333;padding:0.15em 0.4em;border-radius:3px}a{color:#7eb8ff;text-decoration:underline}
-    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#111;color:#e8e8e8;font:inherit}
-    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#7eb8ff;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}button:disabled,input:disabled{opacity:0.55;cursor:not-allowed}
-    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #e8a838;outline-offset:3px}
-    \\.err{color:#ff8a8a;margin:0.75rem 0}
+    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
+    \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
+    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
+    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}button:disabled,input:disabled{opacity:0.55;cursor:not-allowed}
+    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
+    \\.err{color:#ff8585;margin:0.75rem 0}
     \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:MarkText;background:Mark}}
     \\</style></head>
     \\<body><main><h1>zdtd webui</h1>

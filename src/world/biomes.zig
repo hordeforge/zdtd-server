@@ -164,8 +164,6 @@ pub const BiomeMap = struct {
     half_h: i32 = 0,
     /// Blocks per biomes.png pixel (world size / png size); Navezgane ships 3072px for a 6144 world.
     scale: i32 = 1,
-    /// Optional table used at decode time (not owned).
-    color_table: ?*const ColorTable = null,
 
     pub fn deinit(self: *BiomeMap) void {
         if (self.r.len != 0) self.allocator.free(self.r);

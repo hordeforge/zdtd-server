@@ -137,8 +137,8 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
-| [Blood moon](#6-blood-moon) | 5 | 14 | 8 | 27 | Horde runs dusk to dawn on the right night; stat 58 carries the jittered horde day so the red moon and warning clock land correctly |
-| [POIs and prefabs](#7-pois-and-prefabs) | 12 | 14 | 6 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
+| [Blood moon](#6-blood-moon) | 6 | 14 | 7 | 27 | Horde runs dusk to dawn on the right night; stat 58 carries the jittered horde day and the clock calendar survives restart |
+| [POIs and prefabs](#7-pois-and-prefabs) | 13 | 14 | 5 | 32 | Ids, rotation and height now correct; trader compounds ship their areas; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
@@ -1192,12 +1192,15 @@ encoding is one day high.
   either, so a stock dedi client is in the same boat.
   *Anchors:* `asm.il:412595`, `asm.il:413978`, `asm.il:59416`
 
-- **Blood-moon schedule persistence across restart** `MISSING`
-  `WorldClock.day` is never loaded from or written to any save: it starts at 1 on
-  every start. Stock persists bmDay/bmDayLast/bmDayNextOverride via the
-  component's Read/Write alongside worldTime. Restart resets the calendar to day 1
-  08:00, so a save is never more than 7 days from its first horde.
-  *Anchors:* `src/ecs/aidirector.zig:8`, `src/server/game.zig:579`,
+- **Blood-moon schedule persistence across restart** `WORKS`
+  The world clock (day + hours, stock worldTime encoding) is saved to
+  `clock.zcl` on the periodic save path and at deinit, and restored over the
+  fresh clock at init. The blood-moon calendar derives from the day, so a save
+  keeps its horde schedule instead of resetting to day 1. (Stock also persists
+  bmDay/bmDayLast/bmDayNextOverride; zdtd's schedule is deterministic from the
+  cycle + CalcNextDay jitter, so the day is the only state.)
+  *Anchors:* `src/server/game.zig` (`saveClock`/`restoreClock`),
+  `src/ecs/aidirector.zig` (`WorldClock`), `src/server/game.zig:579`
   `asm.il:412351`, `asm.il:412406`
 
 - **Console/admin visibility of the blood moon** `PARTIAL`
@@ -1508,10 +1511,14 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/store.zig:589`, `src/world/prefabs.zig:222`, `:404`,
   `output_log_client_zdtd_connect.txt:20533`
 
-- **Trader areas / teleport volumes from prefabs.xml** `MISSING`
-  Nothing reads TraderArea, TraderAreaProtect or TeleportVolumeList. Trader
-  compounds are ordinary POIs with no protected area and no teleport volumes.
-  *Anchors:* `src/assets/traders.zig:1`, `asm.il:902420-902440`,
+- **Trader areas / teleport volumes from prefabs.xml** `WORKS`
+  `TraderArea`, `TraderAreaProtect` and `TeleportVolumeStart/Size` are parsed
+  from the trader POI XMLs (`QuestData.is_trader_area` + `teleport_*`), and
+  `NetPackageWorldAreas` ships the compounds (position, prefab size, protect
+  padding, teleport volumes) in the join bundle, so trader compounds have their
+  protected areas and closing-time teleport volumes on the client.
+  *Anchors:* `src/world/prefabs.zig` (`QuestData`),
+  `src/server/game.zig` (`sendWorldAreas`), `asm.il:902420-902440`,
   `asm.il:903590-903616`
 
 - **Prefab entity list** `MISSING`

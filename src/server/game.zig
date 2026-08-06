@@ -1386,6 +1386,7 @@ pub const Game = struct {
                     .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
                 });
                 self.restoreWeather();
+                self.restoreClock();
                 const burnt = bl.stackFor(9);
                 std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
                     bl.default_stack.n,
@@ -1436,7 +1437,7 @@ pub const Game = struct {
                 defer refs.deinit(allocator);
                 // Pass 1: within ~512m of spawn
                 for (pf.items) |d| {
-                    if (std.mem.startsWith(u8, d.name, "part_")) continue;
+                    if (world_store.prefabs.isPart(d.name)) continue;
                     const dx = d.x - sp0.x;
                     const dz = d.z - sp0.z;
                     if (dx * dx + dz * dz > 512 * 512) continue;
@@ -1456,7 +1457,7 @@ pub const Game = struct {
                 // Pass 2: fill remaining budget with farther POIs
                 if (refs.items.len < 800) {
                     for (pf.items) |d| {
-                        if (std.mem.startsWith(u8, d.name, "part_")) continue;
+                        if (world_store.prefabs.isPart(d.name)) continue;
                         const dx = d.x - sp0.x;
                         const dz = d.z - sp0.z;
                         if (dx * dx + dz * dz <= 512 * 512) continue;
@@ -2236,6 +2237,7 @@ pub const Game = struct {
         self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
+        self.saveClock() catch |e| logPersistErr(self, "save clock", e);
         self.land_claims_n = 0;
         self.plugins.shutdown();
         self.wasm_plugins.shutdown();
@@ -3122,7 +3124,7 @@ pub const Game = struct {
                 switch (self.resolveAdminTarget(a.target)) {
                     .slot => |slot| {
                         if (self.clients[slot].peer) |p| self.banIp(peerIpKey(p));
-                        self.dropClientSlot(slot);
+                        self.dropClientSlot(slot, "ban");
                     },
                     else => {},
                 }
@@ -3464,6 +3466,10 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save weather", e);
                 };
+                self.saveClock() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save clock", e);
+                };
                 self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
             },
             .kick => |k| {
@@ -3477,7 +3483,7 @@ pub const Game = struct {
                     self.clients[slot].name[0..self.clients[slot].name_len], k.reason,
                 }) catch "Kicking Player\n";
                 self.adminReply(s);
-                self.dropClientSlot(slot);
+                self.dropClientSlot(slot, "kick");
             },
             .kickall => |reason| {
                 for (&self.clients, 0..) |*cl, i| {
@@ -3487,7 +3493,7 @@ pub const Game = struct {
                         cl.name[0..cl.name_len], reason,
                     }) catch "Kicking Player\n";
                     self.adminReply(s);
-                    self.dropClientSlot(i);
+                    self.dropClientSlot(i, "kickall");
                 }
             },
             .ban => |sub| self.runBanCommand(sub),
@@ -3555,7 +3561,7 @@ pub const Game = struct {
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined or cl.name_len != nm.len) continue;
                     if (!std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
-                    self.dropClientSlot(i);
+                    self.dropClientSlot(i, "wipeplayer");
                     kicked += 1;
                 }
                 const removed = self.wipePlayerRecordsByName(nm) catch |e| {
@@ -3836,6 +3842,10 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save weather", e);
                 };
+                self.saveClock() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save clock", e);
+                };
                 self.savePlayers() catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save players", e);
@@ -4021,9 +4031,11 @@ pub const Game = struct {
             self.harness.counters.inc(.encode_errors);
             const n = self.harness.counters.get(.encode_errors);
             if (n == 1 or n % 100 == 0) {
+                // local_id identifies which peer keeps triggering the bad body;
+                // without it a faulty client is indistinguishable from a server bug.
                 std.debug.print(
-                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
-                    .{ pkg_name, body.len, n, @errorName(err) },
+                    "zdtd: encode failed pkg={s} body_len={d} local_id={d} n={d}: {s}\n",
+                    .{ pkg_name, body.len, peer.local_id, n, @errorName(err) },
                 );
             }
             return err;
@@ -4604,6 +4616,40 @@ pub const Game = struct {
         }
     }
 
+    /// Persist the world clock (day + hours as stock worldTime) so a restart
+    /// keeps the calendar — the blood-moon schedule derives from the day, so a
+    /// save used to reset to day 1 and never be more than 7 days from its
+    /// first horde. File: `clock.zcl` ("ZCL1" | u64 worldTime), the same
+    /// encoding stock persists (GamePrefs worldTime / WorldClock Read+Write).
+    /// Saved on the periodic save path and at deinit; restored right after the
+    /// fresh clock in initWithOptions.
+    fn saveClock(self: *const Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir});
+        var buf: [16]u8 = undefined;
+        @memcpy(buf[0..4], "ZCL1");
+        std.mem.writeInt(u64, buf[4..12], self.sim.director.clock.worldTimeBits(), .little);
+        try io_fs.writeFile(self.allocator, p, buf[0..12]);
+    }
+
+    /// Restore `clock.zcl` over the freshly seeded clock. A missing file is a
+    /// fresh world (keep day 1); a corrupt file is dropped with a log line.
+    fn restoreClock(self: *Game) void {
+        var path: [512]u8 = undefined;
+        const p = std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir}) catch return;
+        if (!io_fs.fileExistsSimple(p)) return;
+        var buf: [16]u8 = undefined;
+        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch return;
+        if (bytes.len < 12 or !std.mem.eql(u8, bytes[0..4], "ZCL1")) {
+            std.debug.print("zdtd: clock.zcl unreadable or mismatched; keeping fresh clock\n", .{});
+            return;
+        }
+        const wt = std.mem.readInt(u64, bytes[4..12], .little);
+        self.sim.director.clock.day = @intCast(wt / 24000 + 1);
+        self.sim.director.clock.hours = @as(f32, @floatFromInt(wt % 24000)) / 1000.0;
+        std.debug.print("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
+    }
+
     /// Persist the storm state machine so a restart resumes the storm cycle
     /// instead of re-rolling the opening groups. File: `weather.zwt` (ZWTH1).
     /// Saved on the periodic save path and at deinit; restored right after
@@ -5123,7 +5169,7 @@ pub const Game = struct {
             // so it is checked once the login name is known.
             if (c.name_len != 0 and self.ban_list.banned(c.name[0..c.name_len], clock.wallSeconds())) {
                 self.harness.counters.inc(.join_fail);
-                self.dropClientSlot(c.slot);
+                self.dropClientSlot(c.slot, "identity-ban");
                 return;
             }
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
@@ -6169,7 +6215,7 @@ pub const Game = struct {
                 if (eid != c.entity_id) return;
             }
             self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-            self.dropClientSlot(c.slot);
+            self.dropClientSlot(c.slot, "quit");
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
@@ -7542,13 +7588,19 @@ pub const Game = struct {
                 cl.guard.kick_at_tick = 0;
                 continue;
             }
-            self.dropClientSlot(i);
+            self.dropClientSlot(i, "guard");
         }
     }
 
     /// Shared peer teardown for admin kick/ban/wipeplayer and the guard policy.
-    /// Resetting the slot to `.{}` also clears guard/quarantine state.
-    fn dropClientSlot(self: *Game, slot: usize) void {
+    /// Resetting the slot to `.{}` also clears guard/quarantine state. `reason`
+    /// names the dropping path so the server log keeps a complete join/leave
+    /// trail: joins are logged, so drops (quit, kick, ban, guard) must be too.
+    fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
+        std.debug.print(
+            "zdtd: player dropped slot={d} entity={d} reason={s}\n",
+            .{ slot, self.clients[slot].entity_id, reason },
+        );
         if (self.clients[slot].peer) |p| p.alive = false;
         // Free the seat a dropping rider held, or the vehicle stays occupied
         // (and, for seat 0, undriveable) for the rest of the session.
@@ -10540,6 +10592,7 @@ pub const Game = struct {
             self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
+            self.saveClock() catch |e| logPersistErr(self, "save clock", e);
             if (self.players_dirty) {
                 self.players_dirty = false;
                 self.savePlayers() catch |e| logPersistErr(self, "save players", e);
@@ -11227,6 +11280,40 @@ test "offline steps replay same world_time for same seed" {
         t_b = g.sim.director.clock.worldTimeBits();
     }
     try std.testing.expectEqual(t_a, t_b);
+}
+
+test "world clock persists across a restart (BM calendar survives)" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const dir = ".zdtd_cfg_cache/clock_persist";
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // Day 5, 12:30 — deinit saves clock.zcl.
+        g.sim.director.clock.day = 5;
+        g.sim.director.clock.hours = 12.5;
+        std.debug.print("CLOCKDBG before-deinit day={d} hours={d:.2}\n", .{ g.sim.director.clock.day, g.sim.director.clock.hours });
+    }
+    std.debug.print("CLOCKDBG file exists={} size={d}\n", .{ io_fs.fileExistsSimple(dir ++ "/clock.zcl"), if (io_fs.fileExistsSimple(dir ++ "/clock.zcl")) @as(usize, 12) else 0 });
+    var rbuf: [16]u8 = undefined;
+    if (io_fs.readFileInto(std.testing.allocator, dir ++ "/clock.zcl", &rbuf) catch null) |bytes| {
+        if (bytes.len >= 12) std.debug.print("CLOCKDBG file wt={d}\n", .{std.mem.readInt(u64, bytes[4..12], .little)});
+    }
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expectEqual(@as(u32, 5), g.sim.director.clock.day);
+        try std.testing.expectApproxEqAbs(@as(f32, 12.5), g.sim.director.clock.hours, 0.001);
+    }
 }
 
 test "sleeper scan job batch matches the serial pass" {

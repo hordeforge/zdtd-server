@@ -443,9 +443,11 @@ fn testFacts(_: ?*anyopaque, id: u16) Facts {
 }
 
 /// Build a flat test world: air at and above `surface_y`, solid (id 1) below.
-fn testWorld(gpa: std.mem.Allocator, surface_y: i32) *store.World {
+/// `dir` is a caller-owned scratch dir (tmpDir), so tests never write into the
+/// repo tree and never see residue from a previous run.
+fn testWorld(gpa: std.mem.Allocator, surface_y: i32, dir: []const u8) *store.World {
     const w = gpa.create(store.World) catch unreachable;
-    w.* = store.World.init(gpa, "worlds/unused_stability") catch unreachable;
+    w.* = store.World.init(gpa, dir) catch unreachable;
     var cx: i32 = 0;
     while (cx < 2) : (cx += 1) {
         var cz: i32 = 0;
@@ -474,7 +476,12 @@ test "stability: terrain supports a column; cutting the base fells it" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const w = testWorld(gpa, 60);
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
     defer {
         w.deinit();
         gpa.destroy(w);
@@ -513,7 +520,12 @@ test "stability: overhang beyond support falls after the support goes" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const w = testWorld(gpa, 60);
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
     defer {
         w.deinit();
         gpa.destroy(w);
@@ -546,7 +558,12 @@ test "stability: non-support blocks cap at 1 and never carry support" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const w = testWorld(gpa, 60);
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
     defer {
         w.deinit();
         gpa.destroy(w);

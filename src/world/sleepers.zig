@@ -5,6 +5,7 @@ const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
+const prefabs = @import("prefabs.zig");
 
 pub const max_volumes: usize = 8192;
 pub const max_group_classes: usize = 4;
@@ -214,7 +215,7 @@ pub fn loadFromPrefabs(
 
     for (decorations) |d| {
         // Skip tiny parts: volumes mostly on full POIs.
-        if (std.mem.startsWith(u8, d.name, "part_")) continue;
+        if (prefabs.isPart(d.name)) continue;
 
         const body = blk: {
             if (xml_cache.get(d.name)) |b| break :blk b;

@@ -138,7 +138,11 @@ pub const Server = struct {
     }
 
     /// One password attempt on session `i`. Returns false when the session was
-    /// closed (too many failures). The line is never echoed or logged.
+    /// closed (too many failures). The line (a password attempt) is never echoed
+    /// or logged, but the failed attempt itself is: this console can kick, ban
+    /// and shut the server down, so a silent brute force is a blind spot (the
+    /// webui logs every rejected login; the telnet console must too). The
+    /// password bytes stay out of the log; only the session and attempt count.
     fn authenticate(self: *Server, i: usize, line: []const u8) bool {
         self.active = i;
         if (self.auth.matches(line)) {
@@ -150,10 +154,15 @@ pub const Server = struct {
         }
         self.fails[i] +|= 1;
         if (self.fails[i] >= self.auth.fail_limit) {
+            std.debug.print(
+                "zdtd: admin login failed session={d} attempts={d} closed\n",
+                .{ i, self.fails[i] },
+            );
             self.reply("Too many failed login attempts!\n");
             self.closeActive();
             return false;
         }
+        std.debug.print("zdtd: admin login failed session={d} attempts={d}\n", .{ i, self.fails[i] });
         self.reply("Password incorrect, please enter password:\n");
         return true;
     }

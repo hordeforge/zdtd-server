@@ -15,6 +15,10 @@ pub const Stream = struct {
     stream_radius_max: ?i32 = null,
     chunk_stream_period_ticks: ?u64 = null,
     motion_replicate_period_ticks: ?u64 = null,
+    /// WorldTime broadcast cadence (game.zig default_world_time_send_ticks).
+    world_time_send_ticks: ?u64 = null,
+    /// Vehicle position broadcast cadence (game.zig default_vehicle_pos_send_ticks).
+    vehicle_pos_send_ticks: ?u64 = null,
     spawn_area_radius_max: ?i32 = null,
     /// 2 Hz sim side-work cadence (sleeper volumes, airdrops, workstations).
     sleeper_tick_ticks: ?u64 = null,
@@ -176,6 +180,10 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
             f.stream.chunk_stream_period_ticks = try parseU64(val);
         } else if (std.mem.eql(u8, key, "motion_replicate_period_ticks")) {
             f.stream.motion_replicate_period_ticks = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "world_time_send_ticks")) {
+            f.stream.world_time_send_ticks = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "vehicle_pos_send_ticks")) {
+            f.stream.vehicle_pos_send_ticks = try parseU64(val);
         } else if (std.mem.eql(u8, key, "spawn_area_radius_max")) {
             f.stream.spawn_area_radius_max = try parseI32(val);
         } else if (std.mem.eql(u8, key, "sleeper_tick_ticks")) {
@@ -313,6 +321,8 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.stream_radius_max) |v| opts.chunk_stream_radius_max = v;
     if (f.stream.chunk_stream_period_ticks) |v| opts.chunk_stream_period_ticks = v;
     if (f.stream.motion_replicate_period_ticks) |v| opts.motion_replicate_period_ticks = v;
+    if (f.stream.world_time_send_ticks) |v| opts.world_time_send_ticks = v;
+    if (f.stream.vehicle_pos_send_ticks) |v| opts.vehicle_pos_send_ticks = v;
     if (f.stream.spawn_area_radius_max) |v| opts.spawn_area_radius_max = v;
     if (f.stream.sleeper_tick_ticks) |v| opts.sleeper_tick_ticks = v;
     if (f.stream.turret_sync_ticks) |v| opts.turret_sync_ticks = v;
@@ -381,6 +391,14 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
         opts.motion_replicate_period_ticks = 1;
     }
+    if (opts.world_time_send_ticks == 0) {
+        std.debug.print("zdtd: world_time_send_ticks=0 invalid; using 1\n", .{});
+        opts.world_time_send_ticks = 1;
+    }
+    if (opts.vehicle_pos_send_ticks == 0) {
+        std.debug.print("zdtd: vehicle_pos_send_ticks=0 invalid; using 1\n", .{});
+        opts.vehicle_pos_send_ticks = 1;
+    }
     if (opts.sleeper_tick_ticks == 0) {
         std.debug.print("zdtd: sleeper_tick_ticks=0 invalid; using 1\n", .{});
         opts.sleeper_tick_ticks = 1;
@@ -426,6 +444,8 @@ test "parse stream and authority" {
         \\[stream]
         \\max_streamed_chunks = 100
         \\stream_radius_min = 5
+        \\world_time_send_ticks = 40
+        \\vehicle_pos_send_ticks = 7
         \\[authority]
         \\interest_range_blocks = 120.5
         \\peer_stale_ms = 4000
@@ -450,6 +470,8 @@ test "parse stream and authority" {
     defer f.deinit();
     try std.testing.expectEqual(@as(usize, 100), f.stream.max_streamed_chunks.?);
     try std.testing.expectEqual(@as(i32, 5), f.stream.stream_radius_min.?);
+    try std.testing.expectEqual(@as(u64, 40), f.stream.world_time_send_ticks.?);
+    try std.testing.expectEqual(@as(u64, 7), f.stream.vehicle_pos_send_ticks.?);
     try std.testing.expectApproxEqAbs(@as(f32, 120.5), f.authority.interest_range_blocks.?, 0.01);
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
@@ -478,6 +500,8 @@ test "applyToInitOptions deco_trees only when set" {
         chunk_stream_radius_max: i32 = 9,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -577,6 +601,8 @@ test "sanitizeInitOptions repairs bad radii" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -609,6 +635,8 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -634,6 +662,8 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -658,6 +688,8 @@ test "guard policy merges from [authority] and clamps" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -722,6 +754,8 @@ test "[perf] switches default off and merge only when set" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,
@@ -773,6 +807,8 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
         sleeper_tick_ticks: u64 = 10,
         turret_sync_ticks: u64 = 10,
         save_interval_ticks: u64 = 100,

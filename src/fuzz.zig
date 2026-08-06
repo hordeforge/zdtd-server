@@ -23,6 +23,7 @@ const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
 const biome_layers = @import("assets/biome_layers.zig");
 const gamestages_xml = @import("assets/gamestages.zig");
+const loot = @import("assets/loot.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 const water = @import("world/water.zig");
@@ -1338,4 +1339,60 @@ fn fuzzAddRemoveBuff(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(v.name.len <= name_buf.len);
         try std.testing.expect(v.name.len + 25 <= input.len);
     } else |_| {}
+}
+
+const loot_corpus = [_][]const u8{
+    "",
+    "<lootcontainer name=\"c\"><item name=\"x\"/></lootcontainer>",
+    // Full-domain count ranges: the u16 span arithmetic in the roll path would
+    // overflow on count="0,65535" (cmax-cmin+1 = 65536), so roll must not trap.
+    "<lootcontainer name=\"c\"><item name=\"x\" count=\"0,65535\"/></lootcontainer>",
+    "<lootgroup name=\"g\" count=\"0,255\"><item name=\"x\" count=\"0,65535\"/></lootgroup>",
+    // Non-finite prob must fail closed at the gate: NaN fails both comparisons
+    // and the NaN→int conversion in the gate is undefined behaviour.
+    "<lootcontainer name=\"c\"><item name=\"a\"/><item name=\"x\" prob=\"nan\"/></lootcontainer>",
+    "<lootprobtemplate name=\"t\"><loot level=\"0,99\" prob=\"inf\"/></lootprobtemplate>" ++
+        "<lootcontainer name=\"c\"><item name=\"x\" loot_prob_template=\"t\"/></lootcontainer>",
+    // Self-referential group: recursion depth must bound it, not blow the stack.
+    "<lootgroup name=\"g\" count=\"2,2\"><item group=\"g\"/></lootgroup>",
+    // Zero size / zero counts / negative prob
+    "<lootcontainer name=\"c\" size=\"0,0\"><item name=\"a\" count=\"0,0\" prob=\"-1\"/></lootcontainer>",
+    "<loot_settings poi_tier_mod=\"" ++ ("1.5," ** 12),
+    // Truncations and junk
+    "<lootcontainer name=\"c\"><item name=\"x\" count=\"",
+    "<lootgroup",
+    "<lootcontainer name=\"c\"><item name=\"x\" count=\"999999,999999999\"/></lootcontainer>",
+};
+
+test "fuzz loot.xml parser and roll path" {
+    try std.testing.fuzz({}, fuzzLootXml, .{ .corpus = &loot_corpus });
+}
+
+fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var t = loot.loadFromSlice(std.testing.allocator, storage[0..len]) catch return;
+    defer t.deinit();
+
+    // Fixed-array parsers must never report more entries than they hold.
+    try std.testing.expect(t.groups.len <= loot.max_groups);
+    try std.testing.expect(t.containers.len <= loot.max_containers);
+    for (t.groups) |g| try std.testing.expect(g.entry_n <= loot.max_entries);
+    for (t.containers) |c| try std.testing.expect(c.entry_n <= loot.max_entries);
+
+    // Roll the first few containers at hostile stages/seeds: count span
+    // arithmetic and the prob gate must never trap, and every stack keeps a
+    // positive count that fits u16.
+    const n_rolls = @min(t.containers.len, 4);
+    var stacks: [loot.max_roll_stacks]loot.Stack = undefined;
+    var ci: usize = 0;
+    while (ci < n_rolls) : (ci += 1) {
+        const n = t.rollContainer(t.containers[ci].name, smith.value(i32), smith.value(u32), &stacks);
+        try std.testing.expect(n <= stacks.len);
+        for (stacks[0..n]) |st| {
+            try std.testing.expect(st.count >= 1);
+            try std.testing.expect(st.count <= 65535);
+        }
+    }
 }

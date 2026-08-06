@@ -588,17 +588,32 @@ pub fn tryLoad(
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "biomes.xml", game_dir, config_dir) orelse return null;
+    // Parse/I/O failures must not look like "biomes absent": an operator's
+    // custom/overridden biomes.xml failing to load silently falls back to
+    // builtin defaults (wrong terrain layers, weather groups, deco) with no
+    // diagnostics. Log with the path, like the blocks/quests loaders.
+    const loadLogged = struct {
+        fn call(alloc: std.mem.Allocator, p: []const u8, ibn: *const fn (?*anyopaque, []const u8) ?u16, idd: ?*const fn (?*anyopaque, []const u8) bool, cctx: ?*anyopaque) !?Table {
+            return loadFromPath(alloc, p, ibn, idd, cctx) catch |err| {
+                std.debug.print(
+                    "zdtd: load biomes.xml failed: {s} ({s})\n",
+                    .{ @errorName(err), p },
+                );
+                return null;
+            };
+        }
+    }.call;
     if (paths.override_dirs.len == 0) {
-        return loadFromPath(allocator, base, id_by_name, is_distant_deco, ctx) catch null;
+        return try loadLogged(allocator, base, id_by_name, is_distant_deco, ctx);
     }
     const merged = try paths.readConfigXml(allocator, "biomes.xml", game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
     io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/biomes.xml";
     {
-        io_fs.writeFile(allocator, cp, merged) catch return loadFromPath(allocator, base, id_by_name, is_distant_deco, ctx) catch null;
+        io_fs.writeFile(allocator, cp, merged) catch return loadLogged(allocator, base, id_by_name, is_distant_deco, ctx);
     }
-    return loadFromPath(allocator, cp, id_by_name, is_distant_deco, ctx) catch null;
+    return loadLogged(allocator, cp, id_by_name, is_distant_deco, ctx);
 }
 
 fn testId(_: ?*anyopaque, name: []const u8) ?u16 {

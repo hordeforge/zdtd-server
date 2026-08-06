@@ -143,6 +143,8 @@ const known_serverconfig_names = [_][]const u8{
     "LandClaimSize",
     "LandClaimOnlineDurabilityModifier",
     "LandClaimOfflineDurabilityModifier",
+    "LandClaimExpiryDays",
+    "LootRespawnDays",
     "ZdtdAuthorityMode",
 };
 

@@ -1,0 +1,7 @@
+# Binary / generated artifacts that must never be line-normalized or text-diffed.
+# A checkout on any OS (e.g. Windows core.autocrlf) must preserve these bytes.
+
+# Lance semantic-code index (semcode tool): binary columnar DB, regenerable.
+.semcode.db/** -text
+# Wasm plugin fixtures: compiled binaries.
+*.wasm -text

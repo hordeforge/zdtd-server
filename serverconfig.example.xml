@@ -54,6 +54,8 @@
   <property name="LandClaimSize" value="41"/>
   <property name="LandClaimOnlineDurabilityModifier" value="4"/>
   <property name="LandClaimOfflineDurabilityModifier" value="4"/>
+  <property name="LandClaimExpiryDays" value="3"/>
+  <property name="LootRespawnDays" value="7"/>
 
   <!-- observe | permissive (alias of observe) | correct (default) -->
   <property name="ZdtdAuthorityMode" value="correct"/>

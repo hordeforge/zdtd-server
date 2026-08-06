@@ -88,6 +88,10 @@ pub const LootTable = struct {
     /// `s` is the caller's already-advanced LCG state.
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
         const p = self.entryProb(e, loot_stage);
+        // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
+        // the NaN→int conversion in intFromFloat is undefined; fail closed to
+        // match the C# unchecked cast (NaN rounds to 0, i.e. never picked).
+        if (!std.math.isFinite(p)) return false;
         if (p >= 1.0) return true;
         if (p <= 0.0) return false;
         const thresh: u32 = @intFromFloat(@round(p * 1000.0));
@@ -156,7 +160,10 @@ pub const LootTable = struct {
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
-                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % (cmax - cmin + 1)));
+                // Full-domain ranges (0..65535) make the u16 span arithmetic
+                // overflow; widen so the modulo never sees a wrapped zero.
+                const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
+                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
                 n += 1;
             }
@@ -177,7 +184,10 @@ pub const LootTable = struct {
         const picks: u8 = blk: {
             if (g.pick_max <= g.pick_min) break :blk g.pick_min;
             s = s *% 1103515245 +% 12345;
-            break :blk g.pick_min + @as(u8, @intCast(s % (g.pick_max - g.pick_min + 1)));
+            // Same widening as the count spans: count="0,255" on a group would
+            // overflow the u8 span (255-0+1 = 256).
+            const span: u32 = @as(u32, g.pick_max) - @as(u32, g.pick_min) + 1;
+            break :blk g.pick_min + @as(u8, @intCast(s % span));
         };
         var n: usize = 0;
         var p: u8 = 0;
@@ -193,7 +203,9 @@ pub const LootTable = struct {
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
-                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % (cmax - cmin + 1)));
+                // Same span widening as rollContainer (count="0,65535").
+                const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
+                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
                 n += 1;
             }

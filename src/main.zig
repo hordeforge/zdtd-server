@@ -84,7 +84,12 @@ fn splitPluginModules(allocator: std.mem.Allocator, raw: []const u8) []const []c
     var it = std.mem.tokenizeAny(u8, raw, " ,");
     while (it.next() != null) count += 1;
     if (count == 0) return &.{};
-    const list = allocator.alloc([]const u8, count) catch return &.{};
+    const list = allocator.alloc([]const u8, count) catch {
+        // Never let a configured plugin set vanish silently: log the drop so
+        // the operator sees why their zdtd.toml [plugin] modules did not load.
+        std.debug.print("zdtd: cannot allocate plugin module list ({d} modules); plugins disabled\n", .{count});
+        return &.{};
+    };
     var i: usize = 0;
     it = std.mem.tokenizeAny(u8, raw, " ,");
     while (it.next()) |tok| {
@@ -540,7 +545,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
 
     var toml_path_buf: [1024]u8 = undefined;
-    const world_toml = std.fmt.bufPrint(&toml_path_buf, "{s}/zdtd.toml", .{world_dir}) catch null;
+    const world_toml = std.fmt.bufPrint(&toml_path_buf, "{s}/zdtd.toml", .{world_dir}) catch blk: {
+        // World dir too long for the fixed buffer: do not silently run without
+        // the operator's per-world config.
+        std.debug.print("zdtd: world dir '{s}' too long; skipping world zdtd.toml\n", .{world_dir});
+        break :blk null;
+    };
     const toml_path: ?[]const u8 = blk: {
         if (world_toml) |wt| {
             if (io_fs.fileExistsSimple(wt)) break :blk wt;
