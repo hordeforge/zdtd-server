@@ -232,6 +232,39 @@ and cutting a support drops the structure.
 
 ---
 
+
+## T9. Plugins: stand up the Wasm runtime
+
+**Why:** [ADR 0020](adr/0020-wasm-only-plugin-api.md) makes plugins Wasm-only so a
+modder can ship one `.wasm` from any language and the host can bound what it
+does. Until a runtime is wired up there is no plugin story at all: the in-tree
+static host is test scaffolding and loads nothing user-supplied.
+
+**Change**
+1. Pick the runtime and record why in the ADR follow-up: an embeddable engine
+   (wasm3, wasmtime C API, wasmer) or a Zig interpreter. Judge on startup cost,
+   speed, dependency weight and sandbox maturity.
+2. Load `.wasm` modules named in config, instantiate once, register whichever of
+   `on_enable`, `on_tick`, `on_player_join`, `on_shutdown` the module exports.
+3. Implement the host import table behind capability gates. Start minimal: log,
+   read-only sim views, queue a `SimCommand`. No filesystem, no sockets, no clock
+   beyond the tick time the host passes in.
+4. Enforce a fuel or instruction budget and a linear-memory cap per call.
+   Exhausting either ends the call, disables that plugin and logs the hook and
+   module.
+5. Copy data across as flat bytes both ways. No host pointer reaches a guest.
+
+**Done when:** a `.wasm` built from a language other than Zig registers a hook,
+observes a tick, queues a `SimCommand` that the sim applies, and a deliberately
+looping module is disabled within one tick without stalling the server.
+
+**Proof:** a scenario with two fixture modules, one well-behaved and one that
+loops, asserting the command lands, the loop is cut off by fuel, only the bad
+module is disabled, and the tick budget holds.
+
+**Out of scope:** WASI, hot reload, a plugin marketplace, and any hook not
+already in `src/plugin/api.zig`.
+
 ## W1. Harness: rebuild suite fixtures on a fresh world
 
 **Why:** the playtest harness now starts every run from a fresh world, which is
@@ -275,6 +308,7 @@ unique per-run directory.
 - **Wave 1 (unblocks the most):** T1, then T2 and T3 in parallel.
 - **Wave 2 (session has meaning):** T5, T6 (needs T1), T7.
 - **Wave 3 (world integrity):** T4, T8.
+- **Independent, whenever a modding story is wanted:** T9 (Wasm runtime).
 - **Harness, any time and cheap:** W1, W2, W3. Do W3 first if `make check`
   flakiness is costing you time.
 

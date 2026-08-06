@@ -1,24 +1,74 @@
-# Native plugin API (design)
+# Plugin API: Wasm guests (design)
 
-**Status:** skeleton shipped (static host only; see [ADR 0005](adr/0005-native-plugin-api.md))  
-**Not:** stock `IModApi`, Harmony, or `Mods/` XML.  
+**Status:** design. A plugin is a `.wasm` module ([ADR 0020](adr/0020-wasm-only-plugin-api.md),
+which supersedes [ADR 0005](adr/0005-native-plugin-api.md)). No runtime is wired
+up yet, so nothing user-supplied loads today.
+**Not:** stock `IModApi`, Harmony, `Mods/` XML, or a native plugin ABI.
 **Related:** [ADR 0003](adr/0003-no-stock-mod-host.md), [ADR 0004](adr/0004-server-authoritative-c2s.md),
-[ADR 0010](adr/0010-data-config-zig-plugins.md) (data/config/Zig layers; **Wasm guest**
-as future sandboxed mod API behind this host), TODO P4 (authority),
-mach notes in [ADR 0006](adr/0006-steal-from-mach.md).
+[ADR 0010](adr/0010-data-config-zig-plugins.md) (data and config layers beneath this one).
 
-## Implementation status (2026-08-04)
+## Why Wasm
+
+A modder ships one `.wasm` built from whatever language targets Wasm. The host,
+not the plugin, decides what memory exists and which host calls are reachable, so
+"one plugin fault disables that plugin" is enforceable rather than aspirational.
+A native ABI could promise neither.
+
+## Implementation status (2026-08-06)
 
 | Piece | State |
 |---|---|
-| `src/plugin/api.zig` | `Host`, `PluginVTable`, `LogLevel`, `PLUGIN_API_VERSION=1` |
-| `src/plugin/host.zig` | Fixed table (8), register / enableStaticDefaults / enableAll / setTick / onTick / playerJoin / shutdown |
-| `src/plugin/sample_hello.zig` | In-tree sample: logs once on enable; null tick/join |
-| Game wire-up | `createWithOptions` → `enableStaticDefaults`; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
-| InitOptions | `enable_sample_plugin` (default true; mode pack / future flags may set) |
-| Gamemode pack | `modes/*.toml` data-only + `enable_sample_plugin` (ADR 0010 step 3 first cut) |
-| Dynlib / Wasm | **not** implemented |
+| Wasm runtime, module loading, fuel accounting | **not implemented** |
+| Host function table and capability gating | **not implemented** |
+| `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
+| `src/plugin/host.zig` | Fixed table (8), register / enable / setTick / onTick / playerJoin / shutdown |
+| `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
+| Game wire-up | `createWithOptions` enables the static test plugin; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
 | C2S deny hooks / SimCommand from plugins | deferred (ECS `World.commands` is the drain seam) |
+
+The static host stays because scenarios need to drive hooks without standing up
+a Wasm runtime in the test path. It is not a way to ship a plugin and is not
+loaded from user configuration.
+
+## The boundary
+
+The contract is the module's exports plus the host's imports. Nothing else
+crosses.
+
+- **Guest exports** the hooks it wants: `on_enable`, `on_tick`,
+  `on_player_join`, `on_shutdown`. A missing export means that hook is not
+  registered, which costs nothing at runtime.
+- **Host imports** are capability-gated. A module declares what it needs; the
+  host supplies only those functions. There is no filesystem, no socket, and no
+  clock beyond the tick time passed in, unless a capability grants it.
+- **Data crosses as flat bytes** in the guest's linear memory. The host copies in
+  and copies out. No host pointer is ever handed to a guest, so a guest cannot
+  reach the sim except through the calls it was given.
+- **Authority is unchanged from ADR 0005:** a plugin may deny or adjust a request
+  the core already understands. It may not inject package bytes, invent wire
+  types or skip the join state machine.
+
+## Determinism and cost control
+
+Sim hooks run on the main tick thread in documented order, so two servers with
+the same plugins and the same inputs step the same way.
+
+Every guest call runs under a fuel or instruction budget and a linear-memory cap.
+Exhausting either ends the call, disables that plugin, and logs which hook and
+which module. A plugin that loops forever costs one tick's budget, not the
+server. Budgets are per hook and configurable, with a documented default.
+
+## Open decisions
+
+These are decided when the work starts, and are the reason no runtime is wired
+up yet:
+
+| Decision | Notes |
+|---|---|
+| Runtime | An embeddable engine (wasm3, wasmtime C API, wasmer) versus a Zig interpreter. Trades startup, speed, dependency weight and sandbox maturity |
+| WASI or bare | A bare import table is smaller to audit; WASI brings a familiar toolchain story but a much larger surface |
+| Capability list | The security review surface; start minimal (log, read sim views, queue SimCommand) and add on evidence |
+| Memory and fuel defaults | Must be low enough to bound a bad plugin and high enough for a real one |
 
 Hot path: null hooks are a null check only; sample has no `on_tick`.
 
@@ -51,13 +101,13 @@ catalog, SimCommand, priorities) is **target design**, not implemented.
 | Deny > invent | Plugins can veto/adjust validated requests; they cannot invent world blobs |
 | Ordered, explicit | Fixed hook order; no access-set auto-scheduler |
 | Fail isolate | Hook error → disable that registration; process stays up when practical |
-| Versioned | `PLUGIN_API_VERSION`; static link v1; dynlib only with stable C-ish ABI later |
+| Versioned | `PLUGIN_API_VERSION` names the guest contract: exported hook names plus the host import table |
 
 ## Lifecycle
 
 ```text
 process start
-  → load config (which static plugins / dynlib paths)
+  → load config (which .wasm modules, with their declared capabilities)
   → Game.create / world + assets init
   → plugin.on_enable(Host)        // register hooks, commands
   → listen
@@ -70,13 +120,13 @@ process start
   → Game.deinit
 ```
 
-Static plugins: runtime `PluginHost.register` into the fixed table in
-`src/plugin/host.zig`; sample gated by `enable_sample_plugin`.
-Dynamic native: optional `zdtd_plugin_v1` entry points (only after static is proven).
-**Wasm guests (later):** same hooks and `SimCommand` queue; engine runs modules with
-fuel + memory limits; no raw `*Game`, no package byte injection (ADR 0010).
-Implement Wasm **after** the native hook table works with at least one in-tree
-Zig plugin.
+Guests: each `.wasm` is instantiated once, its exported hooks registered, and
+every call runs under the fuel and memory budget described above. No raw `*Game`
+crosses, and no package bytes can be injected (ADR 0010, ADR 0020).
+
+The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`)
+runs the same hook order without a runtime, so scenarios can assert hook
+behaviour directly. It is test scaffolding, not a shipping format.
 
 ## Host surface (narrow)
 
@@ -246,7 +296,7 @@ extern fn zdtd_plugin_shutdown() void;
 2. Wire 3 hooks: login deny, setblock, admin command  
 3. In-tree sample + scenario  
 4. Migrate thin guard observes onto hooks  
-5. Dynlib only if operators need out-of-tree binaries  
+5. Wasm runtime, host import table and fuel accounting (WORK_PLAN T9)  
 
 ## Open questions
 

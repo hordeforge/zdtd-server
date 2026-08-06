@@ -74,7 +74,7 @@ Where the world and its data come from.
 | [ECS.md](ECS.md) | SoA simulation |
 | [SYSTEMS.md](SYSTEMS.md) | Systems overview |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
-| [PLUGIN_API.md](PLUGIN_API.md) | Native plugin design (ADR 0005) |
+| [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 

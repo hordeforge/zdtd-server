@@ -1,6 +1,11 @@
 # ADR 0005: Native plugin API (not stock mods)
 
-- **Status:** accepted (skeleton shipped: static host + sample_hello; dynlib/Wasm later)
+- **Status:** superseded by [0020](0020-wasm-only-plugin-api.md) (2026-08-06)
+
+> Superseded: plugins are Wasm-only. The native ABI picked the modder's
+> language and could not be sandboxed. The hook and authority model in this ADR
+> carried over unchanged; only the boundary changed. The static host described
+> here survives as test scaffolding, not as a way to ship a plugin.
 - **Date:** 2026-07-22
 
 ## Context

@@ -141,7 +141,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [ ] **PARKED** Steam browser / full telnet parity (P3 ops); admin TCP + WebUI cover research ops
 - [ ] **NON-GOAL** Encryption* RSA+AES: platform AntiCheat only; EAC-off research scope; ServerPassword LiteNet key shipped
 - [ ] **PARKED** Wasm guest mods (ADR 0010 phase 2): after static plugins prove hooks; sandboxed fuel/memory caps; no stock Mods/ promise
-- [ ] **PARKED** Dynlib native plugins: only if still needed after static + Wasm; static host + sample_hello shipped
+- [ ] **DROPPED** Dynlib native plugins: ADR 0020 makes plugins Wasm-only, so there is no native ABI to version
 
 ### Extension roadmap (ADR 0010; after playability)
 
