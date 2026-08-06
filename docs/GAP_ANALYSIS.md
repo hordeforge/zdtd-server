@@ -3087,11 +3087,15 @@ persists so little that a restart visibly damages a built base.
   **Mitigated 2026-08-06:** the retry loops (`sendGame`, `sendFramedReliable`,
   `sendFramedDroppable`) slept 0.5 s every 4th WindowFull attempt, wedging the
   single-threaded tick for up to ~2 min per stuck peer and starving
-  `reapStalePeers` (3 s). They now pump ACK-free for the first 64 attempts
-  (LAN round trips are sub-ms) and then pace at 1 ms, so a live peer drains in
-  a few passes and a dead peer is reclaimed by the stale-peer sweep instead of
-  holding the tick. Residual: a truly stalled window still drops the mapping
-  after the budget; the outer retry still restarts the fragment stream.
+  `reapStalePeers` (3 s). They now pump ACK-free for the first 16 attempts and
+  then pace at 1 ms every 4th (LiteNetLib clients batch ACKs on ~15 ms Update
+  cycles, so the pacing lets a live peer's ACKs drain the window), keeping the
+  ~960-attempt budget bounded to ~240 ms of tick time per stuck peer; a dead
+  peer is reclaimed by the stale-peer sweep instead of holding the tick.
+  Residual: the loadgen client (PollEvents-only networking loop) still drops
+  the mapping on every flat-world join and falls back to local AssignIds
+  (matching for same-install); the outer retry still restarts the fragment
+  stream.
   *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:6207-6283`,
   `:6285-6308`
 

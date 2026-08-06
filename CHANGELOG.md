@@ -108,10 +108,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Reliable-window retry pacing: the WindowFull retry loops no longer sleep
   0.5 s every fourth attempt, which wedged the single-threaded tick for up to
   two minutes per stuck peer and starved the stale-peer sweep. They pump ACKs
-  for the first 64 attempts (a live peer drains in a few passes on LAN) and
-  then pace at 1 ms, so a dead peer is reclaimed within the 3 s sweep instead
-  of holding the tick; this removes the repeated block-IdMapping WindowFull
-  drops seen under loadgen reconnect floods.
+  free for the first 16 attempts, then pace at 1 ms every fourth so a client's
+  ~15 ms LiteNetLib ACK cycle can drain the window; a dead peer is reclaimed
+  within the 3 s sweep instead of holding the tick, and the block-IdMapping
+  WindowFull drops seen under loadgen reconnect floods no longer stall the
+  server.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
