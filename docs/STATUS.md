@@ -67,7 +67,9 @@ observable, on the live stock client:
   **stability plane shipped**: `src/world/stability.zig` ports the stock
   per-block byte plane (15 full / 1 cap / 0 falls) and a C2S SetBlock that cuts
   a support fells the dependency chain with client-visible collapse broadcasts.
-  Claim persistence and the client lpBlocks overlay remain open.
+  **Land claims persist** (`claims.zlc`): keystone claims survive a restart and
+  re-map to the owner's new entity id on login, with the seen-day preserved for
+  offline expiry. The client lpBlocks overlay remains open.
 - **C2S (T10):** `NetPackagePlayerDisconnect` handled on the quit path (own
   entity only, immediate save + slot teardown). Parity coverage is now **0
   unhandled dir=1** (70 handled in game.zig). 775 total.

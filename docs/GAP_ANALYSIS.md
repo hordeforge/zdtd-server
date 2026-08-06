@@ -249,12 +249,15 @@ area and the concrete work.
    the budget), and identity stays login-name keyed per ADR 0017 rather than
    platform user id.
 
-10. **DONE 2026-08-06.** World: make land claims real. `removeClaimAt` drops the
-    claim when the keystone breaks and `expireClaims` releases offline claims
-    past `LandClaimExpiryDays` (0 disables); `markClaimsForEntity` tracks
-    owner online state so the offline durability modifier is live. Test covers
-    keystone break, offline expiry and online-never-expires. Still open: claim
-    persistence across restart and the client lpBlocks overlay
+10. **DONE 2026-08-06 (persistence 2026-08-07).** World: make land claims real.
+    `removeClaimAt` drops the claim when the keystone breaks and `expireClaims`
+    releases offline claims past `LandClaimExpiryDays` (0 disables);
+    `markClaimsForEntity` tracks owner online state so the offline durability
+    modifier is live. **Claims persist across restart** (`claims.zlc`): the
+    owner's login name keys the restore, re-mapped to the new entity id on
+    login; the preserved seen-day keeps offline expiry honest. Test covers
+    keystone break, offline expiry, online-never-expires and the restart +
+    re-map round trip. Still open: the client lpBlocks overlay
     (`src/server/game.zig` removeClaimAt/expireClaims,
     `src/wire/stock_inv.zig:846`).
 
