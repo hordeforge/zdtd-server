@@ -137,7 +137,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
-| [Blood moon](#6-blood-moon) | 6 | 14 | 7 | 27 | Horde runs dusk to dawn on the right night; stat 58 carries the jittered horde day and the clock calendar survives restart |
+| [Blood moon](#6-blood-moon) | 7 | 14 | 6 | 27 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
 | [POIs and prefabs](#7-pois-and-prefabs) | 13 | 14 | 5 | 32 | Ids, rotation and height now correct; trader compounds ship their areas; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
@@ -1242,11 +1242,18 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:159`, `:168`, `asm.il:409351`,
   `Data/Config/gamestages.xml:1582`, `:3458`
 
-- **Blood-moon death bookkeeping (IsBloodMoonDead)** `MISSING`
-  `StartBloodMoon` clears `EntityPlayer.IsBloodMoonDead` on every tracked player.
-  zdtd has no such flag, so nothing downstream can key on "died during a blood
-  moon".
-  *Anchors:* `asm.il:412541`, `src/ecs/aidirector.zig:148`
+- **Blood-moon death bookkeeping (IsBloodMoonDead)** `WORKS`
+  `Player.is_blood_moon_dead` is set when a player dies during an active blood
+  moon (stock `EntityPlayer` death sets `IsBloodMoonDead = BloodMoonActive`,
+  asm.il 412541-412547) and cleared on respawn (stock
+  `get_unModifiedGameStage`). The horde target pass excludes these players
+  (stock `EAISetNearestEntityAsTarget` skips them), so zombies hunt the living;
+  the despawn pass keeps them so a corpse still pins distant zombies. The
+  `StartBloodMoon` clear is covered by the respawn clear (a dead player cannot
+  hold the flag into the next horde).
+  *Anchors:* `src/ecs/components.zig` (`Player.is_blood_moon_dead`),
+  `src/ecs/world.zig:778`, `src/ecs/systems.zig` (`snapshotPlayers`),
+  `asm.il:412541`, `asm.il:435831`
 
 ---
 

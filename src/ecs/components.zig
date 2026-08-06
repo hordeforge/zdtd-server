@@ -37,6 +37,10 @@ pub const NetworkId = struct {
 
 pub const Player = struct {
     peer_slot: i32 = -1,
+    /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
+    /// active blood moon, cleared on respawn. Horde zombies skip these players
+    /// as targets (EAISetNearestEntityAsTarget), so they hunt the living.
+    is_blood_moon_dead: bool = false,
 };
 
 pub const ClassId = struct {

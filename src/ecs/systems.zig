@@ -53,7 +53,12 @@ const PlayerSnap = struct {
     z: f32,
 };
 
-fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap) usize {
+/// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
+/// set, players who died during the active blood moon are excluded (stock
+/// EAISetNearestEntityAsTarget skips IsBloodMoonDead players, so the horde
+/// hunts the living); the despawn pass keeps them so a corpse still pins
+/// distant zombies.
+fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: bool) usize {
     var n: usize = 0;
     // Cached player group instead of a 512-slot scan; it is slot-ascending, so
     // the first 64 entries are the same 64 in the same order (nearest-player
@@ -61,6 +66,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap) usize {
     for (query.groupSlice(w, .player)) |j| {
         if (n >= out.len) break;
         if (!w.mask[j].player or !w.mask[j].transform) continue;
+        if (skip_blood_moon_dead and w.player[j].is_blood_moon_dead) continue;
         out[n] = .{
             .id = w.network_id[j].id,
             .slot = j,
@@ -1472,7 +1478,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // Zombie AI also drives animal wander (kind.animal reuses zombie_ai mask).
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
-    const pn = snapshotPlayers(w, &snaps);
+    const pn = snapshotPlayers(w, &snaps, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
     const ctx = AiCtx{
@@ -1831,7 +1837,7 @@ pub const despawn_dist_sq: f32 = 200.0 * 200.0;
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     if (w.countKind(.zombie) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
-    const pn = snapshotPlayers(w, &snaps);
+    const pn = snapshotPlayers(w, &snaps, false);
     var n: u8 = 0;
     // This loop destroys, so it walks a snapshot of the zombie group rather
     // than the live group (same ascending order, so the capped out_ids picks
@@ -3202,4 +3208,20 @@ pub fn questObjectiveEvent(w: *World, peer_slot: usize, quest_code: i32, kind: q
     const d = w.catalog.byId(s.def_id) orelse return false;
     bumpPhase(w, ps, s, d, kind, 1);
     return true;
+}
+
+test "blood-moon-dead players are skipped as AI targets but kept for despawn" {
+    var w: World = .{};
+    defer w.deinit();
+    // spawnPlayer(x, y, z, peer_slot): second player must use peer 1, not peer 0
+    // (peer 0 would replace the first body under the one-entity-per-peer rule).
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    _ = w.spawnPlayer(1, 70, 5, 1).?;
+    const ps = w.playerByPeer(1).?;
+    w.player[ps].is_blood_moon_dead = true; // died during the horde
+    var snaps: [64]PlayerSnap = undefined;
+    const ai_n = snapshotPlayers(&w, &snaps, true);
+    try std.testing.expectEqual(@as(usize, 1), ai_n);
+    const des_n = snapshotPlayers(&w, &snaps, false);
+    try std.testing.expectEqual(@as(usize, 2), des_n);
 }

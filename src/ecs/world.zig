@@ -772,6 +772,11 @@ pub const World = struct {
             // every later net-id lookup: give/kill/tele all "miss").
             if (self.kind[s] == .player) {
                 self.health[s].hp = 0;
+                // EntityPlayer death sets IsBloodMoonDead = BloodMoonActive
+                // (asm.il 412541-412547); the horde then ignores this player.
+                if (self.mask[s].player) {
+                    self.player[s].is_blood_moon_dead = self.director.clock.isBloodMoonNight();
+                }
                 self.reviveSlot(s); // no-op here (slot was never removed), but
                 // keeps every alive[] = true in the repo on one path.
                 return .{ .killed = true };
@@ -1094,4 +1099,25 @@ test "generation-counted handle invalidates after destroy" {
     // Reuse slot: new gen must not match old handle.
     _ = w.spawnZombie(1, 70, 1, 40);
     try std.testing.expect(!w.handleAlive(h));
+}
+
+test "death during a blood moon sets IsBloodMoonDead, daytime death does not" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    const nid = w.network_id[ps].id;
+    // Blood-moon night: day 7, freq 7, after dusk.
+    w.director.clock.day = 7;
+    w.director.clock.hours = 22.0;
+    w.director.clock.dawn = 6;
+    w.director.clock.dusk = 18;
+    w.director.clock.bloodmoon_frequency = 7;
+    _ = w.damage(nid, 9999);
+    try std.testing.expect(w.player[ps].is_blood_moon_dead);
+    // Daytime death leaves the flag clear.
+    w.player[ps].is_blood_moon_dead = false;
+    w.director.clock.hours = 12.0;
+    _ = w.damage(nid, 9999);
+    try std.testing.expect(!w.player[ps].is_blood_moon_dead);
 }

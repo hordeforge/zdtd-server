@@ -5333,6 +5333,8 @@ pub const Game = struct {
                     // ours silently rather than broadcasting removals it made.
                     if (self.sim.mask[si].buffs) _ = ecs.buff.clearOnDeath(&self.sim.buffs[si]);
                     self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
+                    // Respawn clears IsBloodMoonDead (stock get_unModifiedGameStage).
+                    if (self.sim.mask[si].player) self.sim.player[si].is_blood_moon_dead = false;
                     self.sim.transform[si] = .{
                         .x = @as(f32, @floatFromInt(surf.x)),
                         .y = @as(f32, @floatFromInt(surf.y)) + 0.08,
