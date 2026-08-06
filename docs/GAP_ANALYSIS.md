@@ -3081,6 +3081,14 @@ persists so little that a restart visibly damages a built base.
   through a 64-slot window shared with uncompressed chunk and ConfigFile traffic.
   The client falls back to its own `Block::AssignIds` ordering, which happens to
   match today only because zdtd loads the same blocks.xml.
+  **Mitigated 2026-08-06:** the retry loops (`sendGame`, `sendFramedReliable`,
+  `sendFramedDroppable`) slept 0.5 s every 4th WindowFull attempt, wedging the
+  single-threaded tick for up to ~2 min per stuck peer and starving
+  `reapStalePeers` (3 s). They now pump ACK-free for the first 64 attempts
+  (LAN round trips are sub-ms) and then pace at 1 ms, so a live peer drains in
+  a few passes and a dead peer is reclaimed by the stale-peer sweep instead of
+  holding the tick. Residual: a truly stalled window still drops the mapping
+  after the budget; the outer retry still restarts the fragment stream.
   *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:6207-6283`,
   `:6285-6308`
 

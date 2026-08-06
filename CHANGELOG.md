@@ -102,6 +102,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (digging out a support column drops the structure above it), and the
   stability tests build their world with explicit air above the surface so
   biome-layer regen cannot smuggle extra blocks into the fixture.
+- Reliable-window retry pacing: the WindowFull retry loops no longer sleep
+  0.5 s every fourth attempt, which wedged the single-threaded tick for up to
+  two minutes per stuck peer and starved the stale-peer sweep. They pump ACKs
+  for the first 64 attempts (a live peer drains in a few passes on LAN) and
+  then pace at 1 ms, so a dead peer is reclaimed within the 3 s sweep instead
+  of holding the tick; this removes the repeated block-IdMapping WindowFull
+  drops seen under loadgen reconnect floods.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.

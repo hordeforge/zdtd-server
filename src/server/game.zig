@@ -356,6 +356,14 @@ pub const block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
 pub const min_damage_gap_ns: u64 = 80_000_000;
 pub const damage_burst_max: u8 = 4;
 pub const default_peer_stale_ms: u64 = 3000;
+/// Reliable-window retry pacing: the first `window_fast_attempts` retries pump
+/// ACKs with no sleep (LAN round trips are sub-ms, so a live peer drains in a
+/// few passes), then a short sleep paces the rest. The old fixed 0.5 s sleep
+/// wedged the single-threaded tick for up to two minutes per stuck peer and
+/// starved reapStalePeers, which is what turns a reconnect flood into repeated
+/// IdMapping WindowFull drops.
+const window_fast_attempts: u32 = 64;
+const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms after the fast window
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
@@ -496,7 +504,8 @@ fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
 /// Text SimCommand grammar (PLUGIN_API.md): `spawn x y z hp`, `despawn id`,
 /// `damage id amount`. Allocation-free; unknown or malformed input returns null
 /// and the caller drops it. Extra trailing tokens are malformed, not ignored.
-fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
+fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
+    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
     const verb = it.next() orelse return null;
     if (std.mem.eql(u8, verb, "spawn")) {
         const x = it.next() orelse return null;
@@ -3855,7 +3864,7 @@ pub const Game = struct {
                         self.harness.counters.inc(.net_send_errors);
                     };
                     self.pollNetOnce();
-                    if (attempts % 4 == 3) clock.sleepNs(500_000);
+                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                     continue;
                 },
                 else => {
@@ -6843,15 +6852,18 @@ pub const Game = struct {
     /// the same way `sendGame` does. Separate from `sendGame` because the compressed
     /// mapping frame is built by the streaming framer, not from a body buffer.
     fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8) anyerror!void {
+        // A live peer drains the whole fragmented message inside one sendReliable
+        // (the inner per-part pump waits for ACKs); the outer budget only escapes
+        // a stuck window, so it stays small to bound the tick wedge per peer.
         var attempts: u32 = 0;
-        while (attempts < 960) : (attempts += 1) {
+        while (attempts < 64) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
                 error.WindowFull => {
                     peer.resendPending(&self.net.sock) catch {
                         self.harness.counters.inc(.net_send_errors);
                     };
                     self.pollNetOnce();
-                    if (attempts % 4 == 3) clock.sleepNs(500_000);
+                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                     continue;
                 },
                 else => {
@@ -9006,7 +9018,7 @@ pub const Game = struct {
                         self.harness.counters.inc(.net_send_errors);
                     };
                     self.pollNetOnce();
-                    if (attempts % 4 == 3) clock.sleepNs(500_000);
+                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                     continue;
                 },
                 else => {
