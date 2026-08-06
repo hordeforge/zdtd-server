@@ -291,6 +291,7 @@ pub const InitOptions = struct {
     land_claim_online_durability_modifier: u16 = 4,
     land_claim_offline_durability_modifier: u16 = 4,
     land_claim_expiry_days: u16 = 3,
+    loot_respawn_days: u16 = 7,
     /// When set, enables procedural terrain (terrain_source=proc). Ignored if map_dir loads.
     worldgen_seed: ?u64 = null,
     /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
@@ -306,11 +307,15 @@ pub const InitOptions = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    world_time_send_ticks: u64 = default_world_time_send_ticks,
+    vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
+    /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
+    lock_stale_ns: u64 = default_lock_stale_ns,
     /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Register in-tree sample_hello static plugin (logs once on enable).
@@ -340,6 +345,10 @@ pub const default_chunk_stream_radius_max: i32 = 9;
 pub const default_chunk_adds_per_stream_tick: u32 = 8;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
+/// WorldTime (and weather) broadcast cadence, and vehicle position cadence
+/// (zdtd.toml [stream] world_time_send_ticks / vehicle_pos_send_ticks).
+pub const default_world_time_send_ticks: u64 = 20;
+pub const default_vehicle_pos_send_ticks: u64 = 5;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 pub const default_max_edit_range: f32 = 96;
@@ -357,6 +366,8 @@ pub const block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
 pub const min_damage_gap_ns: u64 = 80_000_000;
 pub const damage_burst_max: u8 = 4;
 pub const default_peer_stale_ms: u64 = 3000;
+/// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
+pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
 /// Reliable-window retry pacing: the first `window_fast_attempts` retries pump
 /// ACKs with no sleep (LAN round trips are sub-ms, so a live peer usually
 /// drains in a few passes), then a 1 ms sleep every 4th attempt paces the
@@ -502,7 +513,9 @@ fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
         return;
     }
     const op = parsePluginCommand(cmd) orelse {
-        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd});
+        // Log verb only: args may include player names, chat text, or coords.
+        const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
+        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd[0..verb_end]});
         return;
     };
     // Fixed 64-slot buffer (ecs/command.zig); drops when full, by named cap.
@@ -698,6 +711,9 @@ pub const Game = struct {
     land_claim_online_dur: u16 = 4,
     land_claim_offline_dur: u16 = 4,
     land_claim_expiry_days: u16 = 3,
+    /// LootRespawnDays: world containers re-roll loot this many in-game days
+    /// after being touched (0 disables; echoed in the GameStats blob).
+    loot_respawn_days: u16 = 7,
     /// Active land claims: owner peer-persistent id keyed by claim block position.
     land_claims: [max_land_claims]LandClaim = undefined,
     land_claims_n: usize = 0,
@@ -798,11 +814,14 @@ pub const Game = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    world_time_send_ticks: u64 = default_world_time_send_ticks,
+    vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
+    lock_stale_ns: u64 = default_lock_stale_ns,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
@@ -854,6 +873,7 @@ pub const Game = struct {
             .land_claim_online_dur = opts.land_claim_online_durability_modifier,
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
             .land_claim_expiry_days = opts.land_claim_expiry_days,
+            .loot_respawn_days = opts.loot_respawn_days,
             .air_drop_interval_hours = opts.air_drop_frequency,
             .authority_mode = opts.authority_mode,
             .guard = opts.guard,
@@ -871,11 +891,14 @@ pub const Game = struct {
             .chunk_adds_per_stream_tick = opts.chunk_adds_per_stream_tick,
             .chunk_stream_period_ticks = opts.chunk_stream_period_ticks,
             .motion_replicate_period_ticks = opts.motion_replicate_period_ticks,
+            .world_time_send_ticks = opts.world_time_send_ticks,
+            .vehicle_pos_send_ticks = opts.vehicle_pos_send_ticks,
             .spawn_area_radius_max = opts.spawn_area_radius_max,
             .max_claimed_damage = opts.max_claimed_damage,
             .max_edit_range = opts.max_edit_range,
             .interest_range = opts.interest_range,
             .peer_stale_ms = opts.peer_stale_ms,
+            .lock_stale_ns = opts.lock_stale_ns,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
@@ -4588,9 +4611,8 @@ pub const Game = struct {
         }
     }
 
-    /// Lock stale after this many ns without unlock (holder disconnect still clears immediately).
-    const lock_stale_ns: u64 = 120_000_000_000; // 120s
-
+    /// Lock stale after this many ns without unlock (holder disconnect still clears
+    /// immediately). Tuned via zdtd.toml [authority] lock_stale_ms; default 120s.
     fn packLockPos(x: i32, y: i32, z: i32) u64 {
         // 21 bits each axis signed into 63 bits (enough for world coords).
         const ux: u64 = @as(u32, @bitCast(x));
@@ -4638,14 +4660,14 @@ pub const Game = struct {
         }
     }
 
-    /// Drop locks held longer than lock_stale_ns (tick path).
+    /// Drop locks held longer than the lock stale window (tick path).
     fn reapStaleLocks(self: *Game) void {
         const now = clock.monoNs();
         for (&self.lock_channel, 0..) |h, i| {
             if (h < 0) continue;
             const g = self.lock_granted_ns[i];
             if (g == 0) continue;
-            if (now -% g >= lock_stale_ns) self.clearLockSlot(i);
+            if (now -% g >= self.lock_stale_ns) self.clearLockSlot(i);
         }
     }
 
@@ -5759,6 +5781,9 @@ pub const Game = struct {
             // Serve TE container slots when Guid matches our deterministic pos-key.
             if (packages.parseInvDataRequestStock(body)) |req| {
                 if (self.containers.getByGuid(&req.inventory_key)) |cont| {
+                    // LootRespawnDays: a looted world container re-rolls here
+                    // when its interval has elapsed (before the slots serve).
+                    self.maybeRespawnContainer(cont);
                     var slots: [containers_mod.max_container_slots]packages.stock_inv.StockSlot =
                         [_]packages.stock_inv.StockSlot{.{}} ** containers_mod.max_container_slots;
                     var si: usize = 0;
@@ -6250,7 +6275,7 @@ pub const Game = struct {
                 // Stale holder on this channel before grant check.
                 if (self.lock_channel[ch] >= 0 and self.lock_granted_ns[ch] != 0) {
                     const now = clock.monoNs();
-                    if (now -% self.lock_granted_ns[ch] >= lock_stale_ns) self.clearLockSlot(ch);
+                    if (now -% self.lock_granted_ns[ch] >= self.lock_stale_ns) self.clearLockSlot(ch);
                 }
                 const pos_key: u64 = if (firstLockTargetPos(req.targets_blob)) |p|
                     packLockPos(p.x, p.y, p.z)
@@ -6676,7 +6701,7 @@ pub const Game = struct {
                 // the removeIndex'th offer, filtered by DifficultyTier and
                 // non-active quests. Accept it into the journal and re-send the
                 // list without it, so the client stops offering it.
-                if (self.sim.catalog.listById("trader_jen_quests")) |list| {
+                if (self.sim.catalog.listById(self.traderQuestList(head.npc_entity_id))) |list| {
                     var idx: u32 = 0;
                     for (list.entries) |qid| {
                         const d = self.sim.catalog.byId(qid) orelse continue;
@@ -6692,7 +6717,7 @@ pub const Game = struct {
                     }
                 }
                 var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
+                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
                     self.body_buf[0..2048],
                     head.npc_entity_id,
@@ -6705,7 +6730,7 @@ pub const Game = struct {
             }
             if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
                 var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
+                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
                     self.body_buf[0..2048],
                     head.npc_entity_id,
@@ -6723,15 +6748,15 @@ pub const Game = struct {
                 return;
             }
             systems.questOnTraderOpen(&self.sim, c.slot);
+            // Stock trader quest offers (npc from open body when present).
+            const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
             // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
-            if (self.sim.catalog.listById("trader_jen_quests")) |list| {
+            if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
                 for (list.entries) |qid| {
                     if (systems.questAccept(&self.sim, c.slot, qid)) break;
                 }
             }
             try self.sendTraderSnapshot(peer, null);
-            // Stock trader quest offers (npc from open body when present).
-            const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
             var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
             var tx: f32 = 0;
             var ty: f32 = 70;
@@ -6743,7 +6768,7 @@ pub const Game = struct {
                     tz = self.sim.transform[ni].z;
                 }
             }
-            const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
+            const on = self.buildTraderQuestOffers(self.traderQuestList(npc_id), c.slot, tx, ty, tz, &offers);
             const qbody = try packages.buildNpcQuestListFetch(
                 self.body_buf[512..2560],
                 npc_id,
@@ -7704,6 +7729,7 @@ pub const Game = struct {
             .land_claim_size = self.land_claim_size,
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,
+            .loot_respawn_days = self.loot_respawn_days,
             .air_drop_frequency = self.air_drop_interval_hours,
         };
     }
@@ -7937,6 +7963,23 @@ pub const Game = struct {
     /// Build trader FetchList offers from a quest_list id (stock quest names
     /// only). A quest already active in the player's journal is not re-offered:
     /// stock removes it from the NPCQuestList on accept (the accept marker).
+    /// The quest list a trader offers, resolved from the trader entity's class
+    /// hash (stock maps each trader class to its own trader_*_quests list;
+    /// the 5 lists are parsed from quests.xml but were never selected by
+    /// trader). Falls back to jen (the default trader) for unknown classes so
+    /// a modded trader still gets offers.
+    fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
+        const hash = if (self.sim.slotOfNetId(npc_entity_id)) |ts|
+            self.sim.class_id[ts].hash
+        else
+            0;
+        if (hash == packages.stock_entity.class_npc_trader_rekt) return "trader_rekt_quests";
+        if (hash == packages.stock_entity.class_npc_trader_bob) return "trader_bob_quests";
+        if (hash == packages.stock_entity.class_npc_trader_hugh) return "trader_hugh_quests";
+        if (hash == packages.stock_entity.class_npc_trader_joel) return "trader_joel_quests";
+        return "trader_jen_quests";
+    }
+
     fn buildTraderQuestOffers(
         self: *Game,
         list_id: []const u8,
@@ -8968,6 +9011,8 @@ pub const Game = struct {
                     const pos = containers_mod.PosKey{ .x = wx, .y = y, .z = wz };
                     if (self.containers.get(pos) != null) continue;
                     const cont = self.containers.getOrCreate(pos, 8, id) orelse continue;
+                    // World container (not player-placed): eligible for loot respawn.
+                    cont.player_storage = false;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
                         self.fillContainerFromLoot(cont, self.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, y, wz));
                     }
@@ -8991,6 +9036,8 @@ pub const Game = struct {
                     const block_id: u16 = tc.g.world.blockWorld(wx, wy, wz) catch 0;
                     const id: u16 = if (block_id != 0) block_id else tc.g.seedChestBlockId();
                     const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
+                    // World container (prefab TE, not player-placed).
+                    cont.player_storage = false;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
                         tc.g.fillContainerFromLoot(cont, tc.g.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, wy, wz));
                     }
@@ -9018,6 +9065,39 @@ pub const Game = struct {
             cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = 1 });
             si += 1;
         }
+        // LootRespawnDays base: the day this loot was generated.
+        cont.touched_day = self.sim.director.clock.day;
+    }
+
+    /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
+    /// container re-rolls its contents when the interval since the touch day
+    /// has elapsed. Player-placed storage never respawns. The next open
+    /// regenerates fresh loot; the cycle-varying seed makes each respawn
+    /// differ while staying deterministic per (pos, cycle).
+    fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
+        if (self.loot_respawn_days == 0) return;
+        if (cont.player_storage) return;
+        if (!cont.touched) return;
+        var empty = true;
+        for (cont.slots[0..cont.slot_count]) |s| {
+            if (s.count > 0 and s.item_id != 0) {
+                empty = false;
+                break;
+            }
+        }
+        if (!empty) return;
+        const day = self.sim.director.clock.day;
+        if (day <= cont.touched_day) return;
+        if (day - cont.touched_day < self.loot_respawn_days) return;
+        std.debug.print("STABDBG respawn day={d} touched={d} respawn={d} block={d}\n", .{ day, cont.touched_day, self.loot_respawn_days, cont.block_id });
+        const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
+        const cycle: u32 = day / self.loot_respawn_days;
+        const pos = cont.pos;
+        self.fillContainerFromLoot(
+            cont,
+            self.maxdamage.lootListFor(id) orelse "woodenChest",
+            lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
+        );
     }
 
     fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
@@ -9985,7 +10065,7 @@ pub const Game = struct {
             }
             self.harness.counters.add(.entities_ticked, self.sim.countKind(.zombie));
 
-            if (self.tick_n % 20 == 0) {
+            if (self.tick_n % self.world_time_send_ticks == 0) {
                 const tb = try packages.buildWorldTimeBody(self.body_buf[0..16], r.world_time);
                 try self.broadcast("NetPackageWorldTime", tb);
                 // Storm scheduling is driven by world time, so it advances even
@@ -10007,7 +10087,7 @@ pub const Game = struct {
                     try self.broadcast("NetPackageBloodmoonMusic", bm_body);
                 }
             }
-            if (self.tick_n % 5 == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
+            if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
             if (self.tick_n % 10 == 0) try self.broadcastTurretSync();
             // Null on_tick hooks are a branch only (sample_hello is enable-only).
             self.plugins.onTick();
@@ -10057,6 +10137,7 @@ pub const Game = struct {
                 self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
             }
             self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+            self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
             if (self.players_dirty) {

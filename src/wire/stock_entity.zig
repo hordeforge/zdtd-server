@@ -156,6 +156,10 @@ pub const class_falling_blocks = unity_hash.class_falling_blocks;
 pub const class_junk_drone = unity_hash.class_junk_drone;
 /// Trader NPC class (EntityTrader): stock trader POIs spawn npcTraderJen.
 pub const class_npc_trader_jen = unity_hash.class_npc_trader_jen;
+pub const class_npc_trader_bob = unity_hash.class_npc_trader_bob;
+pub const class_npc_trader_hugh = unity_hash.class_npc_trader_hugh;
+pub const class_npc_trader_joel = unity_hash.class_npc_trader_joel;
+pub const class_npc_trader_rekt = unity_hash.class_npc_trader_rekt;
 
 /// One falling block: packed BlockValue plus its texture word.
 /// `TextureFullArray.Write` emits exactly one i64 (loop bound 1 in the IL).

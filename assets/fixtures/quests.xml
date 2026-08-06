@@ -46,5 +46,14 @@
   <quest id="tier1_clear"/>
   <quest id="tier1_fetch"/>
 </quest_list>
+  <quest id="quest_rekt_errand">
+    <property name="name_key" value="Rekt Errand"/>
+    <property name="completiontype" value="TurnIn"/>
+    <objective type="Fetch" id="1" value="1"/>
+    <reward type="Exp" value="100"/>
+  </quest>
+<quest_list id="trader_rekt_quests">
+  <quest id="quest_rekt_errand"/>
+</quest_list>
 
 </quests>

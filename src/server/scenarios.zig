@@ -2747,7 +2747,8 @@ test "scenario container loot respawns after LootRespawnDays" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
-    // Place a storage chest and open it: loot rolls on first open.
+    // Place a storage chest and seed it as if it held loot (chunk-scanned loot
+    // fills at materialization, which the flat test world does not stream).
     const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
     var sb: [64]u8 = undefined;
     var frame_buf: [8192]u8 = undefined;
@@ -2755,23 +2756,17 @@ test "scenario container loot respawns after LootRespawnDays" {
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
     const pos = containers_mod.PosKey{ .x = 251, .y = 70, .z = 251 };
     const cont = g.containers.get(pos) orelse return error.TestUnexpectedResult;
+    cont.setSlot(0, .{ .item_id = 1, .count = 5, .quality = 1 });
     var req: [36]u8 = undefined;
     @memcpy(req[0..16], &cont.inv_guid);
     std.mem.writeInt(i32, req[16..20], 0, .little);
     @memcpy(req[20..36], &cont.inv_guid);
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
-    var filled = false;
-    for (cont.slots[0..cont.slot_count]) |s| {
-        if (s.count > 0 and s.item_id != 0) {
-            filled = true;
-            break;
-        }
-    }
-    try std.testing.expect(filled);
 
-    // Loot it: empty slots, age the touch day past the interval, re-open.
+    // Loot it: empty slots, age the touch day past the interval, re-open; the
+    // open must re-roll fresh loot (stock TEFeatureStorage.UpdateTick re-arms).
     cont.clear();
     cont.touched = true;
+    cont.player_storage = false; // world container: eligible for respawn
     cont.touched_day = g.sim.director.clock.day -% 4;
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
     var refilled = false;
@@ -2784,4 +2779,57 @@ test "scenario container loot respawns after LootRespawnDays" {
     try std.testing.expect(refilled);
     try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
     std.debug.print("PASS loot-respawn: container re-rolled after LootRespawnDays\n", .{});
+}
+
+test "scenario trader quest offers follow the trader's class" {
+    // Each stock trader class maps to its own trader_*_quests list (the five
+    // lists are parsed but were never selected by trader). Spawn a trader with
+    // the rekt class hash and assert its offer list is trader_rekt_quests, not
+    // the jen default.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_traders");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traders", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Find the pad trader and switch it to the rekt class (class_table default
+    // is jen; POI traders will carry their own class at spawn).
+    var te: i32 = -1;
+    var si: usize = 0;
+    while (si < 512) : (si += 1) {
+        if (g.sim.alive[@intCast(si)] and g.sim.mask[@intCast(si)].trader) {
+            te = g.sim.network_id[@intCast(si)].id;
+            g.sim.class_id[@intCast(si)].hash = packages.stock_entity.class_npc_trader_rekt;
+            break;
+        }
+    }
+    try std.testing.expect(te > 0);
+
+    cap.clear();
+    var fb: [16]u8 = undefined;
+    std.mem.writeInt(i32, fb[0..4], te, .little);
+    std.mem.writeInt(i32, fb[4..8], c.entity_id, .little);
+    fb[8] = 0; // fetch_list
+    std.mem.writeInt(i32, fb[9..13], 1, .little);
+    var fbuf: [256]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
+    const body = cap.findPkgId(packages.idOf("NetPackageNPCQuestList").?) orelse return error.TestUnexpectedResult;
+    // The rekt list carries clear_the_noise (not in the jen list); its name
+    // must appear in the offered quest ids.
+    const count = std.mem.readInt(i32, body[13..17], .little);
+    try std.testing.expect(count >= 1);
+    // The rekt list carries clear_the_noise (not in the jen list), and the
+    // QuestPacketEntry quest ids are written as raw strings in the response.
+    try std.testing.expect(std.mem.indexOf(u8, body, "quest_rekt_errand") != null);
+    std.debug.print("PASS trader-lists: rekt trader offers quest_rekt_errand from trader_rekt_quests\n", .{});
 }

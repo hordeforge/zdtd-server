@@ -39,6 +39,10 @@ pub const class_zombie_joe: i32 = unityStringHash("zombieJoe");
 pub const class_zombie_default: i32 = class_zombie_boe;
 /// Trader NPC (EntityTrader). Stock trader POIs use npcTraderJen/Bob/Hugh/Joel/Rekt.
 pub const class_npc_trader_jen: i32 = unityStringHash("npcTraderJen");
+pub const class_npc_trader_bob: i32 = unityStringHash("npcTraderBob");
+pub const class_npc_trader_hugh: i32 = unityStringHash("npcTraderHugh");
+pub const class_npc_trader_joel: i32 = unityStringHash("npcTraderJoel");
+pub const class_npc_trader_rekt: i32 = unityStringHash("npcTraderRekt");
 pub const class_dropped_loot_container: i32 = unityStringHash("DroppedLootContainer");
 pub const class_entity_loot_container: i32 = unityStringHash("EntityLootContainer");
 pub const class_item: i32 = unityStringHash("item");

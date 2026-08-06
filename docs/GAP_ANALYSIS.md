@@ -574,11 +574,14 @@ because the per-objective Write shapes are wrong.
   `asm.il:827300-827326`, `asm.il:827512-827630`
 
 - **Trader quest offers** `PARTIAL`
-  `buildTraderQuestOffers` always uses the hardcoded `trader_jen_quests`
-  regardless of which trader was opened (5 other parsed lists are never used),
-  caps at 8, and filters to `quest_`/`tier` names so `intro_buried_supplies` is
-  dropped. Every offer's QuestLocation is the def's fabricated tx/ty/tz and
-  POIName is the quest id string. `tierLevel` is echoed but never used to filter.
+  The offer list now follows the trader's class: the 5 trader class hashes
+  (npcTraderJen/Bob/Hugh/Joel/Rekt, RE-computed) map to their parsed
+  `trader_*_quests` lists, with jen as the fail-closed default, so each trader
+  offers its own list once POI placement spawns the other classes (scenario
+  `trader-lists` proves a rekt-class trader offers `trader_rekt_quests`).
+  Remaining: the 8-offer cap, the `quest_`/`tier` name filter dropping
+  `intro_buried_supplies`, fabricated QuestLocation tx/ty/tz and POIName, and
+  `tierLevel` echoed but not filtering.
   *Anchors:* `src/server/game.zig:6435`, `:5345`, `:5383`, `:6276`
 
 - **Trader quest ACCEPT** `WORKS`
