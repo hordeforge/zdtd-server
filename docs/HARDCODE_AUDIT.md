@@ -9,7 +9,7 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
-| **A** (stock data) | ~12 | 0 | 1 | A22 deco skew fixed; A12 vehicle fallback (P1) + **A29 trader pricing** fixed; A20 dukes fixed |
+| **A** (stock data) | ~12 | 0 | 0 | A12 vehicle fallback + **A29 trader pricing** + A22 deco skew + A20 dukes fixed |
 | **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, new quest heuristics (B25-B26) |
 | **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
@@ -58,6 +58,9 @@ Count drifts; see [STATUS.md](STATUS.md).
 | A19 | `trader_wallet_dukes` const → `InitOptions`/`Game` field + `[sim] trader_wallet_dukes` in `zdtd.toml` (Bucket B; no stock key in traders.xml). All 4 call sites read `self.trader_wallet_dukes`; sanitize clamps negatives to 0. |
 | A20 | `quests.zig`: `reward_coin` = sum of `<reward type="Item" id="casinoCoin" value="N">` in the quest body (stock grants dukes as casinoCoin Item rewards; no Coin reward type). Fail closed: no such reward → 0. Removed the exp-derived heuristic; fixture starter quest + scenario test now exercise the sum path. |
 | A23 | Removed production Steam `defaultGameDir`; `--world-name` requires `--game-dir` or `--map`. |
+| A12 | Vehicle speed: `vehicleControl` falls back to `vehicleKindDefaultSpeed(kind)` when vehicles.xml `velocityMax` is absent/0 (the XML row owns the real value). |
+| A22 | Block id coverage guard test: every placeable blocks.xml name resolves in the bundled AssignIds dump, so client `assignLeftOverBlocks` never sees server data. |
+| A30 | Trader restock cadence from `<trader_info>` `reset_interval` (-1 never, 0 daily, N every N days) instead of a flat daily policy. |
 | B01–B07 | Stream/interest/edit/claimed-damage/peer_stale as `InitOptions` + `Game` fields (`default_*` consts). Hot path reads `self.*`. Array bound = `max_streamed_chunks_cap`. |
 | - | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
 
@@ -71,9 +74,10 @@ load from `traders.xml` / `npc.xml` / `quests.xml` / prefab XML /
 `gamestages.xml` / `spawning.xml` / stock serverconfig keys, and fail closed on
 name-resolution misses. New actionable findings this pass: **A29 P1** (trader
 price/sell ratios, the one real wrong-value risk), A30-A31 P3, B25-B28 P3
-(quest heuristics + doc gap). No prior open row was fixed by these waves; A19 /
-A20 stay fixed, A22 stays partial. Litenet constants and the dual-stack
-`IPV6_V6ONLY=0` socket option are protocol/kernel pins (OK).
+(quest heuristics + doc gap). A22 (deco id skew) is now closed by the
+coverage guard test; A12 vehicle fallback and A30 restock cadence are fixed
+in the follow-up pass. Litenet constants and the dual-stack `IPV6_V6ONLY=0`
+socket option are protocol/kernel pins (OK).
 
 ---
 
@@ -92,7 +96,7 @@ A20 stay fixed, A22 stays partial. Litenet constants and the dual-stack
 | A09 | maxDamageForBlock | P1 | **Fixed** | |
 | A10 | class_table scrap | P1 | **Fixed** | Offline loot_list = EntityLootContainerRegular; spawn uses class loot_list; Game.setClassDef from entityclasses |
 | A11 | AI attack/chase floors | P1 | **Fixed** | class_table speeds/damage from XML; module consts only when field 0 |
-| A12 | vehicle speed switch | P1 | Open | Fallback when max_speed 0 |
+| A12 | vehicle speed switch | P1 | **Fixed** | `vehicleControl` falls back to `vehicleKindDefaultSpeed(kind)` when vehicles.xml `velocityMax` is 0/absent (`systems.zig:1548`); XML value wins when present |
 | A13 | recipe unlock extras | P2 | Open | |
 | A14 | quest builtins | P2 | Warn if game-dir | |
 | A15 | builtin leakage | P1 | **Fixed** (warn) | |
