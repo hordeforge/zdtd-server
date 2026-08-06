@@ -43,7 +43,7 @@ Key facts zdtd should honor:
 | stats/buffs body (buffs deferred) | `entity-stats.md`, `buffs.md`, `protocol-packages.md` | EntityBuffs add/remove net (name,duration,instigator); survival stat sync |
 | `NetPackageChunkRemove` (RemoveAll open) | `protocol-packages.md` §3.2 | chunkKey:i64 (WorldChunkCache packed x,z); channel 1, ToClient |
 | `NetPackageSetBlock` rotation meta sparse | `blocks.md` (BlockValue bitfield) | `BlockValue.rawData` u32: type 0-15, rotation 16-20, meta3 bit21, meta 22-25, meta2 26-29, ischild 30, hasdecal 31; +damage as u16 (6 bytes on wire, not 4) |
-| `NetPackageTileEntity` | `experimental-delta.md` §2 / protocol-packages §6.12 | **V3.1.0 stock:** handle:u8, teWorldPos:Vector3i, teBlockId:i32, len:i32, payload. Implemented in `src/wire/stock_te.zig` |
+| `NetPackageTileEntity` | protocol-packages §6.12 | **V3.1.0 stock:** handle:u8, teWorldPos:Vector3i, teBlockId:i32, len:i32, payload. Implemented in `src/wire/stock_te.zig` |
 | Chat body | `chat.md` §1 | chatType:u8(EChatType 0Global/1Friends/2Party/3Whisper/4Discord), senderEntityId:i32, msg:string, msgSender:u8, bbMode:u8, recipientEntityIds:i32 count+i32[] |
 | `NetPackageWorldInfo` join descriptor (**audit-corrected**) | `protocol-packages.md` §4.2 | gameMode/levelName/gameName/guid:string, ppList(bool+PersistentPlayerList.Write), ticks:u64, fixedSizeCC:bool, firstTimeJoin:bool, **worldHashes: i32 COUNT + count x { filename:string, hash:u32 }** (NOT a byte-length blob), worldDataSize:i64 |
 | `ItemValue` packing (**audit-corrected**) | `items.md` §2 | each Stats entry is **`byte` PassiveEffects type + `i16` value(0 if boosted) + `i16` boosted(0 if not)** (3 fields, not 2); CosmeticMods count/rows skipped for `ItemClassModifier` (same guard as Mods) |
@@ -73,7 +73,7 @@ The RE is pinned to stable V3.1.0 b14. After a game update, run
 `../7dtd-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
 reports changed packages / types / enums so this table and the affected zdtd bodies
 can be revised. The experimental branch already differs (see
-`../7dtd-research/docs/experimental-delta.md`: `NetPackageTileEntity` widened,
+`../7dtd-research/docs/protocol-packages.md`: `NetPackageTileEntity` widened,
 held-entity feature), so version-gate the wire where noted.
 
 ---

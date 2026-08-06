@@ -1182,7 +1182,7 @@ HONEST GAPS:
 
 `NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
 payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md` §6.12
-and `experimental-delta.md`.
+and the research topic docs.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
 `readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 306/306.
