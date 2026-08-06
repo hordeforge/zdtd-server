@@ -14,6 +14,7 @@ wins**. Refresh inventory docs when closing work.
 | [RELEASES.md](RELEASES.md) | Version, compatibility, support, and release policy |
 | [../CHANGELOG.md](../CHANGELOG.md) | Consumer-visible changes and migrations |
 | [../TODO.md](../TODO.md) | Open backlog first; shipped log below the fold |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Functionality gap analysis: 345 features scored WORKS/PARTIAL/MISSING with anchors |
 | [MISSING_FEATURES.md](MISSING_FEATURES.md) | Gap inventory (honest PARTIAL sections) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7–M16 phases (post-playable stack) |
 | [../AGENTS.md](../AGENTS.md) | Project rules for agents and humans |
