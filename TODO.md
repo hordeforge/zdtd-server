@@ -119,6 +119,13 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Residual non-demo (still open)
 
+- [ ] Weather/storm SM state not persisted: on restart each biome resets to its
+      default weather group instead of resuming the storm cycle
+      (`world/weather.zig`; GAP §11 storm rows WORKS, STATUS residual). Small:
+      save per-biome group index + remaining seconds with the world store.
+- [ ] GameStats.BloodMoonDay not re-sent on day roll: a client connected past
+      its first blood moon keeps a stale value (GAP §6, PARTIAL row).
+
 ### Parity polish (client-visible)
 
 - [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/archive/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
