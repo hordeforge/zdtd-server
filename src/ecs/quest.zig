@@ -64,6 +64,10 @@ pub const QuestDef = struct {
     /// Per-reward: true if RewardItem/RewardLootItem (ItemStack after index).
     /// Length used is reward_count (capped at max_reward_flags).
     reward_has_item: [max_reward_flags]bool = .{false} ** max_reward_flags,
+    /// Parsed `<reward>` list in document order (length reward_n). The journal
+    /// wire writes real ItemStacks from these and turn-in pays them out.
+    rewards: [max_reward_flags]RewardSpec = [_]RewardSpec{.{}} ** max_reward_flags,
+    reward_n: u8 = 0,
     /// Ordered phase graph (index i == phase i+1). Empty = legacy single-kind path
     /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 982816).
     phases: []const PhaseSpec = &.{},
@@ -87,6 +91,26 @@ pub const ObjectiveWireKind = enum(u8) {
 };
 
 pub const max_reward_flags: usize = 16;
+
+/// One `<reward>` element kind (quests.xml `type` attribute).
+pub const RewardKind = enum(u8) {
+    item,
+    loot_item,
+    exp,
+    skill,
+    skill_points,
+    quest,
+    show_message_window,
+    other,
+};
+
+/// One `<reward>` element: kind plus the wire and payout fields (Item/LootItem
+/// carry an item name and a count; Exp carries an amount).
+pub const RewardSpec = struct {
+    kind: RewardKind = .other,
+    item_name: []const u8 = "", // Item/LootItem id attr (catalog arena slice)
+    value: u32 = 0, // count for items, amount for exp/skill
+};
 
 pub const QuestList = struct {
     id: []const u8,

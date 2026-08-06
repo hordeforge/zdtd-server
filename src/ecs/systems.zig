@@ -198,6 +198,12 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
         if (w.mask[ps].wallet) {
             w.wallet[ps].coins +|= d.reward_coin;
         }
+        // Stash for the Game's tick-end payout (items + exp need the assets
+        // table and the client xp ledger, both outside the sim).
+        if (w.completed_quests_n < w.completed_quests_ring.len) {
+            w.completed_quests_ring[w.completed_quests_n] = .{ .slot = ps, .def_id = s.def_id };
+            w.completed_quests_n += 1;
+        }
     }
     w.completed_quests +%= 1;
 }

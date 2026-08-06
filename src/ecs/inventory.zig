@@ -133,10 +133,6 @@ pub fn isArmorOffline(item_id: u16) bool {
     return item_id == 11;
 }
 
-pub fn isArmor(item_id: u16) bool {
-    return isArmorOffline(item_id);
-}
-
 fn itemIsArmor(w: *const World, item_id: u16) bool {
     if (w.is_armor_fn) |f| return f(w.is_armor_ctx, item_id);
     return isArmorOffline(item_id);

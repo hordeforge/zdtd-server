@@ -128,6 +128,11 @@ pub const World = struct {
     /// the director each tick per day/night/blood-moon state (1.0 = sim default).
     zombie_speed_scale: f32 = 1.0,
     completed_quests: u32 = 0,
+    /// One quest completed per sim call, drained by the Game at tick end for
+    /// item and exp payout (the wallet coin credit happens inside the sim).
+    /// Fixed ring: a pathological multi-completion tick drops the oldest.
+    completed_quests_ring: [4]struct { slot: Slot, def_id: u16 } = undefined,
+    completed_quests_n: u8 = 0,
     /// Monotonic stock-like Quest.QuestCode allocator (starts above catalog ids).
     next_quest_code: i32 = 10000,
     /// Quest POI lockouts (stock PrefabInstance.lockInstance), driven by the

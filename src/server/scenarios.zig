@@ -2626,3 +2626,47 @@ test "scenario blood moon day re-send fires on the day roll" {
     try std.testing.expectEqual(@as(i32, 14), g.last_bm_day);
     std.debug.print("PASS bmday-resend: day 8 re-sent GameStats (BloodMoonDay 7 -> 14)\n", .{});
 }
+
+test "scenario quest completion pays out item and exp rewards" {
+    // The fixture starter (quest_whiteRiverCitizen1) carries
+    // <reward type="Exp" value="500"/> + <reward type="Item" id="casinoCoin"
+    // value="100"/>. Completing it must credit the wallet coins (sim), drop
+    // the casinoCoin stack into the inventory and award the exp, via the
+    // tick-end payout drain.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_rewards");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_rewards", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const xp0 = g.clients[c.slot].xp;
+    const coins0 = g.sim.wallet[ps].coins;
+    const eid = g.items.ecsIdByName("casinoCoin");
+    try std.testing.expect(eid != 0);
+
+    // Starter: two trader opens complete the white-river fetch turn-in.
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, g.sim.catalog.starter_id));
+    try std.testing.expectEqual(coins0 + 100, g.sim.wallet[ps].coins);
+
+    // The payout drain runs at the next step.
+    try g.step();
+    try std.testing.expect(g.clients[c.slot].xp > xp0);
+    var found = false;
+    for (g.sim.inventory[ps].slots) |s| {
+        if (s.item_id == eid and s.count > 0) found = true;
+    }
+    try std.testing.expect(found);
+    std.debug.print("PASS quest-rewards: coins +100, casinoCoin granted, xp {d}->{d}\n", .{ xp0, g.clients[c.slot].xp });
+}

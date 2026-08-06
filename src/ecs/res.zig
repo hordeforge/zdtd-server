@@ -40,9 +40,6 @@ pub fn powerMut(w: *World) ResMut(PowerGrid) {
 pub fn director(w: *const World) Res(Director) {
     return .{ .ptr = &w.director };
 }
-pub fn directorMut(w: *World) ResMut(Director) {
-    return .{ .ptr = &w.director };
-}
 
 pub fn invLedger(w: *const World) Res(InvLedger) {
     return .{ .ptr = &w.inv_ledger };

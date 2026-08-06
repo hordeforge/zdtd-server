@@ -17,16 +17,6 @@ pub fn packFaces8(faces: [6]u8) u64 {
     return v;
 }
 
-/// Pack 6 face indices with 10 bits each (blocks.xml Texture ids up to ~702).
-pub fn packFaces10(faces: [6]u16) u64 {
-    var v: u64 = 0;
-    var i: usize = 0;
-    while (i < 6) : (i += 1) {
-        v |= @as(u64, faces[i] & 0x3ff) << @intCast(i * 10);
-    }
-    return v;
-}
-
 /// Parse blocks.xml `Texture` for chunk-channel paint (6×u8 only).
 /// Returns 0 if any face id > 255: those atlas ids live on Block.textureInfos
 /// on the client, not in the chunk channel (SetBlockFaceTexture masks to 255).

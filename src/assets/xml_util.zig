@@ -129,12 +129,6 @@ pub fn nextElement(
     };
 }
 
-/// Arena-dupe key then put into a StringHashMapUnmanaged.
-pub fn putDupeKey(map: anytype, arena: std.mem.Allocator, key: []const u8, value: anytype) !void {
-    const kn = try arena.dupe(u8, key);
-    try map.put(arena, kn, value);
-}
-
 test "strip comments removes doc block" {
     const src =
         \\<!-- fake <quest id="bogus"> -->

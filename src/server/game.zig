@@ -7699,11 +7699,22 @@ pub const Game = struct {
             const rc: usize = @min(@as(usize, d.reward_count), ecs.quest.max_reward_flags);
             var ri: usize = 0;
             while (ri < rc) : (ri += 1) {
-                reward_store[n][ri] = .{
-                    .has_item_stack = d.reward_has_item[ri],
-                    // Empty ItemStack (count 0) is valid stock Empty path for Item/LootItem.
-                    .item = .{},
-                };
+                var wire: packages.stock_quest.RewardWire = .{ .has_item_stack = false };
+                const spec = if (ri < d.reward_n) d.rewards[ri] else ecs.quest.RewardSpec{};
+                if (spec.kind == .item or spec.kind == .loot_item) {
+                    wire.has_item_stack = true;
+                    // The client resolves the ItemStack through its own items
+                    // catalog; resolve the stock name to the negotiated type id.
+                    // An unknown name keeps the stock Empty stack (fail closed).
+                    if (self.items.byStockName(spec.item_name)) |st| {
+                        wire.item = .{
+                            .type_id = st,
+                            .count = @intCast(@min(spec.value, 65535)),
+                            .quality = 1,
+                        };
+                    }
+                }
+                reward_store[n][ri] = wire;
             }
             const phase: u8 = if (s.completed)
                 255
@@ -9877,6 +9888,34 @@ pub const Game = struct {
             // their queued commands are drained by the next tick's schedule.
             self.wasm_plugins.onTick();
         }
+        // Quest rewards payout at tick end: the sim credits the wallet coins on
+        // completion and stashes the def; items and exp need the assets table
+        // and the client xp ledger, so the Game drains here (one place covers
+        // every completion site, C2S handlers and tickAll alike).
+        {
+            const cn = self.sim.completed_quests_n;
+            var ci: usize = 0;
+            while (ci < cn) : (ci += 1) {
+                const cq = self.sim.completed_quests_ring[ci];
+                if (cq.slot >= self.sim.player.len) continue;
+                const peer: usize = @intCast(self.sim.player[cq.slot].peer_slot);
+                if (peer >= self.clients.len) continue;
+                const d = self.sim.catalog.byId(cq.def_id) orelse continue;
+                var ri: usize = 0;
+                while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
+                    const spec = d.rewards[ri];
+                    switch (spec.kind) {
+                        .item, .loot_item => {
+                            const eid = self.items.ecsIdByName(spec.item_name);
+                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(spec.value, 65535)));
+                        },
+                        .exp => self.awardXp(peer, spec.value),
+                        else => {},
+                    }
+                }
+            }
+            self.sim.completed_quests_n = 0;
+        }
 
         try self.replicate();
         // Periodic world flush so dig/build survives crash without explicit admin save.
@@ -10094,7 +10133,7 @@ pub const Game = struct {
             const now = clock.monoNs();
             if (next_t > now) {
                 clock.sleepNs(next_t - now);
-            } else {
+            } else if (now > next_t) {
                 // Fell behind the 50 ms budget: count for apm; rate-limit log.
                 self.harness.counters.inc(.tick_overruns);
                 // Availability valve: hold weak evidence + deferrable broadcasts

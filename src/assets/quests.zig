@@ -357,7 +357,8 @@ fn parseQuestDefBody(
 
     const obj_count = countTags(body, "<objective");
     var reward_has_item: [quest.max_reward_flags]bool = .{false} ** quest.max_reward_flags;
-    const rew_count = parseRewardKinds(body, &reward_has_item);
+    var reward_specs: [quest.max_reward_flags]quest.RewardSpec = [_]quest.RewardSpec{.{}} ** quest.max_reward_flags;
+    const rew_count = parseRewardKinds(body, &reward_has_item, &reward_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier);
 
@@ -377,6 +378,8 @@ fn parseQuestDefBody(
         .objective_count = if (obj_count > 0) @min(obj_count, quest.max_phases) else 1,
         .reward_count = if (rew_count > 0) rew_count else 1,
         .reward_has_item = reward_has_item,
+        .rewards = reward_specs,
+        .reward_n = rew_count,
         .phases = graph.phases,
         .highest_phase = graph.highest_phase,
         .objective_phases = graph.objective_phases,
@@ -397,7 +400,7 @@ fn countTags(body: []const u8, tag: []const u8) u8 {
 }
 
 /// Parse `<reward type="…">` list. Item/LootItem need ItemStack after RewardIndex.
-fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool) u8 {
+fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool, rewards: *[quest.max_reward_flags]quest.RewardSpec) u8 {
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len and n < quest.max_reward_flags) {
@@ -405,8 +408,30 @@ fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool) u
         const gt = std.mem.indexOfPos(u8, body, at, ">") orelse break;
         const open = body[at .. gt + 1];
         const typ = xml.attr(open, 0, "type") orelse "";
-        // Stock subclasses that Write ItemStack after BaseReward index:
-        has_item[n] = std.mem.eql(u8, typ, "Item") or std.mem.eql(u8, typ, "LootItem");
+        var spec: quest.RewardSpec = .{};
+        if (std.mem.eql(u8, typ, "Item") or std.mem.eql(u8, typ, "LootItem")) {
+            spec.kind = if (std.mem.eql(u8, typ, "Item")) .item else .loot_item;
+            has_item[n] = true;
+            // The stock `id` attribute is the item name (e.g. casinoCoin); the
+            // wire and payout resolve it through the items table later.
+            spec.item_name = xml.attr(open, 0, "id") orelse "";
+            if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
+        } else if (std.mem.eql(u8, typ, "Exp")) {
+            spec.kind = .exp;
+            if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
+        } else if (std.mem.eql(u8, typ, "Skill")) {
+            spec.kind = .skill;
+        } else if (std.mem.eql(u8, typ, "SkillPoints")) {
+            spec.kind = .skill_points;
+            if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
+        } else if (std.mem.eql(u8, typ, "Quest")) {
+            spec.kind = .quest;
+        } else if (std.mem.eql(u8, typ, "ShowMessageWindow")) {
+            spec.kind = .show_message_window;
+        } else {
+            spec.kind = .other;
+        }
+        rewards[n] = spec;
         n += 1;
         i = gt + 1;
     }
@@ -857,6 +882,36 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
     try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
     const free = cat.byName("freebie").?;
     try std.testing.expectEqual(@as(u32, 0), free.reward_coin);
+}
+
+test "rewards parse kinds, item names and values in document order" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="rich">
+        \\    <reward type="Exp" value="1000"/>
+        \\    <reward type="Item" id="casinoCoin" value="500"/>
+        \\    <reward type="LootItem" id="gunPistolT2" value="2"/>
+        \\    <reward type="SkillPoints" value="3"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const d = cat.byName("rich").?;
+    try std.testing.expectEqual(@as(u8, 4), d.reward_n);
+    try std.testing.expectEqual(quest.RewardKind.exp, d.rewards[0].kind);
+    try std.testing.expectEqual(@as(u32, 1000), d.rewards[0].value);
+    try std.testing.expectEqual(quest.RewardKind.item, d.rewards[1].kind);
+    try std.testing.expectEqualStrings("casinoCoin", d.rewards[1].item_name);
+    try std.testing.expectEqual(@as(u32, 500), d.rewards[1].value);
+    try std.testing.expectEqual(quest.RewardKind.loot_item, d.rewards[2].kind);
+    try std.testing.expectEqualStrings("gunPistolT2", d.rewards[2].item_name);
+    try std.testing.expectEqual(@as(u32, 2), d.rewards[2].value);
+    try std.testing.expectEqual(quest.RewardKind.skill_points, d.rewards[3].kind);
+    // The wire ItemStack flags match the Item/LootItem kinds.
+    try std.testing.expect(d.reward_has_item[1]);
+    try std.testing.expect(d.reward_has_item[2]);
+    try std.testing.expect(!d.reward_has_item[0]);
 }
 
 test "stock quests.xml template quests parse non-empty" {

@@ -110,15 +110,6 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !File {
     return try parse(allocator, data);
 }
 
-/// Load first existing path among candidates (does not allocate path strings).
-pub fn loadFirst(allocator: std.mem.Allocator, paths: []const []const u8) !?File {
-    for (paths) |p| {
-        if (!io_fs.fileExistsSimple(p)) continue;
-        return try loadFromPath(allocator, p);
-    }
-    return null;
-}
-
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer allocator.destroy(arena);

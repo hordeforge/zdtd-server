@@ -23,7 +23,3 @@ pub fn isStorageLike(te_type: u8) bool {
 pub fn isSignLike(te_type: u8) bool {
     return te_type == sign;
 }
-
-pub fn isWorkstation(te_type: u8) bool {
-    return te_type == workstation;
-}

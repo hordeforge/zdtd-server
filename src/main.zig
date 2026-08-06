@@ -21,7 +21,8 @@ const help_text =
     \\  Zig dedicated server for the stock 7DTD client wire (EAC off).
     \\
     \\Options:
-    \\  --port N              TCP info port 0..65533; LiteNet uses N+2 (default 26902)
+    \\  --port N              TCP info port 0..65533; LiteNet uses N+2 (default 26902;
+    \\                        0 = offline deterministic mode, pair with --once/--ticks)
     \\  --world DIR           zdtd save/overlay dir (default worlds/zdtd_default)
     \\  --map DIR             stock Data/Worlds/<Name> (dtm + prefabs)
     \\  --game-dir DIR        install root (Data/Worlds + Data/Config)

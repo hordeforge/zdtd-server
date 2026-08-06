@@ -199,32 +199,6 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("recipes.xml", RecipeTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
-/// Consume ingredients from ECS inventory by stock item name via name→ecs id callback.
-pub const NameToEcs = *const fn (ctx: ?*anyopaque, name: []const u8) u16;
-
-pub fn canCraft(
-    recipe: RecipeDef,
-    inv: *const components.Inventory,
-    name_to_ecs: NameToEcs,
-    ctx: ?*anyopaque,
-) bool {
-    var need: [max_ingredients]struct { id: u16, count: u16 } = undefined;
-    var n: usize = 0;
-    var i: u8 = 0;
-    while (i < recipe.ingredient_n) : (i += 1) {
-        const ing = recipe.ingredients[i];
-        const id = name_to_ecs(ctx, ing.name);
-        if (id == 0) return false;
-        need[n] = .{ .id = id, .count = ing.count };
-        n += 1;
-    }
-    var j: usize = 0;
-    while (j < n) : (j += 1) {
-        if (inv.countItem(need[j].id) < need[j].count) return false;
-    }
-    return true;
-}
-
 test "builtin recipes" {
     const t = RecipeTable.builtin();
     try std.testing.expect(t.byName("resourceWood") != null);

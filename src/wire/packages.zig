@@ -654,13 +654,6 @@ pub fn buildEntitySpawnResponse(buf: []u8, success: bool) ![]u8 {
     return w.written();
 }
 
-pub fn buildEntitySpawnResponseItem(buf: []u8, success: bool, item: stock_inv.StockSlot) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(success);
-    try stock_inv.writeItemValue(&w, item);
-    return w.written();
-}
-
 /// Stock TraderData with primary inventory entries (ItemStack + markup i8 + addedByPlayer).
 pub const TraderStockEntry = stock_entity.TraderStockEntry;
 
@@ -2248,13 +2241,6 @@ test "PlayerDenied body matches stock field order and excludes the package id" {
     try std.testing.expectEqual(@as(usize, 17), manual.len);
 }
 
-pub fn buildChatBody(buf: []u8, from: []const u8, msg: []const u8) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeString(from);
-    try w.writeString(msg);
-    return w.written();
-}
-
 /// Stock NetPackageChat: chatType u8 | sender i32 | msg string | msgSender u8 | bbMode u8 | recipCount i32 | ids...
 /// NetPackageGameEventResponse ack for a GameEventRequest (challenge/quest
 /// actions). Request wire: eventName str | entityID i32 | extraData str | tag
@@ -2417,32 +2403,6 @@ pub fn attachTypeIsDetach(t: AttachType) bool {
     return t == .detach_server or t == .detach_client;
 }
 
-/// NetPackageCloseAllWindows: playerId i32
-pub fn buildCloseAllWindows(buf: []u8, player_id: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI32(player_id);
-    return w.written();
-}
-
-/// NetPackageGameMessage: msgType u8 | mainEntityId i32 | secondaryEntityId i32
-pub fn buildGameMessage(buf: []u8, msg_type: u8, main_entity_id: i32, secondary_entity_id: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(msg_type);
-    try w.writeI32(main_entity_id);
-    try w.writeI32(secondary_entity_id);
-    return w.written();
-}
-
-/// NetPackageLandClaimRepair: x/y/z as i64 + beginRepair bool
-pub fn buildLandClaimRepair(buf: []u8, x: i32, y: i32, z: i32, begin_repair: bool) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI64(@intCast(x));
-    try w.writeI64(@intCast(y));
-    try w.writeI64(@intCast(z));
-    try w.writeBool(begin_repair);
-    return w.written();
-}
-
 pub const SpawnPointXYZ = struct {
     x: i32,
     y: i32,
@@ -2525,21 +2485,6 @@ pub fn buildNavObjectAdd(
     try w.writeBool(false); // useOverrideColor
     try w.writeU32(0xffffffff); // Color32 white as packed ARGB-ish
     try w.writeBool(false); // usingLocalizationId
-    try w.writeI32(entity_id);
-    return w.written();
-}
-
-pub fn buildNavObjectRemove(buf: []u8, nav_class: []const u8, entity_id: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeString(nav_class);
-    try w.writeString("");
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeBool(false); // isAdd = remove
-    try w.writeBool(false);
-    try w.writeU32(0);
-    try w.writeBool(false);
     try w.writeI32(entity_id);
     return w.written();
 }
@@ -3016,15 +2961,6 @@ pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32,
     std.mem.writeInt(u32, buf[5..9], @as(u32, @bitCast(throttle)), .little);
     std.mem.writeInt(u32, buf[9..13], @as(u32, @bitCast(steer)), .little);
     return buf[0..13];
-}
-
-/// Wire tool: op u8, then payload (see electric.PowerGrid.applyWireAction)
-pub fn buildWireConnectBody(buf: []u8, a: u16, b: u16) ![]u8 {
-    if (buf.len < 5) return error.Overflow;
-    buf[0] = 1;
-    std.mem.writeInt(u16, buf[1..3], a, .little);
-    std.mem.writeInt(u16, buf[3..5], b, .little);
-    return buf[0..5];
 }
 
 /// Stock NetPackageWireActions SetParent body (asm.il:842779): op=0,
