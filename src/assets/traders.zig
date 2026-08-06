@@ -253,7 +253,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         if (!self_closing) {
             const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
             refs = try parseTraderRefs(arena, allocator, clean[gt + 1 .. close]);
-            j = close + 15;
+            j = close + "</trader_info>".len;
         }
         try trader_infos.append(allocator, .{
             .id = id,
@@ -381,4 +381,46 @@ test "trader table parses trader_info blocks with per-trader items and attrs" {
         if (!std.mem.eql(u8, a.name, b.name)) same_lead = false;
     }
     try std.testing.expect(!same_lead);
+}
+
+test "trader_info scan survives adjacent blocks with no whitespace" {
+    // The close-tag skip was one byte past "</trader_info>" (15 vs 14), so two
+    // blocks with no separator dropped every other one. Regression: both parse.
+    const xml_text =
+        \\<traders>
+        \\  <trader_item_group name="traderAlways"><item name="medicalBandage" count="3,5"/></trader_item_group>
+        \\  <trader_info id="1" open_time="4:05" close_time="21:50"><trader_items><item name="armorParts"/></trader_items></trader_info><trader_info id="2" is_vending="true"><trader_items><item group="traderAlways"/></trader_items></trader_info>
+        \\</traders>
+    ;
+    var arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer {
+        arena_holder.deinit();
+        std.testing.allocator.destroy(arena_holder);
+    }
+    const arena = arena_holder.allocator();
+    const clean = try xml.stripComments(std.testing.allocator, xml_text);
+    defer std.testing.allocator.free(clean);
+    var infos: std.ArrayList(TraderInfo) = .empty;
+    defer infos.deinit(std.testing.allocator);
+    var j: usize = 0;
+    while (j < clean.len and infos.items.len < max_traders) {
+        const ti = std.mem.indexOfPos(u8, clean, j, "<trader_info ") orelse break;
+        j = ti + 13;
+        const idv = xml.attr(clean, ti, "id") orelse continue;
+        const id = std.fmt.parseInt(u16, idv, 10) catch continue;
+        const gt = std.mem.indexOfPos(u8, clean, ti, ">") orelse break;
+        const self_closing = gt > ti and clean[gt - 1] == '/';
+        var refs: []const ItemRef = &.{};
+        if (!self_closing) {
+            const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
+            refs = try parseTraderRefs(arena, std.testing.allocator, clean[gt + 1 .. close]);
+            j = close + "</trader_info>".len;
+        }
+        try infos.append(std.testing.allocator, .{ .id = id, .refs = refs });
+    }
+    try std.testing.expectEqual(@as(usize, 2), infos.items.len);
+    try std.testing.expectEqual(@as(u16, 1), infos.items[0].id);
+    try std.testing.expectEqual(@as(u16, 2), infos.items[1].id);
+    try std.testing.expectEqual(@as(usize, 1), infos.items[0].refs.len);
 }
