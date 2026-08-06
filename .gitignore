@@ -49,3 +49,6 @@ assets/fixtures/assignids_v314.txt
 node_modules/
 package.json
 package-lock.json
+
+# semcode index (rebuild with `semcode-index -s .`; not a product input)
+.semcode.db/
