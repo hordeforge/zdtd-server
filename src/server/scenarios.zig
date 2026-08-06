@@ -2433,3 +2433,56 @@ fn collectAttaches(
     }
     return n;
 }
+
+test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel" {
+    // T9 proof (WORK_PLAN): C-built .wasm fixtures loaded through the real
+    // config path (plugin_modules). Hello registers hooks, observes ticks and
+    // queues a SimCommand that the sim applies; the looper is cut off by the
+    // fuel budget within one tick and the server keeps ticking.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_wasm");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{
+        "assets/fixtures/plugin_hello.wasm",
+        "assets/fixtures/plugin_looper.wasm",
+    };
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_wasm", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+        // Small fuel: the looper is cut off in microseconds, not seconds.
+        .plugin_budget = .{ .fuel = 200_000 },
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.count());
+    try std.testing.expectEqual(@as(usize, 0), g.wasm_plugins.disabledCount());
+
+    // A joined client anchors the despawn distance, so the queued spawns at
+    // the seed pad (256,70,256) stay alive for the assertion.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+
+    const z_before = g.sim.countKind(.zombie);
+    var t: u64 = 0;
+    while (t < 8) : (t += 1) try g.step();
+
+    // Hello queued three spawns on its first three ticks; the schedule's
+    // per-tick drain applied them (spawn point is the seed pad, in range).
+    const z_after = g.sim.countKind(.zombie);
+    try std.testing.expect(z_after >= z_before + 3);
+    // Only the looper is disabled; the server kept stepping.
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.disabledCount());
+    try std.testing.expect(g.tick_n >= 8);
+
+    std.debug.print(
+        "PASS wasm-plugins: modules=2 disabled=1 zombies {d}->{d} ticks={d}\n",
+        .{ z_before, z_after, g.tick_n },
+    );
+}

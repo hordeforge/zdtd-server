@@ -75,6 +75,24 @@ fn fatal(comptime fmt: []const u8, fmt_args: anytype) noreturn {
     std.process.exit(1);
 }
 
+/// Split the zdtd.toml `[plugin] modules` list (comma/space separated) into a
+/// slice owned by the caller (free with gpa.free when len > 0). The path
+/// strings point into the toml arena, which outlives the create call.
+fn splitPluginModules(allocator: std.mem.Allocator, raw: []const u8) []const []const u8 {
+    var count: usize = 0;
+    var it = std.mem.tokenizeAny(u8, raw, " ,");
+    while (it.next() != null) count += 1;
+    if (count == 0) return &.{};
+    const list = allocator.alloc([]const u8, count) catch return &.{};
+    var i: usize = 0;
+    it = std.mem.tokenizeAny(u8, raw, " ,");
+    while (it.next()) |tok| {
+        list[i] = tok;
+        i += 1;
+    }
+    return list;
+}
+
 /// Help and version go to stdout (not stderr) so operators can pipe them.
 fn printStdout(comptime fmt: []const u8, fmt_args: anytype) void {
     var msg_buf: [4096]u8 = undefined;
@@ -567,6 +585,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (toml_owned) |*tf| {
         zdtd_config.applyToInitOptions(tf, &init_opts);
+        // [plugin] modules is a comma-separated list; applyToInitOptions cannot
+        // allocate, so split it here and free the list after the Game is created
+        // (paths point into the toml arena; Game dupes the names it keeps).
+        if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
         if (tf.authority.mode) |mode_s| {
             if (server_config.AuthorityMode.parse(mode_s)) |am| {
                 init_opts.authority_mode = am;
@@ -598,6 +620,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
     const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| {
         fatal("cannot start server: {s} (world '{s}', port {d})", .{ @errorName(err), world_dir, port });
     };
+    // The module path list is owned by main (split below); Game does not retain it.
+    if (init_opts.plugin_modules.len > 0) gpa.free(init_opts.plugin_modules);
     defer {
         g.deinit();
         gpa.destroy(g);

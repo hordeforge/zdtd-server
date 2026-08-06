@@ -72,6 +72,12 @@ pub const Mode = struct {
     name: ?[]const u8 = null,
 };
 
+/// Wasm plugin runtime (ADR 0020). `modules` is a comma-separated list of
+/// .wasm file paths; main.zig splits it into InitOptions.plugin_modules.
+pub const Plugin = struct {
+    modules: ?[]const u8 = null,
+};
+
 pub const File = struct {
     stream: Stream = .{},
     authority: Authority = .{},
@@ -79,6 +85,7 @@ pub const File = struct {
     perf: Perf = .{},
     sim: Sim = .{},
     mode: Mode = .{},
+    plugin: Plugin = .{},
     /// Arena owning any string slices from parse.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
@@ -243,6 +250,12 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
     } else if (std.mem.eql(u8, section, "mode")) {
         if (std.mem.eql(u8, key, "name")) {
             f.mode.name = try a.dupe(u8, stripQuotes(val));
+        } else {
+            return unknownKey(section, key);
+        }
+    } else if (std.mem.eql(u8, section, "plugin")) {
+        if (std.mem.eql(u8, key, "modules")) {
+            f.plugin.modules = try a.dupe(u8, stripQuotes(val));
         } else {
             return unknownKey(section, key);
         }
@@ -412,6 +425,8 @@ test "parse stream and authority" {
         \\block_id_mapping = false
         \\[mode]
         \\name = "default"
+        \\[plugin]
+        \\modules = "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm"
     ;
     var f = try parse(std.testing.allocator, src);
     defer f.deinit();
@@ -431,6 +446,10 @@ test "parse stream and authority" {
     try std.testing.expectEqual(false, f.feature.deco_mirror.?);
     try std.testing.expectEqual(false, f.feature.block_id_mapping.?);
     try std.testing.expectEqualStrings("default", f.mode.name.?);
+    try std.testing.expectEqualStrings(
+        "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm",
+        f.plugin.modules.?,
+    );
 }
 
 test "applyToInitOptions deco_trees only when set" {

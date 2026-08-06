@@ -1,8 +1,10 @@
 # Plugin API: Wasm guests (design)
 
-**Status:** design. A plugin is a `.wasm` module ([ADR 0020](adr/0020-wasm-only-plugin-api.md),
-which supersedes [ADR 0005](adr/0005-native-plugin-api.md)). No runtime is wired
-up yet, so nothing user-supplied loads today.
+**Status:** shipped first cut (2026-08-06, WORK_PLAN T9). A plugin is a `.wasm`
+module ([ADR 0020](adr/0020-wasm-only-plugin-api.md),
+which supersedes [ADR 0005](adr/0005-native-plugin-api.md)); the zwasm v2
+runtime loads modules named in zdtd.toml `[plugin] modules` and calls the
+exported hooks under fuel and memory budgets.
 **Not:** stock `IModApi`, Harmony, `Mods/` XML, or a native plugin ABI.
 **Related:** [ADR 0003](adr/0003-no-stock-mod-host.md), [ADR 0004](adr/0004-server-authoritative-c2s.md),
 [ADR 0010](adr/0010-data-config-zig-plugins.md) (data and config layers beneath this one).
@@ -18,13 +20,13 @@ A native ABI could promise neither.
 
 | Piece | State |
 |---|---|
-| Wasm runtime, module loading, fuel accounting | **not implemented** |
-| Host function table and capability gating | **not implemented** |
+| Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
+| Host function table and capability gating | **implemented**: `zdtd_log(level, ptr, len)`, `zdtd_tick() -> i64`, `zdtd_queue(ptr, len) -> i32` |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (8), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
-| Game wire-up | `createWithOptions` enables the static test plugin; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
-| C2S deny hooks / SimCommand from plugins | deferred (ECS `World.commands` is the drain seam) |
+| Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
+| C2S deny hooks / SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick); deny hooks still open |
 
 The static host stays because scenarios need to drive hooks without standing up
 a Wasm runtime in the test path. It is not a way to ship a plugin and is not
@@ -97,8 +99,8 @@ build too, not a defect in zwasm.
 
 | Decision | Notes |
 |---|---|
-| Capability list | The security review surface; start minimal (log, read-only sim views, queue a `SimCommand`) and add on evidence, since every addition is permanent |
-| Memory and fuel defaults | zwasm's defaults are already finite; pick zdtd's from a real plugin's measured cost per tick once one exists |
+| Capability list | Shipped minimal: `log`, `tick`, `queue`. Read-only sim views and deny hooks are the next candidates; every addition is permanent, so they land on evidence |
+| Memory and fuel defaults | zdtd ships `Budget` defaults (100M fuel, 1024 pages). Re-tune from a real plugin's measured cost per tick once one exists |
 | Interpreter or JIT | zwasm's interpreter is the hardened default; JIT is a later question and only with evidence that a plugin needs it |
 
 ## Goals
@@ -288,11 +290,12 @@ Plugins are compiled in and registered at runtime via `PluginHost.register`
 (`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
 InitOption, not a build option. Public facade: `src/plugin/root.zig`.
 
-### v2 (optional): Wasm runtime
+### v2 (shipped first cut): Wasm runtime
 
 No native plugin ABI and no `.so` loading ([ADR 0020](adr/0020-wasm-only-plugin-api.md)).
 A plugin ships as a `.wasm` module; the runtime, host import table and fuel
-accounting are not implemented and tracked by WORK_PLAN T9.
+accounting live in `src/plugin/wasm.zig` (WORK_PLAN T9, landed 2026-08-06).
+Load modules with `[plugin] modules = "a.wasm, b.wasm"` in zdtd.toml.
 
 ## Safety and abuse
 

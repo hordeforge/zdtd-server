@@ -1,9 +1,9 @@
 # Writing a zdtd plugin
 
-**Status:** the contract below is designed and the runtime is verified, but the
-host wiring is not shipped yet (WORK_PLAN T9). Nothing user-supplied loads today.
-This document is written so a plugin author can start from it the day it lands,
-and so the contract is reviewable before it is frozen.
+**Status:** shipped first cut (2026-08-06, WORK_PLAN T9). The contract below is
+live: the runtime loads `.wasm` modules named in zdtd.toml and calls the four
+hooks under fuel and memory budgets. The host import table is deliberately
+small and documented below; deny hooks and read-only sim views are still open.
 
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
 Rust, TinyGo, Zig, C, AssemblyScript. You do not link against zdtd, you do not
@@ -29,6 +29,51 @@ your .wasm                        zdtd
 
 Export only the hooks you need. A missing export means that hook is not
 registered, and costs nothing at runtime.
+
+## Enabling a plugin
+
+List `.wasm` files in `[plugin] modules` in zdtd.toml (world dir or CWD,
+see [GAME_OPTIONS.md](GAME_OPTIONS.md)):
+
+```toml
+[plugin]
+modules = "mods/my_plugin.wasm, mods/stats.wasm"
+```
+
+Modules load once at startup; a missing or unloadable module is logged and
+skipped, it does not stop the server. `on_enable` runs right after load,
+`on_tick` runs late in every tick, `on_player_join` runs on a player's first
+join, and `on_shutdown` runs at shutdown.
+
+## Host imports
+
+The host provides exactly three functions, all in the `zdtd` namespace:
+
+| Import | Signature | Notes |
+|---|---|---|
+| `zdtd_log` | `(level: i32, ptr: i32, len: i32) -> ()` | Write `len` bytes at `ptr` to the server log; `level` 0..3 (debug/info/warn/err) |
+| `zdtd_tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
+| `zdtd_queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 on accept, 1 on malformed input |
+
+Every host call reads flat bytes from your linear memory at the offset and
+length you declare. There is no filesystem, no socket, no thread and no clock
+beyond the tick time `zdtd_tick` returns. WASI is deliberately not used; a
+module importing `wasi_snapshot_preview1` fails to instantiate.
+
+### Queued commands
+
+`zdtd_queue` accepts one command per call, as UTF-8 text (bounds: 128 bytes):
+
+| Command | Effect |
+|---|---|
+| `spawn x y z hp` | Queue a zombie spawn at the block coords with the given HP |
+| `despawn id` | Queue removal of the entity with the given net id |
+| `damage id amount` | Queue damage to the entity with the given net id |
+
+Commands are applied by the sim on a later tick's drain (the fixed 64-slot
+command buffer; a full buffer drops new commands). Unknown or malformed
+commands are dropped with a log line. The guest never touches sim state
+directly: everything goes through this queue.
 
 ## Rules you cannot get around
 

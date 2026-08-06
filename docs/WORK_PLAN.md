@@ -301,35 +301,53 @@ and cutting a support drops the structure.
 
 ## T9. Plugins: stand up the Wasm runtime
 
+**Status: landed 2026-08-06** (779 tests). zwasm v2 runtime in
+`src/plugin/wasm.zig` (`WasmHost`): `[plugin] modules` in zdtd.toml loads
+`.wasm` files once at init; the host import table is `zdtd_log(level, ptr, len)`,
+`zdtd_tick() -> i64`, `zdtd_queue(ptr, len)`; every call runs under fuel +
+max-memory budgets; exhaustion or a trap disables that module only. `on_tick`
+runs late in Game.step after the sim settles, `on_player_join` on first join,
+`on_shutdown` at deinit. Queued commands use the text grammar `spawn x y z hp` /
+`despawn id` / `damage id amount` and land in the fixed 64-slot sim command
+buffer (drained once per tick by the ecs schedule). Fixtures are C-built
+(`assets/fixtures/plugin_hello.c` / `plugin_looper.c`).
+
 **Why:** [ADR 0020](adr/0020-wasm-only-plugin-api.md) makes plugins Wasm-only so a
 modder can ship one `.wasm` from any language and the host can bound what it
 does. Until a runtime is wired up there is no plugin story at all: the in-tree
 static host is test scaffolding and loads nothing user-supplied.
 
-**Change**
+**Change** (all shipped)
 1. ~~Pick the runtime.~~ **Done 2026-08-06: zwasm v2 (2.4.1).** Zig-native, so no
    C dependency and no FFI boundary; `minimum_zig_version` 0.16.0. Verified under
    Zig 0.16 that a typed export call returns, `fuelRemaining()` reports the
    budget, and `(loop br 0)` stops with `error.OutOfFuel`. Anything linking it
    needs `.use_llvm = true`: Zig 0.16's self-hosted x86 backend fails on
    `R_X86_64_PC64`. WASI is not used; the import table stays bare.
-2. Load `.wasm` modules named in config, instantiate once, register whichever of
-   `on_enable`, `on_tick`, `on_player_join`, `on_shutdown` the module exports.
-3. Implement the host import table behind capability gates. Start minimal: log,
-   read-only sim views, queue a `SimCommand`. No filesystem, no sockets, no clock
+2. ~~Load `.wasm` modules named in config, instantiate once, register whichever of
+   `on_enable`, `on_tick`, `on_player_join`, `on_shutdown` the module exports.~~
+   `[plugin] modules` (zdtd.toml) → `InitOptions.plugin_modules` → `WasmHost`.
+3. ~~Implement the host import table behind capability gates.~~ Start minimal:
+   `zdtd_log`, `zdtd_tick`, `zdtd_queue`. No filesystem, no sockets, no clock
    beyond the tick time the host passes in.
-4. Enforce a fuel or instruction budget and a linear-memory cap per call.
+4. ~~Enforce a fuel or instruction budget and a linear-memory cap per call.~~
    Exhausting either ends the call, disables that plugin and logs the hook and
-   module.
-5. Copy data across as flat bytes both ways. No host pointer reaches a guest.
+   module (verified: `OutOfFuel` on the looper fixture).
+5. ~~Copy data across as flat bytes both ways.~~ Flat bytes in the guest linear
+   memory; no host pointer reaches a guest.
 
 **Done when:** a `.wasm` built from a language other than Zig registers a hook,
 observes a tick, queues a `SimCommand` that the sim applies, and a deliberately
 looping module is disabled within one tick without stalling the server.
+**DONE.**
 
 **Proof:** a scenario with two fixture modules, one well-behaved and one that
 loops, asserting the command lands, the loop is cut off by fuel, only the bad
 module is disabled, and the tick budget holds.
+**DONE** (`scenario wasm plugins`): hello queued three `spawn` commands that
+landed (zombies 3→7), looper disabled by `OutOfFuel`, server kept ticking, and
+the live server logs `zdtd wasm: info: tick N` at 20 Hz with only the looper
+disabled.
 
 **Out of scope:** WASI, hot reload, a plugin marketplace, and any hook not
 already in `src/plugin/api.zig`.

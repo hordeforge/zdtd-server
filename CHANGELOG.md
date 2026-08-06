@@ -30,6 +30,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   terrain seed options are available. Run `zdtd --help` for precedence.
 - Operator tunables can be set in `zdtd.toml` (world directory or CWD; see
   `zdtd.toml.example`). Run `zdtd --help` for the full precedence order.
+- A Wasm plugin runtime (zwasm v2, ADR 0020) loads `.wasm` modules listed in
+  `zdtd.toml` `[plugin] modules`. Plugins export `on_enable`, `on_tick`,
+  `on_player_join`, `on_shutdown` and import `zdtd_log`, `zdtd_tick`,
+  `zdtd_queue`; every call runs under a fuel and linear-memory budget, and a
+  module that loops is disabled at its budget instead of stalling the server.
+  See `docs/PLUGIN_DEV.md`.
 - An operator web UI is available via `--webui-port`, `--webui-bind`, and
   `--webui-secret` (or env `ZDTD_WEBUI_SECRET`). It is off by default, binds
   to loopback, and refuses to start without a secret. It exposes the same

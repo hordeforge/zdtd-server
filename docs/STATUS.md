@@ -125,7 +125,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Automated in-client playtest | **PASS (2026-08-06)** | V3.1.0 b14 pin. Live gate **23/23** on a fresh world each run (`FRESH=1`); the client renders and plays Navezgane. The earlier demo residuals are closed: the deco S2C NRE is resolved ([archive/DECO_NRE.md](archive/DECO_NRE.md)) and the join hang is fixed (GameState=Running plus chunks before the spawn). Still open: full MinEvents eat amount (chili +15). |
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; `tcp_listen` + `std.http.Server`; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | Authority spine (P4.0) | **PASS (first cut)** | `phase_gate` matrix; movement envelope; reject counters in apm/webui; `ZdtdAuthorityMode`; inv ledger ring |
-| Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; plugins are Wasm-only per ADR 0020, no runtime wired (WORK_PLAN T9) |
+| Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (70 handled in game.zig; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
@@ -277,7 +277,6 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
-| Parked | Wasm plugin runtime | ADR 0020: Wasm-only, no runtime wired yet; static host stays as test scaffolding (WORK_PLAN T9) |
 | Multi-ms | Worldgen W3–W7 | W0/W1/W2 shipped (3D density field); climate/caves/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +

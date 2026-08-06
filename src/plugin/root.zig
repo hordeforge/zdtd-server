@@ -7,6 +7,7 @@
 
 pub const api = @import("api.zig");
 pub const host = @import("host.zig");
+pub const wasm = @import("wasm.zig");
 pub const sample_hello = @import("sample_hello.zig");
 
 pub const PLUGIN_API_VERSION = api.PLUGIN_API_VERSION;
@@ -18,5 +19,6 @@ pub const max_plugins = host.max_plugins;
 test {
     _ = api;
     _ = host;
+    _ = wasm;
     _ = sample_hello;
 }

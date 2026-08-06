@@ -73,3 +73,9 @@ block_id_mapping = true
 #                            # Behaviour-identical (misses use the locked hook).
 # job_batches = false        # run the sleeper-volume player test in parallel.
 #                            # Spawns stay serial in volume order (seed is vi).
+
+# Wasm plugins (ADR 0020, docs/PLUGIN_DEV.md). Comma-separated .wasm module
+# paths; each loads once at startup under a fuel + memory budget. A missing or
+# unloadable module is logged and skipped; on_tick runs late in every tick.
+# [plugin]
+# modules = "mods/my_plugin.wasm, mods/stats.wasm"

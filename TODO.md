@@ -60,6 +60,12 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       open (large subsystem; client-side collapse already desyncs).
 - [x] **C2S (T10)**: `NetPackagePlayerDisconnect` handled on the quit path (own
       entity only, immediate save + slot teardown); parity 0 unhandled dir=1.
+- [x] **Plugins (T9)**: zwasm v2 Wasm runtime (`src/plugin/wasm.zig`). `[plugin]
+      modules` in zdtd.toml loads `.wasm` once at init; host imports
+      `zdtd_log`/`zdtd_tick`/`zdtd_queue`; fuel + memory budget disables a
+      looping module within one tick; queued `SimCommand`s land in the sim.
+      C-built fixtures prove a non-Zig module end to end (hello queues spawns
+      that the sim applies; looper cut off by `OutOfFuel`).
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.
