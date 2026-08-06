@@ -881,6 +881,18 @@ pub const Game = struct {
                 self.entities.defs.len, zdef.name, zdef.hash,
             });
         }
+        // Trader NPC: real class hash so the client renders EntityTrader. Runs
+        // for the builtin table too (no game-dir), where the offline demo trader
+        // still needs a renderable class; the XML def wins when a game-dir loads.
+        if (self.entities.defaultTrader()) |tdef| {
+            self.sim.setClassDef(3, .{
+                .name = tdef.name,
+                .max_hp = tdef.max_hp,
+                .kind = .trader,
+                .hash = tdef.hash,
+                .loot_list = tdef.loot_list,
+            });
+        }
         if (assets_recipes.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |rt| {
             self.recipes.deinit();
             self.recipes = rt;
@@ -5647,8 +5659,51 @@ pub const Game = struct {
                     self.lock_holder_entity[ch] = c.entity_id;
                     self.lock_granted_ns[ch] = clock.monoNs();
                     self.lock_pos_key[ch] = pos_key;
-                    const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    // Trader open: the LockResponse context carries server TraderData
+                    // (stock serializes EntityTraderLockContext into the response;
+                    // NetPackageTraderData is ToServer-only). Detect an entity target
+                    // whose slot is a trader and build that context.
+                    var trader_slot: ?ecs.Slot = null;
+                    if (req.targets_blob.len >= 4) {
+                        var tr: wire_binary.Reader = .{ .data = req.targets_blob };
+                        const n = tr.readI32() catch 0;
+                        var ti: i32 = 0;
+                        while (ti < n) : (ti += 1) {
+                            const present = tr.readByte() catch break;
+                            if (present == 0) continue;
+                            const ty = tr.readByte() catch break;
+                            if (ty == 2) {
+                                const eid = tr.readI32() catch break;
+                                if (self.sim.slotOfNetId(eid)) |ts| {
+                                    if (self.sim.mask[ts].kind and self.sim.kind[ts] == .trader) {
+                                        trader_slot = ts;
+                                        break;
+                                    }
+                                }
+                            } else if (ty == 0 or ty == 1) {
+                                _ = tr.readI32() catch break;
+                                _ = tr.readI32() catch break;
+                                _ = tr.readI32() catch break;
+                                if (ty == 1) tr.skipString() catch {};
+                            } else if (ty == 3) {
+                                if (tr.remaining() < 16) break;
+                                tr.pos += 16;
+                            } else break;
+                        }
+                    }
+                    if (trader_slot) |ts| {
+                        var ent_buf: [16]packages.TraderStockEntry = undefined;
+                        const n = self.stockEntries(ts, &ent_buf);
+                        const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
+                            .trader_id = self.sim.network_id[ts].id,
+                            .available_money = trader_wallet_dukes,
+                            .entries = ent_buf[0..n],
+                        });
+                        try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    } else {
+                        const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
+                        try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    }
                     // Re-push TE for any storage container near the first TEFeature target.
                     // Target blob: i32 count | (present, type, …)*
                     if (req.targets_blob.len >= 4) {
@@ -6126,6 +6181,33 @@ pub const Game = struct {
         }
     }
 
+    /// Convert sim trader_stock into wire TraderStockEntry list (shared by the
+    /// spawn ECD and the trader snapshot). Resolves ecs item ids to stock type
+    /// ids via the negotiated items IdMapping; zero-count rows are skipped.
+    fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
+        const stock = self.sim.trader_stock[s];
+        var n: usize = 0;
+        var e: usize = 0;
+        while (e < stock.n and n < out.len) : (e += 1) {
+            const ent = stock.entries[e];
+            if (ent.count == 0) continue;
+            const type_id: i32 = resolveItemType(@ptrCast(self), ent.item);
+            out[n] = .{
+                .item = .{
+                    .type_id = type_id,
+                    .count = if (ent.count > 0) ent.count else 1,
+                    .quality = 1,
+                },
+                // Stock Entry.Markup is a runtime int8 demand delta (Increase +100 /
+                // Decrease -4, asm.il 856828-856866). We have no per-item markup source,
+                // so 0 is the honest neutral: the client shows the base econ price we model.
+                .markup = 0,
+            };
+            n += 1;
+        }
+        return n;
+    }
+
     fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
         var ti: ?ecs.Slot = prefer_slot;
         if (ti == null) {
@@ -6139,29 +6221,10 @@ pub const Game = struct {
         }
         const s = ti orelse return;
         if (!self.sim.mask[s].trader_stock) return;
-        const stock = self.sim.trader_stock[s];
         const eid = self.sim.network_id[s].id;
         // Stock TraderData with primary inventory from SoA stock table.
         var entries: [16]packages.TraderStockEntry = undefined;
-        var n: usize = 0;
-        var e: usize = 0;
-        while (e < stock.n and n < entries.len) : (e += 1) {
-            const ent = stock.entries[e];
-            if (ent.count == 0) continue;
-            const type_id: i32 = resolveItemType(@ptrCast(self), ent.item);
-            entries[n] = .{
-                .item = .{
-                    .type_id = type_id,
-                    .count = if (ent.count > 0) ent.count else 1,
-                    .quality = 1,
-                },
-                // Stock Entry.Markup is a runtime int8 demand delta (Increase +100 /
-                // Decrease -4, asm.il 856828-856866). We have no per-item markup source,
-                // so 0 is the honest neutral: the client shows the base econ price we model.
-                .markup = 0,
-            };
-            n += 1;
-        }
+        const n = self.stockEntries(s, &entries);
         const body = try packages.buildTraderDataStock(
             self.body_buf[0..4096],
             eid,
@@ -7186,7 +7249,7 @@ pub const Game = struct {
             if (!self.sim.alive[i]) continue;
             if (!self.sim.mask[i].kind) continue;
             const k = self.sim.kind[i];
-            if (k != .zombie and k != .animal) continue;
+            if (k != .zombie and k != .animal and k != .trader) continue;
             if (k == .zombie) alive_z += 1;
             if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
             if (self.sim.mask[i].player) continue;
@@ -7206,6 +7269,11 @@ pub const Game = struct {
                 .z = self.sim.transform[i].z,
                 .yaw = self.sim.transform[i].yaw,
                 .is_sleeper = sleeper,
+                .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
+                    var ent_buf: [16]packages.TraderStockEntry = undefined;
+                    const n = self.stockEntries(i, &ent_buf);
+                    break :blk .{ .trader_id = nid, .available_money = trader_wallet_dukes, .entries = ent_buf[0..n] };
+                } else null,
             });
             try self.sendGame(peer, "NetPackageEntitySpawn", body);
             c.known_entities.set(i);
@@ -8812,6 +8880,7 @@ pub const Game = struct {
             candidates = self.sim.dirty_bits;
             for (self.sim.kind_groups.slice(.zombie)) |s| candidates.set(s);
             for (self.sim.kind_groups.slice(.animal)) |s| candidates.set(s);
+            for (self.sim.kind_groups.slice(.trader)) |s| candidates.set(s);
             candidates.setIntersection(self.sim.alive_bits);
         }
 
@@ -8825,7 +8894,9 @@ pub const Game = struct {
 
             // Spawn-on-approach is per-observer (known_entities); still entity-outer
             // so we only build EntitySpawn once when multiple clients need it.
-            const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal);
+            const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or
+                self.sim.kind[i] == .animal or
+                self.sim.kind[i] == .trader);
             var spawn_mask: ObsMask = 0;
             if (is_mob) {
                 var m = in_range;
@@ -8848,6 +8919,11 @@ pub const Game = struct {
                     .z = self.sim.transform[i].z,
                     .yaw = self.sim.transform[i].yaw,
                     .is_sleeper = sleeper,
+                    .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
+                        var ent_buf: [16]packages.TraderStockEntry = undefined;
+                        const n = self.stockEntries(i, &ent_buf);
+                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = trader_wallet_dukes, .entries = ent_buf[0..n] };
+                    } else null,
                 })) |spb| {
                     // EntitySpawn is join-critical for first sight; use sendGame.
                     var m = spawn_mask;

@@ -67,11 +67,13 @@ discovery, so a typed IP is the only route in, and the one thing that is
 advertised is malformed: `ServerVersion "V 3.1.0"` fails the client's
 `TryParseSerializedString`, which wants `"V.3.10.14"`.
 
-**There is no trader.** The `.trader` entity kind is filtered out of both entity
-spawn paths, so no trader NPC exists anywhere on the client, the five Navezgane
-trader compounds are empty, and `TraderData` is never delivered on either stock
-S2C path. Every quest that says "go to the trader" points at a POI with nobody in
-it, and the entire quest and economy loop is unreachable.
+**Traders are half there.** The trader NPC now replicates to the client with a
+real `npcTraderJen` class hash, and `TraderData` rides both stock S2C paths:
+`EntityCreationData.hasTraderData` on spawn and the channel-1 LockResponse
+context on open (wire-tested; stock-client visual check pending). Still open:
+placing traders in the five Navezgane POIs (only the demo
+`spawnTrader("Trader Jen", ...)` exists), restock rolls, per-trader item lists,
+and quest offering, so the full economy loop is not reachable yet.
 
 **POIs are built right, but not finished.** Ids, rotation and height were all
 wrong and are fixed (2026-08-06): ids remap through the prefab's `.blocks.nim`
@@ -124,7 +126,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 12 | 18 | 6 | 36 | Real `quests.xml` loads; 53 client-known defs parse empty (no template inheritance); accept path missing |
-| [Traders](#5-traders) | 3 | 9 | 14 | 26 | No trader NPC exists on the client; the whole area is downstream of that |
+| [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
@@ -132,7 +134,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **82** | **159** | **104** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **85** | **159** | **101** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -163,13 +165,15 @@ area and the concrete work.
    fight back (`src/ecs/systems.zig:1280-1291`, `:1433-1447`,
    `src/server/game.zig:5527`).
 
-2. **Traders: replicate the trader entity, then deliver `TraderData`.**
-   Un-filter `.trader` from `sendStockEntitySpawns` and the tick spawn path
-   (`src/server/game.zig:7178`, `:8829`), give `class_table[3]` a real
-   `npcTraderJen` hash, then wire `TraderData` onto `EntityCreationData`
-   (`src/wire/stock_entity.zig:250` writes `false` unconditionally) and onto the
-   channel-1 `LockResponse` context. Everything else in traders and most of
-   quests is downstream of this.
+2. **DONE 2026-08-06.** Traders: replicate the trader entity, then deliver
+   `TraderData`. Unfiltered `.trader` from both spawn paths
+   (`src/server/game.zig:7178`, `:8829`), gave `class_table[3]` the real
+   `npcTraderJen` hash (builtin and XML), and wired `TraderData` onto
+   `EntityCreationData.hasTraderData` and the channel-1 `LockResponse` context
+   (`src/wire/stock_entity.zig` `writeTraderDataBody`,
+   `src/wire/packages.zig` `buildLockResponseTrader`). Proven by a wire test and
+   the trader scenario (`server/scenarios.zig`); live stock-client visual check
+   still open. POI placement, restock rolls and quest offering remain.
 
 3. **DONE 2026-08-06.** POIs: remap prefab block ids through `<name>.blocks.nim` (also converts pre-v18 BlockValue layouts).
    `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
@@ -645,14 +649,16 @@ because the per-objective Write shapes are wrong.
 
 ## 5. Traders
 
-**Headline.** A player on a stock V3.1.0 client cannot use a trader at all: zdtd
-never replicates a trader entity, never places one in a POI, and never delivers
-`TraderData` on either of the two stock S2C paths, so there is no NPC to walk up
-to and no window to open. The one trader package zdtd does send
-(`NetPackageTraderData`) is ToServer-only and is dropped by the client with a
-warning.
+**Headline.** A player on a stock V3.1.0 client can now see and reach a trader:
+the `.trader` kind replicates with a real `npcTraderJen` class hash and
+`TraderData` arrives on both stock S2C paths, `EntityCreationData.hasTraderData`
+at spawn and the channel-1 `LockResponse` context on open (wire-tested
+2026-08-06; stock-client visual check pending). What is still missing is the
+economy around the NPC: no trader is placed in the five Navezgane POIs, no
+restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
+parsed, and quest offering is unwired.
 
-**3 WORKS · 9 PARTIAL · 14 MISSING**
+**6 WORKS · 9 PARTIAL · 11 MISSING**
 
 - **Trader placement in POIs** `MISSING`
   `src/world/` has zero trader references. The only trader in the world is one
@@ -662,32 +668,39 @@ warning.
   *Anchors:* `src/server/game.zig:1137`, `Data/Worlds/Navezgane/prefabs.xml`
   (trader_jen/bob/hugh/joel/rekt)
 
-- **Trader entity replicated to the stock client** `MISSING`
-  Both ECD emitters filter to zombie plus animal, so a `.trader` entity is never
-  sent. Even if the filter allowed it, `class_table[3]` has `hash = 0`, so
-  `buildEntitySpawnStock` would fall back to `class_zombie_default` and the client
-  would render a zombie. Everything else in this area is downstream.
-  *Anchors:* `src/server/game.zig:7178`, `:8829`, `src/ecs/world.zig:174`,
-  `:606`, `Data/Config/entityclasses.xml:6775`
+- **Trader entity replicated to the stock client** `WORKS`
+  Both ECD emitters (`sendStockEntitySpawns`, the replicate spawn-on-approach
+  pass) now include `.trader`, and `class_table[3]` carries the real
+  `npcTraderJen` Unity hash (from entityclasses at load, with an offline builtin
+  fallback), so the client renders an EntityTrader instead of falling back to
+  the zombie class. Proven by the wire test and the trader scenario, which
+  asserts the join spawn body carries the trader class and data.
+  *Anchors:* `src/server/game.zig:7178-7230`, `:8829-8910`,
+  `src/assets/entities.zig` `defaultTrader`, `src/assets/unity_hash.zig`
+  `class_npc_trader_jen`
 
-- **TraderData carried in EntityCreationData** `MISSING`
+- **TraderData carried in EntityCreationData** `WORKS`
   Stock `EntityCreationData.write` emits `bool hasTraderData` then
   `TraderData::Write` after the entityData blob, and the read side copies
-  `traderData.Clone()` onto the spawned `EntityTrader`. zdtd hardcodes
-  `writeBool(false)` with no option to supply one.
-  *Anchors:* `src/wire/stock_entity.zig:250`, `asm.il:472732-472745`,
-  `asm.il:472307-472325`, `asm.il:471328-471340`
+  `traderData.Clone()` onto the spawned `EntityTrader`. `buildEntitySpawnStock`
+  now takes a `trader_data` option and emits that block; the trader scenario
+  parses the join spawn body and asserts the flag plus the trader id.
+  *Anchors:* `src/wire/stock_entity.zig:250-257`, `writeTraderDataBody`,
+  `asm.il:472732-472745`, `asm.il:472307-472325`, `asm.il:471328-471340`
 
-- **TraderData on the real trader-open path (LockRequest channel 1)** `MISSING`
+- **TraderData on the real trader-open path (LockRequest channel 1)** `WORKS`
   Stock opens the window in two steps: activate gives `LockRequestLocal(channel 0)`
   with an `EntityTraderLockContext`; picking "trade" gives `UnlockRequestLocal`
   then `LockRequestLocal(channel 1)`, where `EntityTrader::OnLockedServer` runs
   `TraderManager::TraderInventoryRequested` (the restock roll) and stuffs
   `TraderData.Clone()` into the lock context for `NetPackageLockResponse`. zdtd's
-  lock handler has no trader case and `buildLockResponse` echoes the client's
-  `context_tail` byte for byte, so the response carries the client's own empty
-  TraderData. The trade window would open blank.
-  *Anchors:* `src/wire/packages.zig:1799-1815`, `src/server/game.zig:4975-5055`,
+  lock handler now detects a trader entity target and answers with
+  `buildLockResponseTrader`: the request's type name and Command echoed, then
+  `hasTraderData=true` and the server stock (restock roll still deferred, so the
+  window shows the static stock). The trader scenario drives the request and
+  asserts the response context.
+  *Anchors:* `src/wire/packages.zig` `buildLockResponseTrader`,
+  `src/server/game.zig` lock handler trader branch,
   `asm.il:531397-531465`, `asm.il:533826-533834`, `asm.il:533455-533474`,
   `asm.il:530836-530893`
 
@@ -697,10 +710,8 @@ warning.
   unless `IsServer`. The client calls `ProcessPackages` with ToServer as the
   disallowed direction, so an inbound one is logged as
   `[NET] Received package {0} which is only allowed to be sent to the server` and
-  dropped before read. Every `sendTraderSnapshot` call is a no-op plus a client
-  warning. `GAP_ANALYSIS.md:588-605` and `STATUS.md:143` claim this window
-  shows real `traderAlways` stock; that claim is not supported by the IL and there
-  is no client-log observation of it.
+  dropped before read. Cosmetic now that the real S2C paths (spawn ECD and
+  LockResponse) carry the stock: `sendTraderSnapshot` is a refresh hint only.
   *Anchors:* `src/server/game.zig:5482-5527`, `src/wire/packages.zig:643-668`,
   `asm.il:843057-843064`, `asm.il:843277-843285`, `asm.il:787291-787305`,
   `asm.il:787103-787107`, `asm.il:803963-803970`

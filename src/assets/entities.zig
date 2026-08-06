@@ -78,6 +78,17 @@ pub const EntityTable = struct {
         }
         return builtin_defs[2];
     }
+
+    /// Default trader NPC (npcTraderJen or the first trader def). Null when the
+    /// loaded entityclasses have no trader at all; callers keep the offline
+    /// placeholder then, since no trader POI spawns without a real game-dir.
+    pub fn defaultTrader(self: *const EntityTable) ?EntityDef {
+        if (self.byName("npcTraderJen")) |d| return d;
+        for (self.defs) |d| {
+            if (d.kind == .trader) return d;
+        }
+        return null;
+    }
 };
 
 pub const builtin_defs = [_]EntityDef{
@@ -103,6 +114,14 @@ pub const builtin_defs = [_]EntityDef{
         .hash = 0, // filled when xml loads; builtin hash computed at test time
         .max_hp = 30,
         .kind = .animal,
+        .spawnable = true,
+        .is_enemy = false,
+    },
+    .{
+        .name = "npcTraderJen",
+        .hash = unity_hash.class_npc_trader_jen,
+        .max_hp = 9999,
+        .kind = .trader,
         .spawnable = true,
         .is_enemy = false,
     },

@@ -592,6 +592,71 @@ test "scenario quest accept kill complete and trader buy" {
         }
     }
     try std.testing.expect(te > 0);
+    // The join bundle replicated the trader as EntitySpawn; the ECD must carry
+    // the trader class hash and hasTraderData so the client renders EntityTrader
+    // and can open the trade window from the spawn data alone.
+    const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
+    const sp_body = cap.findPkgIdEntity(spawn_id, te) orelse return error.TestUnexpectedResult;
+    var sr: binary.Reader = .{ .data = sp_body };
+    _ = try sr.readI32(); // entityId (targeted)
+    try std.testing.expectEqual(@as(u8, 36), try sr.readByte()); // ECD FileVersion
+    try std.testing.expectEqual(packages.stock_entity.class_npc_trader_jen, try sr.readI32());
+    _ = try sr.readI32(); // entityId copy
+    _ = try sr.readF32(); // lifetime
+    _ = try sr.readF32(); // x
+    _ = try sr.readF32(); // y
+    _ = try sr.readF32(); // z
+    _ = try sr.readF32(); // rot.x
+    _ = try sr.readF32(); // yaw
+    _ = try sr.readF32(); // rot.z
+    _ = try sr.readBool(); // on_ground
+    _ = try sr.readI32(); // BodyDamage parts
+    _ = try sr.readI32();
+    _ = try sr.readU32();
+    _ = try sr.readBool(); // no EntityStats
+    _ = try sr.readI16(); // deathTime
+    _ = try sr.readBool(); // no bag
+    _ = try sr.readI32(); // homePosition x
+    _ = try sr.readI32();
+    _ = try sr.readI32();
+    _ = try sr.readI16(); // homeRange
+    _ = try sr.readByte(); // spawnerSource
+    try std.testing.expectEqual(@as(u16, 0), try sr.readU16()); // entityData length
+    try std.testing.expectEqual(true, try sr.readBool()); // hasTraderData
+    try std.testing.expectEqual(te, try sr.readI32()); // trader id
+    // Trader lock-open: the LockResponse carries EntityTraderLockContext with
+    // server TraderData; the client's trade window reads inventory from it.
+    cap.clear();
+    var lr_body: [64]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_body };
+    try lw.writeBool(true); // locking
+    try lw.writeU16(1); // channel 1 (trade)
+    try lw.writeI32(1); // target count
+    try lw.writeByte(1); // present
+    try lw.writeByte(2); // Entity target
+    try lw.writeI32(te);
+    try lw.writeString("EntityTraderLockContext");
+    try lw.writeString("trade");
+    try lw.writeBool(false); // client-side hasTraderData (server fills it)
+    var lfb: [256]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    const resp_body = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+    var rr: binary.Reader = .{ .data = resp_body };
+    try std.testing.expectEqual(true, try rr.readBool()); // locking
+    try std.testing.expectEqual(true, try rr.readBool()); // success
+    var scratch: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // error
+    try std.testing.expectEqual(false, try rr.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 1), try rr.readU16()); // channel
+    try std.testing.expectEqual(@as(i32, 1), try rr.readI32()); // target count
+    try std.testing.expectEqual(@as(u8, 1), try rr.readByte()); // present
+    try std.testing.expectEqual(@as(u8, 2), try rr.readByte()); // Entity
+    try std.testing.expectEqual(te, try rr.readI32());
+    try std.testing.expectEqualStrings("EntityTraderLockContext", try rr.readString(&scratch));
+    try std.testing.expectEqualStrings("trade", try rr.readString(&scratch));
+    try std.testing.expectEqual(true, try rr.readBool()); // hasTraderData
+    try std.testing.expectEqual(te, try rr.readI32()); // trader id
     var open_body: [4]u8 = undefined;
     std.mem.writeInt(i32, open_body[0..4], te, .little);
     var ofb: [64]u8 = undefined;

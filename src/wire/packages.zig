@@ -662,10 +662,7 @@ pub fn buildEntitySpawnResponseItem(buf: []u8, success: bool, item: stock_inv.St
 }
 
 /// Stock TraderData with primary inventory entries (ItemStack + markup i8 + addedByPlayer).
-pub const TraderStockEntry = struct {
-    item: stock_inv.StockSlot,
-    markup: i8 = 0,
-};
+pub const TraderStockEntry = stock_entity.TraderStockEntry;
 
 /// Stock NetPackageTraderData.write (asm.il 839492-839540): the entity id and
 /// tePosition are mutually exclusive. Write(bool = entityId != -1); when true it
@@ -683,19 +680,11 @@ pub fn buildTraderDataStock(
     try w.writeBool(true); // entityId != -1
     try w.writeI32(entity_id);
     try w.writeBool(true); // has TraderData
-    // TraderData.Write
-    try w.writeI32(trader_id);
-    try w.writeU64(0); // lastInventoryUpdate
-    try w.writeByte(2); // FileVersion
-    // WriteInventoryData: primary count + entries, tier groups 0, money
-    try w.writeI32(@intCast(entries.len));
-    for (entries) |e| {
-        try stock_inv.writeItemStack(&w, e.item);
-        try w.writeByte(@bitCast(e.markup)); // i8 as byte
-        try w.writeBool(false); // AddedByPlayer
-    }
-    try w.writeByte(0); // TierItemGroups count
-    try w.writeI32(available_money);
+    try stock_entity.writeTraderDataBody(&w, .{
+        .trader_id = trader_id,
+        .available_money = available_money,
+        .entries = entries,
+    });
     return w.written();
 }
 
@@ -1836,6 +1825,39 @@ fn buildLockResponse(buf: []u8, req: LockRequestHead, success: bool, err_msg: []
     } else {
         try w.writeString("");
     }
+    return w.written();
+}
+
+/// Grant a lock whose target is a trader entity. Stock serializes the
+/// EntityTraderLockContext into the LockResponse (loot-economy.md): the type
+/// name and Command are echoed from the request, then hasTraderData=true and
+/// the server TraderData. NetPackageTraderData is ToServer-only, so this is
+/// the packet that carries trader inventory to the opening client.
+pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity.TraderDataInfo) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    // Type name + Command from the request context tail (empty-safe fallbacks).
+    // Separate buffers: the second readString must not clobber the first.
+    var type_buf: [64]u8 = undefined;
+    var cmd_buf: [64]u8 = undefined;
+    var r: binary.Reader = .{ .data = req.context_tail };
+    const type_name = if (req.context_tail.len > 0)
+        r.readString(&type_buf) catch "EntityTraderLockContext"
+    else
+        "EntityTraderLockContext";
+    const command = if (r.pos < req.context_tail.len)
+        (r.readString(&cmd_buf) catch "")
+    else
+        "";
+    try w.writeBool(req.locking);
+    try w.writeBool(true); // success
+    try w.writeString(""); // error
+    try w.writeBool(false); // isForceUnlocked
+    try w.writeU16(req.channel);
+    try w.writeBytes(req.targets_blob);
+    try w.writeString(type_name);
+    try w.writeString(command);
+    try w.writeBool(true); // hasTraderData
+    try stock_entity.writeTraderDataBody(&w, td);
     return w.written();
 }
 

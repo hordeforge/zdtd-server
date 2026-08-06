@@ -33,15 +33,20 @@ observable, on the live stock client:
   storm/bloodMoon state machine, quest rally objectives, workstation RecipeQueue,
   power trigger TE wire, A* pathfinding, gamestages, buffs depth, vehicle
   multi-seat, party PlatformUserId, stock telnet console surface.
+- **Traders (T1):** the trader NPC now replicates with a real `npcTraderJen`
+  class hash, and `TraderData` rides both stock S2C paths: spawn
+  `EntityCreationData.hasTraderData` and the channel-1 LockResponse context.
+  Wire + scenario tested (759 total); live stock-client visual check pending.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 
 **Gates at this pin:** `make check` exit 0 · 758 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
 
-**Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are traders (no
-trader NPC reaches the client), quest accept and template inheritance, water,
-and player persistence.
+**Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are trader depth
+(POI placement, restock, per-trader lists, quest offering; the NPC now
+replicates with TraderData on both S2C paths, WORK_PLAN T1), quest accept and
+template inheritance, water, and player persistence.
 
 **Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
 whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs

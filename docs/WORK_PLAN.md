@@ -54,18 +54,27 @@ explain why. Match the surrounding style.
 
 ## T1. Traders: replicate the trader entity, then deliver TraderData
 
+**Status: spawn + open paths landed 2026-08-06** (759 tests). `.trader` is
+unfiltered from both spawn paths, `class_table[3]` carries the real
+`npcTraderJen` hash, `EntityCreationData.hasTraderData` is written on trader
+spawns, and the LockResponse trader branch (`buildLockResponseTrader`) delivers
+server stock on open. Remaining for full "done when": POI placement, restock
+rolls, and the live stock-client visual check.
+
 **Why first:** the gap analysis scores traders 3 WORKS / 9 PARTIAL / 14 MISSING,
 and the headline is "no trader NPC exists on the client". Most of the trader
 area and a large part of quests sit downstream of this one change.
 
 **Change**
-1. Stop filtering `.trader` out of entity replication:
-   `src/server/game.zig:6477` (`sendStockEntitySpawns`) and `:7830` (tick spawn).
-2. Give `class_table[3]` a real `npcTraderJen` class hash instead of the
-   placeholder.
-3. Write the `TraderData` flag on `EntityCreationData`:
-   `src/wire/stock_entity.zig:250` currently writes `false` unconditionally.
-4. Deliver the trader payload on the channel-1 `LockResponse` context.
+1. ~~Stop filtering `.trader` out of entity replication~~ **DONE**
+   (`sendStockEntitySpawns`, replicate spawn-on-approach).
+2. ~~Give `class_table[3]` a real `npcTraderJen` class hash~~ **DONE** (from
+   entityclasses at load, builtin fallback for offline).
+3. ~~Write the `TraderData` flag on `EntityCreationData`~~ **DONE**
+   (`writeTraderDataBody` behind a `trader_data` spawn option).
+4. ~~Deliver the trader payload on the channel-1 `LockResponse` context~~
+   **DONE** (`buildLockResponseTrader`; request type name + Command echoed,
+   hasTraderData=true, server stock).
 
 **Grounding:** `EntityTrader` creation and the `TraderData` block in
 `EntityCreationData::write`; `NetPackageTraderData` is ToServer-only, so the two

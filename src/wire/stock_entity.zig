@@ -45,6 +45,9 @@ pub const SpawnOpts = struct {
     /// ECD bag contents (loot containers). NetPackageBag is ToServer-only;
     /// S2C loot travels inside EntityCreationData.bag.
     bag: ?[]const stock_inv.StockSlot = null,
+    /// Trader NPC payload (EntityTrader). Emits bool hasTraderData + TraderData::Write
+    /// after the entityData blob; the client clones it onto EntityTrader.TraderData.
+    trader_data: ?TraderDataInfo = null,
     /// Dropped-item stack. Set for entity_class == class_item to emit the
     /// EntityCreationData itemClass branch (belongsPlayerId, clientEntityId,
     /// itemStack, trailing sbyte). Verified against EntityCreationData.write IL.
@@ -95,6 +98,40 @@ pub const PlayerProfile = struct {
 
 pub const player_profile_version: i32 = 5;
 
+/// Stock TraderData primary-inventory entry: ItemStack + runtime markup delta
+/// (i8; stock Increase +100 / Decrease -4) + AddedByPlayer. We have no per-item
+/// markup source, so callers pass 0: the client shows the base econ price.
+pub const TraderStockEntry = struct {
+    item: stock_inv.StockSlot,
+    markup: i8 = 0,
+};
+
+/// Server-side trader payload. Both real S2C trader paths embed the same
+/// TraderData::Write block: EntityCreationData.hasTraderData (spawn) and the
+/// channel-1 LockResponse EntityTraderLockContext. NetPackageTraderData itself
+/// is ToServer-only, so a server-sent one is not a delivery path.
+pub const TraderDataInfo = struct {
+    trader_id: i32,
+    available_money: i32,
+    entries: []const TraderStockEntry,
+};
+
+/// TraderData::Write (stock IL 472732-472745): trader id, last restock world
+/// time, FileVersion, primary inventory entries, tier groups, available money.
+pub fn writeTraderDataBody(w: *binary.Writer, td: TraderDataInfo) !void {
+    try w.writeI32(td.trader_id);
+    try w.writeU64(0); // lastInventoryUpdate
+    try w.writeByte(2); // FileVersion
+    try w.writeI32(@intCast(td.entries.len));
+    for (td.entries) |e| {
+        try stock_inv.writeItemStack(w, e.item);
+        try w.writeByte(@bitCast(e.markup)); // i8 as byte
+        try w.writeBool(false); // AddedByPlayer
+    }
+    try w.writeByte(0); // TierItemGroups count
+    try w.writeI32(td.available_money);
+}
+
 /// EntityCreationData fallingTree branch: blockPos then fallTreeDir, both via
 /// StreamUtils.Write (Vector3i = 3x i32, Vector3 = 3x f32).
 pub const FallingTreeInfo = struct {
@@ -117,6 +154,8 @@ pub const class_falling_blocks = unity_hash.class_falling_blocks;
 /// Junk drone (EntityClass.junkDroneClass): adds belongsPlayerId + orderState to
 /// the ECD tail, outside the networkWrite guard.
 pub const class_junk_drone = unity_hash.class_junk_drone;
+/// Trader NPC class (EntityTrader): stock trader POIs spawn npcTraderJen.
+pub const class_npc_trader_jen = unity_hash.class_npc_trader_jen;
 
 /// One falling block: packed BlockValue plus its texture word.
 /// `TextureFullArray.Write` emits exactly one i64 (loop bound 1 in the IL).
@@ -247,7 +286,13 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
         return error.ItemDropRequiresItemClass;
     }
     try w.writeU16(0); // entityData length
-    try w.writeBool(false); // no traderData
+    if (opts.trader_data) |td| {
+        // EntityCreationData.write: bool traderData != null, then TraderData::Write.
+        try w.writeBool(true);
+        try writeTraderDataBody(&w, td);
+    } else {
+        try w.writeBool(false); // no traderData
+    }
     // networkWrite tail
     try w.writeByte(255); // sleeperPose
     try w.writeBool(opts.is_sleeper);
@@ -520,4 +565,74 @@ test "falling-block classes without payload error instead of writing a short bod
         .y = 0,
         .z = 0,
     }));
+}
+
+test "trader ECD emits hasTraderData + TraderData::Write" {
+    var buf: [1024]u8 = undefined;
+    const entries = [_]TraderStockEntry{
+        .{ .item = .{ .type_id = 700, .count = 5, .quality = 1 } },
+        .{ .item = .{ .type_id = 701, .count = 1, .quality = 1 }, .markup = -4 },
+    };
+    const body = try buildEntitySpawnStock(&buf, .{
+        .entity_id = 42,
+        .entity_class = 12345678,
+        .x = 10,
+        .y = 20,
+        .z = 30,
+        .trader_data = .{ .trader_id = 42, .available_money = 5000, .entries = entries[0..] },
+    });
+    // Forward parse of the whole ECD; a plain NPC class writes no class branch.
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entityId (targeted)
+    try std.testing.expectEqual(@as(u8, 36), try r.readByte()); // FileVersion
+    try std.testing.expectEqual(@as(i32, 12345678), try r.readI32()); // entity_class
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entityId copy
+    _ = try r.readF32(); // lifetime
+    _ = try r.readF32(); // x
+    _ = try r.readF32(); // y
+    _ = try r.readF32(); // z
+    _ = try r.readF32(); // rot.x
+    _ = try r.readF32(); // rot.y yaw
+    _ = try r.readF32(); // rot.z
+    try std.testing.expectEqual(true, try r.readBool()); // on_ground
+    try std.testing.expectEqual(@as(i32, 4), try r.readI32()); // BodyDamage parts
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32());
+    try std.testing.expectEqual(@as(u32, 0), try r.readU32());
+    try std.testing.expectEqual(false, try r.readBool()); // no EntityStats
+    try std.testing.expectEqual(@as(i16, 0), try r.readI16()); // deathTime
+    try std.testing.expectEqual(false, try r.readBool()); // no bag
+    _ = try r.readI32(); // homePosition x
+    _ = try r.readI32(); // homePosition y
+    _ = try r.readI32(); // homePosition z
+    try std.testing.expectEqual(@as(i16, -1), try r.readI16()); // homeRange
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // spawnerSource
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // entityData length
+    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
+    // TraderData::Write
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // trader id
+    try std.testing.expectEqual(@as(u64, 0), try r.readU64()); // lastInventoryUpdate
+    try std.testing.expectEqual(@as(u8, 2), try r.readByte()); // FileVersion
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // primary count
+    for (entries) |e| {
+        const item = try stock_inv.readItemStack(&r);
+        try std.testing.expectEqual(e.item.type_id, item.type_id);
+        try std.testing.expectEqual(e.item.count, item.count);
+        try std.testing.expectEqual(e.markup, @as(i8, @bitCast(try r.readByte())));
+        try std.testing.expectEqual(false, try r.readBool()); // AddedByPlayer
+    }
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // TierItemGroups
+    try std.testing.expectEqual(@as(i32, 5000), try r.readI32()); // available money
+    // networkWrite tail
+    try std.testing.expectEqual(@as(u8, 255), try r.readByte()); // sleeperPose
+    try std.testing.expectEqual(false, try r.readBool()); // is_sleeper
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // spawnById
+    var name_buf: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&name_buf));
+    try std.testing.expectEqual(false, try r.readBool()); // spawnByAllowShare
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // headState
+    _ = try r.readF32(); // overrideSize
+    _ = try r.readF32(); // overrideHeadSize
+    try std.testing.expectEqual(false, try r.readBool()); // isDancing
+    try std.testing.expectEqual(@as(f32, 0), try r.readF32()); // stressAmount (v36 tail)
+    try std.testing.expect(r.pos == body.len);
 }
