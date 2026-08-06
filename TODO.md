@@ -39,6 +39,9 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       `EntityCreationData.hasTraderData` and the LockResponse trader context
       carry server stock on both stock S2C paths (wire + scenario tested;
       visual check pending).
+- [x] **Loot (T2)**: containers roll their own `blocks.xml` LootList (Extends
+      resolved); zombie bags resolve the stock chain to `zPackReg` and drop only
+      on `LootDropProb` (.04).
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.

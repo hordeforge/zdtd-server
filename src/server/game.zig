@@ -862,6 +862,7 @@ pub const Game = struct {
                 .kind = .zombie,
                 .hash = zdef.hash,
                 .loot_list = zdef.loot_list,
+                .drop_prob = zdef.loot_drop_prob,
                 .chase_speed = zdef.chase_speed,
                 .wander_speed = zdef.wander_speed,
                 .attack_damage = self.handItemDamage(zdef.hand_item),
@@ -873,6 +874,7 @@ pub const Game = struct {
                 .kind = .animal,
                 .hash = adef.hash,
                 .loot_list = adef.loot_list,
+                .drop_prob = adef.loot_drop_prob,
                 .chase_speed = adef.chase_speed,
                 .wander_speed = adef.wander_speed,
                 .attack_damage = self.handItemDamage(adef.hand_item),
@@ -891,6 +893,7 @@ pub const Game = struct {
                 .kind = .trader,
                 .hash = tdef.hash,
                 .loot_list = tdef.loot_list,
+                .drop_prob = tdef.loot_drop_prob,
             });
         }
         if (assets_recipes.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |rt| {
@@ -922,6 +925,7 @@ pub const Game = struct {
                     .kind = .zombie,
                     .hash = def.hash,
                     .loot_list = def.loot_list,
+                    .drop_prob = def.loot_drop_prob,
                     .chase_speed = def.chase_speed,
                     .wander_speed = def.wander_speed,
                     .attack_damage = self.handItemDamage(def.hand_item),
@@ -8234,7 +8238,7 @@ pub const Game = struct {
                     if (self.containers.get(pos) != null) continue;
                     const cont = self.containers.getOrCreate(pos, 8, id) orelse continue;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        self.fillContainerFromLoot(cont, "woodenChest", lootSeedAt(wx, y, wz));
+                        self.fillContainerFromLoot(cont, self.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, y, wz));
                     }
                     found += 1;
                     if (found >= 32) return;
@@ -8257,7 +8261,7 @@ pub const Game = struct {
                     const id: u16 = if (block_id != 0) block_id else tc.g.seedChestBlockId();
                     const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        tc.g.fillContainerFromLoot(cont, "woodenChest", lootSeedAt(wx, wy, wz));
+                        tc.g.fillContainerFromLoot(cont, tc.g.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, wy, wz));
                     }
                     tc.found.* += 1;
                 }

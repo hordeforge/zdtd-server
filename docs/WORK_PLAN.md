@@ -94,20 +94,24 @@ what the client showed.
 
 ## T2. Loot: make containers and bags roll the right table
 
+**Status: landed 2026-08-06** (761 tests). All three linked fixes are in:
+per-block `LootList` (Extends-resolved) drives the container fill, the
+death-bag chain resolves to `zPackReg` at load, and `LootDropProb` gates the
+bag. Verified against the stock XML (per-block `lootListFor` test, zPackReg
+chain, drop-prob gate) plus a Navezgane loadgen smoke. Remaining from "done
+when": container slot counts still ignore the size attribute (separate gap).
+
 **Why:** every chest in the world currently rolls the wrong list, and every
 zombie drops the same bag.
 
 **Change (three linked fixes)**
-1. Carry the `blocks.xml` `LootList` value through `src/assets/maxdamage.zig:393`
-   instead of only recording that one exists, and use it at
-   `src/server/game.zig:7407`, so a gun safe stops rolling `woodenChest`.
-2. Resolve the death-bag chain: `LootDropEntityClass` names a bag **entity
-   class** (`EntityLootContainerRegular`) whose own `LootList="zPackReg"` is the
-   container. Today the class name is passed straight to `rollContainer`, finds
-   nothing, and falls back to 5 scrap iron every time
-   (`src/assets/entities.zig:245`, `src/assets/loot.zig:119`).
-3. Parse and honour `LootDropProb` (0.04 for a regular zombie) instead of
-   dropping a bag on every kill (`src/ecs/world.zig:683`).
+1. ~~Carry the `blocks.xml` `LootList` value through `maxdamage.zig` instead of
+   only recording that one exists, and use it at the container fill~~ **DONE**
+   (`lootListFor`, both fill sites).
+2. ~~Resolve the death-bag chain~~ **DONE** (`LootDropEntityClass` → the bag
+   class's `LootList=zPackReg`, comma form takes the first candidate).
+3. ~~Parse and honour `LootDropProb`~~ **DONE** (class_table/ClassId
+   `drop_prob`, deterministic per-entity roll in `World.damage`).
 
 **Done when:** opening a gun safe and a wooden chest give visibly different
 loot, and most zombie kills drop nothing.

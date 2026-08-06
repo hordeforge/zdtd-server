@@ -87,9 +87,13 @@ virtually per BlockShape.
 uniform zero, and `water_info.xml` is used only to raise terrain, so every lake
 and pond is a flat dry dirt plain.
 
-**Loot is meaningless.** Every prefab container rolls the same hardcoded
-`woodenChest` list at 8 slots and quality 1; every zombie bag holds exactly 5
-scrap iron; bags drop on 100% of kills.
+**Loot is mostly meaningful now.** Containers roll their own `blocks.xml`
+LootList (a gun safe rolls `smallSafes`, a chest rolls `woodenChest`), and
+zombie bags resolve the stock chain (`LootDropEntityClass` → the bag class's
+`LootList=zPackReg`) and only drop on `LootDropProb` (.04), so most kills drop
+nothing like stock. Still open: container slot counts ignore the `lootcontainer`
+size attribute (everything is 8 slots), and crafting is instant and
+unvalidated.
 
 **Nothing about you persists.** Level, XP, skill points, perks, health, stamina,
 food, water, buffs, equipment, bedroll and map exploration are all absent from
@@ -130,11 +134,11 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 7 | 16 | 12 | 35 | Chests open; content wrong at the source; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 10 | 14 | 11 | 35 | Containers roll their own tables; death bags rare and real; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **85** | **159** | **101** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **88** | **157** | **100** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -190,17 +194,19 @@ area and the concrete work.
    cave, mine, quarry and bunker is stamped at the surface
    (`src/world/prefabs.zig:222`, stock at asm.il:902414).
 
-5. **Loot: make containers and bags roll the right table.**
-   Three linked fixes. (a) Carry the `blocks.xml` `LootList` value through
-   `maxdamage.zig:393` instead of only recording that one exists, so a gun safe
-   stops rolling `woodenChest` (`src/server/game.zig:7407`). (b) Resolve the
-   death-bag chain properly: `LootDropEntityClass` names a bag **entity class**
-   (`EntityLootContainerRegular`), whose own `LootList="zPackReg"` is the
-   container; today it is passed straight to `rollContainer`, finds nothing, and
-   falls back to 5 scrap iron every time (`src/assets/entities.zig:245`,
-   `src/assets/loot.zig:119`). (c) Parse and honour `LootDropProb` (.04 for a
-   regular zombie) instead of dropping a bag on every kill
-   (`src/ecs/world.zig:683`).
+5. **DONE 2026-08-06.** Loot: make containers and bags roll the right table.
+   (a) `maxdamage` now carries each block's `blocks.xml` `LootList` (resolved
+   through `Extends`) and the container fill uses it, so a gun safe rolls
+   `smallSafes` instead of `woodenChest` (`src/assets/maxdamage.zig`
+   `lootListFor`, `src/server/game.zig` fill sites). (b) The death-bag chain is
+   resolved at load: `LootDropEntityClass` names a bag entity class whose own
+   `LootList` is the loot.xml container (`zombieBoe` → `EntityLootContainerRegular`
+   → `zPackReg`; comma-weighted form takes the first candidate). (c)
+   `LootDropProb` (.04 regular zombie) is parsed and gates the bag, so most
+   kills drop nothing like stock. Tests: per-block `lootListFor` against the
+   stock blocks.xml, the zPackReg chain assertion, and a drop-prob gate test;
+   761 tests green. Still open: container slot counts (size attribute) and
+   crafting validation.
 
 6. **DONE 2026-08-06.** Entities / net: `EntityRemove(Unloaded)` when a mob leaves interest.
    `DONE`. The replicate pass now mirrors spawn-on-approach: a mob outside a
@@ -1293,14 +1299,14 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/server/game.zig:7380`, `:6657`, `src/world/containers.zig:9`,
   `:82`
 
-- **Loot content per container** `PARTIAL`
-  `fillContainerFromLoot` is called with the literal `"woodenChest"` from both the
-  block scan and the prefab TE scan. `blocks.xml` declares 172 distinct LootList
-  values across 449 blocks and `loot.xml` defines 340 lootcontainers; none of that
-  mapping exists. A gun safe, a medicine cabinet, a garbage bag and a bookcase all
-  give the same roll, so POI tiering is meaningless.
-  *Anchors:* `src/server/game.zig:7407`, `:7430`, `:7445`,
-  `Data/Config/blocks.xml`, `Data/Config/loot.xml`
+- **Loot content per container** `WORKS`
+  `fillContainerFromLoot` now takes the block's `blocks.xml` LootList via
+  `maxdamage.lootListFor` (resolved through `Extends`), so a gun safe rolls
+  `smallSafes`, a chest `woodenChest`, and a medicine cabinet its own table.
+  `blocks.xml` declares ~172 distinct LootList values across 449 blocks and
+  `loot.xml` defines 340 lootcontainers; the mapping now exists end to end.
+  *Anchors:* `src/server/game.zig` fill sites, `src/assets/maxdamage.zig`
+  `lootListFor`, `Data/Config/blocks.xml`, `Data/Config/loot.xml`
 
 - **Loot container size** `PARTIAL`
   Every container is created with `slot_count 8`. Stock takes it from the
@@ -1376,7 +1382,8 @@ can walk into every POI but none of them is the building TFP authored.
   types passing the wrong-numbered filter. Against real prefab data only Composite
   (25) TEs produce containers, matched via zdtd's misnamed `light` constant; Light
   and Sleeper are correctly ignored but for the wrong reason. Containers created
-  this way get the same woodenChest fill.
+  this way now fill from the block's LootList, but the TE-type filter itself is
+  still off.
   *Anchors:* `src/server/game.zig:7413`, `:7439`, `src/wire/te_types.zig:19`
 
 - **POI block data path into chunks** `WORKS`
@@ -1992,22 +1999,24 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/config.zig:53`, `:237`, `src/server/game.zig:788`,
   `src/assets/loot.zig:52-57`, `:157-177`
 
-- **Per-block loot list selection** `MISSING`
-  `maxdamage.zig` records only whether a block **has** a LootList and discards the
-  value. Every prefab storage block is filled from the hardcoded `"woodenChest"` at
-  a fixed 8 slots with quality 1, so a gun safe, a medicine cabinet, a cash
-  register and a bird nest all yield the same table.
-  *Anchors:* `src/server/game.zig:7405-7408`, `:7429-7431`, `:7445-7456`,
-  `src/assets/maxdamage.zig:393-394`, `Data/Config/blocks.xml`
+- **Per-block loot list selection** `WORKS`
+  `maxdamage` records each block's LootList value (resolved through the Extends
+  chain, children-before-parents safe) and the container fill selects by block
+  id, so a gun safe, a medicine cabinet, a cash register and a bird nest each
+  yield their own table.
+  *Anchors:* `src/assets/maxdamage.zig` `loot_list_by_name` / `lootListFor`,
+  `Data/Config/blocks.xml`
 
-- **Zombie / animal death loot bag contents** `PARTIAL`
-  `entities.zig` reads LootDropEntityClass, which in stock is the bag **entity
-  class** name (`EntityLootContainerRegular`), not a loot container name.
-  `fillLootBagFromTable` feeds that string to `rollContainer`; no such
-  lootcontainer exists in loot.xml (it appears only in a comment), so the roll
-  returns 0 and the hardcoded fallback fires. Every zombie bag contains exactly 5
-  scrap iron. The real chain is entity LootDropEntityClass to entity_class
-  `EntityLootContainerRegular` to its `LootList="zPackReg"` to that lootcontainer.
+- **Zombie / animal death loot bag contents** `WORKS`
+  `entities.zig` resolves the stock chain at load: `LootDropEntityClass` names
+  the bag **entity class** (`EntityLootContainerRegular`), whose own
+  `LootList="zPackReg"` is the loot.xml container; comma-weighted forms take the
+  first candidate. `LootDropProb` (.04 regular zombie) is parsed and gates the
+  bag in `World.damage`, so most kills drop nothing and the rest roll real
+  zPack tables instead of 5 scrap iron.
+  *Anchors:* `src/assets/entities.zig` load, `src/ecs/world.zig` damage gate,
+  `src/ecs/components.zig` `ClassId.drop_prob`,
+  `Data/Config/entityclasses.xml:689`, `Data/Config/loot.xml:9928`
   *Anchors:* `src/assets/entities.zig:245-247`, `src/server/game.zig:6906-6924`,
   `src/assets/loot.zig:119-123`, `Data/Config/entityclasses.xml`,
   `Data/Config/loot.xml:9927`

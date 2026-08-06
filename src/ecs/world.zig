@@ -36,6 +36,8 @@ pub const EntityClass = struct {
     /// ECD wire class (Unity Mono GetHashCode). 0 = stock zombieBoe default at encode.
     hash: i32 = 0,
     loot_list: []const u8 = "",
+    /// Chance a death drops the loot bag (entityclasses LootDropProb). 1.0 default.
+    drop_prob: f32 = 1.0,
     /// XML MoveSpeedAggro max scaled to sim m/s; 0 = use systems default.
     chase_speed: f32 = 0,
     /// XML MoveSpeed scaled; 0 = use systems default.
@@ -482,6 +484,7 @@ pub const World = struct {
             .id = cid,
             .hash = ct.hash,
             .loot_list = ct.loot_list,
+            .drop_prob = ct.drop_prob,
         };
         self.registerNet(s, nid);
         return s;
@@ -718,7 +721,20 @@ pub const World = struct {
                 const y = self.transform[s].y;
                 const z = self.transform[s].z;
                 const loot_name = if (self.mask[s].class_id) self.class_id[s].loot_list else "";
+                const drop_prob = if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0;
+                const nid = self.network_id[s].id;
                 self.destroy(s);
+                if (drop_prob < 1.0) {
+                    // Deterministic per-entity roll (stock uses the world
+                    // GameRandom; the net id is stable within a run). zPackReg
+                    // is a 4% bag: most kills drop nothing, like stock.
+                    var h: u64 = @intCast(nid);
+                    h = h *% 1103515245 +% 12345;
+                    h = (h >> 16) ^ h;
+                    if (h % 1000 >= @as(u64, @intFromFloat(drop_prob * 1000))) {
+                        return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name };
+                    }
+                }
                 const loot = self.spawnLootBag(x, y, z, 1, 5);
                 return .{
                     .killed = true,
@@ -859,6 +875,26 @@ test "damageFrom records the attacker as the revenge target" {
     // A zero-damage claim is not an attack.
     _ = w.damageFrom(z, 0, p);
     try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+}
+
+test "loot bag drops only on LootDropProb" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    // A 0-prob class never drops a bag (stock regular zombie is .04).
+    w.setClassDef(1, .{ .name = "z", .kind = .zombie, .hash = 1, .drop_prob = 0 });
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const r = w.damage(z, 100);
+    try std.testing.expect(r.killed);
+    try std.testing.expectEqual(@as(i32, -1), r.loot_bag_id);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.loot_bag));
+    // A 1.0 class always drops (offline/builtin default keeps tests stable).
+    w.setClassDef(1, .{ .name = "z", .kind = .zombie, .hash = 1, .drop_prob = 1 });
+    const z2 = w.spawnZombie(0, 70, 0, 40).?;
+    const r2 = w.damage(z2, 100);
+    try std.testing.expect(r2.killed);
+    try std.testing.expect(r2.loot_bag_id > 0);
+    try std.testing.expectEqual(@as(u32, 1), w.countKind(.loot_bag));
 }
 
 test "per-tick path budget stride is derived from last tick demand" {

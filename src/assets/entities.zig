@@ -14,8 +14,13 @@ pub const EntityDef = struct {
     hash: i32 = 0,
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
-    /// Loot container name (LootListOnDeath), empty if none.
+    /// Loot.xml container name for the death bag (LootDropEntityClass resolved
+    /// through the bag class's own LootList, e.g. zombieBoe → zPackReg); empty
+    /// if none.
     loot_list: []const u8 = "",
+    /// LootDropProb: chance a death drops the loot bag (stock regular zombie
+    /// .04). 1.0 when unset.
+    loot_drop_prob: f32 = 1.0,
     /// UserSpawnType != None (Menu/Console).
     spawnable: bool = false,
     is_enemy: bool = true,
@@ -262,8 +267,22 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.parseF32(mh)) |f| max_hp = f;
         }
         // V3.x: LootDropEntityClass (bag entity class name). Older docs said LootListOnDeath.
-        const loot = resolveProp(&classes, name, "LootDropEntityClass", 0) orelse
+        // The class name names a bag ENTITY CLASS whose own LootList is the
+        // loot.xml container (zombieBoe → EntityLootContainerRegular → zPackReg);
+        // resolve that one hop. Comma form ("A,1,B,1") takes the first candidate.
+        var loot = resolveProp(&classes, name, "LootDropEntityClass", 0) orelse
             (resolveProp(&classes, name, "LootListOnDeath", 0) orelse "");
+        if (loot.len > 0) {
+            const bag_class = if (std.mem.indexOfScalar(u8, loot, ',')) |ci| loot[0..ci] else loot;
+            const bag_list = resolveProp(&classes, bag_class, "LootList", 0);
+            if (bag_list) |bl| {
+                if (bl.len > 0) loot = bl;
+            }
+        }
+        var drop_prob: f32 = 1.0;
+        if (resolveProp(&classes, name, "LootDropProb", 0)) |lp| {
+            if (xml.parseF32(lp)) |f| drop_prob = f;
+        }
         // MoveSpeedAggro "min, max": take max (night chase). MoveSpeed = shamble.
         var chase: f32 = 0;
         if (resolveProp(&classes, name, "MoveSpeedAggro", 0)) |msa| {
@@ -282,6 +301,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .max_hp = max_hp,
             .kind = kind,
             .loot_list = loot,
+            .loot_drop_prob = drop_prob,
             .spawnable = spawnable,
             .is_enemy = is_enemy,
             .chase_speed = chase,
@@ -332,7 +352,10 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(unity_hash.class_zombie_boe, boe.hash);
     try std.testing.expect(boe.spawnable);
     try std.testing.expectEqual(components.Kind.zombie, boe.kind);
-    try std.testing.expectEqualStrings("EntityLootContainerRegular", boe.loot_list);
+    // LootDropEntityClass "EntityLootContainerRegular" resolves one hop through
+    // that class's LootList to the real loot.xml container.
+    try std.testing.expectEqualStrings("zPackReg", boe.loot_list);
+    try std.testing.expectEqual(@as(f32, 0.04), boe.loot_drop_prob);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);

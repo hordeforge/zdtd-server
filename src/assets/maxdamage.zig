@@ -43,6 +43,10 @@ pub const Table = struct {
     storage_ids: std.AutoHashMapUnmanaged(u16, void) = .{},
     /// name → true (storage from blocks.xml); keys live in arena
     storage_names: std.StringHashMapUnmanaged(void) = .{},
+    /// block name → blocks.xml LootList (the loot.xml container the block rolls).
+    loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// AssignIds → LootList (filled from the dump/nim merge; arena values).
+    loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
     /// block name → AssignIds runtime id (every dump row, not just MaxDamage hits).
     id_by_name: std.StringHashMapUnmanaged(u16) = .{},
     /// block name → power watts (MaxPower for sources, else RequiredPower for
@@ -79,6 +83,8 @@ pub const Table = struct {
             self.by_id = .{};
             self.storage_ids = .{};
             self.storage_names = .{};
+            self.loot_list_by_name = .{};
+            self.loot_list_by_id = .{};
             self.id_by_name = .{};
             self.power_watts_by_name = .{};
             self.power_class_by_name = .{};
@@ -111,6 +117,20 @@ pub const Table = struct {
 
     pub fn isStorageId(self: *const Table, block_id: u16) bool {
         return self.storage_ids.contains(block_id);
+    }
+
+    /// blocks.xml LootList for a block id (the loot.xml container it rolls on
+    /// first open). Id lookup first (dump/nim merge), then the name table.
+    pub fn lootListFor(self: *const Table, block_id: u16) ?[]const u8 {
+        if (self.loot_list_by_id.get(block_id)) |ll| return ll;
+        // No reverse id→name map; walk the name table only when small.
+        var it = self.loot_list_by_name.iterator();
+        while (it.next()) |e| {
+            if (self.idByName(e.key_ptr.*)) |id| {
+                if (id == block_id) return e.value_ptr.*;
+            }
+        }
+        return null;
     }
 
     /// Runtime AssignIds id for a stock block name (from dump / .nim), else null.
@@ -263,6 +283,9 @@ pub const Table = struct {
             try self.markStorageIfKnown(arena, id, name);
             const name_dup = try arena.dupe(u8, name);
             try self.id_by_name.put(arena, name_dup, id);
+            if (self.loot_list_by_name.get(name)) |ll| {
+                try self.loot_list_by_id.put(arena, id, ll);
+            }
         }
     }
 
@@ -369,6 +392,8 @@ const DecoFacts = struct {
     extends: ?[]const u8 = null,
     distant: ?bool = null,
     dim: ?Dim = null,
+    /// Direct blocks.xml LootList (resolved through Extends in a second pass).
+    loot_list: ?[]const u8 = null,
 };
 
 /// Resolve one block's inherited facts by walking `Extends`. Stock chains are
@@ -387,6 +412,21 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         cur = f.extends orelse break;
     }
     return out;
+}
+
+/// Resolve a block's LootList by walking `Extends` (children can precede their
+/// parent in blocks.xml; the hop cap only exists so a modded cycle cannot spin
+/// forever).
+fn resolveLootList(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?[]const u8 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.loot_list) |ll| return ll;
+        cur = f.extends orelse return null;
+    }
+    return null;
 }
 
 fn bodyHasStorage(body: []const u8) bool {
@@ -414,6 +454,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
 
     var by_name: std.StringHashMapUnmanaged(u16) = .{};
     var storage_names: std.StringHashMapUnmanaged(void) = .{};
+    var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
     var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
     var power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
@@ -451,7 +492,13 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (bodyHasStorage(body)) {
             try storage_names.put(arena, kn, {});
         }
-        // Power watts: prefer MaxPower (sources) over RequiredPower (consumers).
+        var facts: DecoFacts = .{};
+        if (xml.propertyValue(body, "Extends")) |ext| {
+            facts.extends = try arena.dupe(u8, ext);
+        }
+        if (xml.propertyValue(body, "LootList")) |ll| {
+            facts.loot_list = try arena.dupe(u8, ll);
+        }
         const watts: ?f32 = if (xml.propertyValue(body, "MaxPower")) |mp|
             xml.parseF32(mp)
         else if (xml.propertyValue(body, "RequiredPower")) |rp|
@@ -477,10 +524,6 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "OutputPerStack")) |ops| {
             if (xml.parseF32(ops)) |v| try power_output_per_stack_by_name.put(arena, kn, v);
         }
-        var facts: DecoFacts = .{};
-        if (xml.propertyValue(body, "Extends")) |ext| {
-            facts.extends = try arena.dupe(u8, ext);
-        }
         if (xml.propertyValue(body, "IsDistantDecoration")) |dd| {
             facts.distant = parseBool(dd);
         }
@@ -500,6 +543,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.dim) |d| {
             if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
         }
+        if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
+            try loot_list_by_name.put(arena, e.key_ptr.*, ll);
+        }
     }
     own_facts.deinit(arena);
 
@@ -508,6 +554,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .by_id = .{},
         .storage_ids = .{},
         .storage_names = storage_names,
+        .loot_list_by_name = loot_list_by_name,
         .power_watts_by_name = power_watts_by_name,
         .power_class_by_name = power_class_by_name,
         .power_max_fuel_by_name = power_max_fuel_by_name,
@@ -576,6 +623,19 @@ test "load blocks.xml MaxDamage when present" {
     const nim = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
     try t.mergeNim(std.testing.allocator, nim);
     try std.testing.expect(t.by_id.count() > 0);
+}
+
+test "blocks.xml LootList resolves per block after the AssignIds merge" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    // Direct property and Extends-inherited property both resolve to the
+    // loot.xml container each block rolls (chest vs gun safe differ).
+    try std.testing.expectEqualStrings("woodenChest", t.lootListFor(t.idByName("cntWoodenChestClosed").?).?);
+    try std.testing.expectEqualStrings("smallSafes", t.lootListFor(t.idByName("cntDeskSafe").?).?);
+    // A non-storage block has no LootList.
+    try std.testing.expect(t.lootListFor(t.idByName("treeDeadTree02").?) == null);
 }
 
 test "deco facts follow Extends chains and fail closed" {

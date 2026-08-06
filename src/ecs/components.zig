@@ -46,6 +46,8 @@ pub const ClassId = struct {
     hash: i32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     loot_list: []const u8 = "",
+    /// LootDropProb chance a death drops the bag; 1.0 default.
+    drop_prob: f32 = 1.0,
 };
 
 pub const AiState = enum(u8) {

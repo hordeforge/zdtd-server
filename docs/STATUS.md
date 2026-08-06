@@ -37,6 +37,10 @@ observable, on the live stock client:
   class hash, and `TraderData` rides both stock S2C paths: spawn
   `EntityCreationData.hasTraderData` and the channel-1 LockResponse context.
   Wire + scenario tested (759 total); live stock-client visual check pending.
+- **Loot (T2):** containers roll their own `blocks.xml` LootList (gun safe
+  `smallSafes`, chest `woodenChest`); zombie bags resolve the stock chain to
+  `zPackReg` and drop only on `LootDropProb` (.04), so most kills drop nothing.
+  Three new tests; 761 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 
