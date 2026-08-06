@@ -2366,6 +2366,10 @@ pub const AttachType = enum(u8) {
     detach_client = 3,
 };
 
+/// "Any free seat" on the wire. The stock client mounts with -1 and detaches
+/// with vehicleId = -1 / slot = -1 (asm.il:541872, asm.il:406816).
+pub const slot_any: i16 = -1;
+
 pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromEnum(attach_type));
@@ -2805,6 +2809,51 @@ test "entity attach layout" {
     try std.testing.expectEqual(AttachType.attach_server, a.attach_type);
     try std.testing.expectEqual(@as(i32, 106), a.rider_id);
     try std.testing.expectEqual(@as(i32, 50), a.vehicle_id);
+    try std.testing.expectEqual(@as(i16, 0), a.slot);
+}
+
+test "entity attach carries the stock mount and dismount shapes" {
+    var buf: [32]u8 = undefined;
+    // Mount request: EntityVehicle::EnterVehicle sends slot -1 (asm.il:541872).
+    const mount = try parseEntityAttach(try buildEntityAttach(&buf, .attach_server, 171, 63, slot_any));
+    try std.testing.expectEqual(slot_any, mount.slot);
+    // Dismount request: Entity::SendDetach sends vehicleId -1 and slot -1
+    // (asm.il:406816), so the server must resolve the hull itself.
+    const detach = try parseEntityAttach(try buildEntityAttach(&buf, .detach_server, 171, -1, slot_any));
+    try std.testing.expectEqual(@as(i32, -1), detach.vehicle_id);
+    try std.testing.expectEqual(slot_any, detach.slot);
+    try std.testing.expect(attachTypeIsDetach(detach.attach_type));
+    // Slot is int32 in memory but int16 on the wire (conv.i2, asm.il:844620).
+    const wide = try parseEntityAttach(try buildEntityAttach(&buf, .attach_client, 1, 2, 32767));
+    try std.testing.expectEqual(@as(i16, 32767), wide.slot);
+
+    for ([_]AttachType{ .attach_server, .attach_client, .detach_server, .detach_client }) |t| {
+        const rt = try parseEntityAttach(try buildEntityAttach(&buf, t, -2147483648, 2147483647, -32768));
+        try std.testing.expectEqual(t, rt.attach_type);
+        try std.testing.expectEqual(@as(i32, -2147483648), rt.rider_id);
+        try std.testing.expectEqual(@as(i32, 2147483647), rt.vehicle_id);
+        try std.testing.expectEqual(@as(i16, -32768), rt.slot);
+    }
+    // AttachType only has 0..3 (asm.il:844620); anything else is not a package.
+    var bogus = [_]u8{4} ++ [_]u8{0} ** 10;
+    try std.testing.expectError(error.InvalidEvent, parseEntityAttach(&bogus));
+    try std.testing.expectError(error.EndOfStream, parseEntityAttach(bogus[0..10]));
+}
+
+test "vehicle data sync header framing" {
+    // senderId | vehicleId | syncFlags | dataLen | data
+    var body: [16]u8 = .{ 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 4, 0, 9, 8, 7, 6 };
+    const s = try parseVehicleDataSync(&body);
+    try std.testing.expectEqual(@as(i32, 1), s.sender_id);
+    try std.testing.expectEqual(@as(i32, 2), s.vehicle_id);
+    try std.testing.expectEqual(@as(u16, 3), s.sync_flags);
+    try std.testing.expectEqualSlices(u8, &.{ 9, 8, 7, 6 }, s.data);
+    // A truncated payload must never hand out bytes past the body.
+    try std.testing.expectError(error.EndOfStream, parseVehicleDataSync(body[0..15]));
+    try std.testing.expectError(error.EndOfStream, parseVehicleDataSync(body[0..11]));
+    // Empty payload is legal framing.
+    const empty = try parseVehicleDataSync(&[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+    try std.testing.expectEqual(@as(usize, 0), empty.data.len);
 }
 
 test "entity spawn response and teleport layout" {
@@ -2895,6 +2944,33 @@ pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, 
     buf[8] = side;
     return buf[0..9];
 }
+
+/// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
+/// senderId i32 | vehicleId i32 | syncFlags u16 | dataLen u16 | data[dataLen].
+/// The payload is an opaque EntityVehicle::ReadSyncData blob that zdtd relays
+/// rather than decodes, so only the framing is validated here.
+pub const VehicleDataSync = struct {
+    sender_id: i32,
+    vehicle_id: i32,
+    sync_flags: u16,
+    data: []const u8,
+};
+
+pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
+    if (body.len < 12) return error.EndOfStream;
+    const data_len = std.mem.readInt(u16, body[10..12], .little);
+    if (12 + @as(usize, data_len) > body.len) return error.EndOfStream;
+    return .{
+        .sender_id = std.mem.readInt(i32, body[0..4], .little),
+        .vehicle_id = std.mem.readInt(i32, body[4..8], .little),
+        .sync_flags = std.mem.readInt(u16, body[8..10], .little),
+        .data = body[12 .. 12 + @as(usize, data_len)],
+    };
+}
+
+/// Native zdtd vehicle control (not a stock layout). Fixed 13 bytes so it can
+/// never be confused with a stock body carrying the same package name.
+pub const vehicle_control_len: usize = 13;
 
 /// Vehicle control: entity_id i32, op u8 (0=enter,1=exit,2=drive), throttle f32, steer f32
 pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, throttle: f32, steer: f32 } {

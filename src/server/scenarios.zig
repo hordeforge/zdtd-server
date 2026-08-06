@@ -5,6 +5,7 @@ const std = @import("std");
 const game_mod = @import("game.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
+const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
@@ -691,11 +692,11 @@ test "scenario vehicle enter drive and turret kills with power" {
     var vb: [32]u8 = undefined;
     const enter = try packages.buildVehicleControlBody(&vb, ve, 0, 0, 0);
     var fb: [64]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageVehicleDataSync", enter));
-    try std.testing.expectEqual(c.entity_id, g.sim.vehicle[vslot].driver_net_id);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageVehicleSpawn", enter));
+    try std.testing.expectEqual(c.entity_id, g.sim.vehicle[vslot].driverNetId());
 
     const drive = try packages.buildVehicleControlBody(&vb, ve, 2, 1.0, 0.1);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageVehicleDataSync", drive));
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageVehicleSpawn", drive));
     try g.step();
     try std.testing.expect(g.sim.vehicle[vslot].speed > 0);
 
@@ -2130,4 +2131,122 @@ test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" 
         "PASS replicate dirty gate: candidates heartbeat={d} off={d} after one move={d}\n",
         .{ cand_heartbeat, cand_off, cand_off + 1 },
     );
+}
+
+test "scenario multi-seat: driver plus passenger, dismount frees the seat" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_seats");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_seats", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // Truck4x4 parked on both players so the 8 m mount gate passes for each.
+    const pa = g.sim.slotOfNetId(ca.entity_id).?;
+    const t = g.sim.transform[pa];
+    const ve = g.sim.spawnVehicleEx(.four_by_four, t.x, t.y, t.z, 300, 14, 4).?;
+    const vs = g.sim.slotOfNetId(ve).?;
+    const pb = g.sim.slotOfNetId(cb.entity_id).?;
+    g.sim.transform[pb] = t;
+
+    var body: [32]u8 = undefined;
+    var fb: [64]u8 = undefined;
+    cap_a.clear();
+    cap_b.clear();
+
+    // Both clients mount the stock way: AttachServer with slot -1.
+    const mount_a = try packages.buildEntityAttach(&body, .attach_server, ca.entity_id, ve, packages.slot_any);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAttach", mount_a));
+    try std.testing.expectEqual(ca.entity_id, g.sim.vehicle[vs].driverNetId());
+
+    const mount_b = try packages.buildEntityAttach(&body, .attach_server, cb.entity_id, ve, packages.slot_any);
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageEntityAttach", mount_b));
+    try std.testing.expectEqual(@as(?u8, 1), systems.vehicleFindSeat(&g.sim, vs, cb.entity_id));
+
+    // The passenger cannot steer: only seat 0 drives.
+    var vb: [32]u8 = undefined;
+    const drive = try packages.buildVehicleControlBody(&vb, ve, 2, 1.0, 0.0);
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageVehicleSpawn", drive));
+    try std.testing.expectEqual(@as(f32, 0), g.sim.vehicle[vs].speed);
+
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageVehicleSpawn", drive));
+    try g.step();
+    try std.testing.expect(g.sim.vehicle[vs].speed > 0);
+    // Both riders travel with the hull.
+    try std.testing.expectApproxEqAbs(g.sim.transform[vs].x, g.sim.transform[pb].x, 0.001);
+    try std.testing.expectApproxEqAbs(g.sim.transform[vs].z, g.sim.transform[pb].z, 0.001);
+
+    // The passenger dismounts the stock way: DetachServer with vehicleId -1.
+    const dismount_b = try packages.buildEntityAttach(&body, .detach_server, cb.entity_id, -1, packages.slot_any);
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageEntityAttach", dismount_b));
+    try std.testing.expectEqual(@as(?u8, null), systems.vehicleFindSeat(&g.sim, vs, cb.entity_id));
+    try std.testing.expect(g.sim.vehicle[vs].speed > 0); // driver still aboard
+
+    const dismount_a = try packages.buildEntityAttach(&body, .detach_server, ca.entity_id, -1, packages.slot_any);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAttach", dismount_a));
+    try std.testing.expectEqual(@as(f32, 0), g.sim.vehicle[vs].speed);
+    try std.testing.expectEqual(@as(u8, 4), g.sim.vehicle[vs].freeSeats());
+
+    // Wire check: peers only ever see the client-side types 1 and 3 carrying the
+    // resolved seat. Types 0/2 would send them down the server branch of
+    // NetPackageEntityAttach::ProcessPackage (asm.il:844722).
+    var types: [16]packages.AttachType = undefined;
+    var slots: [16]i16 = undefined;
+    var vehicles: [16]i32 = undefined;
+    const n = collectAttaches(&cap_b, &types, &slots, &vehicles);
+    try std.testing.expect(n >= 4);
+    var seen_driver = false;
+    var seen_passenger = false;
+    var seen_detach = false;
+    for (types[0..n], slots[0..n], vehicles[0..n]) |ty, slot, veh| {
+        try std.testing.expect(ty == .attach_client or ty == .detach_client);
+        if (ty == .attach_client and slot == 0 and veh == ve) seen_driver = true;
+        if (ty == .attach_client and slot == 1 and veh == ve) seen_passenger = true;
+        if (ty == .detach_client) {
+            try std.testing.expectEqual(@as(i32, -1), veh);
+            try std.testing.expectEqual(packages.slot_any, slot);
+            seen_detach = true;
+        }
+    }
+    try std.testing.expect(seen_driver);
+    try std.testing.expect(seen_passenger);
+    try std.testing.expect(seen_detach);
+    std.debug.print("PASS multi-seat: attaches={d} seats=4 driver+passenger mount/dismount\n", .{n});
+}
+
+/// Every EntityAttach a peer received, so a scenario can assert the server
+/// never puts a client on the server branch of ProcessPackage.
+fn collectAttaches(
+    cap: *const ln_peer.Capture,
+    types: []packages.AttachType,
+    slots: []i16,
+    vehicles: []i32,
+) usize {
+    const attach_id = packages.idOf("NetPackageEntityAttach") orelse return 0;
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < cap.n and n < types.len) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn and n < types.len) : (j += 1) {
+            if (pkgs[j].id != attach_id) continue;
+            const a = packages.parseEntityAttach(pkgs[j].body) catch continue;
+            types[n] = a.attach_type;
+            slots[n] = a.slot;
+            vehicles[n] = a.vehicle_id;
+            n += 1;
+        }
+    }
+    return n;
 }

@@ -642,11 +642,13 @@ pub const World = struct {
     }
 
     pub fn spawnVehicle(self: *World, kind: c.VehicleKind, x: f32, y: f32, z: f32) ?NetId {
-        return self.spawnVehicleEx(kind, x, y, z, 200, 0);
+        return self.spawnVehicleEx(kind, x, y, z, 200, 0, 1);
     }
 
-    /// max_hp / max_speed from vehicles.xml when known (0 speed → kind default).
-    pub fn spawnVehicleEx(self: *World, kind: c.VehicleKind, x: f32, y: f32, z: f32, max_hp: f32, max_speed: f32) ?NetId {
+    /// max_hp / max_speed / seat_count from vehicles.xml when known (0 speed →
+    /// kind default). seat_count is clamped into 1..components.max_seats so a
+    /// bad config can never produce a seatless or out-of-range vehicle.
+    pub fn spawnVehicleEx(self: *World, kind: c.VehicleKind, x: f32, y: f32, z: f32, max_hp: f32, max_speed: f32, seat_count: u8) ?NetId {
         const hp = if (max_hp > 0) max_hp else 200;
         const s = self.spawnBase(.vehicle, x, y, z, hp) orelse return null;
         self.mask[s].vehicle = true;
@@ -654,6 +656,7 @@ pub const World = struct {
             .kind = kind,
             .fuel = if (kind == .bicycle) 0 else 100,
             .max_speed = max_speed,
+            .seat_count = @max(1, @min(seat_count, @as(u8, c.max_seats))),
         };
         self.notifySpawn(s);
         return self.network_id[s].id;

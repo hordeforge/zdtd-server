@@ -1304,7 +1304,7 @@ pub const Game = struct {
         {
             const vk: ecs.components.VehicleKind = .minibike;
             if (self.vehicles.byKind(vk)) |vd| {
-                _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max);
+                _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max, vd.seat_count);
             } else {
                 _ = self.sim.spawnVehicle(vk, sx + 6, sy, sz - 4);
             }
@@ -3273,7 +3273,18 @@ pub const Game = struct {
                             .gyrocopter
                         else
                             .four_by_four;
-                        break :blk self.sim.spawnVehicle(vk, sx, sy, sz);
+                        // Seats come from vehicles.xml when that kind is known,
+                        // so a Truck4x4 gets four seats and not one.
+                        const vd = self.vehicles.byKind(vk);
+                        break :blk self.sim.spawnVehicleEx(
+                            vk,
+                            sx,
+                            sy,
+                            sz,
+                            if (vd) |d| d.max_hp else 200,
+                            if (vd) |d| d.velocity_max else 0,
+                            if (vd) |d| d.seat_count else 1,
+                        );
                     }
                     if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
                         break :blk self.sim.spawnTrader(nm, sx, sy, sz);
@@ -3434,6 +3445,11 @@ pub const Game = struct {
                         "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
                         .{ p.local_id, c.slot, c.entity_id },
                     );
+                    // Free the seat in the sim only. This sweep can run nested
+                    // inside a sendReliable ack pump, so it must not touch the
+                    // shared send buffer; surviving peers drop the visual when
+                    // the rider entity is removed.
+                    _ = systems.vehicleDetach(&self.sim, c.entity_id);
                     self.clearLocksForPeer(c.slot);
                     c.* = .{};
                     self.refreshInfoPlayers();
@@ -6011,41 +6027,52 @@ pub const Game = struct {
             try self.sendGame(peer, "NetPackageNPCQuestList", qbody);
             return;
         }
-        if (std.mem.eql(u8, name, "NetPackageVehicleDataSync") or std.mem.eql(u8, name, "NetPackageVehicleSpawn")) {
+        if (std.mem.eql(u8, name, "NetPackageVehicleDataSync")) {
+            // Real stock body (asm.il:844254); the opaque ReadSyncData payload
+            // stays undecoded and is only relayed, as the stock server does.
+            const s = packages.parseVehicleDataSync(body) catch return;
+            if (s.sender_id != c.entity_id) return;
+            const vi = self.sim.slotOfNetId(s.vehicle_id) orelse return;
+            if (!self.sim.mask[vi].vehicle) return;
+            if (self.sim.vehicle[vi].driverNetId() != c.entity_id) return;
+            try self.broadcastExcept("NetPackageVehicleDataSync", body, c.slot);
+            return;
+        }
+        // Native zdtd control channel. Length-gated to the exact native body so
+        // a stock NetPackageVehicleSpawn (entityType + 2 Vector3 + ItemValue +
+        // entityThatPlaced, asm.il:845051) can never be read as a drive op.
+        if (std.mem.eql(u8, name, "NetPackageVehicleSpawn") and body.len == packages.vehicle_control_len) {
             const vc = packages.parseVehicleControl(body) catch return;
-            if (self.sim.slotOfNetId(vc.entity_id)) |vi| {
-                if (!self.sim.mask[vi].vehicle) return;
-                if (vc.op == 0) {
-                    if (!systems.vehicleEnter(&self.sim, vi, c.entity_id)) return;
-                    if (packages.buildEntityAttach(self.body_buf[0..16], .attach_server, c.entity_id, vc.entity_id, 0)) |ab| {
-                        try self.broadcast("NetPackageEntityAttach", ab);
-                    } else |_| {}
-                } else if (vc.op == 1) {
-                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
-                    if (!systems.vehicleExit(&self.sim, c.entity_id)) return;
-                    if (packages.buildEntityAttach(self.body_buf[0..16], .detach_server, c.entity_id, vc.entity_id, 0)) |ab| {
-                        try self.broadcast("NetPackageEntityAttach", ab);
-                    } else |_| {}
-                } else if (vc.op == 2) {
-                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
+            const vi = self.sim.slotOfNetId(vc.entity_id) orelse return;
+            if (!self.sim.mask[vi].vehicle) return;
+            switch (vc.op) {
+                0 => try self.seatRider(c.entity_id, vi, systems.seat_any),
+                1 => try self.unseatRider(c.entity_id),
+                2 => {
+                    // Passengers do not steer: only seat 0 drives (asm.il:542176).
+                    if (self.sim.vehicle[vi].driverNetId() != c.entity_id) return;
                     systems.vehicleControl(&self.sim, vi, vc.throttle, vc.steer, 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second)));
-                }
+                },
+                else => {},
             }
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageEntityAttach")) {
             const a = packages.parseEntityAttach(body) catch return;
             if (a.rider_id != c.entity_id) return;
-            if (self.sim.slotOfNetId(a.vehicle_id)) |vi| {
+            // Types 0/2 are the server branch of NetPackageEntityAttach::
+            // ProcessPackage (asm.il:844722); the server answers with 1/3 and
+            // never echoes the client's own body, which would put every peer on
+            // the server branch.
+            if (packages.attachTypeIsDetach(a.attach_type)) {
+                // Detach carries vehicleId = -1 (asm.il:406816): resolve the hull
+                // from server state, never from the packet.
+                try self.unseatRider(c.entity_id);
+            } else {
+                const vi = self.sim.slotOfNetId(a.vehicle_id) orelse return;
                 if (!self.sim.mask[vi].vehicle) return;
-                if (packages.attachTypeIsDetach(a.attach_type)) {
-                    if (self.sim.vehicle[vi].driver_net_id != c.entity_id) return;
-                    if (!systems.vehicleExit(&self.sim, c.entity_id)) return;
-                } else {
-                    if (!systems.vehicleEnter(&self.sim, vi, c.entity_id)) return;
-                }
+                try self.seatRider(c.entity_id, vi, a.slot);
             }
-            try self.broadcastExcept("NetPackageEntityAttach", body, c.slot);
             return;
         }
         // Gun/tool FX: rebroadcast so other clients see muzzle/swing.
@@ -6558,6 +6585,9 @@ pub const Game = struct {
     /// Resetting the slot to `.{}` also clears guard/quarantine state.
     fn dropClientSlot(self: *Game, slot: usize) void {
         if (self.clients[slot].peer) |p| p.alive = false;
+        // Free the seat a dropping rider held, or the vehicle stays occupied
+        // (and, for seat 0, undriveable) for the rest of the session.
+        self.unseatRider(self.clients[slot].entity_id) catch {};
         self.clearLocksForPeer(slot);
         self.clients[slot] = .{};
         self.refreshInfoPlayers();
@@ -6849,6 +6879,7 @@ pub const Game = struct {
             // Buffs already on the other players (their AddRemoveBuff relays
             // predate this peer).
             try self.sendBuffSync(peer, c);
+            try self.sendSeatedRiders(peer);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
@@ -9252,6 +9283,57 @@ pub const Game = struct {
         if (!self.anyEnteredClient()) return;
         const body = self.buildWeatherBodyFromBiomes() orelse return;
         try self.broadcast("NetPackageWeather", body);
+    }
+
+    /// Seat a rider and tell every client which seat it landed in. The stock
+    /// server answers a mount request with AttachType 1 carrying the RESOLVED
+    /// slot (NetPackageEntityAttach::ProcessPackage, asm.il:844722 IL_008d) and
+    /// the client applies that index verbatim, so this number is the whole of
+    /// "passengers render in the right seat".
+    fn seatRider(self: *Game, rider_id: i32, vslot: ecs.Slot, requested: i16) !void {
+        const seat = systems.vehicleAttach(&self.sim, vslot, rider_id, requested) orelse return;
+        const body = packages.buildEntityAttach(
+            self.body_buf[0..11],
+            .attach_client,
+            rider_id,
+            self.sim.network_id[vslot].id,
+            seat,
+        ) catch return;
+        try self.broadcast("NetPackageEntityAttach", body);
+    }
+
+    /// Unseat a rider and broadcast AttachType 3 with vehicleId and slot both
+    /// -1, matching the server branch of Entity::SendDetach (asm.il:406816).
+    fn unseatRider(self: *Game, rider_id: i32) !void {
+        _ = systems.vehicleDetach(&self.sim, rider_id) orelse return;
+        const body = packages.buildEntityAttach(
+            self.body_buf[0..11],
+            .detach_client,
+            rider_id,
+            -1,
+            packages.slot_any,
+        ) catch return;
+        try self.broadcast("NetPackageEntityAttach", body);
+    }
+
+    /// Replay current occupancy to one peer so a late joiner draws riders in
+    /// their seats instead of standing on the hull.
+    fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
+        for (ecs.groupSlice(&self.sim, .vehicle)) |i| {
+            if (!self.sim.mask[i].vehicle or !self.sim.mask[i].network_id) continue;
+            const v = self.sim.vehicle[i];
+            for (v.seats[0..v.usableSeats()], 0..) |rider, seat| {
+                if (rider < 0) continue;
+                const body = packages.buildEntityAttach(
+                    self.body_buf[0..11],
+                    .attach_client,
+                    rider,
+                    self.sim.network_id[i].id,
+                    @intCast(seat),
+                ) catch continue;
+                try self.sendGame(peer, "NetPackageEntityAttach", body);
+            }
+        }
     }
 
     fn broadcastVehiclePositions(self: *Game) !void {

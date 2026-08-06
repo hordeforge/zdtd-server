@@ -68,9 +68,16 @@ trader_stock                     // traders (inventory on the entity)
 6. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
 7. `systemDespawnFar`: cull far zombies  
 8. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
+1. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
+2. `systemZombieAi`: multi-threaded over slots; deferred player damage  
+3. `systemVehicles`: seated-rider transform stick  
+4. Power: resolve stays in `Game.step` (daylight); not doubled here  
+5. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
+6. `systemDespawnFar`: cull far zombies  
+7. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
-`vehicleEnter` / `vehicleControl` / `vehicleExit`.
+`vehicleAttach` / `vehicleControl` / `vehicleDetach`.
 
 ### Queries (`query.zig`)
 

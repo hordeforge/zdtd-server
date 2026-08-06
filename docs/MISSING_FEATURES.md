@@ -38,6 +38,8 @@ This document is deliberately exhaustive. Status labels:
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders, gamestages | biomes.xml, vehicles.xml | buffs | tables load |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders + buffs | biomes.xml, vehicles.xml | gamestages, buff effect VM | tables load |
+| Vehicles / power / turrets | attach + seats, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | vehicle mod slots, part damage | place/wire/drive/ride first cut |
+| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders | biomes.xml, vehicles.xml | gamestages, buffs | tables load |
 | Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
 | Admin / browser | stock telnet console (greeting, login, stock verbs + output shapes) | client-side console verbs | Steam browser | ops usable |
 
@@ -128,6 +130,8 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityAttach` / detach | P1 (vehicles, seats) |
 | `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health also replicates from the tick pass whenever `dirty.hp` is set, so AI melee, C2S damage and death reach the client the way `EntityStats::TickWait` polls `Stat.Changed` (asm.il:199393); NPC stats and buffs deferred) |
 | `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buff set is server-owned via AddRemoveBuff) |
+| `NetPackageEntityAttach` / detach | HAVE (server resolves slot, replies AttachClient/DetachClient) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buffs deferred) |
 | `NetPackageEntityStealth` | P2 |
 | `NetPackageEntityCollect` | P1 (loot) |
 | `NetPackageEntityWaypointList` / map markers | P2 |
@@ -184,7 +188,8 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority |
 |---|---|
 | Stock vehicle packages (beyond simplified trio) | P1 |
-| Fuel / storage / seats multi-occupant | P1 |
+| Seats multi-occupant | HAVE (base seats from vehicles.xml; no seat-mod budget) |
+| Fuel / storage as items | P1 |
 | Vehicle damage / parts | P2 |
 
 #### Electricity / traps
@@ -626,7 +631,8 @@ not stock:
 |---|---|
 | Vehicle kinds + enter/drive | PARTIAL (arcade physics) |
 | Stock vehicle definitions XML | MISSING |
-| Multi-seat / storage / fuel items | PARTIAL fuel float only |
+| Multi-seat | HAVE (seat0..N from vehicles.xml, driver is seat 0) |
+| Storage / fuel items | PARTIAL fuel float only |
 | Vehicle collision / terrain stick | PARTIAL (server gravity + terrain-top clamp; no entity/block-side collision) |
 | Placeable vehicle as entity spawn stock | PARTIAL |
 | Power grid BFS | HAVE (flood from generators, demand>gen drop) |
@@ -943,6 +949,7 @@ remainder (triggered_effect VM, cvar sync, immunity/damage-type gates, buff
 persistence across sessions), vehicle multi-seat, Encryption* (optional).
 Steam browser, party PlatformUserId, gamestages, buffs
 depth, vehicle multi-seat, Encryption* (optional).
+depth, Encryption* (optional).
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.
@@ -1121,6 +1128,37 @@ HONEST GAPS:
 - **Reported read calls.** `docs/PACKAGES.md` under-reports these packages
   because `PlatformUserIdentifierAbs::FromStream` is a static call, not a
   `BinaryReader` virtual: the AllyRequest row shows only `ReadBoolean;`.
+## Vehicle seats (multi-occupant)
+
+`components.Vehicle.seats` is a fixed `[6]i32` of rider net ids; seat 0 is the
+driver (`EntityVehicle::AttachEntityToSelf` sets `hasDriver` only for slot 0,
+asm.il:542176) and 1..n-1 are passengers. Seat allocation in
+`systems.vehicleAttach` mirrors `Entity::AttachEntityToSelf` (asm.il:406554): a
+negative request takes the lowest free seat, re-requesting the held seat is a
+no-op, an out-of-range request fails. `seat_count` comes from the contiguous
+`seatN` classes in vehicles.xml (`Vehicle::SetSeats`, asm.il:1344168), giving
+Bicycle/Minibike/Motorcycle 1, Gyrocopter 2, Truck4x4 4.
+
+On the wire the server is authoritative, as stock is: a client sends
+`AttachType` 0 with slot -1 (`EntityVehicle::EnterVehicle`, asm.il:541872) or
+type 2 with `vehicleId = -1, slot = -1` (`Entity::SendDetach`, asm.il:406816),
+and the server answers everyone with type 1 carrying the RESOLVED seat or type 3
+(asm.il:844722). The client parents the rider to the seat transform itself
+(`EntityVehicle::GetAttachedToInfo`, asm.il:542503), so the seat index is the
+only thing the server has to get right for a passenger to render in place.
+
+HONEST GAPS:
+- **No `VehicleSeats` mod budget.** `Vehicle::SetSeats` allows extra seats when
+  `EffectManager.GetValue(PassiveEffects::VehicleSeats, ...)` (asm.il:733849) is
+  non-zero. zdtd has no vehicle mod slots, so the budget is fixed at 0 and only
+  base seats count: a Truck4x4 is 4 seats, never 6.
+- **Occupancy is not persisted.** A restart leaves every seat empty.
+- **Explicit requests for an occupied seat are refused, not honoured.** Stock
+  overwrites the array entry (asm.il:406554 IL_005d), which would unseat another
+  player on a client's say-so. The stock client never sends a positive slot.
+- **`NetPackageVehicleDataSync` payload stays opaque.** The framing is parsed
+  and validated (asm.il:844254) and the body is relayed to other peers, but the
+  `EntityVehicle::ReadSyncData` blob is not decoded.
 
 ## Related
 

@@ -171,11 +171,23 @@ pub const VehicleKind = enum(u8) {
     gyrocopter = 4,
 };
 
+/// Stock ceiling: Truck4x4 declares seat0..seat5 in vehicles.xml, the widest
+/// seat block any stock vehicle has (Vehicle::SetSeats, asm.il:1344168).
+pub const max_seats: usize = 6;
+
+/// Seat 0 is the driver: EntityVehicle::AttachEntityToSelf sets hasDriver only
+/// when the resolved slot is 0 (asm.il:542176 IL_008a).
+pub const driver_seat: u8 = 0;
+
 pub const Vehicle = struct {
     kind: VehicleKind = .minibike,
     speed: f32 = 0,
     fuel: f32 = 100,
-    driver_net_id: i32 = -1,
+    /// Rider net id per seat, -1 when free. Index is the wire slot carried by
+    /// NetPackageEntityAttach (asm.il:844620).
+    seats: [max_seats]i32 = [_]i32{-1} ** max_seats,
+    /// Usable seats, always clamped to 1..max_seats on spawn.
+    seat_count: u8 = 1,
     /// Vertical velocity accumulator for gravity integration (systemVehicles).
     vy: f32 = 0,
     /// Cap from vehicles.xml velocityMax; 0 → kind default in vehicleControl.
@@ -183,6 +195,23 @@ pub const Vehicle = struct {
     /// Last drive input (held until exit or new op=2). Applied each sim tick.
     throttle: f32 = 0,
     steer: f32 = 0,
+
+    pub fn driverNetId(self: *const Vehicle) i32 {
+        return self.seats[driver_seat];
+    }
+
+    /// Legal seat indices, guarded against a corrupt seat_count.
+    pub fn usableSeats(self: *const Vehicle) u8 {
+        return @max(1, @min(self.seat_count, @as(u8, max_seats)));
+    }
+
+    pub fn freeSeats(self: *const Vehicle) u8 {
+        var n: u8 = 0;
+        for (self.seats[0..self.usableSeats()]) |r| {
+            if (r < 0) n += 1;
+        }
+        return n;
+    }
 };
 
 pub const Turret = struct {

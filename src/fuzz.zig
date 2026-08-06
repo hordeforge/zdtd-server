@@ -159,6 +159,12 @@ const package_corpus = [_][]const u8{
     &.{ 1, 0, 0, 0, 1, 0, 1, 0, 0 },
     // entity attach: type + rider + vehicle + slot
     &.{ 0, 106, 0, 0, 0, 1, 0, 0, 0, 0, 0 },
+    // entity attach mount request: slot -1 (EntityVehicle::EnterVehicle)
+    &.{ 0, 106, 0, 0, 0, 1, 0, 0, 0, 0xFF, 0xFF },
+    // entity attach dismount request: vehicle -1 and slot -1 (Entity::SendDetach)
+    &.{ 2, 106, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+    // stock vehicle data sync: sender + vehicle + syncFlags + len + payload
+    &.{ 106, 0, 0, 0, 63, 0, 0, 0, 1, 0, 2, 0, 0xAA, 0xBB },
     // land claim repair: xyz + begin
     &.{ 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 1 },
     // chunk body: cx,cz,pad + 256 heights zeros
@@ -215,6 +221,9 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseLandClaimRepair(input) catch null;
     _ = packages.parseTraderTrade(input) catch null;
     _ = packages.parseVehicleControl(input) catch null;
+    if (packages.parseVehicleDataSync(input)) |s| {
+        try std.testing.expect(s.data.len + 12 <= input.len);
+    } else |_| {}
     var cmd_buf: [256]u8 = undefined;
     const cmd = packages.parseConsoleCmd(input, &cmd_buf);
     try std.testing.expect(cmd.len <= cmd_buf.len);

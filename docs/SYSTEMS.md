@@ -77,7 +77,8 @@ Join auto-accepts `catalog.starter_id`. Systems: `questAccept*`, `questOn*`.
 ## Chat / attach / collect
 
 - Stock `NetPackageChat` (Global); SimpleChat upgraded to Chat
-- `NetPackageEntityAttach` for vehicle enter/exit
+- `NetPackageEntityAttach` for vehicle mount/dismount: the client sends type 0/2,
+  the server resolves the seat and answers everyone with type 1/3 (asm.il:844722)
 - `NetPackageEntityCollect` entityId+playerId fan-out
 
 ## PackageIds
@@ -88,8 +89,13 @@ Join-stable prefix plus large stock name list in `packages.default_mappings`
 ## Vehicles (`Vehicle` component + `systemVehicles`)
 
 - Kinds: bicycle, minibike, motorcycle, 4x4, gyrocopter
-- Enter / exit / drive (throttle + steer); fuel burn; driver transforms stick to vehicle
-- Wire: `NetPackageVehicleSpawn`, `VehiclePositions`, `VehicleDataSync` (control body)
+- Mount / dismount / drive (throttle + steer); fuel burn; every seated rider's
+  transform sticks to the vehicle
+- Seats: `seat0..seatN` from vehicles.xml (`Vehicle::SetSeats`, asm.il:1344168).
+  Seat 0 drives, 1..n-1 ride. Base counts: Bicycle/Minibike/Motorcycle 1,
+  Gyrocopter 2, Truck4x4 4
+- Wire: `NetPackageVehicleSpawn` (native control body), `VehiclePositions`,
+  `VehicleDataSync` (stock framing, opaque payload relayed)
 
 ## Electricity (`ecs/electric.zig` PowerGrid resource)
 
