@@ -54,7 +54,7 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `blocks.zig` | blocks.xml + AssignIds | solid flags; **ids from dump only** |
 | `block_textures.zig` | blocks.xml Texture | defaults; terrain >255 not on chunk channel |
 | `painting.zig` | painting.xml | paint id ↔ TextureId |
-| `biome_layers.zig` | biomes.xml layers + default weather | column fill; WeatherPackage params from weather name=default |
+| `biome_layers.zig` | biomes.xml layers + weather groups | column fill; ordered `<weather>` groups per biome (name/prob/duration/delay/ranges) drive `world/weather.zig`; wire params keep the raw 0..100 XML scale (the client divides) |
 | biomap colors | biomes.xml biomemapcolor | `world/biomes.zig` ColorTable |
 | `items.zig` | items.xml | stacks, prices, stock type, placeable block |
 | `entities.zig` | entityclasses.xml | hash, HP, loot |

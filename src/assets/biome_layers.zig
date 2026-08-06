@@ -43,23 +43,77 @@ pub fn defaultStack() Stack {
     };
 }
 
-/// Wire snapshot defaults from biomes.xml weather name="default" (mid of first range).
-/// Slot order matches WeatherPackage: temp, precip, cloud, wind, fog.
-pub const WeatherDefaults = struct {
-    biome_id: u8 = 0,
-    params: [5]f32 = .{ 70, 0, 0.15, 0.1, 0.04 },
+pub const max_weather_biomes: usize = 16;
+/// Stock biomes.xml tops out at 12 groups (wasteland); trailing extras are dropped.
+/// Dropping only the tail keeps every kept group's document ordinal, which is the
+/// wire groupIndex the client indexes weatherGroups with.
+pub const max_weather_groups: usize = 12;
+/// Stock tops out at two `<Condition>` entries per group; extras are dropped and
+/// the remaining weights renormalize over what was kept.
+pub const max_weather_ranges: usize = 4;
+pub const max_weather_name: usize = 16;
+/// BiomeDefinition/Probabilities/ProbType (asm.il ~1249177): Temperature,
+/// Precipitation, CloudThickness, Wind, Fog. Same slot order as WeatherPackage.param.
+pub const prob_type_count: usize = 5;
+
+/// One `<Condition range="lo,hi" prob="w"/>`. `weight` is normalized across the
+/// condition's entries (BiomeDefinition/Probabilities::Normalize, asm.il ~1249400).
+pub const WeatherRange = struct {
+    lo: f32 = 0,
+    hi: f32 = 0,
+    weight: f32 = 0,
 };
 
-pub const max_weather_biomes: usize = 16;
+/// One `<weather name= prob= duration= delay= buff=>` group of a biome.
+/// Wire groupIndex is the group's document ordinal inside its own biome.
+pub const WeatherGroup = struct {
+    name_buf: [max_weather_name]u8 = [_]u8{0} ** max_weather_name,
+    /// 0 when the XML name did not fit the buffer, so it matches no group query.
+    name_len: u8 = 0,
+    /// Normalized across the biome's groups (BiomeDefinition::SetupWeather).
+    prob: f32 = 0,
+    /// World ticks: AddWeatherGroup (asm.il ~1249840) scales XML hours by 1000.
+    duration: i32 = 3000,
+    delay_lo: i32 = 0,
+    delay_hi: i32 = 0,
+    range_n: [prob_type_count]u8 = [_]u8{0} ** prob_type_count,
+    ranges: [prob_type_count][max_weather_ranges]WeatherRange =
+        [_][max_weather_ranges]WeatherRange{[_]WeatherRange{.{}} ** max_weather_ranges} ** prob_type_count,
+
+    pub fn name(self: *const WeatherGroup) []const u8 {
+        return self.name_buf[0..self.name_len];
+    }
+
+    pub fn rangeSlice(self: *const WeatherGroup, prob_type: usize) []const WeatherRange {
+        return self.ranges[prob_type][0..self.range_n[prob_type]];
+    }
+};
+
+/// Ordered weather groups of one biome (index == wire groupIndex).
+pub const WeatherGroupSet = struct {
+    n: u8 = 0,
+    groups: [max_weather_groups]WeatherGroup = [_]WeatherGroup{.{}} ** max_weather_groups,
+
+    /// BiomeDefinition::FindWeatherGroupIndex (asm.il ~1250180): -1 when absent.
+    pub fn findIndex(self: *const WeatherGroupSet, group_name: []const u8) ?u8 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (std.mem.eql(u8, self.groups[i].name(), group_name)) return @intCast(i);
+        }
+        return null;
+    }
+};
 
 pub const Table = struct {
     /// biomemap id → fill stack (missing → default_stack).
     stacks: [max_biomemap_id]Stack = [_]Stack{.{}} ** max_biomemap_id,
     default_stack: Stack = defaultStack(),
-    /// Per biomemap id weather params from XML default group (missing = unset).
-    weather: [max_biomemap_id]?[5]f32 = .{null} ** max_biomemap_id,
-    /// Ordered biomemap ids that have weather (for NetPackageWeather body).
+    /// Ordered biomemap ids that have weather groups (for NetPackageWeather body).
+    /// Stock InitBiomeWeather (asm.il ~2050437) keeps exactly the biomes with
+    /// weatherGroups.Count > 0, which is what sizes the wire body on both ends.
     weather_ids: [max_weather_biomes]u8 = .{0} ** max_weather_biomes,
+    /// Parallel to weather_ids.
+    weather_groups: [max_weather_biomes]WeatherGroupSet = [_]WeatherGroupSet{.{}} ** max_weather_biomes,
     weather_n: u8 = 0,
     loaded: bool = false,
 
@@ -72,21 +126,6 @@ pub const Table = struct {
             return self.stacks[biome_id];
         if (self.default_stack.n > 0) return self.default_stack;
         return defaultStack();
-    }
-
-    /// Fill out[] with WeatherDefaults for each biomemap that has weather XML.
-    /// Returns count written (0 if none loaded; caller may omit Weather package).
-    pub fn weatherPackages(self: *const Table, out: []WeatherDefaults) usize {
-        var n: usize = 0;
-        var i: usize = 0;
-        while (i < self.weather_n and n < out.len) : (i += 1) {
-            const id = self.weather_ids[i];
-            if (id >= max_biomemap_id) continue;
-            const p = self.weather[id] orelse continue;
-            out[n] = .{ .biome_id = id, .params = p };
-            n += 1;
-        }
-        return n;
     }
 
     /// Fill column blocks[0..h] inclusive from layers (surface at y=h).
@@ -162,59 +201,133 @@ fn parseDepth(s: []const u8) ?u16 {
     return xml.parseU16(s);
 }
 
-/// Midpoint of first `range="lo,hi"` (or single value) on a weather child tag.
-fn firstRangeMid(body: []const u8, tag: []const u8) ?f32 {
-    var needle_buf: [48]u8 = undefined;
-    if (tag.len + 1 > needle_buf.len) return null;
-    needle_buf[0] = '<';
-    @memcpy(needle_buf[1..][0..tag.len], tag);
-    const needle = needle_buf[0 .. tag.len + 1];
-    const ti = std.mem.indexOf(u8, body, needle) orelse return null;
-    const range_s = xml.attr(body, ti, "range") orelse return null;
-    if (std.mem.indexOfScalar(u8, range_s, ',')) |c| {
-        const lo = xml.parseF32(std.mem.trim(u8, range_s[0..c], " \t")) orelse return null;
-        const hi = xml.parseF32(std.mem.trim(u8, range_s[c + 1 ..], " \t")) orelse return null;
-        return (lo + hi) * 0.5;
-    }
-    return xml.parseF32(std.mem.trim(u8, range_s, " \t"));
+/// Finite non-negative float or `fallback` (biomes.xml is patchable by mods, so
+/// every number it yields is sanitized before it can steer a probability walk).
+fn sanePositive(v: ?f32, fallback: f32) f32 {
+    const f = v orelse return fallback;
+    if (!std.math.isFinite(f) or f < 0) return fallback;
+    return f;
 }
 
-/// Parse weather name="default" (or first weather group) into param slots.
-/// XML units: Temp F, others 0..100 → wire uses same numeric scale stock sends.
-fn parseWeatherDefaults(body: []const u8) ?[5]f32 {
-    // Prefer <weather name="default" ...> … </weather>
-    var wi: usize = 0;
-    var weather_body: ?[]const u8 = null;
-    while (wi < body.len) {
-        const at = std.mem.indexOfPos(u8, body, wi, "<weather") orelse break;
-        const gt = std.mem.indexOfPos(u8, body, at, ">") orelse break;
-        const name_a = xml.attr(body, at, "name");
-        const close = std.mem.indexOfPos(u8, body, gt, "</weather>") orelse break;
-        const inner = body[gt + 1 .. close];
-        if (name_a) |nm| {
-            if (std.mem.eql(u8, nm, "default")) {
-                weather_body = inner;
-                break;
-            }
-        } else if (weather_body == null) {
-            weather_body = inner;
-        }
-        wi = close + 10;
+fn saneFinite(v: ?f32, fallback: f32) f32 {
+    const f = v orelse return fallback;
+    if (!std.math.isFinite(f)) return fallback;
+    return f;
+}
+
+/// XML hours → world ticks (AddWeatherGroup multiplies by 1000). Clamped so a
+/// malformed duration can never trap @intFromFloat or run time backwards.
+fn ticksFromHours(hours: f32) i32 {
+    if (!std.math.isFinite(hours) or hours <= 0) return 0;
+    return @intFromFloat(@min(hours * 1000.0, 2.0e9));
+}
+
+/// `lo,hi` pair, or a single value used for both components (Unity Vector2 parse).
+fn parsePair(s: []const u8, lo: *f32, hi: *f32) void {
+    if (std.mem.indexOfScalar(u8, s, ',')) |c| {
+        lo.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[0..c], " \t")), lo.*);
+        hi.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[c + 1 ..], " \t")), hi.*);
+        return;
     }
-    const wb = weather_body orelse return null;
-    const temp = firstRangeMid(wb, "Temperature") orelse 70;
-    const precip = firstRangeMid(wb, "Precipitation") orelse 0;
-    const cloud = firstRangeMid(wb, "CloudThickness") orelse 15;
-    const wind = firstRangeMid(wb, "Wind") orelse 10;
-    const fog = firstRangeMid(wb, "Fog") orelse 1;
-    // Stock wire param scale: temp F as-is; precip/cloud/wind/fog as 0..1 fractions of 100.
-    return .{
-        temp,
-        precip * 0.01,
-        cloud * 0.01,
-        wind * 0.01,
-        fog * 0.01,
-    };
+    const v = saneFinite(xml.parseF32(std.mem.trim(u8, s, " \t")), lo.*);
+    lo.* = v;
+    hi.* = v;
+}
+
+/// WorldBiomes::ParseWeather (asm.il ~1252740) matches condition tags case-insensitively.
+fn probTypeFor(tag: []const u8) ?usize {
+    if (std.ascii.eqlIgnoreCase(tag, "Temperature")) return 0;
+    if (std.ascii.eqlIgnoreCase(tag, "Precipitation")) return 1;
+    if (std.ascii.eqlIgnoreCase(tag, "CloudThickness")) return 2;
+    if (std.ascii.eqlIgnoreCase(tag, "Wind")) return 3;
+    if (std.ascii.eqlIgnoreCase(tag, "Fog")) return 4;
+    return null;
+}
+
+/// Element name right after `<` (empty when the tag is a close/comment/decl).
+fn tagNameAt(body: []const u8, lt: usize) []const u8 {
+    var e = lt + 1;
+    while (e < body.len and (std.ascii.isAlphanumeric(body[e]) or body[e] == '_')) e += 1;
+    return body[lt + 1 .. e];
+}
+
+/// `<Temperature range=".." min=".." max=".." prob=".."/>` children of one group.
+/// Defaults follow ParseWeather: 0..100, except Temperature which is -50..150.
+fn parseWeatherConditions(group_body: []const u8, g: *WeatherGroup) void {
+    var i: usize = 0;
+    while (i < group_body.len) {
+        const lt = std.mem.indexOfScalarPos(u8, group_body, i, '<') orelse break;
+        i = lt + 1;
+        const tag = tagNameAt(group_body, lt);
+        if (tag.len == 0) continue;
+        const pt = probTypeFor(tag) orelse continue;
+        if (g.range_n[pt] >= max_weather_ranges) continue;
+        var lo: f32 = if (pt == 0) -50 else 0;
+        var hi: f32 = if (pt == 0) 150 else 100;
+        if (xml.attr(group_body, lt, "min")) |s| lo = saneFinite(xml.parseF32(s), lo);
+        if (xml.attr(group_body, lt, "max")) |s| hi = saneFinite(xml.parseF32(s), hi);
+        if (xml.attr(group_body, lt, "range")) |s| parsePair(s, &lo, &hi);
+        const weight = sanePositive(if (xml.attr(group_body, lt, "prob")) |s| xml.parseF32(s) else null, 1);
+        g.ranges[pt][g.range_n[pt]] = .{ .lo = lo, .hi = hi, .weight = weight };
+        g.range_n[pt] += 1;
+    }
+}
+
+/// Probabilities::Normalize: per condition, divide every weight by their sum.
+fn normalizeConditions(g: *WeatherGroup) void {
+    var pt: usize = 0;
+    while (pt < prob_type_count) : (pt += 1) {
+        var total: f32 = 0;
+        for (g.ranges[pt][0..g.range_n[pt]]) |r| total += r.weight;
+        if (total <= 0) continue;
+        var i: usize = 0;
+        while (i < g.range_n[pt]) : (i += 1) g.ranges[pt][i].weight /= total;
+    }
+}
+
+/// Ordered `<weather>` groups of one `<biome>` body, probabilities normalized the
+/// way BiomeDefinition::SetupWeather does (prob /= total + 1e-6).
+pub fn parseWeatherGroups(body: []const u8) WeatherGroupSet {
+    var set: WeatherGroupSet = .{};
+    var i: usize = 0;
+    while (set.n < max_weather_groups) {
+        const el = xml.nextElement(body, i, "<weather", "</weather>") orelse break;
+        i = el.next_i;
+        // Guard against a longer tag that merely shares the prefix.
+        const after = el.open_at + "<weather".len;
+        if (after < body.len and !std.ascii.isWhitespace(body[after]) and body[after] != '>' and body[after] != '/')
+            continue;
+        var g: WeatherGroup = .{};
+        if (xml.attr(body, el.open_at, "name")) |nm| {
+            if (nm.len <= max_weather_name) {
+                @memcpy(g.name_buf[0..nm.len], nm);
+                g.name_len = @intCast(nm.len);
+            }
+        }
+        g.prob = sanePositive(if (xml.attr(body, el.open_at, "prob")) |s| xml.parseF32(s) else null, 1);
+        g.duration = ticksFromHours(sanePositive(
+            if (xml.attr(body, el.open_at, "duration")) |s| xml.parseF32(s) else null,
+            3,
+        ));
+        if (xml.attr(body, el.open_at, "delay")) |s| {
+            var lo: f32 = 0;
+            var hi: f32 = 0;
+            parsePair(s, &lo, &hi);
+            g.delay_lo = ticksFromHours(lo);
+            g.delay_hi = ticksFromHours(hi);
+        }
+        parseWeatherConditions(el.body, &g);
+        normalizeConditions(&g);
+        set.groups[set.n] = g;
+        set.n += 1;
+    }
+    var total: f32 = 0;
+    var ti: usize = 0;
+    while (ti < set.n) : (ti += 1) total += set.groups[ti].prob;
+    const denom = total + 1e-6;
+    var gi: usize = 0;
+    while (gi < set.n) : (gi += 1) set.groups[gi].prob /= denom;
+    return set;
 }
 
 fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const u8) ?u16, ctx: ?*anyopaque) Stack {
@@ -290,11 +403,12 @@ pub fn loadFromPath(
         i = mi + 9;
     }
 
-    // Parse each <biome name="..."> … </biome> for layer stack + default weather.
+    // Parse each <biome name="..."> … </biome> for layer stack; keep the body slice
+    // so weather groups are only parsed for the biomes a biomemap id points at.
     var stacks_by_name: std.StringHashMapUnmanaged(Stack) = .{};
     defer stacks_by_name.deinit(allocator);
-    var weather_by_name: std.StringHashMapUnmanaged([5]f32) = .{};
-    defer weather_by_name.deinit(allocator);
+    var bodies_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer bodies_by_name.deinit(allocator);
     i = 0;
     while (i < clean.len) {
         const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
@@ -310,9 +424,7 @@ pub fn loadFromPath(
         if (st.n > 0) {
             try stacks_by_name.put(allocator, bname, st);
         }
-        if (parseWeatherDefaults(body)) |wp| {
-            try weather_by_name.put(allocator, bname, wp);
-        }
+        try bodies_by_name.put(allocator, bname, body);
         i = close + 8;
     }
 
@@ -325,18 +437,17 @@ pub fn loadFromPath(
 
     var id: usize = 0;
     while (id < max_biomemap_id) : (id += 1) {
-        if (name_by_id[id]) |nm| {
-            if (stacks_by_name.get(nm)) |st| {
-                table.stacks[id] = st;
-            }
-            if (weather_by_name.get(nm)) |wp| {
-                table.weather[id] = wp;
-                if (table.weather_n < max_weather_biomes) {
-                    table.weather_ids[table.weather_n] = @intCast(id);
-                    table.weather_n += 1;
-                }
-            }
+        const nm = name_by_id[id] orelse continue;
+        if (stacks_by_name.get(nm)) |st| {
+            table.stacks[id] = st;
         }
+        const body = bodies_by_name.get(nm) orelse continue;
+        if (table.weather_n >= max_weather_biomes) continue;
+        const set = parseWeatherGroups(body);
+        if (set.n == 0) continue;
+        table.weather_ids[table.weather_n] = @intCast(id);
+        table.weather_groups[table.weather_n] = set;
+        table.weather_n += 1;
     }
     // water / underwater: keep default (no land layers); surface gen still uses heights.
     table.loaded = true;
@@ -415,12 +526,122 @@ test "load stock biomes.xml when present" {
     try std.testing.expectEqual(assignids.terr_burnt_forest_ground, burnt.layers[0].block_id);
     const pine = t.stackFor(3);
     try std.testing.expectEqual(assignids.terr_forest_ground, pine.layers[0].block_id);
-    // Weather defaults from XML (pine_forest temp ~78 F mid of 76..80).
-    try std.testing.expect(t.weather_n >= 4);
-    const pine_w = t.weather[3] orelse return error.TestUnexpectedResult;
-    try std.testing.expect(pine_w[0] > 70 and pine_w[0] < 85);
-    var pkgs: [max_weather_biomes]WeatherDefaults = undefined;
-    const n = t.weatherPackages(&pkgs);
-    try std.testing.expect(n >= 4);
-    try std.testing.expect(pkgs[0].biome_id != 0 or pkgs[1].biome_id != 0);
+    // Stock ships weather groups for exactly 5 biomes: snow 1, pine_forest 3,
+    // desert 5, wasteland 8, burnt_forest 9 (ascending biomemap id here).
+    try std.testing.expectEqual(@as(u8, 5), t.weather_n);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 3, 5, 8, 9 }, t.weather_ids[0..5]);
+    // Group index is per biome document order, never global: pine_forest has a
+    // "fog" group that desert lacks, so their storm indices differ.
+    const pine_set = &t.weather_groups[1];
+    try std.testing.expectEqual(@as(u8, 11), pine_set.n);
+    try std.testing.expectEqual(@as(?u8, 0), pine_set.findIndex("default"));
+    try std.testing.expectEqual(@as(?u8, 4), pine_set.findIndex("stormbuild"));
+    try std.testing.expectEqual(@as(?u8, 5), pine_set.findIndex("storm"));
+    const desert_set = &t.weather_groups[2];
+    try std.testing.expectEqual(@as(?u8, 3), desert_set.findIndex("stormbuild"));
+    // duration="1.1" delay="26,36" → 1100 ticks, 26000..36000 tick gap.
+    const storm = &pine_set.groups[5];
+    try std.testing.expectEqual(@as(i32, 1100), storm.duration);
+    try std.testing.expectEqual(@as(i32, 26000), storm.delay_lo);
+    try std.testing.expectEqual(@as(i32, 36000), storm.delay_hi);
+    // Every biome has a bloodMoon group (the global forced weather type).
+    var i: usize = 0;
+    while (i < t.weather_n) : (i += 1) {
+        try std.testing.expect(t.weather_groups[i].findIndex("bloodMoon") != null);
+    }
+}
+
+const pine_weather_xml =
+    \\<weather name="default" prob="83" duration="6">
+    \\  <Temperature range="76,80"/>
+    \\  <CloudThickness range="0,0" prob="35"/>
+    \\  <CloudThickness range="10,70" prob="65"/>
+    \\  <Precipitation range="0,0"/>
+    \\  <Fog range="0,2"/>
+    \\  <Wind range="3,22"/>
+    \\</weather>
+    \\<weather name="fog" prob="7">
+    \\  <Temperature range="65,70"/>
+    \\  <CloudThickness min="35" max="70"/>
+    \\  <Fog min="17" max="27"/>
+    \\</weather>
+    \\<weather name="stormbuild" prob="0" duration=".2">
+    \\  <Wind range="25,25"/>
+    \\  <spectrum name="Stormy"/>
+    \\</weather>
+    \\<weather name="storm" prob="0" duration="1.1" delay="26,36">
+    \\  <Wind range="40,40"/>
+    \\</weather>
+;
+
+test "parseWeatherGroups pine forest shape" {
+    const set = parseWeatherGroups(pine_weather_xml);
+    try std.testing.expectEqual(@as(u8, 4), set.n);
+    try std.testing.expectEqualStrings("default", set.groups[0].name());
+    try std.testing.expectEqual(@as(?u8, 3), set.findIndex("storm"));
+    try std.testing.expectEqual(@as(?u8, null), set.findIndex("rainheavy"));
+    // 83 + 7 + 0 + 0 = 90, normalized by 90 + 1e-6.
+    try std.testing.expectApproxEqAbs(@as(f32, 83.0 / 90.0), set.groups[0].prob, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.0 / 90.0), set.groups[1].prob, 1e-5);
+    try std.testing.expectEqual(@as(f32, 0), set.groups[3].prob);
+    // Two CloudThickness entries, weights normalized over 35 + 65.
+    const cloud = set.groups[0].rangeSlice(2);
+    try std.testing.expectEqual(@as(usize, 2), cloud.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), cloud[0].weight, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.65), cloud[1].weight, 1e-5);
+    try std.testing.expectEqual(@as(f32, 10), cloud[1].lo);
+    try std.testing.expectEqual(@as(f32, 70), cloud[1].hi);
+    // Legacy min=/max= form is equivalent to range=.
+    const fog_cloud = set.groups[1].rangeSlice(2);
+    try std.testing.expectEqual(@as(f32, 35), fog_cloud[0].lo);
+    try std.testing.expectEqual(@as(f32, 70), fog_cloud[0].hi);
+    // Absent condition: stock rolls 0 for it, so no range entry is synthesized.
+    try std.testing.expectEqual(@as(usize, 0), set.groups[1].rangeSlice(3).len);
+    // duration is XML hours * 1000; ".2" → 200 ticks.
+    try std.testing.expectEqual(@as(i32, 200), set.groups[2].duration);
+    try std.testing.expectEqual(@as(i32, 1100), set.groups[3].duration);
+    try std.testing.expectEqual(@as(i32, 26000), set.groups[3].delay_lo);
+    // Params carry the raw 0..100 XML scale: the client divides by 100 in
+    // BiomeWeather::FogPercent and WeatherManager::GetCurrentCloudThicknessPercent.
+    try std.testing.expectEqual(@as(f32, 40), set.groups[3].rangeSlice(3)[0].lo);
+}
+
+test "parseWeatherGroups defaults and malformed input" {
+    // No attributes: name "" (matches nothing), prob 1, duration 3 hours.
+    const bare = parseWeatherGroups("<weather><Fog/></weather>");
+    try std.testing.expectEqual(@as(u8, 1), bare.n);
+    try std.testing.expectEqual(@as(i32, 3000), bare.groups[0].duration);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), bare.groups[0].prob, 1e-5);
+    // Condition defaults: 0..100, Temperature -50..150.
+    const fog = bare.groups[0].rangeSlice(4);
+    try std.testing.expectEqual(@as(f32, 0), fog[0].lo);
+    try std.testing.expectEqual(@as(f32, 100), fog[0].hi);
+    // Self-closing group, then a normal one: the scan must not swallow the rest.
+    const mixed = parseWeatherGroups("<weather/><weather name=\"storm\"><Wind range=\"1,2\"/></weather>");
+    try std.testing.expectEqual(@as(u8, 2), mixed.n);
+    try std.testing.expectEqual(@as(?u8, 1), mixed.findIndex("storm"));
+    // Unclosed group is dropped, not read past the end.
+    try std.testing.expectEqual(@as(u8, 0), parseWeatherGroups("<weather name=\"x\">").n);
+    // Junk numbers fall back to the stock defaults instead of NaN/inf.
+    const junk = parseWeatherGroups("<weather prob=\"nan\" duration=\"1e40\"><Wind range=\"inf,2\"/></weather>");
+    try std.testing.expectApproxEqAbs(@as(f32, 1), junk.groups[0].prob, 1e-5);
+    try std.testing.expectEqual(@as(i32, 3000), junk.groups[0].duration);
+    try std.testing.expectEqual(@as(f32, 0), junk.groups[0].rangeSlice(3)[0].lo);
+    // A finite but absurd duration saturates instead of trapping @intFromFloat.
+    const huge = parseWeatherGroups("<weather duration=\"3000000\"/>");
+    try std.testing.expectEqual(@as(i32, 2_000_000_000), huge.groups[0].duration);
+    // A name longer than the buffer is stored as unnamed so it matches no query.
+    const long = parseWeatherGroups("<weather name=\"a_very_long_group_name\"/>");
+    try std.testing.expectEqual(@as(usize, 0), long.groups[0].name().len);
+    // Groups beyond the cap are dropped from the tail; kept ordinals stay stable.
+    var buf: [1024]u8 = undefined;
+    var o: usize = 0;
+    var k: usize = 0;
+    while (k < max_weather_groups + 4) : (k += 1) {
+        const s = try std.fmt.bufPrint(buf[o..], "<weather name=\"g{d}\"/>", .{k});
+        o += s.len;
+    }
+    const capped = parseWeatherGroups(buf[0..o]);
+    try std.testing.expectEqual(@as(u8, max_weather_groups), capped.n);
+    try std.testing.expectEqualStrings("g0", capped.groups[0].name());
 }

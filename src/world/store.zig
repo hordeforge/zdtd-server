@@ -12,6 +12,7 @@ const worldgen_mod = @import("worldgen.zig");
 const parallel = @import("../util/parallel.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+const weather_mod = @import("weather.zig");
 const io_fs = @import("../util/io_fs.zig");
 const chunk_flush = @import("chunk_flush.zig");
 
@@ -305,6 +306,9 @@ pub const World = struct {
     biomes: ?biomes_mod.BiomeMap = null,
     /// biomes.xml layer stacks (AssignIds-resolved). Empty until Game loads config.
     biome_layers_table: biome_layers.Table = .{},
+    /// Storm / bloodMoon weather groups, seeded from biome_layers_table. Inert
+    /// (n == 0) until Game loads biomes.xml.
+    weather: weather_mod.Manager = .{},
     map_dir: ?[]u8 = null,
     spawns: [32]dtm.SpawnPoint = undefined,
     spawn_count: usize = 0,
