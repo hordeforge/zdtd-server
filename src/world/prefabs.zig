@@ -400,3 +400,33 @@ test "tts size read abandoned_house if present" {
     try std.testing.expectEqual(@as(i32, 21), sy);
     try std.testing.expectEqual(@as(i32, 42), sz);
 }
+
+test "navezgane paints a real POI into its chunk" {
+    // Regression: the client saw only terrain where abandoned_house_07 stands,
+    // so a POI that the index lists must actually reach the paint callback.
+    const world_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(world_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+    if (!fileExists(prefab_root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
+
+    var idx = try loadFromWorldDir(std.testing.allocator, world_dir, prefab_root);
+    defer idx.deinit();
+
+    const Count = struct {
+        n: usize = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+            _ = wx;
+            _ = wy;
+            _ = wz;
+            _ = tex;
+            _ = dens;
+            if (raw == 0) return;
+            const c: *@This() = @ptrCast(@alignCast(ctx.?));
+            c.n += 1;
+        }
+    };
+    var c: Count = .{};
+    // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
+    idx.applyTtsPaintToChunk(-17, 28, Count.put, &c);
+    try std.testing.expect(c.n > 0);
+}

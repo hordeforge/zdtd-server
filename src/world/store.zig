@@ -1135,3 +1135,26 @@ test "evict then reload of a queued key reads the newest bytes" {
     // Reload must wait on the queued write, never read a stale/absent file.
     try std.testing.expectEqual(block_stone, try w.blockWorld(16 + 4, 90, 4));
 }
+
+test "navezgane spawn chunk carries its POI blocks" {
+    // The stock client saw only terrain where abandoned_house_07 stands, so the
+    // POI must survive the whole store path, not just the prefab index.
+    const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    if (!io_fs.fileExistsSimple(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+
+    var w = try World.init(std.testing.allocator, "worlds/zdtd_poi_test");
+    defer w.deinit();
+    try w.loadStockMapEx(map_dir, null);
+
+    // prefabs.xml lists the prefab's origin CORNER, so probe inside the
+    // footprint: abandoned_house_07 is 42x42 at (-262,61,450).
+    const t2 = World.worldToChunk(-241, 471);
+    const ch = try w.getOrCreate(t2.pos);
+
+    var non_air: usize = 0;
+    var y: i32 = 62;
+    while (y < 80) : (y += 1) {
+        if (ch.blockAt(t2.lx, y, t2.lz) != 0) non_air += 1;
+    }
+    try std.testing.expect(non_air > 0);
+}

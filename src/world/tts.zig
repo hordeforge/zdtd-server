@@ -279,6 +279,50 @@ pub fn rotateLocalXZ(x: i32, z: i32, sx: i32, sz: i32, rot: u8) struct { x: i32,
     };
 }
 
+/// BlockValue.rotation is bits 16..20 (`(rawData >> 16) & 31`, asm.il
+/// BlockValue::get_rotation ~140513).
+const rotation_shift: u5 = 16;
+const rotation_mask: u32 = 31;
+
+/// One 90 degree step about world Y for the 24 cube orientations. Stock does
+/// this in BlockShapeNew::CalcRotation (asm.il ~181959) by running the
+/// orientation through ConvertRotationFree; this table is that same permutation,
+/// derived from the BlockShapeNew::rotationsToQuats construction (asm.il
+/// ~181879) where entry i is AngleAxis(a, right|forward) * AngleAxis(b, up).
+/// It is a bijection of order 4, which the tests below assert.
+const rot_y_step = [24]u8{
+    1,  2,  3,  0,
+    7,  4,  5,  6,
+    23, 20, 21, 22,
+    11, 8,  9,  10,
+    13, 14, 15, 12,
+    17, 18, 19, 16,
+};
+
+/// Rotate a block's own facing to match a prefab stamped at `steps` * 90
+/// degrees. Rotating only the footprint leaves every wall, roof and sign inside
+/// a rotated POI facing its unrotated direction, which is most of Navezgane:
+/// its prefabs.xml uses rotations 0..3 in roughly equal numbers.
+/// Entries 24..27 are the 45 degree band and cycle among themselves, matching
+/// CalcRotation's separate loop for `_rotation >= 24`. Anything above that is
+/// left alone rather than guessed at.
+pub fn rotateRawY(raw: u32, steps: u8) u32 {
+    const n: u8 = steps & 3;
+    if (n == 0) return raw;
+    const rot: u8 = @truncate((raw >> rotation_shift) & rotation_mask);
+    var out: u8 = rot;
+    if (rot < 24) {
+        var i: u8 = 0;
+        while (i < n) : (i += 1) out = rot_y_step[out];
+    } else if (rot < 28) {
+        out = 24 + ((rot - 24 + n) & 3);
+    } else {
+        return raw;
+    }
+    return (raw & ~(rotation_mask << rotation_shift)) |
+        (@as(u32, out) << rotation_shift);
+}
+
 /// dens: TTS density sbyte as u8 when plane present; null when unknown.
 pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void;
 
@@ -313,8 +357,41 @@ pub fn paintDecoration(
         if (wy < 0 or wy >= 256) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
-        set_block(ctx, wx, wy, wz, raw, tex, dens);
+        set_block(ctx, wx, wy, wz, rotateRawY(raw, rot), tex, dens);
     }
+}
+
+test "rotateRawY is identity for zero steps and preserves non-rotation bits" {
+    const raw: u32 = 0x0AB3_0042; // type 0x42, rotation 3, high meta bits set
+    try std.testing.expectEqual(raw, rotateRawY(raw, 0));
+    const r1 = rotateRawY(raw, 1);
+    try std.testing.expectEqual(raw & ~(rotation_mask << rotation_shift), r1 & ~(rotation_mask << rotation_shift));
+}
+
+test "rotateRawY cube orientations form a bijection of order four" {
+    var seen = [_]bool{false} ** 24;
+    var rot: u8 = 0;
+    while (rot < 24) : (rot += 1) {
+        const raw = @as(u32, rot) << rotation_shift;
+        const once: u8 = @truncate((rotateRawY(raw, 1) >> rotation_shift) & rotation_mask);
+        try std.testing.expect(once < 24);
+        try std.testing.expect(!seen[once]);
+        seen[once] = true;
+        // Four quarter turns must land back on the original facing.
+        try std.testing.expectEqual(raw, rotateRawY(raw, 4));
+        // Stepping twice equals one half turn.
+        try std.testing.expectEqual(rotateRawY(raw, 2), rotateRawY(rotateRawY(raw, 1), 1));
+    }
+    for (seen) |s| try std.testing.expect(s);
+}
+
+test "rotateRawY cycles the 45 degree band and leaves unknown rotations alone" {
+    const band_base: u32 = 24 << rotation_shift;
+    try std.testing.expectEqual(@as(u32, 25) << rotation_shift, rotateRawY(band_base, 1));
+    try std.testing.expectEqual(@as(u32, 24) << rotation_shift, rotateRawY(@as(u32, 27) << rotation_shift, 1));
+    try std.testing.expectEqual(band_base, rotateRawY(band_base, 4));
+    const unknown: u32 = 30 << rotation_shift;
+    try std.testing.expectEqual(unknown, rotateRawY(unknown, 1));
 }
 
 test "tts load abandoned_house block types if present" {
