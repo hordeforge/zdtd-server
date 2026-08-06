@@ -143,8 +143,8 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 12 | 29 | 11 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **102** | **150** | **93** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 13 | 29 | 10 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **103** | **150** | **92** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -862,16 +862,21 @@ parsed, and quest offering is unwired.
 - **Trade execution** `PARTIAL`
   `systems.trade` is coherent bookkeeping with rollback and overflow guards, but
   only over zdtd's private 9-byte body and only exercised by zdtd's own scenario
-  harness. Two behavioural gaps regardless of wire: you can only sell an item the
-  trader already stocks, and the trader's money is never debited when you sell.
+  harness. The trader's money pool is now debited on sell and credited on buy
+  (wallet row); remaining regardless of wire: you can only sell an item the
+  trader already stocks.
   *Anchors:* `src/ecs/systems.zig:623-689`, `:636-640`,
   `src/server/scenarios.zig:614-633`
 
 - **Trader wallet / AvailableMoney** `PARTIAL`
-  A fixed `trader_wallet_dukes = 5000` is written into every TraderData and never
-  spent, regenerated per reset interval, or made per-trader. Selling is
-  effectively unlimited; stock also enforces `TraderInfo.TraderBuyLimit`.
-  *Anchors:* `src/server/game.zig:133-136`, `:5522`, `asm.il:861697`
+  Each trader now owns a live money pool (`TraderStock.wallet`, spawned from
+  `trader_wallet_dukes`): the wire TraderData shows the real balance, buying
+  from the trader credits it, selling to the trader debits it and refuses the
+  sale once it runs out, and `traderRestock` regenerates it toward the spawn
+  default. Remaining: `TraderInfo.TraderBuyLimit` (per-item buy caps) and the
+  restock timer is still not wired to the tick.
+  *Anchors:* `src/ecs/components.zig:538`, `src/ecs/systems.zig:628` (`trade`),
+  `:700` (`traderRestock`), `src/server/game.zig` (`traderMoney`), `asm.il:861697`
 
 - **Haggling / barter perks** `MISSING`
   No occurrence of "barter" anywhere in `src/`. `progression.xml` defines
@@ -2897,7 +2902,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**12 WORKS · 29 PARTIAL · 11 MISSING**
+**13 WORKS · 29 PARTIAL · 10 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3100,10 +3105,12 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/c2s_text.zig:38-45`, `src/server/game.zig:2199-2205`,
   `asm.il:204246-204254`, `asm.il:1865701`
 
-- **IPv6 hosting** `MISSING`
-  The UDP socket binds only `IpAddress.ip4.unspecified(port)`. An IPv6-only client
-  cannot reach the server. Stock LiteNetLib is constructed with the dual-stack flag
-  set.
+- **IPv6 hosting** `WORKS` `(2026-08-07)`
+  The UDP socket binds IPv6 unspecified with `IPV6_V6ONLY` cleared, so both
+  IPv4-mapped and native IPv6 clients reach the server (stock LiteNetLib is
+  constructed with the dual-stack flag); hosts without IPv6 fall back to
+  IPv4-only. Regression test round-trips a loopback datagram on whichever
+  family the host supports and a native v6 send when dual-stack is active.
   *Anchors:* `src/litenet/udp_socket.zig:21-27`, `asm.il:852304-852310`
 
 - **Reliable-ordered channel and ack bitmap** `WORKS` `(2026-08-07)`

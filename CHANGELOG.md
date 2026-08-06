@@ -91,6 +91,19 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   from its neighbours and re-spreads. Support and ignore membership resolve
   from the block tables, not a hardcoded list. See
   `../7dtd-research/docs/stability.md` for the RE ground.
+- Land claims persist across restarts: keystone claims write to `claims.zlc`
+  and re-map to the owner on login (entity ids are per-session), and the
+  preserved seen-day keeps offline expiry past `LandClaimExpiryDays` honest.
+  Removing the keystone takes the claim with it (`removeClaimAt`).
+- Trader stock is per class: each trader resolves its own traders.xml
+  `<trader_info>` id from npc.xml and fills its window from its own
+  `<trader_items>` list instead of the shared `traderAlways` fallback. The
+  lock-open path denies trading outside the trader's open hours (vending stays
+  always open) and `allow_sell=false` blocks selling to that trader.
+- Trader quest offers come from each class's npc.xml `quest_list` instead of a
+  hardcoded map, accept the stock quest-name families (`intro_`, `test_`,
+  `challengegroup_reward_`) alongside tiered `quest_` names, and are filtered
+  by the requested tier with active quests excluded.
 
 ### Fixed
 
@@ -129,6 +142,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `sendGame`, `broadcastExcept` and the replicate fan-out, so 20 Hz position
   spam no longer occupies or retransmits inside the 64-slot reliable window
   shared with chunks and join-critical control traffic.
+- IPv6 hosting: the UDP socket binds IPv6 unspecified with IPV6_V6ONLY cleared,
+  so both IPv4-mapped and native IPv6 clients reach the server (stock
+  LiteNetLib's dual-stack flag); hosts without IPv6 fall back to IPv4-only.
 - Loot respawn: `LootRespawnDays` (serverconfig, default 7, 0 disables) re-rolls
   a looted world container on its next open when the interval since its touch
   day has elapsed; the cycle-varying seed makes each respawn differ while
@@ -142,6 +158,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   and silently loses a message that was already ACKed. A third concurrent
   message drops with an `asm_drops` counter; a regression test interleaves two
   messages and reassembles both whole.
+- POIBlockActivate quest objectives now wait for and advance on the client's
+  block-activated objective update (parsed but previously discarded) instead
+  of auto-scaffolding past the phase; unrelated objective events such as
+  zombie kills no longer advance it.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
