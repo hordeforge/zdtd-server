@@ -397,6 +397,10 @@ const LandClaim = struct {
     owner_online: bool = true,
     /// In-game day the owner was last seen online (expiry base when offline).
     owner_seen_day: u32 = 0,
+    /// Stable owner key for persistence: the login name (entity ids are
+    /// reassigned across restarts). Empty when the claim predates the field.
+    owner_name: [32]u8 = .{0} ** 32,
+    owner_name_len: u8 = 0,
 };
 
 const Client = struct {
@@ -953,6 +957,13 @@ pub const Game = struct {
         self.containers.load(self.world.world_dir) catch |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load containers", e);
+                return e;
+            }
+        };
+        // Land claims survive restart (claims.zlc); restored owners re-map on login.
+        self.loadClaims() catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load claims", e);
                 return e;
             }
         };
@@ -2103,6 +2114,7 @@ pub const Game = struct {
         }
         self.sampleFlushCounters();
         self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+        self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
         self.land_claims_n = 0;
@@ -3311,6 +3323,10 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
                 };
+                self.saveClaims() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save claims", e);
+                };
                 self.saveBlockMeta() catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save block meta", e);
@@ -3678,6 +3694,10 @@ pub const Game = struct {
                 self.containers.save(self.world.world_dir) catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
+                };
+                self.saveClaims() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save claims", e);
                 };
                 self.saveBlockMeta() catch |e| {
                     save_failed = true;
@@ -4116,11 +4136,24 @@ pub const Game = struct {
 
     /// Register (or replace) a land claim owned by `owner_entity` at a keystone.
     fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
+        // Capture the stable owner key (login name) so the claim survives a
+        // restart; entity ids are reassigned and cannot be persisted.
+        var owner_name: [32]u8 = .{0} ** 32;
+        var owner_name_len: u8 = 0;
+        for (&self.clients) |*c| {
+            if (c.entity_id != owner_entity) continue;
+            const n = @min(c.name_len, owner_name.len);
+            @memcpy(owner_name[0..n], c.name[0..n]);
+            owner_name_len = @intCast(n);
+            break;
+        }
         for (self.land_claims[0..self.land_claims_n]) |*claim| {
             if (claim.x == x and claim.y == y and claim.z == z) {
                 claim.owner_entity = owner_entity;
                 claim.owner_online = true;
                 claim.owner_seen_day = self.sim.director.clock.day;
+                claim.owner_name = owner_name;
+                claim.owner_name_len = owner_name_len;
                 return;
             }
         }
@@ -4132,6 +4165,8 @@ pub const Game = struct {
             .z = z,
             .owner_entity = owner_entity,
             .owner_seen_day = self.sim.director.clock.day,
+            .owner_name = owner_name,
+            .owner_name_len = owner_name_len,
         };
         self.land_claims_n += 1;
     }
@@ -4175,6 +4210,90 @@ pub const Game = struct {
             } else {
                 i += 1;
             }
+        }
+    }
+
+    /// Persist land claims to {world_dir}/claims.zlc (magic ZCLC | u16 count |
+    /// records: x i32, y i32, z i32, name_len u8, name[32], seen_day u32).
+    /// Best-effort like the other save paths; owner_entity is not stored (it is
+    /// reassigned across restarts and re-mapped on login by name).
+    fn saveClaims(self: *Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
+        var buf: [max_land_claims * (4 + 4 + 4 + 1 + 32 + 4) + 8]u8 = undefined;
+        var o: usize = 0;
+        @memcpy(buf[0..4], "ZCLC");
+        o = 6; // count patched below
+        var count: u16 = 0;
+        var i: usize = 0;
+        while (i < self.land_claims_n) : (i += 1) {
+            const c = &self.land_claims[i];
+            if (o + 49 > buf.len) break;
+            std.mem.writeInt(i32, buf[o..][0..4], c.x, .little);
+            std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.y, .little);
+            std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.z, .little);
+            buf[o + 12] = c.owner_name_len;
+            @memcpy(buf[o + 13 ..][0..32], &c.owner_name);
+            std.mem.writeInt(u32, buf[o + 45 ..][0..4], c.owner_seen_day, .little);
+            o += 49;
+            count += 1;
+        }
+        std.mem.writeInt(u16, buf[4..6], count, .little);
+        try io_fs.writeFileSimple(p, buf[0..o]);
+    }
+
+    /// Restore land claims from claims.zlc. Restored claims have no live owner
+    /// until their player logs in (reclaimForName re-maps owner_entity); the
+    /// preserved seen_day keeps the offline expiry math honest. A missing file
+    /// means fresh world (OpenFailed, like containers.load); any other read
+    /// failure surfaces so the caller can log before the next save clobbers.
+    fn loadClaims(self: *Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
+        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return error.ReadFailed,
+        };
+        defer self.allocator.free(data);
+        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZCLC")) return error.BadMagic;
+        const count = std.mem.readInt(u16, data[4..6], .little);
+        var o: usize = 6;
+        var i: usize = 0;
+        while (i < count and self.land_claims_n < max_land_claims) : (i += 1) {
+            if (o + 49 > data.len) return error.Truncated;
+            const x = std.mem.readInt(i32, data[o..][0..4], .little);
+            const y = std.mem.readInt(i32, data[o + 4 ..][0..4], .little);
+            const z = std.mem.readInt(i32, data[o + 8 ..][0..4], .little);
+            const name_len = data[o + 12];
+            if (name_len > 32) return error.BadRecord;
+            var name: [32]u8 = .{0} ** 32;
+            @memcpy(name[0..name_len], data[o + 13 ..][0..name_len]);
+            const seen = std.mem.readInt(u32, data[o + 45 ..][0..4], .little);
+            o += 49;
+            self.land_claims[self.land_claims_n] = .{
+                .x = x,
+                .y = y,
+                .z = z,
+                .owner_entity = -1, // re-mapped on login
+                .owner_online = false,
+                .owner_seen_day = seen,
+                .owner_name = name,
+                .owner_name_len = name_len,
+            };
+            self.land_claims_n += 1;
+        }
+    }
+
+    /// Re-map restored claims to the entity id a player got at login, and mark
+    /// the owner online. Called once per login; no-op for unknown names.
+    fn reclaimForName(self: *Game, name: []const u8, entity_id: i32) void {
+        if (entity_id <= 0) return;
+        for (self.land_claims[0..self.land_claims_n]) |*claim| {
+            if (claim.owner_name_len != name.len) continue;
+            if (!std.mem.eql(u8, claim.owner_name[0..claim.owner_name_len], name)) continue;
+            claim.owner_entity = entity_id;
+            claim.owner_online = true;
+            claim.owner_seen_day = self.sim.director.clock.day;
         }
     }
 
@@ -4885,6 +5004,9 @@ pub const Game = struct {
             const was_joined = c.joined;
             const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return;
             c.entity_id = eid;
+            // Restored claims keyed by this login name get their live owner
+            // entity re-mapped here (entity ids are reassigned per session).
+            self.reclaimForName(c.name[0..c.name_len], eid);
             c.joined = true;
             c.view_radius = self.view_radius;
             // PlayerDataFile::CopyTo clamps a not-yet-set bornAt down to the

@@ -2670,3 +2670,62 @@ test "scenario quest completion pays out item and exp rewards" {
     try std.testing.expect(found);
     std.debug.print("PASS quest-rewards: coins +100, casinoCoin granted, xp {d}->{d}\n", .{ xp0, g.clients[c.slot].xp });
 }
+
+test "scenario land claims persist across restart and re-map on login" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const claim_x: i32 = 250;
+    const claim_z: i32 = 250;
+    // Game A: the owner places a keystone claim; deinit persists claims.zlc.
+    {
+        const g = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const kid = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
+        var sb: [64]u8 = undefined;
+        var frame_buf: [8192]u8 = undefined;
+        const place = try packages.buildSetBlockBody(&sb, claim_x, 70, claim_z, kid);
+        try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+        try std.testing.expect((try g.world.blockWorld(claim_x, 70, claim_z)) == kid);
+    }
+
+    // claims.zlc was written by deinit.
+    var claims_path: [512]u8 = undefined;
+    const cp = try std.fmt.bufPrint(&claims_path, "{s}/claims.zlc", .{dir});
+    const raw = try io_fs.readFileAll(gpa, cp);
+    defer gpa.free(raw);
+    try std.testing.expect(std.mem.eql(u8, raw[0..4], "ZCLC"));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, raw[4..6], .little));
+
+    // Game B: the restored claim loads with no live owner; the owner's login
+    // re-maps the entity, so their edit inside the claim is allowed.
+    {
+        const g2 = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c2 = try g2.attachJoinedClient(&cap); // login "Bot" re-maps the claim
+        var sb: [64]u8 = undefined;
+        var frame_buf: [8192]u8 = undefined;
+        const wood = world_store.block_stone;
+        const place = try packages.buildSetBlockBody(&sb, claim_x + 1, 70, claim_z, wood);
+        try g2.injectFramed(c2, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+        // Allowed: the owner re-mapped. A claim with no live owner would deny
+        // (owner_entity -1), leaving the block air.
+        try std.testing.expectEqual(wood, try g2.world.blockWorld(claim_x + 1, 70, claim_z));
+        std.debug.print("PASS claims-persist: keystone claim survived restart and re-mapped on login\n", .{});
+    }
+}
