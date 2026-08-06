@@ -1,6 +1,77 @@
 # Abstraction review (zdtd)
 
 Scope: full tree under `src/` (util, wire, assets, world, server, ecs, litenet,
+apm). Date: 2026-08-04 (baseline), 2026-08-06 (feature wave follow-up). Method:
+`docs/prompts/abstractions-review.md` decision tree + scorecard. Complementary
+to idiomatic Zig / `std.Io` migration.
+
+## 2026-08-06 wave findings
+
+Audited the 2026-08-06 feature wave (chunk raws memoization + water channel,
+water sources, items/quests Extends, loot list tables, drop_prob, quest wire
+kinds, ZPV3 save/restore, trader lock response, zdtd.toml [sim]) plus the
+parallel-agent commits (8742721 storm persistence, 4ca2b3a/d4a2a77 stability
+RE docs, 5ccd337 zig-idiomatic fixes). Review-only preferred; one P2 merge made
+(quests.zig target extraction). Uncommitted `src/assets/maxdamage.zig`
+(stability facts) left untouched per instruction.
+
+| Name | Path | Verdict | Sev | Notes |
+|---|---|---|---|---|
+| `raws` plane memo (rawAt/raws_scratch) | `wire/stock_chunk.zig` | **keep** | - | Hot stream path; caller-owned fixed `[65536]u32` (`Game.chunk_raws`), no heap; callback fallback for tests is one encoder, one data source. Not a dual encoder |
+| `writeWaterChannel` | `wire/stock_chunk.zig` | **keep** | - | Reads the memoized plane; same-value vs full-plane shape mirrors texture/density channels; band loop duplication across the three channels is wire-shape-specific, shared SIMD packs already extracted |
+| `applyWaterSources` | `world/store.zig` | **keep** | - | Single water-fill path on the chunk materialize path; `world/water.zig Sources` is the domain type; no duplicate fill anywhere |
+| `Sources.waterYNear` / `applyToChunkHeights` | `world/water.zig` | **keep** | - | Boundary helper, fail-closed (`?u8`) |
+| `WeatherManager.encode/decode` | `world/weather.zig` | **keep** | - | Persistence format owned by the world layer, wire-free (no wire import); decode validates magic/bounds/biome/group against the seeding table and fails closed. Game only orchestrates save/restore |
+| `items.zig` Stacknumber Extends resolve | `assets/items.zig` | **keep** | - | Two-pass own/ext maps, 24-hop cap, fail closed to stock 500; one authority |
+| `resolveBody` (template) | `assets/quests.zig` | **keep** | - | Load-time concat, depth-capped, null → own body; recursive closure is the one obvious Zig shape |
+| `parseQuestDefBody` | `assets/quests.zig` | **keep** | - | Named fn with explicit context; tests own the graph |
+| `pickPrimaryKind` target extraction | `assets/quests.zig` | **merge** | P2 | Duplicated `objectiveTarget` rule (value/count/item_count). **Fixed:** now calls `objectiveTarget(body, oi, objectiveElementEnd(body, oi))` |
+| `classifyObjective` vs `classifyPhaseKind` | `assets/quests.zig` | **keep split** | P2 | Different projections (primary meat kind vs per-phase advancing kind) onto different enums; string lists overlap but the mapping differs; a shared list constant adds indirection for little |
+| `loot_list_by_name`/`by_id` + `lootListFor` | `assets/maxdamage.zig` | **keep** | - | Same by_name/by_id pattern as MaxDamage; `by_id` filled from the dump merge, name-table walk is a fail-closed fallback, not a second authority |
+| `resolveLootList` / `resolveDecoFacts` | `assets/maxdamage.zig` | **keep** | - | Extends hop walk shared with distant/dim; uncommitted stability facts extend the same `DecoFacts` walk (left untouched) |
+| Extends-walk pattern (3 resolvers) | items, maxdamage, quests | **keep** | P3 | Shared kernel is a ~6-line hop loop; a generic callback-based resolver would cost more than it saves. Extract only if a 4th resolver lands |
+| `drop_prob` + LootDropProb clamp | `ecs/world.zig`, `assets/entities.zig` | **keep** | - | Plain data field; invariant clamped at load ([0,1], fail closed 1.0), sim roll is deterministic hash, no alloc |
+| `ObjectiveWireKind` | `ecs/quest.zig` | **keep** | - | Wire shape kept in ecs deliberately; exhaustive `switch` at game.zig:7581 is the single wire mapping point (compiler-checked, one direction) |
+| ZPV3 save/restore + `zPVRecordLen`/`zPV2DropName` | `server/game.zig` | **keep** | P2 | Record length + drop are pure fns; write side (savePlayers) and read side (tryRestorePlayer) still hand-walk fields. Extract a record reader pair on a 3rd reader site; not P0/P1 |
+| `stockEntries` | `server/game.zig` | **keep** | - | 4 call sites (spawn ECD + snapshots + lock response), ECS→wire mapping with named cap, skips zero-count rows. Correct layer (server orchestration) |
+| `buildLockResponseTrader` / `buildTraderDataStock` | `wire/packages.zig` | **keep** | - | Two envelopes, one `stock_entity.writeTraderDataBody` body writer: no dual trader-data encoder |
+| `remove_quest` handlers (5664, 6379) | `server/game.zig` | **keep** | - | Two protocols (SharedQuest event vs NPCQuestList offer accept), different semantics, not duplicated logic |
+| `zdtd.toml [sim]` | `server/zdtd_config.zig` | **keep** | - | One-key section following the exact applyKV/sanitize/merge pattern; consistent with stream/authority/feature/perf |
+| Weather `encode/decode` rng state carry | `world/weather.zig` | **keep** | - | Restored manager replays the identical schedule (test proves it); fail-closed decode |
+
+### Dual-path hunt (2026-08-06)
+
+- FS: still a single `io_fs` story; no `linux_fs` module; residual raw posix only
+  in litenet/tcp_listen thin layers.
+- Encoders: one chunk encoder (`encodeNetworkChunk`); trader data has one body
+  writer with two envelopes; no second stock package builder introduced.
+- Id resolve: one runtime AssignIds authority; `loot_list_by_id` is derived from
+  the same dump merge.
+- ecs→assets / ecs→server / ecs→wire / world→wire / assets→wire imports: none
+  (grep-verified; `ecs/root.zig` contract holds).
+
+### Hot-path check (2026-08-06 additions)
+
+- `rawAt` memo read: no heap, no I/O; fills `chunk_raws` once per chunk encode.
+- `writeWaterChannel` / density / texture: stack arrays only, SIMD packs shared.
+- `drop_prob` roll: integer math on the damage path, no alloc.
+- `stockEntries`: fixed `[16]` caller buffer, no alloc.
+- Weather encode/decode: off-tick (save/restore), alloc-free fixed buffer.
+
+### Changes made this pass
+
+1. `src/assets/quests.zig`: `pickPrimaryKind` now reuses `objectiveTarget`
+   instead of re-implementing the value/count/item_count rule (P2 merge).
+
+### Do not build (wave-specific)
+
+- Generic Extends-chain resolver over the three existing walks (items/maxdamage/quests).
+- A generic ChunkBlockChannel writer over light/damage/texture/water (shapes differ; SIMD packs already shared).
+- An abstract weather backend / plugin-style storm hook; the single `Manager` state machine is the stock boundary.
+
+## 2026-08-04 baseline
+
+Scope: full tree under `src/` (util, wire, assets, world, server, ecs, litenet,
 apm). Date: 2026-08-04. Method: `docs/prompts/abstractions-review.md` decision
 tree + scorecard. Complementary to idiomatic Zig / `std.Io` migration.
 

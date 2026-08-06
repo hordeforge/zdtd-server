@@ -166,15 +166,8 @@ fn pickPrimaryKind(body: []const u8) struct { kind: quest.QuestKind, target: u16
             continue;
         };
         const oid = xml.attr(body, oi, "id");
-        const val_s = xml.attr(body, oi, "value");
-        const count_s = xml.attr(body, oi, "count");
-        var local_target: u16 = 1;
-        if (val_s) |v| local_target = xml.parseU16(v) orelse 1;
-        if (count_s) |c| local_target = xml.parseU16(c) orelse local_target;
-        const slice_end = objectiveElementEnd(body, oi);
-        if (xml.propertyValue(body[oi..slice_end], "item_count")) |ic| {
-            local_target = xml.parseU16(ic) orelse local_target;
-        }
+        // Same value/count/item_count target rule as buildPhaseGraph.
+        const local_target = objectiveTarget(body, oi, objectiveElementEnd(body, oi));
 
         const kind = classifyObjective(typ, oid) orelse {
             i = oi + 10;
