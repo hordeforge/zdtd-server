@@ -637,3 +637,33 @@ Known limitation: with a fresh world the `full` suite currently registers 23
 cases instead of 85, because the extra cases depend on a prepared world and stop
 registering rather than failing. That is tracked as W1 and W2 in
 [WORK_PLAN.md](WORK_PLAN.md).
+
+## Loadgen parity run vs the stock dedicated server (2026-08-06)
+
+The same loadgen workload ran against the stock V3.1.0 dedicated server and
+against zdtd, to compare the join/walk path on the real protocol.
+
+Workload: `7dtd-loadgen --join --count 2 --actions 20 --seed 4242`
+(`--mode wander`, 150 s timeout). Stock leg: stock dedi, Navezgane, EAC off,
+LiteNet port 26902. zdtd leg: flat default world, LiteNet port 27004.
+
+| Metric | Stock dedi | zdtd |
+|---|---|---|
+| Bots joined | 2, rc=0 | 2, rc=0 |
+| Walks | 1058 (713 + 345) | 667 (322 + 345) |
+| Jumps | 15 | 15 |
+| Deaths / respawns | 0 / 0 | 0 / 0 |
+| Protocol errors (loadgen side) | none | none |
+| Server-side join/phase/decodes | n/a (no counters) | join_ok=26, join_fail=0, phase_rejects=0, decode_rejects=0, c2s_rejects=0 |
+
+Walk totals differ because the worlds differ (Navezgane vs flat); both bots
+walked until the run ended and neither server dropped or killed them. The zdtd
+apm dump shows the known reliable-window send pressure under the bot reconnect
+flood (`net_send_errors` / `reliable_window_drops`), which is the IdMapping
+WindowFull item tracked in GAP (mitigated by the retry pacing in game.zig), and
+a few startup/worldgen tick overruns; none of it failed a join.
+
+Conclusion: for the loadgen surface (challenge, ids, login, enter, spawn,
+movement, teleport), zdtd behaves like the stock dedicated server on the same
+workload. The full stock-client suite remains the visual oracle and is covered
+by the automated demo runs recorded in STATUS.
