@@ -253,8 +253,9 @@ All items below shipped. Kept as historical checklist.
   lists still open. File: `src/world/tts.zig`.
 
 - [x] **TTS name→id remap**  
-  Stock V3.x `.tts` types already AssignIds-range (max ~24k on sample POI).  
-  Remap only if client/server id tables diverge; `.blocks.nim` exists for that.
+  `.tts` types are prefab-local ids, not AssignIds: over Navezgane's 750 prefabs
+  10.2% of authored cells meant a different block. `prefabs.remapToRuntimeIds`
+  translates them by name through `<name>.blocks.nim` (`Prefab::loadIdMapping`).
 
 - [x] **Prefab `part_*` paint policy**  
   Skip all `part_*` TTS paint (driveways/road clutter). Heights still flatten.

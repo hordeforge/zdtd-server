@@ -1,9 +1,19 @@
 //! Stock world prefabs.xml index + footprint stamping on heightmaps.
-//! Block paint: stock `.tts` via `tts.zig` (Prefab.readBlockData raw types).
+//! Block paint: stock `.tts` via `tts.zig` (Prefab.readBlockData raw types),
+//! with the prefab-local type ids remapped to runtime block ids by name through
+//! each POI's `<name>.blocks.nim` (Prefab::loadIdMapping).
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const blocks_nim = @import("../assets/blocks_nim.zig");
 const tts = @import("tts.zig");
+
+/// Runtime block id for a stock block name (AssignIds space), null when the
+/// install has no such block. Supplied by the server from its AssignIds table.
+pub const IdLookup = struct {
+    ctx: ?*anyopaque = null,
+    lookup: *const fn (ctx: ?*anyopaque, name: []const u8) ?u16,
+};
 
 pub const Decoration = struct {
     name: []const u8,
@@ -38,6 +48,9 @@ pub const Index = struct {
     prefabs_root: []const u8 = "",
     /// Lazy .tts block cache keyed by decoration name (stable name_storage slices).
     tts_cache: std.StringHashMap(tts.TtsBlocks),
+    /// Runtime AssignIds resolver for the `.blocks.nim` remap; without it the
+    /// prefab-local ids are stamped raw (offline / no id table).
+    id_lookup: ?IdLookup = null,
 
     pub fn deinit(self: *Index) void {
         var it = self.tts_cache.iterator();
@@ -98,29 +111,101 @@ pub const Index = struct {
         }
     }
 
-    /// Resolve path to name.tts under prefabs_root (POIs/Parts/RWGTiles).
-    pub fn findTtsPath(self: *const Index, name: []const u8, path_buf: []u8) ?[]const u8 {
+    /// Resolve path to `name<ext>` under prefabs_root (POIs/Parts/RWGTiles).
+    pub fn findPrefabPath(self: *const Index, name: []const u8, ext: []const u8, path_buf: []u8) ?[]const u8 {
         if (self.prefabs_root.len == 0) return null;
         const subdirs = [_][]const u8{ "POIs", "Parts", "RWGTiles" };
         for (subdirs) |sub| {
-            const need = self.prefabs_root.len + 1 + sub.len + 1 + name.len + 4;
+            const need = self.prefabs_root.len + 1 + sub.len + 1 + name.len + ext.len;
             if (need >= path_buf.len) continue;
-            const p = std.fmt.bufPrint(path_buf, "{s}/{s}/{s}.tts", .{ self.prefabs_root, sub, name }) catch continue;
+            const p = std.fmt.bufPrint(path_buf, "{s}/{s}/{s}{s}", .{ self.prefabs_root, sub, name, ext }) catch continue;
             if (fileExists(p)) return p;
         }
         return null;
     }
 
-    /// Load (or cache) TTS block types for a prefab name.
+    /// Resolve path to name.tts under prefabs_root (POIs/Parts/RWGTiles).
+    pub fn findTtsPath(self: *const Index, name: []const u8, path_buf: []u8) ?[]const u8 {
+        return self.findPrefabPath(name, ".tts", path_buf);
+    }
+
+    /// Install the runtime AssignIds resolver used by the `.blocks.nim` remap.
+    /// Drops cached prefabs so anything loaded before this point is re-read and
+    /// remapped rather than left in prefab-local ids.
+    pub fn setIdLookup(self: *Index, l: IdLookup) void {
+        self.id_lookup = l;
+        var it = self.tts_cache.iterator();
+        while (it.next()) |e| e.value_ptr.deinit();
+        self.tts_cache.clearRetainingCapacity();
+    }
+
+    /// Translate prefab-local `.tts` type ids into runtime block ids by NAME,
+    /// through the prefab's own `<name>.blocks.nim` (`Prefab::loadIdMapping`,
+    /// asm.il:928850, applied per cell in `readBlockData`, asm.il:920216).
+    /// The two id spaces have drifted: over Navezgane's 750 distinct prefabs
+    /// 1126764 of 11097182 authored cells (10.2%) carry a local id whose
+    /// runtime block is a different block, so stamping the raw id builds the
+    /// wrong POI.
+    fn remapToRuntimeIds(self: *Index, name: []const u8, tb: *tts.TtsBlocks) void {
+        const resolver = self.id_lookup orelse return;
+        var path_buf: [2048]u8 = undefined;
+        // Stock refuses to load a prefab whose name map is missing; keeping the
+        // raw ids at least yields a building on a nonstandard install. Loaded
+        // prefabs are cached, so each of these prints at most once per prefab.
+        const nim_path = self.findPrefabPath(name, ".blocks.nim", &path_buf) orelse {
+            std.debug.print("zdtd: prefab {s}: no .blocks.nim, block ids stay prefab-local\n", .{name});
+            return;
+        };
+        var map = blocks_nim.loadFromPath(self.allocator, nim_path) catch |err| {
+            std.debug.print("zdtd: blocks.nim load failed {s}: {s}\n", .{ nim_path, @errorName(err) });
+            return;
+        };
+        defer map.deinit();
+
+        // Stock's translation table: one entry per local id, -1 where the name
+        // is unknown to this install (asm.il:1177941 createIdTranslationTable).
+        const table = self.allocator.alloc(i32, map.names.len) catch {
+            std.debug.print("zdtd: prefab {s}: id table alloc failed, ids stay prefab-local\n", .{name});
+            return;
+        };
+        defer self.allocator.free(table);
+        for (map.names, 0..) |bname, local| {
+            table[local] = if (bname.len == 0)
+                -1
+            else if (resolver.lookup(resolver.ctx, bname)) |rid| @intCast(rid) else -1;
+        }
+
+        var unknown: u32 = 0;
+        for (tb.types) |*raw| {
+            const typ: u16 = @truncate(raw.* & tts.type_mask);
+            if (typ == 0) continue;
+            const mapped: i32 = if (typ < table.len) table[typ] else -1;
+            if (mapped < 0) {
+                // Stock substitutes "missingBlock" or fails the whole prefab;
+                // leaving the cell air is the honest middle: no wrong block.
+                raw.* = 0;
+                unknown += 1;
+                continue;
+            }
+            // BlockValue::set_type: low 16 bits only, rotation/meta survive.
+            raw.* = (raw.* & ~tts.type_mask) | @as(u32, @intCast(mapped));
+        }
+        if (unknown != 0) {
+            std.debug.print("zdtd: prefab {s}: {d} cells have no block in this install\n", .{ name, unknown });
+        }
+    }
+
+    /// Load (or cache) TTS block types for a prefab name, in runtime block ids.
     pub fn getTtsBlocks(self: *Index, name: []const u8) ?*const tts.TtsBlocks {
         if (self.tts_cache.getPtr(name)) |p| return p;
         var path_buf: [2048]u8 = undefined;
         const path = self.findTtsPath(name, &path_buf) orelse return null;
         // Path exists (findTtsPath); load failure is corrupt TTS / OOM, not "no prefab".
-        const loaded = tts.loadBlocks(self.allocator, path) catch |err| {
+        var loaded = tts.loadBlocks(self.allocator, path) catch |err| {
             std.debug.print("zdtd: tts load failed {s}: {s}\n", .{ path, @errorName(err) });
             return null;
         };
+        self.remapToRuntimeIds(name, &loaded);
         self.tts_cache.put(name, loaded) catch {
             var tmp = loaded;
             tmp.deinit();
@@ -132,8 +217,8 @@ pub const Index = struct {
 
     /// Paint stock .tts blocks into world for decorations overlapping this chunk.
     /// Policy: paint full POIs always; paint `part_*` only when volume <= 24^3
-    /// (skip huge RWG clutter parts). TTS type ids are AssignIds-range on stock
-    /// installs; name remap deferred until client/server id tables diverge.
+    /// (skip huge RWG clutter parts). Ids come out of `getTtsBlocks` already
+    /// remapped from prefab-local to runtime AssignIds (see remapToRuntimeIds).
     pub fn applyTtsPaintToChunk(
         self: *Index,
         cx: i32,
@@ -581,4 +666,75 @@ test "navezgane paints a real POI into its chunk" {
     // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
     idx.applyTtsPaintToChunk(-17, 28, Count.put, &c);
     try std.testing.expect(c.n > 0);
+}
+
+test "prefab type ids remap through blocks.nim into runtime ids" {
+    const maxdamage = @import("../assets/maxdamage.zig");
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
+    var table = maxdamage.Table.empty();
+    defer table.deinit();
+    table.tryMergeBundledAssignIds(std.testing.allocator);
+    if (table.id_by_name.count() == 0) return error.SkipZigTest;
+
+    const xml =
+        \\<prefabs>
+        \\  <decoration type="model" name="abandoned_house_01" position="-872,61,612" rotation="0" />
+        \\  <decoration type="model" name="cave_05" position="-100,40,100" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_07" position="-262,61,450" rotation="3" />
+        \\</prefabs>
+    ;
+    var idx = try parseXml(std.testing.allocator, xml, root);
+    defer idx.deinit();
+    const Look = struct {
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            const t: *const maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+            return t.idByName(name);
+        }
+    };
+    idx.setIdLookup(.{ .ctx = &table, .lookup = Look.lookup });
+
+    // abandoned_house_01/_07 are file version 19, cave_05 is version 17: the
+    // pre-18 one only lands in its own name map once BlockValueV3 is converted.
+    for ([_][]const u8{ "abandoned_house_01", "cave_05", "abandoned_house_07" }) |name| {
+        var tts_buf: [2048]u8 = undefined;
+        const tts_path = idx.findTtsPath(name, &tts_buf) orelse return error.SkipZigTest;
+        var raw = try tts.loadBlocks(std.testing.allocator, tts_path);
+        defer raw.deinit();
+        var nim_buf: [2048]u8 = undefined;
+        const nim_path = idx.findPrefabPath(name, ".blocks.nim", &nim_buf) orelse return error.SkipZigTest;
+        var map = try blocks_nim.loadFromPath(std.testing.allocator, nim_path);
+        defer map.deinit();
+
+        const remapped = idx.getTtsBlocks(name) orelse return error.SkipZigTest;
+        try std.testing.expectEqual(raw.types.len, remapped.types.len);
+
+        // Live client evidence for this defect: abandoned_house_07 stands at
+        // world (-241,471) and its y63 cell arrived as id 2505, which the client
+        // renders as woodShapes:signLetter_period. 2505 is a prefab-local id and
+        // this POI's name map calls it brickShapes:cube, a different runtime id.
+        if (std.mem.eql(u8, name, "abandoned_house_07")) {
+            try std.testing.expectEqualStrings("brickShapes:cube", map.nameOf(2505).?);
+            try std.testing.expect(table.idByName("brickShapes:cube").? != 2505);
+        }
+
+        var checked: usize = 0;
+        var changed: usize = 0;
+        for (raw.types, remapped.types) |r, m| {
+            const local: u16 = @truncate(r & tts.type_mask);
+            if (local == 0) continue;
+            // Every authored id must name a block this install still has, or
+            // the prefab would be stamped with something else entirely.
+            const bname = map.nameOf(local) orelse return error.PrefabIdMissingFromNameMap;
+            const runtime = table.idByName(bname) orelse return error.BlockNameMissingFromAssignIds;
+            try std.testing.expectEqual(runtime, @as(u16, @truncate(m & tts.type_mask)));
+            // BlockValue::set_type replaces the low 16 bits only.
+            try std.testing.expectEqual(r & ~tts.type_mask, m & ~tts.type_mask);
+            checked += 1;
+            if (runtime != local) changed += 1;
+        }
+        try std.testing.expect(checked > 1000);
+        // The defect: those cells used to be stamped with the local id.
+        try std.testing.expect(changed > 0);
+    }
 }

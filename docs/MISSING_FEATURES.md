@@ -287,6 +287,8 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Spawnpoints.xml | HAVE | first spawn |
 | prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint; prefab `.xml` `YOffset` applied to the stamp origin (caves/mines/bunkers land below grade) |
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
+| prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint |
+| `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; prefab-local ids remapped by name via `<name>.blocks.nim` (`Prefab::loadIdMapping`), pre-18 files converted from `BlockValueV3` |
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
 | RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |

@@ -92,7 +92,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Spawn/stream ring for light+mesh | `server/game.zig` | defaults r 7..9 (`default_chunk_stream_radius_*`), 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
-| **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | skip terrainFiller; rotation bits kept |
+| **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | ids remapped by name via `.blocks.nim`; pre-18 `BlockValueV3` converted; skip terrainFiller; rotation bits kept |
 | AssignIds pins + dump merge | `assets/assignids_comptime.zig`, `maxdamage.zig` | cwd + /proc/self/exe paths |
 | Catalog loaders (XML) | `assets/*` | blocks ids=dump only; biomes colors; painting; spawning; buffs+passives; progression attrs/perks; vehicles; storage pairs; traders groups |
 | Shared I/O | `util/io_fs.zig`, `assets/paths.zig` | std.Io-backed filesystem helpers and config-path resolution |

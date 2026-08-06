@@ -11,12 +11,40 @@
 //! Block loop (version > 4): flat index 0..count-1 with Prefab.offsetToCoord:
 //!   dim = sx*sy; z = i/dim; y = (i%dim)/sx; x = (i%dim)%sx
 //! BlockValue.type = raw & 0xFFFF; child bit = 0x40000000 (skip children).
+//! File version < 18 stores the older BlockValueV3 layout: convertOldRawData.
+//! Type ids are prefab-local indices into `<name>.blocks.nim`, not runtime block
+//! ids; `prefabs.Index` remaps them by name (Prefab::loadIdMapping).
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const child_bit: u32 = 0x4000_0000;
+pub const decal_bit: u32 = 0x8000_0000;
 pub const type_mask: u32 = 0xFFFF;
+/// First file version written with the current `BlockValue` bit layout; older
+/// files carry `BlockValueV3` and go through `convertOldRawData` first.
+pub const blockvalue_version: u32 = 18;
+
+/// `BlockValueV3.rawData` → `BlockValue.rawData` (`BlockValueV3::ConvertOldRawData`,
+/// asm.il:141406). `readBlockData` runs this on every cell of a pre-18 prefab
+/// before anything reads the type (asm.il:920200), and 568 of Navezgane's 1559
+/// decorations are pre-18, so without it the type field is off by a bit.
+///   old: type 0..14, rotation 15..19, meta 20..23, meta2 24..27, meta3 28..29
+///   new: type 0..15, rotation 16..20, meta3 21, meta 22..25, meta2 26..29
+/// Child (bit 30) and decal (bit 31) keep their position in both layouts.
+/// Stock re-encodes the parent offset for a child cell; `parseBlocks` drops
+/// child cells (multi-block children are not regenerated), so only the child
+/// bit has to survive here. Stock also converts through one shared static
+/// BlockValue, which leaks the child bit from a child cell into the cells after
+/// it; starting from zero avoids inheriting that.
+pub fn convertOldRawData(old: u32) u32 {
+    if (old & child_bit != 0) return child_bit;
+    var new: u32 = old & 0x7FFF;
+    new |= ((old >> 15) & 31) << 16;
+    new |= ((old >> 20) & 15) << 22;
+    new |= ((old >> 24) & 15) << 26;
+    return new | (old & decal_bit);
+}
 
 /// Prefab TileEntity list entry (local coords + type + raw payload).
 pub const TeEntry = struct {
@@ -102,7 +130,8 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const off = 14 + i * 4;
-        const raw = std.mem.readInt(u32, data[off..][0..4], .little);
+        const stored = std.mem.readInt(u32, data[off..][0..4], .little);
+        const raw = if (version < blockvalue_version) convertOldRawData(stored) else stored;
         if (raw & child_bit != 0) {
             types[i] = 0;
             continue;
@@ -477,4 +506,22 @@ test "rotateLocalXZ turns clockwise like stock" {
             try std.testing.expectEqual(z, d.z);
         }
     }
+}
+
+test "convert BlockValueV3 raw data to the current layout" {
+    // type 0x1234, rotation 5, meta 9, meta2 3, decal set, in the old layout.
+    const old: u32 = 0x1234 | (5 << 15) | (9 << 20) | (3 << 24) | decal_bit;
+    const new = convertOldRawData(old);
+    try std.testing.expectEqual(@as(u32, 0x1234), new & type_mask);
+    try std.testing.expectEqual(@as(u32, 5), (new >> 16) & 31);
+    try std.testing.expectEqual(@as(u32, 9), (new >> 22) & 15);
+    try std.testing.expectEqual(@as(u32, 3), (new >> 26) & 15);
+    try std.testing.expect(new & decal_bit != 0);
+    try std.testing.expect(new & child_bit == 0);
+    // Old type is 15 bits, so bit 15 belongs to rotation, not the type. Reading
+    // it as a 16-bit type is what made pre-18 prefabs miss their name map.
+    try std.testing.expectEqual(@as(u32, 0x0001), convertOldRawData(0x0001 | (1 << 15)) & type_mask);
+    // Child cells keep only the child bit; parseBlocks drops them.
+    try std.testing.expectEqual(child_bit, convertOldRawData(0x2222 | child_bit));
+    try std.testing.expectEqual(@as(u32, 0), convertOldRawData(0));
 }

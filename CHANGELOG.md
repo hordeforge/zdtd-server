@@ -65,6 +65,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 - Package and entity layouts were updated for the V3.1.0 b14 client wire.
 - Chunk persistence now retains full `BlockValue.rawData` in ZCH3.
+- POIs are built from the blocks they were authored with. Prefab block ids are
+  prefab-local and are now translated by name through each prefab's
+  `<name>.blocks.nim`; roughly one in ten placed blocks used to be a different
+  block. Prefab files older than format 18 are converted from the old
+  `BlockValueV3` bit layout first, which covers 568 of Navezgane's 1559
+  placements.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.

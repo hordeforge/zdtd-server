@@ -712,6 +712,23 @@ pub const Game = struct {
             var terr_ctx: TerrCtx = .{ .t = &self.maxdamage };
             self.world.resolveTerrainIds(TerrCtx.lookup, &terr_ctx);
         }
+        // Prefab `.tts` type ids are indices into each POI's own
+        // `<name>.blocks.nim`, not runtime block ids; remap them by name the way
+        // stock does at Prefab::loadIdMapping (asm.il:928850). Installed before
+        // the first chunk is generated so no POI is stamped with local ids.
+        if (self.world.prefabs) |*pf| {
+            const NimCtx = struct {
+                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+                    const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+                    return t.idByName(name);
+                }
+            };
+            if (self.maxdamage.id_by_name.count() > 0) {
+                pf.setIdLookup(.{ .ctx = &self.maxdamage, .lookup = NimCtx.lookup });
+            } else {
+                std.debug.print("zdtd: warn: no AssignIds table, POI block ids stay prefab-local\n", .{});
+            }
+        }
         {
             const IdCtx = struct {
                 t: *const assets_maxdamage.Table,
