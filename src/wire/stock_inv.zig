@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const binary = @import("binary.zig");
+const platform_user = @import("platform_user.zig");
 const components = @import("../ecs/components.zig");
 
 /// Matches Block.ItemsStartHere after static init (MAX_BLOCKS).
@@ -845,38 +846,38 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 // AuthoredText(name) ToStream | lastLogin i64 | pos xyz i32*3 | entityId i32 |
 // lpCount i32 | backpackCount i32 | lpBlocks | backpacks | bedroll xyz |
 // questPosCount i32 | ... | vendingCount i32 | ...
-// PUID.ToStream: bool present | u8 platform-tag-len-ish (client pops) | platform string | id string.
+// PUID.ToStream (asm.il 31206): see wire/platform_user.zig.
 // AuthoredText.ToStream: bool present | text string | author PUID.
 
 pub const persistent_reason_login: u8 = 0;
 
-fn writePuid(w: *binary.Writer, platform: []const u8, id: []const u8) !void {
-    try w.writeBool(true);
-    try w.writeByte(0); // popped unread by FromStream
-    try w.writeString(platform);
-    try w.writeString(id);
-}
-
 /// Build NetPackagePersistentPlayerState body (reason=Login) so clients can map
 /// entityId → player name (GameMessage shows '' otherwise).
+///
+/// `PersistentPlayerList::CreatePlayerData` (asm.il 890568) is called with
+/// PrimaryId = `ClientInfo.InternalId` (crossplatform, else native) and
+/// NativeId = `ClientInfo.PlatformId`; the AuthoredText author is the PrimaryId
+/// again (asm.il 1885235). Callers pass a client's real identity, so an EOS
+/// player is labelled EOS rather than mislabelled Steam.
 pub fn buildPersistentPlayerState(
     buf: []u8,
     entity_id: i32,
     name: []const u8,
-    steam_id: []const u8,
+    primary_id: platform_user.Id,
+    native_id: platform_user.Id,
     x: i32,
     y: i32,
     z: i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(persistent_reason_login);
-    try writePuid(&w, "Steam", steam_id); // PrimaryId
-    try writePuid(&w, "Steam", steam_id); // NativeId
+    try platform_user.write(&w, primary_id);
+    try platform_user.write(&w, native_id);
     try w.writeByte(0); // playGroup Standard
     // AuthoredText: present | text | author PUID
     try w.writeBool(true);
     try w.writeString(name);
-    try writePuid(&w, "Steam", steam_id);
+    try platform_user.write(&w, primary_id);
     try w.writeI64(0); // lastLogin ticks
     try w.writeI32(x);
     try w.writeI32(y);
@@ -895,16 +896,19 @@ pub fn buildPersistentPlayerState(
 
 test "persistent player state body layout" {
     var buf: [512]u8 = undefined;
-    const body = try buildPersistentPlayerState(&buf, 107, "maci", "76561190000000000", -273, 61, 449);
+    const primary: platform_user.Id = .{ .platform = "EOS", .id = "0123456789abcdef" };
+    const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
+    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
     try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // present
-    _ = try r.readByte(); // platform enum byte (stock FromStream pops)
+    // UserIdentifierVersion: stock writes 1 and pops it on read (asm.il 31206).
+    try std.testing.expectEqual(platform_user.user_identifier_version, try r.readByte());
     var sbuf: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
-    try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
-    // NativeId PUID (same shape)
+    try std.testing.expectEqualStrings("EOS", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("0123456789abcdef", try r.readString(&sbuf));
+    // NativeId PUID (same shape, native platform account)
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     _ = try r.readByte();
     try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
@@ -912,11 +916,11 @@ test "persistent player state body layout" {
     try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // playGroup Standard
     try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // AuthoredText present
     try std.testing.expectEqualStrings("maci", try r.readString(&sbuf));
-    // author PUID
+    // author PUID is the PrimaryId again (asm.il 1885235)
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     _ = try r.readByte();
-    try std.testing.expectEqualStrings("Steam", try r.readString(&sbuf));
-    try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("EOS", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("0123456789abcdef", try r.readString(&sbuf));
     try std.testing.expectEqual(@as(i64, 0), try r.readI64()); // lastLogin
     try std.testing.expectEqual(@as(i32, -273), try r.readI32());
     try std.testing.expectEqual(@as(i32, 61), try r.readI32());

@@ -10,6 +10,9 @@ const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
 const io_fs = @import("../util/io_fs.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+const binary = @import("../wire/binary.zig");
+const platform_user = @import("../wire/platform_user.zig");
+const ally_mod = @import("ally.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPathSimple("worlds");
@@ -1700,4 +1703,97 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
         "PASS hp replication: hurt={d:.0}/{d:.0} then hp=0 then respawn hp={d:.0}\n",
         .{ hurt_hp, hurt_max, g.sim.health[ps].hp },
     );
+}
+
+test "scenario ally invite accept and identity spoof reject" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_ally");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ally", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Both peers log in with a real platform identity, so the identity the ally
+    // wire uses comes out of the shipped NetPackagePlayerLogin decode.
+    const id_a: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000001" };
+    const id_b: platform_user.Id = .{ .platform = "EOS", .id = "0123456789abcdef" };
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, id_a);
+    const cb = try g.attachJoinedClientAs(&cap_b, id_b);
+    try std.testing.expect(ca.puid_primary.matches(id_a));
+    try std.testing.expect(ca.puid_native.matches(id_a));
+    try std.testing.expect(cb.puid_primary.matches(id_b));
+
+    // The join PersistentPlayerState must carry that identity, not a fabricated
+    // one: it is what the client's PersistentPlayerData is keyed on.
+    {
+        const pps_id = packages.idOf("NetPackagePersistentPlayerState").?;
+        const pps = cap_b.findPkgId(pps_id) orelse return error.NoPersistentPlayerState;
+        var r: binary.Reader = .{ .data = pps };
+        try std.testing.expectEqual(packages.stock_inv.persistent_reason_login, try r.readByte());
+        var plat: [platform_user.max_platform_len]u8 = undefined;
+        var pid: [platform_user.max_id_len]u8 = undefined;
+        const primary = (try platform_user.read(&r, &plat, &pid)).?;
+        try std.testing.expectEqualStrings(id_b.platform, primary.platform);
+        try std.testing.expectEqualStrings(id_b.id, primary.id);
+    }
+
+    const resp_id = packages.idOf("NetPackageAllyResponse").?;
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+
+    // A invites B.
+    cap_a.clear();
+    cap_b.clear();
+    const invite = try packages.buildAllyRequestBody(&body, id_a, id_b, true);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyRequest", invite));
+    try std.testing.expectEqual(ally_mod.Status.outgoing_invite, g.allies.status(id_a, id_b));
+    try std.testing.expectEqual(ally_mod.Status.incoming_invite, g.allies.status(id_b, id_a));
+    // Stock broadcasts the response, so both sides see it.
+    const seen_b = cap_b.findPkgId(resp_id) orelse return error.NoAllyResponse;
+    try std.testing.expect(cap_a.findPkgId(resp_id) != null);
+    {
+        var r: binary.Reader = .{ .data = seen_b };
+        var plat: [platform_user.max_platform_len]u8 = undefined;
+        var pid: [platform_user.max_id_len]u8 = undefined;
+        try std.testing.expectEqualStrings(id_a.id, (try platform_user.read(&r, &plat, &pid)).?.id);
+        try std.testing.expectEqualStrings(id_b.id, (try platform_user.read(&r, &plat, &pid)).?.id);
+        try std.testing.expectEqual(@intFromEnum(ally_mod.Status.outgoing_invite), try r.readByte());
+        try std.testing.expectEqual(@intFromEnum(ally_mod.Event.outgoing_sent), try r.readByte());
+        try std.testing.expectEqual(@intFromEnum(ally_mod.Event.incoming_received), try r.readByte());
+    }
+
+    // B accepts: the request now comes from B's side.
+    const accept = try packages.buildAllyRequestBody(&body, id_b, id_a, true);
+    try g.injectFramed(cb, try packages.framed(&frame_buf, "NetPackageAllyRequest", accept));
+    try std.testing.expect(g.allies.isAlly(id_a, id_b));
+    try std.testing.expect(g.allies.isAlly(id_b, id_a));
+
+    // A claims B's identity to cancel the pair: rejected, state untouched.
+    const rejects_before = g.harness.counters.get(.ownership_rejects);
+    const spoof = try packages.buildAllyRequestBody(&body, id_b, id_a, false);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyRequest", spoof));
+    try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(g.allies.isAlly(id_a, id_b));
+
+    // A removes the ally for real; both sides drop back to NotAllied.
+    const remove = try packages.buildAllyRequestBody(&body, id_a, id_b, false);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyRequest", remove));
+    try std.testing.expectEqual(ally_mod.Status.not_allied, g.allies.status(id_a, id_b));
+    try std.testing.expectEqual(@as(usize, 0), g.allies.count());
+
+    // A client-sent AllyResponse is wrong-direction and must never be reflected.
+    const rejects_pre_resp = g.harness.counters.get(.ownership_rejects);
+    const fake = try packages.buildAllyResponseBody(&body, id_b, id_a, 1, 3, 6);
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyResponse", fake));
+    try std.testing.expectEqual(rejects_pre_resp + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_a.findPkgId(resp_id) == null);
+    std.debug.print("PASS ally: invite/accept/remove by identity; spoof and C2S AllyResponse rejected\n", .{});
 }

@@ -6,6 +6,13 @@ Direction: ToServer=client→server (server MUST handle), ToClient=server→clie
 **Join map:** `packages.default_mappings` has **189** names (runtime `package_maps=189`). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
 `sent` = zdtd emits it S2C. Regenerate with ../7dtd-research/tools/parity + this script.
 
+The `read wire (head)` column lists `BinaryReader` virtual calls only, so it
+under-reports every package carrying a `PlatformUserIdentifierAbs`:
+`PlatformUserIdentifierAbs::FromStream` is a static call and does not appear.
+NetPackageAllyRequest shows `ReadBoolean;` but actually reads two identities and
+then the bool (asm.il 886226). Same for NetPackageAllyResponse, NetPackageSetBlock
+and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
+
 | Package | Dir | Handled(C2S) | Sent(S2C) | read wire (head) |
 |---|---|---|---|---|
 | NetPackageAddRemoveBuff | ? | handled |  | `ReadInt32;ReadString;ReadSingle;ReadBoolean;ReadInt32;SU.Rea` |

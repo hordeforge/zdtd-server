@@ -73,7 +73,7 @@ electrical gaps, vehicle physics, blood-moon FX.
 |---|---|---|
 | Challenge `0xCA` + Guid16 echo | HAVE | |
 | `NetPackagePackageIds` map | HAVE | **negotiated** 189-name list (full stock subset) |
-| `NetPackagePlayerLogin` parse | PARTIAL | name/version fields; incomplete profile |
+| `NetPackagePlayerLogin` parse | PARTIAL | full field walk (asm.il 832140): name + both `PlatformUserIdentifierAbs`; auth tokens skipped (no authorizer chain) |
 | `PlayerLoginAnswer` | HAVE | simple ok/fail string |
 | `PlayerId` | PARTIAL | may not match stock body |
 | `PlayerSpawnedInWorld` | PARTIAL | spawn coords; not full stock fields |
@@ -84,8 +84,8 @@ electrical gaps, vehicle physics, blood-moon FX.
 | Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
 | Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; no whitelist file |
 | `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
-| Reconnect resume | PARTIAL | players.zsv v2 by name (pos/inv/journal); no platform id |
-| Crossplay platform users | MISSING | |
+| Reconnect resume | PARTIAL | players.zsv v2 keyed **by login name**, not by identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration; tracked in §10 |
+| Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
 
 ---
 
@@ -340,7 +340,8 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
-| Party / allies | PARTIAL (echo first cut; PlatformUserId MISSING) |
+| Party (membership) | MISSING (PartyActions/PartyData echoed to sender; no Party state) |
+| Allies | PARTIAL (identity-keyed AllyStore + AllyResponse; not persisted) |
 | Spatial hash for queries | MISSING (broadcastNear radius only) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
 | Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate + dirty-clear + interest still O(512)) |
@@ -699,6 +700,8 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Vehicle / turret persistence | MISSING |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | MISSING |
+| Player save key | PARTIAL (login name; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
+| Ally relationships | MISSING (in-memory only; stock persists them in PersistentPlayerList) |
 
 ---
 
@@ -824,8 +827,10 @@ Dirty bitsets, serialize-once interest, persistent thread pool, O(1) NetId map,
 32-128 bot apm gate. See IMPLEMENTATION_PLAN M11 + TODO near-term scale.
 
 ### P3: Ops and polish
-Full telnet surface, Steam browser, party PlatformUserId, gamestages, buffs
-depth, vehicle multi-seat, Encryption* (optional).
+Full telnet surface, Steam browser, party membership (a Party/PartyManager
+equivalent driving S2C `NetPackagePartyData`), ally persistence, PUID-keyed
+player saves, gamestages, buffs depth, vehicle multi-seat, Encryption*
+(optional).
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.
@@ -946,6 +951,56 @@ HONEST GAPS (Unity client-side in stock, no server representation / no assets):
   terrain normals. The clamp follows height per (x,z) sample only.
 - **Water buoyancy / fluid handling.** The height query treats the terrain top
   as the only surface.
+
+## Platform identity, party and allies
+
+`PlatformUserIdentifierAbs` is the only real player identity on the wire. One
+codec owns it (`src/wire/platform_user.zig`); nothing else may hand-roll the
+four fields.
+
+LANDED (real, IL-grounded):
+- **PUID codec.** `FromStream` (asm.il 30604): bool present, and a false bool is
+  the whole value. Otherwise u8 UserIdentifierVersion (read then popped), string
+  platform, string id, then `ReadCustomData`. `ToStream` (asm.il 31206) writes a
+  lone 0 for null, else `1, 1, platform, id`. `WriteCustomData` /
+  `ReadCustomData` (asm.il 30544 / 30553) are empty base bodies with no override
+  anywhere in the assembly, so `inclCustomData` costs zero bytes.
+- **Login.** `NetPackagePlayerLogin::read` (asm.il 832140) is walked in full:
+  name, native PUID, native token, crossplatform PUID, crossplatform token,
+  version, compVersion, u64 discordUserId. Both identities are stored per client;
+  the two tokens are skipped because zdtd runs no authorizer chain.
+- **PersistentPlayerState.** PrimaryId is `ClientInfo.InternalId` (crossplatform
+  else native, asm.il 783909, matching `getPersistentPlayerID` asm.il 1886263)
+  and NativeId is `ClientInfo.PlatformId`, per `CreatePlayerData` (asm.il 890568,
+  called at asm.il 1885235). A client that sent no identity still gets a stable
+  synthetic id so the entityId → name mapping (GMSG join line, party UI names)
+  cannot regress.
+- **Allies.** `NetPackageAllyRequest` (asm.il 886226) is decoded, the sender is
+  required to speak for its own identity, and `AllyStore::ComputeTransition`
+  (asm.il 885142) / `GetStatus` / `SetStatus` (asm.il 885392 / 885424) drive a
+  real relationship table (`src/server/ally.zig`). The result goes out as
+  `NetPackageAllyResponse` (asm.il 886390). A client-sent AllyResponse is dropped:
+  its direction is ToClient (asm.il 886358).
+
+HONEST GAPS:
+- **Party membership.** `NetPackagePartyActions` (asm.il 829049) and
+  `NetPackagePartyData` (asm.il 829470) carry **no** PlatformUserId; both are
+  purely entity-id keyed. zdtd holds no `Party` state, so both are echoed to the
+  sender and no S2C `PartyData` is ever constructed. What is missing is a
+  Party/PartyManager equivalent (AcceptInvite / ChangeLead / LeaveParty /
+  KickFromParty / JoinAutoParty), not identity. This is also why party members
+  are not exempt from the POI `PlayerInside` lockout (`src/ecs/systems.zig`).
+- **Ally persistence.** Relationships live in the server process only; stock
+  saves them in `PersistentPlayerList`. They reset on restart.
+- **Player save key.** Persistence is still keyed on the login name, so a client
+  can claim another player's save by picking their name. Stock loads the PDF from
+  `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration
+  with a name-keyed fallback for existing players.
+- **Platform verification.** Neither auth token is decoded or checked, so an
+  identity is a claim, not a proof (EAC-off scope; see §2).
+- **Reported read calls.** `docs/PACKAGES.md` under-reports these packages
+  because `PlatformUserIdentifierAbs::FromStream` is a static call, not a
+  `BinaryReader` virtual: the AllyRequest row shows only `ReadBoolean;`.
 
 ## Related
 

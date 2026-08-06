@@ -53,6 +53,7 @@ const movement = @import("movement.zig");
 const c2s_text = @import("c2s_text.zig");
 const evidence_mod = @import("evidence.zig");
 const guard_policy = @import("guard_policy.zig");
+const ally_mod = @import("ally.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
 const plugin_mod = @import("../plugin/root.zig");
@@ -61,6 +62,7 @@ const plugin_mod = @import("../plugin/root.zig");
 const stock_sign = packages.stock_sign;
 const stock_te = packages.stock_te;
 const te_types = packages.te_types;
+const platform_user = packages.platform_user;
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
@@ -339,6 +341,14 @@ const Client = struct {
     /// Weak block-destroy-rate signal: window start tick + destroys in window.
     farm_window_tick: u64 = 0,
     farm_breaks: u16 = 0,
+    /// Platform identities from NetPackagePlayerLogin. `primary` is stock's
+    /// ClientInfo.InternalId (crossplatform when present, else native, asm.il
+    /// 783909) and is what PersistentPlayerData and the ally store key on.
+    /// Absent on both is a legitimate state, not an error: a client with no
+    /// platform session, and zdtd's own loadgen bots, send null identifiers.
+    /// Cleared for free by `clients[slot] = .{}` on kick/disconnect.
+    puid_primary: platform_user.Stored = .{},
+    puid_native: platform_user.Stored = .{},
 };
 
 pub const Game = struct {
@@ -355,6 +365,9 @@ pub const Game = struct {
     evidence: evidence_mod.Ring = .{},
     /// P4 guard policy switches (zdtd.toml [authority]). Default log-only.
     guard: guard_policy.Policy = .{},
+    /// Ally relationships keyed on platform identity (stock AllyStore).
+    /// In-memory only: stock persists these, zdtd does not yet.
+    allies: ally_mod.Store = .{},
     /// Load-shed valve: weak evidence + deferrable broadcasts are dropped while
     /// `tick_n < shed_until_tick`. Armed only by the real-time run() overrun branch.
     shed_until_tick: u64 = 0,
@@ -3834,14 +3847,25 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
                 return;
             }
-            // parse name for save key (first string in login body)
+            // Name (save key) plus both platform identities, per asm.il 832140.
             if (body.len > 1) {
-                var r: wire_binary.Reader = .{ .data = body };
-                if (r.readString(c.name[0..])) |nm| {
+                if (packages.parsePlayerLogin(body, c.name[0..])) |login| {
                     // Strip C0/DEL so login names cannot inject CR/LF into admin
                     // replies, audit lines, or GSI-adjacent operator surfaces.
-                    c.name_len = sanitizePlayerName(c.name[0..], nm);
-                } else |_| {}
+                    c.name_len = sanitizePlayerName(c.name[0..], login.name);
+                    c.puid_primary = login.internalId();
+                    c.puid_native = login.native;
+                } else |_| {
+                    // A login body zdtd cannot fully decode still gets its name
+                    // read, because refusing the join would lock the player out
+                    // over a field the server never trusts anyway. The identity
+                    // stays null and the deterministic fallback below applies.
+                    self.harness.counters.inc(.c2s_malformed);
+                    var r: wire_binary.Reader = .{ .data = body };
+                    if (r.readString(c.name[0..])) |nm| {
+                        c.name_len = sanitizePlayerName(c.name[0..], nm);
+                    } else |_| {}
+                }
             }
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
             try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
@@ -4748,9 +4772,23 @@ pub const Game = struct {
             }
             return;
         }
-        // Party / ally: echo C2S so client UI unblocks (full PlatformUser wire deferred).
-        if (std.mem.eql(u8, name, "NetPackagePartyActions") or std.mem.eql(u8, name, "NetPackagePartyData") or std.mem.eql(u8, name, "NetPackageAllyRequest") or std.mem.eql(u8, name, "NetPackageAllyResponse")) {
+        // Party: echoed to the sender so the client UI unblocks. Neither
+        // NetPackagePartyActions (asm.il 829049) nor NetPackagePartyData
+        // (asm.il 829470) carries a platform identity (both are entity-id
+        // keyed), and zdtd holds no party membership, so there is nothing to
+        // route them to yet.
+        if (std.mem.eql(u8, name, "NetPackagePartyActions") or std.mem.eql(u8, name, "NetPackagePartyData")) {
             try self.sendGame(peer, name, body);
+            return;
+        }
+        if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {
+            try self.handleAllyRequest(c, body);
+            return;
+        }
+        // NetPackageAllyResponse is ToClient (asm.il 886358): the server decides
+        // relationships, so a client sending one is claiming state it does not own.
+        if (std.mem.eql(u8, name, "NetPackageAllyResponse")) {
+            self.harness.counters.inc(.ownership_rejects);
             return;
         }
         // Stock SavePlayerData: PDF WriteNetwork (ECD + toolbelt/bag + meta tail).
@@ -6155,13 +6193,24 @@ pub const Game = struct {
             // PersistentPlayerState(Login): entityId → name mapping. Without it the
             // client shows GMSG "Player '' joined" and party UI has no names.
             {
+                // Stock builds PersistentPlayerData with PrimaryId =
+                // ClientInfo.InternalId and NativeId = ClientInfo.PlatformId
+                // (asm.il 1885235). A client that sent no identity still needs a
+                // PPD or its name never reaches other clients, so fall back to a
+                // stable per-entity id rather than dropping the package.
                 var sid_buf: [24]u8 = undefined;
-                const sid = std.fmt.bufPrint(&sid_buf, "7656119{d:0>10}", .{@as(u32, @intCast(eid))}) catch "76561190000000000";
+                const fallback: platform_user.Id = .{
+                    .platform = "Steam",
+                    .id = std.fmt.bufPrint(&sid_buf, "7656119{d:0>10}", .{@as(u32, @intCast(eid))}) catch "76561190000000000",
+                };
+                const primary_id = c.puid_primary.get() orelse fallback;
+                const native_id = c.puid_native.get() orelse primary_id;
                 if (packages.stock_inv.buildPersistentPlayerState(
                     self.body_buf[8704..9216],
                     eid,
                     c.name[0..c.name_len],
-                    sid,
+                    primary_id,
+                    native_id,
                     sx2,
                     sy2,
                     sz2,
@@ -8446,7 +8495,15 @@ pub const Game = struct {
         }
     }
 
+    /// Loadgen / scenario join with a null platform identity, which is what a
+    /// client running without a platform session sends.
     pub fn attachJoinedClient(self: *Game, capture: ?*ln_peer.Capture) !*Client {
+        return self.attachJoinedClientAs(capture, null);
+    }
+
+    /// Same join, but the synthetic login carries `puid` as both the native and
+    /// the crossplatform identity, so the real PlayerLogin decode runs.
+    pub fn attachJoinedClientAs(self: *Game, capture: ?*ln_peer.Capture, puid: ?platform_user.Id) !*Client {
         var peer_ptr: ?*ln_peer.Peer = null;
         for (&self.net.peers) |*p| {
             if (p.alive) continue;
@@ -8473,17 +8530,17 @@ pub const Game = struct {
         var ch: [17]u8 = undefined;
         wire_frame.buildChallenge(&ch, c.challenge);
         try self.onData(peer, &ch);
-        var login_body: [64]u8 = undefined;
+        var login_body: [256]u8 = undefined;
         var w: wire_binary.Writer = .{ .buf = &login_body };
         try w.writeString("Bot");
-        try w.writeByte(0);
+        try platform_user.write(&w, puid);
         try w.writeString("");
-        try w.writeByte(0);
+        try platform_user.write(&w, puid);
         try w.writeString("");
         try w.writeString(version.stock_wire_announce);
         try w.writeString(version.stock_wire_announce);
         try w.writeU64(0);
-        var frame_buf: [256]u8 = undefined;
+        var frame_buf: [512]u8 = undefined;
         const framed = try packages.framed(&frame_buf, "NetPackagePlayerLogin", w.written());
         try self.onData(peer, framed);
         // Match stock/loadgen: enter → spawn so WorldInfo then PlayerId/chunks are sent.
@@ -8511,6 +8568,45 @@ pub const Game = struct {
 
     pub fn replicateNow(self: *Game) !void {
         try self.replicate();
+    }
+
+    /// Stock `AllyStore::ProcessAllyRequest` (asm.il 885024): take the pair's
+    /// current status, compute the transition, apply it, and tell the clients
+    /// with `NetPackageAllyResponse` (asm.il 886390). Stock sends that to every
+    /// client, so both sides of the pair see the change wherever they are.
+    fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
+        const req = packages.parseAllyRequest(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return;
+        };
+        // Stock returns before touching the store when either identity is null,
+        // and a client with no identity of its own never sends one at all
+        // (AllyStore::AllyUpdateRequest, asm.il 884977).
+        const source = req.source.get() orelse return;
+        const target = req.target.get() orelse return;
+        const own = c.puid_primary.get() orelse return;
+        if (!own.eql(source)) {
+            // Speaking for another account would let anyone accept, decline or
+            // cancel invites they were never part of.
+            self.harness.counters.inc(.ownership_rejects);
+            return;
+        }
+        const t = self.allies.processRequest(source, target, req.add_ally) catch {
+            // Relationship table full: refuse the new pair rather than evict
+            // someone else's. Existing pairs keep updating.
+            self.harness.counters.inc(.c2s_throttle);
+            return;
+        };
+        if (t.isNoop()) return;
+        const resp = try packages.buildAllyResponseBody(
+            self.body_buf[9216..9728],
+            source,
+            target,
+            @intFromEnum(t.new_status),
+            @intFromEnum(t.event_source),
+            @intFromEnum(t.event_target),
+        );
+        try self.broadcast("NetPackageAllyResponse", resp);
     }
 };
 

@@ -10,6 +10,7 @@
 pub const binary = @import("binary.zig");
 pub const frame = @import("frame.zig");
 pub const packages = @import("packages.zig");
+pub const platform_user = @import("platform_user.zig");
 pub const stock_inv = @import("stock_inv.zig");
 pub const stock_chunk = @import("stock_chunk.zig");
 pub const stock_deco = @import("stock_deco.zig");
@@ -24,6 +25,7 @@ test {
     _ = binary;
     _ = frame;
     _ = packages;
+    _ = platform_user;
     _ = stock_inv;
     _ = stock_chunk;
     _ = stock_deco;

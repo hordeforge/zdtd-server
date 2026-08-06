@@ -7,6 +7,7 @@ const packet = @import("litenet/packet.zig");
 const frame = @import("wire/frame.zig");
 const binary = @import("wire/binary.zig");
 const packages = @import("wire/packages.zig");
+const platform_user = @import("wire/platform_user.zig");
 const stock_te = @import("wire/stock_te.zig");
 const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
@@ -160,6 +161,16 @@ const package_corpus = [_][]const u8{
     &.{ 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 1 },
     // chunk body: cx,cz,pad + 256 heights zeros
     &([_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    // login: "Bot" + two null PUIDs + empty tokens + versions + discord u64
+    &.{ 3, 'B', 'o', 't', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // login: name + present Steam PUID (present, version, "Steam", "1")
+    &.{ 1, 'a', 1, 1, 5, 'S', 't', 'e', 'a', 'm', 1, '1', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // ally request: two null PUIDs + addAlly
+    &.{ 0, 0, 1 },
+    // ally request: present source, null target, addAlly
+    &.{ 1, 1, 3, 'E', 'O', 'S', 2, 'i', 'd', 0, 0 },
+    // PUID with an overlong 7-bit string length
+    &.{ 1, 1, 0xff, 0xff, 0xff, 0xff, 0x0f },
 };
 
 test "fuzz variable-length C2S package decoders" {
@@ -234,6 +245,27 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(trig.wire_n <= trig.wires.len);
         try std.testing.expect(trig.wire_n <= trig.wire_total);
     } else |_| {}
+    _ = stock_te.parseWorkstationTeBody(input) catch null;
+
+    // Identity-bearing bodies: a hostile login or ally request must never write
+    // past the fixed platform/id buffers, and a null identity is a valid value.
+    var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+    var puid_buf: [platform_user.max_id_len]u8 = undefined;
+    var pr: binary.Reader = .{ .data = input };
+    if (platform_user.read(&pr, &plat_buf, &puid_buf)) |maybe| {
+        if (maybe) |id| {
+            try std.testing.expect(id.platform.len <= plat_buf.len);
+            try std.testing.expect(id.id.len <= puid_buf.len);
+        }
+    } else |_| {}
+    var sr: binary.Reader = .{ .data = input };
+    platform_user.skip(&sr) catch {};
+    var login_name: [32]u8 = undefined;
+    if (packages.parsePlayerLogin(input, &login_name)) |login| {
+        try std.testing.expect(login.name.len <= login_name.len);
+        if (login.internalId().get()) |id| try std.testing.expect(id.id.len <= platform_user.max_id_len);
+    } else |_| {}
+    _ = packages.parseAllyRequest(input) catch null;
 }
 
 const inv_corpus = [_][]const u8{

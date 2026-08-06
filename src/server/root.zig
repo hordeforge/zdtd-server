@@ -19,6 +19,7 @@ pub const movement = @import("movement.zig");
 pub const c2s_text = @import("c2s_text.zig");
 pub const evidence = @import("evidence.zig");
 pub const guard_policy = @import("guard_policy.zig");
+pub const ally = @import("ally.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -38,4 +39,5 @@ test {
     _ = c2s_text;
     _ = evidence;
     _ = guard_policy;
+    _ = ally;
 }

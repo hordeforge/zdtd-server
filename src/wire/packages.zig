@@ -6,6 +6,7 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const frame = @import("frame.zig");
 const components = @import("../ecs/components.zig");
+pub const platform_user = @import("platform_user.zig");
 pub const stock_inv = @import("stock_inv.zig");
 pub const stock_chunk = @import("stock_chunk.zig");
 pub const stock_deco = @import("stock_deco.zig");
@@ -1207,7 +1208,7 @@ pub fn buildSetBlockBodyRaw(
     local_player_that_changed: i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(false); // no PlatformUserIdentifierAbs
+    try platform_user.write(&w, null);
     try w.writeI16(1); // one BlockChangeInfo
     // BlockValueRef: type=1 (BlockPosition) + Vector3i
     try w.writeByte(1);
@@ -1259,12 +1260,7 @@ pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
         return 1;
     }
     var r: binary.Reader = .{ .data = body };
-    const has_user = try r.readBool();
-    if (has_user) {
-        _ = try r.readByte();
-        try r.skipString();
-        try r.skipString();
-    }
+    try platform_user.skip(&r);
     const n_i = try r.readI16();
     if (n_i <= 0) return 0;
     const n: usize = @intCast(n_i);
@@ -2979,4 +2975,220 @@ test "chunk key roundtrip" {
     const p = try parseChunkRemoveBody(body);
     try std.testing.expectEqual(@as(i32, -18), p.cx);
     try std.testing.expectEqual(@as(i32, 28), p.cz);
+}
+
+// --- Identity-bearing packages (PlatformUserIdentifierAbs) ---
+
+/// Stock `NetPackagePlayerLogin::read` (asm.il 832140), field for field:
+/// playerName string | native PlatformUserIdentifierAbs (inclCustomData=true) |
+/// native auth token string | crossplatform PlatformUserIdentifierAbs
+/// (inclCustomData=true) | crossplatform token string | version string |
+/// compVersion string | u64 discordUserId.
+///
+/// The two tokens are the platform auth blobs (Steam ticket / EOS JWT, multi-KiB).
+/// zdtd runs no authorizer chain, so they are walked past rather than copied.
+pub const PlayerLogin = struct {
+    name: []const u8,
+    /// ClientInfo.PlatformId: the native platform account (asm.il 783892).
+    native: platform_user.Stored = .{},
+    /// ClientInfo.CrossplatformId: the EOS account, absent on native-only clients.
+    crossplatform: platform_user.Stored = .{},
+    discord_user_id: u64 = 0,
+
+    /// `ClientInfo::get_InternalId` (asm.il 783909): crossplatform when present,
+    /// otherwise native. This is what stock keys PersistentPlayerData on
+    /// (`GameManager::getPersistentPlayerID`, asm.il 1886263).
+    pub fn internalId(self: *const PlayerLogin) platform_user.Stored {
+        return if (self.crossplatform.present) self.crossplatform else self.native;
+    }
+};
+
+/// Parse a full login body. `name_buf` receives the raw (unsanitized) name; the
+/// caller still owns sanitizing it before it reaches any operator surface.
+pub fn parsePlayerLogin(body: []const u8, name_buf: []u8) binary.ReadError!PlayerLogin {
+    var r: binary.Reader = .{ .data = body };
+    var out: PlayerLogin = .{ .name = try r.readString(name_buf) };
+    var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+    var id_buf: [platform_user.max_id_len]u8 = undefined;
+
+    try out.native.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    try r.skipString(); // native auth token
+    try out.crossplatform.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    try r.skipString(); // crossplatform auth token
+    try r.skipString(); // version
+    try r.skipString(); // compVersion
+    out.discord_user_id = try r.readU64();
+    return out;
+}
+
+/// Stock `NetPackageAllyRequest::read` (asm.il 886226): source
+/// PlatformUserIdentifierAbs | target PlatformUserIdentifierAbs | bool addAlly.
+/// Both identities are required: `AllyStore::ProcessAllyRequest` (asm.il 885024)
+/// returns immediately when either is null, so a null one is a dead request.
+pub const AllyRequest = struct {
+    source: platform_user.Stored,
+    target: platform_user.Stored,
+    add_ally: bool,
+};
+
+/// Stock `NetPackageAllyRequest::write` (asm.il 886258). zdtd never sends this
+/// one (its direction is ToServer, asm.il 886198); it exists so scenarios can
+/// drive the real C2S handler with real bytes.
+pub fn buildAllyRequestBody(
+    buf: []u8,
+    source: platform_user.Id,
+    target: platform_user.Id,
+    add_ally: bool,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try platform_user.write(&w, source);
+    try platform_user.write(&w, target);
+    try w.writeBool(add_ally);
+    return w.written();
+}
+
+pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
+    var r: binary.Reader = .{ .data = body };
+    var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+    var id_buf: [platform_user.max_id_len]u8 = undefined;
+    var out: AllyRequest = .{ .source = .{}, .target = .{}, .add_ally = false };
+    try out.source.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    try out.target.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    out.add_ally = try r.readBool();
+    return out;
+}
+
+/// Stock `NetPackageAllyResponse::read` (asm.il 886390): source | target |
+/// u8 newStatus | u8 allyEventSource | u8 allyEventTarget. Its direction is
+/// ToClient (asm.il 886358), so the server only ever writes this one.
+pub fn buildAllyResponseBody(
+    buf: []u8,
+    source: platform_user.Id,
+    target: platform_user.Id,
+    new_status: u8,
+    event_source: u8,
+    event_target: u8,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try platform_user.write(&w, source);
+    try platform_user.write(&w, target);
+    try w.writeByte(new_status);
+    try w.writeByte(event_source);
+    try w.writeByte(event_target);
+    return w.written();
+}
+
+test "player login body parses stock field order" {
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeString("maci");
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
+    try w.writeString("native-ticket");
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
+    try w.writeString("eos-jwt");
+    try w.writeString("V 3.1.0 (b14)");
+    try w.writeString("V 3.1.0");
+    try w.writeU64(42);
+
+    var name_buf: [32]u8 = undefined;
+    const login = try parsePlayerLogin(w.written(), &name_buf);
+    try std.testing.expectEqualStrings("maci", login.name);
+    try std.testing.expectEqualStrings("Steam", login.native.get().?.platform);
+    try std.testing.expectEqualStrings("76561198000000001", login.native.get().?.id);
+    try std.testing.expectEqualStrings("EOS", login.crossplatform.get().?.platform);
+    try std.testing.expectEqual(@as(u64, 42), login.discord_user_id);
+    // InternalId prefers the crossplatform account.
+    try std.testing.expectEqualStrings("EOS", login.internalId().get().?.platform);
+}
+
+test "player login with both identities null still yields the name" {
+    // Shape zdtd's own loadgen bot sends: name, null PUID, empty token, ...
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeString("Bot");
+    try platform_user.write(&w, null);
+    try w.writeString("");
+    try platform_user.write(&w, null);
+    try w.writeString("");
+    try w.writeString("V 3.1.0 (b14)");
+    try w.writeString("V 3.1.0 (b14)");
+    try w.writeU64(0);
+
+    var name_buf: [32]u8 = undefined;
+    const login = try parsePlayerLogin(w.written(), &name_buf);
+    try std.testing.expectEqualStrings("Bot", login.name);
+    try std.testing.expect(login.native.get() == null);
+    try std.testing.expect(login.crossplatform.get() == null);
+    try std.testing.expect(login.internalId().get() == null);
+}
+
+test "player login truncated at any boundary is rejected" {
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeString("Bot");
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
+    try w.writeString("");
+    try platform_user.write(&w, null);
+    try w.writeString("");
+    try w.writeString("V");
+    try w.writeString("V");
+    try w.writeU64(0);
+    const full = w.written();
+
+    var name_buf: [32]u8 = undefined;
+    var cut: usize = 0;
+    while (cut < full.len) : (cut += 1) {
+        try std.testing.expectError(error.EndOfStream, parsePlayerLogin(full[0..cut], &name_buf));
+    }
+    _ = try parsePlayerLogin(full, &name_buf);
+}
+
+test "ally request round-trips both identities" {
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "1001" });
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "beef" });
+    try w.writeBool(true);
+
+    const req = try parseAllyRequest(w.written());
+    try std.testing.expect(req.source.matches(.{ .platform = "Steam", .id = "1001" }));
+    try std.testing.expect(req.target.matches(.{ .platform = "EOS", .id = "beef" }));
+    try std.testing.expect(req.add_ally);
+}
+
+test "ally request with a null identity parses but is not actionable" {
+    var body: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try platform_user.write(&w, null);
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "beef" });
+    try w.writeBool(false);
+    const full = w.written();
+
+    const req = try parseAllyRequest(full);
+    try std.testing.expect(req.source.get() == null);
+    try std.testing.expect(req.target.get() != null);
+    try std.testing.expect(!req.add_ally);
+    // Missing the trailing addAlly bool is a short body, not a default.
+    try std.testing.expectError(error.EndOfStream, parseAllyRequest(full[0 .. full.len - 1]));
+}
+
+test "ally response body layout" {
+    var buf: [128]u8 = undefined;
+    const out = try buildAllyResponseBody(
+        &buf,
+        .{ .platform = "Steam", .id = "1001" },
+        .{ .platform = "Steam", .id = "1002" },
+        1,
+        3,
+        6,
+    );
+    var r: binary.Reader = .{ .data = out };
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    try std.testing.expectEqualStrings("1001", (try platform_user.read(&r, &plat, &id)).?.id);
+    try std.testing.expectEqualStrings("1002", (try platform_user.read(&r, &plat, &id)).?.id);
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 3), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 6), try r.readByte());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }

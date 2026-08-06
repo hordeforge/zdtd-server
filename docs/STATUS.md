@@ -188,6 +188,9 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
+| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
+| P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
+| P3 | Party membership + ally persistence | PUID flows login → PersistentPlayerState → AllyStore; party packages carry no PUID (entity-id keyed) so party needs Party state, not identity |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
