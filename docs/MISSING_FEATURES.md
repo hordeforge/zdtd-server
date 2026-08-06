@@ -23,7 +23,7 @@ This document is deliberately exhaustive. Status labels:
 ## 0. Executive scorecard
 
 **Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** **434** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (automated playtest pass=83 fail=0, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
+**Tests:** **537** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (live stock-client gate 23/23 on a fresh world, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
 
 | Domain | Have | Partial | Missing (high) | Stock-client impact |
 |---|---:|---:|---:|---|
@@ -45,7 +45,7 @@ This document is deliberately exhaustive. Status labels:
 
 **Honest bottom line:** core stock loop is playable under EAC-off (join, move,
 dig/build, fight, death/respawn, loot, craft + workstation, trade, persist;
-automated playtest pass=83 fail=0). Remaining work is **depth and scale**, not join.
+live stock-client gate 23/23). Remaining work is **depth and content fidelity**, not join.
 Prefer missing over fakes. Best PARTIAL write-ups: §5.2.1 EAI, §6.1 quests,
 electrical gaps, vehicle physics, blood-moon FX.
 
@@ -848,7 +848,7 @@ kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
 |---|---|
 | Unit / scenario tests | HAVE (**434** total; see STATUS for pass/fail pin) |
 | Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
-| Stock client join + stand | **PASS** (playtest-zdtd **pass=83 fail=0** pin; see STATUS) |
+| Stock client join + stand | **PASS** (live gate **23/23** on a fresh world; see STATUS) |
 | Golden wire size checks | PARTIAL (some packages) |
 | Capture regression suite vs stock | MISSING |
 | Multi-version client matrix | MISSING |

@@ -35,7 +35,7 @@ Status labels, used exactly as defined:
 ### What a player can do today
 
 Join a zdtd server over direct IP with an unmodified V3.1.0 client and reach
-Playing with zero NullReferenceExceptions (gate 23/23, playtest pass=83 fail=0).
+Playing with zero NullReferenceExceptions (live gate 23/23 on a fresh world).
 Walk real Navezgane terrain built from the shipped DTM heightmap and the shipped
 biome layer stacks. Enter POIs stamped from the real `.tts` prefab files, with
 the block, texture and density planes reaching the client cell for cell. Dig,
