@@ -9,8 +9,11 @@ const stock_inv = @import("stock_inv.zig");
 pub const quest_file_version: u8 = 8;
 pub const journal_version: u8 = 5;
 pub const objective_file_version: u8 = 0;
-/// Quest.PositionDataTypes.Location (QuestGiver=0, Location=1, …).
+/// Quest.PositionDataTypes (asm.il 983460-983475).
+pub const position_data_quest_giver: u8 = 0;
 pub const position_data_location: u8 = 1;
+pub const position_data_poi_position: u8 = 2;
+pub const position_data_poi_size: u8 = 3;
 
 /// Stock objective Write path (from Assembly-CSharp BaseObjective / overrides).
 pub const ObjectiveWriteKind = enum(u8) {
@@ -75,11 +78,20 @@ pub const StockQuestWrite = struct {
     rewards: []const RewardWire = &.{},
     quest_faction: u8 = 0,
     quest_progress_day: i32 = 0,
-    /// Optional PositionDataTypes.Location when InProgress.
-    has_location: bool = false,
-    loc_x: f32 = 0,
-    loc_y: f32 = 70,
-    loc_z: f32 = 0,
+    /// Quest.PositionData entries, written only when InProgress. Order is the
+    /// stock Dictionary iteration order, which the client keys by type byte.
+    position_data: []const PositionEntry = &.{},
+    /// Quest.RallyMarkerActivated (asm.il 989046): false re-arms the marker
+    /// block, true makes BlockRallyMarker report it as already used.
+    rally_marker_activated: bool = false,
+};
+
+/// One Quest.PositionData pair: PositionDataTypes key + Vector3.
+pub const PositionEntry = struct {
+    kind: u8,
+    x: f32 = 0,
+    y: f32 = 70,
+    z: f32 = 0,
 };
 
 const MarkerU16 = struct { pos: usize };
@@ -172,16 +184,17 @@ pub fn writeStockQuest(w: *binary.Writer, q: StockQuestWrite) !void {
     }
     try w.writeByte(0); // DataVariables count
     if (q.state == .in_progress) {
-        if (q.has_location) {
-            try w.writeByte(1); // PositionData count
-            try w.writeByte(position_data_location);
-            try w.writeF32(q.loc_x);
-            try w.writeF32(q.loc_y);
-            try w.writeF32(q.loc_z);
-        } else {
-            try w.writeByte(0);
+        // Stock writes the dictionary count as a byte; more than 255 entries
+        // cannot be expressed, so refuse rather than truncate the count.
+        if (q.position_data.len > 255) return error.Overflow;
+        try w.writeByte(@intCast(q.position_data.len)); // PositionData count
+        for (q.position_data) |p| {
+            try w.writeByte(p.kind);
+            try w.writeF32(p.x);
+            try w.writeF32(p.y);
+            try w.writeF32(p.z);
         }
-        try w.writeBool(false); // RallyMarkerActivated
+        try w.writeBool(q.rally_marker_activated);
     } else {
         try w.writeU64(0); // FinishTime
     }
@@ -343,6 +356,206 @@ pub fn parseSharedQuestHead(body: []const u8) !SharedQuestHead {
     return head;
 }
 
+// --- NetPackageQuestEvent (rally marker activation / POI quest lock) ---
+
+/// NetPackageQuestEvent.QuestEventTypes (asm.il 834734-834751).
+pub const QuestEventType = enum(u8) {
+    try_rally_marker = 0,
+    confirm_rally_marker = 1,
+    rally_marker_activated = 2,
+    rally_marker_locked = 3,
+    rally_marker_player_locked = 4,
+    rally_marker_bedroll_locked = 5,
+    rally_marker_land_claim_locked = 6,
+    lock_poi = 7,
+    unlock_poi = 8,
+    clear_sleeper = 9,
+    show_sleeper_volume = 10,
+    hide_sleeper_volume = 11,
+    setup_fetch = 12,
+    setup_restore_power = 13,
+    finish_managed_quest = 14,
+    poi_locked = 15,
+    reset_trader_quests = 16,
+};
+
+/// Fixed head of every NetPackageQuestEvent plus the tails the server acts on.
+/// Head order from NetPackageQuestEvent.read (asm.il 835089-835124):
+/// entityID i32 | prefabPos Vector3 | eventType u8 | questTags string | questCode i32.
+pub const QuestEventHead = struct {
+    entity_id: i32,
+    px: f32 = 0,
+    py: f32 = 0,
+    pz: f32 = 0,
+    event: QuestEventType,
+    quest_code: i32 = 0,
+    /// RallyMarkerLocked tail (asm.il 835089 IL_0161): QuestLockInstance.LockedOutUntil.
+    extra_data: u64 = 0,
+    /// ResetTraderQuests tail (asm.il 835089 IL_01bd).
+    faction_point_override: i32 = 0,
+    /// ClearSleeper tail (asm.il 835089 IL_007c).
+    subscribe_to: bool = false,
+};
+
+/// Consume the per-event tail so a malformed body is rejected instead of being
+/// silently accepted on its head alone. Mirrors the read switch at asm.il
+/// 835089 IL_0049/IL_0052: only 3, 7, 9, 12, 13 and 16 carry a tail.
+fn readQuestEventTail(r: *binary.Reader, head: *QuestEventHead) !void {
+    switch (head.event) {
+        .rally_marker_locked => head.extra_data = try r.readU64(),
+        .lock_poi => {
+            try r.skipString(); // questID
+            try skipI32List(r);
+        },
+        .clear_sleeper => head.subscribe_to = try r.readBool(),
+        .setup_fetch => {
+            _ = try r.readByte(); // FetchModeType
+            try skipI32List(r);
+        },
+        .setup_restore_power => {
+            try r.skipString(); // blockIndex
+            try r.skipString(); // eventName
+            try skipI32List(r);
+            const n = try r.readByte();
+            // activateList: Vector3i triples.
+            if (r.remaining() < @as(usize, n) * 12) return error.EndOfStream;
+            r.pos += @as(usize, n) * 12;
+        },
+        .reset_trader_quests => head.faction_point_override = try r.readI32(),
+        else => {},
+    }
+}
+
+/// SharedWithList: byte count followed by that many i32 entity ids.
+fn skipI32List(r: *binary.Reader) !void {
+    const n = try r.readByte();
+    if (r.remaining() < @as(usize, n) * 4) return error.EndOfStream;
+    r.pos += @as(usize, n) * 4;
+}
+
+/// Parse a C2S NetPackageQuestEvent. Rejects unknown event bytes and any body
+/// whose declared tail runs past the end (trust boundary: this is off the wire).
+pub fn parseQuestEventHead(body: []const u8) !QuestEventHead {
+    var r: binary.Reader = .{ .data = body };
+    const entity_id = try r.readI32();
+    const px = try r.readF32();
+    const py = try r.readF32();
+    const pz = try r.readF32();
+    const et_raw = try r.readByte();
+    if (et_raw > @intFromEnum(QuestEventType.reset_trader_quests)) return error.InvalidEvent;
+    try r.skipString(); // questTags (FastTags.ToString; empty set is "")
+    const quest_code = try r.readI32();
+    var head: QuestEventHead = .{
+        .entity_id = entity_id,
+        .px = px,
+        .py = py,
+        .pz = pz,
+        .event = @enumFromInt(et_raw),
+        .quest_code = quest_code,
+    };
+    try readQuestEventTail(&r, &head);
+    return head;
+}
+
+/// Build a server-side NetPackageQuestEvent. questTags is always the empty tag
+/// set, which FastTags.ToString serializes as "" (asm.il 772366-772404), i.e. a
+/// single zero length byte. Only the tails the server emits are written.
+pub fn buildQuestEvent(buf: []u8, head: QuestEventHead) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(head.entity_id);
+    try w.writeF32(head.px);
+    try w.writeF32(head.py);
+    try w.writeF32(head.pz);
+    try w.writeByte(@intFromEnum(head.event));
+    try w.writeString("");
+    try w.writeI32(head.quest_code);
+    switch (head.event) {
+        .rally_marker_locked => try w.writeU64(head.extra_data),
+        .clear_sleeper => try w.writeBool(head.subscribe_to),
+        .reset_trader_quests => try w.writeI32(head.faction_point_override),
+        // lock_poi / setup_fetch / setup_restore_power carry list tails the
+        // server never originates; refuse rather than emit a headless body.
+        .lock_poi, .setup_fetch, .setup_restore_power => return error.Unsupported,
+        else => {},
+    }
+    return w.written();
+}
+
+test "quest event rally round trip" {
+    var buf: [64]u8 = undefined;
+    const body = try buildQuestEvent(&buf, .{
+        .entity_id = 171,
+        .px = 128,
+        .py = 70,
+        .pz = -64,
+        .event = .rally_marker_activated,
+        .quest_code = 10007,
+    });
+    // head = i32 + 3×f32 + u8 + empty string (1 byte) + i32, no tail
+    try std.testing.expectEqual(@as(usize, 4 + 12 + 1 + 1 + 4), body.len);
+    const head = try parseQuestEventHead(body);
+    try std.testing.expectEqual(@as(i32, 171), head.entity_id);
+    try std.testing.expectEqual(QuestEventType.rally_marker_activated, head.event);
+    try std.testing.expectEqual(@as(i32, 10007), head.quest_code);
+    try std.testing.expectEqual(@as(f32, 128), head.px);
+    try std.testing.expectEqual(@as(f32, -64), head.pz);
+}
+
+test "quest event locked tail carries extra data" {
+    var buf: [64]u8 = undefined;
+    const body = try buildQuestEvent(&buf, .{
+        .entity_id = 171,
+        .event = .rally_marker_locked,
+        .quest_code = 3,
+        .extra_data = 0x0102030405060708,
+    });
+    try std.testing.expectEqual(@as(usize, 4 + 12 + 1 + 1 + 4 + 8), body.len);
+    const head = try parseQuestEventHead(body);
+    try std.testing.expectEqual(@as(u64, 0x0102030405060708), head.extra_data);
+}
+
+test "quest event rejects unknown event and truncation" {
+    var buf: [64]u8 = undefined;
+    const body = try buildQuestEvent(&buf, .{
+        .entity_id = 1,
+        .event = .try_rally_marker,
+        .quest_code = 5,
+    });
+    try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0 .. body.len - 1]));
+    try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0..4]));
+    var bad = buf;
+    bad[16] = 17; // eventType byte, one past ResetTraderQuests
+    try std.testing.expectError(error.InvalidEvent, parseQuestEventHead(bad[0..body.len]));
+}
+
+test "quest event list tails are bounds checked" {
+    // LockPOI: questID string + SharedWithList (u8 count + count×i32).
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(9);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeByte(@intFromEnum(QuestEventType.lock_poi));
+    try w.writeString("");
+    try w.writeI32(4);
+    try w.writeString("tier1_clear");
+    try w.writeByte(2);
+    try w.writeI32(101);
+    try w.writeI32(102);
+    const body = w.written();
+    const head = try parseQuestEventHead(body);
+    try std.testing.expectEqual(QuestEventType.lock_poi, head.event);
+    // A count that overruns the buffer must be refused, not read past the end.
+    var short = buf;
+    short[body.len - 9] = 200; // SharedWithList count byte
+    try std.testing.expectError(error.EndOfStream, parseQuestEventHead(short[0..body.len]));
+    try std.testing.expectError(error.Unsupported, buildQuestEvent(&buf, .{
+        .entity_id = 9,
+        .event = .lock_poi,
+    }));
+}
+
 test "shared quest share layout" {
     var buf: [256]u8 = undefined;
     const body = try buildSharedQuestShare(&buf, .{
@@ -396,6 +609,36 @@ test "stock quest journal one in-progress" {
     const outer = std.mem.readInt(u16, out[5..7], .little);
     try std.testing.expect(outer > 10);
     try std.testing.expectEqual(@as(usize, 5 + outer + 1), out.len);
+}
+
+test "position data entries cost 13 bytes each" {
+    // Quest.Write PositionData: count u8 then per entry key u8 + Vector3.
+    // A slip here desyncs the whole journal read inside PlayerId, so pin it.
+    var buf_none: [256]u8 = undefined;
+    var buf_poi: [256]u8 = undefined;
+    var w_none: binary.Writer = .{ .buf = &buf_none };
+    var w_poi: binary.Writer = .{ .buf = &buf_poi };
+    const pos = [_]PositionEntry{
+        .{ .kind = position_data_location, .x = 1, .y = 70, .z = 2 },
+        .{ .kind = position_data_poi_position, .x = 10, .y = 60, .z = 20 },
+        .{ .kind = position_data_poi_size, .x = 40, .y = 20, .z = 50 },
+    };
+    const q_none = StockQuestWrite{
+        .id = "tier1_rally",
+        .quest_code = 4,
+        .objective_count = 1,
+    };
+    var q_poi = q_none;
+    q_poi.position_data = pos[0..];
+    q_poi.rally_marker_activated = true;
+    try writeStockQuest(&w_none, q_none);
+    try writeStockQuest(&w_poi, q_poi);
+    try std.testing.expectEqual(w_none.written().len + 3 * 13, w_poi.written().len);
+    // RallyMarkerActivated sits right after the entries, ahead of the tail:
+    // rewards (u16 marker + i32 count, no rewards) | faction u8 | day i32.
+    const out = w_poi.written();
+    const tail_after_rally: usize = 2 + 4 + 1 + 4;
+    try std.testing.expectEqual(@as(u8, 1), out[out.len - tail_after_rally - 1]);
 }
 
 test "treasure chest objective write is 8 bytes not base" {

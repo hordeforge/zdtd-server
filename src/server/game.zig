@@ -63,6 +63,8 @@ const te_types = packages.te_types;
 
 const max_clients = ln_server.max_peers;
 const max_land_claims: usize = 256;
+/// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
+const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 
 /// Persist failures are non-fatal but never silent: lost world/player/container
@@ -618,6 +620,9 @@ pub const Game = struct {
         self.sim.stack_fn = &itemStackFor;
         self.sim.is_armor_ctx = self;
         self.sim.is_armor_fn = &itemIsArmor;
+        // Quest POI placement: rally objectives need a real prefab footprint.
+        self.sim.poi_ctx = self;
+        self.sim.poi_fn = &poiRectAtWorld;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -1257,6 +1262,28 @@ pub const Game = struct {
         return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
     }
 
+    /// ECS POI hook: prefab footprint covering world (x,z), or null outside
+    /// every prefab (also when no prefabs.xml was loaded). Backs World.poi_fn.
+    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const pf = if (g.world.prefabs) |*p| p else return null;
+        const wx: i32 = @intFromFloat(@floor(x));
+        const wz: i32 = @intFromFloat(@floor(z));
+        for (pf.items, 0..) |d, i| {
+            const b = pf.boundsXZ(i);
+            if (wx < b.x0 or wx >= b.x1 or wz < b.z0 or wz >= b.z1) continue;
+            return .{
+                .x = @floatFromInt(b.x0),
+                .y = @floatFromInt(d.y),
+                .z = @floatFromInt(b.z0),
+                .size_x = @floatFromInt(b.x1 - b.x0),
+                .size_y = @floatFromInt(d.size_y),
+                .size_z = @floatFromInt(b.z1 - b.z0),
+            };
+        }
+        return null;
+    }
+
     /// ECS path solid hook: true if body-height cell blocks horizontal move.
     /// Uses heightmap top + 1 as body y (same surface band as heightAtWorld).
     fn pathSolidAt(ctx: ?*anyopaque, wx: i32, wz: i32) bool {
@@ -1691,7 +1718,7 @@ pub const Game = struct {
                     if (o + 10 > rec.len) break;
                     std.mem.writeInt(u16, rec[o..][0..2], q.def_id, .little);
                     std.mem.writeInt(i32, rec[o + 2 ..][0..4], q.quest_code, .little);
-                    rec[o + 6] = (@as(u8, @intFromBool(q.active))) | (@as(u8, @intFromBool(q.completed)) << 1) | (@as(u8, @intFromBool(q.ready_turn_in)) << 2);
+                    rec[o + 6] = (@as(u8, @intFromBool(q.active))) | (@as(u8, @intFromBool(q.completed)) << 1) | (@as(u8, @intFromBool(q.ready_turn_in)) << 2) | (@as(u8, @intFromBool(q.rally_activated)) << 3);
                     std.mem.writeInt(u16, rec[o + 7 ..][0..2], q.progress, .little);
                     rec[o + 9] = q.phase;
                     o += 10;
@@ -1800,6 +1827,9 @@ pub const Game = struct {
                     .ready_turn_in = (qb[6] & 4) != 0,
                     .progress = std.mem.readInt(u16, qb[7..9], .little),
                     .phase = qb[9],
+                    // Bit 3 was always zero before rally markers existed, so old
+                    // saves read back as "marker not yet used" without a bump.
+                    .rally_activated = (qb[6] & 8) != 0,
                 };
             }
             if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) continue;
@@ -1826,6 +1856,12 @@ pub const Game = struct {
                 var fq: usize = 0;
                 while (fq < jn and fq < quests.len) : (fq += 1) {
                     self.sim.journal[ps].slots[fq] = quests[fq];
+                    // The POI rect is derived from the world, not persisted:
+                    // re-resolve it so a restored quest keeps its rally rect.
+                    const qd = self.sim.catalog.byId(quests[fq].def_id) orelse continue;
+                    if (self.sim.poiAt(qd.tx, qd.tz)) |rect| {
+                        self.sim.journal[ps].slots[fq].poi = rect;
+                    }
                 }
             }
             return;
@@ -5027,6 +5063,10 @@ pub const Game = struct {
             try self.broadcastNear("NetPackageExplosionClient", client_body, ex.wx, ex.wz, self.interest_range);
             return;
         }
+        if (std.mem.eql(u8, name, "NetPackageQuestEvent")) {
+            try self.handleQuestEvent(peer, c, body);
+            return;
+        }
         if (std.mem.eql(u8, name, "NetPackageQuestObjectiveUpdate")) {
             // Stock wire: treasure/block objective events. Keep ECS sim for loadgen.
             // Also accept legacy zdtd-native {def_id u16, op u8} for unit fixtures.
@@ -5696,7 +5736,8 @@ pub const Game = struct {
         var qbuf: [2]packages.stock_quest.StockQuestWrite = undefined;
         var reward_store: [2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire = undefined;
         var obj_val_store: [2][ecs.quest.max_phases]u8 = undefined;
-        const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store);
+        var pos_store: [2][max_quest_position_data]packages.stock_quest.PositionEntry = undefined;
+        const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &pos_store);
         // Cap always_unlocked list so PlayerId stays under body_buf slice.
         var unlock_names: [64][]const u8 = undefined;
         const unlock_n = self.recipes.appendAlwaysUnlocked(&unlock_names);
@@ -5893,12 +5934,54 @@ pub const Game = struct {
 
     /// Fill stock Quest.Write snapshots for active journal slots (client-known ids only).
     /// `reward_store` holds RewardWire arrays for each quest (Item/LootItem need ItemStack).
+    /// C2S NetPackageQuestEvent. Only the rally marker and the POI lock/unlock
+    /// events have a server side (NetPackageQuestEvent.ProcessPackage,
+    /// asm.il 835696-835943); the rest are client-local and are dropped.
+    fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
+        const head = packages.stock_quest.parseQuestEventHead(body) catch return;
+        // Trust boundary: a peer may only raise quest events for its own entity.
+        if (head.entity_id != c.entity_id) return;
+        switch (head.event) {
+            .try_rally_marker => {
+                const lockout = systems.questCheckPoiLockout(&self.sim, c.entity_id, head.px, head.pz);
+                var reply = head;
+                reply.extra_data = lockout.extra_data;
+                // Reason → reply event, from the switch at asm.il 835696 IL_009d.
+                reply.event = switch (lockout.reason) {
+                    .none => .rally_marker_activated,
+                    .player_inside => .rally_marker_player_locked,
+                    .bedroll => .rally_marker_bedroll_locked,
+                    .land_claim => .rally_marker_land_claim_locked,
+                    .quest_lock => .rally_marker_locked,
+                };
+                if (lockout.reason == .none) {
+                    // An unknown or already spent quest code gets no reply: the
+                    // marker must not report activated for a quest we cannot track.
+                    if (!systems.questOnRallyActivated(&self.sim, c.slot, head.quest_code)) return;
+                    systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
+                }
+                const out = try packages.stock_quest.buildQuestEvent(self.body_buf[0..64], reply);
+                if (lockout.reason == .none) {
+                    // Activation is shared state (shared-quest party members see
+                    // the same marker); a refusal only concerns the requester.
+                    try self.broadcast("NetPackageQuestEvent", out);
+                } else {
+                    try self.sendGame(peer, "NetPackageQuestEvent", out);
+                }
+            },
+            .lock_poi => systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz),
+            .unlock_poi => systems.questPoiUnlock(&self.sim, c.entity_id, head.px, head.pz),
+            else => return,
+        }
+    }
+
     fn fillStockJournalWrites(
         self: *Game,
         peer_slot: usize,
         out: []packages.stock_quest.StockQuestWrite,
         reward_store: *[2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire,
         obj_val_store: *[2][ecs.quest.max_phases]u8,
+        pos_store: *[2][max_quest_position_data]packages.stock_quest.PositionEntry,
     ) usize {
         const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
         if (!self.sim.mask[ps].journal) return 0;
@@ -5956,6 +6039,33 @@ pub const Game = struct {
                 }
                 obj_vals = obj_val_store[n][0..lim];
             }
+            // PositionData: the Location marker plus, when the quest was placed
+            // in a POI, the rect ObjectiveRallyPoint scans for its rally block.
+            var pn: usize = 0;
+            if (d.kind == .goto_point or d.kind == .kill_zombies or d.kind == .fetch_item) {
+                pos_store[n][pn] = .{
+                    .kind = packages.stock_quest.position_data_location,
+                    .x = if (d.kind == .goto_point) d.tx else self.sim.transform[ps].x,
+                    .y = if (d.kind == .goto_point) d.ty else self.sim.transform[ps].y,
+                    .z = if (d.kind == .goto_point) d.tz else self.sim.transform[ps].z,
+                };
+                pn += 1;
+            }
+            if (s.poi.valid()) {
+                pos_store[n][pn] = .{
+                    .kind = packages.stock_quest.position_data_poi_position,
+                    .x = s.poi.x,
+                    .y = s.poi.y,
+                    .z = s.poi.z,
+                };
+                pos_store[n][pn + 1] = .{
+                    .kind = packages.stock_quest.position_data_poi_size,
+                    .x = s.poi.size_x,
+                    .y = s.poi.size_y,
+                    .z = s.poi.size_z,
+                };
+                pn += 2;
+            }
             out[n] = .{
                 .id = d.name,
                 .state = state,
@@ -5965,10 +6075,8 @@ pub const Game = struct {
                 .first_objective_value = prog,
                 .objective_values = obj_vals,
                 .rewards = reward_store[n][0..rc],
-                .has_location = d.kind == .goto_point or d.kind == .kill_zombies or d.kind == .fetch_item,
-                .loc_x = if (d.kind == .goto_point) d.tx else self.sim.transform[ps].x,
-                .loc_y = if (d.kind == .goto_point) d.ty else self.sim.transform[ps].y,
-                .loc_z = if (d.kind == .goto_point) d.tz else self.sim.transform[ps].z,
+                .position_data = pos_store[n][0..pn],
+                .rally_marker_activated = s.rally_activated,
             };
             n += 1;
         }

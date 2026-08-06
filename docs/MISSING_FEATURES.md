@@ -175,7 +175,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; see §6.1 gaps) |
 | Trader inventory stock format (stock TraderData) | PARTIAL (entity-id envelope + TraderData v2 primary entries now parse in the stock window; gaps below) |
 | Dialog / NPC interaction | P1 |
-| Quest POI marker / rally | P1 |
+| Quest POI marker / rally | PARTIAL (`NetPackageQuestEvent` rally-marker + Lock/UnlockPOI handled; POIPosition/POISize on Quest.Write; rally engages only for quests placed in a prefab) |
 
 #### Vehicles / mounts
 | Package | Priority |
@@ -469,7 +469,7 @@ Honest gaps:
 | Multi-phase objectives | PARTIAL (real ordered phase graph; see gaps below) |
 | ClearSleepers volume clear | PARTIAL (kill counter drives the kill phase; no volume/spawn sim) |
 | Fetch container / treasure | PARTIAL (fetch phase counter; no container/treasure sim) |
-| RandomPOIGoto / rally markers | PARTIAL (Goto phase by location; RallyPoint auto-skipped, no marker) |
+| RandomPOIGoto / rally markers | PARTIAL (Goto phase by location; RallyPoint executes via `NetPackageQuestEvent` when the quest lands in a prefab, otherwise still scaffolding) |
 | TurnIn at correct trader NPC | PARTIAL (any trader open) |
 | Stock quest wire packages | MISSING (zdtd-native journal body) |
 | Localization.csv titles | MISSING |
@@ -499,10 +499,24 @@ Remaining gaps:
 - **Phase-0 always-active objectives.** Stock counts `Phase==0` in every phase's
   check; missing-phase objectives are approximated as phase 1, not active across
   all phases.
-- **Scaffolding phases auto-complete.** RallyPoint, POIStayWithin, UnlockPOI
-  action, and empty intermediate phases map to `PhaseKind.auto` and complete on
-  entry with no rally-marker network flow, StayWithin volume check, or POI unlock
-  / FX (no assets).
+- **Scaffolding phases auto-complete.** POIStayWithin and empty intermediate
+  phases map to `PhaseKind.auto` and complete on entry. RallyPoint is now
+  `PhaseKind.rally` and waits for the client's `TryRallyMarker`, but only when
+  the quest instance carries a POI rect: the server resolves one from
+  prefabs.xml at accept time, and a quest that lands outside every prefab keeps
+  the old auto-skip so it cannot stall (the client only emits the event when it
+  finds a `Rally` indexed block inside the quest's POI rect,
+  `QuestJournal.HasQuestAtRallyPosition` asm.il 1006297).
+- **UnlockPOI is an action, not an objective.** Stock resolves `<action>` via
+  the `QuestAction` prefix (asm.il 1390609), so `QuestActionUnlockPOI`
+  (asm.il 956062) never was a phase. Its server half is the POI lockout table:
+  the `UnlockPOI` quest event releases the lock. `<action>` elements are still
+  not parsed from quests.xml, so nothing triggers an unlock but the client.
+- **POI lockout reasons are partial.** `questCheckPoiLockout` reports
+  `QuestLock` (live lock in `ecs/poi_lock.zig`) and `PlayerInside` (another
+  player standing in the prefab rect). `Bedroll` and `LandClaim` need home /
+  claim tracking the server does not have, so they never fire. Party members
+  are not exempt from `PlayerInside` because zdtd tracks no parties.
 - **Objective-type coverage.** Executed: ClearSleepers/EntityKill/AnimalKill
   (kill), Goto family (goto/trader), Fetch family + TreasureChest (fetch),
   InteractWithNPC/ReturnToNPC (trader-interact). Mapped to `auto` or ignored:
@@ -729,7 +743,7 @@ Do not plan these as product features of zdtd:
    persist storm state across restart (stock `WeatherManager::Save`/`Load`), and
    `ForceWeather` / `SetStorm` admin commands.  
 3. Path A* (or better than greedy) + more EAI task types.  
-4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
+4. Quest objective-type coverage (Craft/StayWithin/Rally wired; POIStayWithin and unmodelled types still auto, and quests.xml `<action>` elements are still unparsed).  
 5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
 6. Workstation RecipeQueue C2S depth (lock contention shipped).
 

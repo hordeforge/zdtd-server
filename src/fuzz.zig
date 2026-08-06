@@ -328,6 +328,45 @@ fn fuzzSharedQuest(_: void, smith: *std.testing.Smith) !void {
     } else |_| {}
 }
 
+const quest_event_corpus = [_][]const u8{
+    "",
+    // TryRallyMarker: entity | pos | event | empty tags | questCode
+    &.{ 171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 39, 0, 0, 0 },
+    // RallyMarkerLocked: same head + u64 extraData
+    &.{ 171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // LockPOI: questID string + SharedWithList with an overlong count
+    &.{ 171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 39, 0, 0, 0, 1, 'q', 200 },
+    // eventType past ResetTraderQuests (should reject)
+    &.{ 171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 39, 0, 0, 0 },
+    // truncated head
+    &.{ 171, 0, 0, 0, 0, 0, 0 },
+    // SetupRestorePower: two strings + two counted lists
+    &.{ 171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 0, 39, 0, 0, 0, 0, 0, 0, 0 },
+};
+
+test "fuzz quest event head decoder" {
+    try std.testing.fuzz({}, fuzzQuestEvent, .{ .corpus = &quest_event_corpus });
+}
+
+fn fuzzQuestEvent(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [1024]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    if (stock_quest.parseQuestEventHead(input)) |head| {
+        try std.testing.expect(@intFromEnum(head.event) <=
+            @intFromEnum(stock_quest.QuestEventType.reset_trader_quests));
+        // Anything the server can re-emit must round-trip through the builder.
+        var out: [64]u8 = undefined;
+        if (stock_quest.buildQuestEvent(&out, head)) |body| {
+            const again = try stock_quest.parseQuestEventHead(body);
+            try std.testing.expectEqual(head.event, again.event);
+            try std.testing.expectEqual(head.entity_id, again.entity_id);
+            try std.testing.expectEqual(head.quest_code, again.quest_code);
+        } else |_| {}
+    } else |_| {}
+}
+
 const admin_corpus = [_][]const u8{
     "",
     "help",
