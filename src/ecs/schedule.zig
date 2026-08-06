@@ -3,10 +3,13 @@
 
 const World = @import("world.zig").World;
 const systems = @import("systems.zig");
+const buff = @import("buff.zig");
 
 /// Named tick phases (document order = run order).
 pub const Phase = enum(u8) {
     begin,
+    /// Before ai so movement and damage read this tick's buff state.
+    buffs,
     director,
     ai,
     vehicles,
@@ -26,6 +29,10 @@ pub const TickResult = struct {
     loot_n: u8 = 0,
     despawned_ids: [8]i32 = .{0} ** 8,
     despawned_n: u8 = 0,
+    /// Buffs that ended this tick; the net layer relays each as an
+    /// AddRemoveBuff with adding=false so observers drop the icon.
+    buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16,
+    buff_expired_n: u8 = 0,
     commands_applied: u32 = 0,
     /// A* replans this tick. Evidence for the deferred path-solve phase gap
     /// (docs/SCALE_ARCHITECTURE.md); not used by the sim itself.
@@ -35,10 +42,13 @@ pub const TickResult = struct {
     path_replans_denied: u32 = 0,
 };
 
-/// Run full sim tick: beginTick → director → ai → vehicles → turrets →
+/// Run full sim tick: beginTick → buffs → director → ai → vehicles → turrets →
 /// despawn → drain commands. Power resolve stays in Game.step (daylight).
 pub fn run(w: *World, dt: f32) TickResult {
     w.beginTick();
+
+    var buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16;
+    const buff_n = systems.systemBuffs(w, buff_expired[0..]);
 
     const dr = systems.systemDirector(w, dt);
     const hits = systems.systemZombieAi(w, dt);
@@ -64,10 +74,12 @@ pub fn run(w: *World, dt: f32) TickResult {
         .killed_n = tk.killed_n,
         .loot_n = tk.loot_n,
         .despawned_n = de_n,
+        .buff_expired_n = buff_n,
         .commands_applied = cmd.applied,
         .path_replans = w.path_replans.load(.monotonic),
         .path_replans_denied = w.path_replans_denied.load(.monotonic),
     };
+    @memcpy(out.buff_expired[0..buff_n], buff_expired[0..buff_n]);
     @memcpy(out.killed_ids[0..tk.killed_n], tk.killed_ids[0..tk.killed_n]);
     @memcpy(out.loot_bag_ids[0..tk.loot_n], tk.loot_bag_ids[0..tk.loot_n]);
     @memcpy(out.despawned_ids[0..de_n], de_ids[0..de_n]);

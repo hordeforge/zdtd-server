@@ -8,7 +8,7 @@ src/ecs/
   components.zig   plain data types + Mask
   world.zig        SoA columns + resources + spawn + locals + observers
   systems.zig      mutations; tickAll → schedule.run
-  schedule.zig     Phase enum + ordered run (director…commands)
+  schedule.zig     Phase enum + ordered run (buffs…commands)
   locals.zig       TickLocals scratch (cleared beginTick)
   jobs.zig         thin forSlotRange over util/parallel
   query.zig        forEach* / each packed / forEachParallelKind / group face
@@ -21,6 +21,7 @@ src/ecs/
   inventory.zig    armor mitigation + inventory helpers
   path.zig         greedy path helper (no navmesh yet)
   quest.zig        Catalog resource types (defs from stock XML or builtin)
+  buff.zig         buff stack/duration/expiry rules over the BuffSet component
   electric.zig     PowerGrid resource
   powerblocks.zig  placeable electrical block registry (id -> kind/watts)
   aidirector.zig   Director resource (clock / hordes / animals)
@@ -49,6 +50,7 @@ Agent scorecard for "is this state ECS SoA, a resource, world/*, or session?":
 alive, mask
 transform, health, network_id, kind, flags
 player, journal, wallet          // players
+buffs                            // any EntityAlive (lazily attached)
 zombie_ai                        // zombies
 vehicle                          // vehicles
 turret                           // turrets
@@ -58,13 +60,14 @@ trader_stock                     // traders (inventory on the entity)
 ### Tick order (`schedule.run` / `systems.tickAll`)
 
 0. `World.beginTick`: clear `TickLocals`  
-1. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
-2. `systemZombieAi`: multi-threaded over slots; deferred player damage  
-3. `systemVehicles`: driver transform stick  
-4. Power: resolve stays in `Game.step` (daylight); not doubled here  
-5. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
-6. `systemDespawnFar`: cull far zombies  
-7. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
+1. `systemBuffs`: 20 Hz buff duration/stack tick; reports expiries to the net layer  
+2. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
+3. `systemZombieAi`: multi-threaded over slots; deferred player damage  
+4. `systemVehicles`: driver transform stick  
+5. Power: resolve stays in `Game.step` (daylight); not doubled here  
+6. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
+7. `systemDespawnFar`: cull far zombies  
+8. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 `vehicleEnter` / `vehicleControl` / `vehicleExit`.

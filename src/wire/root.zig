@@ -17,6 +17,7 @@ pub const stock_deco = @import("stock_deco.zig");
 pub const stock_nameid = @import("stock_nameid.zig");
 pub const stock_entity = @import("stock_entity.zig");
 pub const stock_quest = @import("stock_quest.zig");
+pub const stock_buff = @import("stock_buff.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const te_types = @import("te_types.zig");
@@ -32,6 +33,7 @@ test {
     _ = stock_nameid;
     _ = stock_entity;
     _ = stock_quest;
+    _ = stock_buff;
     _ = stock_te;
     _ = stock_sign;
     _ = te_types;

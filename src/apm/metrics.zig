@@ -83,6 +83,8 @@ pub const CounterId = enum(u16) {
     path_replans,
     /// A* replans refused by the per-tick node budget.
     path_replans_denied,
+    /// C2S AddRemoveBuff dropped: bad body, foreign entity, or unknown name.
+    buff_rejects,
     _,
 };
 

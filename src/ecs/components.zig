@@ -535,6 +535,85 @@ pub const Dirty = packed struct(u8) {
     }
 };
 
+/// Stock buff ticks per second: BuffValue::get_DurationInSeconds divides
+/// durationTicks by a hardcoded 20 (asm.il 733359), independent of any server
+/// tick-rate config. Deviating makes HUD timers expire at the wrong moment.
+pub const buff_ticks_per_second: f32 = 20;
+/// Concurrent buffs per entity. Stock's ActiveBuffs list is unbounded; a fixed
+/// set keeps the component POD and bounds what one client can push at us.
+pub const max_buffs_per_entity: usize = 8;
+
+/// BuffEffectStackTypes (asm.il 738358): what a repeat application of an
+/// already-active buff does. Absent stack_type in buffs.xml means Ignore
+/// (BuffClass::.ctor, asm.il 732691), never Replace.
+pub const StackType = enum(u8) { ignore = 0, duration = 1, effect = 2, replace = 3 };
+
+/// BuffValue/BuffFlags (asm.il 733040). Bit positions are wire-visible:
+/// BuffValue::Write emits this byte verbatim (asm.il 733588).
+pub const BuffFlags = packed struct(u8) {
+    started: bool = false,
+    finished: bool = false,
+    remove: bool = false,
+    update: bool = false,
+    invalid: bool = false,
+    paused: bool = false,
+    _pad: u2 = 0,
+};
+
+/// One entry of stock's EntityBuffs::ActiveBuffs (BuffValue, asm.il 733040).
+/// The BuffClass fields the tick needs (duration, update rate, remove-on-death)
+/// are copied in at add time: stock reads them off a shared BuffClass that
+/// set_DurationMax mutates process-wide (asm.il 732658), which we refuse to model.
+pub const BuffInstance = struct {
+    active: bool = false,
+    /// Index into the buffs.xml catalog (assets/buffs.Table.byId).
+    def_id: u16 = 0,
+    /// BuffValue::.ctor starts at 1; Effect stacking increments (asm.il 733486).
+    stack_mult: u8 = 1,
+    flags: BuffFlags = .{},
+    duration_ticks: u32 = 0,
+    update_ticks: u16 = 0,
+    update_rate_ticks: i32 = 20,
+    /// BuffClass::DurationMax in seconds; <= 0 never expires (asm.il 732754).
+    duration_max: f32 = 0,
+    remove_on_death: bool = true,
+    instigator_id: i32 = -1,
+    instigator_x: i32 = 0,
+    instigator_y: i32 = 0,
+    instigator_z: i32 = 0,
+
+    /// BuffValue::get_DurationInSeconds (asm.il 733359).
+    pub fn durationSeconds(self: *const BuffInstance) f32 {
+        return @as(f32, @floatFromInt(self.duration_ticks)) / buff_ticks_per_second;
+    }
+};
+
+pub const BuffSet = struct {
+    slots: [max_buffs_per_entity]BuffInstance = [_]BuffInstance{.{}} ** max_buffs_per_entity,
+
+    pub fn find(self: *BuffSet, def_id: u16) ?*BuffInstance {
+        for (&self.slots) |*s| {
+            if (s.active and s.def_id == def_id) return s;
+        }
+        return null;
+    }
+
+    pub fn findFree(self: *BuffSet) ?*BuffInstance {
+        for (&self.slots) |*s| {
+            if (!s.active) return s;
+        }
+        return null;
+    }
+
+    pub fn count(self: *const BuffSet) u8 {
+        var n: u8 = 0;
+        for (self.slots) |s| {
+            if (s.active) n += 1;
+        }
+        return n;
+    }
+};
+
 pub const Mask = packed struct(u32) {
     transform: bool = false,
     health: bool = false,
@@ -554,7 +633,8 @@ pub const Mask = packed struct(u32) {
     loot_bag: bool = false,
     sleeper: bool = false,
     dirty: bool = false,
-    _pad: u14 = 0,
+    buffs: bool = false,
+    _pad: u13 = 0,
 };
 
 test "putInSlot rejects overflowing stack counts" {
@@ -589,4 +669,44 @@ test "addSlotStacked preserves quality and meta" {
     try std.testing.expectEqual(@as(u16, 2), inv.slots[0].count);
     try std.testing.expectEqual(@as(u8, 4), inv.slots[0].quality);
     try std.testing.expectEqual(InvSlot{ .item_id = 11, .count = 1, .quality = 1, .meta = 0 }, inv.slots[1]);
+}
+
+test "BuffFlags bit layout matches stock BuffValue.BuffFlags" {
+    // asm.il 733040: Started 1, Finished 2, Remove 4, Update 8, Invalid 0x10, Paused 0x20.
+    try std.testing.expectEqual(@as(u8, 0x01), @as(u8, @bitCast(BuffFlags{ .started = true })));
+    try std.testing.expectEqual(@as(u8, 0x02), @as(u8, @bitCast(BuffFlags{ .finished = true })));
+    try std.testing.expectEqual(@as(u8, 0x04), @as(u8, @bitCast(BuffFlags{ .remove = true })));
+    try std.testing.expectEqual(@as(u8, 0x08), @as(u8, @bitCast(BuffFlags{ .update = true })));
+    try std.testing.expectEqual(@as(u8, 0x10), @as(u8, @bitCast(BuffFlags{ .invalid = true })));
+    try std.testing.expectEqual(@as(u8, 0x20), @as(u8, @bitCast(BuffFlags{ .paused = true })));
+    try std.testing.expectEqual(@as(u8, 0), @as(u8, @bitCast(BuffFlags{})));
+}
+
+test "BuffSet find and findFree handle empty and full sets" {
+    var set: BuffSet = .{};
+    try std.testing.expect(set.find(3) == null);
+    try std.testing.expectEqual(@as(u8, 0), set.count());
+
+    for (&set.slots, 0..) |*s, i| {
+        const free = set.findFree() orelse return error.NoFreeSlot;
+        free.* = .{ .active = true, .def_id = @intCast(i) };
+        _ = s;
+    }
+    try std.testing.expectEqual(@as(u8, max_buffs_per_entity), set.count());
+    try std.testing.expect(set.findFree() == null);
+    try std.testing.expectEqual(@as(u16, 3), set.find(3).?.def_id);
+    // Freeing a middle slot makes it reusable without disturbing the others.
+    set.slots[3] = .{};
+    try std.testing.expect(set.find(3) == null);
+    try std.testing.expect(set.findFree() != null);
+    try std.testing.expectEqual(@as(u8, max_buffs_per_entity - 1), set.count());
+}
+
+test "durationSeconds divides by the stock 20 Hz buff clock" {
+    var b: BuffInstance = .{ .duration_ticks = 0 };
+    try std.testing.expectEqual(@as(f32, 0), b.durationSeconds());
+    b.duration_ticks = 20;
+    try std.testing.expectEqual(@as(f32, 1), b.durationSeconds());
+    b.duration_ticks = 90;
+    try std.testing.expectEqual(@as(f32, 4.5), b.durationSeconds());
 }

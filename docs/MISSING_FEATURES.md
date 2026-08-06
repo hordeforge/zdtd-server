@@ -37,6 +37,7 @@ This document is deliberately exhaustive. Status labels:
 | Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders, gamestages | biomes.xml, vehicles.xml | buffs | tables load |
+| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders + buffs | biomes.xml, vehicles.xml | gamestages, buff effect VM | tables load |
 | Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
 | Admin / browser | admin TCP (kick/ban/give/tele/kill/…) + console | full telnet surface | Steam browser | ops usable |
 
@@ -126,6 +127,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityRagdoll` | P2 |
 | `NetPackageEntityAttach` / detach | P1 (vehicles, seats) |
 | `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health also replicates from the tick pass whenever `dirty.hp` is set, so AI melee, C2S damage and death reach the client the way `EntityStats::TickWait` polls `Stat.Changed` (asm.il:199393); NPC stats and buffs deferred) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buff set is server-owned via AddRemoveBuff) |
 | `NetPackageEntityStealth` | P2 |
 | `NetPackageEntityCollect` | P1 (loot) |
 | `NetPackageEntityWaypointList` / map markers | P2 |
@@ -137,7 +139,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | `NetPackageDamageEntity` full field semantics | PARTIAL (head parse/build) |
 | `NetPackageExplosionInitiate` / `ExplosionClient` | PARTIAL (initiate dig + client FX; nested blob shallow) |
-| `NetPackageAddRemoveBuff` / `EntityStatsBuff` | P1 |
+| `NetPackageAddRemoveBuff` / `EntityStatsBuff` | PARTIAL (AddRemoveBuff C2S validated + S2C relay/expiry; EntityStatsBuff full-list sync on join; PDF `buffData` still empty, no cvar section) |
 | `NetPackageEmitSmell` | P3 |
 | Blood / infection / wetness packages | P2 |
 
@@ -333,7 +335,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |
 | Ragdoll / death loot bags | PARTIAL (loot ECD bag; no ragdoll) |
 | XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |
-| Buffs / disease / food/water/temp | PARTIAL (join stats; buff packages shallow) |
+| Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
 | Equipment / armor mitigation | PARTIAL (equip slots; mitigation shallow) |
 | Projectile / ranged combat | MISSING |
@@ -673,6 +675,8 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | vehicles.xml | PARTIAL (load + spawn HP/speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
+| gamestages / spawning | PARTIAL (spawning.xml → director groups; gamestages no) |
+| buffs / progression | PARTIAL (typed catalog + stack/duration/update_rate + passives + XP curve; no triggered_effect VM) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | MISSING |
 | materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
@@ -869,6 +873,9 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
   per-session Client state, so the streak restarts on reconnect.
 - Party grouping ignores stock's same-`PrefabInstance` requirement (zdtd has no
   per-player POI tracking); distance alone decides.
+Full telnet surface, Steam browser, party PlatformUserId, gamestages, buffs
+remainder (triggered_effect VM, cvar sync, immunity/damage-type gates, buff
+persistence across sessions), vehicle multi-seat, Encryption* (optional).
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.

@@ -13,6 +13,7 @@ pub const stock_deco = @import("stock_deco.zig");
 pub const stock_nameid = @import("stock_nameid.zig");
 pub const stock_entity = @import("stock_entity.zig");
 pub const stock_quest = @import("stock_quest.zig");
+pub const stock_buff = @import("stock_buff.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const te_types = @import("te_types.zig");
@@ -537,7 +538,10 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeI32(0);
     try w.writeI32(0);
     try w.writeI32(0); // rentalEndDay
-    // progressionData / buffData / stealthData: length 0 (empty streams)
+    // progressionData / buffData / stealthData: length 0 (empty streams).
+    // buffData would carry an EntityBuffs blob (asm.il 1977295); nothing to put
+    // there until buffs survive a session, and live buff sync rides
+    // AddRemoveBuff / EntityStatsBuff instead.
     try w.writeI32(0);
     try w.writeI32(0);
     try w.writeI32(0);

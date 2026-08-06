@@ -11,6 +11,7 @@ const platform_user = @import("wire/platform_user.zig");
 const stock_te = @import("wire/stock_te.zig");
 const stock_inv = @import("wire/stock_inv.zig");
 const stock_quest = @import("wire/stock_quest.zig");
+const stock_buff = @import("wire/stock_buff.zig");
 const admin = @import("server/admin.zig");
 const components = @import("ecs/components.zig");
 const mode_pack = @import("server/mode.zig");
@@ -1294,3 +1295,38 @@ const gamestages_xml_corpus = [_][]const u8{
     // very long group name (exceeds max_name_len, must be rejected not truncated silently)
     "<group name=\"" ++ ("S_" ** 200) ++ "\" spawner=\"s\"/>",
 };
+const buff_corpus = [_][]const u8{
+    "",
+    // entityId only
+    &.{ 171, 0, 0, 0 },
+    // entityId | "buffShocked" | -1.0f | adding | instigator -1 | Vector3i 0
+    &.{
+        171,  0,   0,    0,    11,  'b',  'u',  'f',
+        'f',  'S', 'h',  'o',  'c', 'k',  'e',  'd',
+        0,    0,   0x80, 0xbf, 1,   0xff, 0xff, 0xff,
+        0xff, 0,   0,    0,    0,   0,    0,    0,
+        0,    0,   0,    0,    0,
+    },
+    // huge 7-bit name length with no payload
+    &.{ 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0x0f },
+    // NaN duration, adding byte outside {0,1}
+    &.{ 0, 0, 0, 0, 0, 0xff, 0xff, 0xc0, 0x7f, 0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+};
+
+test "fuzz AddRemoveBuff body decoder" {
+    try std.testing.fuzz({}, fuzzAddRemoveBuff, .{ .corpus = &buff_corpus });
+}
+
+fn fuzzAddRemoveBuff(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+
+    var name_buf: [stock_buff.max_buff_name]u8 = undefined;
+    if (stock_buff.parseAddRemoveBuff(input, &name_buf)) |v| {
+        // The name must fit the caller's buffer and have come out of the body.
+        try std.testing.expect(v.name.len <= name_buf.len);
+        try std.testing.expect(v.name.len + 25 <= input.len);
+    } else |_| {}
+}

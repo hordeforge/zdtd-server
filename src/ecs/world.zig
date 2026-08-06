@@ -67,6 +67,9 @@ pub const World = struct {
     sleeper: [max_entities]c.Sleeper = [_]c.Sleeper{.{}} ** max_entities,
     flags: [max_entities]c.Flags = [_]c.Flags{.{}} ** max_entities,
     dirty: [max_entities]c.Dirty = [_]c.Dirty{.{}} ** max_entities,
+    /// Lazily attached (see buffsMut): most entities never carry a buff, and
+    /// spawnBase resets mask[s] wholesale, so a stale set can never be read.
+    buffs: [max_entities]c.BuffSet = [_]c.BuffSet{.{}} ** max_entities,
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,
@@ -210,6 +213,17 @@ pub const World = struct {
     pub fn setCatalog(self: *World, cat: quest.Catalog) void {
         self.catalog.deinit();
         self.catalog = cat;
+    }
+
+    /// Buff set for a slot, attaching the column on first use. Zeroing here (not
+    /// in spawnBase) keeps a 300-byte memset off every spawn while guaranteeing
+    /// a reused slot never inherits the previous entity's buffs.
+    pub fn buffsMut(self: *World, slot: Slot) *c.BuffSet {
+        if (!self.mask[slot].buffs) {
+            self.mask[slot].buffs = true;
+            self.buffs[slot] = .{};
+        }
+        return &self.buffs[slot];
     }
 
     pub fn playerByPeer(self: *const World, peer_slot: usize) ?Slot {

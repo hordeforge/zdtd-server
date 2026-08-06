@@ -1797,3 +1797,213 @@ test "scenario ally invite accept and identity spoof reject" {
     try std.testing.expect(cap_a.findPkgId(resp_id) == null);
     std.debug.print("PASS ally: invite/accept/remove by identity; spoof and C2S AllyResponse rejected\n", .{});
 }
+
+test "scenario buff add relays to observers and expires on the server clock" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_buff");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    // buffShocked: stack_type=duration, duration 4 s (80 stock ticks).
+    const def_id = g.buffs.indexOfName("buffShocked").?;
+    var body: [128]u8 = undefined;
+    var frame_buf: [256]u8 = undefined;
+    const add = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id,
+        .name = "buffShocked",
+        // A client may ask for any duration; the server must not honour it.
+        .duration = 30,
+        .adding = true,
+        .instigator_id = ca.entity_id,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", add));
+
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    try std.testing.expect(g.sim.mask[ps].buffs);
+    const inst = g.sim.buffs[ps].find(def_id).?;
+    // Class duration wins over the client's 30 s request.
+    try std.testing.expectEqual(@as(f32, 4), inst.duration_max);
+
+    // B is told, A is not (it already applied the buff locally).
+    const pkg_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    const relayed = cap_b.findPkgIdEntity(pkg_id, ca.entity_id) orelse return error.NoRelay;
+    var name_buf: [64]u8 = undefined;
+    const parsed = try packages.stock_buff.parseAddRemoveBuff(relayed, &name_buf);
+    try std.testing.expectEqualStrings("buffShocked", parsed.name);
+    try std.testing.expect(parsed.adding);
+    // Never a concrete duration: that would retune the shared BuffClass on B.
+    try std.testing.expectEqual(@as(f32, -1), parsed.duration);
+    try std.testing.expect(cap_a.findPkgIdEntity(pkg_id, ca.entity_id) == null);
+
+    // A peer that joins now missed the relay, so the join bundle must carry the
+    // full list as EntityStatsBuff (remote-only on the client).
+    var cap_c: ln_peer.Capture = .{};
+    const cc = try g.attachJoinedClient(&cap_c);
+    const stats_id = packages.idOf("NetPackageEntityStatsBuff").?;
+    const sync = cap_c.findPkgIdEntity(stats_id, ca.entity_id) orelse return error.NoBuffSync;
+    // i32 entityId | i32 len | EntityBuffs blob (version 3, count 1).
+    try std.testing.expectEqual(@as(i32, @intCast(sync.len - 8)), std.mem.readInt(i32, sync[4..8], .little));
+    try std.testing.expectEqual(@as(u8, 3), sync[8]);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, sync[9..11], .little));
+    // A peer never gets its own list this way (the client would drop it anyway).
+    try std.testing.expect(cap_c.findPkgIdEntity(stats_id, cc.entity_id) == null);
+
+    // Run the 81 ticks it takes to reach 4.0 s and then report the removal.
+    cap_a.clear();
+    cap_b.clear();
+    var t: u32 = 0;
+    while (t < 81) : (t += 1) try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(def_id) == null);
+
+    const gone_a = cap_a.findPkgIdEntity(pkg_id, ca.entity_id) orelse return error.NoExpiry;
+    const gone = try packages.stock_buff.parseAddRemoveBuff(gone_a, &name_buf);
+    try std.testing.expect(!gone.adding);
+    try std.testing.expectEqualStrings("buffShocked", gone.name);
+    try std.testing.expect(cap_b.findPkgIdEntity(pkg_id, ca.entity_id) != null);
+    std.debug.print(
+        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks\n",
+        .{ ca.entity_id, t },
+    );
+}
+
+test "scenario buff rejects unknown names and foreign entities" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_buff_rej");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff_rej", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const pkg_id = packages.idOf("NetPackageAddRemoveBuff").?;
+
+    var body: [128]u8 = undefined;
+    var frame_buf: [256]u8 = undefined;
+    const unknown = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id,
+        .name = "buffNotInAnyCatalog",
+        .duration = -1,
+        .adding = true,
+        .instigator_id = -1,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    cap_b.clear();
+    const before = g.harness.counters.get(.buff_rejects);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", unknown));
+    try std.testing.expectEqual(before + 1, g.harness.counters.get(.buff_rejects));
+    try std.testing.expect(cap_b.findPkgId(pkg_id) == null);
+
+    // Buffing somebody else's entity is not a client's call.
+    const foreign = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id + 1000,
+        .name = "buffIsOnFire",
+        .duration = -1,
+        .adding = true,
+        .instigator_id = -1,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", foreign));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_b.findPkgId(pkg_id) == null);
+
+    // A truncated body is malformed input, not a buff.
+    const mal_before = g.harness.counters.get(.c2s_malformed);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", unknown[0..5]));
+    try std.testing.expectEqual(mal_before + 1, g.harness.counters.get(.c2s_malformed));
+
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    try std.testing.expectEqual(@as(u8, 0), g.sim.buffs[ps].count());
+    std.debug.print("PASS buff rejects: unknown name, foreign entity, truncated body all dropped\n", .{});
+}
+
+test "scenario replace-stack buff re-add restarts instead of duplicating" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_buff_stack");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff_stack", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // buffInjuryBleeding is stack_type=replace in stock buffs.xml.
+    const def_id = g.buffs.indexOfName("buffInjuryBleeding").?;
+    var body: [128]u8 = undefined;
+    var frame_buf: [256]u8 = undefined;
+    const add = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = c.entity_id,
+        .name = "buffInjuryBleeding",
+        .duration = -1,
+        .adding = true,
+        .instigator_id = -1,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    const framed = try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", add);
+    try g.injectFramed(c, framed);
+
+    var t: u32 = 0;
+    while (t < 10) : (t += 1) try g.step();
+    const ps = g.sim.playerByPeer(c.slot).?;
+    try std.testing.expectEqual(@as(u32, 10), g.sim.buffs[ps].find(def_id).?.duration_ticks);
+
+    try g.injectFramed(c, framed);
+    try std.testing.expectEqual(@as(u8, 1), g.sim.buffs[ps].count());
+    try std.testing.expectEqual(@as(u32, 0), g.sim.buffs[ps].find(def_id).?.duration_ticks);
+
+    // duration 0 in the catalog means it never expires on its own; a client
+    // remove request ends it through the same path an expiry would.
+    const rem = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = c.entity_id,
+        .name = "buffInjuryBleeding",
+        .duration = -1,
+        .adding = false,
+        .instigator_id = -1,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", rem));
+    try std.testing.expect(g.sim.buffs[ps].find(def_id).?.flags.remove);
+    try g.step();
+    try std.testing.expectEqual(@as(u8, 0), g.sim.buffs[ps].count());
+    std.debug.print("PASS buff stacking: replace restarted one instance, client remove ended it\n", .{});
+}

@@ -50,6 +50,30 @@ Join auto-accepts `catalog.starter_id`. Systems: `questAccept*`, `questOn*`.
   (primary ItemStack entries + markup + money)
 - Opening trader advances fetch-trader / TurnIn quests (sim); offers via NPCQuestList
 
+## Buffs (`BuffSet` component + `systemBuffs` + `ecs/buff.zig`)
+
+- Catalog: `assets/buffs.zig` (typed `stack_type`, `duration`, `update_rate`
+  seconds → `UpdateRateTicks`, `remove_on_death`), builtin subset without buffs.xml
+- Runtime: fixed 8-slot `BuffSet` attached lazily per entity; the rules mirror
+  stock `EntityBuffs`/`BuffClass`/`BuffValue` tick-for-tick (Invalid → Finished →
+  Remove → Paused/dead → Started → DurationTick), 20 Hz counting **up**, and
+  `DurationMax <= 0` never expires
+- Stack rules (`BuffEffectStackTypes`): Ignore revives a pending removal,
+  Duration extends by the remainder, Effect increments `stackEffectMultiplier`
+  (saturating at 255), Replace restarts the timer. No `stack_type` means Ignore
+- Wire (`src/wire/stock_buff.zig`): `NetPackageAddRemoveBuff` body and the
+  `EntityBuffs` blob (version 3). Join sends every other player's full list as
+  `NetPackageEntityStatsBuff` (remote-only on the client), since a late joiner
+  missed the relays
+- C2S is validated (own entity only, name must resolve) then relayed to the other
+  peers; expiries fan out from the tick. Relays always send `duration = -1`:
+  any value >= 0 calls `BuffClass::set_DurationMax` on the receiving client and
+  retunes that buff class for every entity for the rest of its session
+- Not shipped: the `triggered_effect` VM (the client runs it from its own
+  buffs.xml), the blob's cvar section, immunity/damage-type gates, buff
+  persistence across sessions, and therefore `PlayerDataFile.buffData` (still
+  written as length 0)
+
 ## Chat / attach / collect
 
 - Stock `NetPackageChat` (Global); SimpleChat upgraded to Chat

@@ -94,7 +94,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
 | **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | ids remapped by name via `.blocks.nim`; pre-18 `BlockValueV3` converted; skip terrainFiller; rotation bits kept |
 | AssignIds pins + dump merge | `assets/assignids_comptime.zig`, `maxdamage.zig` | cwd + /proc/self/exe paths |
-| Catalog loaders (XML) | `assets/*` | blocks ids=dump only; biomes colors; painting; spawning; buffs+passives; progression attrs/perks; vehicles; storage pairs; traders groups |
+| Catalog loaders (XML) | `assets/*` | blocks ids=dump only; biomes colors; painting; spawning; buffs (stack/duration/update_rate) + passives; progression attrs/perks; vehicles; storage pairs; traders groups |
 | Shared I/O | `util/io_fs.zig`, `assets/paths.zig` | std.Io-backed filesystem helpers and config-path resolution |
 | Seed chest AssignIds | `stock_deco.zig` | cntWoodenChestClosed from dump |
 | Place item→block | `ecs/inventory` + Game.place_fn | name→AssignIds (wood→frameShapes:cube) |
@@ -142,6 +142,8 @@ zdtd     → Zig dedi, client wire only, no mods
 | SharedQuest forward/accept | `stock_quest.zig`, `game.zig` | |
 | Stock TraderData (entity + TraderData v2) | `packages.zig` | primary entries + money |
 | Stock NetPackageChat Global | `packages.zig` | SimpleChat upgraded |
+| Buff set + stack/duration ticks | `ecs/buff.zig`, `ecs/components.zig` | stock EntityBuffs tick order at 20 Hz |
+| AddRemoveBuff + EntityBuffs blob | `wire/stock_buff.zig`, `game.zig` | C2S validated, relay/expiry always duration -1 |
 
 ### Content XML (2026-07-21)
 

@@ -65,7 +65,7 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `recipes.zig` | recipes.xml | craft graph |
 | `quests.zig` | quests.xml | catalog |
 | `traders.zig` | traders.xml | groups + rolls |
-| `buffs.zig` | buffs.xml | metadata + passive_effect rows |
+| `buffs.zig` | buffs.xml | duration, stack_type, update_rate, remove_on_death + passive_effect rows |
 | `progression.zig` | progression.xml | level curve + attributes/perks catalog |
 | `vehicles.zig` | vehicles.xml | kind, velocityMax, torque, fuel |
 | `storage_pairs.zig` | blocks.xml DowngradeBlock | Closed↔Open storage ids |

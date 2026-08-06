@@ -452,7 +452,9 @@ pub const Game = struct {
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
     spawning: assets_spawning.Table = assets_spawning.Table.empty(),
-    buffs: assets_buffs.Table = assets_buffs.Table.empty(),
+    /// buffs.xml when present, else the builtin subset: buff names must resolve
+    /// or C2S buff traffic is rejected wholesale.
+    buffs: assets_buffs.Table = assets_buffs.builtin(),
     progression: assets_progression.LevelCurve = .{},
     progression_table: assets_progression.Table = assets_progression.Table.empty(),
     vehicles: assets_vehicles.Table = assets_vehicles.Table.empty(),
@@ -4113,6 +4115,10 @@ pub const Game = struct {
                         c.game_stage_born_world_time,
                     );
                     self.sim.reviveSlot(si);
+                    // The client drops its own remove_on_death buffs when it
+                    // dies (BuffClass::RemoveOnDeath, asm.il 1371585), so drop
+                    // ours silently rather than broadcasting removals it made.
+                    if (self.sim.mask[si].buffs) _ = ecs.buff.clearOnDeath(&self.sim.buffs[si]);
                     self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
                     self.sim.transform[si] = .{
                         .x = @as(f32, @floatFromInt(surf.x)),
@@ -4950,8 +4956,12 @@ pub const Game = struct {
             self.players_dirty = true;
             return;
         }
-        // Client local buff apply / audio noise: accept, no sim yet.
-        if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff") or std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+        if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
+            try self.handleAddRemoveBuff(c, body);
+            return;
+        }
+        // Client audio noise / client-side stat mirrors: accept, no sim state.
+        if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
             return;
         }
         // C2S that need no server state change but must not warn/drop as
@@ -6394,6 +6404,9 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned_early);
             }
             try self.sendStockEntitySpawns(peer, c, sx, sz);
+            // Buffs already on the other players (their AddRemoveBuff relays
+            // predate this peer).
+            try self.sendBuffSync(peer, c);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
@@ -8104,6 +8117,136 @@ pub const Game = struct {
         return interest.inRange(op.x, op.z, wx, wz, cl.view_radius);
     }
 
+    /// C2S NetPackageAddRemoveBuff (asm.il 202415). Stock's server branch re-Setups
+    /// the package and fans it out to the clients attached to the entity
+    /// (ProcessPackage, asm.il 202531); we validate first, because the body is
+    /// entirely client-chosen: a peer may only drive its own player entity, and
+    /// only with a buff name the catalog resolves.
+    fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
+        var name_buf: [packages.stock_buff.max_buff_name]u8 = undefined;
+        const req = packages.stock_buff.parseAddRemoveBuff(body, &name_buf) catch {
+            self.harness.counters.inc(.buff_rejects);
+            self.harness.counters.inc(.c2s_malformed);
+            return;
+        };
+        if (req.entity_id != c.entity_id) {
+            self.harness.counters.inc(.buff_rejects);
+            self.harness.counters.inc(.ownership_rejects);
+            return;
+        }
+        const def_id = self.buffs.indexOfName(req.name) orelse {
+            // Unknown names are the loud case: a client-side mod, a catalog
+            // mismatch, or probing. Rate-limit so it cannot flood the log.
+            self.harness.counters.inc(.buff_rejects);
+            const n = self.harness.counters.get(.buff_rejects);
+            if (n == 1 or n % 100 == 0) {
+                std.debug.print("zdtd: buff name not in catalog slot={d} n={d}\n", .{ c.slot, n });
+            }
+            return;
+        };
+        const ps = self.sim.playerByPeer(c.slot) orelse return;
+        const set = self.sim.buffsMut(ps);
+        if (!req.adding) {
+            // Flag only: the tick removes and broadcasts, so client-requested and
+            // expiry removals leave the world through one path.
+            _ = ecs.buff.remove(set, def_id);
+            return;
+        }
+        const def = self.buffs.byId(def_id) orelse return;
+        const res = ecs.buff.add(set, .{
+            .def_id = def_id,
+            .duration = def.duration,
+            .stack_type = def.stack_type,
+            .update_rate_ticks = def.update_rate_ticks,
+            .remove_on_death = def.remove_on_death,
+            // The client's requested duration is deliberately dropped: any value
+            // >= 0 on the wire calls BuffClass::set_DurationMax on every receiving
+            // client and retunes that buff class for the whole session
+            // (asm.il 736259 IL_00cf, set_DurationMax asm.il 732658).
+        }, ecs.buff.duration_from_class, req.instigator_id, req.instigator_x, req.instigator_y, req.instigator_z);
+        if (res == .no_slot) {
+            self.harness.counters.inc(.buff_rejects);
+            return;
+        }
+        try self.relayBuff(c.entity_id, def.name, true, req.instigator_id, c.slot);
+    }
+
+    /// Full buff list of every OTHER joined player, as NetPackageEntityStatsBuff.
+    /// A relayed AddRemoveBuff only reaches the peers connected at the time, so a
+    /// late joiner needs the whole list once. The client applies this package to
+    /// remote entities only (asm.il 202268), which is exactly the set we send.
+    fn sendBuffSync(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
+        var blob_buf: [1024]u8 = undefined;
+        for (&self.clients) |*other| {
+            if (!other.joined or other.slot == c.slot) continue;
+            const blob = self.playerBuffBlob(other.slot, &blob_buf);
+            if (blob.len == 0) continue;
+            const body = packages.stock_buff.buildEntityStatsBuffBody(&self.body_buf, other.entity_id, blob) catch {
+                self.harness.counters.inc(.encode_errors);
+                continue;
+            };
+            try self.sendGame(peer, "NetPackageEntityStatsBuff", body);
+        }
+    }
+
+    /// EntityBuffs blob for a peer's player. Empty (not even a header) when the
+    /// player carries no buffs, so callers can skip the send entirely.
+    fn playerBuffBlob(self: *Game, peer_slot: usize, buf: []u8) []const u8 {
+        const ps = self.sim.playerByPeer(peer_slot) orelse return &.{};
+        if (!self.sim.mask[ps].buffs) return &.{};
+        var values: [ecs.components.max_buffs_per_entity]packages.stock_buff.BuffValueWire = undefined;
+        var n: usize = 0;
+        for (self.sim.buffs[ps].slots) |b| {
+            if (!b.active) continue;
+            const def = self.buffs.byId(b.def_id) orelse continue;
+            values[n] = .{
+                .name = def.name,
+                .stack_mult = b.stack_mult,
+                .duration_ticks = b.duration_ticks,
+                .instigator_id = b.instigator_id,
+                .flags = @bitCast(b.flags),
+                .update_ticks = b.update_ticks,
+                .instigator_x = b.instigator_x,
+                .instigator_y = b.instigator_y,
+                .instigator_z = b.instigator_z,
+            };
+            n += 1;
+        }
+        if (n == 0) return &.{};
+        return packages.stock_buff.writeEntityBuffs(buf, values[0..n]) catch &.{};
+    }
+
+    /// Fan an add/remove out to the observers of `entity_id`. duration is always
+    /// -1 so the receiving client uses its own buffs.xml BuffClass duration.
+    fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
+        const b = packages.stock_buff.buildAddRemoveBuffBody(&self.body_buf, .{
+            .entity_id = entity_id,
+            .name = buff_name,
+            .duration = ecs.buff.duration_from_class,
+            .adding = adding,
+            .instigator_id = instigator_id,
+            .instigator_x = 0,
+            .instigator_y = 0,
+            .instigator_z = 0,
+        }) catch {
+            self.harness.counters.inc(.encode_errors);
+            return;
+        };
+        try self.broadcastExcept("NetPackageAddRemoveBuff", b, except_slot);
+    }
+
+    /// Drain the tick's buff removals. Everyone gets them, the owner included:
+    /// ProcessPackage applies to any EntityAlive, so this is what clears the
+    /// local HUD icon as well as the observers' (asm.il 202531).
+    fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
+        var i: u8 = 0;
+        while (i < r.buff_expired_n) : (i += 1) {
+            const ex = r.buff_expired[i];
+            const def = self.buffs.byId(ex.def_id) orelse continue;
+            try self.relayBuff(ex.entity_id, def.name, false, -1, null);
+        }
+    }
+
     /// M11 serialize-once interest: for each entity that needs a motion send,
     /// encode PosAndRot (and zombie Speeds/AliveFlags) once, frame once, then
     /// fan-out framed bytes to interested peers. Cost ~ O(dirty × interest), not
@@ -8469,6 +8612,9 @@ pub const Game = struct {
                 const rm = try packages.buildRemoveBodyReason(&self.body_buf, did, .despawned);
                 try self.broadcast("NetPackageEntityRemove", rm);
             }
+            // Expired buffs: tell every client so HUD icons and remote-entity
+            // effects end at the same tick the server ended them.
+            if (r.buff_expired_n > 0) try self.broadcastBuffExpiries(&r);
             var li: u8 = 0;
             while (li < r.loot_n) : (li += 1) {
                 const lid = r.loot_bag_ids[li];
