@@ -47,6 +47,9 @@ observable, on the live stock client:
 - **Water (T4):** lakes and rivers now fill from `water_info.xml` sources at
   chunk generation, and the chunk water channel carries the full static mass
   (POI water planes and the fluid sim remain open). Two new tests; 764 total.
+- **Progression (T5):** `players.zsv` v3 persists level, XP, food/water and
+  active buffs across restarts (server-side `awardXp` ledger; ZPV2 files still
+  read; admin wipeplayer handles v3). Round-trip test x2; 765 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

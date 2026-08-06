@@ -46,6 +46,8 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       `Extends` (leaf, one-hop and two-hop cases tested against the stock file).
 - [x] **Water (T4)**: lakes/rivers fill from `water_info.xml` sources at chunk
       generation; the chunk water channel carries the full static mass.
+- [x] **Progression (T5)**: `players.zsv` v3 persists level/XP/food/water/buffs
+      across restarts (server-side ledger; ZPV2 still read; wipeplayer v3-aware).
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.

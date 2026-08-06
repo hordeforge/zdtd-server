@@ -145,32 +145,58 @@ const Zpv2Drop = struct {
     removed: u32 = 0,
 };
 
-/// Pure ZPV2 rewrite: omit records whose name equals `name`. Allocates only when
-/// at least one record is dropped. Caller owns `blob` when non-null.
+/// Total length of one players.zsv record starting at `off` (name_len byte).
+/// ZPV2 records stop after the journal; ZPV3 records carry a progression tail
+/// (prog flag + level/xp/survival stats/buffs). Corrupt on out-of-bounds.
+fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile}!usize {
+    if (off >= data.len) return error.CorruptPlayersFile;
+    const nl: usize = data[off];
+    if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
+    var p = off + 1 + nl + 16;
+    const inv_n: usize = data[p];
+    p += 1 + inv_n * 7;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const jn: usize = data[p];
+    p += 1 + jn * 10;
+    if (p > data.len) return error.CorruptPlayersFile;
+    if (v3) {
+        if (p >= data.len) return error.CorruptPlayersFile;
+        const prog = data[p];
+        p += 1;
+        if (prog == 1) {
+            if (p + 2 + 8 + 16 + 1 > data.len) return error.CorruptPlayersFile;
+            p += 2 + 8 + 16; // level u16, xp u64, food/max/water/max f32x4
+            const buff_n: usize = data[p];
+            p += 1;
+            if (p + buff_n * 19 > data.len) return error.CorruptPlayersFile;
+            p += buff_n * 19;
+        }
+    }
+    return p - off;
+}
+
+/// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Allocates
+/// only when at least one record is dropped. Caller owns `blob` when non-null.
 fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
-    if (data.len < 8 or !std.mem.eql(u8, data[0..4], "ZPV2")) return error.CorruptPlayersFile;
+    if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
+        return error.CorruptPlayersFile;
+    const v3 = std.mem.eql(u8, data[0..4], "ZPV3");
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, &[_]u8{ 'Z', 'P', 'V', '2', 0, 0, 0, 0 });
+    try out.appendSlice(allocator, data[0..4]); // keep the file's magic
+    try out.appendSlice(allocator, &[_]u8{ 0, 0, 0, 0 });
     var written: u32 = 0;
     var removed: u32 = 0;
     var off: usize = 8;
     var i: u32 = 0;
     while (i < n) : (i += 1) {
         const rec_start = off;
-        if (off >= data.len) return error.CorruptPlayersFile;
+        const rec_len = try zpvRecordLen(data, off, v3);
         const nl: usize = data[off];
-        if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
         const rec_name = data[off + 1 ..][0..nl];
-        off += 1 + nl + 16;
-        const inv_n: usize = data[off];
-        off += 1 + inv_n * 7;
-        if (off >= data.len) return error.CorruptPlayersFile;
-        const jn: usize = data[off];
-        off += 1 + jn * 10;
-        if (off > data.len) return error.CorruptPlayersFile;
+        off += rec_len;
         if (nl == name.len and std.mem.eql(u8, rec_name, name)) {
             removed += 1;
             continue;
@@ -1923,11 +1949,15 @@ pub const Game = struct {
         return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
     }
 
-    /// Record layout (v2): magic ZPV2 | n:u32 | records…
+    /// Record layout (v3): magic ZPV3 | n:u32 | records…
     /// each: name_len:u8 | name | x,y,z:f32 | coins:u32 |
     ///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16) |
     ///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8)
-    /// Merge-write: offline players' existing records are carried over, not erased.
+    ///   prog:u8 (1 = present) | level:u16 | xp:u64 | food/max/water/max:f32×4 |
+    ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
+    ///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8)
+    /// ZPV2 files (no progression tail) are still read. Merge-write: offline
+    /// players' existing records are carried over, not erased.
     /// ADR 0011 sibling stores; item_id = ECS handle (ADR 0015).
     fn savePlayers(self: *Game) !void {
         var path_buf: [512]u8 = undefined;
@@ -1939,10 +1969,12 @@ pub const Game = struct {
         defer self.allocator.free(old_file);
         var old_recs: []const u8 = &.{};
         var old_count: u32 = 0;
+        var old_v3 = false;
         if (io_fs.readFileAll(self.allocator, path)) |old_data| {
             old_file = old_data;
-            if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..4], "ZPV2"))
+            if (old_data.len < 8 or (!std.mem.eql(u8, old_data[0..4], "ZPV2") and !std.mem.eql(u8, old_data[0..4], "ZPV3")))
                 return error.CorruptPlayersFile;
+            old_v3 = std.mem.eql(u8, old_data[0..4], "ZPV3");
             old_count = std.mem.readInt(u32, old_data[4..8], .little);
             old_recs = old_data[8..];
             // Unreadable existing file: abort save so offline player records in
@@ -1955,25 +1987,17 @@ pub const Game = struct {
         // Header count is patched in last, from records actually appended. A
         // count predicted up front drifts whenever a joined client has no ECS
         // player slot, and the loader then walks past the last record.
-        try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '2', 0, 0, 0, 0 });
+        try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '3', 0, 0, 0, 0 });
         var written: u32 = 0;
         {
             var ri: u32 = 0;
             var off: usize = 0;
             while (ri < old_count) : (ri += 1) {
                 const rec_start = off;
-                if (off >= old_recs.len) return error.CorruptPlayersFile;
+                const rec_len = zpvRecordLen(old_recs, off, old_v3) catch return error.CorruptPlayersFile;
                 const nl: usize = old_recs[off];
-                if (nl > 32 or off + 1 + nl + 17 > old_recs.len)
-                    return error.CorruptPlayersFile;
                 const rec_name = old_recs[off + 1 ..][0..nl];
-                off += 1 + nl + 16;
-                const inv_n: usize = old_recs[off];
-                off += 1 + inv_n * 7;
-                if (off >= old_recs.len) return error.CorruptPlayersFile;
-                const jn: usize = old_recs[off];
-                off += 1 + jn * 10;
-                if (off > old_recs.len) return error.CorruptPlayersFile;
+                off += rec_len;
                 var online = false;
                 for (&self.clients) |*cl| {
                     if (cl.joined and cl.name_len == nl and std.mem.eql(u8, cl.name[0..nl], rec_name)) {
@@ -1989,7 +2013,7 @@ pub const Game = struct {
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
             const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-            var rec: [512]u8 = undefined;
+            var rec: [768]u8 = undefined;
             var o: usize = 0;
             rec[o] = @intCast(cl.name_len);
             o += 1;
@@ -2037,6 +2061,46 @@ pub const Game = struct {
                 }
             }
             rec[j_start] = jn;
+            // ZPV3 progression tail: level/xp/survival stats + active buffs.
+            // Best-effort like inv/journal: a full record simply truncates.
+            if (o + 2 + 8 + 16 + 1 <= rec.len) {
+                rec[o] = 1;
+                o += 1;
+                std.mem.writeInt(u16, rec[o..][0..2], cl.level, .little);
+                o += 2;
+                std.mem.writeInt(u64, rec[o..][0..8], cl.xp, .little);
+                o += 8;
+                const h = &self.sim.health[ps];
+                inline for (.{ h.food, h.food_max, h.water, h.water_max }) |f| {
+                    if (o + 4 > rec.len) break;
+                    std.mem.writeInt(u32, rec[o..][0..4], @as(u32, @bitCast(f)), .little);
+                    o += 4;
+                }
+                const buff_n_pos = o;
+                rec[o] = 0;
+                o += 1;
+                var buff_n: u8 = 0;
+                if (self.sim.mask[ps].buffs) {
+                    for (self.sim.buffs[ps].slots) |b| {
+                        if (!b.active) continue;
+                        if (o + 19 > rec.len) break;
+                        std.mem.writeInt(u16, rec[o..][0..2], b.def_id, .little);
+                        rec[o + 2] = b.stack_mult;
+                        rec[o + 3] = @bitCast(b.flags);
+                        std.mem.writeInt(u32, rec[o + 4 ..][0..4], b.duration_ticks, .little);
+                        std.mem.writeInt(u16, rec[o + 8 ..][0..2], b.update_ticks, .little);
+                        std.mem.writeInt(i32, rec[o + 10 ..][0..4], b.update_rate_ticks, .little);
+                        std.mem.writeInt(u32, rec[o + 14 ..][0..4], @as(u32, @bitCast(b.duration_max)), .little);
+                        rec[o + 18] = @intFromBool(b.remove_on_death);
+                        o += 19;
+                        buff_n += 1;
+                    }
+                }
+                rec[buff_n_pos] = buff_n;
+            } else {
+                rec[o] = 0; // truncated: mark no progression tail
+                o += 1;
+            }
             try out.appendSlice(self.allocator, rec[0..o]);
             written += 1;
         }
@@ -2075,14 +2139,11 @@ pub const Game = struct {
             return;
         };
         defer self.allocator.free(data);
-        if (data.len < 8) {
-            std.debug.print("zdtd: restore player: file too short ({d} bytes)\n", .{data.len});
-            return;
-        }
-        if (data[0] != 'Z' or data[1] != 'P' or data[3] != '2') {
+        if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or (data[3] != '2' and data[3] != '3')) {
             std.debug.print("zdtd: restore player: bad players file header\n", .{});
             return;
         }
+        const v3 = data[3] == '3';
         const n = std.mem.readInt(u32, data[4..8], .little);
         var off: usize = 8;
         var i: u32 = 0;
@@ -2172,6 +2233,53 @@ pub const Game = struct {
                     const qd = self.sim.catalog.byId(quests[fq].def_id) orelse continue;
                     if (self.sim.poiAt(qd.tx, qd.tz)) |rect| {
                         self.sim.journal[ps].slots[fq].poi = rect;
+                    }
+                }
+            }
+            // ZPV3 progression tail: level/xp/survival stats + active buffs.
+            if (v3) {
+                if (off >= data.len) return;
+                const prog = data[off];
+                off += 1;
+                if (prog == 1 and off + 2 + 8 + 16 + 1 <= data.len) {
+                    c.level = std.mem.readInt(u16, data[off..][0..2], .little);
+                    off += 2;
+                    c.xp = std.mem.readInt(u64, data[off..][0..8], .little);
+                    off += 8;
+                    var stats: [4]f32 = undefined;
+                    inline for (0..4) |si| {
+                        stats[si] = @bitCast(std.mem.readInt(u32, data[off..][0..4], .little));
+                        off += 4;
+                    }
+                    if (self.sim.mask[ps].health) {
+                        self.sim.health[ps].food = stats[0];
+                        self.sim.health[ps].food_max = stats[1];
+                        self.sim.health[ps].water = stats[2];
+                        self.sim.health[ps].water_max = stats[3];
+                    }
+                    if (off < data.len) {
+                        const buff_n = data[off];
+                        off += 1;
+                        if (off + buff_n * 19 <= data.len) {
+                            const bs = self.sim.buffsMut(ps);
+                            var bi: usize = 0;
+                            while (bi < buff_n) : (bi += 1) {
+                                const bb = data[off..][0..19];
+                                off += 19;
+                                const slot = bs.findFree() orelse break;
+                                slot.* = .{
+                                    .active = true,
+                                    .def_id = std.mem.readInt(u16, bb[0..2], .little),
+                                    .stack_mult = bb[2],
+                                    .flags = @bitCast(bb[3]),
+                                    .duration_ticks = std.mem.readInt(u32, bb[4..8], .little),
+                                    .update_ticks = std.mem.readInt(u16, bb[8..10], .little),
+                                    .update_rate_ticks = std.mem.readInt(i32, bb[10..14], .little),
+                                    .duration_max = @bitCast(std.mem.readInt(u32, bb[14..18], .little)),
+                                    .remove_on_death = bb[18] != 0,
+                                };
+                            }
+                        }
                     }
                 }
             }
@@ -9704,6 +9812,70 @@ test "players zpv2 preserves inventory slot gaps across restart" {
         try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps].slots[7].count);
         try std.testing.expectEqual(@as(u8, 4), g.sim.inventory[ps].slots[7].quality);
         try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[7].meta);
+    }
+}
+
+test "players zpv3 round-trips level xp stats and buffs across restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    // Two full save/restart cycles: the second proves the round-trip is not
+    // order dependent (the restored record is re-saved and re-read).
+    var round: u32 = 0;
+    while (round < 2) : (round += 1) {
+        {
+            const g = try Game.create(std.testing.allocator, world_dir, 0);
+            defer {
+                g.deinit();
+                std.testing.allocator.destroy(g);
+            }
+            var capture: ln_peer.Capture = .{};
+            const cl = try g.attachJoinedClient(&capture);
+            const ps = g.sim.playerByPeer(cl.slot).?;
+            g.clients[cl.slot].level = 7;
+            g.clients[cl.slot].xp = 12345;
+            g.sim.health[ps].food = 42;
+            g.sim.health[ps].food_max = 100;
+            g.sim.health[ps].water = 33;
+            g.sim.health[ps].water_max = 100;
+            const bs = g.sim.buffsMut(ps);
+            bs.slots[0] = .{
+                .active = true,
+                .def_id = 5,
+                .stack_mult = 2,
+                .duration_ticks = 400,
+                .update_ticks = 7,
+                .update_rate_ticks = 20,
+                .duration_max = 20,
+                .remove_on_death = false,
+            };
+            try g.savePlayers();
+        }
+        {
+            const g = try Game.create(std.testing.allocator, world_dir, 0);
+            defer {
+                g.deinit();
+                std.testing.allocator.destroy(g);
+            }
+            var capture: ln_peer.Capture = .{};
+            const cl = try g.attachJoinedClient(&capture);
+            const ps = g.sim.playerByPeer(cl.slot).?;
+            try std.testing.expectEqual(@as(u16, 7), g.clients[cl.slot].level);
+            try std.testing.expectEqual(@as(u64, 12345), g.clients[cl.slot].xp);
+            try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].food);
+            try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food_max);
+            try std.testing.expectEqual(@as(f32, 33), g.sim.health[ps].water);
+            try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].water_max);
+            const bs = g.sim.buffsMut(ps);
+            try std.testing.expect(bs.slots[0].active);
+            try std.testing.expectEqual(@as(u16, 5), bs.slots[0].def_id);
+            try std.testing.expectEqual(@as(u8, 2), bs.slots[0].stack_mult);
+            try std.testing.expectEqual(@as(u32, 400), bs.slots[0].duration_ticks);
+            try std.testing.expectEqual(@as(f32, 20), bs.slots[0].duration_max);
+            try std.testing.expect(!bs.slots[0].remove_on_death);
+        }
     }
 }
 

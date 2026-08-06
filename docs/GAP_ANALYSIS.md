@@ -97,9 +97,12 @@ nothing like stock. Still open: container slot counts ignore the `lootcontainer`
 size attribute (everything is 8 slots), and crafting is instant and
 unvalidated.
 
-**Nothing about you persists.** Level, XP, skill points, perks, health, stamina,
-food, water, buffs, equipment, bedroll and map exploration are all absent from
-the save, and nothing saves on disconnect at all.
+**What you are is mostly saved now.** Level, XP, survival stats (food/water)
+and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
+`awardXp` feeds it; login-name keyed per ADR 0017). Still open: the client's
+`NetPackagePlayerStats` blob is dropped (other players never see your level),
+perk/skill-point spending is client-owned with no server model, and there is no
+server-to-client XP/level push.
 
 **The world is bald, dry and stepped.** The join deco burst produced 3 objects for
 an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
@@ -234,12 +237,16 @@ area and the concrete work.
    Navezgane's 39 sources render wet; a Navezgane loadgen smoke passes. Still
    open: prefab `.tts` water planes (POI pools) and the flowing-water sim.
 
-9. **Progression / net: save what a player is.**
-   The `players.zsv` v2 record is name, position, coins, inventory, journal. Add
-   health, food, water, XP, level, skill points, perks, and equipment, key it on
-   platform identity rather than login name, and call `savePlayers` from
-   `dropClientSlot` and `reapStalePeers` so a disconnect does not discard up to
-   5 s (`src/server/game.zig:1910-1913`, `:6586-6588`, `:4081-4085`).
+9. **DONE (server side) 2026-08-06.** Progression / net: save what a player
+   is. `players.zsv` v3 extends each record with a progression tail: level,
+   XP (the server-side `awardXp` ledger), food/water survival stats and the
+   active buffs (full BuffInstance state), restored on rejoin and handled by
+   the admin wipeplayer rewrite. Old ZPV2 files still read. Round-trip test
+   runs two full save/restart cycles. Honest gaps kept open: the client's
+   `NetPackagePlayerStats` blob is still dropped, perk/skill-point spending is
+   client-owned with no server model (the ledger saves level+XP which define
+   the budget), and identity stays login-name keyed per ADR 0017 rather than
+   platform user id.
 
 10. **World: make land claims real.** There is no `removeClaim`, so a destroyed
     keystone leaves a permanent 41x41 no-edit zone; claims are never persisted;
@@ -2103,12 +2110,13 @@ unvalidated, and durability, mods and repair do not exist.
 ## 10. Player progression
 
 **Headline.** A player can join, eat, take client-reported damage, die by
-admin/self-report and respawn, but there is no progression a player can feel: no
-perks, no buff runtime, no survival simulation, zombies literally cannot hurt you
-(server-side melee damage is never replicated), and nothing about level, XP,
-skills or vitals survives a relog let alone a restart.
+admin/self-report and respawn. Level, XP, survival stats and active buffs now
+survive a restart (players.zsv v3, server-side ledger). Still missing: no perk
+runtime (client-owned spending, no server model), the client's
+`NetPackagePlayerStats` blob is dropped so other players never see your level,
+and server-to-client XP/level pushes do not exist.
 
-**4 WORKS · 11 PARTIAL · 22 MISSING**
+**8 WORKS · 11 PARTIAL · 18 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000

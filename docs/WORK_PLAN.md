@@ -177,11 +177,22 @@ plus a live screenshot.
 
 ## T5. Progression: save what a player is
 
+**Status: landed 2026-08-06 (server side)** (765 tests). `players.zsv` v3
+extends each record with a progression tail: level + XP (the server-side
+`awardXp` ledger), food/water survival stats and the active buffs (full
+BuffInstance state), restored on rejoin; ZPV2 files still read and the admin
+wipeplayer rewrite handles both. Round-trip test runs two full save/restart
+cycles. Honest scope: perk/skill-point spending is client-owned with no server
+model (the ledger saves level+XP, which define the budget), the client's
+`NetPackagePlayerStats` blob is still dropped, and identity stays login-name
+keyed per ADR 0017 rather than platform user id.
+
 **Why:** progression, buffs and survival state do not survive a restart, so a
 session is disposable.
 
-**Change:** extend the player save with level, XP, skill points, buffs and the
-survival stats, keyed by platform user id rather than login name.
+**Change:** ~~extend the player save with level, XP, skill points, buffs and the
+survival stats, keyed by platform user id rather than login name~~ **DONE**
+(level/XP/buffs/survival; login-name key per ADR 0017).
 
 **Grounding:** `Progression::Write` blob layout and the XP curve exponent
 recorded in `../7dtd-research/docs/progression.md`.
