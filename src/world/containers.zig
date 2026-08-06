@@ -7,7 +7,7 @@ const components = @import("../ecs/components.zig");
 pub const max_container_slots: usize = 54; // 9x6 common chest
 /// Keep small: Game embeds ContainerStore; large arrays blow the stack on init.
 pub const max_containers: usize = 256;
-const persisted_container_size: usize = 20 + max_container_slots * 7;
+const persisted_container_size: usize = 20 + max_container_slots * 7 + 4; // + touched_day u32
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
 pub const PosKey = struct {
@@ -29,6 +29,9 @@ pub const Container = struct {
     slots: [max_container_slots]components.InvSlot = [_]components.InvSlot{.{}} ** max_container_slots,
     slot_count: u16 = 8, // default 2x4
     touched: bool = false,
+    /// In-game day the container's loot was generated or last taken from
+    /// (LootRespawnDays re-roll base). 0 = unknown (pre-persistence saves).
+    touched_day: u32 = 0,
     player_storage: bool = true,
 
     pub fn clear(self: *Container) void {
@@ -156,7 +159,7 @@ pub const ContainerStore = struct {
         var count: u16 = 0;
         for (idxs[0..n_idx]) |ii| {
             const c = &self.items[ii];
-            if (o + 20 + @as(usize, c.slot_count) * 7 > buf.len) break;
+            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
             std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.pos.z, .little);
@@ -174,6 +177,10 @@ pub const ContainerStore = struct {
                 std.mem.writeInt(u16, buf[o + 5 ..][0..2], sl.meta, .little);
                 o += 7;
             }
+            // touched_day u32 appended after the slots; older saves omit it and
+            // load as 0 (no immediate respawn).
+            std.mem.writeInt(u32, buf[o..][0..4], c.touched_day, .little);
+            o += 4;
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
@@ -217,6 +224,12 @@ pub const ContainerStore = struct {
                     };
                 }
                 o += 7;
+            }
+            // touched_day appended after the slots in newer saves; older files
+            // end at the last slot and load touched_day as 0.
+            if (o + 4 <= len) {
+                c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
+                o += 4;
             }
         }
     }
