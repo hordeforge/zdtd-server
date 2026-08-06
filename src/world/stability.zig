@@ -289,11 +289,18 @@ pub fn removeBlockAt(
     while (sp > 0) {
         sp -= 1;
         const cur = stack[sp].pos;
+        const is_root = (cur.x == x and cur.y == y and cur.z == z);
         // Stock zeroes each cell as the recursion enters it (the root was
         // zeroed above; re-zeroing is harmless).
         {
             const tz = store.World.worldToChunk(cur.x, cur.z);
             if (chunkOf(w, tz.pos.x, tz.pos.z)) |cz| cz.setStabilityByte(tz.lx, cur.y, tz.lz, 0);
+        }
+        // The dependency chain falls unconditionally (stock stab0); the root
+        // is already air and was handled by the caller, so it is not reported.
+        if (!is_root and n_fallen < fallen.len) {
+            fallen[n_fallen] = cur;
+            n_fallen += 1;
         }
         const cur_stab = stack[sp].stab;
         for (dirs) |d| {
@@ -444,15 +451,16 @@ fn testWorld(gpa: std.mem.Allocator, surface_y: i32) *store.World {
         var cz: i32 = 0;
         while (cz < 2) : (cz += 1) {
             const c = w.getOrCreate(.{ .x = cx, .z = cz }) catch unreachable;
+            // Biome-layer regen fills surface blocks above surface_y; zero the
+            // whole column so the world is exactly "terrain below, air above"
+            // and the test placements are the only structure.
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
                 var lz: i32 = 0;
                 while (lz < 16) : (lz += 1) {
                     var y: i32 = 0;
                     while (y < 256) : (y += 1) {
-                        if (y < surface_y) {
-                            c.setBlock(gpa, lx, y, lz, 1) catch unreachable;
-                        }
+                        c.setBlock(gpa, lx, y, lz, if (y < surface_y) 1 else 0) catch unreachable;
                     }
                 }
             }
