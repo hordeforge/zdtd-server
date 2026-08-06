@@ -9902,3 +9902,124 @@ test "sleeper volume groups resolve through the gamestage ladder" {
     try std.testing.expect(g.gamestages.sleeperEntityGroup("GroupGenericZombie", -1) == null);
     try std.testing.expectEqualStrings(walker.name, g.resolveSleeperClass("NoSuchThing", null, 3).name);
 }
+
+test "console replies use the stock error and listing shapes" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/admin_stock_shapes", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var sink: [8192]u8 = undefined;
+
+    try std.testing.expectEqualStrings(
+        "*** ERROR: unknown command 'frobnicate'\n",
+        adminRun(g, &sink, "frobnicate 1"),
+    );
+    try std.testing.expectEqualStrings(
+        "Wrong number of arguments, expected 1 or 3, found 2.\n",
+        adminRun(g, &sink, "settime 1 2"),
+    );
+    try std.testing.expectEqualStrings("Day must be >= 1\n", adminRun(g, &sink, "settime 0 1 1"));
+    try std.testing.expectEqualStrings(
+        "\"noon\" is not a valid integer.\n",
+        adminRun(g, &sink, "settime 1 noon 0"),
+    );
+    // No players joined: both listings are just the stock total line.
+    try std.testing.expectEqualStrings("Total of 0 in the game\n", adminRun(g, &sink, "listplayers"));
+    try std.testing.expectEqualStrings("Total of 0 in the game\n", adminRun(g, &sink, "listplayerids"));
+    // A miss on a player target reports the stock resolution error.
+    try std.testing.expectEqualStrings(
+        "\"Alice\" is not a valid entity id, player name or user id.\n",
+        adminRun(g, &sink, "kick Alice"),
+    );
+
+    const help = adminRun(g, &sink, "help");
+    try std.testing.expect(std.mem.startsWith(u8, help, "*** Generic Console Help ***\n"));
+    try std.testing.expect(std.mem.indexOf(u8, help, "*** List of Commands ***\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, " => lists all players\n") != null);
+
+    // settime takes stock world time and reports it back verbatim.
+    try std.testing.expectEqualStrings("Set time to 12000\n", adminRun(g, &sink, "settime day"));
+    try std.testing.expectEqual(@as(u32, 1), g.sim.director.clock.day);
+    try std.testing.expectEqual(@as(f32, 12), g.sim.director.clock.hours);
+    try std.testing.expectEqualStrings("Set time to 24000\n", adminRun(g, &sink, "settime night"));
+    try std.testing.expectEqual(@as(u32, 2), g.sim.director.clock.day);
+    try std.testing.expectEqual(@as(f32, 0), g.sim.director.clock.hours);
+
+    // listents rows carry the stock field order for the seeded zombies.
+    const ents = adminRun(g, &sink, "listents");
+    try std.testing.expect(std.mem.indexOf(u8, ents, ", pos=(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ents, ", rot=(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ents, ", lifetime=float.Max, remote=False, dead=False, health=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ents, "in the game\n") != null);
+
+    try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "chunkcache"), "Chunks: "));
+    try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "mem"), "Time: "));
+    try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "gg ServerPort"), "GamePref.ServerPort = ") != null);
+}
+
+test "admin, whitelist and ban lists persist across a restart" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const dir = ".zdtd_cfg_cache/admin_lists_persist";
+    var sink: [8192]u8 = undefined;
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expectEqualStrings(
+            "Alice added with permission level of 0.\n",
+            adminRun(g, &sink, "admin add Alice 0"),
+        );
+        try std.testing.expectEqualStrings(
+            "Bob added to whitelist.\n",
+            adminRun(g, &sink, "whitelist add Bob"),
+        );
+        try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "ban add Carol 1 day rude"), "Carol banned until "));
+        // An expired ban must not survive the round-trip.
+        _ = g.ban_list.add("Dave", clock.wallSeconds() - 1, "old");
+        g.saveAdminLists();
+    }
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        const admins = adminRun(g, &sink, "admin list");
+        try std.testing.expect(std.mem.indexOf(u8, admins, "0: Alice (stored name: Alice)\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "whitelist list"), "  Bob (stored name: Bob)\n") != null);
+        const bans = adminRun(g, &sink, "ban list");
+        try std.testing.expect(std.mem.indexOf(u8, bans, "Carol) - rude\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, bans, "Dave") == null);
+
+        try std.testing.expectEqualStrings(
+            "Carol removed from ban list.\n",
+            adminRun(g, &sink, "ban remove Carol"),
+        );
+        try std.testing.expectEqualStrings(
+            "Alice removed from permissions list.\n",
+            adminRun(g, &sink, "admin remove Alice"),
+        );
+        try std.testing.expectEqualStrings(
+            "Alice was not on permissions list.\n",
+            adminRun(g, &sink, "admin remove Alice"),
+        );
+        try std.testing.expectEqualStrings(
+            "Bob removed from the whitelist.\n",
+            adminRun(g, &sink, "whitelist remove Bob"),
+        );
+    }
+}
+
+/// Run one console line against a Game and capture the reply the way the webui
+/// path does, so a test asserts the exact bytes an operator tool would read.
+fn adminRun(g: *Game, sink: []u8, line: []const u8) []const u8 {
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink;
+    g.runAdminLine(line, "test");
+    g.admin_reply_sink = null;
+    return sink[0..g.admin_reply_len];
+}
