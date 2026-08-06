@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-06  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **796** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **807** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -69,7 +69,10 @@ observable, on the live stock client:
   a support fells the dependency chain with client-visible collapse broadcasts.
   **Land claims persist** (`claims.zlc`): keystone claims survive a restart and
   re-map to the owner's new entity id on login, with the seen-day preserved for
-  offline expiry. The client lpBlocks overlay remains open.
+  offline expiry. **Loot respawns**: `LootRespawnDays` (serverconfig, default 7)
+  re-rolls a looted world container on its next open, and the touch day persists
+  in `containers.zct`; player-placed storage never respawns. The client lpBlocks
+  overlay remains open.
 - **C2S (T10):** `NetPackagePlayerDisconnect` handled on the quit path (own
   entity only, immediate save + slot teardown). Parity coverage is now **0
   unhandled dir=1** (70 handled in game.zig). 775 total.
@@ -113,9 +116,9 @@ observable, on the live stock client:
   value/message properties and UnlockPOI fires on phase entry. Template-derived
   quests resolve `<variable>` overrides (last occurrence wins) so difficulty
   tier flows through `param1="difficulty"` and `tier2_fetch` reports 2.
-- 796 unit tests (the exact count comes from running the cached binary).
+- 803 unit tests (the exact count comes from running the cached binary).
 
-**Gates at this pin:** `make check` exit 0 · 796 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 803 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are trader depth
