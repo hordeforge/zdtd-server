@@ -138,13 +138,13 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 7 | 9 | 10 | 26 | Per-trader stock and hours from traders.xml `<trader_info>` + npc.xml; POI placement and restock open |
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
-| [POIs and prefabs](#7-pois-and-prefabs) | 11 | 14 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
+| [POIs and prefabs](#7-pois-and-prefabs) | 12 | 14 | 6 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 13 | 29 | 10 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **103** | **150** | **92** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **104** | **150** | **91** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1228,7 +1228,7 @@ files and reach a stock client, but they are built from the wrong block ids
 rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
 can walk into every POI but none of them is the building TFP authored.
 
-**11 WORKS · 14 PARTIAL · 7 MISSING**
+**12 WORKS · 14 PARTIAL · 6 MISSING**
 
 - **prefabs.xml decoration parse** `WORKS`
   Reads all 1559 `<decoration>` elements with rotation mod 4 and
@@ -2646,10 +2646,15 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   stock biomes.xml is a `type="prefab"` row zdtd does not send anyway.
   *Anchors:* `src/wire/stock_deco.zig:287-289`
 
-- **type="prefab" decorations** `MISSING`
-  Only `type="block"` rows become DecoObjects. Surface rock formations
-  (rock_form01/02) and the surface ore veins (deco_iron_vein, deco_coal_vein) that
-  feed early mining never appear anywhere.
+- **type="prefab" decorations** `WORKS` `(2026-08-07)`
+  Biomes.xml `type="prefab"` rows (rock_form01/02, deco_iron_vein,
+  deco_coal_vein) are not part of the distant-deco species: stock
+  `BiomeDefinition::AddDecoBlock` builds `m_DistantDecoBlocks` from
+  `IsDistantDecoration` blocks only (treeMaster/treeCactus01, world-chunks.md
+  §Distant deco), and the prefab rows feed the dynamic prefab decorator, not the
+  DecoUpdate burst. Skipping them matches stock, so the claim that they "never
+  appear anywhere" is about the not-yet-implemented dynamic prefab decorator
+  (prefabs.xml `<decoration>` placement), tracked separately.
   *Anchors:* `src/wire/stock_deco.zig:154-159`, `Data/Config/biomes.xml:283`,
   `:310`, `:494-495`
 
