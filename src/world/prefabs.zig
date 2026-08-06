@@ -15,6 +15,18 @@ pub const Decoration = struct {
     size_x: i32 = 8,
     size_y: i32 = 4,
     size_z: i32 = 8,
+    /// `YOffset` from the prefab .xml. Only meaningful once the prefab files
+    /// have been probed (parseXml with a prefabs data dir), 0 otherwise.
+    y_offset: i32 = 0,
+
+    /// World Y the prefab's local y=0 plane lands on. Stock adds `Prefab.yOffset`
+    /// to the decoration position, but only when `y_is_groundlevel` is set
+    /// (DynamicPrefabDecorator.Load, asm.il:902414-902420); a decoration that
+    /// pins an absolute Y keeps it. 679 of Navezgane's 1487 full POIs carry a
+    /// nonzero offset, and caves/mines/bunkers are 25 to 55 blocks below ground.
+    pub fn stampY(self: Decoration) i32 {
+        return if (self.y_is_ground) self.y + self.y_offset else self.y;
+    }
 };
 
 pub const Index = struct {
@@ -60,6 +72,9 @@ pub const Index = struct {
             // Reject if AABB misses chunk
             if (b.x1 <= base_x or b.x0 >= base_x + 16 or b.z1 <= base_z or b.z0 >= base_z + 16) continue;
             const d = self.items[i];
+            // Declared position, NOT stampY(): this is the terrain pad the POI
+            // sits on, which stays at ground level even when the prefab body is
+            // stamped 30+ blocks below it (caves, mines, bunkers).
             const ground: u8 = @intCast(@min(255, @max(0, d.y)));
             const is_part = std.mem.startsWith(u8, d.name, "part_");
             // Full POIs get a 1-block pad above listed ground; parts only flatten to ground.
@@ -135,7 +150,7 @@ pub const Index = struct {
             // Skip driveway/road parts: huge and low value for play; full POIs first.
             if (std.mem.startsWith(u8, d.name, "part_")) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
-            tts.paintDecoration(tb, d.x, d.y, d.z, d.rot, set_block, ctx);
+            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, set_block, ctx);
         }
     }
 
@@ -155,10 +170,11 @@ pub const Index = struct {
             const d = self.items[i];
             if (std.mem.startsWith(u8, d.name, "part_")) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
+            const origin_y = d.stampY();
             for (tb.tile_entities) |te| {
                 const r = tts.rotateLocalXZ(te.lx, te.lz, tb.sx, tb.sz, d.rot);
                 const wx = d.x + r.x;
-                const wy = d.y + te.ly;
+                const wy = origin_y + te.ly;
                 const wz = d.z + r.z;
                 if (wx < base_x or wx >= base_x + 16 or wz < base_z or wz >= base_z + 16) continue;
                 cb(ctx, wx, wy, wz, te.te_type);
@@ -182,7 +198,9 @@ fn parseI32Prefix(s: []const u8) ?i32 {
     if (i >= s.len or s[i] < '0' or s[i] > '9') return null;
     var v: i32 = 0;
     while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {
-        v = v * 10 + (s[i] - '0');
+        // Malformed XML must not crash the loader: reject instead of overflowing.
+        v = std.math.mul(i32, v, 10) catch return null;
+        v = std.math.add(i32, v, s[i] - '0') catch return null;
     }
     return if (neg) -v else v;
 }
@@ -308,10 +326,40 @@ fn readTtsSize(path: []const u8, sx: *i32, sy: *i32, sz: *i32) bool {
     return sx.* > 0 and sz.* > 0;
 }
 
+/// Pull `<property name="YOffset" value="N" />` out of a stock prefab .xml.
+/// Stock reads it as `properties.GetInt("YOffset")` at the end of `Prefab::Load`
+/// (asm.il:917079-917081); `DynamicProperties::GetInt` yields 0 both for a
+/// missing key and for a value `Int32.TryParse` rejects (asm.il:2082831), so
+/// every failure path here returns 0 rather than an error.
+fn parseYOffset(xml: []const u8) i32 {
+    var search: usize = 0;
+    while (std.mem.indexOfPos(u8, xml, search, "<property")) |tag_start| {
+        const tag_end = std.mem.indexOfScalarPos(u8, xml, tag_start, '>') orelse return 0;
+        const tag = xml[tag_start..tag_end];
+        search = tag_end + 1;
+        // Exact name compare: the same file also carries "DistantPOIYOffset".
+        const name = attrValue(tag, "name") orelse continue;
+        if (!std.mem.eql(u8, name, "YOffset")) continue;
+        const value = attrValue(tag, "value") orelse return 0;
+        return parseI32Prefix(value) orelse 0;
+    }
+    return 0;
+}
+
+/// YOffset from the prefab .xml next to its .tts; 0 when the file is missing.
+fn readPrefabYOffset(allocator: std.mem.Allocator, tts_path: []const u8) i32 {
+    if (!std.mem.endsWith(u8, tts_path, ".tts")) return 0;
+    var path_buf: [2048]u8 = undefined;
+    const p = std.fmt.bufPrint(&path_buf, "{s}.xml", .{tts_path[0 .. tts_path.len - 4]}) catch return 0;
+    const xml = io_fs.readFileAll(allocator, p) catch return 0;
+    defer allocator.free(xml);
+    return parseYOffset(xml);
+}
+
 fn fillSizesFromTts(idx: *Index) !void {
     var path_buf: [2048]u8 = undefined;
     // Cache by name (keys are d.name slices into stable name_storage).
-    var cache = std.StringHashMap(struct { x: i32, y: i32, z: i32 }).init(idx.allocator);
+    var cache = std.StringHashMap(struct { x: i32, y: i32, z: i32, yoff: i32 }).init(idx.allocator);
     defer cache.deinit();
 
     const subdirs = [_][]const u8{ "POIs", "Parts", "RWGTiles" };
@@ -323,12 +371,14 @@ fn fillSizesFromTts(idx: *Index) !void {
             d.size_x = sz.x;
             d.size_y = sz.y;
             d.size_z = sz.z;
+            d.y_offset = sz.yoff;
             continue;
         }
         var found = false;
         var sx: i32 = 8;
         var sy: i32 = 4;
         var sz: i32 = 8;
+        var yoff: i32 = 0;
         for (subdirs) |sub| {
             // Avoid bufPrint overflow on long Steam paths: check lengths first.
             const need = root.len + 1 + sub.len + 1 + d.name.len + 4;
@@ -336,6 +386,7 @@ fn fillSizesFromTts(idx: *Index) !void {
             const p = std.fmt.bufPrint(path_buf[0..], "{s}/{s}/{s}.tts", .{ root, sub, d.name }) catch continue;
             if (readTtsSize(p, &sx, &sy, &sz)) {
                 found = true;
+                yoff = readPrefabYOffset(idx.allocator, p);
                 break;
             }
         }
@@ -348,10 +399,11 @@ fn fillSizesFromTts(idx: *Index) !void {
             sy = 8;
             sz = 16;
         }
-        try cache.put(d.name, .{ .x = sx, .y = sy, .z = sz });
+        try cache.put(d.name, .{ .x = sx, .y = sy, .z = sz, .yoff = yoff });
         d.size_x = sx;
         d.size_y = sy;
         d.size_z = sz;
+        d.y_offset = yoff;
     }
 }
 
@@ -399,6 +451,106 @@ test "tts size read abandoned_house if present" {
     try std.testing.expectEqual(@as(i32, 42), sx);
     try std.testing.expectEqual(@as(i32, 21), sy);
     try std.testing.expectEqual(@as(i32, 42), sz);
+}
+
+test "parse YOffset property from prefab xml" {
+    // Stock property blocks put DistantPOIYOffset before YOffset, so a loose
+    // substring match on "YOffset" would read the wrong property.
+    const xml =
+        \\<prefab>
+        \\  <property name="DistantPOIYOffset" value="7" />
+        \\  <property name="YOffset" value="-33" />
+        \\  <property class="Stats">
+        \\    <property name="TotalVertices" value="280910" />
+        \\  </property>
+        \\</prefab>
+    ;
+    try std.testing.expectEqual(@as(i32, -33), parseYOffset(xml));
+    // Absent, malformed and overflowing values all read 0, like GetInt does.
+    try std.testing.expectEqual(@as(i32, 0), parseYOffset("<prefab><property name=\"Zoning\" value=\"City\" /></prefab>"));
+    try std.testing.expectEqual(@as(i32, 0), parseYOffset("<prefab><property name=\"YOffset\" value=\"abc\" /></prefab>"));
+    try std.testing.expectEqual(@as(i32, 0), parseYOffset("<prefab><property name=\"YOffset\" value=\"99999999999\" /></prefab>"));
+    try std.testing.expectEqual(@as(i32, 0), parseYOffset(""));
+    // Every truncation of a well formed file must return, not run off the end.
+    const full = "<prefab>\n  <property name=\"YOffset\" value=\"-2\" />\n</prefab>";
+    var cut: usize = 0;
+    while (cut <= full.len) : (cut += 1) _ = parseYOffset(full[0..cut]);
+}
+
+test "YOffset applies to the stamp origin but not to the terrain pad" {
+    const root = "worlds/zdtd_yoffset_test/Prefabs";
+    var hdr: [14]u8 = @splat(0);
+    @memcpy(hdr[0..4], "tts\x00");
+    std.mem.writeInt(u32, hdr[4..8], 19, .little);
+    std.mem.writeInt(u16, hdr[8..10], 12, .little);
+    std.mem.writeInt(u16, hdr[10..12], 6, .little);
+    std.mem.writeInt(u16, hdr[12..14], 12, .little);
+    try io_fs.writeFileSimple(root ++ "/POIs/zdtd_yoffset_poi.tts", &hdr);
+    try io_fs.writeFileSimple(root ++ "/POIs/zdtd_yoffset_poi.xml",
+        \\<prefab>
+        \\  <property name="DistantPOIYOffset" value="0" />
+        \\  <property name="YOffset" value="-7" />
+        \\</prefab>
+    );
+
+    const world_dir = "worlds/zdtd_yoffset_test";
+    try io_fs.writeFileSimple(world_dir ++ "/prefabs.xml",
+        \\<prefabs>
+        \\  <decoration type="model" name="zdtd_yoffset_poi" position="4,60,4" rotation="0" y_is_groundlevel="true" />
+        \\  <decoration type="model" name="zdtd_yoffset_poi" position="4,60,4" rotation="0" y_is_groundlevel="false" />
+        \\</prefabs>
+    );
+
+    var idx = try loadFromWorldDir(std.testing.allocator, world_dir, root);
+    defer idx.deinit();
+    try std.testing.expectEqual(@as(usize, 2), idx.items.len);
+    try std.testing.expectEqual(@as(i32, -7), idx.items[0].y_offset);
+    try std.testing.expectEqual(@as(i32, 53), idx.items[0].stampY());
+    // Stock only adds yOffset when y_is_groundlevel is set (asm.il:902414).
+    try std.testing.expectEqual(@as(i32, -7), idx.items[1].y_offset);
+    try std.testing.expectEqual(@as(i32, 60), idx.items[1].stampY());
+
+    // The pad stays at the declared ground level: the height plane must not
+    // follow a cave 30 blocks down and punch a pit through the terrain.
+    var h: [256]u8 = @splat(50);
+    idx.applyToChunkHeights(0, 0, &h);
+    try std.testing.expectEqual(@as(u8, 61), h[4 + 4 * 16]);
+}
+
+test "stock cave_07 stamps its body below the declared ground" {
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(root ++ "/POIs/cave_07.tts")) return error.SkipZigTest;
+
+    const world_dir = "worlds/zdtd_yoffset_cave_test";
+    try io_fs.writeFileSimple(world_dir ++ "/prefabs.xml",
+        \\<prefabs>
+        \\  <decoration type="model" name="cave_07" position="0,60,0" rotation="0" y_is_groundlevel="true" />
+        \\</prefabs>
+    );
+    var idx = try loadFromWorldDir(std.testing.allocator, world_dir, root);
+    defer idx.deinit();
+    try std.testing.expectEqual(@as(usize, 1), idx.items.len);
+    // cave_07.xml declares YOffset -33; without it the cave sits at the surface.
+    try std.testing.expectEqual(@as(i32, -33), idx.items[0].y_offset);
+    try std.testing.expectEqual(@as(i32, 27), idx.items[0].stampY());
+
+    const Rec = struct {
+        min_wy: i32 = std.math.maxInt(i32),
+        fn onBlock(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+            _ = .{ wx, wz, raw, tex, dens };
+            const r: *@This() = @ptrCast(@alignCast(ctx.?));
+            if (wy < r.min_wy) r.min_wy = wy;
+        }
+    };
+    var with_offset: Rec = .{};
+    idx.applyTtsPaintToChunk(0, 0, Rec.onBlock, &with_offset);
+    try std.testing.expect(with_offset.min_wy < 60);
+
+    // Same POI with the offset dropped: the delta is exactly the YOffset.
+    var without: Rec = .{};
+    idx.items[0].y_offset = 0;
+    idx.applyTtsPaintToChunk(0, 0, Rec.onBlock, &without);
+    try std.testing.expectEqual(without.min_wy - 33, with_offset.min_wy);
 }
 
 test "navezgane paints a real POI into its chunk" {
