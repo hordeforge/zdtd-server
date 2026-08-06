@@ -66,6 +66,14 @@ fi
 test -f "$bin.sha256"
 (cd zig-out/bin && sha256sum -c zdtd.sha256)
 
+# Provenance record must exist and name the same hash (make release writes both).
+test -f zig-out/bin/buildinfo.txt
+sidecar_hash="$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)"
+if ! grep -q "binary_sha256=$sidecar_hash" zig-out/bin/buildinfo.txt; then
+  echo "smoke-release: buildinfo.txt does not record binary_sha256=$sidecar_hash" >&2
+  exit 1
+fi
+
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).
 smoke_world=zig-out/smoke-world

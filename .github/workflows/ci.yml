@@ -89,7 +89,9 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: zdtd-linux-x86_64-${{ github.sha }}
+          # Tag builds are version-identified (check-release.sh guarantees the
+          # tag equals the product version); main builds keep the commit SHA.
+          name: zdtd-linux-x86_64-${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
           path: |
             zig-out/bin/zdtd
             zig-out/bin/zdtd.sha256

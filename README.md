@@ -92,7 +92,10 @@ validation and release builds use the exact compiler in `.zigversion`; `make che
 enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck. `make release`
 additionally requires `sha256sum`.
 
-No network fetch: the package has no Zig dependencies. Override the compiler with
+One pinned dependency: the Wasm plugin runtime `zwasm` v2.4.1 (`build.zig.zon`,
+URL + hash). `zig build` fetches it into Zig's global cache on first use, so a
+clean checkout needs network for that one fetch; later builds are offline and
+the hash pins the exact content. Override the compiler with
 `ZIG=/path/to/zig` if needed. The optional `-Dtracy` profiling build links an
 operator-supplied Tracy checkout (`-Dtracy-src=PATH`); it is opt-in, never
 fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).

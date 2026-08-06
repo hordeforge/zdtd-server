@@ -63,7 +63,13 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
 5. Build the release from the tag and smoke-test `zdtd --version` plus startup
    against a copy of a previous-version world. Never replace an existing tag or
    artifact; publish a new patch version for a bad release.
-6. After releasing, bump `src/version.zig` and `build.zig.zon` on the development
+6. Verify reproducibility: build the same source twice in separate clean
+   directories (`zig build -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline`
+   in each) and confirm both `sha256sum zig-out/bin/zdtd` match. The pinned
+   `.zigversion` compiler, `-Dcpu=baseline`, and `strip` make the binary
+   independent of build path, host CPU, and wall-clock time; a mismatch means a
+   nondeterminism slipped in and must be fixed before tagging.
+7. After releasing, bump `src/version.zig` and `build.zig.zon` on the development
    branch before landing any further change. The release check rejects a commit
    that reuses a product version already tagged on another commit.
 

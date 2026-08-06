@@ -44,12 +44,25 @@ run: need-zig
 # Depends on release-check so a version-drifted tree cannot produce a release binary.
 # -Dcpu=baseline: without it Zig targets the build host's CPU features, so the
 # artifact's bytes vary per build machine and can SIGILL on older operator CPUs.
-# Writes zig-out/bin/zdtd.sha256 (hash of the binary only) for artifact integrity.
+# Writes zig-out/bin/zdtd.sha256 (hash of the binary only) and
+# zig-out/bin/buildinfo.txt (toolchain + version + hash, timestamp-free so a
+# same-source rebuild reproduces it byte-for-byte) for artifact integrity.
 release: release-check need-zig need-release-tools
 	$(ZIG) build -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline
 	@bin=zig-out/bin/zdtd; \
 	  test -f "$$bin" || { echo "zdtd: release build did not produce $$bin" >&2; exit 1; }; \
 	  (cd zig-out/bin && sha256sum zdtd > zdtd.sha256); \
+	  product="$$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig | head -n1)"; \
+	  wire="$$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig | head -n1)"; \
+	  { \
+	    echo "product=$$product"; \
+	    echo "stock_wire=$$wire"; \
+	    echo "zig=$$("$(ZIG)" version)"; \
+	    echo "optimize=ReleaseSafe"; \
+	    echo "strip=true"; \
+	    echo "cpu=baseline"; \
+	    echo "binary_sha256=$$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)"; \
+	  } > zig-out/bin/buildinfo.txt; \
 	  echo "zdtd: release ok $$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)  $$bin"
 
 lint: need-zig
