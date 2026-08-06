@@ -1349,11 +1349,15 @@ can walk into every POI but none of them is the building TFP authored.
   heightWorld-based placement inside a POI land 2 blocks above the floor.
   *Anchors:* `src/world/prefabs.zig:79`, `src/world/store.zig:589`
 
-- **Painting part_* decorations** `MISSING`
-  `applyTtsPaintToChunk` returns early for any `part_` name and `sleepers.zig`
-  skips them too. Navezgane has 72: driveways, town signs for
-  Gravestowne/Diersville/Perishton, and the Perishton pedestrian bridge.
-  *Anchors:* `src/world/prefabs.zig:232`, `src/world/sleepers.zig:217`
+- **Painting part_* decorations** `PARTIAL`
+  `applyTtsPaintToChunk` now paints parts up to the volume cap
+  (`isPaintablePart`, 24^3): Navezgane's 72 parts — driveways, town signs for
+  Gravestowne/Diersville/Perishton and the Perishton pedestrian bridge — are
+  all far under it and render like stock; only the huge RWG clutter parts stay
+  skipped. `sleepers.zig` still skips them (parts rarely carry authored sleeper
+  volumes).
+  *Anchors:* `src/world/prefabs.zig:232` (`isPaintablePart`),
+  `src/world/sleepers.zig:217`
 
 - **Multi-block / child blocks** `MISSING`
   `parseBlocks` zeroes every cell with the child bit 0x40000000 and nothing

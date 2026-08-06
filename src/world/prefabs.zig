@@ -41,10 +41,23 @@ pub const QuestData = struct {
 pub const max_teleport_volumes: usize = 8;
 
 /// City parts (driveways, roads, sewer caps, ...) are the stock `part_*`
-/// naming: never quest POIs, skipped for painting and sleeper-volume budget,
-/// and given a flat pad and fallback size.
+/// naming: never quest POIs, skipped for sleeper-volume budget, and given a
+/// flat pad and fallback size.
 pub fn isPart(name: []const u8) bool {
     return std.mem.startsWith(u8, name, "part_");
+}
+
+/// Part volume cap for painting: stock paints every part, but the huge RWG
+/// clutter parts (multi-hundred-cell roads) cost more than they show, so zdtd
+/// paints parts only up to this volume. Navezgane's 72 parts (driveways,
+/// town signs, the pedestrian bridge) are all far under it.
+pub const part_paint_volume_cap: u64 = 24 * 24 * 24;
+
+/// Whether a decoration should be block-painted: parts respect the volume cap.
+pub fn isPaintablePart(d: Decoration) bool {
+    if (!isPart(d.name)) return true;
+    const vol: u64 = @as(u64, @intCast(d.size_x)) * @as(u64, @intCast(d.size_y)) * @as(u64, @intCast(d.size_z));
+    return vol <= part_paint_volume_cap;
 }
 
 /// Local cell of the trader NPC from `IndexedBlockOffsets class="Trader"`:
@@ -391,8 +404,9 @@ pub const Index = struct {
             const b = self.boundsXZ(i);
             if (b.x1 <= base_x or b.x0 >= base_x + 16 or b.z1 <= base_z or b.z0 >= base_z + 16) continue;
             const d = self.items[i];
-            // Skip driveway/road parts: huge and low value for play; full POIs first.
-            if (isPart(d.name)) continue;
+            // Parts paint up to the volume cap (driveways, signs, the bridge);
+            // only the huge RWG clutter parts are skipped.
+            if (!isPaintablePart(d)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
             tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, set_block, ctx);
         }
@@ -949,4 +963,41 @@ test "trader POI data: cell and class tag from the stock install" {
     try std.testing.expectEqual(@as(i32, -1), plain.trader_x);
     try std.testing.expect(plain.trader_tag.len == 0);
     try std.testing.expect(!plain.is_trader_area);
+}
+
+test "part decorations paint up to the volume cap" {
+    // Small parts (Navezgane driveways, signs, the bridge) paint; only the
+    // huge RWG clutter parts are skipped.
+    const small = Decoration{ .name = "part_driveway_01", .x = 0, .y = 0, .z = 0, .size_x = 40, .size_y = 2, .size_z = 12 };
+    try std.testing.expect(isPaintablePart(small));
+    const huge = Decoration{ .name = "part_driveway_01", .x = 0, .y = 0, .z = 0, .size_x = 200, .size_y = 2, .size_z = 200 };
+    try std.testing.expect(!isPaintablePart(huge));
+    // Non-parts always paint regardless of size.
+    const poi = Decoration{ .name = "house_old_01", .x = 0, .y = 0, .z = 0, .size_x = 40, .size_y = 10, .size_z = 40 };
+    try std.testing.expect(isPaintablePart(poi));
+}
+
+test "part decoration paints its blocks into the chunk" {
+    const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(prefab_root ++ "/Parts/part_5m_water_tower.tts")) return error.SkipZigTest;
+    var idx = try parseXml(std.testing.allocator,
+        \\<prefabs><decoration type="model" name="part_5m_water_tower" position="100,60,100" rotation="0" /></prefabs>
+    , prefab_root);
+    defer idx.deinit();
+    const Count = struct {
+        n: usize = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+            _ = wx;
+            _ = wy;
+            _ = wz;
+            _ = tex;
+            _ = dens;
+            if (raw == 0) return;
+            const c: *@This() = @ptrCast(@alignCast(ctx.?));
+            c.n += 1;
+        }
+    };
+    var c: Count = .{};
+    idx.applyTtsPaintToChunk(6, 6, Count.put, &c); // chunk x96..112 overlaps the part
+    try std.testing.expect(c.n > 0);
 }
