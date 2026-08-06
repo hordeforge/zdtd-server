@@ -849,13 +849,14 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/ecs/components.zig:199`, `src/assets/traders.zig:10`, `:71-81`,
   `src/server/game.zig:5498`, `:6762`
 
-- **Buy/sell pricing from items.xml EconomicValue** `PARTIAL`
-  `price = econ/10`, `sell = econ/50`. Stock multiplies EconomicValue by the
-  `BuyCostMultiplier` passive, then `TraderInfo.BuyMarkup` (3), then a quality lerp
-  and `PercentUsesLeft`, plus `(1 + Entry.Markup*0.2)`. zdtd is roughly 30x low on
-  buy and 10x low on sell. Because the client computes the displayed price itself
-  in `XUiM_Trader`, a working window would show one number and the server would
-  charge another.
+- **Buy/sell pricing from items.xml EconomicValue** `PARTIAL` `(markup 2026-08-07)`
+  Stock multiplies EconomicValue by `TraderInfo.BuyMarkup` (root 3,
+  per-trader OverrideBuyMarkup wins) and by `SellMarkdown` (root 0.2,
+  OverrideSellMarkdown wins); zdtd now applies those parsed multipliers, so the
+  server charges what the client's `XUiM_Trader` displays on the buy side
+  (previously ~30x low). Residual: the `EconomicSellScale` (not in traders.xml)
+  and the quality lerp / `PercentUsesLeft` / `Entry.Markup` terms are still
+  absent, so sell prices stay approximate.
   *Anchors:* `src/server/game.zig:6757-6777`, `src/assets/items.zig:429-432`,
   `asm.il:1830470-1830700`, `Data/Config/traders.xml:3`
 
