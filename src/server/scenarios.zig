@@ -1054,8 +1054,19 @@ test "scenario inventory move drop place equip" {
 
     // Wire: move holding, drop, place
     var txb: [32]u8 = undefined;
-    const drop_req = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.drop), 0, 0, 1, -1);
     var fb: [128]u8 = undefined;
+    // Drop one wood (tests the drop path) without consuming the armor: the
+    // bag already holds wood, so give(7,10) stacked into it and give(11,1)
+    // landed armor in the first empty slot (toolbelt 0). Dropping slot 0
+    // would discard that armor, so target the wood slot instead.
+    const drop_wood_slot: u16 = blk: {
+        const ps = g.sim.playerByPeer(c.slot).?;
+        for (g.sim.inventory[ps].slots, 0..) |s, i| {
+            if (s.item_id == 7 and s.count > 0) break :blk @intCast(i);
+        }
+        break :blk 1;
+    };
+    const drop_req = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.drop), drop_wood_slot, 0, 1, -1);
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", drop_req));
     // place wood at 10,70,10
     const wood_slot: u16 = blk: {
