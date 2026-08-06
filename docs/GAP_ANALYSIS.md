@@ -579,9 +579,11 @@ because the per-objective Write shapes are wrong.
   `trader_*_quests` lists, with jen as the fail-closed default, so each trader
   offers its own list once POI placement spawns the other classes (scenario
   `trader-lists` proves a rekt-class trader offers `trader_rekt_quests`).
-  Remaining: the 8-offer cap, the `quest_`/`tier` name filter dropping
-  `intro_buried_supplies`, fabricated QuestLocation tx/ty/tz and POIName, and
-  `tierLevel` echoed but not filtering.
+  The offer list is filtered by the requested tier (stock DifficultyTier ==
+  tierLevel, asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing
+  from a tier-1 list). Remaining: the 8-offer cap, the `quest_`/`tier` name
+  filter dropping `intro_buried_supplies`, and fabricated QuestLocation
+  tx/ty/tz + POIName.
   *Anchors:* `src/server/game.zig:6435`, `:5345`, `:5383`, `:6276`
 
 - **Trader quest ACCEPT** `WORKS`

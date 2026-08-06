@@ -48,6 +48,7 @@
 </quest_list>
   <quest id="quest_activate_block">
     <property name="name_key" value="Activate the block"/>
+    <property name="difficulty_tier" value="1"/>
     <property name="completiontype" value="TurnIn"/>
     <objective type="POIBlockActivate" id="1" value="1" phase="1"/>
     <objective type="InteractWithNPC" id="1" value="1" phase="2"/>
@@ -55,6 +56,7 @@
   </quest>
   <quest id="quest_rekt_errand">
     <property name="name_key" value="Rekt Errand"/>
+    <property name="difficulty_tier" value="1"/>
     <property name="completiontype" value="TurnIn"/>
     <objective type="Fetch" id="1" value="1"/>
     <reward type="Exp" value="100"/>

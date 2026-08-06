@@ -2831,7 +2831,15 @@ test "scenario trader quest offers follow the trader's class" {
     // The rekt list carries clear_the_noise (not in the jen list), and the
     // QuestPacketEntry quest ids are written as raw strings in the response.
     try std.testing.expect(std.mem.indexOf(u8, body, "quest_rekt_errand") != null);
-    std.debug.print("PASS trader-lists: rekt trader offers quest_rekt_errand from trader_rekt_quests\n", .{});
+    // The offer list is filtered by the requested tier (stock DifficultyTier ==
+    // tierLevel): a tier-2 fetch must not offer the tier-1 errand.
+    cap.clear();
+    std.mem.writeInt(i32, fb[9..13], 2, .little); // tier 2
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
+    const body2 = cap.findPkgId(packages.idOf("NetPackageNPCQuestList").?) orelse return error.TestUnexpectedResult;
+    const count2 = std.mem.readInt(i32, body2[13..17], .little);
+    try std.testing.expectEqual(@as(i32, 0), count2);
+    std.debug.print("PASS trader-lists: rekt trader offers quest_rekt_errand from trader_rekt_quests; tier 2 filtered\n", .{});
 }
 
 test "scenario block_activated objective event advances the phase" {

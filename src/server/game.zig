@@ -177,8 +177,9 @@ fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile
     return p - off;
 }
 
-/// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Allocates
-/// only when at least one record is dropped. Caller owns `blob` when non-null.
+/// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Builds a
+/// rewrite buffer and frees it again when no record is dropped; the early
+/// invalid-input paths do not allocate. Caller owns `blob` when non-null.
 fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
@@ -572,7 +573,7 @@ fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
 
 /// The scheduled blood-moon day for the clock (GameStats.blood_moon_day):
 /// 0 when disabled, else the next frequency multiple at/after today.
-fn bloodMoonDayFor(clk: anytype) i32 {
+fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
     if (clk.bloodmoon_frequency == 0) return 0;
     if (clk.day % clk.bloodmoon_frequency == 0) return @intCast(clk.day);
     return @intCast(((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency);
@@ -6725,7 +6726,7 @@ pub const Game = struct {
                     }
                 }
                 var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, &offers);
+                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
                     self.body_buf[0..2048],
                     head.npc_entity_id,
@@ -6738,7 +6739,7 @@ pub const Game = struct {
             }
             if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
                 var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, &offers);
+                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
                     self.body_buf[0..2048],
                     head.npc_entity_id,
@@ -6776,7 +6777,7 @@ pub const Game = struct {
                     tz = self.sim.transform[ni].z;
                 }
             }
-            const on = self.buildTraderQuestOffers(self.traderQuestList(npc_id), c.slot, tx, ty, tz, &offers);
+            const on = self.buildTraderQuestOffers(self.traderQuestList(npc_id), c.slot, tx, ty, tz, 0, &offers);
             const qbody = try packages.buildNpcQuestListFetch(
                 self.body_buf[512..2560],
                 npc_id,
@@ -7995,6 +7996,7 @@ pub const Game = struct {
         trader_x: f32,
         trader_y: f32,
         trader_z: f32,
+        tier: u8,
         out: []packages.stock_quest.QuestPacketEntry,
     ) usize {
         const list = self.sim.catalog.listById(list_id) orelse return 0;
@@ -8004,6 +8006,9 @@ pub const Game = struct {
             if (n >= out.len) break;
             const d = self.sim.catalog.byId(qid) orelse continue;
             if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+            // Stock filters the trader's quest list by DifficultyTier == the
+            // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
+            if (tier != 0 and d.difficulty_tier != tier) continue;
             if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
             out[n] = .{
                 .quest_id = d.name,
@@ -9088,6 +9093,16 @@ pub const Game = struct {
     /// regenerates fresh loot; the cycle-varying seed makes each respawn
     /// differ while staying deterministic per (pos, cycle).
     fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
+        std.debug.print("STABDBG respawn r={d} ps={} t={} day={d} td={d} e={}\n", .{ self.loot_respawn_days, cont.player_storage, cont.touched, self.sim.director.clock.day, cont.touched_day, blk: {
+            var e = true;
+            for (cont.slots[0..cont.slot_count]) |s| {
+                if (s.count > 0 and s.item_id != 0) {
+                    e = false;
+                    break;
+                }
+            }
+            break :blk e;
+        } });
         if (self.loot_respawn_days == 0) return;
         if (cont.player_storage) return;
         if (!cont.touched) return;
