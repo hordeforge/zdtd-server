@@ -6,7 +6,9 @@
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
+const maxdamage = @import("../assets/maxdamage.zig");
 const xml_util = @import("../assets/xml_util.zig");
+const deco_mirror = @import("deco_mirror.zig");
 const tts = @import("tts.zig");
 
 /// Quest-facing data from the prefab's `<name>.xml` (stock PrefabManager keeps
@@ -119,6 +121,10 @@ fn parseVolumeLists(
 pub const IdLookup = struct {
     ctx: ?*anyopaque = null,
     lookup: *const fn (ctx: ?*anyopaque, name: []const u8) ?u16,
+    /// Optional blocks.xml MultiBlockDim by name; used to regenerate the
+    /// multi-block children the prefab file does not store (Prefab::
+    /// AddAllChildBlocks, asm.il 3422+).
+    multiblock: ?*const fn (ctx: ?*anyopaque, name: []const u8) maxdamage.Dim = null,
 };
 
 pub const Decoration = struct {
@@ -291,8 +297,13 @@ pub const Index = struct {
         }
 
         var unknown: u32 = 0;
-        for (tb.types) |*raw| {
+        // Local type per cell for the multi-block pass: the remap below replaces
+        // the types with runtime ids, which index a different id space.
+        var local_types = self.allocator.alloc(u16, tb.types.len) catch return;
+        defer self.allocator.free(local_types);
+        for (tb.types, 0..) |*raw, i| {
             const typ: u16 = @truncate(raw.* & tts.type_mask);
+            local_types[i] = typ;
             if (typ == 0) continue;
             const mapped: i32 = if (typ < table.len) table[typ] else -1;
             if (mapped < 0) {
@@ -307,6 +318,45 @@ pub const Index = struct {
         }
         if (unknown != 0) {
             std.debug.print("zdtd: prefab {s}: {d} cells have no block in this install\n", .{ name, unknown });
+        }
+        // Regenerate multi-block children (Prefab::AddAllChildBlocks, asm.il
+        // 3422): the prefab file stores only the parent cell, so beds, tables,
+        // double doors and gun safes rendered as a single walk-through cell.
+        // Same offset list and child encoding as the deco mirror (blocks.xml
+        // MultiBlockDim, centered x/z, up in y). Children only fill air cells.
+        if (self.id_lookup) |lu| {
+            const mb = lu.multiblock orelse return;
+            // OOM here would silently drop every multi-block child for the POI.
+            var dim_table = self.allocator.alloc(maxdamage.Dim, map.names.len) catch |err| {
+                std.debug.print(
+                    "zdtd: multiblock dim table alloc failed names={d}: {s}\n",
+                    .{ map.names.len, @errorName(err) },
+                );
+                return;
+            };
+            defer self.allocator.free(dim_table);
+            for (map.names, 0..) |bname, local| {
+                dim_table[local] = if (bname.len == 0) maxdamage.Dim{} else mb(lu.ctx, bname);
+            }
+            for (tb.types, 0..) |raw, i| {
+                const typ = local_types[i];
+                if (typ == 0 or typ >= dim_table.len) continue;
+                const d = dim_table[typ];
+                if (d.x <= 1 and d.y <= 1 and d.z <= 1) continue;
+                const offs = deco_mirror.offsetsFor(d.x, d.y, d.z);
+                const pc = tb.offsetToCoord(@intCast(i));
+                for (offs.slice()) |off| {
+                    if (off.x == 0 and off.y == 0 and off.z == 0) continue;
+                    const cx = pc.x + off.x;
+                    const cy = pc.y + off.y;
+                    const cz = pc.z + off.z;
+                    if (cx < 0 or cx >= tb.sx or cy < 0 or cy >= tb.sy or cz < 0 or cz >= tb.sz) continue;
+                    const ci: usize = @intCast((cz * tb.sy + cy) * tb.sx + cx);
+                    // Stock AddAllChildBlocks overwrites the box cells with the
+                    // child encoding regardless of what the file stores.
+                    tb.types[ci] = deco_mirror.childRaw(raw, off) orelse continue;
+                }
+            }
         }
     }
 
@@ -844,7 +894,6 @@ test "navezgane paints a real POI into its chunk" {
 }
 
 test "prefab type ids remap through blocks.nim into runtime ids" {
-    const maxdamage = @import("../assets/maxdamage.zig");
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
     if (!fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
     var table = maxdamage.Table.empty();
@@ -1000,4 +1049,47 @@ test "part decoration paints its blocks into the chunk" {
     var c: Count = .{};
     idx.applyTtsPaintToChunk(6, 6, Count.put, &c); // chunk x96..112 overlaps the part
     try std.testing.expect(c.n > 0);
+}
+
+test "multi-block children regenerate from the parent's MultiBlockDim" {
+    // Prefab files store only the parent cell (Prefab::AddAllChildBlocks fills
+    // the rest at load): beds, tables, double doors and gun safes used to
+    // render as a single walk-through cell. After the remap, ischild children
+    // must exist where the parent's blocks.xml MultiBlockDim says.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const root = game_dir ++ "/Data/Prefabs";
+    if (!fileExists(root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
+    var table = (maxdamage.tryLoad(std.testing.allocator, game_dir, null) catch null) orelse return error.SkipZigTest;
+    defer table.deinit();
+    table.tryMergeBundledAssignIds(std.testing.allocator);
+    if (table.id_by_name.count() == 0) return error.SkipZigTest;
+
+    var idx = try parseXml(std.testing.allocator,
+        \\<prefabs><decoration type="model" name="abandoned_house_07" position="0,0,0" rotation="0" /></prefabs>
+    , root);
+    defer idx.deinit();
+    const MB = struct {
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            const t: *const maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+            return t.idByName(name);
+        }
+        fn multiblock(ctx: ?*anyopaque, name: []const u8) maxdamage.Dim {
+            const t: *const maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+            return t.multiBlockDim(name);
+        }
+    };
+    idx.setIdLookup(.{ .ctx = &table, .lookup = MB.lookup, .multiblock = MB.multiblock });
+    const tb = idx.getTtsBlocks("abandoned_house_07") orelse return error.SkipZigTest;
+    var children: usize = 0;
+    var parents: usize = 0;
+    for (tb.types) |raw| {
+        if (raw & tts.type_mask == 0) continue;
+        if (raw & deco_mirror.ischild_bit != 0) {
+            children += 1;
+        } else {
+            parents += 1;
+        }
+    }
+    try std.testing.expect(parents > 0);
+    try std.testing.expect(children > 0);
 }

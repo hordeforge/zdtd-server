@@ -138,7 +138,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
 | [Blood moon](#6-blood-moon) | 7 | 14 | 6 | 27 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
-| [POIs and prefabs](#7-pois-and-prefabs) | 13 | 14 | 5 | 32 | Ids, rotation and height now correct; trader compounds ship their areas; part_* decorations and sleeper triggers remain |
+| [POIs and prefabs](#7-pois-and-prefabs) | 14 | 15 | 3 | 32 | Ids, rotation and height now correct; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
@@ -1359,12 +1359,18 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/prefabs.zig:232` (`isPaintablePart`),
   `src/world/sleepers.zig:217`
 
-- **Multi-block / child blocks** `MISSING`
-  `parseBlocks` zeroes every cell with the child bit 0x40000000 and nothing
-  regenerates them. Stock calls `AddAllChildBlocks` at the end of `RotateY` and
-  after load. Large POI props exist only as their parent cell, partly
-  walk-through and partly invisible.
-  *Anchors:* `src/world/tts.zig:106`, `asm.il:918950-919033`, `asm.il:921630`
+- **Multi-block / child blocks** `WORKS`
+  Prefab files store only the parent cell; `remapToRuntimeIds` now regenerates
+  the children (Prefab::AddAllChildBlocks) from each parent's blocks.xml
+  `MultiBlockDim`, using the same offset list and child encoding as the deco
+  mirror (centered x/z, up in y, ischild bit + parent offsets). Beds, tables,
+  double doors and gun safes render solid instead of a single walk-through
+  cell; children only fill air cells so authored blocks are never overwritten.
+  The child bit in parsed prefab data is still cleared (V3 files carry no child
+  cells; the regeneration is dim-driven).
+  *Anchors:* `src/world/prefabs.zig` (`remapToRuntimeIds`),
+  `src/world/deco_mirror.zig` (`childRaw`), `asm.il:918950-919033`,
+  `asm.il:921630`
 
 - **Prefab authored block damage plane** `PARTIAL`
   Decoded into `TtsBlocks.damage` but nothing consumes it; the chunk encoder

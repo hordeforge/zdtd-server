@@ -1085,9 +1085,13 @@ pub const Game = struct {
                     const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
                     return t.idByName(name);
                 }
+                fn multiblock(ctx: ?*anyopaque, name: []const u8) assets_maxdamage.Dim {
+                    const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+                    return t.multiBlockDim(name);
+                }
             };
             if (self.maxdamage.id_by_name.count() > 0) {
-                pf.setIdLookup(.{ .ctx = &self.maxdamage, .lookup = NimCtx.lookup });
+                pf.setIdLookup(.{ .ctx = &self.maxdamage, .lookup = NimCtx.lookup, .multiblock = NimCtx.multiblock });
             } else {
                 std.debug.print("zdtd: warn: no AssignIds table, POI block ids stay prefab-local\n", .{});
             }

@@ -230,15 +230,6 @@ pub const Peer = struct {
         try self.sendRaw(sock, buf[0 .. 1 + user.len]);
     }
 
-    /// ReliableSequenced channel (channel_id=1). Same window as ordered; stock uses
-    /// separate channel for some motion. Full per-channel seq still deferred.
-    pub fn sendSequenced(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
-        // ponytail: reuse reliable window with channel 1; dedicated seq when needed.
-        if (user.len > packet.max_single_user) return error.Overflow;
-        if (self.capture) |cap| cap.push(user);
-        try self.sendOneReliableOnChannel(sock, user, null, 1);
-    }
-
     pub fn sendReliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
         if (self.capture) |cap| {
             // Record full user message for scenarios, then exercise real send path.
