@@ -979,6 +979,11 @@ test "stock quests.xml template quests parse non-empty" {
     try std.testing.expect(adv.reward_count >= 1);
     const homestead = cat.byName("challengegroup_reward_homesteading") orelse return;
     try std.testing.expect(homestead.objective_count >= 1);
+    // The merged body counts the template's objectives too: the wire
+    // objective_count must be at least the template's (the client's inherited
+    // QuestClass carries the template's full objective list, so a count of 1
+    // would trip its ValidateSizeMarker on the join PDF).
+    try std.testing.expect(adv.objective_count >= homestead.objective_count);
 }
 
 test "quest actions parse types, phases and properties" {

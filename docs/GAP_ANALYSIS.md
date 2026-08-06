@@ -530,11 +530,17 @@ because the per-objective Write shapes are wrong.
   `ObjectiveWireKind`, `src/server/game.zig` fillStockJournalWrites,
   `src/wire/stock_quest.zig:76`, `:162`
 
-- **objective_count on the wire for template-derived quests** `PARTIAL`
-  `objective_count = countTags(body, "<objective")`, so template-derived quests
-  report 1 while the client's inherited `QuestClass` has 6 or 7. Same
-  `ValidateSizeMarker` failure. Affects all 53 client-known template-derived defs.
-  *Anchors:* `src/assets/quests.zig:323`, `:342`, `src/server/game.zig:6422`
+- **objective_count on the wire for template-derived quests** `WORKS`
+  `objective_count = countTags(body, "<objective")` counts the **merged**
+  body: the T6 template merge (`resolveBody`) concatenates the template body
+  before the quest's own, so a derived quest's count is at least the
+  template's full objective list (the count the client's inherited
+  `QuestClass` carries). Verified against the stock file: 67 template-derived
+  quests, and `challengegroup_reward_advanced_survival` carries the full
+  homesteading objective set (test asserts the derived count >= the
+  template's, so the join-PDF ValidateSizeMarker cannot trip on a count of 1).
+  *Anchors:* `src/assets/quests.zig:380`, `:394`, `:555` (resolveBody),
+  `src/server/game.zig:7440`
 
 - **Per-objective CurrentValue from the phase graph** `PARTIAL`
   Emits 255 for completed phases, clamped progress for the active phase, 0 for
