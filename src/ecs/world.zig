@@ -11,6 +11,7 @@ const inv_ledger = @import("inv_ledger.zig");
 const locals_mod = @import("locals.zig");
 const observers_mod = @import("observers.zig");
 const group = @import("group.zig");
+const poi_lock = @import("poi_lock.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -114,6 +115,9 @@ pub const World = struct {
     completed_quests: u32 = 0,
     /// Monotonic stock-like Quest.QuestCode allocator (starts above catalog ids).
     next_quest_code: i32 = 10000,
+    /// Quest POI lockouts (stock PrefabInstance.lockInstance), driven by the
+    /// rally-marker and Lock/UnlockPOI quest events.
+    poi_locks: poi_lock.Table = .{},
 
     /// Optional terrain-height hook backing vehicle physics. Game sets these to
     /// the block store; unset (null) means no terrain data (headless / tests) so
@@ -140,6 +144,11 @@ pub const World = struct {
     /// Optional item_id → armor? (name prefix armor*). Null → offline pin.
     is_armor_ctx: ?*anyopaque = null,
     is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// Optional POI footprint at a world XZ (Game wires the prefabs index).
+    /// Unset → no POI data (tests / headless), so quests get no POI rect and
+    /// their rally objectives stay scaffolding instead of stalling.
+    poi_ctx: ?*anyopaque = null,
+    poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.
@@ -293,6 +302,14 @@ pub const World = struct {
     pub fn groundY(self: *const World, x: f32, z: f32) ?f32 {
         if (self.ground_fn) |f| return f(self.ground_ctx, @intFromFloat(@floor(x)), @intFromFloat(@floor(z)));
         return null;
+    }
+
+    /// POI footprint covering world (x,z) via the optional hook, or null when
+    /// unset or the position sits outside every prefab.
+    pub fn poiAt(self: *const World, x: f32, z: f32) ?c.PoiRect {
+        const f = self.poi_fn orelse return null;
+        const r = f(self.poi_ctx, x, z) orelse return null;
+        return if (r.valid()) r else null;
     }
 
     /// True when cell (wx,wz) blocks horizontal AI movement (optional hook).

@@ -179,6 +179,30 @@ comptime {
         @compileError("max_inv_slots must equal equip end");
 }
 
+/// POI footprint assigned to a quest, mirroring stock PrefabInstance
+/// boundingBoxPosition/boundingBoxSize. Goes on the wire as the Quest
+/// PositionData POIPosition/POISize pair; the client scans exactly this rect
+/// for the "Rally" indexed block (ObjectiveRallyPoint.GetRallyPosition,
+/// asm.il 973195-973344). A zero XZ size means "no POI resolved".
+pub const PoiRect = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    size_x: f32 = 0,
+    size_y: f32 = 0,
+    size_z: f32 = 0,
+
+    pub fn valid(self: PoiRect) bool {
+        return self.size_x > 0 and self.size_z > 0;
+    }
+
+    /// Stock Rect.Contains: min inclusive, max exclusive.
+    pub fn containsXZ(self: PoiRect, x: f32, z: f32) bool {
+        return x >= self.x and x < self.x + self.size_x and
+            z >= self.z and z < self.z + self.size_z;
+    }
+};
+
 pub const QuestProgress = struct {
     def_id: u16 = 0,
     /// Stock Quest.QuestCode (distinct from catalog def_id when possible).
@@ -189,6 +213,12 @@ pub const QuestProgress = struct {
     progress: u16 = 0,
     /// 1-based phase matching stock quest objective phase attributes.
     phase: u8 = 1,
+    /// Stock Quest.RallyMarkerActivated (asm.il 989046): the marker block is
+    /// spent for this quest and BlockRallyMarker stops offering activation.
+    rally_activated: bool = false,
+    /// POI this quest instance runs in; unset (zero size) for quests the server
+    /// could not place, which keeps their rally objectives as scaffolding.
+    poi: PoiRect = .{},
 };
 
 pub const Journal = struct {

@@ -7,6 +7,7 @@ const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
+const poi_lock = @import("poi_lock.zig");
 const path_mod = @import("path.zig");
 const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
@@ -174,11 +175,23 @@ fn finishPhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef)
     }
 }
 
-/// Auto-complete leading `.auto` scaffolding phases (RallyPoint/StayWithin/etc.)
-/// starting at the current phase; finishes the quest if the highest phase is auto.
+/// A phase the sim cannot drive to completion, so it must not block the quest.
+/// A rally phase only blocks once the quest has a POI rect: without one the
+/// client never finds a rally marker (QuestJournal.HasQuestAtRallyPosition,
+/// asm.il 1006297) and would leave the quest stuck forever.
+fn phaseIsScaffolding(spec: quest.PhaseSpec, s: *const c.QuestProgress) bool {
+    return switch (spec.kind) {
+        .auto => true,
+        .rally => !s.poi.valid(),
+        else => false,
+    };
+}
+
+/// Auto-complete leading scaffolding phases starting at the current phase;
+/// finishes the quest if the highest phase is scaffolding.
 fn skipAutoPhases(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
     while (currentPhaseSpec(d, s)) |spec| {
-        if (spec.kind != .auto) return;
+        if (!phaseIsScaffolding(spec, s)) return;
         if (s.phase >= d.highest_phase) {
             finishPhaseGraph(w, ps, s, d);
             return;
@@ -227,8 +240,11 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
         .progress = 0,
         .phase = 1,
     };
-    // Phase graph: land the player on the first actionable (non-auto) phase.
     const d = w.catalog.byId(def_id).?;
+    // Place the quest in a POI so rally objectives and the client's POI marker
+    // have a real rect (stock picks the POI when the quest is handed out).
+    if (w.poiAt(d.tx, d.tz)) |rect| s.poi = rect;
+    // Phase graph: land the player on the first actionable (non-auto) phase.
     if (d.phases.len > 0) skipAutoPhases(w, ps, s, d);
     return true;
 }
@@ -339,6 +355,66 @@ pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
         s.progress +|= 1;
         markProgress(w, ps, s, d);
     }
+}
+
+// --- Rally marker / POI lockout (NetPackageQuestEvent server half) ---
+
+/// Outcome of a rally-marker request: reason 0 means the marker may be armed.
+pub const PoiLockout = struct {
+    reason: poi_lock.LockReason = .none,
+    /// QuestLockInstance.LockedOutUntil, only meaningful for `quest_lock`.
+    extra_data: u64 = 0,
+};
+
+/// Server half of QuestEventManager.CheckForPOILockouts (asm.il 998957-999155).
+/// Only the reasons this server can observe are reported: an active quest lock
+/// on the POI, or another player standing inside it. Bedroll and land-claim
+/// lockouts need home/claim tracking the server does not have yet, so they
+/// never fire rather than being guessed.
+pub fn questCheckPoiLockout(w: *World, entity_id: i32, x: f32, z: f32) PoiLockout {
+    if (w.poi_locks.check(x, z, w.director.clock.worldTimeBits())) |until| {
+        return .{ .reason = .quest_lock, .extra_data = until };
+    }
+    const rect = w.poiAt(x, z) orelse return .{};
+    // Stock exempts party members; zdtd tracks no parties, so every other
+    // player inside the POI blocks the reset.
+    var i: Slot = 0;
+    while (i < max_entities) : (i += 1) {
+        if (!w.alive[i] or !w.mask[i].player or !w.mask[i].transform) continue;
+        if (w.mask[i].network_id and w.network_id[i].id == entity_id) continue;
+        if (rect.containsXZ(w.transform[i].x, w.transform[i].z)) {
+            return .{ .reason = .player_inside };
+        }
+    }
+    return .{};
+}
+
+/// Take the POI at (x,z) for `entity_id` (stock QuestLockPOI, asm.il 998898).
+pub fn questPoiLock(w: *World, entity_id: i32, x: f32, z: f32) void {
+    const rect = w.poiAt(x, z) orelse return;
+    _ = w.poi_locks.lock(rect, entity_id, w.director.clock.worldTimeBits());
+}
+
+/// Release the POI at (x,z) for `entity_id` (stock QuestUnlockPOI, asm.il 998930).
+pub fn questPoiUnlock(w: *World, entity_id: i32, x: f32, z: f32) void {
+    w.poi_locks.unlock(x, z, entity_id, w.director.clock.worldTimeBits());
+}
+
+/// The client activated the rally marker of quest `quest_code`. Marks the quest
+/// (stock Quest.RallyMarkerActivated) and advances a rally phase exactly once.
+/// False = no such active quest for this peer, or the marker was already spent.
+pub fn questOnRallyActivated(w: *World, peer_slot: usize, quest_code: i32) bool {
+    const ps = w.playerByPeer(peer_slot) orelse return false;
+    const s = questFindByCode(w, peer_slot, quest_code) orelse return false;
+    if (s.completed or s.rally_activated) return false;
+    s.rally_activated = true;
+    const d = w.catalog.byId(s.def_id) orelse return true;
+    if (d.phases.len > 0) {
+        if (currentPhaseSpec(d, s)) |spec| {
+            if (spec.kind == .rally) bumpPhase(w, ps, s, d, .rally, spec.required);
+        }
+    }
+    return true;
 }
 
 /// StayWithin: player must remain near def.tx/tz (radius from target_count as blocks, min 8).
@@ -2044,6 +2120,102 @@ test "quest phase graph auto-skips leading scaffolding on accept" {
     questOnZombieKilled(&w, 0);
     try std.testing.expect(!questHasActive(&w, 0, 21));
     try std.testing.expectEqual(@as(u32, 30), questCoins(&w, 0));
+}
+
+/// Fixed POI covering the quest target used by the rally tests.
+fn testPoiRect(_: ?*anyopaque, x: f32, z: f32) ?c.PoiRect {
+    const rect: c.PoiRect = .{ .x = 0, .y = 60, .z = 0, .size_x = 64, .size_y = 20, .size_z = 64 };
+    return if (rect.containsXZ(x, z)) rect else null;
+}
+
+const rally_phases = [_]quest.PhaseSpec{
+    .{ .kind = .rally, .required = 1 },
+    .{ .kind = .kill_zombies, .required = 2 },
+};
+
+const rally_defs = [_]quest.QuestDef{.{
+    .id = 22,
+    .kind = .kill_zombies,
+    .name = "rp",
+    .title = "RP",
+    .target_count = 2,
+    .reward_coin = 30,
+    .tx = 10,
+    .ty = 70,
+    .tz = 10,
+    .objective_count = 2,
+    .phases = &rally_phases,
+    .highest_phase = 2,
+    .objective_phases = &[_]u8{ 1, 2 },
+}};
+
+test "rally phase blocks until the marker is activated" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const s = questFindActive(&w, 0, 22).?;
+    // With a POI rect the rally phase is real work: it must not be skipped.
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    try std.testing.expect(s.poi.valid());
+    // Kills on the rally phase do not advance it.
+    questOnZombieKilled(&w, 0);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    // A foreign quest code is ignored.
+    try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code + 1));
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    try std.testing.expect(questOnRallyActivated(&w, 0, s.quest_code));
+    try std.testing.expect(s.rally_activated);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    // A repeat activation is refused and must not advance the kill phase.
+    try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code));
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expectEqual(@as(u16, 0), s.progress);
+}
+
+test "rally phase stays scaffolding without a poi rect" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const s = questFindActive(&w, 0, 22).?;
+    // No POI hook → the client can never find a rally marker, so the phase
+    // auto-completes exactly as it did before rally objectives existed.
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expect(!s.poi.valid());
+    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 22));
+}
+
+test "poi lockout reports quest lock and other players inside" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    const a_id = w.spawnPlayer(5, 70, 5, 0).?;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+
+    // Another player standing in the POI blocks the reset.
+    const b_id = w.spawnPlayer(20, 70, 20, 1).?;
+    const b = w.slotOfNetId(b_id).?;
+    try std.testing.expectEqual(poi_lock.LockReason.player_inside, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+    w.transform[b].x = 500;
+    w.transform[b].z = 500;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+
+    // A live quest lock wins over everything and carries LockedOutUntil.
+    questPoiLock(&w, b_id, 10, 10);
+    const locked = questCheckPoiLockout(&w, a_id, 10, 10);
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, locked.reason);
+    try std.testing.expectEqual(@as(u64, 0), locked.extra_data);
+    questPoiUnlock(&w, b_id, 10, 10);
+    // Still inside the unlock grace window.
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, questCheckPoiLockout(&w, a_id, 10, 10).reason);
 }
 
 test "quest turn_in needs trader open" {

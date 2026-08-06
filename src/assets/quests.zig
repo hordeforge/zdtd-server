@@ -66,8 +66,10 @@ fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind
 }
 
 /// Map a stock objective type -> executable phase kind (see docs/MISSING_FEATURES.md
-/// for the RallyPoint/StayWithin/UnlockPOI etc. that collapse to `.auto`).
+/// for the objective types that still collapse to `.auto`).
 fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind {
+    // ObjectiveRallyPoint (asm.il 1391077 resolves type="RallyPoint" by prefix).
+    if (std.mem.eql(u8, obj_type, "RallyPoint")) return .rally;
     if (std.mem.eql(u8, obj_type, "ClearSleepers") or
         std.mem.eql(u8, obj_type, "EntityKill") or
         std.mem.eql(u8, obj_type, "AnimalKill")) return .kill_zombies;
@@ -144,6 +146,9 @@ fn objectiveScore(typ: []const u8, oid: ?[]const u8) i32 {
         std.mem.eql(u8, typ, "ClosestPOIGoto") or
         std.mem.eql(u8, typ, "RandomGotoNPC")) return 60;
     if (std.mem.eql(u8, typ, "ReturnToNPC")) return 40;
+    // Rally is the gate into a POI, never the phase's meat: it must lose to
+    // every real objective sharing the phase but still beat unmodelled types.
+    if (std.mem.eql(u8, typ, "RallyPoint")) return 30;
     return 10;
 }
 
@@ -634,6 +639,31 @@ test "parse fixture catalog" {
     try std.testing.expectEqual(@as(usize, 1), cat.lists.len);
     try std.testing.expectEqualStrings("trader_jen_quests", cat.lists[0].id);
     try std.testing.expectEqual(@as(usize, 2), cat.lists[0].entries.len);
+}
+
+test "rally point objective becomes a rally phase without stealing one" {
+    const fixture =
+        \\<?xml version="1.0"?>
+        \\<quests starter_quest="tier1_rally">
+        \\  <quest id="tier1_rally">
+        \\    <property name="name_key" value="Rally"/>
+        \\    <objective type="RandomPOIGoto" phase="1"/>
+        \\    <objective type="RallyPoint" phase="2"/>
+        \\    <objective type="RallyPoint" phase="3"/>
+        \\    <objective type="ClearSleepers" phase="3"/>
+        \\    <reward type="Exp" value="100"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const d = cat.byName("tier1_rally").?;
+    try std.testing.expectEqual(@as(u8, 3), d.highest_phase);
+    try std.testing.expectEqual(quest.PhaseKind.goto_point, d.phases[0].kind);
+    // Alone in its phase, RallyPoint drives it.
+    try std.testing.expectEqual(quest.PhaseKind.rally, d.phases[1].kind);
+    // Sharing a phase with real work, RallyPoint must lose.
+    try std.testing.expectEqual(quest.PhaseKind.kill_zombies, d.phases[2].kind);
 }
 
 test "load stock quests.xml when present" {

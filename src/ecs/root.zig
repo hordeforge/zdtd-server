@@ -12,6 +12,7 @@ pub const components = @import("components.zig");
 pub const world = @import("world.zig");
 pub const systems = @import("systems.zig");
 pub const quest = @import("quest.zig");
+pub const poi_lock = @import("poi_lock.zig");
 pub const electric = @import("electric.zig");
 pub const powerblocks = @import("powerblocks.zig");
 pub const aidirector = @import("aidirector.zig");
@@ -61,6 +62,7 @@ test {
     _ = world;
     _ = systems;
     _ = quest;
+    _ = poi_lock;
     _ = electric;
     _ = powerblocks;
     _ = aidirector;

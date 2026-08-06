@@ -147,7 +147,7 @@ Direction: ToServer=client→server (server MUST handle), ToClient=server→clie
 | NetPackagePlayerTwitchStats | ? |  |  | `NetPackageEntityTargeted.read;ReadBoolean;ReadBoolean;ReadBy` |
 | NetPackagePlayerVendingMachine | ? |  |  | `ReadInt32;ReadInt32;ReadInt32;ReadBoolean;` |
 | NetPackageQuestEntitySpawn | ToServer | handled |  | `ReadInt32;ReadString;ReadInt32;` |
-| NetPackageQuestEvent | ? |  |  | `ReadInt32;SU.ReadVector3;ReadByte;ReadString;ReadInt32;ReadB` |
+| NetPackageQuestEvent | ? | handled | sent | `ReadInt32;SU.ReadVector3;ReadByte;ReadString;ReadInt32;ReadB` |
 | NetPackageQuestGotoPoint | ? |  |  | `ReadInt32;ReadInt32;ReadByte;ReadString;ReadInt32;ReadInt32;` |
 | NetPackageQuestObjectiveUpdate | ? | handled |  | `ReadInt32;ReadInt32;ReadByte;SU.ReadVector3i;` |
 | NetPackageQuestTreasurePoint | ? |  |  | `ReadByte;ReadInt32;SU.ReadVector3i;ReadInt32;ReadSingle;Read` |
