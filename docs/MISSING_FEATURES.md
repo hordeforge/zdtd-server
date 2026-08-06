@@ -9,6 +9,19 @@ depth and scale, not join blockers.
 
 Each gap below is mapped to its now-available RE spec in [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md).
 
+**Which gap document to use.** Three files cover gaps and they do not overlap by
+accident:
+
+| File | Owns | Use it when |
+|---|---|---|
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Per-feature WORKS/PARTIAL/MISSING scoring with anchors, rescored against the code | You want to know whether one thing works, and why that is believed |
+| This file | Long-form narrative per area, priority bands, and the reasoning behind a gap | You want the background and the shape of an area |
+| [WORK_PLAN.md](WORK_PLAN.md) | Handoff-ready tasks with acceptance criteria | You are about to build something |
+
+When a status here disagrees with GAP_ANALYSIS, GAP_ANALYSIS wins on the state of
+a single feature (it is verified against the code) and STATUS wins on whether a
+gate shipped.
+
 This document is deliberately exhaustive. Status labels:
 
 | Tag | Meaning |
@@ -20,34 +33,15 @@ This document is deliberately exhaustive. Status labels:
 
 ---
 
-## 0. Executive scorecard
+## 0. Scorecard
 
-**Living hub:** [STATUS.md](STATUS.md) · open backlog: [TODO.md](../TODO.md) · index: [INDEX.md](INDEX.md)  
-**Tests:** **537** total (see STATUS for pass/fail) · stock join: green (0 NRE) · core play loop: **yes** (live stock-client gate 23/23 on a fresh world, soft residuals in STATUS) · full stock parity: **partial** (gaps below)
+The scorecard lives in [GAP_ANALYSIS.md](GAP_ANALYSIS.md) section 2, which scores
+345 features per area against the code and carries the anchors. Gate state is in
+[STATUS.md](STATUS.md); the ranked work is in [WORK_PLAN.md](WORK_PLAN.md).
 
-| Domain | Have | Partial | Missing (high) | Stock-client impact |
-|---|---:|---:|---:|---|
-| LiteNet + join | yes (password, rate limit, frag pump) | ordered hold, sequenced | Encryption* (optional) | joins clean |
-| Package catalog | 190 names; 33/33 C2S | many S2C bodies shallow | editor/EAC/platform | play path covered |
-| Terrain wire | stock Chunk.write + upper24 + DTM | dens residual, deco suppressed | full .ttc | POI textured; CGO green |
-| Prefab TTS | types + density/TE/water/texture planes | part_* skip policy | name remap if tables diverge | houses from real TTS |
-| Block world | columns + SetBlock + ZCH3 (.zch) + land claim | multi/meta depth | stability, falling | dig/build/persist |
-| Inventory / TE / loot | PDF, TE, workstation RecipeQueue + craft complete, loot ECD bag, InvTx | lock contention depth | recipes.xml-driven queue validation | chest/craft/loot work |
-| Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task, grid A* | AI task depth | navmesh, more EAI tasks | fight/loot visible |
-| Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
-| Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
-| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders, gamestages | biomes.xml, vehicles.xml | buffs | tables load |
-| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders + buffs | biomes.xml, vehicles.xml | gamestages, buff effect VM | tables load |
-| Vehicles / power / turrets | attach + seats, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | vehicle mod slots, part damage | place/wire/drive/ride first cut |
-| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders | biomes.xml, vehicles.xml | gamestages, buffs | tables load |
-| Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
-| Admin / browser | stock telnet console (greeting, login, stock verbs + output shapes) | client-side console verbs | Steam browser | ops usable |
-
-**Honest bottom line:** core stock loop is playable under EAC-off (join, move,
-dig/build, fight, death/respawn, loot, craft + workstation, trade, persist;
-live stock-client gate 23/23). Remaining work is **depth and content fidelity**, not join.
-Prefer missing over fakes. Best PARTIAL write-ups: §5.2.1 EAI, §6.1 quests,
-electrical gaps, vehicle physics, blood-moon FX.
+This file is the long-form narrative: why an area looks the way it does, what
+stock does that zdtd does not, and the deep dives at the end. It does not
+maintain a second set of per-feature statuses.
 
 ---
 
@@ -681,7 +675,6 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | vehicles.xml | PARTIAL (load + spawn HP/speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
-| gamestages / spawning | PARTIAL (spawning.xml → director groups; gamestages no) |
 | buffs / progression | PARTIAL (typed catalog + stack/duration/update_rate + passives + XP curve; no triggered_effect VM) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | MISSING |
@@ -721,8 +714,6 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 |---|---|
 | Broadcast all transforms | PARTIAL (except owner for PosAndRot; broadcastNear 160) |
 | Spatial interest (chunk/grid) | PARTIAL (radius filter; no cell hash) |
-| Serialize-once shared buffers | MISSING (M11 open) |
-| Dirty flags (POS/ROT/FLAGS/HP) | PARTIAL (spawn dirty + known_entities; HP drains into player `EntityStatChanged` each tick; full bitset open) |
 | Serialize-once shared buffers | HAVE (`Game.replicate` is entity-outer: encode + frame once, memcpy fan-out per interested peer; docs/adr/0008) |
 | Dirty flags (POS/ROT/FLAGS/HP) | HAVE (`World.dirty_bits` mirrors `dirty[]` through `markDirty`; off-heartbeat replicate visits dirty ∪ mobs only. Mob motion stays heartbeat-only by design: marking `stepToward` dirty would take mob PosAndRot from tick%10 to tick%2) |
 | RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
@@ -852,19 +843,6 @@ kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
 | Golden wire size checks | PARTIAL (some packages) |
 | Capture regression suite vs stock | MISSING |
 | Multi-version client matrix | MISSING |
-
----
-
-## 14. Explicit non-goals (OUT)
-
-Do not plan these as product features of zdtd:
-
-1. Loading `Mods/`, Harmony, ModAPI, EfficientServer, RealEarth as runtime.  
-2. Integrating **7dtd-apm** Mono bridge / bpftrace into the Zig process.  
-3. EAC-signed multiplayer.  
-4. Shipping TFP DLLs, prefab binaries, or bulk decompiled C#.  
-5. Bit-identical blood-moon festivities / full Unity FX parity.  
-6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
 

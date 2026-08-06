@@ -30,6 +30,12 @@ Status labels, used exactly as defined:
 
 ---
 
+**Relationship to the other gap docs:** this file owns the per-feature scoring
+and its anchors. [MISSING_FEATURES.md](MISSING_FEATURES.md) owns the long-form
+narrative and priority bands; [WORK_PLAN.md](WORK_PLAN.md) owns the tasks. On the
+state of a single feature this file wins, because it is rescored against the
+code; on whether a gate shipped, [STATUS.md](STATUS.md) wins.
+
 ## 1. Honest summary
 
 ### What a player can do today
@@ -126,6 +132,19 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
 | **Total** | **82** | **159** | **104** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+
+---
+
+## 2a. Explicit non-goals
+
+Do not plan these as product features of zdtd:
+
+1. Loading `Mods/`, Harmony, ModAPI, EfficientServer, RealEarth as runtime.  
+2. Integrating **7dtd-apm** Mono bridge / bpftrace into the Zig process.  
+3. EAC-signed multiplayer.  
+4. Shipping TFP DLLs, prefab binaries, or bulk decompiled C#.  
+5. Bit-identical blood-moon festivities / full Unity FX parity.  
+6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
 

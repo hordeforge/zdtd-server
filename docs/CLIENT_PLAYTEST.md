@@ -625,3 +625,15 @@ not more ad-hoc steps in connect; it is a **dedicated playtest product**:
 
 That stack can grow to cover combat, craft, trade, persist, and soak without
 violating "server owns the wire" and without pretending loadgen is a full client.
+
+## Fresh world per run
+
+The harness defaults to `FRESH=1`, which removes the save before each run. The
+suites dig and place blocks, so reusing one world accumulates holes under the
+test area until dig and place fail on the previous run's terrain rather than on
+anything the server did. Pass `FRESH=0` only to inspect an existing save.
+
+Known limitation: with a fresh world the `full` suite currently registers 23
+cases instead of 85, because the extra cases depend on a prepared world and stop
+registering rather than failing. That is tracked as W1 and W2 in
+[WORK_PLAN.md](WORK_PLAN.md).

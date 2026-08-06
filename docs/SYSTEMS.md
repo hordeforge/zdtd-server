@@ -117,17 +117,45 @@ Join-stable prefix plus large stock name list in `packages.default_mappings`
 - Wire: `NetPackageTurretSpawn`, `TurretSync`
 - Default map: gen + turret wired near spawn
 
+
+## Weather (`src/world/weather.zig` + `NetPackageWeather`)
+
+Storm and blood-moon weather groups run as a state machine driven from
+biomes.xml, with the per-biome parameters (temp, precipitation, cloud, wind, fog)
+on the raw 0..100 XML scale the client divides by 100. The package carries one
+entry per biome with no count prefix, so the body length must match what the
+client's `biomeWeather.Count` expects, and `groupIndex` is clamped because
+`BiomeDefinition::SetWeatherGroup` indexes unchecked.
+Open: storm state does not persist across a restart, and there are no
+`ForceWeather` / `SetStorm` admin commands.
+
+## Pathfinding (`src/ecs/path.zig`, used by `systemZombieAi`)
+
+Grid A* over a body-aware step predicate that models step-up, drop and headroom,
+so a wall, a POI roof and a crawlspace are all impassable while a slope is not.
+Results fill an 8-cell waypoint buffer, and the search runs under a deterministic
+per-tick node budget so the 20 Hz tick cannot be blown by one hard path.
+
+The predicate replaced a boolean hook that asked `isSolid(heightAt + 1)`, which
+is false for every column by construction, because `heights` is maintained as the
+topmost non-air block. The pathfinder therefore used to see an open world
+everywhere.
+Open: navmesh parity, jump and climb, data-driven per-class task graphs.
+
+## Gamestage (`src/assets/gamestages.zig`)
+
+Computed from level, days survived and deaths with party weighting, and consumed
+by sleeper volume groups, the blood-moon spawner tier, daytime scout tiers and
+loot probability bands. Several stock inputs are parsed but not applied; the list
+is in [MISSING_FEATURES.md](MISSING_FEATURES.md) under the gamestage subsection.
+
 ## Honesty
 
-Real IL-grounded cores now landed for the previously-missing subsystems
-(2026-07-23): EAI prioritized task graphs (ApproachAndAttackTarget + Wander,
-greedy pathing kept), POI sleeper volumes from prefab `.tts`/`.nim` markers,
-trader stock TraderData wire, blood-moon `BloodmoonMusic` builder (HordeEvent
-builder shipped **unwired** because stock has zero senders), vehicle terrain
-gravity/ground-clamp, electrical block placement + WireActions, and quest
-multi-phase objective execution (real phase graph, not primary-kind collapse).
-Each has documented remaining gaps (navmesh A*, gamestage biome/quest/POI-tier
-inputs, generator
-fuel sim, per-item markup, multi-objective phases, etc.). Prefer missing over
-fake. Precise, current gap inventory: [MISSING_FEATURES.md](MISSING_FEATURES.md).
-Hub: [STATUS.md](STATUS.md).
+This file describes shape, not completeness. For what actually works, what is
+partial and what is missing, with anchors, use
+[GAP_ANALYSIS.md](GAP_ANALYSIS.md); it is rescored against the code rather than
+written from intent. The ranked follow-up work is in
+[WORK_PLAN.md](WORK_PLAN.md).
+
+Systems land in layers: an IL-grounded core first, then depth. Every section
+above names its own open items rather than implying the system is finished.

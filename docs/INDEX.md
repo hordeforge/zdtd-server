@@ -84,7 +84,6 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [WEBUI.md](WEBUI.md) | Operator web UI, security model, roadmap |
-| [APM.md](APM.md) | Metrics harness for operators |
 
 ## Review prompts and their findings
 
