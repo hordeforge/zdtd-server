@@ -5780,10 +5780,8 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageInventoryDataRequest")) {
             // Stock: KeyHashPair (Guid+hash) + managerToken Guid.
             // Serve TE container slots when Guid matches our deterministic pos-key.
-            std.debug.print("STABDBG invreq len={d}\n", .{body.len});
             if (packages.parseInvDataRequestStock(body)) |req| {
                 if (self.containers.getByGuid(&req.inventory_key)) |cont| {
-                    std.debug.print("STABDBG invreq guid-match respawn={d}\n", .{self.loot_respawn_days});
                     // LootRespawnDays: a looted world container re-rolls here
                     // when its interval has elapsed (before the slots serve).
                     self.maybeRespawnContainer(cont);
@@ -7787,6 +7785,11 @@ pub const Game = struct {
         if (name.len == 0) return false;
         if (std.mem.startsWith(u8, name, "quest_")) return true;
         if (std.mem.startsWith(u8, name, "tier")) return true;
+        // Other stock quest-name families the client's quests.xml knows
+        // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*).
+        if (std.mem.startsWith(u8, name, "intro_")) return true;
+        if (std.mem.startsWith(u8, name, "test_")) return true;
+        if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
         return false;
     }
 
@@ -9069,7 +9072,6 @@ pub const Game = struct {
     fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
         const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, &stacks);
-        std.debug.print("STABDBG fill name={s} n={d} lootsrc={}\n", .{ loot_name, n, self.loot.source });
         var si: usize = 0;
         var i: usize = 0;
         while (i < n and si < cont.slot_count) : (i += 1) {
@@ -9093,16 +9095,6 @@ pub const Game = struct {
     /// regenerates fresh loot; the cycle-varying seed makes each respawn
     /// differ while staying deterministic per (pos, cycle).
     fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
-        std.debug.print("STABDBG respawn r={d} ps={} t={} day={d} td={d} e={}\n", .{ self.loot_respawn_days, cont.player_storage, cont.touched, self.sim.director.clock.day, cont.touched_day, blk: {
-            var e = true;
-            for (cont.slots[0..cont.slot_count]) |s| {
-                if (s.count > 0 and s.item_id != 0) {
-                    e = false;
-                    break;
-                }
-            }
-            break :blk e;
-        } });
         if (self.loot_respawn_days == 0) return;
         if (cont.player_storage) return;
         if (!cont.touched) return;

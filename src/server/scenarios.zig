@@ -2743,7 +2743,7 @@ test "scenario container loot respawns after LootRespawnDays" {
         g.deinit();
         gpa.destroy(g);
     }
-    g.loot_respawn_days = 3; // short interval for the test
+    g.loot_respawn_days = 1; // one-day interval for the test
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -2767,7 +2767,7 @@ test "scenario container loot respawns after LootRespawnDays" {
     cont.clear();
     cont.touched = true;
     cont.player_storage = false; // world container: eligible for respawn
-    cont.touched_day = g.sim.director.clock.day -% 4;
+    cont.touched_day = 0; // pre-save default: older than the interval
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
     var refilled = false;
     for (cont.slots[0..cont.slot_count]) |s| {
@@ -2831,6 +2831,8 @@ test "scenario trader quest offers follow the trader's class" {
     // The rekt list carries clear_the_noise (not in the jen list), and the
     // QuestPacketEntry quest ids are written as raw strings in the response.
     try std.testing.expect(std.mem.indexOf(u8, body, "quest_rekt_errand") != null);
+    // intro_buried_supplies is a stock quest the old quest_/tier filter dropped.
+    try std.testing.expect(std.mem.indexOf(u8, body, "intro_buried_supplies") != null);
     // The offer list is filtered by the requested tier (stock DifficultyTier ==
     // tierLevel): a tier-2 fetch must not offer the tier-1 errand.
     cap.clear();

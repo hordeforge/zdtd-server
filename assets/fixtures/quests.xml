@@ -61,8 +61,15 @@
     <objective type="Fetch" id="1" value="1"/>
     <reward type="Exp" value="100"/>
   </quest>
+  <quest id="intro_buried_supplies">
+    <property name="name_key" value="Buried Supplies"/>
+    <property name="difficulty_tier" value="1"/>
+    <objective type="FetchFromContainer" id="1" value="1"/>
+    <reward type="Exp" value="100"/>
+  </quest>
 <quest_list id="trader_rekt_quests">
   <quest id="quest_rekt_errand"/>
+  <quest id="intro_buried_supplies"/>
 </quest_list>
 
 </quests>
