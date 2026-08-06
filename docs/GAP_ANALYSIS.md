@@ -621,12 +621,20 @@ because the per-objective Write shapes are wrong.
   `op==1`. Block-objective and treasure events have no effect.
   *Anchors:* `src/server/game.zig:5314`, `src/wire/packages.zig:2742`
 
-- **S2C quest progress updates during a session** `MISSING`
+- **S2C quest progress updates during a session** `BLOCKED (2026-08-07)`
   The stock journal is written only inside `NetPackagePlayerId`, i.e. at first
   join. Nothing re-sends a journal or emits a QuestObjectiveUpdate when the
   server-side phase advances. Every server-side advance is invisible until the
   next login.
-  *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`
+  *Blocked on:* the exact mid-session sync mechanism. The RE docs establish
+  that the client owns the quest object and the server mirrors coordination
+  events over `NetPackageQuestEvent`, but the precise package/mechanism stock
+  uses to push objective CurrentValue progress to the owning client is not yet
+  extracted (the `QuestEventManager` hook mirroring path). Needs a
+  `7dtd-research` dump of the quest objective sync path before implementing;
+  guessing would invent wire behavior.
+  *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`,
+  `../7dtd-research/docs/quests-challenges.md` §5 (client owns the quest)
 
 - **Server-side journal: accept, phase advance, turn-in, coins** `WORKS`
   `questAccept` allocates a slot, assigns a monotonic quest_code, resolves a POI
@@ -2723,12 +2731,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   no `EntityFallingBlock` visual entity (the client collapses locally).
   *Anchors:* `src/world/stability.zig`, `../7dtd-research/docs/stability.md`
 
-- **Structural collapse / falling blocks** `MISSING`
-  No falling-block entity, no `AddFallingBlock` equivalent, no `LetBlocksFall`. Cut
-  every support out from under a building and nothing happens server-side. Stock
-  feeds unstable positions from StabilityCalculator into `World::AddFallingBlock`
-  and spawns `fallingBlock` entities from `GameManager::UpdateTick` with no
-  IsServer gate.
+- **Structural collapse / falling blocks** `BLOCKED (2026-08-07)`
+  The stability plane and collapse removal are shipped (the server removes
+  every now-unsupported block and broadcasts the change; the client renders its
+  own falling blocks because it runs the identical plane locally). The
+  server-side `fallingBlock` ENTITY spawn (stock `World::AddFallingBlock` +
+  `LetBlocksFall` outside the IsServer guard) is deferred: spawning server
+  entities for positions the client already collapses locally risks visible
+  duplicate falling blocks, and the dedup behavior between server-replicated
+  and client-local falling entities is not yet pinned down from RE.
+  *Blocked on:* `EntityFallingBlock(s)` spawn/landing dedup RE before the
+  entity spawn can ship; the removal-side parity is done.
   *Anchors:* `asm.il:1095889-1095893`, `asm.il:1239718`, `asm.il:1239773`,
   `asm.il:1240000`, `asm.il:1881963`, `src/wire/stock_entity.zig:121`
 
@@ -3851,6 +3864,11 @@ Honest gaps:
   column reachable at two heights resolves to whichever the search found first.
   No navmesh, no jump/climb, no stock pathCounter/relocateTicks fidelity.
 - **Five EAI tasks stay unimplemented, each on a hard missing dependency.**
+  **BLOCKED (2026-08-07):** each needs a subsystem or data source that does
+  not exist yet (client animator state, vertical movement / MoveHelper
+  physics, item actions + projectiles, per-class task graphs, dropped-item
+  entities with item-class flags). Not inventable without those subsystems;
+  the dependencies below are the evidence.
   - *EAIDodge* (asm.il:426512): CanExecute reads the target's
     `avatarController.IsAnimationToDodge()` and Start calls
     `StartAnimationDodge` - client animator state the server does not have.
