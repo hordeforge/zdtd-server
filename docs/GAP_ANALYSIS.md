@@ -483,12 +483,14 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/assets/quests.zig:296`, `src/ecs/systems.zig:222`, `:349`,
   `asm.il:990502-990503`
 
-- **difficulty_tier** `PARTIAL`
-  Read from the property and used only to scale the default kill count
-  (`3 + tier*2`). Template-derived quests carry their tier in
-  `<variable name="difficulty">` (27 occurrences), which zdtd never resolves, so
-  every tier2..tier6 quest reports `difficulty_tier=0`. Trader tier gating and the
-  `NPCQuestList` `tierLevel` filter cannot be honoured.
+- **difficulty_tier** `WORKS`
+  The stock property carries `param1="difficulty"`: the tier comes from the
+  quest's `<variable name="difficulty">` override (27 occurrences), falling
+  back to the property value. zdtd now resolves variables (last occurrence
+  wins, so the derived quest overrides the template) and reads the tier through
+  the param. Verified against the stock file: `tier2_fetch` reports 2 while
+  `tier1_fetch` reports 1. The tier still only scales the default kill count;
+  trader tier gating and the `NPCQuestList` `tierLevel` filter remain open.
   *Anchors:* `src/assets/quests.zig:294`, `:227`, `:303`
 
 - **Rewards: counting and per-reward wire shape flags** `PARTIAL`
@@ -542,6 +544,10 @@ because the per-objective Write shapes are wrong.
   quests, and `challengegroup_reward_advanced_survival` carries the full
   homesteading objective set (test asserts the derived count >= the
   template's, so the join-PDF ValidateSizeMarker cannot trip on a count of 1).
+  **2026-08-07:** the pre-scan that feeds the template maps skipped
+  self-closing `<quest id="X"/>` list placeholders, which previously
+  overwrote the real quest body with an empty slice and silently lost all
+  template content (objectives, rewards, difficulty_tier).
   *Anchors:* `src/assets/quests.zig:380`, `:394`, `:555` (resolveBody),
   `src/server/game.zig:7440`
 

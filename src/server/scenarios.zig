@@ -15,6 +15,7 @@ const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
 const platform_user = @import("../wire/platform_user.zig");
 const ally_mod = @import("ally.zig");
+const containers_mod = @import("../world/containers.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPathSimple("worlds");
@@ -2728,4 +2729,59 @@ test "scenario land claims persist across restart and re-map on login" {
         try std.testing.expectEqual(wood, try g2.world.blockWorld(claim_x + 1, 70, claim_z));
         std.debug.print("PASS claims-persist: keystone claim survived restart and re-mapped on login\n", .{});
     }
+}
+
+test "scenario container loot respawns after LootRespawnDays" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_lootrespawn");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lootrespawn", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.loot_respawn_days = 3; // short interval for the test
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Place a storage chest and open it: loot rolls on first open.
+    const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
+    var sb: [64]u8 = undefined;
+    var frame_buf: [8192]u8 = undefined;
+    const place = try packages.buildSetBlockBody(&sb, 251, 70, 251, chest_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+    const pos = containers_mod.PosKey{ .x = 251, .y = 70, .z = 251 };
+    const cont = g.containers.get(pos) orelse return error.TestUnexpectedResult;
+    var req: [36]u8 = undefined;
+    @memcpy(req[0..16], &cont.inv_guid);
+    std.mem.writeInt(i32, req[16..20], 0, .little);
+    @memcpy(req[20..36], &cont.inv_guid);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    var filled = false;
+    for (cont.slots[0..cont.slot_count]) |s| {
+        if (s.count > 0 and s.item_id != 0) {
+            filled = true;
+            break;
+        }
+    }
+    try std.testing.expect(filled);
+
+    // Loot it: empty slots, age the touch day past the interval, re-open.
+    cont.clear();
+    cont.touched = true;
+    cont.touched_day = g.sim.director.clock.day -% 4;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    var refilled = false;
+    for (cont.slots[0..cont.slot_count]) |s| {
+        if (s.count > 0 and s.item_id != 0) {
+            refilled = true;
+            break;
+        }
+    }
+    try std.testing.expect(refilled);
+    try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
+    std.debug.print("PASS loot-respawn: container re-rolled after LootRespawnDays\n", .{});
 }

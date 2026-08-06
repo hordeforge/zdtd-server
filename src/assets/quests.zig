@@ -324,8 +324,9 @@ fn parseQuestDefBody(
 ) !?quest.QuestDef {
     const name_key = xml.propertyValue(body, "name_key") orelse tag_name_key;
     const title_src = name_key orelse qid;
-    const tier_s = xml.propertyValue(body, "difficulty_tier");
-    const tier: u8 = if (tier_s) |t| xml.parseU8(t) orelse 0 else 0;
+    var vars: [max_quest_vars]QuestVar = undefined;
+    const var_n = parseVariables(body, &vars);
+    const tier: u8 = resolveDifficultyTier(body, vars[0..var_n]);
     const completion = xml.propertyValue(body, "completiontype") orelse "Auto";
     const turn_in = std.mem.eql(u8, completion, "TurnIn");
     const cat = xml.propertyValue(body, "category_key") orelse
@@ -491,6 +492,69 @@ fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_act
     return n;
 }
 
+const max_quest_vars: usize = 8;
+const QuestVar = struct { name: []const u8, value: []const u8 };
+
+/// Parse `<variable name= value=>` overrides; the last occurrence wins because
+/// the quest's own body is merged after the template's (T6 resolveBody), so
+/// the derived quest's variables override the template's.
+fn parseVariables(body: []const u8, out: *[max_quest_vars]QuestVar) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < body.len) {
+        const vi = std.mem.indexOfPos(u8, body, i, "<variable") orelse break;
+        const name = xml.attr(body, vi, "name") orelse {
+            i = vi + 9;
+            continue;
+        };
+        const value = xml.attr(body, vi, "value") orelse {
+            i = vi + 9;
+            continue;
+        };
+        var replaced = false;
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            if (std.mem.eql(u8, out[k].name, name)) {
+                out[k].value = value;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced and n < max_quest_vars) {
+            out[n] = .{ .name = name, .value = value };
+            n += 1;
+        }
+        i = vi + 9;
+    }
+    return n;
+}
+
+/// Stock `difficulty_tier` is a template property carrying
+/// `param1="difficulty"` (asm.il 1390474-1390510): the real tier comes from
+/// the quest's `<variable name="difficulty" value="N">` override, falling back
+/// to the property value when no variable names it.
+fn resolveDifficultyTier(body: []const u8, vars: []const QuestVar) u8 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.indexOfPos(u8, body, i, "<property") orelse break;
+        const pn = xml.attr(body, pi, "name") orelse {
+            i = pi + 9;
+            continue;
+        };
+        if (std.mem.eql(u8, pn, "difficulty_tier")) {
+            if (xml.attr(body, pi, "param1")) |param| {
+                for (vars) |v| {
+                    if (std.mem.eql(u8, v.name, param)) return xml.parseU8(v.value) orelse 0;
+                }
+            }
+            if (xml.attr(body, pi, "value")) |v| return xml.parseU8(v) orelse 0;
+            return 0;
+        }
+        i = pi + 9;
+    }
+    return 0;
+}
+
 /// Parse catalog from quests.xml bytes (comments optional; stripped first).
 pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Catalog {
     const clean = try xml.stripComments(allocator, xml_src);
@@ -540,6 +604,13 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
             if (!(gt2 > qi2 and clean[gt2 - 1] == '/')) {
                 const cl2 = std.mem.indexOfPos(u8, clean, gt2, "</quest>") orelse break;
                 body_end = cl2;
+            } else {
+                // Self-closing placeholder (a quest_list entry, e.g.
+                // <quest id="tier1_fetch"/>). It defines nothing and must not
+                // overwrite the real quest's body in the template maps with an
+                // empty slice, or template resolution merges an empty template.
+                si = body_end;
+                continue;
             }
             try quest_body.put(allocator, try arena.dupe(u8, qid2), clean[gt2 + 1 .. body_end]);
             if (xml.attr(clean, qi2, "template")) |t| {
@@ -984,6 +1055,13 @@ test "stock quests.xml template quests parse non-empty" {
     // QuestClass carries the template's full objective list, so a count of 1
     // would trip its ValidateSizeMarker on the join PDF).
     try std.testing.expect(adv.objective_count >= homestead.objective_count);
+    // difficulty_tier resolves through the `<variable name="difficulty">`
+    // override (template property carries param1="difficulty"): tier2_fetch
+    // must report 2, not the template's 1.
+    const t2 = cat.byName("tier2_fetch") orelse return;
+    try std.testing.expectEqual(@as(u8, 2), t2.difficulty_tier);
+    const t1 = cat.byName("tier1_fetch") orelse return;
+    try std.testing.expectEqual(@as(u8, 1), t1.difficulty_tier);
 }
 
 test "quest actions parse types, phases and properties" {
@@ -1015,4 +1093,45 @@ test "quest actions parse types, phases and properties" {
     try std.testing.expectEqualStrings("1", d.actions[1].value);
     try std.testing.expectEqual(quest.QuestActionKind.spawn_gs_enemy, d.actions[2].kind);
     try std.testing.expectEqualStrings("SleeperGSList", d.actions[2].name);
+}
+
+test "difficulty_tier resolves through template variable overrides" {
+    // tier1_fetch declares difficulty_tier via param1="difficulty"; the
+    // derived tier2_fetch overrides the variable to 2 (and tier3 to 3).
+    const fixture =
+        \\<quests>
+        \\  <quest id="tier1_fetch">
+        \\    <property name="name_key" value="q1"/>
+        \\    <property name="difficulty_tier" value="1" param1="difficulty"/>
+        \\    <objective type="Fetch" id="1"/>
+        \\  </quest>
+        \\  <quest id="tier2_fetch" template="tier1_fetch">
+        \\    <variable name="difficulty" value="2"/>
+        \\    <objective type="Fetch" id="1"/>
+        \\  </quest>
+        \\  <quest id="tier3_fetch" template="tier1_fetch">
+        \\    <variable name="difficulty" value="3"/>
+        \\    <objective type="Fetch" id="1"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    try std.testing.expectEqual(@as(u8, 1), cat.byName("tier1_fetch").?.difficulty_tier);
+    try std.testing.expectEqual(@as(u8, 2), cat.byName("tier2_fetch").?.difficulty_tier);
+    try std.testing.expectEqual(@as(u8, 3), cat.byName("tier3_fetch").?.difficulty_tier);
+}
+
+test "resolveDifficultyTier reads param1 variables directly" {
+    const body =
+        \\<property name="name_key" value="q1"/>
+        \\<property name="difficulty_tier" value="1" param1="difficulty"/>
+        \\<variable name="difficulty" value="2"/>
+    ;
+    var vars: [max_quest_vars]QuestVar = undefined;
+    const vn = parseVariables(body, &vars);
+    try std.testing.expectEqual(@as(u8, 1), vn);
+    try std.testing.expectEqualStrings("difficulty", vars[0].name);
+    try std.testing.expectEqualStrings("2", vars[0].value);
+    try std.testing.expectEqual(@as(u8, 2), resolveDifficultyTier(body, vars[0..vn]));
 }
