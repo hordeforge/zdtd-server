@@ -21,6 +21,7 @@ const xml_util = @import("assets/xml_util.zig");
 const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
 const biome_layers = @import("assets/biome_layers.zig");
+const gamestages_xml = @import("assets/gamestages.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 const water = @import("world/water.zig");
@@ -1234,4 +1235,8 @@ fn fuzzAStar(_: void, smith: *std.testing.Smith) !void {
     const again = path_mod.aStarToward(&q, sx, sz, sy, gx, gz, budget, &terrain, FuzzTerrain.step);
     try std.testing.expectEqual(expanded, again);
     try std.testing.expectEqualSlices(path_mod.Point, p.points[0..p.len], q.points[0..q.len]);
+}
+
+test "fuzz gamestages.xml parser" {
+    try std.testing.fuzz({}, fuzzGameStages, .{ .corpus = &gamestages_xml_corpus });
 }

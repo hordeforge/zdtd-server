@@ -160,6 +160,8 @@ pub const Command = union(enum) {
     settime: struct { day: u32, hour: u8, minute: u8 },
     /// Stock `spawnentity <peerSlot> <entityClassName>` (near player).
     spawnentity: struct { peer: usize, name_off: usize, name_len: usize },
+    /// Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player.
+    gamestage: ?usize,
     /// Stock `listents` (alive entity table).
     listents,
     /// Stock `listplayers` / `lp` (joined peers with entity ids).
@@ -196,6 +198,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "spawnentity") or std.mem.eql(u8, verb, "se"))
         return "spawnentity <slot|entityId> <class>";
     if (std.mem.eql(u8, verb, "wipeplayer")) return "wipeplayer <name>";
+    if (std.mem.eql(u8, verb, "gamestage")) return "gamestage [slot]";
     if (std.mem.eql(u8, verb, "guardclear") or std.mem.eql(u8, verb, "gc"))
         return "guardclear <slot>";
     return null;
@@ -236,6 +239,11 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .unban = ip };
     }
     if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "players")) return if (it.next() == null) .list else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "gamestage")) {
+        const p = it.next() orelse return .{ .gamestage = null };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .gamestage = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd } };
+    }
     if (std.mem.eql(u8, cmd, "give")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const i = it.next() orelse return .{ .bad_args = cmd };
@@ -474,4 +482,16 @@ test "parse wipeplayer" {
     try std.testing.expect(c == .wipeplayer);
     try std.testing.expectEqualStrings("Alice", c.wipeplayer);
     try std.testing.expect(parseCommand("wipeplayer") == .bad_args);
+}
+
+test "parse gamestage with and without a slot" {
+    const all = parseCommand("gamestage");
+    try std.testing.expect(all == .gamestage);
+    try std.testing.expect(all.gamestage == null);
+    const one = parseCommand("gamestage 2");
+    try std.testing.expect(one == .gamestage);
+    try std.testing.expectEqual(@as(usize, 2), one.gamestage.?);
+    try std.testing.expect(parseCommand("gamestage x") == .bad_args);
+    try std.testing.expect(parseCommand("gamestage 1 2") == .bad_args);
+    try std.testing.expectEqualStrings("gamestage [slot]", usageFor("gamestage").?);
 }

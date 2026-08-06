@@ -67,6 +67,22 @@ pub const WorldClock = struct {
     }
 };
 
+/// Resolved gamestages.xml `<spawn>` row: which entitygroup, and how many.
+pub const StageGroup = struct {
+    group: []const u8 = "",
+    num: u16 = 1,
+    max_alive: u16 = 1,
+};
+
+/// AIDirectorChunkEventComponent::SpawnScouts (asm.il ~415972): the scout
+/// `<entityspawner>` is picked purely by party game stage at 45 / 85 / 125.
+pub fn scoutSpawnerName(party_stage: i32) []const u8 {
+    if (party_stage < 45) return "Scouts1";
+    if (party_stage < 85) return "Scouts2";
+    if (party_stage < 125) return "ScoutsFeral";
+    return "ScoutsRadiated";
+}
+
 pub const Director = struct {
     clock: WorldClock = .{},
     horde_cd: f32 = 0,
@@ -77,6 +93,18 @@ pub const Director = struct {
     /// Optional pick: (ctx, group_name, seed) → class name; Game wires entitygroups.
     group_pick_ctx: ?*anyopaque = null,
     group_pick_fn: ?*const fn (?*anyopaque, []const u8, u32) ?[]const u8 = null,
+    /// Party game stage (CalcGameStageAround over the online players). Drives
+    /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
+    party_stage: i32 = 0,
+    /// Optional lookup: (ctx, spawner_name, stage) → entitygroup name plus wave
+    /// size, resolving gamestages.xml. Game wires it; the ECS layer stays free
+    /// of asset imports, matching the group_pick_fn contract above.
+    stage_group_ctx: ?*anyopaque = null,
+    stage_group_fn: ?*const fn (?*anyopaque, []const u8, i32) ?StageGroup = null,
+    /// Optional lookup: (ctx, entityspawner_name) → EntityGroupName from
+    /// spawning.xml, for the code-named scout spawners.
+    spawner_group_ctx: ?*anyopaque = null,
+    spawner_group_fn: ?*const fn (?*anyopaque, []const u8) ?[]const u8 = null,
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
@@ -157,16 +185,25 @@ pub const Director = struct {
         }
 
         if (self.clock.isNight() and self.horde_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 2, 18.0, 28.0);
+            spawned += self.spawnNearPlayers(w, 2, 18.0, 28.0, "");
             self.horde_cd = if (self.bloodmoon_active) 8.0 else 45.0;
         }
         if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
-            const wave: u32 = @max(1, self.bloodmoon_enemy_count / 2);
-            spawned += self.spawnNearPlayers(w, wave, 12.0, 22.0);
+            // BloodMoonHorde's gamestage ladder names the group and caps how
+            // many may be alive per player; BloodMoonEnemyCount is the floor
+            // when gamestages.xml is absent.
+            const bm = self.stageGroup(bloodmoon_spawner);
+            var wave: u32 = @max(1, self.bloodmoon_enemy_count / 2);
+            var bm_group: []const u8 = "";
+            if (bm) |sg| {
+                wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
+                bm_group = sg.group;
+            }
+            spawned += self.spawnNearPlayers(w, wave, 12.0, 22.0, bm_group);
             self.bloodmoon_cd = 6.0;
         }
         if (!self.clock.isNight() and self.scouts_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0);
+            spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0, self.scoutGroup());
             self.scouts_cd = 120.0;
         }
         // Daytime wildlife up to MaxSpawnedAnimals (wander, not chase).
@@ -230,7 +267,27 @@ pub const Director = struct {
         return n;
     }
 
-    fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
+    /// gamestages.xml spawner name the blood moon draws from.
+    pub const bloodmoon_spawner = "BloodMoonHorde";
+
+    /// Resolve a gamestages.xml spawner at the current party stage.
+    fn stageGroup(self: *const Director, spawner: []const u8) ?StageGroup {
+        const f = self.stage_group_fn orelse return null;
+        const sg = f(self.stage_group_ctx, spawner, self.party_stage) orelse return null;
+        if (sg.group.len == 0) return null;
+        return sg;
+    }
+
+    /// Daytime scout entity group for the current party stage; empty when the
+    /// spawning.xml entityspawner table is unavailable.
+    fn scoutGroup(self: *const Director) []const u8 {
+        const f = self.spawner_group_fn orelse return "";
+        return f(self.spawner_group_ctx, scoutSpawnerName(self.party_stage)) orelse "";
+    }
+
+    /// `group_override` wins over the day/night spawning.xml groups; empty
+    /// keeps the existing biome-rule behaviour.
+    fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32, group_override: []const u8) u32 {
         var n: u32 = 0;
         var p: ecs_world.Slot = 0;
         while (p < ecs_world.max_entities and n < count) : (p += 1) {
@@ -244,7 +301,9 @@ pub const Director = struct {
                 const y = w.transform[p].y;
                 // Prefer spawning.xml entity group → entityclasses; else class_table rotation.
                 var ct = w.class_table[1];
-                const grp = if (self.clock.isNight()) self.night_group else self.day_group;
+                const grp = if (group_override.len > 0)
+                    group_override
+                else if (self.clock.isNight()) self.night_group else self.day_group;
                 if (grp.len > 0) {
                     if (self.group_pick_fn) |pick| {
                         if (pick(self.group_pick_ctx, grp, self.total_spawned +% n)) |cname| {
@@ -359,4 +418,84 @@ test "bloodmoon frequency and range" {
         if (cl.isBloodMoonNight()) hits += 1;
     }
     try std.testing.expectEqual(@as(u32, 1), hits); // exactly one blood moon in cycle 1's window
+}
+
+test "scout spawner tier follows the stock gamestage thresholds" {
+    // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
+    try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(0));
+    try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(44));
+    try std.testing.expectEqualStrings("Scouts2", scoutSpawnerName(45));
+    try std.testing.expectEqualStrings("Scouts2", scoutSpawnerName(84));
+    try std.testing.expectEqualStrings("ScoutsFeral", scoutSpawnerName(85));
+    try std.testing.expectEqualStrings("ScoutsFeral", scoutSpawnerName(124));
+    try std.testing.expectEqualStrings("ScoutsRadiated", scoutSpawnerName(125));
+    try std.testing.expectEqualStrings("ScoutsRadiated", scoutSpawnerName(std.math.maxInt(i32)));
+    // A negative stage cannot come out of partyLevel but must not trap.
+    try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(std.math.minInt(i32)));
+}
+
+test "director draws the daytime scout group from the stage tier" {
+    const Hooks = struct {
+        var asked: [64]u8 = undefined;
+        var asked_len: usize = 0;
+        fn spawnerGroup(_: ?*anyopaque, name: []const u8) ?[]const u8 {
+            asked_len = @min(name.len, asked.len);
+            @memcpy(asked[0..asked_len], name[0..asked_len]);
+            return "ZombieScoutsFeral";
+        }
+        fn pick(_: ?*anyopaque, group: []const u8, _: u32) ?[]const u8 {
+            if (std.mem.eql(u8, group, "ZombieScoutsFeral")) return "zombieJoe";
+            return null;
+        }
+    };
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .party_stage = 90,
+        .spawner_group_fn = &Hooks.spawnerGroup,
+        .group_pick_fn = &Hooks.pick,
+    };
+    const r = dir.tick(&w, 0.1);
+    try std.testing.expect(r.spawned >= 1);
+    try std.testing.expectEqualStrings("ScoutsFeral", Hooks.asked[0..Hooks.asked_len]);
+}
+
+test "blood moon wave size is capped by the stage maxAlive" {
+    const Hooks = struct {
+        var seen_stage: i32 = -1;
+        fn stageGroup(_: ?*anyopaque, spawner: []const u8, stage: i32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.bloodmoon_spawner)) return null;
+            seen_stage = stage;
+            return .{ .group = "ZombiesNight", .num = 300, .max_alive = 2 };
+        }
+    };
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    // Blood moon night with a generous BloodMoonEnemyCount; maxAlive=2 wins.
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .bloodmoon_enemy_count = 40,
+        .party_stage = 61,
+        .horde_cd = 999, // isolate the blood moon branch from the night horde
+        .stage_group_fn = &Hooks.stageGroup,
+    };
+    const r = dir.tick(&w, 0.1);
+    try std.testing.expect(dir.bloodmoon_active);
+    try std.testing.expectEqual(@as(i32, 61), Hooks.seen_stage);
+    try std.testing.expect(r.spawned >= 1);
+    try std.testing.expect(r.spawned <= 2);
+}
+
+test "director without stage hooks keeps its unstaged behaviour" {
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .bloodmoon_enemy_count = 8,
+        .horde_cd = 999,
+    };
+    const r = dir.tick(&w, 0.1);
+    try std.testing.expect(dir.bloodmoon_active);
+    try std.testing.expectEqual(@as(u32, 4), r.spawned); // BloodMoonEnemyCount / 2
 }

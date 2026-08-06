@@ -25,6 +25,7 @@ const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
 const assets_entitygroups = @import("../assets/entitygroups.zig");
+const assets_gamestages = @import("../assets/gamestages.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
 const assets_traders = @import("../assets/traders.zig");
 const assets_biome_layers = @import("../assets/biome_layers.zig");
@@ -293,6 +294,11 @@ const Client = struct {
     xp: u64 = 0,
     /// Player level derived from progression curve (1-based).
     level: u16 = 1,
+    /// EntityPlayer::gameStageBornAtWorldTime: world time the current survival
+    /// streak started. Seeded to "now" on join and pushed forward on death
+    /// (asm.il SetAlive ~503838). Client state is per-session, so days survived
+    /// restarts at zero on reconnect until player persistence lands.
+    game_stage_born_world_time: u64 = 0,
     authed_challenge: bool = false,
     joined: bool = false,
     /// True after sendJoinBundle (WorldInfo/PlayerId). Gate tick broadcasts until then.
@@ -440,6 +446,7 @@ pub const Game = struct {
     recipes: assets_recipes.RecipeTable = assets_recipes.RecipeTable.builtin(),
     loot: assets_loot.LootTable = assets_loot.LootTable.builtin(),
     entitygroups: assets_entitygroups.GroupTable = assets_entitygroups.GroupTable.builtin(),
+    gamestages: assets_gamestages.Table = assets_gamestages.Table.empty(),
     maxdamage: assets_maxdamage.Table = assets_maxdamage.Table.empty(),
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
@@ -619,6 +626,7 @@ pub const Game = struct {
             self.recipes.deinit();
             self.loot.deinit();
             self.entitygroups.deinit();
+            self.gamestages.deinit();
             self.maxdamage.deinit();
             self.block_textures.deinit();
             self.painting.deinit();
@@ -842,6 +850,28 @@ pub const Game = struct {
                 if (pick_seed > 32) break;
             }
         }
+        // After entitygroups: every <spawn group=…> must name a real entity
+        // group. Stock throws XmlLoadException there (ParseSpawn, asm.il
+        // ~1379646); zdtd warns and keeps the ladder so one bad row cannot
+        // take the server down.
+        if (assets_gamestages.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |gst| {
+            self.gamestages.deinit();
+            self.gamestages = gst;
+            var stage_n: usize = 0;
+            var missing: usize = 0;
+            for (self.gamestages.spawners) |sp| {
+                stage_n += sp.stages.len;
+                for (sp.stages) |st| {
+                    for (st.spawns) |sg| {
+                        if (self.entitygroups.byName(sg.group) == null) missing += 1;
+                    }
+                }
+            }
+            std.debug.print(
+                "zdtd: gamestages spawners={d} stages={d} groups={d} unknown_entitygroups={d}\n",
+                .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
+            );
+        }
         if (assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
             self.traders.deinit();
             self.traders = tt;
@@ -924,6 +954,10 @@ pub const Game = struct {
             self.sim.director.animal_group = animal_g;
             self.sim.director.group_pick_ctx = self;
             self.sim.director.group_pick_fn = &Game.pickEntityGroup;
+            self.sim.director.stage_group_ctx = self;
+            self.sim.director.stage_group_fn = &Game.pickStageGroup;
+            self.sim.director.spawner_group_ctx = self;
+            self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
             if (night_g.len > 0 or day_g.len > 0) {
                 std.debug.print("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
             }
@@ -1077,7 +1111,16 @@ pub const Game = struct {
                 }) |sv| {
                     self.sleepers.deinit();
                     self.sleepers = sv;
-                    std.debug.print("zdtd: sleeper volumes={d} (prefabs_near={d})\n", .{ self.sleepers.volumes.len, refs.items.len });
+                    // Stock POI volumes name gamestage groups, not entitygroups
+                    // (SleeperVolume::Spawn, asm.il ~1199169). Probe at stage 1,
+                    // the lowest rung any stock ladder has, so a regression back
+                    // to defaultZombie for most of the map is visible at boot.
+                    var gs_ok: usize = 0;
+                    for (self.sleepers.volumes) |vol| {
+                        if (vol.group_n == 0) continue;
+                        if (self.gamestages.sleeperEntityGroup(vol.groups[0].class_name, 1) != null) gs_ok += 1;
+                    }
+                    std.debug.print("zdtd: sleeper volumes={d} (prefabs_near={d}) gamestage_resolved={d}\n", .{ self.sleepers.volumes.len, refs.items.len, gs_ok });
                 }
             }
         }
@@ -1743,6 +1786,7 @@ pub const Game = struct {
         self.recipes.deinit();
         self.loot.deinit();
         self.entitygroups.deinit();
+        self.gamestages.deinit();
         self.maxdamage.deinit();
         self.block_textures.deinit();
         self.painting.deinit();
@@ -2491,7 +2535,7 @@ pub const Game = struct {
             .help => self.adminReply(
                 \\commands:
                 \\  status  guardstats  evidence  guardclear|gc <slot>  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
-                \\  gettime|gt  settime|st <day|night|ticks|D H M>
+                \\  gettime|gt  settime|st <day|night|ticks|D H M>  gamestage [slot]
                 \\  give <slot> <itemId> [count]  tele|tp <slot> <x> <y> <z>  say <msg>
                 \\  kick <slot>  ban <slot>  unban <iphex>
                 \\  wipeplayer <name>
@@ -2570,6 +2614,7 @@ pub const Game = struct {
                 const n = self.evidence.dumpText(&dump);
                 if (n == 0) self.adminReply("evidence empty\n") else self.adminReply(dump[0..n]);
             },
+            .gamestage => |maybe_slot| self.adminReplyGameStage(maybe_slot),
             .apm => {
                 // Full harness dump without waiting for the minute JSON line or --ticks exit.
                 const snap = self.harness.snapshot();
@@ -3091,6 +3136,61 @@ pub const Game = struct {
             c.level += 1;
             next_threshold += self.progression.expForLevel(c.level);
         }
+    }
+
+    /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
+    /// quest modifiers are zero: biomes.xml GameStageMod/Bonus and quests.xml
+    /// GameStageMod/Bonus are not parsed yet (docs/MISSING_FEATURES.md).
+    fn gameStageOf(self: *const Game, slot: usize) i32 {
+        if (slot >= self.clients.len) return 1;
+        const c = &self.clients[slot];
+        const now = self.sim.director.clock.worldTimeBits();
+        return assets_gamestages.playerStage(self.gamestages.config, .{
+            .level = c.level,
+            .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
+        });
+    }
+
+    /// EntityPlayer::GetLootStage for one client (asm.il ~504215): level driven,
+    /// with no POI tier or biome terms until those tables are parsed.
+    fn lootStageOf(self: *const Game, slot: usize) i32 {
+        if (slot >= self.clients.len) return 1;
+        return assets_gamestages.lootStage(.{ .level = self.clients[slot].level });
+    }
+
+    /// GameStageDefinition::CalcGameStageAround (asm.il ~1093351): party stage
+    /// over joined players within `radius` of (wx,wz). Stock also requires the
+    /// same PrefabInstance; zdtd has no per-player POI tracking, so distance
+    /// alone decides. Pass a negative radius for "every joined player".
+    fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
+        var stages: [max_clients]i32 = undefined;
+        var n: usize = 0;
+        for (&self.clients, 0..) |*c, i| {
+            if (!c.joined) continue;
+            if (radius >= 0) {
+                const ps = self.sim.playerByPeer(c.slot) orelse continue;
+                const dx = self.sim.transform[ps].x - wx;
+                const dz = self.sim.transform[ps].z - wz;
+                if (dx * dx + dz * dz > radius * radius) continue;
+            }
+            stages[n] = self.gameStageOf(i);
+            n += 1;
+        }
+        if (n == 0) return 0;
+        return assets_gamestages.partyLevel(self.gamestages.config, stages[0..n]);
+    }
+
+    /// EntityPlayer::GetHighestPartyLootStage (asm.il ~504467) over all joined
+    /// clients. Container contents are shared world state, so a per-viewer
+    /// stage would make the same chest differ between clients; the party high
+    /// water mark is both stock-shaped and viewer independent.
+    fn partyLootStage(self: *const Game) i32 {
+        var best: i32 = 1;
+        for (&self.clients, 0..) |*c, i| {
+            if (!c.joined) continue;
+            best = @max(best, self.lootStageOf(i));
+        }
+        return best;
     }
 
     /// Current whole world-hour (day*24 + hour), for time-based scheduling.
@@ -3875,6 +3975,10 @@ pub const Game = struct {
             c.entity_id = eid;
             c.joined = true;
             c.view_radius = self.view_radius;
+            // PlayerDataFile::CopyTo clamps a not-yet-set bornAt down to the
+            // current world time (asm.il ~1975949), so a fresh session starts
+            // at zero days survived rather than at the -1 sentinel.
+            if (!was_joined) c.game_stage_born_world_time = self.sim.director.clock.worldTimeBits();
             self.tryRestorePlayer(c);
             // Stock: LoginAnswer only. Configs must arrive after StartAsClient starts
             // WaitForConfigsFromServer (which resets WasReceivedFromServer). That is
@@ -4001,6 +4105,13 @@ pub const Game = struct {
                 if (!self.sim.alive[si] or self.sim.health[si].hp <= 0) {
                     // Only sanctioned un-kill: a raw alive[] write would leave
                     // the cached kind group out of sync.
+                    // EntityPlayer::SetAlive (asm.il ~503838): a death costs
+                    // daysAliveChangeWhenKilled days off the survival streak.
+                    c.game_stage_born_world_time = assets_gamestages.bornAtAfterDeath(
+                        self.gamestages.config,
+                        self.sim.director.clock.worldTimeBits(),
+                        c.game_stage_born_world_time,
+                    );
                     self.sim.reviveSlot(si);
                     self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
                     self.sim.transform[si] = .{
@@ -5838,6 +5949,52 @@ pub const Game = struct {
 
     /// Second `guardstats` line: policy rungs, gate outcomes, and the slots that
     /// currently hold quarantine bits. Bounded by max_clients (64).
+    /// ConsoleCmdGameStage::Execute (asm.il ~220775) prints the whole formula so
+    /// a live client's own `gamestage` output can be diffed against the server.
+    /// Biome/quest terms are printed as the zeros zdtd actually feeds in.
+    fn adminReplyGameStage(self: *Game, maybe_slot: ?usize) void {
+        if (maybe_slot) |slot| {
+            if (slot >= max_clients or !self.clients[slot].joined) {
+                self.adminReply("no player in slot\n");
+                return;
+            }
+        }
+        var sb: [512]u8 = undefined;
+        const now = self.sim.director.clock.worldTimeBits();
+        var any = false;
+        for (&self.clients, 0..) |*c, i| {
+            if (!c.joined) continue;
+            if (maybe_slot) |slot| if (i != slot) continue;
+            any = true;
+            const days = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level);
+            const s = std.fmt.bufPrint(
+                &sb,
+                "slot={d} gamestage={d} lootstage={d} level={d} biome_mod=0 quest_mod=0 days_alive={d} " ++
+                    "biome_bonus=0 quest_bonus=0 difficulty_bonus={d:.3} global_modifier=1.000 born_at={d}\n",
+                .{
+                    i,
+                    self.gameStageOf(i),
+                    self.lootStageOf(i),
+                    c.level,
+                    days,
+                    self.gamestages.config.difficulty_bonus,
+                    c.game_stage_born_world_time,
+                },
+            ) catch return;
+            self.adminReply(s);
+        }
+        if (!any) {
+            self.adminReply("no players joined\n");
+            return;
+        }
+        const p = std.fmt.bufPrint(&sb, "party_stage={d} party_lootstage={d} world_time={d}\n", .{
+            self.partyStageAround(0, 0, -1),
+            self.partyLootStage(),
+            now,
+        }) catch return;
+        self.adminReply(p);
+    }
+
     fn adminReplyGuardPolicy(self: *Game) void {
         var sb: [512]u8 = undefined;
         const s = std.fmt.bufPrint(
@@ -6188,6 +6345,7 @@ pub const Game = struct {
                 tb_slots[0..tb_n],
                 bag_slots[0..bag_n],
                 true,
+                c.game_stage_born_world_time,
             );
             try self.sendGame(peer, "NetPackagePlayerId", pid);
             // PersistentPlayerState(Login): entityId → name mapping. Without it the
@@ -6752,6 +6910,22 @@ pub const Game = struct {
         return g.entitygroups.pick(group, seed);
     }
 
+    /// gamestages.xml spawner ladder → the stage's first <spawn> row.
+    fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const sp = g.gamestages.spawnerByName(spawner) orelse return null;
+        const st = sp.getStage(stage) orelse return null;
+        const sg = st.spawnGroup(0) orelse return null;
+        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive };
+    }
+
+    /// spawning.xml <entityspawner name=…> → its EntityGroupName property.
+    fn pickSpawnerGroup(ctx: ?*anyopaque, spawner: []const u8) ?[]const u8 {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const s = g.spawning.spawnerByName(spawner) orelse return null;
+        return s.entitygroup;
+    }
+
     /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
     fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
         if (recipe_index >= self.recipes.defs.len) return false;
@@ -6974,7 +7148,7 @@ pub const Game = struct {
     fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32) void {
         const list_name = if (loot_list.len > 0) loot_list else "EntityLootContainerRegular";
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-        const n = self.loot.rollContainer(list_name, seed, &stacks);
+        const n = self.loot.rollContainer(list_name, self.partyLootStage(), seed, &stacks);
         if (n == 0) return;
         const slot = self.sim.slotOfNetId(bag_net_id) orelse return;
         if (!self.sim.mask[slot].inventory) return;
@@ -7100,17 +7274,34 @@ pub const Game = struct {
 
             const grp = vol.groups[0];
             const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);
-            const def = self.resolveSleeperClass(grp.class_name, seed);
-            const count: u8 = if (grp.max_count <= grp.min_count) grp.min_count else blk: {
+            // SleeperVolume::Spawn (asm.il ~1197380): gameStage = Max(0, party
+            // stage of the players around the volume). Stock adds a per-volume
+            // adjust byte that zdtd's .tts reader does not carry yet.
+            const cx: f32 = @floatFromInt(@divTrunc(vol.x0 + vol.x1, 2));
+            const cz: f32 = @floatFromInt(@divTrunc(vol.z0 + vol.z1, 2));
+            const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, sleeper_party_radius));
+            const stage_spawn = self.gamestages.sleeperEntityGroup(grp.class_name, vol_stage);
+            const def = self.resolveSleeperClass(grp.class_name, stage_spawn, seed);
+            // Stock draws the per-stage <spawn num=…> for the wave size; the
+            // prefab's own min/max is the fallback when no ladder resolved.
+            const count: u8 = if (stage_spawn) |sg|
+                @intCast(@max(1, @min(sg.num, @as(u16, 255))))
+            else if (grp.max_count <= grp.min_count) grp.min_count else blk: {
                 const span = grp.max_count - grp.min_count + 1;
                 break :blk grp.min_count + @as(u8, @intCast((vi) % span));
             };
+            // maxAlive is a per-player ceiling on the wave; without a live
+            // sleeper population counter it only caps this burst.
+            const alive_cap: u8 = if (stage_spawn) |sg|
+                @intCast(@max(1, @min(sg.max_alive, @as(u16, 255))))
+            else
+                255;
 
             if (vol.spawns.len > 0) {
                 // Stock spawns at authored Class=Sleeper marker cells. Spawn one
-                // zombie per marker, capped at the requested count and the marker
-                // count (no gamestage scaling: zdtd has no gamestage, gsScale=1).
-                const cap: usize = @min(@as(usize, count), vol.spawns.len);
+                // zombie per marker, capped at the requested count, the marker
+                // count and the stage's maxAlive.
+                const cap: usize = @min(@as(usize, @min(count, alive_cap)), vol.spawns.len);
                 var n: usize = 0;
                 while (n < cap) : (n += 1) {
                     const sp = vol.spawns[n];
@@ -7133,7 +7324,7 @@ pub const Game = struct {
             const cy: f32 = @floatFromInt(vol.y0 + 1);
             var prng = rng_util.XorShift32.init(seed);
             var n: u8 = 0;
-            while (n < count and n < 8) : (n += 1) {
+            while (n < count and n < alive_cap and n < 8) : (n += 1) {
                 const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
                 const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
                 _ = self.sim.spawnSleeperClass(ox, cy, oz, def.max_hp, def.hash, def.loot_list);
@@ -7141,17 +7332,34 @@ pub const Game = struct {
         }
     }
 
-    /// Resolve a SleeperVolumeGroup name to an entity def. Stock names are either
-    /// an entityclass or a gamestage entitygroup (EntityGroups::GetRandomFromGroup,
-    /// asm.il 1085857): try the class table first, then the group table, else the
-    /// default walker.
-    fn resolveSleeperClass(self: *Game, name: []const u8, seed: u32) assets_entities.EntityDef {
+    /// Resolve a SleeperVolumeGroup name to an entity def, stock order first
+    /// (SleeperVolume::Spawn, asm.il ~1199169): the already-resolved gamestage
+    /// SpawnGroup names an entitygroup, and only its class pick counts. Across
+    /// stock Data/Prefabs the volume names are overwhelmingly gamestage group
+    /// names (GroupGenericZombie and friends) that entitygroups.xml does not
+    /// contain, so without this the fallbacks below hit defaultZombie for
+    /// nearly every POI. The entityclass / entitygroup fallbacks stay for
+    /// prefabs that do name one directly.
+    fn resolveSleeperClass(
+        self: *Game,
+        name: []const u8,
+        stage_spawn: ?assets_gamestages.SpawnGroup,
+        seed: u32,
+    ) assets_entities.EntityDef {
+        if (stage_spawn) |sg| {
+            if (self.entitygroups.pick(sg.group, seed)) |cname| {
+                if (self.entities.byName(cname)) |d| return d;
+            }
+        }
         if (self.entities.byName(name)) |d| return d;
         if (self.entitygroups.pick(name, seed)) |cname| {
             if (self.entities.byName(cname)) |d| return d;
         }
         return self.entities.defaultZombie();
     }
+
+    /// GameStageDefinition::CalcGameStageAround radius (asm.il ~1093363).
+    const sleeper_party_radius: f32 = 100.0;
 
     /// Runtime AssignIds id for seed chest. Preference order: AssignIds dump
     /// (id_by_name), then optional world-dir override file, then V3.1.4 pin.
@@ -7512,7 +7720,7 @@ pub const Game = struct {
 
     fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-        const n = self.loot.rollContainer(loot_name, seed, &stacks);
+        const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, &stacks);
         var si: usize = 0;
         var i: usize = 0;
         while (i < n and si < cont.slot_count) : (i += 1) {
@@ -8208,6 +8416,10 @@ pub const Game = struct {
                 ts.end();
                 self.harness.counters.add(.terrain_snap_chunks, covered);
             }
+            // The director's spawn branches read the party stage; stock
+            // recomputes it when the event fires (CalcGameStageAround), and the
+            // director's own cooldowns are what gate the events here.
+            self.sim.director.party_stage = self.partyStageAround(0, 0, -1);
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
             self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
@@ -9001,4 +9213,119 @@ test "power visuals rewrite block meta once per state change" {
     g.sim.power.nodes[ni].powered = false;
     g.broadcastPowerVisuals();
     try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
+}
+
+test "player game stage tracks level, days survived and deaths" {
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/gamestage", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Stock config defaults when gamestages.xml is absent (asm.il .cctor ~1093405).
+    g.gamestages.config = .{ .difficulty_bonus = 1.2, .days_alive_change_when_killed = 2 };
+    const c = &g.clients[0];
+    c.joined = true;
+    c.level = 10;
+    g.sim.director.clock.day = 0;
+    g.sim.director.clock.hours = 0;
+    c.game_stage_born_world_time = g.sim.director.clock.worldTimeBits();
+    // Day zero: level only, floored after the difficulty bonus (10 * 1.2 = 12).
+    try std.testing.expectEqual(@as(i32, 12), g.gameStageOf(0));
+    // Four days survived: (10 + 4) * 1.2 = 16.8 → 16, the header's example.
+    g.sim.director.clock.day = 4;
+    try std.testing.expectEqual(@as(i32, 16), g.gameStageOf(0));
+    // Days alive caps at the player level: 25 days at level 10 is 10.
+    g.sim.director.clock.day = 25;
+    try std.testing.expectEqual(@as(i32, 24), g.gameStageOf(0));
+    // A death costs daysAliveChangeWhenKilled days off the streak.
+    const before = c.game_stage_born_world_time;
+    c.game_stage_born_world_time = assets_gamestages.bornAtAfterDeath(
+        g.gamestages.config,
+        g.sim.director.clock.worldTimeBits(),
+        before,
+    );
+    try std.testing.expectEqual(before + 2 * assets_gamestages.ticks_per_day, c.game_stage_born_world_time);
+    // Still capped to level, so the stage is unchanged at 25 days.
+    try std.testing.expectEqual(@as(i32, 24), g.gameStageOf(0));
+    // Loot stage is level driven and independent of days survived.
+    try std.testing.expectEqual(@as(i32, 10), g.lootStageOf(0));
+    try std.testing.expectEqual(@as(i32, 10), g.partyLootStage());
+    // A single player's party stage is just their own stage.
+    try std.testing.expectEqual(@as(i32, 24), g.partyStageAround(0, 0, -1));
+}
+
+test "party stage weights the second player by diminishing returns" {
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/partystage", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    g.gamestages.config = .{ .difficulty_bonus = 1, .starting_weight = 1, .diminishing_returns = 0.5 };
+    g.sim.director.clock.day = 0;
+    g.sim.director.clock.hours = 0;
+    const now = g.sim.director.clock.worldTimeBits();
+    for ([_]struct { slot: usize, level: u16 }{ .{ .slot = 0, .level = 40 }, .{ .slot = 1, .level = 20 } }) |p| {
+        const c = &g.clients[p.slot];
+        c.joined = true;
+        c.level = p.level;
+        c.game_stage_born_world_time = now;
+    }
+    try std.testing.expectEqual(@as(i32, 40), g.gameStageOf(0));
+    try std.testing.expectEqual(@as(i32, 20), g.gameStageOf(1));
+    // 40 * 1 + 20 * 0.5 = 50 (CalcPartyLevel, asm.il ~1093305).
+    try std.testing.expectEqual(@as(i32, 50), g.partyStageAround(0, 0, -1));
+    // Highest party loot stage, not the sum.
+    try std.testing.expectEqual(@as(i32, 40), g.partyLootStage());
+    // No joined players is stage 0, and the loot floor stays at 1.
+    g.clients[0].joined = false;
+    g.clients[1].joined = false;
+    try std.testing.expectEqual(@as(i32, 0), g.partyStageAround(0, 0, -1));
+    try std.testing.expectEqual(@as(i32, 1), g.partyLootStage());
+}
+
+test "sleeper volume groups resolve through the gamestage ladder" {
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/sleepergs", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Synthetic tables: the stock POI group name is a gamestage group, never an
+    // entitygroup, so the pre-gamestage lookup could only reach defaultZombie.
+    var gs = try assets_gamestages.loadFromSlice(std.testing.allocator,
+        \\<gamestages>
+        \\  <group name="1GroupGenericZombie" spawner="SleeperGSList"/>
+        \\  <spawner name="SleeperGSList">
+        \\    <gamestage stage="0"><spawn group="ZombiesAll" num="3" maxAlive="2"/></gamestage>
+        \\  </spawner>
+        \\</gamestages>
+    );
+    g.gamestages.deinit();
+    g.gamestages = gs;
+    gs = undefined;
+
+    // A one-entry entity group so the pick is deterministic and distinguishable
+    // from defaultZombie (which is zombieBoe in the builtin table).
+    const stag_entries = [_]assets_entitygroups.Entry{.{ .name = "animalStag", .weight = 1 }};
+    const stage_groups = [_]assets_entitygroups.Group{
+        .{ .name = "ZombiesAll", .entries = &stag_entries, .weight_sum = 1 },
+    };
+    g.entitygroups.deinit();
+    g.entitygroups = .{ .groups = &stage_groups };
+
+    const walker = g.entities.defaultZombie();
+    // Both stock spellings clean to the same key and reach a real class.
+    for ([_][]const u8{ "GroupGenericZombie", "S_-Group_Generic_Zombie" }) |name| {
+        const sg = g.gamestages.sleeperEntityGroup(name, 0) orelse return error.GroupUnresolved;
+        try std.testing.expectEqualStrings("ZombiesAll", sg.group);
+        try std.testing.expectEqual(@as(u16, 3), sg.num);
+        try std.testing.expectEqual(@as(u16, 2), sg.max_alive);
+        // The class comes from the stage's entitygroup, not the default walker.
+        const def = g.resolveSleeperClass(name, sg, 11);
+        try std.testing.expectEqualStrings("animalStag", def.name);
+        try std.testing.expect(!std.mem.eql(u8, walker.name, def.name));
+    }
+    // A stage below the ladder's first entry resolves to nothing (stock returns
+    // null from GetStage), so the old entityclass/entitygroup path still runs.
+    try std.testing.expect(g.gamestages.sleeperEntityGroup("GroupGenericZombie", -1) == null);
+    try std.testing.expectEqualStrings(walker.name, g.resolveSleeperClass("NoSuchThing", null, 3).name);
 }

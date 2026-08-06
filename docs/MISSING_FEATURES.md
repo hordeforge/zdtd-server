@@ -36,7 +36,7 @@ This document is deliberately exhaustive. Status labels:
 | Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task, grid A* | AI task depth | navmesh, more EAI tasks | fight/loot visible |
 | Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
-| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders | biomes.xml, vehicles.xml | gamestages, buffs | tables load |
+| Content XML | blocks/items/entities/groups/recipes/loot/quests/traders, gamestages | biomes.xml, vehicles.xml | buffs | tables load |
 | Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
 | Admin / browser | admin TCP (kick/ban/give/tele/kill/…) + console | full telnet surface | Steam browser | ops usable |
 
@@ -302,7 +302,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
 | Water flow / physics | MISSING | |
 | Falling blocks | MISSING | |
-| POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers. Gaps: gamestage, respawn, trigger cascade, quest/boss flags, pose |
+| POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
 | Land claim / bedroll spawn | PARTIAL | LandClaim options + keystone deny; bedroll ownership MISSING |
 | World borders / difficulty tiers | MISSING | |
 
@@ -319,7 +319,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Item | Status |
 |---|---|
 | Entity class system (`entityclasses.xml`) | HAVE (`assets/entities.zig`) |
-| Archetypes / gamestages / spawning.xml | MISSING |
+| Archetypes / gamestages / spawning.xml | PARTIAL (`assets/gamestages.zig` + spawning.xml `<biome>`/`<entityspawner>`; archetypes MISSING) |
 | Animals / special infected / bosses | PARTIAL (animals spawner + cap; bosses MISSING) |
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
@@ -511,7 +511,7 @@ Honest gaps:
 | World clock + blood moon day%7 | PARTIAL |
 | Night horde near players | PARTIAL (simple spawn) |
 | Scout daytime | PARTIAL |
-| Gamestage scaling | MISSING |
+| Gamestage scaling | PARTIAL (player/party stage, scout tier, blood-moon stage, sleeper groups, loot prob bands; see 5.x gamestage gaps) |
 | Heat map / activity | MISSING |
 | Wandering horde paths | MISSING |
 | Feral sense / blood moon music sync | MISSING |
@@ -671,7 +671,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | biomes.xml / biomes.png | HAVE (colors + layers + biomes.png) |
 | traders.xml | HAVE (groups + expand) |
 | vehicles.xml | PARTIAL (load + spawn HP/speed) |
-| gamestages / spawning | PARTIAL (spawning.xml → director groups; gamestages no) |
+| gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | MISSING |
@@ -831,6 +831,44 @@ Full telnet surface, Steam browser, party membership (a Party/PartyManager
 equivalent driving S2C `NetPackagePartyData`), ally persistence, PUID-keyed
 player saves, gamestages, buffs depth, vehicle multi-seat, Encryption*
 (optional).
+Full telnet surface, Steam browser, party PlatformUserId, gamestage inputs
+(below), buffs depth, vehicle multi-seat, Encryption* (optional).
+
+#### Gamestage: what is in and what is still missing
+
+In (`src/assets/gamestages.zig`, grounded in asm.il V3.1.0 b14):
+- `<config>`, `<group>`, `<spawner>/<gamestage>/<spawn>` parsing with the IL's
+  spawn defaults `num=1 maxAlive=1 interval=2 duration=0` (`GamesStagesFromXml::
+  ParseSpawn` ~1379611). The gamestages.xml header comment states different
+  defaults and is wrong.
+- `EntityPlayer::get_gameStage` (~503972), `GetLootStage` (~504215),
+  `CalcPartyLevel` (~1093305), `CalcGameStageAround` (~1093351),
+  `GetStage`/`GetBoundIndex` (~1093187), `GameStageGroup::CleanName` (~1093513),
+  `SetAlive` days-alive penalty (~503838).
+- Consumers: sleeper volume groups, blood-moon spawner stage (group + maxAlive),
+  daytime scout tier at 45/85/125 (`SpawnScouts` ~415972), loot.xml
+  `loot_prob_template` bands, and the `gamestage [slot]` admin command
+  (same fields as `ConsoleCmdGameStage::Execute` ~220775).
+- `gameStageBornAtWorldTime` now rides the PlayerId PDF instead of the -1
+  sentinel, so the client's own `gamestage` readout agrees with the server.
+
+Still missing (inputs zdtd does not parse; all are fed as zero/absent, never faked):
+- biomes.xml `GameStageMod` / `GameStageBonus` / `LootStageMod` /
+  `LootStageBonus` / `LootStageMin` / `LootStageMax`.
+- quests.xml `GameStageMod` / `GameStageBonus` (active-quest terms).
+- Prefab `DifficultyTier`, so loot.xml `loot_settings poi_tier_mod` /
+  `poi_tier_bonus` load but are never applied.
+- loot.xml `<lootqualitytemplates>`: item quality by loot stage. zdtd's loot
+  `Stack` carries no quality, so this needs a container/wire change first.
+- EffectManager passive modifiers on both stages (`GlobalGameStageModifier`,
+  `BiomeGameStageModifier`, `GlobalLootStageModifier`, … all pinned at 1).
+- Blood-moon and wandering-horde loot drop bonus counters (`LootBonusEvery`,
+  `LootBonusMaxCount`, `LootBonusScale`, `LootWanderingBonusEvery`,
+  `LootWanderingBonusScale`): parsed into `Config`, not consumed.
+- Cross-session persistence of days survived: `game_stage_born_world_time` is
+  per-session Client state, so the streak restarts on reconnect.
+- Party grouping ignores stock's same-`PrefabInstance` requirement (zdtd has no
+  per-player POI tracking); distance alone decides.
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.
@@ -851,11 +889,19 @@ Implemented (`src/world/sleepers.zig`, `Game.tickSleeperVolumes`):
   (`Block.IsSleeperBlock -> SleeperVolume::AddSpawnPoint`, asm.il ~919380). Wake
   spawns one zombie per marker (capped to the requested count). When no `.tts` or
   no marker blocks are present, falls back to a deterministic AABB scatter.
-- Group name resolves through the class table then the entitygroup table
-  (`EntityGroups::GetRandomFromGroup`), else the default walker.
+- Group name resolves stock-first: `GameStageGroup::CleanName` → gamestages.xml
+  group → spawner → `GetStage(volume stage)` → first `<spawn>` group →
+  `EntityGroups::GetRandomFromGroup`; then the class table, then the entitygroup
+  table, else the default walker. The volume stage is
+  `Max(0, CalcGameStageAround(players within 100))`. On a stock Navezgane boot
+  all 3124 sleeper volumes resolve through the gamestage chain; before it they
+  all fell through to the default walker, because stock POIs name gamestage
+  groups (`GroupGenericZombie`, `S_-Group_Generic_Zombie`) that entitygroups.xml
+  does not contain.
 
 Honest gaps (no data path in zdtd, not faked):
-- Gamestage / difficulty scaling of counts and entity variants (`gsScale=1` here).
+- Per-volume gamestage adjust byte (zdtd's .tts/.nim reader does not carry it),
+  and `maxAlive` is a per-burst cap rather than a live per-player population cap.
 - Sleeper respawn (`respawnMap`/`respawnTime`/`cRespawnNever`); one-shot `triggered`.
 - Trigger types (`ETriggerType`) and volume-to-volume wake cascade
   (`SleeperVolumeTriggeredBy`); zdtd wakes purely on player-inside-AABB.

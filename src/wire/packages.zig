@@ -357,11 +357,18 @@ pub fn buildPlayerIdBodyInv(
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
 ) ![]u8 {
-    return buildPlayerIdBodyInvLoaded(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, true);
+    return buildPlayerIdBodyInvLoaded(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, true, game_stage_born_unset);
 }
+
+/// EntityPlayer::Init seeds gameStageBornAtWorldTime to -1 (asm.il ~503740);
+/// PlayerDataFile::CopyTo then clamps anything above the current world time
+/// down to it (asm.il ~1975949), so the sentinel reads as zero days survived.
+pub const game_stage_born_unset: u64 = std.math.maxInt(u64);
 
 /// Like buildPlayerIdBodyInv; b_loaded=false for death-respawn re-bundle (avoids
 /// GameManager.PlayerId CreateEntity+ToPlayer on an already-spawned local player).
+/// `game_stage_born_at` is the server's survival-streak origin in world ticks,
+/// so the client's own `gamestage` console command agrees with the server.
 pub fn buildPlayerIdBodyInvLoaded(
     buf: []u8,
     entity_id: i32,
@@ -375,11 +382,12 @@ pub fn buildPlayerIdBodyInvLoaded(
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
     b_loaded: bool,
+    game_stage_born_at: u64,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
     try w.writeI16(team);
-    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, b_loaded);
+    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, b_loaded, game_stage_born_at);
     try w.writeI32(chunk_view_dim);
     return w.written();
 }
@@ -396,6 +404,7 @@ fn writeEmptyPlayerDataFileNetwork(
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
     b_loaded: bool,
+    game_stage_born_at: u64,
 ) !void {
     const px: f32 = @floatFromInt(sx);
     const py: f32 = @floatFromInt(sy);
@@ -509,7 +518,7 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeU32(0); // totalItemsCrafted
     try w.writeF32(0); // distanceWalked
     try w.writeF32(0); // longestLife
-    try w.writeU64(std.math.maxInt(u64)); // gameStageBornAtWorldTime = -1 as u64
+    try w.writeU64(game_stage_born_at); // gameStageBornAtWorldTime
     // WaypointCollection.Write: version 7, count 0
     try w.writeByte(7);
     try w.writeU16(0);
@@ -571,6 +580,24 @@ test "player id body layout: header fields and non-empty pdf" {
     try std.testing.expectEqual(@as(i16, 3), std.mem.readInt(i16, body2[4..6], .little));
     try std.testing.expectEqual(@as(i32, 8), std.mem.readInt(i32, body2[body2.len - 4 ..][0..4], .little));
     try std.testing.expectEqual(body.len, body2.len);
+}
+
+test "gameStageBornAtWorldTime rides the same offset as the -1 sentinel" {
+    var a: [16384]u8 = undefined;
+    var b: [16384]u8 = undefined;
+    const dflt = try buildPlayerIdBodyInv(&a, 171, 0, 4, -273, 61, 449, &.{}, &.{}, &.{}, &.{});
+    const born: u64 = 7 * 24000 + 12000;
+    const set = try buildPlayerIdBodyInvLoaded(&b, 171, 0, 4, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, born);
+    // Only the eight bytes of the field change; the body must not resize.
+    try std.testing.expectEqual(dflt.len, set.len);
+    const off = std.mem.indexOf(u8, dflt, &@as([8]u8, @bitCast(game_stage_born_unset))) orelse
+        return error.SentinelNotFound;
+    try std.testing.expectEqual(born, std.mem.readInt(u64, set[off..][0..8], .little));
+    var i: usize = 0;
+    while (i < dflt.len) : (i += 1) {
+        if (i >= off and i < off + 8) continue;
+        try std.testing.expectEqual(dflt[i], set[i]);
+    }
 }
 
 /// Stock RespawnType (byte stored as i32 on wire).
@@ -799,7 +826,7 @@ test "entity speeds body roundtrip" {
 test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true);
+    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, game_stage_born_unset);
     const h = try parsePlayerDataEcdHead(w.written());
     try std.testing.expectEqual(@as(i32, 106), h.entity_id);
     try std.testing.expectApproxEqAbs(@as(f32, -273), h.x, 0.01);

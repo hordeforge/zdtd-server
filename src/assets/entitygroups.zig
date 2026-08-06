@@ -4,19 +4,19 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 
-pub const max_groups: usize = 512;
-pub const max_entries: usize = 64;
-
 pub const Entry = struct {
     name: []const u8 = "",
     /// Relative weight (default 1). Stock `p` attribute.
     weight: f32 = 1,
 };
 
+/// Entries are a flat arena slice, not a fixed array: stock entitygroups.xml has
+/// 1875 groups, so a per-group fixed array would cost megabytes and any cap on
+/// the group count silently drops the tail (the gamestage horde groups live
+/// there, e.g. feralHordeStageGS2 at index 1177).
 pub const Group = struct {
     name: []const u8 = "",
-    entries: [max_entries]Entry = [_]Entry{.{}} ** max_entries,
-    entry_n: u8 = 0,
+    entries: []const Entry = &.{},
     weight_sum: f32 = 0,
 };
 
@@ -51,44 +51,38 @@ pub const GroupTable = struct {
     /// not depend on f32 accumulation order (DST / cross-machine replay).
     pub fn pick(self: *const GroupTable, group_name: []const u8, seed: u32) ?[]const u8 {
         const g = self.byName(group_name) orelse return null;
-        if (g.entry_n == 0 or g.weight_sum <= 0) return null;
+        if (g.entries.len == 0 or g.weight_sum <= 0) return null;
         const s = seed *% 1103515245 +% 12345;
         // milli-weight: round(weight * 1000). Integer walk; r in [0, sum).
         var sum_mw: u64 = 0;
-        var i: u8 = 0;
-        while (i < g.entry_n) : (i += 1) {
-            const w = g.entries[i].weight;
-            if (w <= 0) continue;
-            sum_mw += @as(u64, @intFromFloat(@round(w * 1000.0)));
+        for (g.entries) |e| {
+            if (e.weight <= 0) continue;
+            sum_mw += @as(u64, @intFromFloat(@round(e.weight * 1000.0)));
         }
         if (sum_mw == 0) return null;
         // Match prior scale: (s % 10000) / 10000 * sum, via integer multiply.
         const r_mw: u64 = (@as(u64, s % 10000) * sum_mw) / 10000;
         var acc_mw: u64 = 0;
-        i = 0;
-        while (i < g.entry_n) : (i += 1) {
-            const w = g.entries[i].weight;
-            if (w <= 0) continue;
-            acc_mw += @as(u64, @intFromFloat(@round(w * 1000.0)));
-            if (r_mw < acc_mw) return g.entries[i].name;
+        for (g.entries) |e| {
+            if (e.weight <= 0) continue;
+            acc_mw += @as(u64, @intFromFloat(@round(e.weight * 1000.0)));
+            if (r_mw < acc_mw) return e.name;
         }
-        return g.entries[g.entry_n - 1].name;
+        return g.entries[g.entries.len - 1].name;
     }
 };
 
+const builtin_all = [_]Entry{
+    .{ .name = "zombieBoe", .weight = 1 },
+    .{ .name = "zombieJoe", .weight = 1 },
+};
+const builtin_night = [_]Entry{
+    .{ .name = "zombieBoe", .weight = 1 },
+    .{ .name = "zombieSpider", .weight = 0.25 },
+};
 const builtin_groups = [_]Group{
-    blk: {
-        var g: Group = .{ .name = "ZombiesAll", .entry_n = 2, .weight_sum = 2 };
-        g.entries[0] = .{ .name = "zombieBoe", .weight = 1 };
-        g.entries[1] = .{ .name = "zombieJoe", .weight = 1 };
-        break :blk g;
-    },
-    blk: {
-        var g: Group = .{ .name = "ZombiesNight", .entry_n = 2, .weight_sum = 1.25 };
-        g.entries[0] = .{ .name = "zombieBoe", .weight = 1 };
-        g.entries[1] = .{ .name = "zombieSpider", .weight = 0.25 };
-        break :blk g;
-    },
+    .{ .name = "ZombiesAll", .entries = &builtin_all, .weight_sum = 2 },
+    .{ .name = "ZombiesNight", .entries = &builtin_night, .weight_sum = 1.25 },
 };
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable {
@@ -107,9 +101,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
 
     var list: std.ArrayList(Group) = .empty;
     defer list.deinit(allocator);
+    var entry_buf: std.ArrayList(Entry) = .empty;
+    defer entry_buf.deinit(allocator);
 
     var i: usize = 0;
-    while (i < clean.len and list.items.len < max_groups) {
+    while (i < clean.len) {
         const tag = std.mem.indexOfPos(u8, clean, i, "<entitygroup") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 12;
@@ -126,8 +122,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
         var g: Group = .{
             .name = try arena.dupe(u8, name),
         };
+        entry_buf.clearRetainingCapacity();
         var bi: usize = 0;
-        while (bi < body.len and g.entry_n < max_entries) {
+        while (bi < body.len) {
             const et = std.mem.indexOfPos(u8, body, bi, "<e ") orelse break;
             const en = xml.attr(body, et, "n") orelse {
                 bi = et + 3;
@@ -138,22 +135,22 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
                 // Explicit p="0" disables the entry; do not coerce it to 1.
                 w = @max(0, xml.parseF32(ps) orelse 1);
             }
-            g.entries[g.entry_n] = .{
+            try entry_buf.append(allocator, .{
                 .name = try arena.dupe(u8, en),
                 .weight = w,
-            };
-            g.weight_sum += g.entries[g.entry_n].weight;
-            g.entry_n += 1;
+            });
+            g.weight_sum += w;
             bi = et + 3;
         }
-        if (g.entry_n > 0) try list.append(allocator, g);
+        if (entry_buf.items.len > 0) {
+            g.entries = try arena.dupe(Entry, entry_buf.items);
+            try list.append(allocator, g);
+        }
         i = next_i;
     }
 
-    const gs = try arena.alloc(Group, list.items.len);
-    @memcpy(gs, list.items);
     return .{
-        .groups = gs,
+        .groups = try arena.dupe(Group, list.items),
         .arena_ptr = arena_holder,
         .source = .xml,
     };
@@ -195,4 +192,18 @@ test "load stock entitygroups when present" {
     try std.testing.expect(t.byName("ZombiesAll") != null);
     const pick = t.pick("ZombiesAll", 99);
     try std.testing.expect(pick != null);
+}
+
+test "stock entitygroups keeps the whole file, tail groups included" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entitygroups.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    // Stock ships 1875 groups; any cap below that silently drops the tail, and
+    // the gamestage horde groups live in the tail.
+    try std.testing.expect(t.groups.len >= 1800);
+    try std.testing.expect(t.byName("feralHordeStageGS2") != null);
+    try std.testing.expect(t.byName("sleeperHordeStageGS5") != null);
+    try std.testing.expect(t.pick("feralHordeStageGS2", 7) != null);
+    // No group may come back empty: pick() would return null for it.
+    for (t.groups) |g| try std.testing.expect(g.entries.len > 0);
 }

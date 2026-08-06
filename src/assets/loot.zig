@@ -17,6 +17,21 @@ pub const LootEntry = struct {
     count_max: u16 = 1,
     /// Probability weight (1.0 = always considered in equal pick).
     prob: f32 = 1,
+    /// loot_prob_template index + 1 into LootTable.prob_templates; 0 = none.
+    /// Resolved at load so the roll path never compares template names.
+    prob_template: u16 = 0,
+};
+
+/// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
+pub const ProbBand = struct {
+    min_level: i32 = 0,
+    max_level: i32 = 0,
+    prob: f32 = 0,
+};
+
+pub const ProbTemplate = struct {
+    name: []const u8 = "",
+    bands: []const ProbBand = &.{},
 };
 
 pub const LootGroup = struct {
@@ -44,10 +59,40 @@ pub const Stack = struct {
 pub const LootTable = struct {
     groups: []const LootGroup = &.{},
     containers: []const LootContainer = &.{},
+    prob_templates: []const ProbTemplate = &.{},
+    /// `<loot_settings poi_tier_mod= poi_tier_bonus=>`: LootManager::POITierMod /
+    /// POITierBonus, indexed by Prefab.DifficultyTier-1 (asm.il GetLootStage
+    /// ~504240). Empty until a caller knows the POI it is standing in.
+    poi_tier_mod: []const f32 = &.{},
+    poi_tier_bonus: []const f32 = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     source: enum { builtin, xml } = .builtin,
     /// LootAbundance percent (serverconfig); scales rolled stack counts. 100 = 1×.
     abundance_pct: u16 = 100,
+
+    /// LootContainer::getProbability (asm.il ~699478): a loot_prob_template
+    /// replaces the entry's own prob with the band covering `loot_stage`.
+    /// A template with no covering band falls back to the entry prob, exactly
+    /// as the IL falls through its band loop.
+    pub fn entryProb(self: *const LootTable, e: LootEntry, loot_stage: i32) f32 {
+        if (e.prob_template == 0) return e.prob;
+        const idx = e.prob_template - 1;
+        if (idx >= self.prob_templates.len) return e.prob;
+        for (self.prob_templates[idx].bands) |b| {
+            if (loot_stage >= b.min_level and loot_stage <= b.max_level) return b.prob;
+        }
+        return e.prob;
+    }
+
+    /// Fixed-point milli-prob gate so the roll stays integer-only (DST replay).
+    /// `s` is the caller's already-advanced LCG state.
+    fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
+        const p = self.entryProb(e, loot_stage);
+        if (p >= 1.0) return true;
+        if (p <= 0.0) return false;
+        const thresh: u32 = @intFromFloat(@round(p * 1000.0));
+        return (s % 1000) <= thresh;
+    }
 
     /// Scale a rolled count by LootAbundance, keeping at least 1.
     fn scaleCount(self: *const LootTable, cnt: u16) u16 {
@@ -88,11 +133,13 @@ pub const LootTable = struct {
         return null;
     }
 
-    /// Deterministic roll into `out`. Returns stack count.
-    pub fn rollContainer(self: *const LootTable, name: []const u8, seed: u32, out: []Stack) usize {
+    /// Deterministic roll into `out` at `loot_stage`. Returns stack count.
+    /// Pass 1 for "no gamestage information"; the templates' first band starts
+    /// at level 0 or 1, so stage 1 is the honest floor, not a magic value.
+    pub fn rollContainer(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack) usize {
         const cont = self.containerByName(name) orelse {
             // Unknown: try as group name.
-            return self.rollGroup(name, seed, out, 0);
+            return self.rollGroup(name, loot_stage, seed, out, 0);
         };
         var n: usize = 0;
         var s = seed ^ 0x9e3779b9;
@@ -100,14 +147,12 @@ pub const LootTable = struct {
         while (i < cont.entry_n and n < out.len) : (i += 1) {
             const e = cont.entries[i];
             s = s *% 1103515245 +% 12345;
-            // Always include first entry; others with prob.
-            // Fixed-point milli-prob (0..1000) so the gate is integer-only (DST).
-            if (i > 0 and e.prob < 1.0) {
-                const thresh: u32 = @intFromFloat(@round(e.prob * 1000.0));
-                if ((s % 1000) > thresh) continue;
-            }
+            // Always include the first entry unless it carries a loot stage
+            // template: a template's prob is the stage gate itself, and stock
+            // never emits an entry whose band prob is 0.
+            if ((i > 0 or e.prob_template != 0) and !self.probGate(e, loot_stage, s)) continue;
             if (e.is_group) {
-                n += self.rollGroup(e.name, s, out[n..], 0);
+                n += self.rollGroup(e.name, loot_stage, s, out[n..], 0);
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
@@ -124,7 +169,7 @@ pub const LootTable = struct {
         return n;
     }
 
-    fn rollGroup(self: *const LootTable, name: []const u8, seed: u32, out: []Stack, depth: u8) usize {
+    fn rollGroup(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, depth: u8) usize {
         if (depth > 6 or out.len == 0) return 0;
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0) return 0;
@@ -140,8 +185,11 @@ pub const LootTable = struct {
             s = s *% 1103515245 +% 12345;
             const idx: usize = s % g.entry_n;
             const e = g.entries[idx];
+            // A picked entry still has to clear its loot stage band, so a
+            // low-stage player cannot pull a top-tier item out of a group.
+            if (e.prob_template != 0 and !self.probGate(e, loot_stage, s)) continue;
             if (e.is_group) {
-                n += self.rollGroup(e.name, s, out[n..], depth + 1);
+                n += self.rollGroup(e.name, loot_stage, s, out[n..], depth + 1);
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
@@ -157,10 +205,10 @@ pub const LootTable = struct {
 test "loot abundance scales counts, keeps at least one" {
     var lt = LootTable.builtin();
     var base: [max_roll_stacks]Stack = undefined;
-    const nb = lt.rollContainer("woodenChest", 12345, &base);
+    const nb = lt.rollContainer("woodenChest", 1, 12345, &base);
     lt.abundance_pct = 200;
     var big: [max_roll_stacks]Stack = undefined;
-    const ng = lt.rollContainer("woodenChest", 12345, &big);
+    const ng = lt.rollContainer("woodenChest", 1, 12345, &big);
     try std.testing.expectEqual(nb, ng);
     // Every non-fallback stack doubles (same seed → same base counts).
     var i: usize = 0;
@@ -171,7 +219,7 @@ test "loot abundance scales counts, keeps at least one" {
     // A tiny abundance still yields at least 1 per stack.
     lt.abundance_pct = 1;
     var small: [max_roll_stacks]Stack = undefined;
-    const ns = lt.rollContainer("woodenChest", 12345, &small);
+    const ns = lt.rollContainer("woodenChest", 1, 12345, &small);
     i = 0;
     while (i < ns) : (i += 1) try std.testing.expect(small[i].count >= 1);
 }
@@ -225,24 +273,63 @@ fn parseCountRange(s: []const u8) struct { min: u16, max: u16 } {
     return .{ .min = v, .max = v };
 }
 
-fn parseItemOrGroup(tag_src: []const u8, tag_at: usize) ?LootEntry {
+fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbTemplate) ?LootEntry {
     const is_group = xml.attr(tag_src, tag_at, "group") != null;
     const name = if (is_group) xml.attr(tag_src, tag_at, "group") else xml.attr(tag_src, tag_at, "name");
     const n = name orelse return null;
     const cr = parseCountRange(xml.attr(tag_src, tag_at, "count") orelse "1");
     const prob = xml.parseF32(xml.attr(tag_src, tag_at, "prob") orelse "1") orelse 1;
+    var tpl: u16 = 0;
+    if (xml.attr(tag_src, tag_at, "loot_prob_template")) |tn| {
+        for (templates, 0..) |t, ti| {
+            if (std.mem.eql(u8, t.name, tn)) {
+                tpl = @intCast(ti + 1);
+                break;
+            }
+        }
+    }
     return .{
         .name = n,
         .is_group = is_group,
         .count_min = cr.min,
         .count_max = cr.max,
         .prob = prob,
+        .prob_template = tpl,
     };
+}
+
+/// `level="a,b"` on a `<loot>` band; a bare number covers exactly that level.
+fn parseLevelRange(s: []const u8) struct { min: i32, max: i32 } {
+    const comma = std.mem.indexOfScalar(u8, s, ',') orelse {
+        const v = std.fmt.parseInt(i32, std.mem.trim(u8, s, " \t"), 10) catch 0;
+        return .{ .min = v, .max = v };
+    };
+    const a = std.fmt.parseInt(i32, std.mem.trim(u8, s[0..comma], " \t"), 10) catch 0;
+    const b = std.fmt.parseInt(i32, std.mem.trim(u8, s[comma + 1 ..], " \t"), 10) catch a;
+    return .{ .min = a, .max = @max(a, b) };
+}
+
+/// Comma list of floats into an arena slice (`poi_tier_mod="0.05,0.1,…"`).
+fn parseF32List(arena: std.mem.Allocator, s: []const u8) ![]const f32 {
+    var n: usize = 0;
+    var count_it = std.mem.splitScalar(u8, s, ',');
+    while (count_it.next()) |_| n += 1;
+    const out = try arena.alloc(f32, n);
+    var i: usize = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |part| : (i += 1) {
+        out[i] = xml.parseF32(std.mem.trim(u8, part, " \t")) orelse 0;
+    }
+    return out;
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
     const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
+    return loadFromSlice(allocator, raw);
+}
+
+pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
 
@@ -258,6 +345,53 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
     defer groups.deinit(allocator);
     var containers: std.ArrayList(LootContainer) = .empty;
     defer containers.deinit(allocator);
+
+    // <loot_settings poi_tier_mod="…" poi_tier_bonus="…"/>
+    var poi_mod: []const f32 = &.{};
+    var poi_bonus: []const f32 = &.{};
+    if (std.mem.indexOf(u8, clean, "<loot_settings")) |ls| {
+        if (xml.attr(clean, ls, "poi_tier_mod")) |v| poi_mod = try parseF32List(arena, v);
+        if (xml.attr(clean, ls, "poi_tier_bonus")) |v| poi_bonus = try parseF32List(arena, v);
+    }
+
+    // lootprobtemplate: parsed first so item rows can resolve to an index.
+    var templates: std.ArrayList(ProbTemplate) = .empty;
+    defer templates.deinit(allocator);
+    var bands: std.ArrayList(ProbBand) = .empty;
+    defer bands.deinit(allocator);
+    var ti: usize = 0;
+    while (std.mem.indexOfPos(u8, clean, ti, "<lootprobtemplate")) |tag| {
+        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const name = xml.attr(clean, tag, "name") orelse {
+            ti = gt + 1;
+            continue;
+        };
+        var body: []const u8 = "";
+        ti = gt + 1;
+        if (!(gt > tag and clean[gt - 1] == '/')) {
+            const close = std.mem.indexOfPos(u8, clean, gt, "</lootprobtemplate>") orelse break;
+            body = clean[gt + 1 .. close];
+            ti = close + 19;
+        }
+        bands.clearRetainingCapacity();
+        var bi: usize = 0;
+        while (std.mem.indexOfPos(u8, body, bi, "<loot")) |ltag| {
+            bi = ltag + 5;
+            const lvl = xml.attr(body, ltag, "level") orelse continue;
+            const lr = parseLevelRange(lvl);
+            try bands.append(allocator, .{
+                .min_level = lr.min,
+                .max_level = lr.max,
+                .prob = xml.parseF32(std.mem.trim(u8, xml.attr(body, ltag, "prob") orelse "0", " \t")) orelse 0,
+            });
+        }
+        if (bands.items.len == 0) continue;
+        try templates.append(allocator, .{
+            .name = try arena.dupe(u8, name),
+            .bands = try arena.dupe(ProbBand, bands.items),
+        });
+    }
+    const tpl = try arena.dupe(ProbTemplate, templates.items);
 
     // lootgroup
     var i: usize = 0;
@@ -286,7 +420,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
         var bi: usize = 0;
         while (bi < body.len and g.entry_n < max_entries) {
             const itag = std.mem.indexOfPos(u8, body, bi, "<item") orelse break;
-            if (parseItemOrGroup(body, itag)) |ent| {
+            if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 g.entries[g.entry_n] = e;
@@ -326,7 +460,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
         var bi: usize = 0;
         while (bi < body.len and c.entry_n < max_entries) {
             const itag = std.mem.indexOfPos(u8, body, bi, "<item") orelse break;
-            if (parseItemOrGroup(body, itag)) |ent| {
+            if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 c.entries[c.entry_n] = e;
@@ -338,14 +472,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LootTable {
         i = next_i;
     }
 
-    const gs = try arena.alloc(LootGroup, groups.items.len);
-    @memcpy(gs, groups.items);
-    const cs = try arena.alloc(LootContainer, containers.items.len);
-    @memcpy(cs, containers.items);
-
     return .{
-        .groups = gs,
-        .containers = cs,
+        .groups = try arena.dupe(LootGroup, groups.items),
+        .containers = try arena.dupe(LootContainer, containers.items),
+        .prob_templates = tpl,
+        .poi_tier_mod = poi_mod,
+        .poi_tier_bonus = poi_bonus,
         .arena_ptr = arena_holder,
         .source = .xml,
     };
@@ -359,7 +491,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 test "builtin loot roll" {
     const t = LootTable.builtin();
     var stacks: [max_roll_stacks]Stack = undefined;
-    const n = t.rollContainer("EntityLootContainerRegular", 42, &stacks);
+    const n = t.rollContainer("EntityLootContainerRegular", 1, 42, &stacks);
     try std.testing.expect(n >= 1);
     try std.testing.expect(stacks[0].count >= 1);
 }
@@ -374,7 +506,120 @@ test "load stock loot when present" {
     var stacks: [max_roll_stacks]Stack = undefined;
     // EntityLootContainerRegular may be group-only; roll woodenChest or first container
     if (t.containerByName("woodenChest")) |_| {
-        const n = t.rollContainer("woodenChest", 7, &stacks);
+        const n = t.rollContainer("woodenChest", 1, 7, &stacks);
         try std.testing.expect(n >= 1);
+    }
+}
+
+test "loot prob templates gate entries by loot stage" {
+    const src =
+        \\<lootcontainers>
+        \\<loot_settings poi_tier_mod="0.05,0.1,0.15" poi_tier_bonus="3,6,9"/>
+        \\<lootprobtemplates>
+        \\  <lootprobtemplate name="veryLowDelayed">
+        \\    <loot level="0,14" prob="0"/>
+        \\    <loot level="15,999999" prob=".05"/>
+        \\  </lootprobtemplate>
+        \\  <lootprobtemplate name="guaranteed">
+        \\    <loot level="1,999999" prob="1"/>
+        \\  </lootprobtemplate>
+        \\</lootprobtemplates>
+        \\<lootgroup name="g">
+        \\  <item name="always" loot_prob_template="guaranteed"/>
+        \\  <item name="plain"/>
+        \\</lootgroup>
+        \\<lootcontainer name="c" size="6,2">
+        \\  <item name="gated" loot_prob_template="veryLowDelayed"/>
+        \\  <item name="plain"/>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var t = try loadFromSlice(std.testing.allocator, src);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(usize, 2), t.prob_templates.len);
+    try std.testing.expectEqual(@as(usize, 3), t.poi_tier_mod.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.15), t.poi_tier_mod[2], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), t.poi_tier_bonus[0], 0.0001);
+
+    const cont = t.containerByName("c").?;
+    const gated = cont.entries[0];
+    const plain = cont.entries[1];
+    // veryLowDelayed: zero below stage 15, .05 at and above it.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), t.entryProb(gated, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), t.entryProb(gated, 14), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), t.entryProb(gated, 15), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), t.entryProb(gated, 999999), 0.0001);
+    // Above the last band nothing matches, so the entry's own prob applies.
+    try std.testing.expectApproxEqAbs(@as(f32, 1), t.entryProb(gated, 1_000_000), 0.0001);
+    // An entry with no template is stage-blind (unchanged behaviour).
+    try std.testing.expectApproxEqAbs(@as(f32, 1), t.entryProb(plain, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), t.entryProb(plain, 5000), 0.0001);
+
+    // The zero band must suppress the item across every seed, and the .05 band
+    // must let it through at least once.
+    var stacks: [max_roll_stacks]Stack = undefined;
+    var seen_low: usize = 0;
+    var seen_high: usize = 0;
+    var seed: u32 = 0;
+    while (seed < 400) : (seed += 1) {
+        var n = t.rollContainer("c", 0, seed, &stacks);
+        for (stacks[0..n]) |st| {
+            if (std.mem.eql(u8, st.item_name, "gated")) seen_low += 1;
+        }
+        n = t.rollContainer("c", 40, seed, &stacks);
+        for (stacks[0..n]) |st| {
+            if (std.mem.eql(u8, st.item_name, "gated")) seen_high += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), seen_low);
+    try std.testing.expect(seen_high >= 1);
+}
+
+test "loot rolls stay deterministic for a given stage and seed" {
+    const t = LootTable.builtin();
+    var a: [max_roll_stacks]Stack = undefined;
+    var b: [max_roll_stacks]Stack = undefined;
+    const na = t.rollContainer("woodenChest", 37, 99, &a);
+    const nb = t.rollContainer("woodenChest", 37, 99, &b);
+    try std.testing.expectEqual(na, nb);
+    for (a[0..na], b[0..nb]) |x, y| {
+        try std.testing.expectEqualStrings(x.item_name, y.item_name);
+        try std.testing.expectEqual(x.count, y.count);
+    }
+    // Stage 0 and the i32 extremes must not trap.
+    _ = t.rollContainer("woodenChest", 0, 1, &a);
+    _ = t.rollContainer("woodenChest", std.math.minInt(i32), 1, &a);
+    _ = t.rollContainer("woodenChest", std.math.maxInt(i32), 1, &a);
+}
+
+test "stock loot prob templates load and band the real items" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    try std.testing.expect(t.prob_templates.len > 10);
+    // loot_settings ships five POI tiers.
+    try std.testing.expectEqual(@as(usize, 5), t.poi_tier_mod.len);
+    try std.testing.expectEqual(@as(usize, 5), t.poi_tier_bonus.len);
+    // At least one item row must reference a template, else the resolve step
+    // silently did nothing.
+    var referenced: usize = 0;
+    for (t.groups) |g| {
+        var i: u8 = 0;
+        while (i < g.entry_n) : (i += 1) {
+            if (g.entries[i].prob_template != 0) referenced += 1;
+        }
+    }
+    try std.testing.expect(referenced > 100);
+    // ProbT0's documented mid band: level 20,21 → prob 1.
+    for (t.prob_templates) |p| {
+        if (!std.mem.eql(u8, p.name, "ProbT0")) continue;
+        var hit = false;
+        for (p.bands) |b| {
+            if (b.min_level == 20 and b.max_level == 21) {
+                try std.testing.expectApproxEqAbs(@as(f32, 1), b.prob, 0.0001);
+                hit = true;
+            }
+        }
+        try std.testing.expect(hit);
     }
 }

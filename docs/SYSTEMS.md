@@ -96,7 +96,8 @@ trader stock TraderData wire, blood-moon `BloodmoonMusic` builder (HordeEvent
 builder shipped **unwired** because stock has zero senders), vehicle terrain
 gravity/ground-clamp, electrical block placement + WireActions, and quest
 multi-phase objective execution (real phase graph, not primary-kind collapse).
-Each has documented remaining gaps (navmesh A*, gamestage scaling, generator
+Each has documented remaining gaps (navmesh A*, gamestage biome/quest/POI-tier
+inputs, generator
 fuel sim, per-item markup, multi-objective phases, etc.). Prefer missing over
 fake. Precise, current gap inventory: [MISSING_FEATURES.md](MISSING_FEATURES.md).
 Hub: [STATUS.md](STATUS.md).

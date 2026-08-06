@@ -59,8 +59,9 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `items.zig` | items.xml | stacks, prices, stock type, placeable block |
 | `entities.zig` | entityclasses.xml | hash, HP, loot |
 | `entitygroups.zig` | entitygroups.xml | director / spawn groups |
-| `spawning.zig` | spawning.xml | biome spawn rules |
-| `loot.zig` | loot.xml | groups + containers |
+| `spawning.zig` | spawning.xml | biome spawn rules + `<entityspawner>` groups (scouts) |
+| `gamestages.zig` | gamestages.xml | player/party stage math, spawner stage ladders, POI group aliases |
+| `loot.zig` | loot.xml | groups + containers + `lootprobtemplate` stage bands |
 | `recipes.zig` | recipes.xml | craft graph |
 | `quests.zig` | quests.xml | catalog |
 | `traders.zig` | traders.xml | groups + rolls |

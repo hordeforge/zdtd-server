@@ -70,6 +70,8 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A20 | quest reward_coin | P2 | Open | |
 | A21 | director / gamestages | P2 | Open | |
 | A22 | deco version skew | P0 | **Partial** | Server now dictates block ids with a full `blocks` NameIdMapping before the config files, so a client cannot compute a different id for a name we ship. Still partial: names only the client has fall through to `assignLeftOverBlocks`, and the mapping has had no live V3.1.x run. Kill switches `[feature] block_id_mapping` and `deco_trees`; see DECO_NRE.md gap 2 |
+| A21 | director / gamestages | P2 | **Partial** | gamestages.xml loaded; scout tier, blood-moon stage, sleeper groups and loot prob bands are data driven. Biome/quest/POI-tier stage inputs still zero (MISSING_FEATURES P3 gamestage list) |
+| A22 | deco version skew | P0 | **Partial** | Fail closed on missing *name* + `[feature] deco_trees` kill switch. Cannot detect a client that computed a different id for the same name (no `blocks` NameIdMapping sent): see DECO_NRE.md gap 2 |
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
 | A24 | NONE loaders | P2 | Open | When feature lands |
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |
@@ -78,7 +80,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 
 Unchanged HAVE list: blocks, materials (HP), items, entities, entitygroups,
 recipes, loot, quests, traders, biomes, painting, spawning, buffs, progression,
-vehicles, storage_pairs, signs, AssignIds. NONE until feature: gamestages,
+vehicles, storage_pairs, signs, AssignIds, gamestages. NONE until feature:
 nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 
 ---
