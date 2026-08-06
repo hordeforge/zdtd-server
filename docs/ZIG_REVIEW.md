@@ -7,6 +7,57 @@
 | Scope | `src/server`, `src/world`, `src/assets`, `src/util`, `src/ecs` (sample hot paths) |
 | Prompt | `docs/prompts/zig-idiomatic-review.md` |
 
+## Pass 2026-08-06 (follow-up)
+
+| | |
+|---|---|
+| Date | 2026-08-06 |
+| Mode | Review + fix P0/P1 |
+| Scope | `src/plugin/wasm.zig` (Wasm runtime, new), `src/world/weather.zig` encode/decode (new), `src/server/game.zig` wasm wiring + saveWeather/restoreWeather, plus codebase re-scan of the search recipes |
+| Result | No P0/P1 found in the new code; re-scan of the hot-path recipes found no new violations. Prior pass debt unchanged (see fix plan below) |
+
+### New-code review (T9 wasm + storm persistence)
+
+| Location | Issue | Verdict |
+|---|---|---|
+| `src/plugin/wasm.zig` `callHook`/`callPlayerJoin`/`WasmHost.onTick` | Tick path: no heap, no grow; disabled flag short-circuits before the call | Clean |
+| `src/plugin/wasm.zig` `Plugin.load` | Init path: `errdefer` ladder (engine create/deinit, name dupe) disarms on success | Clean |
+| `src/plugin/wasm.zig` `defineImports` | Host fns copy via `Caller.memory().sliceAt` (bounds-checked, no alloc) | Clean |
+| `src/server/game.zig` `parsePluginCommand` | Tick path: `tokenizeScalar` + `parseFloat`/`parseInt`, 128-byte cap, no alloc | Clean |
+| `src/world/weather.zig` `encode` | Fixed offsets + little-endian writes; caller buffer (1024 B), `BufferTooSmall` on overflow | Clean |
+| `src/world/weather.zig` `decode` | Fail-closed: magic, length, bounds, biome id + group index vs table, finite params; manager untouched on reject | Clean |
+| `src/server/game.zig` `saveWeather`/`restoreWeather` | Init/save paths only; `io_fs.readFileInto` into a stack buffer; oversize file truncates and decode rejects (fail closed) | Clean |
+| `src/world/weather.zig` encode field offsets | Offset arithmetic (o+5/13/21/29) is a P3 footgun if `BiomeState` grows; the round-trip test covers every current field, so not worth churn now | P3, tracked |
+
+### Re-scan results (2026-08-06)
+
+| Recipe | Result |
+|---|---|
+| `allocator.alloc/create/dupe/realloc` on tick | None in game/ecs/wire tick path; chunk store allocs are load/first-touch (documented) |
+| `page_allocator` | `src/world/store.zig:761,819` only, documented parallel-worker choice; not on the tick |
+| `catch {}` / `catch unreachable` | `fuzz.zig` (test harness) + documented best-effort paths (parallel yield, tcp poll, litenet reject send) |
+| `Thread.spawn` | Only `util/parallel.zig` (persistent pool) and `world/chunk_flush.zig` (single writer thread); documented |
+| `std.os.linux.*` / raw posix FS | None outside the documented LiteNet/`tcp_listen`/clock layer |
+| `inline fn` | Only tiny `apm/tracy.zig` wrappers (2-4 lines) |
+| `anytype` public | `applyToInitOptions`/`sanitizeInitOptions` duck-type init merge, `xml_util.putDupeKey`, `powerblocks.build`; all documented |
+| Pre-0.16 `ArrayList` style | None; all `.empty` + explicit allocator |
+| `/tmp` for caches | None |
+
+### Ordered fix plan (carried from the 2026-08-04 pass, still open)
+
+1. Migrate admin telnet + GameServerInfo TCP to `std.Io` / `std.net` when next touched.
+2. Comment or split remaining tick-path `catch {}` on broadcast (group helper with documented drop policy).
+3. ~~Cap / pre-reserve `ecs.net_to_slot` HashMap at `ensureNetMap`~~ **Done**: `ensureTotalCapacity(max_entities)` (world.zig:213).
+4. Optional: long-lived `std.Io.Threaded` on `Game` to avoid Threaded init per persist call (P2 perf).
+5. P2 naming / god-file split of `game.zig` (out of scope).
+6. `weather.zig` encode offsets: promote to named `const` if `BiomeState` gains a field (P3).
+
+### Zen notes (2026-08-06)
+
+- Memory is a resource: the wasm plugin queue rides the fixed 64-slot command buffer; the storm save rides a caller stack buffer.
+- Fail closed: plugin fuel/trap disables one module; weather decode rejects mismatched files instead of desyncing the client.
+- One obvious way: text SimCommand grammar and the `ZWTH1` layout are each documented in one place.
+
 ## Summary counts
 
 | Sev | Found | Fixed this pass | Remaining |
