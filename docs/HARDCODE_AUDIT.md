@@ -61,6 +61,7 @@ Count drifts; see [STATUS.md](STATUS.md).
 | A12 | Vehicle speed: `vehicleControl` falls back to `vehicleKindDefaultSpeed(kind)` when vehicles.xml `velocityMax` is absent/0 (the XML row owns the real value). |
 | A22 | Block id coverage guard test: every placeable blocks.xml name resolves in the bundled AssignIds dump, so client `assignLeftOverBlocks` never sees server data. |
 | A30 | Trader restock cadence from `<trader_info>` `reset_interval` (-1 never, 0 daily, N every N days) instead of a flat daily policy. |
+| A31 | Loot respawn fail closed: storage blocks with no `LootList` stay empty (no `woodenChest` fallback) on both initial fill and respawn paths. |
 | B01–B07 | Stream/interest/edit/claimed-damage/peer_stale as `InitOptions` + `Game` fields (`default_*` consts). Hot path reads `self.*`. Array bound = `max_streamed_chunks_cap`. |
 | - | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
 
@@ -112,7 +113,7 @@ socket option are protocol/kernel pins (OK).
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |
 | A29 | trader price/sell ratios `econ/10`, `econ/50` | P1 | **New 08-07** | `game.zig:8454-8455` `fillTraderFromXml`: buy = EconomicValue/10, sell = EconomicValue/50, fallback 5/1 when econ 0. Stock RE (loot-economy.md §5, XUiM_Trader `GetBuyPrice`/`GetSellPrice` 1830470): buy = econ × `TraderInfo.BuyMarkup` (or `OverrideBuyMarkup`), sell = econ × `EconomicSellScale` × `SellMarkdown`; econ 0 = not purchasable. Loader parses `override_buy_markup`/`override_sell_markup` but nothing applies them. Client shows econ × markup while server charges econ/10 → displayed vs charged price desync (GAP_ANALYSIS "30x low buy, 10x low sell"). Fix: apply traders.xml markups + RE statics; econ 0 → fail closed. Do not move ratios to zdtd.toml (A, not B). |
 | A30 | trader `reset_interval` parsed-unused | P3 | **New 08-07** | `traders.zig` parses `reset_interval` (stock traders.xml: 1/3 days); `systems.zig:708 traderRestock` ignores it: flat zdtd policy (soft cap 50, +10 per restock, wallet to spawn default). Restock cadence should follow the XML interval; the 50/10 policy itself is Bucket B. |
-| A31 | loot respawn fallback `"woodenChest"` | P3 | **New 08-07** | `game.zig:9285 maybeRespawnContainer`: block with no `LootList` re-rolls to stock group name `"woodenChest"` instead of failing closed (empty container). Prefer skip / empty per "missing beats fake"; name string, not an id, so severity low. |
+| A31 | loot respawn fallback `"woodenChest"` | P3 | **Fixed** | `maybeRespawnContainer` + both initial-fill sites now fail closed: a storage block with no resolvable `LootList` stays empty instead of re-rolling `"woodenChest"` ("missing beats fake"). Scenario test covers both branches (LootList present → re-roll, absent → empty and untouched). |
 
 ### Loader inventory vs stock Config
 

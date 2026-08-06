@@ -2764,6 +2764,8 @@ test "scenario container loot respawns after LootRespawnDays" {
 
     // Loot it: empty slots, age the touch day past the interval, re-open; the
     // open must re-roll fresh loot (stock TEFeatureStorage.UpdateTick re-arms).
+    // Fail closed (audit A31): a block with no resolvable LootList stays empty.
+    const has_loot_list = g.maxdamage.lootListFor(chest_id) != null;
     cont.clear();
     cont.touched = true;
     cont.player_storage = false; // world container: eligible for respawn
@@ -2776,9 +2778,15 @@ test "scenario container loot respawns after LootRespawnDays" {
             break;
         }
     }
-    try std.testing.expect(refilled);
-    try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
-    std.debug.print("PASS loot-respawn: container re-rolled after LootRespawnDays\n", .{});
+    if (has_loot_list) {
+        try std.testing.expect(refilled);
+        try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
+    } else {
+        // Fail closed: the empty container stays empty and untouched.
+        try std.testing.expect(!refilled);
+        try std.testing.expectEqual(@as(u32, 0), cont.touched_day);
+    }
+    std.debug.print("PASS loot-respawn: container re-rolled after LootRespawnDays (fail-closed={s})\n", .{if (has_loot_list) "no" else "yes"});
 }
 
 test "scenario trader quest offers follow the trader's class" {

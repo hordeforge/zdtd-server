@@ -9215,7 +9215,11 @@ pub const Game = struct {
                     // World container (not player-placed): eligible for loot respawn.
                     cont.player_storage = false;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        self.fillContainerFromLoot(cont, self.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, y, wz));
+                        // Fail closed (audit A31): a storage block with no
+                        // LootList stays empty instead of inventing woodenChest.
+                        if (self.maxdamage.lootListFor(id)) |ll| {
+                            self.fillContainerFromLoot(cont, ll, lootSeedAt(wx, y, wz));
+                        }
                     }
                     found += 1;
                     if (found >= 32) return;
@@ -9240,7 +9244,10 @@ pub const Game = struct {
                     // World container (prefab TE, not player-placed).
                     cont.player_storage = false;
                     if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                        tc.g.fillContainerFromLoot(cont, tc.g.maxdamage.lootListFor(id) orelse "woodenChest", lootSeedAt(wx, wy, wz));
+                        // Fail closed (audit A31): no LootList, no invented loot.
+                        if (tc.g.maxdamage.lootListFor(id)) |ll| {
+                            tc.g.fillContainerFromLoot(cont, ll, lootSeedAt(wx, wy, wz));
+                        }
                     }
                     tc.found.* += 1;
                 }
@@ -9274,12 +9281,8 @@ pub const Game = struct {
     /// container re-rolls its contents when the interval since the touch day
     /// has elapsed. Player-placed storage never respawns. The next open
     /// regenerates fresh loot; the cycle-varying seed makes each respawn
-    /// differ while staying deterministic per (pos, cycle).
-    /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
-    /// container re-rolls its contents when the interval since the touch day
-    /// has elapsed. Player-placed storage never respawns. The next open
-    /// regenerates fresh loot; the cycle-varying seed makes each respawn
-    /// differ while staying deterministic per (pos, cycle).
+    /// differ while staying deterministic per (pos, cycle). A block without a
+    /// LootList stays empty (fail closed, audit A31), never woodenChest.
     fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
         if (self.loot_respawn_days == 0) return;
         if (cont.player_storage) return;
@@ -9302,9 +9305,11 @@ pub const Game = struct {
         const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
         const cycle: u32 = day / self.loot_respawn_days;
         const pos = cont.pos;
+        // Fail closed (audit A31): no LootList, the container stays empty.
+        const ll = self.maxdamage.lootListFor(id) orelse return;
         self.fillContainerFromLoot(
             cont,
-            self.maxdamage.lootListFor(id) orelse "woodenChest",
+            ll,
             lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
         );
     }
