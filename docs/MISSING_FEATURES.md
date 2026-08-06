@@ -32,7 +32,7 @@ This document is deliberately exhaustive. Status labels:
 | Terrain wire | stock Chunk.write + upper24 + DTM | dens residual, deco suppressed | full .ttc | POI textured; CGO green |
 | Prefab TTS | types + density/TE/water/texture planes | part_* skip policy | name remap if tables diverge | houses from real TTS |
 | Block world | columns + SetBlock + ZCH3 (.zch) + land claim | multi/meta depth | stability, falling | dig/build/persist |
-| Inventory / TE / loot | PDF, TE, workstation sim, loot ECD bag, InvTx | lock contention depth | RecipeQueue C2S beyond TE | chest/craft/loot work |
+| Inventory / TE / loot | PDF, TE, workstation RecipeQueue + craft complete, loot ECD bag, InvTx | lock contention depth | recipes.xml-driven queue validation | chest/craft/loot work |
 | Entity sim | ECD spawn, entityclasses/groups, animals, EAI 2-task, grid A* | AI task depth | navmesh, more EAI tasks | fight/loot visible |
 | Quests / traders | Quest.Write, multi-phase, TraderData v2, traderAlways | objective types, markup | dialog trees | journal + trade UI |
 | Vehicles / power / turrets | attach, gravity clamp, place+WireActions, BFS | fuel/SoC, actuation | multi-seat stock bodies | place/wire/drive first cut |
@@ -588,7 +588,7 @@ not stock:
 | Loot containers / `loot.xml` | HAVE (`assets/loot.zig`) |
 | Quality / mods / durability | PARTIAL (quality/meta persist; mods shallow) |
 | Stacking / bag size | PARTIAL (items.xml Stacknumber) |
-| Workstation / forge / chemistry | PARTIAL (TE type 12 + 2Hz burn/craft; see WIRE_WORKSTATION) |
+| Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see WIRE_WORKSTATION) |
 | Schematic unlocks | PARTIAL (always_unlocked recipe list on join) |
 | Trader buy against real item defs | PARTIAL (traderAlways + EconomicValue; group rolls deferred) |
 
@@ -745,7 +745,13 @@ Do not plan these as product features of zdtd:
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin/Rally wired; POIStayWithin and unmodelled types still auto, and quests.xml `<action>` elements are still unparsed).  
 5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
-6. Workstation RecipeQueue C2S depth (lock contention shipped).
+6. Workstation: the C2S/S2C body is now complete (fixed stock array lengths,
+   trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the craft tick
+   follows `HandleRecipeQueue`/`cycleRecipeQueue`. Remaining: the server trusts
+   the client's `Recipe` blob for output type/count/time instead of validating it
+   against `recipes.xml`, non-burning stations (workbench) do not advance
+   server-side because the Module gate is not on the wire, and no live-client
+   playtest has confirmed the forge UI end to end.
 
 ### P2: Multiplayer CPU (M11)
 Dirty bitsets, serialize-once interest, persistent thread pool, O(1) NetId map,

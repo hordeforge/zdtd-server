@@ -1349,3 +1349,127 @@ test "scenario guard policy: quarantine denies only the abused surface" {
     try std.testing.expectEqual(false, c.guard.quarantine.any());
     std.debug.print("PASS guard policy quarantine: no_damage only, damage C2S denied\n", .{});
 }
+
+test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock geometry" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_ws");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ws", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    const ws = @import("../world/workstations.zig");
+    const stock_te = packages.stock_te;
+    const stock_inv = packages.stock_inv;
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const wx: i32 = @intFromFloat(g.sim.transform[pa].x);
+    const wy: i32 = @intFromFloat(g.sim.transform[pa].y);
+    const wz: i32 = @intFromFloat(g.sim.transform[pa].z);
+
+    // Client write: full stock array lengths, fuel lit, one recipe queued in the
+    // active (last) slot with a Recipe blob, and an empty craft-complete list.
+    var recipe: [128]u8 = undefined;
+    var rw: @import("../wire/binary.zig").Writer = .{ .buf = &recipe };
+    const out_type = stock_inv.itemTypeFromIndex(7); // resourceWood
+    try rw.writeU16(1);
+    try rw.writeI32(out_type);
+    try rw.writeI32(2);
+    try rw.writeBool(false);
+    try rw.writeF32(1.0);
+    try rw.writeI32(9);
+    try rw.writeString("forge");
+    try rw.writeI32(0);
+
+    var fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
+    fuel[0] = .{ .type_id = out_type, .count = 4 };
+    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    var last_input_buf: [64]u8 = undefined;
+    var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
+    for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
+    const melt = [_]f32{0} ** ws.stock_melt_len;
+    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    queue[queue.len - 1] = .{
+        .multiplier = 2,
+        .is_crafting = true,
+        .craft_time_left = 0.2,
+        .one_item_craft_time = 1.0,
+        .starting_entity_id = ca.entity_id,
+        .output_type = out_type,
+        .output_count = 2,
+        .craft_exp_gain = 9,
+    };
+    queue[queue.len - 1].setRecipeBlob(rw.written());
+
+    var body: [4096]u8 = undefined;
+    const c2s = try stock_te.buildWorkstationTeBody(&body, 3, wx, wy, wz, 1301, .{
+        .fuel = fuel[0..],
+        .input = input[0..],
+        .tools = tools[0..],
+        .output = output[0..],
+        .last_input_count = ws.stock_last_input_len,
+        .last_input = liw.written(),
+        .queue = queue[0..],
+        .melt = melt[0..],
+        .is_burning = true,
+        .burn_time_left = 30,
+    });
+    var fb: [4096]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageTileEntity", c2s));
+
+    const st = g.workstations.get(wx, wy, wz).?;
+    try std.testing.expect(st.geometry_known);
+    try std.testing.expectEqual(@as(i32, 1301), st.block_id);
+    try std.testing.expectEqual(ws.stock_queue_len, st.queue_len);
+    try std.testing.expectEqual(ws.stock_output_len, st.output_len);
+    try std.testing.expect(st.queue[st.queue_len - 1].recipeBlob().len > 0);
+
+    // Craft tick: the active entry finishes one item and queues a record.
+    cap_b.clear(); // isolate the S2C dirty broadcast from the raw C2S echo
+    try g.tickWorkstations(0.5);
+    try std.testing.expectEqual(@as(i16, 1), st.queue[st.queue_len - 1].multiplier);
+    try std.testing.expectEqual(@as(u8, 1), st.craft_complete_n);
+    try std.testing.expectEqual(ca.entity_id, st.craft_complete[0].crafter_entity_id);
+
+    // The S2C echo B receives must decode at the same array lengths, still carry
+    // the recipe blob and the craft-complete record, and drain exactly.
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    const echo = cap_b.findPkgId(te_id).?;
+    const p = try stock_te.parseWorkstationTeBody(echo);
+    try std.testing.expectEqual(ws.stock_fuel_len, p.fuel_n);
+    try std.testing.expectEqual(ws.stock_output_len, p.output_n);
+    try std.testing.expectEqual(ws.stock_last_input_len, p.last_input_n);
+    try std.testing.expectEqual(ws.stock_queue_len, p.queue_n);
+    try std.testing.expectEqual(ws.stock_melt_len, p.melt_n);
+    try std.testing.expectEqual(@as(i32, 1301), p.block_id);
+    try std.testing.expect(p.queue[p.queue_n - 1].recipeBlob().len > 0);
+    try std.testing.expectEqual(@as(u8, 1), p.craft_complete_n);
+    try std.testing.expectEqual(@as(i32, 9), p.craft_complete[0].exp_gain);
+
+    // The next client write acknowledges consumption by returning a trimmed list.
+    const ack = try stock_te.buildWorkstationTeBody(&body, 4, wx, wy, wz, 1301, .{
+        .fuel = fuel[0..],
+        .input = input[0..],
+        .tools = tools[0..],
+        .output = output[0..],
+        .last_input_count = ws.stock_last_input_len,
+        .last_input = liw.written(),
+        .queue = queue[0..],
+        .melt = melt[0..],
+        .is_burning = true,
+        .burn_time_left = 29,
+    });
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageTileEntity", ack));
+    try std.testing.expectEqual(@as(u8, 0), st.craft_complete_n);
+
+    std.debug.print("PASS workstation: queue depth {d}, craft complete acknowledged\n", .{st.queue_len});
+}

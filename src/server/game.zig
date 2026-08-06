@@ -4233,10 +4233,28 @@ pub const Game = struct {
                     applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
                     applyWsGroup(self, st.tools[0..], ws.tools[0..ws.tools_n]);
                     applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
-                    st.queue_n = ws.queue_n;
+                    @memcpy(st.last_input[0..ws.last_input_blob_len], ws.last_input[0..ws.last_input_blob_len]);
+                    st.last_input_blob_len = ws.last_input_blob_len;
                     @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
+                    @memcpy(st.melt[0..ws.melt_n], ws.melt[0..ws.melt_n]);
+                    // The client returns the craft-complete entries its
+                    // CheckForCraftComplete has not consumed: that list is the
+                    // acknowledgement, so it replaces ours wholesale.
+                    st.setCraftComplete(ws.craft_complete[0..ws.craft_complete_n]);
+                    // Array lengths are the client's, never a used prefix: the
+                    // echo must send them back unchanged or its grids resize.
+                    st.fuel_len = ws.fuel_n;
+                    st.input_len = ws.input_n;
+                    st.tools_len = ws.tools_n;
+                    st.output_len = ws.output_n;
+                    st.last_input_len = ws.last_input_n;
+                    st.queue_len = ws.queue_n;
+                    st.melt_len = ws.melt_n;
                     st.is_burning = ws.is_burning;
                     st.burn_time_left = ws.burn_time_left;
+                    st.is_player_placed = ws.is_player_placed;
+                    st.block_id = ws.block_id;
+                    st.geometry_known = true;
                     st.dirty = false;
                 }
                 try self.broadcastNear(
@@ -4820,6 +4838,7 @@ pub const Game = struct {
                                 const z = tr.readI32() catch break;
                                 if (ty == 1) tr.skipString() catch {};
                                 try self.sendStorageTe(peer, x, y, z);
+                                try self.sendWorkstationTe(peer, x, y, z);
                             } else if (ty == 2) {
                                 _ = tr.readI32() catch break;
                             } else if (ty == 3) {
@@ -6214,6 +6233,24 @@ pub const Game = struct {
         return g.items.ecsIdFromStockType(stock_type);
     }
 
+    /// Workstation craft output: sim item plus the name the client derives from
+    /// `Recipe::GetName()`, i.e. the output ItemClass name (asm.il ~274245).
+    /// The name only feeds the client's `_craftCount_` XP scaling, so an unknown
+    /// type still crafts, just without a per-recipe counter.
+    fn resolveWorkstationOutput(ctx: ?*anyopaque, stock_type: i32) workstations_mod.ResolvedOutput {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        var out: workstations_mod.ResolvedOutput = .{ .item_id = g.items.ecsIdFromStockType(stock_type) };
+        for (g.items.stock_types, 0..) |st, i| {
+            if (st != stock_type or i >= g.items.stock_names.len) continue;
+            out.stock_name = g.items.stock_names[i];
+            return out;
+        }
+        if (out.item_id != 0) {
+            if (assets_items.builtinStockName(out.item_id)) |sn| out.stock_name = sn;
+        }
+        return out;
+    }
+
     fn buildInventorySnap(self: *Game, c: *Client, buf: []u8) ![]u8 {
         const ps = self.sim.playerByPeer(c.slot) orelse return error.NoPlayer;
         if (!self.sim.mask[ps].inventory) return error.NoInv;
@@ -6416,50 +6453,62 @@ pub const Game = struct {
         return 0;
     }
 
-    fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) usize {
-        var n: usize = 0;
-        for (src, 0..) |s, i| {
-            dst[i] = if (s.count > 0 and s.item_id != 0) .{
+    fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
+        for (dst, src) |*d, s| {
+            d.* = if (s.count > 0 and s.item_id != 0) .{
                 .type_id = resolveItemType(@ptrCast(self), s.item_id),
                 .count = s.count,
                 .quality = s.quality,
                 .meta = s.meta,
             } else .{};
-            if (s.count > 0) n = i + 1;
         }
-        return n;
+    }
+
+    /// Encode one workstation's authoritative state at its client-declared array
+    /// lengths. `te_block_id` comes from the client's own write: ProcessPackage
+    /// drops the package when it disagrees with the block it finds (asm.il ~842882).
+    fn buildWorkstationBody(self: *Game, w: *const workstations_mod.Workstation, buf: []u8) ![]u8 {
+        var fuel: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
+        var input: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
+        var tools: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
+        var output: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
+        self.wsGroupToStock(fuel[0..w.fuel_len], w.fuel[0..w.fuel_len]);
+        self.wsGroupToStock(input[0..w.input_len], w.input[0..w.input_len]);
+        self.wsGroupToStock(tools[0..w.tools_len], w.tools[0..w.tools_len]);
+        self.wsGroupToStock(output[0..w.output_len], w.output[0..w.output_len]);
+        return stock_te.buildWorkstationTeBody(buf, 255, w.x, w.y, w.z, w.block_id, .{
+            .fuel = fuel[0..w.fuel_len],
+            .input = input[0..w.input_len],
+            .tools = tools[0..w.tools_len],
+            .output = output[0..w.output_len],
+            .last_input_count = w.last_input_len,
+            .last_input = w.last_input[0..w.last_input_blob_len],
+            .queue = w.queue[0..w.queue_len],
+            .craft_complete = w.craft_complete[0..w.craft_complete_n],
+            .melt = w.melt[0..w.melt_len],
+            .is_burning = w.is_burning,
+            .burn_time_left = w.burn_time_left,
+            .is_player_placed = w.is_player_placed,
+        });
+    }
+
+    /// One workstation step: burn/craft, then re-broadcast the stations it changed.
+    pub fn tickWorkstations(self: *Game, dt: f32) !void {
+        self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self);
+        try self.broadcastDirtyWorkstations();
     }
 
     fn broadcastDirtyWorkstations(self: *Game) !void {
         for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
             if (!u or !w.dirty) continue;
+            // Nothing is sent before a client write has told us the real array
+            // lengths: a guessed count resizes the client's grids.
+            if (!w.geometry_known) {
+                w.dirty = false;
+                continue;
+            }
             // Keep dirty until encode+broadcast succeed so a failed send retries next tick.
-            var fuel: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-            var input: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-            var tools: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-            var output: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-            const fn_ = self.wsGroupToStock(fuel[0..], w.fuel[0..]);
-            const in_ = self.wsGroupToStock(input[0..], w.input[0..]);
-            const tn_ = self.wsGroupToStock(tools[0..], w.tools[0..]);
-            const on_ = self.wsGroupToStock(output[0..], w.output[0..]);
-            const te_block_id: i32 = @intCast(self.blockIdAtWorld(w.x, w.y, w.z));
-            const body = stock_te.buildWorkstationTeBody(
-                self.body_buf[8192..16384],
-                255,
-                w.x,
-                w.y,
-                w.z,
-                te_block_id,
-                .{
-                    .fuel = fuel[0..fn_],
-                    .input = input[0..in_],
-                    .tools = tools[0..tn_],
-                    .output = output[0..on_],
-                    .queue = w.queue[0..w.queue_n],
-                    .is_burning = w.is_burning,
-                    .burn_time_left = w.burn_time_left,
-                },
-            ) catch |err| {
+            const body = self.buildWorkstationBody(w, self.body_buf[8192..16384]) catch |err| {
                 self.harness.counters.inc(.encode_errors);
                 std.debug.print(
                     "zdtd: workstation TE encode failed at ({d},{d},{d}): {s}\n",
@@ -6483,6 +6532,14 @@ pub const Game = struct {
             };
             w.dirty = false;
         }
+    }
+
+    /// Push a workstation's authoritative state to one peer (lock/open path).
+    pub fn sendWorkstationTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
+        const w = self.workstations.get(x, y, z) orelse return;
+        if (!w.geometry_known) return;
+        const body = try self.buildWorkstationBody(w, self.body_buf[8192..16384]);
+        try self.sendGame(peer, "NetPackageTileEntity", body);
     }
 
     fn applyWsGroup(self: *Game, dst: []ecs.components.InvSlot, src: []const packages.stock_inv.StockSlot) void {
@@ -7603,8 +7660,7 @@ pub const Game = struct {
             }
             // Workstation burn/craft at 2Hz; dirty stations re-broadcast state.
             if (self.tick_n % 10 == 0) {
-                self.workstations.tickAllResolved(0.5, reverseItemType, self);
-                self.broadcastDirtyWorkstations() catch |err| {
+                self.tickWorkstations(0.5) catch |err| {
                     self.harness.counters.inc(.net_send_errors);
                     std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
                 };
