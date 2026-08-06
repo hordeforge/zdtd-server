@@ -217,9 +217,28 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
 - *Trigger/timer/toggle actuation*: PARTIAL. PressurePlate / TripWire /
   MotionSensor / Trigger are `is_trigger` gates: BFS powers the plate when
   wired, but does not flood past until `activateTriggerAt` (player step via
-  `noteAcceptedMove`) sets `pulse_left` for `default_trigger_pulse_s`. Timer
-  nodes still use `armTimer` periodic toggle. Gaps: Switch / ConsumerToggle
-  interact C2S, stock TE ClientTriggerData wire, multi-parent directed edges.
+  `noteAcceptedMove`) opens it. The gate now honours the trigger's stock
+  `TriggerPowerDelay` / `TriggerPowerDuration` (`triggerDelaySeconds` /
+  `triggerDurationSeconds`, asm.il:900414 and 900579): Always latches until a
+  reset, a numeric duration holds for its seconds, and Triggered still falls
+  back to `default_trigger_pulse_s` because zdtd has no "contact released"
+  event. Class=Switch / ConsumerToggle register as `is_switch` gates driven by
+  BlockValue meta bit 0x2, which arrives on the SetBlock path
+  (`BlockSwitch::updateState` -> `SetBlockRPC`, asm.il:136663), not as a TE
+  payload. Grid state goes back out as zdtd's `Block::ActivateBlock` equivalent:
+  an edge-triggered `NetPackageSetBlock` rewriting meta bit 0x1 (isPowered) and
+  0x2 (isOn) per node (asm.il:127088 / 137044 / 1323820). The
+  TileEntityPoweredTrigger ClientTriggerData payload is encoded and decoded in
+  `wire/stock_te.zig` (both directions, asm.il:1325813 / 1326015).
+  Gaps: `PowerTimerRelay` StartTime/EndTime hour semantics (Property1/Property2
+  are carried but a TimerRelay still runs on the old `armTimer` period), Motion
+  sensor ownerID and TargetTypes filtering (TargetType is parsed and echoed, not
+  enforced), multi-parent directed edges, and the S2C TE leg only lands where
+  the client already holds a TileEntity: zdtd streams chunks with tile-entity
+  count 0 (`stock_chunk.zig`), and `NetPackageTileEntity::ProcessPackage`
+  (asm.il:842860) drops an update for a position with no TileEntity. That leg is
+  unverified against a live client; the SetBlock/meta legs are the ones that
+  render today.
 - *RemoveParent precision*: stock removes exactly the child→parent edge
   (`PowerItem.RemoveSelfFromParent`, asm.il:843033). zdtd wires are undirected,
   so `removeParentAt` drops all edges incident to the node. Matches the common
@@ -728,7 +747,7 @@ Do not plan these as product features of zdtd:
 2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
-5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
+5. Power: trigger TE wire (shipped: Switch meta gate on SetBlock, delay/duration from ClientTriggerData, edge-triggered meta broadcast of grid state). Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a live-client playtest of the S2C TE leg (needs tile entities in the chunk stream).  
 6. Workstation RecipeQueue C2S depth (lock contention shipped).
 
 ### P2: Multiplayer CPU (M11)

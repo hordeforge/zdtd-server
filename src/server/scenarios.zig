@@ -193,6 +193,102 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_switch");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_switch", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const switch_id = g.maxdamage.idByName("switch") orelse return error.SkipZigTest;
+    try std.testing.expect(g.power_registry.lookup(switch_id) != null);
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    var sb: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const place = try packages.buildSetBlockBody(&sb, 250, 70, 251, switch_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+    const ni = g.sim.power.indexOfPosition(250, 70, 251) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.nodes[ni].is_switch);
+    // A freshly placed switch is latched off: block meta 0 and grid agree.
+    try std.testing.expect(!g.sim.power.nodes[ni].on);
+
+    // Flip it: BlockSwitch::updateState sets meta bit 0x2 and SetBlockRPCs the
+    // whole BlockValue, so the wire flags are bChangeBlockValue|bUpdateLight.
+    const raw_on = packages.withBlockMeta(@as(u32, switch_id), packages.block_meta_on);
+    const flip = try packages.buildSetBlockBodyRaw(&sb, 250, 70, 251, raw_on, 0, ca.entity_id, ca.entity_id);
+    flip[20] = 0x11;
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", flip));
+    try std.testing.expect(g.sim.power.nodes[ni].on);
+
+    // The echo must carry the meta back, or every client snaps the switch off.
+    const sb_id = packages.idOf("NetPackageSetBlock").?;
+    const echo = cap_b.findPkgId(sb_id) orelse return error.TestUnexpectedResult;
+    var one: [1]packages.BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 1), try packages.parseSetBlockChanges(echo, one[0..]));
+    try std.testing.expectEqual(switch_id, one[0].block_id);
+    try std.testing.expectEqual(packages.block_meta_on, packages.blockMeta(one[0].raw) & packages.block_meta_on);
+
+    // Flipping back closes the gate again.
+    const raw_off = packages.withBlockMeta(@as(u32, switch_id), 0);
+    const unflip = try packages.buildSetBlockBodyRaw(&sb, 250, 70, 251, raw_off, 0, ca.entity_id, ca.entity_id);
+    unflip[20] = 0x11;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", unflip));
+    try std.testing.expect(!g.sim.power.nodes[ni].on);
+    std.debug.print("PASS power-switch: meta flip drives the grid latch and survives the echo\n", .{});
+}
+
+test "scenario powered trigger TE: malformed body leaves containers alone" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_trigger");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trigger", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+
+    // Seed a real chest so a permissive trigger parser would have something to
+    // corrupt if it ever swallowed a storage payload.
+    const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
+    var sb: [64]u8 = undefined;
+    var frame_buf: [8192]u8 = undefined;
+    const place = try packages.buildSetBlockBody(&sb, 251, 70, 251, chest_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+    const cont = g.containers.get(.{ .x = 251, .y = 70, .z = 251 }) orelse return error.TestUnexpectedResult;
+    const slots_before = cont.slot_count;
+    const nodes_before = g.sim.power.node_n;
+
+    // Truncated and nonsense TE payloads must both fall through to the drop.
+    const bad = [_][]const u8{
+        &.{},
+        &.{ 255, 1, 0, 0, 0 },
+        &.{ 255, 251, 0, 0, 0, 70, 0, 0, 0, 251, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 9, 9, 9, 9 },
+    };
+    for (bad) |body| {
+        try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+    }
+    const after = g.containers.get(.{ .x = 251, .y = 70, .z = 251 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(slots_before, after.slot_count);
+    try std.testing.expectEqual(nodes_before, g.sim.power.node_n);
+    std.debug.print("PASS powered-trigger-te: malformed payloads dropped, chest untouched\n", .{});
+}
+
 test "scenario persist: block write, process restart, read-back, rejoin" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

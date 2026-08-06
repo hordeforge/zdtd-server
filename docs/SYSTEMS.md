@@ -72,7 +72,13 @@ Join-stable prefix plus large stock name list in `packages.default_mappings`
 - Nodes: generator, battery, relay, consumer
 - Undirected wires; BFS power flood from generators
 - Overload: consumers unpowered when load > generation
+- Gates: `is_trigger` plates open on player step for their stock
+  TriggerPowerDelay/Duration; `is_switch` blocks open while latched on
 - Wire: `NetPackageWireActions` / `WireToolActions` (connect, toggle, add node)
+- Wire: `NetPackageTileEntity` carries TileEntityPoweredTrigger ClientTriggerData
+  (delay/duration/reset in, authoritative state out)
+- Wire: grid state reaches clients as edge-triggered `NetPackageSetBlock` bodies
+  rewriting BlockValue meta bit 0x1 (isPowered) and 0x2 (isOn)
 
 ## Turrets (`Turret` component + `systemTurrets`)
 

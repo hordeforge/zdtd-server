@@ -10,6 +10,34 @@ pub const max_node_watts: f32 = 100_000;
 /// Pressure plate / tripwire pulse duration (seconds). ~10 ticks at 20 TPS.
 pub const default_trigger_pulse_s: f32 = 0.5;
 
+/// Stock PowerTrigger/TriggerPowerDelayTypes -> seconds. The enum is Instant=0
+/// then OneSecond..FiveSecond, and set_IsTriggered stores the index verbatim as
+/// delayStartTime (asm.il:900414, switch at IL_0112). Out of range = Instant.
+pub fn triggerDelaySeconds(idx: u8) f32 {
+    return if (idx <= 5) @floatFromInt(idx) else 0;
+}
+
+/// Stock PowerTrigger/TriggerPowerDurationTypes -> seconds, from
+/// PowerTrigger::SetupDurationTime (asm.il:900579). Always yields -1 (hold until
+/// something else clears it) and Triggered yields 0 (hold only while the sensor
+/// reports contact); both are sentinels, not durations. Out of range = Triggered.
+pub fn triggerDurationSeconds(idx: u8) f32 {
+    return switch (idx) {
+        0 => -1, // Always
+        1 => 0, // Triggered
+        2...11 => @floatFromInt(idx - 1), // OneSecond .. TenSecond
+        12 => 15,
+        13 => 30,
+        14 => 45,
+        15 => 60,
+        16 => 300,
+        17 => 600,
+        18 => 1800,
+        19 => 3600,
+        else => 0,
+    };
+}
+
 pub const NodeKind = enum(u8) {
     generator = 0,
     battery = 1,
@@ -43,9 +71,36 @@ pub const PowerNode = struct {
     solar: bool = false,
     /// PressurePlate / TripWire / MotionSensor / Trigger: step actuation.
     is_trigger: bool = false,
+    /// Switch / ConsumerToggle: gate the player latches by hand (`on` is the latch).
+    is_switch: bool = false,
     /// Seconds of active trigger pulse remaining (0 = idle).
     pulse_left: f32 = 0,
+    /// Trigger gate held open with no pulse (stock TriggerPowerDuration.Always).
+    latched: bool = false,
+    /// TriggerPowerDelay: seconds still to wait before an actuation opens the gate.
+    delay_left: f32 = 0,
+    /// Stock TriggerPowerDelay index (0 = Instant). Kept as the wire index rather
+    /// than seconds so the ToClient TE echo needs no lossy inverse mapping.
+    delay_idx: u8 = 0,
+    /// Stock TriggerPowerDuration index. Default 1 = Triggered, which maps to the
+    /// fixed contact pulse zdtd uses for a plate with no configured duration.
+    duration_idx: u8 = 1,
+    /// Last on/powered pair echoed to clients as block meta, and whether one was
+    /// ever sent. Lives on the node because removeAt swaps the tail node into a
+    /// freed slot, so any index-keyed side table would follow the wrong block.
+    net_on: bool = false,
+    net_powered: bool = false,
+    net_synced: bool = false,
 };
+
+/// Block meta bit 0x2 (isOn) for a node: the switch latch, a trigger's open gate,
+/// or plain "powered" for everything else (Block::ActivateBlock is called with
+/// (IsPowered, IsPowered) for non-triggers, asm.il:1323820).
+pub fn nodeIsOn(n: PowerNode) bool {
+    if (n.is_switch) return n.on;
+    if (n.is_trigger) return n.latched or n.pulse_left > 0;
+    return n.powered;
+}
 
 pub const Wire = struct {
     a: u16 = 0,
@@ -130,8 +185,8 @@ pub const PowerGrid = struct {
     }
 
     /// Actuate a pressure plate / tripwire at world position. Fail closed: requires an
-    /// `is_trigger` node that is already powered (wired to a live generator). Starts a
-    /// pulse so BFS floods past the gate for `default_trigger_pulse_s`.
+    /// `is_trigger` node that is already powered (wired to a live generator). Opens the
+    /// gate for the node's configured TriggerPowerDuration, after its TriggerPowerDelay.
     /// Returns false if no trigger, unpowered, or missing node.
     pub fn activateTriggerAt(self: *PowerGrid, x: i32, y: i32, z: i32) bool {
         const i = self.indexOfPosition(x, y, z) orelse return false;
@@ -139,7 +194,64 @@ pub const PowerGrid = struct {
         // Ensure connectivity is current before the powered gate.
         self.resolve();
         if (!self.nodes[i].powered) return false;
-        self.nodes[i].pulse_left = default_trigger_pulse_s;
+        // Stock arms delayStartTime on the rising edge only and ignores repeat
+        // contact until it elapses (asm.il:900414 IL_00d7).
+        const delay = triggerDelaySeconds(self.nodes[i].delay_idx);
+        if (delay > 0 and self.nodes[i].pulse_left <= 0 and !self.nodes[i].latched) {
+            if (self.nodes[i].delay_left <= 0) self.nodes[i].delay_left = delay;
+            return true;
+        }
+        self.openTriggerGate(i);
+        self.resolve();
+        return true;
+    }
+
+    /// Open a trigger's gate for its configured duration. The stock sentinels
+    /// decide the shape: Always (-1) latches until reset, Triggered (0) has no
+    /// "released" event in zdtd so it falls back to the fixed contact pulse.
+    fn openTriggerGate(self: *PowerGrid, i: usize) void {
+        var n = &self.nodes[i];
+        n.delay_left = 0;
+        const duration = triggerDurationSeconds(n.duration_idx);
+        if (duration < 0) {
+            n.latched = true;
+            n.pulse_left = 0;
+        } else {
+            n.pulse_left = if (duration > 0) duration else default_trigger_pulse_s;
+        }
+    }
+
+    /// Apply a client's ClientTriggerData delay/duration pair (stock enum indices)
+    /// to the trigger at a position. Returns false when the cell holds no trigger.
+    pub fn setTriggerConfigAt(self: *PowerGrid, x: i32, y: i32, z: i32, delay_idx: u8, duration_idx: u8) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (!self.nodes[i].is_trigger) return false;
+        self.nodes[i].delay_idx = delay_idx;
+        self.nodes[i].duration_idx = duration_idx;
+        return true;
+    }
+
+    /// Stock PowerTrigger::ResetTrigger: drop the active pulse/latch so the gate
+    /// closes now. Returns false when the cell holds no trigger.
+    pub fn resetTriggerAt(self: *PowerGrid, x: i32, y: i32, z: i32) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (!self.nodes[i].is_trigger) return false;
+        self.nodes[i].pulse_left = 0;
+        self.nodes[i].latched = false;
+        self.nodes[i].delay_left = 0;
+        self.resolve();
+        return true;
+    }
+
+    /// Latch or unlatch the switch at a position (BlockSwitch meta bit 0x2).
+    /// Fail closed like activateTriggerAt: the cell must hold a switch node.
+    /// Returns true only when the latch actually flipped, so callers can
+    /// edge-trigger their re-resolve and S2C echo.
+    pub fn setSwitchAt(self: *PowerGrid, x: i32, y: i32, z: i32, on: bool) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (!self.nodes[i].is_switch) return false;
+        if (self.nodes[i].on == on) return false;
+        self.nodes[i].on = on;
         self.resolve();
         return true;
     }
@@ -249,7 +361,18 @@ pub const PowerGrid = struct {
                 }
             }
         }
-        // 5) Trigger pulses: count down; expire clears signal path (re-resolve).
+        // 5) Trigger delay: an armed plate opens its gate once the delay elapses.
+        i = 0;
+        while (i < self.node_n) : (i += 1) {
+            var n = &self.nodes[i];
+            if (n.delay_left <= 0) continue;
+            n.delay_left -= dt;
+            if (n.delay_left <= 0) {
+                self.openTriggerGate(i);
+                dirty = true;
+            }
+        }
+        // 6) Trigger pulses: count down; expire clears signal path (re-resolve).
         i = 0;
         while (i < self.node_n) : (i += 1) {
             var n = &self.nodes[i];
@@ -465,9 +588,13 @@ pub const PowerGrid = struct {
         while (qh < qt) {
             const u: u16 = @intCast(queue[qh]);
             qh += 1;
-            // Trigger gates: only flood past the plate while a pulse is active.
-            // The trigger node itself stays powered (visited when enqueued).
-            if (self.nodes[u].is_trigger and self.nodes[u].pulse_left <= 0) continue;
+            // Trigger gates: only flood past the plate while a pulse (or an
+            // Always latch) holds. The gate node itself stays powered (visited
+            // when enqueued), which is what lights its meta bit 0x1 on clients.
+            if (self.nodes[u].is_trigger and self.nodes[u].pulse_left <= 0 and !self.nodes[u].latched) continue;
+            // Switch gates: a relay-kind switch is always reachable so the client
+            // still sees it powered, but it only passes power while latched on.
+            if (self.nodes[u].is_switch and !self.nodes[u].on) continue;
             for (adj[adj_start[u]..adj_start[u + 1]]) |other| {
                 const oi: usize = other;
                 if (visited[oi]) continue;
@@ -815,4 +942,104 @@ test "activateTriggerAt fails closed without trigger or power" {
     const plate = g.addNodeAt(.consumer, 4, 70, 4, 1).?;
     g.nodes[g.indexOfId(plate).?].is_trigger = true;
     try std.testing.expect(!g.activateTriggerAt(4, 70, 4));
+}
+
+test "trigger delay and duration map to stock seconds" {
+    // TriggerPowerDelayTypes: Instant then one second per index.
+    try std.testing.expectEqual(@as(f32, 0), triggerDelaySeconds(0));
+    try std.testing.expectEqual(@as(f32, 5), triggerDelaySeconds(5));
+    try std.testing.expectEqual(@as(f32, 0), triggerDelaySeconds(6));
+    try std.testing.expectEqual(@as(f32, 0), triggerDelaySeconds(255));
+    // TriggerPowerDurationTypes: Always/Triggered sentinels then real seconds.
+    try std.testing.expectEqual(@as(f32, -1), triggerDurationSeconds(0));
+    try std.testing.expectEqual(@as(f32, 0), triggerDurationSeconds(1));
+    try std.testing.expectEqual(@as(f32, 1), triggerDurationSeconds(2));
+    try std.testing.expectEqual(@as(f32, 10), triggerDurationSeconds(11));
+    try std.testing.expectEqual(@as(f32, 45), triggerDurationSeconds(14));
+    try std.testing.expectEqual(@as(f32, 3600), triggerDurationSeconds(19));
+    try std.testing.expectEqual(@as(f32, 0), triggerDurationSeconds(20));
+    try std.testing.expectEqual(@as(f32, 0), triggerDurationSeconds(255));
+}
+
+test "configured trigger duration and delay drive the gate" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const plate = g.addNodeAt(.consumer, 2, 70, 0, 1).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    g.nodes[g.indexOfId(plate).?].is_trigger = true;
+    try std.testing.expect(g.connect(gen, plate));
+    try std.testing.expect(g.connect(plate, load));
+    // ThreeSecond duration (index 4) outlives the default 0.5s pulse.
+    try std.testing.expect(g.setTriggerConfigAt(2, 70, 0, 0, 4));
+    try std.testing.expect(g.activateTriggerAt(2, 70, 0));
+    _ = g.tick(default_trigger_pulse_s + 0.1, true);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    _ = g.tick(3.0, true);
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    // Always duration (index 0) latches until an explicit reset.
+    try std.testing.expect(g.setTriggerConfigAt(2, 70, 0, 0, 0));
+    try std.testing.expect(g.activateTriggerAt(2, 70, 0));
+    _ = g.tick(60.0, true);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    try std.testing.expect(g.resetTriggerAt(2, 70, 0));
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    // TwoSecond delay (index 2) holds the gate shut until it elapses.
+    try std.testing.expect(g.setTriggerConfigAt(2, 70, 0, 2, 4));
+    try std.testing.expect(g.activateTriggerAt(2, 70, 0));
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    _ = g.tick(2.1, true);
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "setTriggerConfigAt and resetTriggerAt fail closed off a trigger" {
+    var g: PowerGrid = .{};
+    try std.testing.expect(!g.setTriggerConfigAt(1, 2, 3, 0, 0));
+    try std.testing.expect(!g.resetTriggerAt(1, 2, 3));
+    _ = g.addNodeAt(.consumer, 1, 70, 1, 10).?;
+    try std.testing.expect(!g.setTriggerConfigAt(1, 70, 1, 0, 0));
+    try std.testing.expect(!g.resetTriggerAt(1, 70, 1));
+}
+
+test "switch gates downstream power and reports flips once" {
+    var g: PowerGrid = .{};
+    const gen = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const sw = g.addNodeAt(.relay, 2, 70, 0, 0).?;
+    const load = g.addNodeAt(.consumer, 5, 70, 0, 40).?;
+    const si = g.indexOfId(sw).?;
+    g.nodes[si].is_switch = true;
+    g.nodes[si].on = false;
+    try std.testing.expect(g.connect(gen, sw));
+    try std.testing.expect(g.connect(sw, load));
+    g.resolve();
+    // Off switch is still powered (client sees meta bit 0x1) but passes nothing.
+    try std.testing.expect(g.nodes[si].powered);
+    try std.testing.expect(!nodeIsOn(g.nodes[si]));
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+    try std.testing.expect(g.setSwitchAt(2, 70, 0, true));
+    try std.testing.expect(nodeIsOn(g.nodes[si]));
+    try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
+    // Idempotent: no flip, no work for the caller to echo.
+    try std.testing.expect(!g.setSwitchAt(2, 70, 0, true));
+    try std.testing.expect(g.setSwitchAt(2, 70, 0, false));
+    try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
+}
+
+test "setSwitchAt fails closed off a switch cell" {
+    var g: PowerGrid = .{};
+    try std.testing.expect(!g.setSwitchAt(1, 2, 3, true));
+    _ = g.addNodeAt(.consumer, 1, 70, 1, 10).?;
+    try std.testing.expect(!g.setSwitchAt(1, 70, 1, false));
+}
+
+test "nodeIsOn mirrors Block::ActivateBlock isOn per node class" {
+    // Plain powered block: isOn tracks isPowered.
+    try std.testing.expect(nodeIsOn(.{ .kind = .consumer, .powered = true }));
+    try std.testing.expect(!nodeIsOn(.{ .kind = .consumer, .powered = false }));
+    // Trigger: isOn is the open gate, not the feed.
+    try std.testing.expect(!nodeIsOn(.{ .is_trigger = true, .powered = true }));
+    try std.testing.expect(nodeIsOn(.{ .is_trigger = true, .powered = true, .pulse_left = 0.1 }));
+    try std.testing.expect(nodeIsOn(.{ .is_trigger = true, .powered = true, .latched = true }));
+    // Switch: isOn is the latch, independent of the feed.
+    try std.testing.expect(nodeIsOn(.{ .is_switch = true, .on = true, .powered = false }));
+    try std.testing.expect(!nodeIsOn(.{ .is_switch = true, .on = false, .powered = true }));
 }

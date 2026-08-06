@@ -1130,11 +1130,35 @@ pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32
 /// Minimal BlockChangeInfo: BlockValueRef(pos) + entityId + flags + BlockValue.
 /// BlockValue: u32 rawData (type in low 16 bits) + u16 damage.
 /// BlockValueRef type 1 = world position Vector3i.
+/// BlockChangeInfo::Write flag bits (asm.il:1100162). Only value/density/texture
+/// carry payload bytes; damage/forceDensity/updateLight are pure booleans that
+/// change how the receiver applies the change, so a reader that rejects them
+/// drops perfectly ordinary stock edits. WorldBase::SetBlockRPC(bvRef, bv)
+/// (asm.il:1248595) always sets bUpdateLight, so a plain block flip is 0x11.
 const block_change_flag_value: u8 = 1; // bChangeBlockValue
+const block_change_flag_damage: u8 = 2; // bChangeDamage (damage rides in BlockValue)
 const block_change_flag_density: u8 = 4; // bChangeDensity (sbyte)
+const block_change_flag_force_density: u8 = 8; // bForceDensity (no payload)
+const block_change_flag_update_light: u8 = 0x10; // bUpdateLight (no payload)
 const block_change_flag_texture: u8 = 0x20; // bChangeTexture (TextureFullArray)
 const block_change_flags_known: u8 =
-    block_change_flag_value | block_change_flag_density | block_change_flag_texture;
+    block_change_flag_value | block_change_flag_damage | block_change_flag_density |
+    block_change_flag_force_density | block_change_flag_update_light | block_change_flag_texture;
+
+/// BlockValue.meta lives in rawData bits 22..25 (asm.il:140570 get_meta).
+/// Powered blocks carry their visual state there: bit 0x1 = isPowered,
+/// bit 0x2 = isOn (Block::ActivateBlock, asm.il:127088 / 137044).
+pub const block_meta_powered: u8 = 1;
+pub const block_meta_on: u8 = 2;
+
+pub fn blockMeta(raw: u32) u8 {
+    return @truncate((raw >> 22) & 15);
+}
+
+/// BlockValue::set_meta: clear bits 22..25 then splice the low nibble back in.
+pub fn withBlockMeta(raw: u32, meta: u8) u32 {
+    return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
+}
 
 /// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
@@ -1164,6 +1188,23 @@ pub fn buildSetBlockBodyDamage(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
+    return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), damage, changed_by_entity, local_player_that_changed);
+}
+
+/// Authoritative SetBlock carrying the whole BlockValue.rawData. Callers that
+/// echo a mutated block must use this, not the id-only form: rotation and meta
+/// live above the low 16 bits (asm.il:141018 BlockValue::Write), so rebuilding
+/// rawData from the id alone snaps switches back off and doors back shut.
+pub fn buildSetBlockBodyRaw(
+    buf: []u8,
+    x: i32,
+    y: i32,
+    z: i32,
+    raw: u32,
+    damage: u16,
+    changed_by_entity: i32,
+    local_player_that_changed: i32,
+) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(false); // no PlatformUserIdentifierAbs
     try w.writeI16(1); // one BlockChangeInfo
@@ -1174,8 +1215,7 @@ pub fn buildSetBlockBodyDamage(
     try w.writeI32(z);
     try w.writeI32(changed_by_entity);
     try w.writeByte(block_change_flag_value);
-    // BlockValue: type in low 16 of rawData, then absolute damage u16
-    try w.writeU32(@as(u32, block_id));
+    try w.writeU32(raw);
     try w.writeU16(damage);
     try w.writeI32(local_player_that_changed);
     return w.written();
@@ -1295,6 +1335,62 @@ test "setblock stock body roundtrip" {
     try std.testing.expectEqual(@as(u16, 20304), one[0].block_id);
     try std.testing.expectEqual(@as(u16, 7), one[0].damage);
     try std.testing.expectEqual(@as(u16, 13), p.block_id);
+}
+
+test "setblock accepts payload-free stock flag bits and keeps rejecting unknown ones" {
+    // BlockSwitch::updateState -> SetBlockRPC(bvRef, bv) emits value|updateLight.
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeBool(false);
+    try w.writeI16(1);
+    try w.writeByte(1); // BlockValueRef type = world position
+    try w.writeI32(4);
+    try w.writeI32(70);
+    try w.writeI32(-9);
+    try w.writeI32(106); // changedByEntityId
+    try w.writeByte(0x11); // bChangeBlockValue | bUpdateLight
+    try w.writeU32(withBlockMeta(19200, block_meta_on));
+    try w.writeU16(0);
+    try w.writeI32(106);
+    const body = w.written();
+    var one: [1]BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(body, one[0..]));
+    try std.testing.expectEqual(@as(u16, 19200), one[0].block_id);
+    try std.testing.expectEqual(block_meta_on, blockMeta(one[0].raw));
+    // bChangeDamage and bForceDensity are payload-free too.
+    buf[20] = block_change_flag_damage | block_change_flag_force_density | block_change_flag_value;
+    try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(body, one[0..]));
+    // Bits the stock writer never emits still fail closed: their payload (if any)
+    // is unknown, so continuing would decode the rest of the batch desynced.
+    buf[20] = 0x80;
+    try std.testing.expectError(error.EndOfStream, parseSetBlockChanges(body, one[0..]));
+    buf[20] = 0x40;
+    try std.testing.expectError(error.EndOfStream, parseSetBlockChanges(body, one[0..]));
+}
+
+test "setblock raw body preserves the meta nibble" {
+    var buf: [64]u8 = undefined;
+    const raw = withBlockMeta(19200, block_meta_on | block_meta_powered);
+    const body = try buildSetBlockBodyRaw(&buf, 1, 2, 3, raw, 11, 106, 106);
+    var one: [1]BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(body, one[0..]));
+    try std.testing.expectEqual(raw, one[0].raw);
+    try std.testing.expectEqual(@as(u16, 19200), one[0].block_id);
+    try std.testing.expectEqual(@as(u16, 11), one[0].damage);
+    // The id-only form is the same encoder with an empty meta nibble.
+    const plain = try buildSetBlockBodyDamage(&buf, 1, 2, 3, 19200, 11, 106, 106);
+    try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(plain, one[0..]));
+    try std.testing.expectEqual(@as(u8, 0), blockMeta(one[0].raw));
+}
+
+test "block meta accessors match BlockValue get_meta/set_meta" {
+    try std.testing.expectEqual(@as(u8, 0), blockMeta(19200));
+    try std.testing.expectEqual(@as(u32, 19200 | (2 << 22)), withBlockMeta(19200, 2));
+    // Only bits 22..25 move; rotation and the type survive, and meta wraps to 4 bits.
+    const rot: u32 = 19200 | (5 << 26) | (3 << 22);
+    try std.testing.expectEqual(@as(u8, 3), blockMeta(rot));
+    try std.testing.expectEqual(@as(u8, 15), blockMeta(withBlockMeta(rot, 0xff)));
+    try std.testing.expectEqual(rot & ~@as(u32, 15 << 22), withBlockMeta(rot, 0));
 }
 
 test "NetPackageChunk package id is 12" {
