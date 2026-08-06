@@ -38,6 +38,7 @@ const assets_vehicles = @import("../assets/vehicles.zig");
 const assets_storage_pairs = @import("../assets/storage_pairs.zig");
 const biomes_mod = @import("../world/biomes.zig");
 const world_weather = @import("../world/weather.zig");
+const stability_mod = @import("../world/stability.zig");
 const terrain_snapshot = @import("../world/terrain_snapshot.zig");
 const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
@@ -495,8 +496,7 @@ fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
 /// Text SimCommand grammar (PLUGIN_API.md): `spawn x y z hp`, `despawn id`,
 /// `damage id amount`. Allocation-free; unknown or malformed input returns null
 /// and the caller drops it. Extra trailing tokens are malformed, not ignored.
-fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
-    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
+fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
     const verb = it.next() orelse return null;
     if (std.mem.eql(u8, verb, "spawn")) {
         const x = it.next() orelse return null;
@@ -526,6 +526,67 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
         } };
     }
     return null;
+}
+
+/// Stability plane facts for a block id (world/stability.zig probe). Resolved
+/// through the maxdamage table's Extends-aware facts; an unknown id fails
+/// closed as a normal supporting block.
+fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return .{ .support = true, .ignore = false }));
+    const name = g.blocks.byId(id) orelse return .{ .support = true, .ignore = false };
+    return .{
+        .support = g.maxdamage.stabilitySupport(name.name),
+        .ignore = g.maxdamage.stabilityIgnore(name.name),
+    };
+}
+
+/// Run the stock stability update after a C2S SetBlock mutation and return the
+/// count of fallen blocks. A removed block (old != air) relaxes the region and
+/// may fell neighbours; a placed block (new != air) takes its stability from
+/// the supported neighbours and re-spreads. Both run for a replace. The fallen
+/// positions are removed and broadcast here.
+fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
+    var n: usize = 0;
+    if (old_id != 0) {
+        var fallen: [stability_mod.max_fallen]stability_mod.Pos = undefined;
+        n = stability_mod.removeBlockAt(
+            &self.world,
+            x,
+            y,
+            z,
+            self.allocator,
+            self,
+            stabilityFacts,
+            &fallen,
+        );
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const p = fallen[i];
+            self.clearBlockHp(p.x, p.y, p.z);
+            self.removeClaimAt(p.x, p.y, p.z);
+            self.clearBlockRaw(p.x, p.y, p.z);
+            self.containers.remove(.{ .x = p.x, .y = p.y, .z = p.z });
+            self.world.setBlockWorld(p.x, p.y, p.z, 0) catch continue;
+            if (packages.buildSetBlockBodyRaw(
+                self.body_buf[0..96],
+                p.x,
+                p.y,
+                p.z,
+                0,
+                0,
+                -1,
+                -1,
+            )) |sb| {
+                // Best-effort fan-out; a failed send is dropped like the tick
+                // broadcast path (the client collapses the same blocks locally).
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(p.x), @floatFromInt(p.z), self.interest_range) catch {};
+            } else |_| {}
+        }
+    }
+    if (new_id != 0) {
+        stability_mod.placeBlockAt(&self.world, x, y, z, self.allocator, self, stabilityFacts);
+    }
+    return n;
 }
 
 pub const Game = struct {
@@ -6278,6 +6339,14 @@ pub const Game = struct {
                     self.setBlockRaw(b.x, b.y, b.z, b.raw);
                 } else if (place_id == 0) {
                     self.clearBlockRaw(b.x, b.y, b.z);
+                }
+                // Stock stability: a SetBlock that changes the block TYPE relaxes
+                // the plane (removal) or takes support (placement) and fells
+                // every now-unsupported block; a damage-only or repair change
+                // (same id) leaves support untouched. Fallen blocks are removed
+                // and broadcast here (the client runs the same collapse locally).
+                if (cur_id != place_id) {
+                    _ = stabilityAfterSetBlock(self, b.x, b.y, b.z, cur_id, place_id);
                 }
                 if (self.isStorageBlockId(place_id)) {
                     if (self.containers.get(.{ .x = b.x, .y = b.y, .z = b.z })) |cont| {

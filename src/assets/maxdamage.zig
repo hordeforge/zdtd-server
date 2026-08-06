@@ -73,6 +73,13 @@ pub const Table = struct {
     distant_deco: std.StringHashMapUnmanaged(void) = .{},
     /// block name → resolved `MultiBlockDim` (absent means 1x1x1, single block).
     multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{},
+    /// block name → resolved `StabilitySupport == false` after the Extends
+    /// chain. Stock Block.StabilitySupport defaults true; only explicit false
+    /// is stored. A non-support block caps its stability byte at 1.
+    non_support: std.StringHashMapUnmanaged(void) = .{},
+    /// block name → resolved `StabilityIgnore` (default false): exempt from the
+    /// stability plane, never falls and never carries support.
+    stability_ignore_names: std.StringHashMapUnmanaged(void) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -171,6 +178,19 @@ pub const Table = struct {
     /// blocks.xml `MultiBlockDim` after Extends resolution; 1x1x1 when unset.
     pub fn multiBlockDim(self: *const Table, name: []const u8) Dim {
         return self.multi_block_dim.get(name) orelse .{};
+    }
+
+    /// blocks.xml `StabilitySupport` after Extends resolution (default true:
+    /// only explicit false is stored, matching the stock Block.StabilitySupport
+    /// default). A non-support block caps its stability byte at 1.
+    pub fn stabilitySupport(self: *const Table, name: []const u8) bool {
+        return !self.non_support.contains(name);
+    }
+
+    /// blocks.xml `StabilityIgnore` after Extends resolution (default false):
+    /// exempt from the stability plane, never falls and never carries support.
+    pub fn stabilityIgnore(self: *const Table, name: []const u8) bool {
+        return self.stability_ignore_names.contains(name);
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -394,6 +414,10 @@ const DecoFacts = struct {
     dim: ?Dim = null,
     /// Direct blocks.xml LootList (resolved through Extends in a second pass).
     loot_list: ?[]const u8 = null,
+    /// StabilitySupport / StabilityIgnore (resolved through Extends; null =
+    /// "ask the parent", both default true/false when the chain is exhausted).
+    stability_support: ?bool = null,
+    stability_ignore: ?bool = null,
 };
 
 /// Resolve one block's inherited facts by walking `Extends`. Stock chains are
@@ -408,7 +432,10 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         const f = facts.get(cur) orelse break;
         if (out.distant == null) out.distant = f.distant;
         if (out.dim == null) out.dim = f.dim;
-        if (out.distant != null and out.dim != null) break;
+        if (out.stability_support == null) out.stability_support = f.stability_support;
+        if (out.stability_ignore == null) out.stability_ignore = f.stability_ignore;
+        if (out.distant != null and out.dim != null and
+            out.stability_support != null and out.stability_ignore != null) break;
         cur = f.extends orelse break;
     }
     return out;
@@ -530,12 +557,20 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "MultiBlockDim")) |md| {
             facts.dim = parseDim(md);
         }
+        if (xml.propertyValue(body, "StabilitySupport")) |ss| {
+            facts.stability_support = parseBool(ss);
+        }
+        if (xml.propertyValue(body, "StabilityIgnore")) |si| {
+            facts.stability_ignore = parseBool(si);
+        }
         try own_facts.put(arena, kn, facts);
         i = body_end;
     }
 
     var distant_deco: std.StringHashMapUnmanaged(void) = .{};
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
+    var non_support: std.StringHashMapUnmanaged(void) = .{};
+    var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
         const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
@@ -543,6 +578,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.dim) |d| {
             if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
         }
+        if (r.stability_support orelse true == false) try non_support.put(arena, e.key_ptr.*, {});
+        if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -564,6 +601,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .block_material = block_material,
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
+        .non_support = non_support,
+        .stability_ignore_names = stability_ignore_names,
         .arena_ptr = arena_holder,
     };
 }

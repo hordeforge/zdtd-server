@@ -87,6 +87,10 @@ pub const Chunk = struct {
     /// Per-block density (stock sbyte as u8). Lazy; only cells with dens_set bit.
     densities: ?[]u8 = null,
     dens_set: ?[]u8 = null, // bitset: 1 = densities[i] is valid TTS paint
+    /// Per-block stability byte plane (0..15; see world/stability.zig). Lazy
+    /// derived state, never persisted: computed once on first touch with
+    /// reset + spread semantics (stock ResetStability + DistributeStability).
+    stability: ?[]u8 = null,
     dirty: bool = false,
     /// Runtime-only: server finished its one-time storage-TE scan of this chunk.
     te_scanned: bool = false,
@@ -122,6 +126,10 @@ pub const Chunk = struct {
             if (self.allocator) |a| a.free(d);
             self.dens_set = null;
         }
+        if (self.stability) |s| {
+            if (self.allocator) |a| a.free(s);
+            self.stability = null;
+        }
     }
 
     pub fn texAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u64 {
@@ -138,6 +146,29 @@ pub const Chunk = struct {
         const bit: u8 = @as(u8, 1) << @intCast(idx % 8);
         if (set[idx / 8] & bit == 0) return null;
         return dens[idx];
+    }
+
+    /// Stability byte plane (see world/stability.zig); 0 when not computed.
+    pub fn stabilityAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u8 {
+        if (y < 0 or y >= y_dim) return 0;
+        const s = self.stability orelse return 0;
+        return s[blockIndex(lx, y, lz)];
+    }
+
+    /// Allocate the per-block stability plane if absent (init/load path).
+    pub fn ensureStability(self: *Chunk, allocator: std.mem.Allocator) ![]u8 {
+        if (self.stability) |s| return s;
+        const s = try allocator.alloc(u8, blocks_per_chunk);
+        @memset(s, 0);
+        self.stability = s;
+        if (self.allocator == null) self.allocator = allocator;
+        return s;
+    }
+
+    /// Write one stability byte (plane must exist; caller ensured it).
+    pub fn setStabilityByte(self: *Chunk, lx: i32, y: i32, lz: i32, v: u8) void {
+        const s = self.stability orelse return;
+        s[blockIndex(lx, y, lz)] = v;
     }
 
     /// Set a block (full rawData) plus paint texture and optional TTS density.
