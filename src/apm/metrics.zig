@@ -48,6 +48,8 @@ pub const CounterId = enum(u16) {
     c2s_malformed,
     /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
     c2s_rejects,
+    /// Named C2S package with no handler arm (falls off handlePackage).
+    c2s_unhandled,
     /// Peer reconnects after prior join (churn signal).
     reconnects,
     /// Evidence JSONL lines written (observe).

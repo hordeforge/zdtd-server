@@ -6908,6 +6908,17 @@ pub const Game = struct {
             }
             return;
         }
+        // Named C2S package with no handler arm: count + rate-limited log so a
+        // new stock client package surfaces instead of vanishing silently
+        // (GAP "Unhandled C2S packages are dropped with no trace").
+        self.harness.counters.inc(.c2s_unhandled);
+        const un = self.harness.counters.get(.c2s_unhandled);
+        if (un == 1 or un % 100 == 0) {
+            std.debug.print(
+                "zdtd: unhandled C2S pkg={s} local_id={d} n={d}\n",
+                .{ name, peer.local_id, un },
+            );
+        }
     }
 
     /// Convert sim trader_stock into wire TraderStockEntry list (shared by the
