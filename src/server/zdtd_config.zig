@@ -60,6 +60,13 @@ pub const Perf = struct {
     job_batches: ?bool = null,
 };
 
+/// Sim policy that is not stock serverconfig and not stock game data.
+pub const Sim = struct {
+    /// Trader AvailableMoney display pool (no stock key: stock Traders.xml has
+    /// no wallet property; AvailableMoney is engine-managed per-day).
+    trader_wallet_dukes: ?i32 = null,
+};
+
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
 pub const Mode = struct {
     name: ?[]const u8 = null,
@@ -70,6 +77,7 @@ pub const File = struct {
     authority: Authority = .{},
     feature: Feature = .{},
     perf: Perf = .{},
+    sim: Sim = .{},
     mode: Mode = .{},
     /// Arena owning any string slices from parse.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
@@ -226,6 +234,12 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
         } else {
             return unknownKey(section, key);
         }
+    } else if (std.mem.eql(u8, section, "sim")) {
+        if (std.mem.eql(u8, key, "trader_wallet_dukes")) {
+            f.sim.trader_wallet_dukes = try parseI32(val);
+        } else {
+            return unknownKey(section, key);
+        }
     } else if (std.mem.eql(u8, section, "mode")) {
         if (std.mem.eql(u8, key, "name")) {
             f.mode.name = try a.dupe(u8, stripQuotes(val));
@@ -305,6 +319,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
+    if (f.sim.trader_wallet_dukes) |v| opts.trader_wallet_dukes = v;
 }
 
 /// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
@@ -367,6 +382,10 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
     }
+    if (opts.trader_wallet_dukes < 0) {
+        std.debug.print("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
+        opts.trader_wallet_dukes = 0;
+    }
     opts.guard.clamp();
 }
 
@@ -427,6 +446,7 @@ test "applyToInitOptions deco_trees only when set" {
         max_edit_range: f32 = 96,
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -522,6 +542,7 @@ test "sanitizeInitOptions repairs bad radii" {
         max_edit_range: f32 = 96,
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{
@@ -550,6 +571,7 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         max_edit_range: f32 = std.math.nan(f32),
         interest_range: f32 = std.math.inf(f32),
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{};
@@ -571,6 +593,7 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         max_edit_range: f32 = 96,
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{ .max_streamed_chunks = 999 };
@@ -591,6 +614,7 @@ test "guard policy merges from [authority] and clamps" {
         max_edit_range: f32 = 96,
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -651,6 +675,7 @@ test "[perf] switches default off and merge only when set" {
         max_edit_range: f32 = 96,
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -683,4 +708,45 @@ test "[perf] switches default off and merge only when set" {
         error.UnknownTomlKey,
         parse(std.testing.allocator, "[perf]\nnope = true\n"),
     );
+}
+
+test "[sim] trader_wallet_dukes parses, merges, and clamps" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        spawn_area_radius_max: i32 = 8,
+        interest_range: f32 = 160,
+        max_edit_range: f32 = 96,
+        max_claimed_damage: i32 = 200,
+        peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
+        wire_chunks: bool = true,
+        deco_trees: bool = true,
+        deco_mirror: bool = true,
+        block_id_mapping: bool = true,
+        async_chunk_flush: bool = false,
+        terrain_snapshot: bool = false,
+        job_batches: bool = false,
+        guard: guard_policy.Policy = .{},
+    };
+    var o: Opts = .{};
+    var f = try parse(std.testing.allocator,
+        \\[sim]
+        \\trader_wallet_dukes = 2500
+    );
+    defer f.deinit();
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(@as(i32, 2500), o.trader_wallet_dukes);
+
+    var neg = try parse(std.testing.allocator, "[sim]\ntrader_wallet_dukes = -5\n");
+    defer neg.deinit();
+    applyToInitOptions(&neg, &o);
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(i32, 0), o.trader_wallet_dukes);
+
+    try std.testing.expectError(error.UnknownTomlKey, parse(std.testing.allocator, "[sim]\nnope = 1\n"));
 }

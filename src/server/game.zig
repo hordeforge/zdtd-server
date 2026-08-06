@@ -5814,7 +5814,7 @@ pub const Game = struct {
                         const n = self.stockEntries(ts, &ent_buf);
                         const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
                             .trader_id = self.sim.network_id[ts].id,
-                            .available_money = trader_wallet_dukes,
+                            .available_money = self.trader_wallet_dukes,
                             .entries = ent_buf[0..n],
                         });
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
@@ -6379,7 +6379,7 @@ pub const Game = struct {
             self.body_buf[0..4096],
             eid,
             eid, // trader id (stock TraderID is a traders.xml index; entity id is a safe placeholder)
-            trader_wallet_dukes,
+            self.trader_wallet_dukes,
             entries[0..n],
         );
         try self.sendGame(peer, "NetPackageTraderData", body);
@@ -7444,7 +7444,7 @@ pub const Game = struct {
                 .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [16]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);
-                    break :blk .{ .trader_id = nid, .available_money = trader_wallet_dukes, .entries = ent_buf[0..n] };
+                    break :blk .{ .trader_id = nid, .available_money = self.trader_wallet_dukes, .entries = ent_buf[0..n] };
                 } else null,
             });
             try self.sendGame(peer, "NetPackageEntitySpawn", body);
@@ -9095,7 +9095,7 @@ pub const Game = struct {
                     .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                         var ent_buf: [16]packages.TraderStockEntry = undefined;
                         const n = self.stockEntries(i, &ent_buf);
-                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = trader_wallet_dukes, .entries = ent_buf[0..n] };
+                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.trader_wallet_dukes, .entries = ent_buf[0..n] };
                     } else null,
                 })) |spb| {
                     // EntitySpawn is join-critical for first sight; use sendGame.
@@ -10247,10 +10247,11 @@ test "player game stage tracks level, days survived and deaths" {
     // Day zero: level only, floored after the difficulty bonus (10 * 1.2 = 12).
     try std.testing.expectEqual(@as(i32, 12), g.gameStageOf(0));
     // Four days survived: (10 + 4) * 1.2 = 16.8 → 16, the header's example.
-    g.sim.director.clock.day = 4;
+    // Stock days are 1-based: day 5 is four days after the day-0 birth.
+    g.sim.director.clock.day = 5;
     try std.testing.expectEqual(@as(i32, 16), g.gameStageOf(0));
     // Days alive caps at the player level: 25 days at level 10 is 10.
-    g.sim.director.clock.day = 25;
+    g.sim.director.clock.day = 26;
     try std.testing.expectEqual(@as(i32, 24), g.gameStageOf(0));
     // A death costs daysAliveChangeWhenKilled days off the streak.
     const before = c.game_stage_born_world_time;

@@ -264,21 +264,31 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
     return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds };
 }
 
-fn sumExpReward(body: []const u8) u32 {
+/// Dukes total from stock `<reward type="Item" id="casinoCoin" value="N">`
+/// entries. Stock quests.xml has no Coin reward type: quest dukes are granted
+/// as casinoCoin item rewards, so the server wallet credit must match the sum
+/// of those values (the client Quest.Write already lists them as Item rewards).
+fn sumCoinReward(body: []const u8) u32 {
     var total: u32 = 0;
     var i: usize = 0;
     while (i < body.len) {
         const ri = std.mem.indexOfPos(u8, body, i, "<reward") orelse break;
-        const typ = xml.attr(body, ri, "type") orelse {
-            i = ri + 7;
+        const gt = std.mem.indexOfPos(u8, body, ri, ">") orelse break;
+        const open = body[ri .. gt + 1];
+        const typ = xml.attr(open, 0, "type") orelse {
+            i = gt + 1;
             continue;
         };
-        if (std.mem.eql(u8, typ, "Exp")) {
-            if (xml.attr(body, ri, "value")) |v| {
-                total +%= xml.parseU32(v) orelse 0;
+        if (std.mem.eql(u8, typ, "Item")) {
+            if (xml.attr(open, 0, "id")) |rid| {
+                if (std.mem.eql(u8, rid, "casinoCoin")) {
+                    if (xml.attr(open, 0, "value")) |v| {
+                        total +%= xml.parseU32(v) orelse 0;
+                    }
+                }
             }
         }
-        i = ri + 7;
+        i = gt + 1;
     }
     return total;
 }
@@ -334,8 +344,10 @@ fn parseQuestDefBody(
         target = @as(u16, 3) + @as(u16, tier) * 2;
     }
 
-    const exp = sumExpReward(body);
-    const reward_coin: u32 = if (exp > 0) @max(10, exp / 20) else 15;
+    // Dukes: stock grants them as casinoCoin Item rewards (no Coin reward type
+    // exists in quests.xml). Fail closed: no casinoCoin reward in the body
+    // means the stock quest grants no dukes, so credit 0, not an invented floor.
+    const reward_coin: u32 = sumCoinReward(body);
 
     var tx: f32 = 50;
     const ty: f32 = 70;
@@ -831,6 +843,27 @@ test "objective write kinds follow objective type" {
     try std.testing.expectEqual(quest.ObjectiveWireKind.base, d.objective_kinds[0]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.treasure_chest, d.objective_kinds[1]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[2]);
+}
+
+test "reward_coin sums casinoCoin Item rewards and fails closed" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="payday">
+        \\    <reward type="Exp" value="1000"/>
+        \\    <reward type="Item" id="casinoCoin" value="500"/>
+        \\    <reward type="Item" id="casinoCoin" value="250"/>
+        \\  </quest>
+        \\  <quest id="freebie">
+        \\    <reward type="Exp" value="1000"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const pay = cat.byName("payday").?;
+    try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
+    const free = cat.byName("freebie").?;
+    try std.testing.expectEqual(@as(u32, 0), free.reward_coin);
 }
 
 test "stock quests.xml template quests parse non-empty" {

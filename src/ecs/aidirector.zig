@@ -22,8 +22,24 @@ pub const WorldClock = struct {
     }
 
     pub fn setDayLightLength(self: *WorldClock, daylight_hours: u8) void {
-        self.dawn = 4.0;
-        self.dusk = 4.0 + @as(f32, @floatFromInt(daylight_hours));
+        // Stock GameUtils::CalcDuskDawnHours (asm.il 1926249): a DayLightLength
+        // of 0 or 24 returns (dusk 22, dawn 4); otherwise dusk starts at 22,
+        // clamps to DayLightLength when > 22, becomes 12 + DL/2 when < 18, and
+        // dawn = clamp(dusk - DL, 0, 23).
+        const dl = daylight_hours;
+        if (dl == 0 or dl == 24) {
+            self.dawn = 4.0;
+            self.dusk = 22.0;
+            return;
+        }
+        var dusk: f32 = 22.0;
+        if (dl > 22) dusk = @floatFromInt(dl);
+        if (dl < 18) dusk = 12.0 + @as(f32, @floatFromInt(dl)) / 2.0;
+        var dawn: f32 = dusk - @as(f32, @floatFromInt(dl));
+        if (dawn < 0) dawn = 0;
+        if (dawn > 23) dawn = 23;
+        self.dusk = dusk;
+        self.dawn = dawn;
     }
 
     pub fn tick(self: *WorldClock, dt: f32) void {
@@ -38,30 +54,46 @@ pub const WorldClock = struct {
         return self.hours < self.dawn or self.hours >= self.dusk;
     }
 
+    /// Stock GameUtils::IsBloodMoonTime (asm.il 1926341): the blood moon spans
+    /// dusk on the scheduled day through dawn of the next day, crossing the
+    /// midnight rollover. True when the current day is the scheduled day and it
+    /// is at/after dusk, or the day after the scheduled day before dawn.
     pub fn isBloodMoonNight(self: *const WorldClock) bool {
         if (self.bloodmoon_frequency == 0) return false;
-        if (!self.isNight()) return false;
-        if (self.bloodmoon_range == 0) return self.day % self.bloodmoon_frequency == 0;
-        // Blood moon day = c*freq + jitter(c), jitter deterministic in [-range,+range].
+        if (self.hours >= self.dusk) return self.isBloodMoonDay(self.day);
+        if (self.hours < self.dawn and self.day > 1) return self.isBloodMoonDay(self.day - 1);
+        return false;
+    }
+
+    fn isBloodMoonDay(self: *const WorldClock, day: u32) bool {
+        if (self.bloodmoon_range == 0) return day % self.bloodmoon_frequency == 0;
+        // Blood moon day = c*freq + jitter(c), jitter deterministic in [0, range].
         // A given day may match the target of an adjacent cycle (jitter can push a
         // blood moon across the c*freq boundary), so test the neighbouring cycles.
-        const base = self.day / self.bloodmoon_frequency;
+        const base = day / self.bloodmoon_frequency;
         const lo = if (base == 0) 0 else base - 1;
         var c = lo;
         while (c <= base + 1) : (c += 1) {
-            if (self.bloodMoonDayForCycle(c) == self.day) return true;
+            if (self.bloodMoonDayForCycle(c) == day) return true;
         }
         return false;
     }
 
     fn bloodMoonDayForCycle(self: *const WorldClock, cycle: u32) i64 {
-        const span: u32 = @as(u32, self.bloodmoon_range) * 2 + 1;
-        const jitter: i64 = @as(i64, @intCast((cycle *% 2654435761) % span)) - @as(i64, self.bloodmoon_range);
+        // Stock CalcNextDay (asm.il 412880): bmDayLast + frequency +
+        // RandomRange(0, range+1) — the jitter is non-negative, so a blood moon
+        // is never early relative to the frequency multiple.
+        const span: u32 = @as(u32, self.bloodmoon_range) + 1;
+        const jitter: i64 = @as(i64, @intCast((cycle *% 2654435761) % span));
         return @as(i64, cycle) * @as(i64, self.bloodmoon_frequency) + jitter;
     }
 
+    /// Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000 (+ minutes*1000/60).
+    /// Day 1 spans [0, 24000); WorldTimeToDays(wt) = wt/24000 + 1. A day-0
+    /// clock (test convention) encodes as 0 rather than underflowing.
     pub fn worldTimeBits(self: *const WorldClock) u64 {
-        const day_part: u64 = @as(u64, self.day) * 24000;
+        const d: u64 = if (self.day > 0) self.day - 1 else 0;
+        const day_part: u64 = d * 24000;
         const hour_part: u64 = @intFromFloat(self.hours * 1000.0);
         return day_part + hour_part;
     }
@@ -341,11 +373,32 @@ pub const Director = struct {
     }
 };
 
-test "clock advances and bloodmoon every 7 days" {
-    var cl: WorldClock = .{ .hours = 23.0, .day = 6, .seconds_per_hour = 1.0 };
-    cl.tick(2.0);
+test "clock advances and bloodmoon spans dusk to dawn across rollover" {
+    // BM day 7: the horde runs day 7 22:00 (dusk) through day 8 04:00 (dawn),
+    // including the midnight day rollover (stock IsBloodMoonTime).
+    var cl: WorldClock = .{ .hours = 21.0, .day = 7, .seconds_per_hour = 1.0 };
+    try std.testing.expect(!cl.isBloodMoonNight()); // before dusk
+    cl.tick(2.0); // 23:00 day 7: at/after dusk
     try std.testing.expectEqual(@as(u32, 7), cl.day);
     try std.testing.expect(cl.isBloodMoonNight());
+    cl.tick(3.0); // 02:00 day 8: after the rollover, before dawn
+    try std.testing.expectEqual(@as(u32, 8), cl.day);
+    try std.testing.expect(cl.isBloodMoonNight());
+    cl.tick(3.0); // 05:00 day 8: dawn passed
+    try std.testing.expect(!cl.isBloodMoonNight());
+}
+
+test "worldTimeBits encodes stock day 1 as zero offset" {
+    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .seconds_per_hour = 1.0 };
+    // Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000; WorldTimeToDays
+    // (wt/24000 + 1) must round-trip the wire day.
+    const wt = cl.worldTimeBits();
+    try std.testing.expectEqual(@as(u64, 8000), wt);
+    try std.testing.expectEqual(@as(u32, 1), @as(u32, @intCast(wt / 24000 + 1)));
+    cl.day = 7;
+    cl.hours = 12.0;
+    try std.testing.expectEqual(@as(u64, 6 * 24000 + 12000), cl.worldTimeBits());
+    try std.testing.expectEqual(@as(u32, 7), @as(u32, @intCast(cl.worldTimeBits() / 24000 + 1)));
 }
 
 test "director spawns at night near player ecs" {

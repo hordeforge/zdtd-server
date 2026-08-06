@@ -8,9 +8,9 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
-| **A** (stock data) | ~12 | 0 | ~6 | A22 residual closed as P0 (block_id_mapping pins every shipped id); P1s: A07/A12/A13 open |
-| **B** (zdtd policy) | ~11 | 0 | ~2 | Stream/authority/feature/perf/sim via `zdtd.toml`; A19 wallet now configurable; residual open consts (AI bands, tick throttles, caps) |
-| **OK** | 24+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants |
+| **A** (stock data) | ~9 | 1 | 1 | A22 residual (P0); A12 vehicle fallback (P1); A20 dukes fixed |
+| **B** (zdtd policy) | ~11 | 0 | 1 | Stream/authority/feature/perf/sim via `zdtd.toml`; A19 wallet now configurable; residual open consts (AI bands, tick throttles, caps) |
+| **OK** | 28+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants |
 
 | Spot-check | Result |
 |---|---|
@@ -18,11 +18,17 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | `coin_item_id_default = 6` | **Fixed**: trade requires non-zero `ecsIdByName("casinoCoin")` |
 | `max_streamed_chunks` / interest / edit caps | **On Game/InitOptions** + loaded from `zdtd.toml` (`src/server/zdtd_config.zig`) |
 | `trader_wallet_dukes` | **Configurable** (`[sim] trader_wallet_dukes`); Game field used in ECD spawn / lock / snapshot paths |
+| `water_mass_full = 19500` | **OK**: RE constant (WaterUtils GetStableMassBelow clamp; light-mesh-water.md §4) |
+| `stock_default_stack = 0x1f4` | **OK**: ItemClass default when no property (asm.il:749089); XML per-item Stacknumber overrides |
+| `class_npc_trader_jen` | **OK**: Unity hash computed from the stock name `npcTraderJen` |
+| `loot_drop_prob` | **A OK**: loaded from entityclasses.xml `LootDropProb`; default 1.0 only when absent |
+| `ObjectiveWireKind` | **OK**: Quest.Write subclass shapes (base/treasure_chest/empty); quests.zig classifiers read `type=` strings |
+| `players.zsv` ZPV3 | **OK**: zdtd-owned save format (ADR 0011); not stock data, not operator config |
 | bare `assignids.*` on production paths | **Reduced**: IdCtx pins only if dump empty; place fails closed when dump loaded |
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation (this audit pass):** unit suite is **769** tests (`zig build test`, 2026-08-06). Count drifts; see [STATUS.md](STATUS.md).
+**Validation (this audit pass):** unit suite is **771** tests (`zig build test`, 2026-08-06). Count drifts; see [STATUS.md](STATUS.md).
 
 ---
 
@@ -39,6 +45,8 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | A09 | `maxDamageForBlock`: drop deco pin HP table when maxdamage loaded; generic 100 / offline bands offline only. |
 | A15 | game-dir + still-builtin **warn** for loot, entitygroups, blocks, quests (plus existing items/recipes/entities). |
 | A17 | `ecsIdFromItemName` 6/7 aliases only when `items.source == .builtin`. |
+| A19 | `trader_wallet_dukes` const → `InitOptions`/`Game` field + `[sim] trader_wallet_dukes` in `zdtd.toml` (Bucket B; no stock key in traders.xml). All 4 call sites read `self.trader_wallet_dukes`; sanitize clamps negatives to 0. |
+| A20 | `quests.zig`: `reward_coin` = sum of `<reward type="Item" id="casinoCoin" value="N">` in the quest body (stock grants dukes as casinoCoin Item rewards; no Coin reward type). Fail closed: no such reward → 0. Removed the exp-derived heuristic; fixture starter quest + scenario test now exercise the sum path. |
 | A23 | Removed production Steam `defaultGameDir`; `--world-name` requires `--game-dir` or `--map`. |
 | B01–B07 | Stream/interest/edit/claimed-damage/peer_stale as `InitOptions` + `Game` fields (`default_*` consts). Hot path reads `self.*`. Array bound = `max_streamed_chunks_cap`. |
 | - | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
@@ -68,7 +76,7 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | A17 | name→6/7 builtin | P3 | **Fixed** gated | |
 | A18 | stock_chunk pins | P2 | Open | |
 | A19 | trader_wallet 5000 | P2 | **Fixed → B** | `default_trader_wallet_dukes` const → Game field from `[sim] trader_wallet_dukes`; ECD spawn / LockResponse / snapshot all read `self.trader_wallet_dukes` |
-| A20 | quest reward_coin | P2 | **In progress** | `sumExpReward` (Exp rewards) drives `reward_coin`; stock quest dukes are casinoCoin **Item** rewards (uncommitted `sumCoinReward` rework in tree) |
+| A20 | quest reward_coin | P2 | **Fixed** | `reward_coin` now sums `<reward type="Item" id="casinoCoin" value="N">` from the quest body (stock has no Coin reward type); fail closed to 0 when absent. Fixture starter quest carries a casinoCoin reward so the scenario asserts the sum path |
 | A21 | director / gamestages | P2 | **Partial** | gamestages.xml loaded; scout tier, blood-moon stage, sleeper groups and loot prob bands are data driven. Biome/quest/POI-tier stage inputs still zero (GAP_ANALYSIS P3 gamestage list) |
 | A22 | deco version skew | P0 | **Partial** | Server now dictates block ids with a full `blocks` NameIdMapping before the config files, so a client cannot compute a different id for a name we ship. Still partial: names only the client has fall through to `assignLeftOverBlocks`, and the mapping has had no live V3.1.x run. Kill switches `[feature] block_id_mapping` and `deco_trees`; see archive/DECO_NRE.md gap 2 |
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
@@ -106,8 +114,9 @@ CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
 ```
 
 Parsed today: `[stream]`, `[authority]`, `[feature]`, `[perf]`, `[sim]`
-(`trader_wallet_dukes`). Keys under `[net]`, `[ai]`, `[caps]` in the draft
-below are residual (unknown-key warn if present).
+(`trader_wallet_dukes` only). Keys under `[net]`, `[ai]`, `[caps]`, and the
+`[sim]` draft keys `craft_max_times` / `save_every_ticks` are residual
+(unknown-key warn if present).
 
 ```toml
 [stream]
@@ -190,6 +199,8 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 | `stock_chunk.water_mass_full = 19500` | WaterUtils GetStableMassBelow clamp; visible-water gate mass > 195 |
 | `unity_hash.class_npc_trader_jen` | Unity hash computed from the stock name |
 | LootDropProb default 1.0 | XML path resolves `LootDropProb` from entityclasses; fallback only for entities without it / offline |
+| `ecs/quest.zig ObjectiveWireKind` | Quest.Write CreateQuest subclass shapes (base / treasure_chest / empty); classifiers read quests.xml `type=` strings |
+| `players.zsv` ZPV3 layout | zdtd-owned persistence format (ADR 0011), like ZCH3; not stock data |
 
 ---
 
@@ -204,7 +215,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 
 1. ~~**A10–A11**~~ **Done.** **A12** vehicle speed switch residuals remain.
 2. **B13 residual** world-time / save / sleeper `% N` not all Game fields.
-3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature). AI bands / wallets / tick %N still open.
+3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). AI bands / tick %N still open.
 4. **A07** biome default stack pins before XML (acceptable offline).
 
 ---
@@ -217,7 +228,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 4. Extend toml for AI bands / tick throttles / caps (B08–B14, draft `[net]`/`[ai]`/`[caps]`).
 5. ~~A11 AI floors.~~ A12 vehicle speeds from vehicles.xml only.
 6. Drop recipe unlock extras when `source==xml` (A13).
-7. Land the quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) when it is committed (A20).
+7. ~~Quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) landed (A20).~~
 
 ---
 

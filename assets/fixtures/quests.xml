@@ -10,6 +10,7 @@
   <objective type="Goto" id="trader" value="5" phase="1"/>
   <objective type="InteractWithNPC" phase="2"/>
   <reward type="Exp" value="500"/>
+  <reward type="Item" id="casinoCoin" value="100"/>
 </quest>
 
 <quest id="tier1_clear">

@@ -48,6 +48,13 @@ deco_mirror = true
 # false for a modded client whose block set differs from ours.
 block_id_mapping = true
 
+# Sim policy that is not stock serverconfig and not stock game data.
+[sim]
+# Trader AvailableMoney display pool. Stock Traders.xml has no wallet key
+# (AvailableMoney is engine-managed per-day); zdtd has no trader economy, so
+# trade() credits the player wallet directly and this is a display value.
+# trader_wallet_dukes = 5000
+
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]
 # name = "default"

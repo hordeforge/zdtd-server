@@ -14,7 +14,7 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 |---|---|
 | CLI (`--port`, `--mode`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
-| `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature + optional `[mode] name`; first existing file wins; **fatal** if present but unreadable |
+| `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature/sim + optional `[mode] name`; first existing file wins; **fatal** if present but unreadable |
 | Mode pack `modes/<name>.toml` | When `--mode` or `[mode] name` is set: data-only InitOptions overrides (after serverconfig, before stream keys) |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
@@ -93,6 +93,7 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE_ARCHITECTURE.md` |
+| `[sim]` | `trader_wallet_dukes` | Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
 
 ### Gamemode packs (`modes/`)
