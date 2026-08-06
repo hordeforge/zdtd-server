@@ -338,6 +338,11 @@ fn parseQuestDefBody(
 
     const primary = pickPrimaryKind(body);
     var target = primary.target;
+    // Kill objectives without an explicit count (stock ClearSleepers always
+    // omits count: the target is the POI's sleeper volume, which stock counts
+    // at runtime via QuestEvent_SleepersCleared, asm ObjectiveClearSleepers
+    // IL). zdtd approximates with a tier-scaled floor until the kill objective
+    // is driven by the bound POI's sleeper volume (audit B25).
     if (primary.kind == .kill_zombies and target <= 1) {
         target = @as(u16, 3) + @as(u16, tier) * 2;
     }
