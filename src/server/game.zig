@@ -29,6 +29,7 @@ const assets_entitygroups = @import("../assets/entitygroups.zig");
 const assets_gamestages = @import("../assets/gamestages.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
 const assets_traders = @import("../assets/traders.zig");
+const assets_npc = @import("../assets/npc.zig");
 const assets_biome_layers = @import("../assets/biome_layers.zig");
 const assets_block_textures = @import("../assets/block_textures.zig");
 const assets_painting = @import("../assets/painting.zig");
@@ -753,6 +754,7 @@ pub const Game = struct {
     /// Stock electrical block id → power NodeKind/watts, built from maxdamage.
     power_registry: ecs.powerblocks.Registry = .{},
     traders: assets_traders.TraderTable = assets_traders.TraderTable.empty(),
+    npc: assets_npc.NpcTable = assets_npc.NpcTable.empty(),
     sleepers: sleepers_mod.Store = sleepers_mod.Store.empty(),
     containers: containers_mod.ContainerStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
@@ -950,6 +952,7 @@ pub const Game = struct {
             self.storage_pairs.deinit();
             self.biome_colors.deinit();
             self.traders.deinit();
+            self.npc.deinit();
             self.sleepers.deinit();
             self.world.deinit();
         }
@@ -1211,6 +1214,10 @@ pub const Game = struct {
         if (assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
             self.traders.deinit();
             self.traders = tt;
+        }
+        if (assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
+            self.npc.deinit();
+            self.npc = nt;
         }
         if (assets_painting.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
             self.painting.deinit();
@@ -1567,7 +1574,7 @@ pub const Game = struct {
         const z3 = self.sim.spawnSleeperClass(sx + 30, sy, sz - 40, zdef.max_hp + 10, zdef.hash, zdef.loot_list);
         const adef = self.entities.defaultAnimal();
         _ = self.sim.spawnAnimal(sx - 20, sy, sz - 25, adef.max_hp, adef.hash, adef.loot_list);
-        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8)) |trader_id| {
+        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"))) |trader_id| {
             self.fillTraderFromXml(trader_id);
         }
         {
@@ -2163,6 +2170,7 @@ pub const Game = struct {
         self.storage_pairs.deinit();
         self.biome_colors.deinit();
         self.traders.deinit();
+        self.npc.deinit();
         self.sleepers.deinit();
         self.admin.deinit();
         self.webui.deinit();
@@ -3665,7 +3673,7 @@ pub const Game = struct {
                         );
                     }
                     if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
-                        break :blk self.sim.spawnTrader(nm, sx, sy, sz);
+                        break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm));
                     }
                     if (def.kind == .animal) {
                         break :blk self.sim.spawnAnimal(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
@@ -6339,6 +6347,14 @@ pub const Game = struct {
                         }
                     }
                     if (trader_slot) |ts| {
+                        // Stock EntityTrader opens the window only inside the
+                        // trader_info open hours (vending machines and traders
+                        // without hours are always open). Deny outside them.
+                        if (!self.traderIsOpen(ts)) {
+                            const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "closed");
+                            try self.sendGame(peer, "NetPackageLockResponse", resp);
+                            return;
+                        }
                         var ent_buf: [16]packages.TraderStockEntry = undefined;
                         const n = self.stockEntries(ts, &ent_buf);
                         const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
@@ -6947,6 +6963,18 @@ pub const Game = struct {
 
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         const t = packages.parseTraderTrade(body) catch return;
+        // allow_sell=false traders (vending machines, player-owned booths) never
+        // buy from the player; stock disables the Sell tab entirely.
+        if (t.side == 1) {
+            if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
+                const info_id = self.sim.trader_stock[ts].trader_info_id;
+                if (info_id != 0) {
+                    if (self.traders.traderInfo(info_id)) |info| {
+                        if (!info.allow_sell) return;
+                    }
+                }
+            }
+        }
         const coin = self.items.ecsIdByName("casinoCoin");
         _ = systems.trade(&self.sim, c.slot, t.trader_entity, t.item, t.qty, t.side, coin);
         if (c.peer) |p| {
@@ -7975,16 +8003,21 @@ pub const Game = struct {
     /// Build trader FetchList offers from a quest_list id (stock quest names
     /// only). A quest already active in the player's journal is not re-offered:
     /// stock removes it from the NPCQuestList on accept (the accept marker).
-    /// The quest list a trader offers, resolved from the trader entity's class
-    /// hash (stock maps each trader class to its own trader_*_quests list;
-    /// the 5 lists are parsed from quests.xml but were never selected by
-    /// trader). Falls back to jen (the default trader) for unknown classes so
+    /// The quest list a trader offers resolves from npc.xml (quest_list per
+    /// trader_info id; the entity class picked the id at spawn). When npc.xml
+    /// is absent (fixtures) the stock class-hash map below is the fallback so
     /// a modded trader still gets offers.
     fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
         const hash = if (self.sim.slotOfNetId(npc_entity_id)) |ts|
             self.sim.class_id[ts].hash
         else
             0;
+        if (self.sim.slotOfNetId(npc_entity_id)) |ts| {
+            const info_id = self.sim.trader_stock[ts].trader_info_id;
+            if (info_id != 0) {
+                if (self.npc.questListForTrader(info_id)) |ql| return ql;
+            }
+        }
         if (hash == packages.stock_entity.class_npc_trader_rekt) return "trader_rekt_quests";
         if (hash == packages.stock_entity.class_npc_trader_bob) return "trader_bob_quests";
         if (hash == packages.stock_entity.class_npc_trader_hugh) return "trader_hugh_quests";
@@ -8339,16 +8372,56 @@ pub const Game = struct {
         return true;
     }
 
-    /// Map stock item name → ECS id (0 unknown).
-    /// Replace builtin trader stock with traders.xml traderAlways entries when
-    /// resolvable to ECS items. Price from items.xml EconomicValue when known.
+    /// Parse a stock "H:MM" hour string to minutes after midnight; null if malformed.
+    fn traderMinutes(v: []const u8) ?u32 {
+        const colon = std.mem.indexOfScalar(u8, v, ':') orelse return null;
+        if (colon == 0 or colon + 1 >= v.len) return null;
+        const h = std.fmt.parseInt(u32, v[0..colon], 10) catch return null;
+        const m = std.fmt.parseInt(u32, v[colon + 1 ..], 10) catch return null;
+        if (h > 23 or m > 59) return null;
+        return h * 60 + m;
+    }
+
+    /// trader_info open hours gate: vending machines and traders without
+    /// open_time are always open; unknown info ids (fixtures) never gate.
+    fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
+        const info_id = self.sim.trader_stock[ts].trader_info_id;
+        if (info_id == 0) return true;
+        const info = self.traders.traderInfo(info_id) orelse return true;
+        if (info.is_vending or info.open_time.len == 0) return true;
+        const open = traderMinutes(info.open_time) orelse return true;
+        const close = traderMinutes(info.close_time) orelse return true;
+        // 24000 ticks/day, 1000 ticks/hour → minute of day = ticks*3/50.
+        const now = (@as(u32, @intCast(self.sim.director.clock.worldTimeBits() % 24000)) * 3) / 50;
+        if (close > open) return now >= open and now < close;
+        return now >= open or now < close; // overnight window
+    }
+
+    /// Replace builtin trader stock with the trader's own traders.xml list when
+    /// resolvable to ECS items: per-trader `<trader_items>` from the trader_info
+    /// matching the entity's class (npc.xml trader_id), else traderAlways.
+    /// Price from items.xml EconomicValue when known.
     fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         const tt = self.traders;
-        if (tt.entries.len == 0) return;
         const s = self.sim.slotOfNetId(trader_net_id) orelse return;
         if (!self.sim.mask[s].trader_stock) return;
         var n: usize = 0;
-        for (tt.entries) |e| {
+        var fill: []const assets_traders.Entry = &.{};
+        var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
+        const info_id = self.sim.trader_stock[s].trader_info_id;
+        if (info_id != 0) {
+            if (tt.traderInfo(info_id)) |ti| {
+                if (ti.refs.len > 0) {
+                    const en = tt.expandTraderRefs(ti, &per_trader);
+                    fill = per_trader[0..en];
+                }
+            }
+        }
+        if (fill.len == 0) {
+            if (tt.entries.len == 0) return;
+            fill = tt.entries; // fallback traderAlways
+        }
+        for (fill) |e| {
             if (n >= ecs.components.max_stock) break;
             const iid = self.ecsIdFromItemName(e.name);
             if (iid == 0) continue;
@@ -8362,6 +8435,74 @@ pub const Game = struct {
             n += 1;
         }
         if (n > 0) self.sim.trader_stock[s].n = @intCast(n);
+    }
+
+    test "per-trader stock and hours come from trader_info + npc.xml" {
+        const traders_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
+        const npc_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/npc.xml";
+        const tt = assets_traders.loadFromPath(std.testing.allocator, traders_path) catch return error.SkipZigTest;
+        const nt = assets_npc.loadFromPath(std.testing.allocator, npc_path) catch return error.SkipZigTest;
+
+        io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/trader_info_stock", 0, .{});
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // No config dirs here, so create left the tables empty: own the stock files.
+        g.traders.deinit();
+        g.traders = tt;
+        g.npc.deinit();
+        g.npc = nt;
+
+        try std.testing.expectEqual(@as(u16, 6), g.npc.traderIdForClass("npcTraderBob"));
+        try std.testing.expectEqual(@as(u16, 2), g.npc.traderIdForClass("Trader Jen"));
+        try std.testing.expectEqualStrings("trader_rekt_quests", g.npc.questListForTrader(8).?);
+
+        // Pad trader gets Jen's trader_info (2) and her own list, not traderAlways.
+        var jen: ?i32 = null;
+        var si: ecs.Slot = 0;
+        while (si < ecs.max_entities) : (si += 1) {
+            if (g.sim.alive[si] and g.sim.mask[si].trader) {
+                g.sim.trader_stock[si].trader_info_id = 2;
+                jen = g.sim.network_id[si].id;
+                break;
+            }
+        }
+        const jen_id = jen orelse return error.TestUnexpectedResult;
+        g.fillTraderFromXml(jen_id);
+        const jslot = g.sim.slotOfNetId(jen_id).?;
+        // Offline game has the ~12-item builtin table, so at least one of Jen's
+        // refs must resolve; the exact count depends on items.xml coverage.
+        try std.testing.expect(g.sim.trader_stock[jslot].n >= 1);
+
+        // Joel's trader_info (1) fills a different list: some (item, count)
+        // pair among the first entries differs from Jen's.
+        const joel_id = g.sim.spawnTrader("npcTraderJoel", 100, 70, 100, 1).?;
+        g.fillTraderFromXml(joel_id);
+        const kslot = g.sim.slotOfNetId(joel_id).?;
+        const a = &g.sim.trader_stock[jslot];
+        const b = &g.sim.trader_stock[kslot];
+        try std.testing.expect(a.n >= 1 and b.n >= 1);
+        var differs = false;
+        const m = @min(a.n, b.n);
+        for (a.entries[0..m], b.entries[0..m]) |x, y| {
+            if (x.item != y.item or x.count != y.count) differs = true;
+        }
+        try std.testing.expect(differs);
+
+        // Hours gate: Jen (4:05–21:50) is open at noon, closed at 03:00; a
+        // vending trader_info (4) and unknown ids (fixtures) never gate.
+        g.sim.director.clock.hours = 12.0;
+        try std.testing.expect(g.traderIsOpen(jslot));
+        g.sim.director.clock.hours = 3.0;
+        try std.testing.expect(!g.traderIsOpen(jslot));
+        const vend_id = g.sim.spawnTrader("vending", 110, 70, 110, 4).?;
+        const vslot = g.sim.slotOfNetId(vend_id).?;
+        try std.testing.expect(g.traderIsOpen(vslot));
+        const unk_id = g.sim.spawnTrader("Trader", 120, 70, 120, 0).?;
+        const uslot = g.sim.slotOfNetId(unk_id).?;
+        try std.testing.expect(g.traderIsOpen(uslot));
     }
 
     fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
@@ -8938,6 +9079,10 @@ pub const Game = struct {
                 const c: *const world_store.Chunk = @ptrCast(@alignCast(ctx.?));
                 return c.texAt(lx, y, lz);
             }
+            fn dens(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) ?u8 {
+                const c: *const world_store.Chunk = @ptrCast(@alignCast(ctx.?));
+                return c.densAt(lx, y, lz);
+            }
         };
         const TexCtx = struct {
             t: *const assets_block_textures.Table,
@@ -8959,10 +9104,7 @@ pub const Game = struct {
             .tex_at = BlockCtx.tex,
             .default_tex = TexCtx.def,
             .default_tex_ctx = &tex_ctx,
-            .dens_overrides = if (ch.dens_set != null and ch.densities != null)
-                .{ .bits = ch.dens_set.?, .values = ch.densities.? }
-            else
-                null,
+            .dens_at = BlockCtx.dens,
             .water_block_id = self.world.terrain_ids.water,
             .raws_scratch = &self.chunk_raws,
         });

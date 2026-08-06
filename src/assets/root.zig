@@ -19,6 +19,7 @@ pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
 pub const maxdamage = @import("maxdamage.zig");
 pub const traders = @import("traders.zig");
+pub const npc = @import("npc.zig");
 pub const assignids_comptime = @import("assignids_comptime.zig");
 pub const biome_layers = @import("biome_layers.zig");
 pub const block_textures = @import("block_textures.zig");

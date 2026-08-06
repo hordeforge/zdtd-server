@@ -58,8 +58,14 @@ explain why. Match the surrounding style.
 unfiltered from both spawn paths, `class_table[3]` carries the real
 `npcTraderJen` hash, `EntityCreationData.hasTraderData` is written on trader
 spawns, and the LockResponse trader branch (`buildLockResponseTrader`) delivers
-server stock on open. Remaining for full "done when": POI placement, restock
-rolls, and the live stock-client visual check.
+server stock on open. **Per-trader stock landed 2026-08-06:** npc.xml is parsed
+(`src/assets/npc.zig`) so each trader class resolves its own traders.xml
+`<trader_info>` id and quest_list at spawn; `fillTraderFromXml` fills the
+window from that trader's own `<trader_items>` list (traderAlways fallback),
+the lock-open path denies outside the trader's open hours (vending always
+open), and `allow_sell=false` blocks selling to that trader. Remaining for full
+"done when": POI placement, restock rolls, and the live stock-client visual
+check.
 
 **Why first:** the gap analysis scores traders 3 WORKS / 9 PARTIAL / 14 MISSING,
 and the headline is "no trader NPC exists on the client". Most of the trader

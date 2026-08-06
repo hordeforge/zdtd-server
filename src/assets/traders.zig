@@ -9,10 +9,43 @@ pub const max_entries: usize = 128;
 pub const max_groups: usize = 256;
 pub const max_expand: usize = 64;
 pub const max_group_depth: usize = 8;
+pub const max_traders: usize = 32;
 
 pub const Entry = struct {
     name: []const u8 = "",
     count: u16 = 1,
+};
+
+/// One `<item .../>` ref inside a trader_info `<trader_items>` block. A group
+/// ref expands to the group's items at fill time; a name ref is a direct item.
+pub const ItemRef = struct {
+    name: []const u8 = "",
+    count: u16 = 1,
+    group: bool = false,
+};
+
+/// traders.xml `<trader_info id="N">` block: per-trader hours, vending /
+/// player-owned flags and the `<trader_items>` refs that make that trader's
+/// stock (stock maps entity class → trader_id via npc.xml).
+pub const TraderInfo = struct {
+    id: u16 = 0,
+    /// "4:05" stock format; "" = no hours gate (always open).
+    open_time: []const u8 = "",
+    close_time: []const u8 = "",
+    is_vending: bool = false,
+    /// false → the trader does not buy from players (vending, player-owned).
+    allow_sell: bool = true,
+    /// 0 = unset (root economy / pricing row owns the price math).
+    override_buy_markup: f32 = 0,
+    override_sell_markup: f32 = 0,
+    /// -1 = never; >0 = days between restock (restock row owns the timer).
+    reset_interval: i32 = 0,
+    player_owned: bool = false,
+    rentable: bool = false,
+    rent_cost: i32 = 0,
+    rent_time: i32 = 0,
+    /// Union of every `<trader_items>` block, in XML order (SPECIALTY first).
+    refs: []const ItemRef = &.{},
 };
 
 pub const Group = struct {
@@ -27,6 +60,8 @@ pub const TraderTable = struct {
     /// Expanded traderAlways stock (direct + resolved groups, deterministic first picks).
     entries: []const Entry = &.{},
     groups: []const Group = &.{},
+    /// Per-trader `<trader_info>` blocks keyed by id.
+    trader_infos: []const TraderInfo = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *TraderTable) void {
@@ -80,6 +115,34 @@ pub const TraderTable = struct {
         }
         return n;
     }
+
+    pub fn traderInfo(self: *const TraderTable, id: u16) ?TraderInfo {
+        for (self.trader_infos) |ti| {
+            if (ti.id == id) return ti;
+        }
+        return null;
+    }
+
+    /// Expand a trader_info's refs into out[]: direct names keep their ref
+    /// count, group refs expand via expandGroup (pick-count/RNG is the
+    /// inventory-roll row). Returns count written; preserves ref order.
+    pub fn expandTraderRefs(self: *const TraderTable, info: TraderInfo, out: []Entry) usize {
+        var n: usize = 0;
+        var group_buf: [max_expand]Entry = undefined;
+        for (info.refs) |r| {
+            if (n >= out.len) break;
+            if (r.group) {
+                const en = self.expandGroup(r.name, &group_buf);
+                const k = @min(en, out.len - n);
+                @memcpy(out[n..][0..k], group_buf[0..k]);
+                n += k;
+            } else {
+                out[n] = .{ .name = r.name, .count = r.count };
+                n += 1;
+            }
+        }
+        return n;
+    }
 };
 
 fn lowCount(v: []const u8) u16 {
@@ -109,6 +172,32 @@ fn parseGroupBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []cons
     const cslice = try arena.alloc([]const u8, children.items.len);
     @memcpy(cslice, children.items);
     return .{ islice, cslice };
+}
+
+/// Parse one `<trader_items>` body into ItemRefs (group and name refs kept).
+fn parseTraderRefs(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
+    var refs: std.ArrayList(ItemRef) = .empty;
+    defer refs.deinit(gpa);
+    var i: usize = 0;
+    while (i < body.len) {
+        const ii = std.mem.indexOfPos(u8, body, i, "<item ") orelse break;
+        i = ii + 6;
+        const count: u16 = if (xml.attr(body, ii, "count")) |cv| lowCount(cv) else 1;
+        if (xml.attr(body, ii, "group")) |gname| {
+            try refs.append(gpa, .{ .name = try arena.dupe(u8, gname), .count = count, .group = true });
+            continue;
+        }
+        const name = xml.attr(body, ii, "name") orelse continue;
+        try refs.append(gpa, .{ .name = try arena.dupe(u8, name), .count = count });
+    }
+    const rsl = try arena.alloc(ItemRef, refs.items.len);
+    @memcpy(rsl, refs.items);
+    return rsl;
+}
+
+fn attrBool(v: []const u8, dflt: bool) bool {
+    if (v.len == 0) return dflt;
+    return std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable {
@@ -148,10 +237,47 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     }
     if (groups.items.len == 0) return error.OpenFailed;
 
+    // Per-trader `<trader_info>` blocks: id + hours/vending/player-owned attrs
+    // + the `<trader_items>` refs that make that trader's own stock.
+    var trader_infos: std.ArrayList(TraderInfo) = .empty;
+    defer trader_infos.deinit(allocator);
+    var j: usize = 0;
+    while (j < clean.len and trader_infos.items.len < max_traders) {
+        const ti = std.mem.indexOfPos(u8, clean, j, "<trader_info ") orelse break;
+        j = ti + 13;
+        const idv = xml.attr(clean, ti, "id") orelse continue;
+        const id = std.fmt.parseInt(u16, idv, 10) catch continue;
+        const gt = std.mem.indexOfPos(u8, clean, ti, ">") orelse break;
+        const self_closing = gt > ti and clean[gt - 1] == '/';
+        var refs: []const ItemRef = &.{};
+        if (!self_closing) {
+            const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
+            refs = try parseTraderRefs(arena, allocator, clean[gt + 1 .. close]);
+            j = close + 15;
+        }
+        try trader_infos.append(allocator, .{
+            .id = id,
+            .open_time = try arena.dupe(u8, xml.attr(clean, ti, "open_time") orelse ""),
+            .close_time = try arena.dupe(u8, xml.attr(clean, ti, "close_time") orelse ""),
+            .is_vending = attrBool(xml.attr(clean, ti, "is_vending") orelse "", false),
+            .allow_sell = attrBool(xml.attr(clean, ti, "allow_sell") orelse "", true),
+            .override_buy_markup = std.fmt.parseFloat(f32, xml.attr(clean, ti, "override_buy_markup") orelse "0") catch 0,
+            .override_sell_markup = std.fmt.parseFloat(f32, xml.attr(clean, ti, "override_sell_markup") orelse "0") catch 0,
+            .reset_interval = std.fmt.parseInt(i32, xml.attr(clean, ti, "reset_interval") orelse "0", 10) catch 0,
+            .player_owned = attrBool(xml.attr(clean, ti, "player_owned") orelse "", false),
+            .rentable = attrBool(xml.attr(clean, ti, "rentable") orelse "", false),
+            .rent_cost = std.fmt.parseInt(i32, xml.attr(clean, ti, "rent_cost") orelse "0", 10) catch 0,
+            .rent_time = std.fmt.parseInt(i32, xml.attr(clean, ti, "rent_time") orelse "0", 10) catch 0,
+            .refs = refs,
+        });
+    }
+    const tisl = try arena.alloc(TraderInfo, trader_infos.items.len);
+    @memcpy(tisl, trader_infos.items);
+
     const gsl = try arena.alloc(Group, groups.items.len);
     @memcpy(gsl, groups.items);
 
-    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder };
+    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl };
 
     // Expand traderAlways into entries (primary stock list).
     var expand_buf: [max_expand]Entry = undefined;
@@ -198,4 +324,61 @@ test "trader table parses stock traderAlways when present" {
     var buf: [64]Entry = undefined;
     const n = t.expandGroup("groupAllAmmo", &buf);
     try std.testing.expect(n > 0);
+}
+
+test "trader table parses trader_info blocks with per-trader items and attrs" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    // The five NPC traders (joel=1 jen=2 bob=6 hugh=7 rekt=8) plus vending
+    // (4,10) and player-owned/rentable (3,5) all exist as trader_info blocks.
+    try std.testing.expect(t.trader_infos.len >= 10);
+    for ([_]u16{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }) |want| {
+        try std.testing.expect(t.traderInfo(want) != null);
+    }
+    // Joel (1): armor specialty + general blocks, refs preserved in order.
+    const joel = t.traderInfo(1).?;
+    try std.testing.expect(joel.open_time.len > 0);
+    try std.testing.expectEqualStrings("4:05", joel.open_time);
+    try std.testing.expectEqualStrings("21:50", joel.close_time);
+    try std.testing.expect(!joel.is_vending);
+    try std.testing.expect(joel.allow_sell);
+    try std.testing.expect(joel.refs.len >= 10);
+    var saw_armor_group = false;
+    var saw_direct_name = false;
+    for (joel.refs) |r| {
+        if (r.group and std.mem.eql(u8, r.name, "groupArmorLight")) saw_armor_group = true;
+        if (!r.group and std.mem.eql(u8, r.name, "armorParts")) saw_direct_name = true;
+    }
+    try std.testing.expect(saw_armor_group);
+    try std.testing.expect(saw_direct_name);
+    // Vending trader 4 is always open (no hours), does not buy from players.
+    const vend = t.traderInfo(4).?;
+    try std.testing.expect(vend.is_vending);
+    try std.testing.expect(!vend.allow_sell);
+    // Player-owned 3 and rentable 5 carry their flags; 5 has hours like the NPCs.
+    const po = t.traderInfo(3).?;
+    try std.testing.expect(po.player_owned);
+    try std.testing.expect(!po.allow_sell);
+    try std.testing.expectEqual(@as(f32, 1.0), po.override_buy_markup);
+    const rent = t.traderInfo(5).?;
+    try std.testing.expect(rent.rentable);
+    try std.testing.expectEqual(@as(i32, 2500), rent.rent_cost);
+    try std.testing.expectEqual(@as(i32, 30), rent.rent_time);
+    // expandTraderRefs resolves group refs (Joel's specialty has no traderAlways).
+    var out: [128]Entry = undefined;
+    const on = t.expandTraderRefs(joel, &out);
+    try std.testing.expect(on > joel.refs.len);
+    try std.testing.expect(on <= out.len);
+    // Jen (2) is a different list from Joel (1): different direct names.
+    const jen = t.traderInfo(2).?;
+    var outj: [128]Entry = undefined;
+    const ojn = t.expandTraderRefs(jen, &outj);
+    try std.testing.expect(ojn > 0);
+    var same_lead = true;
+    const k = @min(on, ojn);
+    for (out[0..k], outj[0..k]) |a, b| {
+        if (!std.mem.eql(u8, a.name, b.name)) same_lead = false;
+    }
+    try std.testing.expect(!same_lead);
 }

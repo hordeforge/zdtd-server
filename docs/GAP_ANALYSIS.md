@@ -136,7 +136,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
-| [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
+| [Traders](#5-traders) | 7 | 9 | 10 | 26 | Per-trader stock and hours from traders.xml `<trader_info>` + npc.xml; POI placement and restock open |
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
 | [POIs and prefabs](#7-pois-and-prefabs) | 11 | 14 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
@@ -807,14 +807,20 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/assets/traders.zig:114-177`, `:54-82`, `:183-201`,
   `Data/Config/traders.xml:1179-1194`
 
-- **traders.xml `<trader_info>` elements** `MISSING`
-  Only the literal `"<trader_item_group "` is looked for. Nothing reads id,
-  reset_interval, open_time, close_time, override_buy_markup,
-  override_sell_markup, allow_sell, is_vending, player_owned,
-  rentable/rent_cost/rent_time, or the per-trader `<trader_items>` blocks. Every
-  trader would carry the same generic `traderAlways` list; Jen's clothing, Bob's
-  vehicles, Rekt's food, and the player-owned and vending variants do not exist.
-  *Anchors:* `src/assets/traders.zig:131-148`, `Data/Config/traders.xml:1240-1280`,
+- **traders.xml `<trader_info>` elements** `WORKS`
+  `loadFromPath` now parses every `<trader_info id="N">` block: id,
+  reset_interval, open_time/close_time, override_buy/sell_markup, allow_sell,
+  is_vending, player_owned, rentable/rent_cost/rent_time, plus the per-trader
+  `<trader_items>` refs (group and name, XML order preserved). npc.xml is
+  parsed (`src/assets/npc.zig`) so each trader entity class resolves its own
+  trader_info id and quest_list at spawn. `fillTraderFromXml` fills each
+  trader's window from its own list (Jen's food, Bob's vehicles, Rekt's etc.)
+  with `traderAlways` as the fallback; the lock-open path denies outside the
+  trader's open hours (vending machines always open) and `allow_sell=false`
+  blocks selling to that trader. override_buy/sell_markup and reset_interval
+  are parsed but not applied: the pricing and restock rows own that math.
+  *Anchors:* `src/assets/traders.zig:249-288`, `src/assets/npc.zig`,
+  `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
   `:1469`, `:1472`, `:1488`
 
 - **traders.xml root economy attributes** `MISSING`
@@ -923,11 +929,11 @@ parsed, and quest offering is unwired.
   The reply is legal (base direction Both) and the bodies are right, but the
   client's `ProcessPackage` resolves the npc id with `GetEntity(id) as
   EntityTrader` before doing anything, and zdtd has no trader entity on the
-  client, so the offers are silently discarded. The list id is hardcoded to
-  `trader_jen_quests` at all three call sites; `npc.xml` is only forwarded as a
-  ConfigFile, never parsed.
+  client, so the offers are silently discarded. The list id per trader is no
+  longer hardcoded: npc.xml is parsed and drives each trader's quest_list via
+  its trader_info id (fallback is the stock class-hash map).
   *Anchors:* `src/server/game.zig:6434-6462`, `:5345`, `:5364`, `:5383`,
-  `src/assets/xml_patch.zig:101`, `asm.il:827745-827765`, `asm.il:804011-804018`,
+  `src/assets/npc.zig`, `asm.il:827745-827765`, `asm.il:804011-804018`,
   `Data/Config/npc.xml:19-31`
 
 - **Quest turn-in / phase advance on trader open** `PARTIAL`

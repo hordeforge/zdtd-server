@@ -653,11 +653,11 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
-    pub fn spawnTrader(self: *World, name: []const u8, x: f32, y: f32, z: f32) ?NetId {
+    pub fn spawnTrader(self: *World, name: []const u8, x: f32, y: f32, z: f32, trader_info_id: u16) ?NetId {
         const s = self.spawnBase(.trader, x, y, z, 9999) orelse return null;
         self.mask[s].trader = true;
         self.mask[s].trader_stock = true;
-        self.trader_stock[s] = .{ .name = name };
+        self.trader_stock[s] = .{ .name = name, .trader_info_id = trader_info_id };
         self.notifySpawn(s);
         return self.network_id[s].id;
     }

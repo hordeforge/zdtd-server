@@ -36,7 +36,11 @@ observable, on the live stock client:
 - **Traders (T1):** the trader NPC now replicates with a real `npcTraderJen`
   class hash, and `TraderData` rides both stock S2C paths: spawn
   `EntityCreationData.hasTraderData` and the channel-1 LockResponse context.
-  Wire + scenario tested (759 total); live stock-client visual check pending.
+  Each trader class resolves its own traders.xml `<trader_info>` id from
+  npc.xml and fills its window with its own `<trader_items>` list (not the
+  shared `traderAlways`); the lock-open path denies outside the trader's open
+  hours (vending always open) and `allow_sell=false` blocks selling to it.
+  Wire + scenario tested; live stock-client visual check pending.
 - **Loot (T2):** containers roll their own `blocks.xml` LootList (gun safe
   `smallSafes`, chest `woodenChest`); zombie bags resolve the stock chain to
   `zPackReg` and drop only on `LootDropProb` (.04), so most kills drop nothing.
@@ -122,9 +126,9 @@ observable, on the live stock client:
 gate **23/23** · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are trader depth
-(POI placement, restock, per-trader lists; the NPC replicates with TraderData
-on both S2C paths and quest rewards/actions now pay out, WORK_PLAN T1), and
-player persistence depth.
+(POI placement, restock; the NPC replicates with TraderData on both S2C paths,
+per-trader stock/hours ship, and quest rewards/actions pay out, WORK_PLAN T1),
+and player persistence depth.
 
 **Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
 whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs
@@ -152,7 +156,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Player persist v2 | **PASS** | players.zsv v2 (quality/meta + journal); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
-| Trader XML stock | **PASS** | traders.xml traderAlways direct items + items.xml EconomicValue prices (assets/traders.zig; group rolls deferred) |
+| Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
 | Director class variety | **PASS** | zombie slots 1+8..11 from entitygroups weighted picks; rotation per spawn |
 | Zombie population bound | **PASS** | alive-cap 24 + far-despawn (>200 blocks, reason=Despawned); pw27 Ent stable 3-4 vs prior 7→34 creep |
 | ItemValue/Explosion wire | **PASS** | ReadData + ExplosionData positional per IL (no remaining() or scan heuristics); unit tests |

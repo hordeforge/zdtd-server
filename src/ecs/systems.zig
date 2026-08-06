@@ -2713,7 +2713,7 @@ test "failed trader buy leaves wallet stock and inventory unchanged" {
     var w: World = .{};
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
-    const trader_id = w.spawnTrader("Trader", 1, 70, 1).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0).?;
     const ps = w.playerByPeer(0).?;
     const ts = w.slotOfNetId(trader_id).?;
     for (w.inventory[ps].slots[0..c.inv_equip_start], 0..) |*slot, i| {

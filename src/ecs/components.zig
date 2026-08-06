@@ -537,6 +537,8 @@ fn defaultStock() [max_stock]StockEntry {
 
 pub const TraderStock = struct {
     name: []const u8 = "Trader",
+    /// traders.xml `<trader_info>` id for this trader (0 = generic/default).
+    trader_info_id: u16 = 0,
     entries: [max_stock]StockEntry = defaultStock(),
     n: usize = 5,
 };
