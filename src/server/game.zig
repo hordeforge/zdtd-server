@@ -6774,7 +6774,7 @@ pub const Game = struct {
                     var idx: u32 = 0;
                     for (list.entries) |qid| {
                         const d = self.sim.catalog.byId(qid) orelse continue;
-                        if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+                        if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
                         if (d.difficulty_tier != head.tier_level) continue;
                         const ps = self.sim.playerByPeer(c.slot) orelse break;
                         if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
@@ -7841,7 +7841,7 @@ pub const Game = struct {
         for (self.sim.journal[ps].slots) |s| {
             if (!s.active or s.completed) continue;
             const d = self.sim.catalog.byId(s.def_id) orelse continue;
-            if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
             // nav_objects.xml: quest | go_to_trader | return_to_trader
             const nav_class: []const u8 = switch (d.kind) {
                 .fetch_trader => if (s.ready_turn_in) "return_to_trader" else "go_to_trader",
@@ -7870,8 +7870,13 @@ pub const Game = struct {
     }
 
     /// True when quest id is likely present in stock client QuestClass.
-    fn isStockClientQuestName(name: []const u8) bool {
+    fn isStockClientQuestName(self: *Game, name: []const u8) bool {
         if (name.len == 0) return false;
+        // A stock quests.xml catalog is client-known by construction: both the
+        // server and the stock client load the same Data/Config/quests.xml, so
+        // every def in it has a client QuestClass entry. The prefix gate below
+        // only proxies the client catalog for builtin/offline defs (audit B28).
+        if (self.sim.catalog.source == .stock_xml) return true;
         if (std.mem.startsWith(u8, name, "quest_")) return true;
         if (std.mem.startsWith(u8, name, "tier")) return true;
         // Other stock quest-name families the client's quests.xml knows
@@ -7941,7 +7946,7 @@ pub const Game = struct {
             if (!s.active and !s.completed) continue;
             if (n >= out.len or n >= reward_store.len) break;
             const d = self.sim.catalog.byId(s.def_id) orelse continue;
-            if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
             const state: packages.stock_quest.QuestState = if (s.completed)
                 .completed
             else if (s.ready_turn_in)
@@ -8106,7 +8111,7 @@ pub const Game = struct {
         for (list.entries) |qid| {
             if (n >= out.len) break;
             const d = self.sim.catalog.byId(qid) orelse continue;
-            if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
+            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
             // Stock filters the trader's quest list by DifficultyTier == the
             // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
             if (tier != 0 and d.difficulty_tier != tier) continue;

@@ -137,7 +137,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 | B25 | quest kill-count boost `3 + tier*2` | P3 | **RE basis added** | `assets/quests.zig:342` now cites the RE fact: stock ClearSleepers objectives always omit `count` (11/11 in stock quests.xml) because the target is the POI's sleeper volume, counted at runtime via `QuestEvent_SleepersCleared` / `SleeperVolumePosition*` (ObjectiveClearSleepers IL). The tier-scaled floor stays as a documented approximation until the kill objective is driven by the bound POI's sleeper volume (which the B26 POI binding now makes possible). |
 | B26 | quest goto fallback position (FNV `%200 -100`) | P3 | **Fixed** | goto_point / stay_within / craft quests without a static def position now bind the nearest real POI at accept (`World.nearestPoi` hook wired to the prefab index; stock RandomPOIGoto picks the POI at hand-out). The goto check, NavObject marker and save-restore re-resolve all use the bound POI center; the FNV offset survives only as the no-POI-data fallback for offline/test worlds. |
 | B27 | `LootRespawnDays` undocumented | P3 | **New 08-07**: config.zig parses + clamps + applies it, but `docs/GAME_OPTIONS.md` "Applied to the sim" table has no row. Doc gap (success criterion "GAME_OPTIONS lists every new key"). |
-| B28 | quest offer name gate `isStockClientQuestName` | P3 | **New 08-07**: `game.zig:7823` prefix filter (`quest_`, `tier`, `intro_`, `test_`, `challengegroup_reward_`) proxies the client's quest catalog; fail-closed (drops unknown), but duplicate stock-name knowledge; re-verify against the connected client's quests.xml |
+| B28 | quest offer name gate `isStockClientQuestName` | P3 | **Fixed** | The gate now short-circuits to true when the catalog loaded from stock `quests.xml` (server and client read the same file, so every def is client-known by construction); the prefix filter remains only as the builtin/offline-catalog proxy. |
 
 ### `zdtd.toml` (shipped surface; B13 throttles still bare)
 
@@ -263,7 +263,7 @@ markup ratios (A29) here (Bucket A).
 7. ~~Quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) landed (A20).~~
 8. ~~**A29/A30:** price from `EconomicValue × BuyMarkup`/`OverrideBuyMarkup`; `reset_interval` wired into `traderRestock`.~~ Residual A29: `EconomicSellScale` and the quality-lerp terms still absent (sell prices approximate).
 9. ~~**B27:** `LootRespawnDays` row added to GAME_OPTIONS.md.~~
-10. ~~**B26:** goto quests bind the nearest real POI at accept.~~ Re-verify B25/B28 against stock quest behavior.
+10. ~~**B26:** goto quests bind the nearest real POI at accept.~~ ~~**B25:** kill-count floor RE-cited.~~ ~~**B28:** stock quests.xml catalog skips the prefix gate.~~
 
 ---
 
