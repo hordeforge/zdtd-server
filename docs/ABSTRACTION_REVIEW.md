@@ -175,3 +175,45 @@ Matches AGENTS table. FS helpers stay in `util/io_fs`. Wire bodies stay in
 - Private per-file `fileExists` forwards (harmless).
 - Comptime AssignIds pins vs runtime dump (documented dual-role, not dual path; ECS item handles: ADR 0015).
 
+
+### 2026-08-06 late-wave follow-up (wasm runtime + stability)
+
+Audited the post-review landings: the zwasm v2 plugin runtime (`e2d2fe3`,
+`src/plugin/wasm.zig`) and the stability implementation (`6daf9ca`/`02a373a`,
+`src/world/stability.zig` + facts in `maxdamage.zig` + the SetBlock hook).
+
+| Name | Path | Verdict | Sev | Notes |
+|---|---|---|---|---|
+| `WasmHost` fixed table | `plugin/wasm.zig` | **keep** | - | Mirrors the static `PluginHost` shape (bounded 8, ordered enable/tick/join/shutdown); one plugin container, one obvious way |
+| `Plugin` owning engine/linker/instance/module/name | `plugin/wasm.zig` | **keep** | - | The zwasm lifetime contract (linker ctx_storage outlives the instance, `Linker.engine` pins the Engine address) forces the ownership; documented at the field |
+| `HostCtx` fn pointers + `data: ?*anyopaque` | `plugin/wasm.zig` | **keep** | - | Same ctx+callback shape as `heightAtWorld`/`pathStepAt`/`IdCtx` elsewhere; plugin layer stays Game-free (layer table) |
+| `zdtd_log/tick/queue` import table | `plugin/wasm.zig` | **keep** | - | The documented capability-gated host surface; small on purpose (PLUGIN_API.md) |
+| Text `SimCommand` grammar + `parsePluginCommand` | `server/game.zig` | **keep** | - | Flat-bytes contract over the wasm boundary (PLUGIN_DEV.md); allocation-free tokenizer; typed commands would need a struct ABI for no gain |
+| `splitPluginModules` | `main.zig` | **keep** | P3 | 15-line comma splitter; could live in `zdtd_config` for unit-testability, but the toml File already owns the raw string and main owns the free; not worth churn now |
+| `stability.zig` plane + spread + removal | `world/stability.zig` | **keep** | - | World-layer module importing only `store`; no wire; matches the derived stock algorithm one-to-one |
+| `Chunk.stability` lazy plane | `world/store.zig` | **keep** | - | Same lazy `?[]u8` channel shape as textures/densities; never persisted (derived), freed with the chunk |
+| `FactsFn` probe (`stabilityFacts`) | `world/stability.zig`, `server/game.zig` | **keep** | - | Same ctx+fn shape as the wasm host table; keeps the module table-agnostic; game resolves via maxdamage Extends facts |
+| `removeBlockAt` visited set | `world/stability.zig` | **keep** | P2 | Linear-scan dedup on a fixed `[8192]u64` is O(n^2) at the cap (bounded, ~67M compares worst case for one collapse). A fixed open-addressing set is the one-obvious-way shape if a large-collapse pass ever shows up in apm; the named cap already prevents tick bombs |
+| `stabilityAfterSetBlock` | `server/game.zig` | **keep** | - | Server orchestration only; removal + placement + fallen broadcast in one place, gated on a type change (damage/repair untouched) |
+| `stabilitySupport`/`stabilityIgnore` facts | `assets/maxdamage.zig` | **keep** | - | Third fact pair on the existing Extends `DecoFacts` walk; same by-name authority as MaxDamage/LootList; no new resolver |
+
+### Dual-path hunt (late wave)
+
+- Encoders: the falling-block ECD payload (`FallingBlockInfo`) predates the
+  stability work and is the single builder; the stability path removes blocks
+  with the existing `buildSetBlockBodyRaw`, no new body writer.
+- Stability plane: one computed channel per chunk, one seed+spread authority
+  (`ensureComputed`), incremental removal is the only writer besides the spread.
+- Plugin queue: one text grammar, one drain seam (`sim.commands`), no second
+  command path.
+- Import layering: `world/stability.zig` imports `world/store.zig` only
+  (grep-verified); plugin still imports no server/ecs/wire/world/assets.
+
+### Hot-path check (late wave)
+
+- Wasm hooks: `callHook`/`onTick`/`parsePluginCommand` are alloc-free; queue
+  lands in the fixed 64-slot command buffer.
+- Stability tick path: `removeBlockAt` uses fixed stack/visited/change arrays
+  (8192 cap), no heap; `ensureComputed` allocates the plane only on first touch
+  (documented gray area, same as the lazy block columns).
+- `stabilityAfterSetBlock` broadcasts fallen blocks with `body_buf`, no alloc.
