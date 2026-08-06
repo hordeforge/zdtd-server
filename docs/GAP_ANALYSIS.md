@@ -48,6 +48,11 @@ storms driven by the real `biomes.xml` state machine, and a blood moon fire on
 schedule with the correct music cue. Operators get an admin TCP console, a web
 dashboard, autosave, and APM metrics.
 
+Zombies can hurt you and you can die: server-side melee reaches the client as
+EntityStatChanged, so combat has stakes (2026-08-06). Buffs apply, tick, stack
+and expire on the server and reach the client. Mobs that wander out of interest
+are unloaded instead of standing frozen in your world forever.
+
 ### What a player cannot do
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -55,23 +60,19 @@ discovery, so a typed IP is the only route in, and the one thing that is
 advertised is malformed: `ServerVersion "V 3.1.0"` fails the client's
 `TryParseSerializedString`, which wants `"V.3.10.14"`.
 
-**Zombies cannot hurt you.** Server-side melee accrues into `health[].hp` and no
-`EntityStatChanged` is ever emitted for it, so the client never learns. Once the
-server believes you are at 0 HP your own outgoing damage is rejected and you
-become a ghost who cannot fight back.
-
 **There is no trader.** The `.trader` entity kind is filtered out of both entity
 spawn paths, so no trader NPC exists anywhere on the client, the five Navezgane
 trader compounds are empty, and `TraderData` is never delivered on either stock
 S2C path. Every quest that says "go to the trader" points at a POI with nobody in
 it, and the entire quest and economy loop is unreachable.
 
-**Every POI is the wrong building.** Prefab block ids are never remapped through
-the prefab's `.blocks.nim`, so roughly 21% of painted cells are a different block
-than authored (live-confirmed on the client). Prefab rotation is inverted, so 709
-of 1559 Navezgane decorations face 180 degrees off. `YOffset` is ignored, so 679
-of 1487 POIs sit too high, and caves, mines, quarries and bunkers are stamped at
-the surface with no entrance.
+**POIs are built right, but not finished.** Ids, rotation and height were all
+wrong and are fixed (2026-08-06): ids remap through the prefab's `.blocks.nim`
+including pre-v18 BlockValue layouts, prefabs turn clockwise like stock with the
+matching per-block facing, and `YOffset` places caves, mines and bunkers below
+the surface. Still open: `part_*` decorations are not painted, sleeper triggers
+are partial, and per-block facing uses one remap table where stock resolves it
+virtually per BlockShape.
 
 **There is no water.** No water block is ever written, the chunk water channel is
 uniform zero, and `water_info.xml` is used only to raise terrain, so every lake
@@ -104,27 +105,27 @@ replication), 3 (blocks.nim id remap), 4 (rotation direction and YOffset), 6
 multi-seat, party PlatformUserId, the stock telnet console surface and the M11
 replication CPU work.
 
-The per-area feature tables below have **not** been rescored for those changes,
-so treat a PARTIAL or MISSING row in an area touched by the list above as
-"check the code first". The counts in the scorecard are as of `60153a0`.
+The per-area tables and the scorecard **have** been rescored against the code at
+head `2768e30` (2026-08-06): rows verified as landed carry a `(2026-08-06)` tag
+next to their state. Totals moved from 74/160/111 to 82/159/104.
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-345 features catalogued across nine areas.
+345 features catalogued across nine areas. Rescored 2026-08-06 at head `2768e30`.
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 12 | 18 | 6 | 36 | Real `quests.xml` loads; 53 client-known defs parse empty (no template inheritance); accept path missing |
 | [Traders](#5-traders) | 3 | 9 | 14 | 26 | No trader NPC exists on the client; the whole area is downstream of that |
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
-| [POIs and prefabs](#7-pois-and-prefabs) | 7 | 16 | 9 | 32 | Every POI is present but built from wrong ids, wrong rotation, wrong height |
-| [Entities and AI](#8-entities-and-ai) | 15 | 20 | 14 | 49 | Real fights, real A*; population is ~6 classes and one animal species |
+| [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
+| [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 7 | 16 | 12 | 35 | Chests open; content wrong at the source; crafting instant and unvalidated |
-| [Player progression](#10-player-progression) | 4 | 11 | 22 | 37 | Nothing a player can feel; combat damage never reaches the client |
+| [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
-| [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works and the 189-name map is exact; invisible to browsers, thin persistence |
-| **Total** | **75** | **159** | **111** | **345** | Core loop playable; depth, content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **82** | **159** | **104** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1133,7 +1134,7 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/tts.zig:88`, `:67`, `asm.il:920310-920625`,
   `asm.il:915380-915421`
 
-- **Prefab block id remap through `<name>.blocks.nim`** `MISSING`
+- **Prefab block id remap through `<name>.blocks.nim`** `WORKS` (2026-08-06)
   `applyTtsPaintToChunk` stamps the raw `.tts` type id and the comment assumes
   "TTS type ids are AssignIds-range on stock installs". That is false: every
   Navezgane POI ships a `.blocks.nim` (120/120 sampled) whose ids have drifted
@@ -1153,7 +1154,7 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/prefabs.zig:41`, `asm.il:921616-921637`,
   `asm.il:944180-944243`
 
-- **Prefab rotation: block coordinate mapping** `PARTIAL`
+- **Prefab rotation: block coordinate mapping** `WORKS` (2026-08-06)
   Rotations 1 and 3 are swapped: zdtd rotates +90*r where stock rotates -90*r.
   Stock forward map: r=1 gives `(sz-1-z, x)`; r=3 gives `(z, sx-1-x)`. zdtd has
   those two swapped. `Prefab::RotatePointOnY` confirms the sign directly
@@ -1166,7 +1167,7 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/tts.zig:272`, `asm.il:915424-915618`,
   `asm.il:915620-915698`, `asm.il:921639-921684`, `asm.il:931080-931180`
 
-- **Prefab rotation: per-block facing** `PARTIAL`
+- **Prefab rotation: per-block facing** `PARTIAL` (step count fixed 2026-08-06)
   The 24-orientation permutation table is correct (re-derived from
   `BlockShapeNew::rotationsToQuats` with the world-space pre-multiply
   `ConvertRotationFree` performs). What is wrong is the **step count**: stock
@@ -1180,7 +1181,7 @@ can walk into every POI but none of them is the building TFP authored.
   `asm.il:181959-182018`, `asm.il:173648-173702`, `asm.il:166904-166921`,
   `asm.il:171283-171414`
 
-- **Prefab YOffset** `MISSING`
+- **Prefab YOffset** `WORKS` (2026-08-06)
   `paintDecoration` uses `origin_y = d.y` and never reads the prefab .xml
   `YOffset`; stock applies it in `DynamicPrefabDecorator.Load` right after
   `GetPrefabRotated`. 679 of the 1487 full-POI decorations (46%) have a nonzero
@@ -1475,7 +1476,7 @@ gamestage, no wandering hordes, and no screamers.
   hits exactly like zombieBoe. Only `max_hp` differs.
   *Anchors:* `src/ecs/world.zig:467-474`, `src/ecs/systems.zig:951-954`, `:1285`
 
-- **Gamestage** `MISSING`
+- **Gamestage** `PARTIAL` (2026-08-06)
   `gamestages.xml` is not parsed anywhere (only in the xml_patch name table).
   Stock resolves SleeperVolumeGroup, horde and quest spawn names through
   `GameStageDefinition::GetGameStage(name)` to `GetStage(PartyGameStage)` to
@@ -2181,27 +2182,24 @@ skills or vitals survives a relog let alone a restart.
   *Anchors:* `src/assets/buffs.zig:85-174`, `:80-83`, `:9`, `server-orch.log:13`,
   `Data/Config/buffs.xml`
 
-- **Buff runtime: apply, tick, expire, stack** `MISSING`
-  There is no buff component in the ECS Mask, no per-entity buff list, and no buff
-  system in `tickAll`. `Table.passiveValue` has zero callers. Nothing on the server
-  can hold a buff, so injuries, infection, food buffs, weather buffs and set
-  bonuses do not exist server-side; the client runs its own local buff manager in
-  isolation (client log: `+buffForest_Hazard`, `WeatherBuffUpdate`; playtest
-  `PASS core/buffs buff mgr live`).
+- **Buff runtime: apply, tick, expire, stack** `WORKS` (2026-08-06)
+  A buff component, per-entity buff list and a `systemBuffs` pass now run in the
+  ECS with stack rules and 20 Hz timers, and buff changes reach the client over
+  the stock wire. Open: the triggered_effect VM, cvar sync, immunity and
+  damage-type gates, and persistence across sessions (see WORK_PLAN T5).
   *Anchors:* `src/ecs/components.zig:538-560`, `src/assets/buffs.zig:57-69`,
   `output_log_client_zdtd_connect.txt:21110`, `:27206`
 
-- **NetPackageAddRemoveBuff relay and emission** `MISSING`
-  Dropped in the "accept, no sim" branch. Stock's server re-Setups the package and
-  sends it to the other clients before applying `AddBuff`/`RemoveBuff` locally. On
-  zdtd, one player applying a buff is invisible to everyone else, and the server
-  can never push bleeding, a sprained leg or food poisoning onto a player.
+- **NetPackageAddRemoveBuff relay and emission** `WORKS` (2026-08-06)
+  Validated then relayed, following stock's server branch: a peer may only drive
+  its own player entity and only with a buff name the catalog resolves. The
+  server can now push a buff onto a player and other clients see it.
   *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:202415`,
   `asm.il:202530-202566`
 
-- **NetPackageEntityStatsBuff** `MISSING`
-  Among the packages accepted with no handling so they do not warn. No builder, no
-  state.
+- **NetPackageEntityStatsBuff** `WORKS` (2026-08-06)
+  Built and sent: the full buff list of every other joined player rides
+  `buildEntityStatsBuffBody` on join.
   *Anchors:* `src/server/game.zig:4790-4793`
 
 - **Health component and client-claimed damage into the sim** `PARTIAL`
@@ -2212,22 +2210,15 @@ skills or vitals survives a relog let alone a restart.
   *Anchors:* `src/server/game.zig:4881-4936`, `src/ecs/world.zig:665-710`,
   `src/ecs/components.zig:22-30`
 
-- **Zombie melee damage replicated to the victim** `MISSING`
-  The biggest hole. `systems.zig` accrues zombie melee into a fixed-point per-slot
-  buffer and `applyDeferredDamage` subtracts it from `w.health[i].hp` for players,
-  but (a) `applyDeferredDamage` never sets `dirty.hp`, and (b) even
-  `world.damageFrom`'s `dirty[s].hp = true` is dead: nothing in the repo ever reads
-  `Dirty.hp`. `interest.clearAfterReplicate` deliberately preserves the bit and
-  there is no consumer. The four EntityStatChanged send sites are all event-driven
-  (eat, admin kill, respawn heal, join vitals); the tick replicate pass sends only
-  PosAndRot/Speeds/AliveFlags. A zombie beats on you, the server ticks your HP to
-  zero, and your client never hears about it: you do not flinch, you do not die,
-  and once the server thinks you are dead your own C2S damage is silently rejected
-  so you can no longer hit anything. Stock does replicate this via
-  `EntityStats::SendStatChangePacket`.
-  *Anchors:* `src/ecs/systems.zig:1280-1291`, `:158-183`, `:1433-1447`,
-  `src/ecs/world.zig:681`, `src/ecs/interest.zig:48-53`,
-  `src/server/game.zig:7871-7940`, `:4892`, `asm.il:199650`
+- **Zombie melee damage replicated to the victim** `WORKS` (2026-08-06)
+  Was the biggest hole: `applyDeferredDamage` subtracted HP and emitted nothing,
+  `Dirty.hp` was written in one place and read in none, and the four
+  EntityStatChanged send sites were all event driven, so a zombie could beat a
+  player to zero HP without the client ever hearing about it. The tick replicate
+  pass now drains the hp dirty bit into stock EntityStatChanged(Health), the way
+  `EntityStats::SendStatChangePacket` does, so combat has stakes and a dead
+  player is dead rather than a ghost.
+  *Anchors:* `src/ecs/systems.zig`, `src/server/game.zig`, `asm.il:199650`
 
 - **Food / water application on eat** `PARTIAL`
   Works end to end and is the one live-verified vitals path (playtest
@@ -3073,13 +3064,16 @@ persists so little that a restart visibly damages a built base.
   forces a full reconnect.
   *Anchors:* `src/server/game.zig:3495-3527`, `src/server/zdtd_config.zig:429`
 
-- **Admin TCP console** `PARTIAL`
-  Loopback-only (hardcoded 0x7f000001), no password, no telnet option negotiation,
-  4 persistent sessions with slot-0 eviction, and a startup warning that it is
-  unauthenticated. Roughly 30 verbs against 191 stock `ConsoleCmdAbstract`
-  subclasses exposing 283 command aliases. TelnetEnabled / TelnetPort /
-  TelnetPassword / TelnetFailedLoginLimit / TelnetFailedLoginsBlocktime are all
-  ignored, so an existing stock ops setup does not carry over.
+- **Admin TCP console** `PARTIAL` (2026-08-06)
+  The stock telnet protocol now ships: TelnetEnabled / TelnetPort /
+  TelnetPassword / TelnetFailedLoginLimit are parsed, the greeting and password
+  prompts match stock, the bind is loopback without a password and INADDR_ANY
+  with one, and the reply text for listplayers, listplayerids, listents, help,
+  getgamepref, chunkcache and mem matches the stock literals. admin, whitelist
+  and ban lists persist. Open: client-only verbs are deliberately absent,
+  TelnetFailedLoginsBlocktime is parsed but not enforced as a per-source block,
+  and permission entries are keyed by login name because zdtd has no stock user
+  id to key them by.
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
   `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
 

@@ -1,6 +1,6 @@
 # Work plan: handoff-ready tasks
 
-**Date pin:** 2026-08-06. **Head:** `76d8032`. **Gates at pin:** `make check`
+**Date pin:** 2026-08-06. **Head:** `2768e30` (gap analysis rescored at this head). **Gates at pin:** `make check`
 exit 0, 537 unit tests, live stock-client gate 23/23.
 
 This file exists to be handed to an agent or a programmer who has no other
