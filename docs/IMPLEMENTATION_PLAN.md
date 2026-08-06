@@ -409,7 +409,7 @@ Historical week-1..12 chunk/inventory stack is **done** (see STATUS). Current or
 
 | Band | PRs |
 |---|---|
-| Now | Deco/AssignIds V3.0.1 pin or keep suppress; Weather + GameStats day; quest objective types or A* path (pick by soak pain) |
+| Now | See [WORK_PLAN.md](WORK_PLAN.md) for the current ranked tasks |
 | Next | M11.2 dirty + serialize-once; M11.4 persistent pool; O(1) NetId map; apm section budgets |
 | Then | M11.5 32-bot then 128-bot loadgen gate; power fuel/actuation; lock contention |
 | Later | P4 guard spine (policy + ledgers around existing gates); telnet surface; multi-version matrix |
@@ -443,7 +443,7 @@ Tracks Wire RE and World store should start day one; ECS inventory waits on pack
 | PackageIds list | Full 194 names vs subset | Subset + grow; missing names only when handling |
 | Currency | Coins vs duke item | Move to real item id in M9/M13 |
 | Thread pool | std.Thread.Pool vs custom | Custom fixed pool (Zig 0.16 API churn) |
-| Client target version | Pin 3.0.1 | Yes; document in README |
+| Client target version | Pin **V3.1.0 b14** | Yes; documented in STATUS and RELEASES |
 
 ---
 

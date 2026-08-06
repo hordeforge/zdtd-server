@@ -1,5 +1,5 @@
 //! LiteNetLib wire packet property helpers.
-//! Property ordinals match the **game** Managed LiteNetLib (7DTD V3.0.1),
+//! Property ordinals match the **game** Managed LiteNetLib (7DTD V3.1.0 b14),
 //! which differs from upstream LiteNetLib 1.x (no ReliableMerged slot; ConnectRequest=5).
 
 const std = @import("std");

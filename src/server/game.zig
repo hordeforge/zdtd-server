@@ -7295,7 +7295,7 @@ pub const Game = struct {
     fn buildInventorySnap(self: *Game, c: *Client, buf: []u8) ![]u8 {
         const ps = self.sim.playerByPeer(c.slot) orelse return error.NoPlayer;
         if (!self.sim.mask[ps].inventory) return error.NoInv;
-        // Stock V3.0.1 body with ItemTable stock types when items.xml is loaded.
+        // Stock body with ItemTable stock types when items.xml is loaded.
         return packages.buildInventoryBodyStockResolved(buf, &self.sim.inventory[ps], resolveItemType, self);
     }
 

@@ -305,7 +305,7 @@ pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
     return w.written();
 }
 
-/// Stock NetPackagePlayerId body (V3.0.1):
+/// Stock NetPackagePlayerId body (derived V3.0.1, live against V3.1.0 b14):
 /// id:i32 | team:i16 | PlayerDataFile.WriteNetwork | chunkViewDim:i32
 /// Empty PDF matches a fresh PlayerDataFile() so stock ReadNetwork completes without EOF.
 /// `sx,sy,sz` are world spawn coords written into ECD pos + lastSpawnPosition so the
@@ -957,7 +957,7 @@ pub const HordeEvent = enum(u8) {
 /// HandleHordeEvent(m_event) only if (localPlayerPos - m_pos).sqrMagnitude <= m_maxDist^2,
 /// so m_pos at origin with a large m_maxDist reaches every receiving client.
 /// NOTE: stock server has NO sender for this package; the wire format and client handler
-/// are real but the package is vestigial over the network in V3.0.1. Emitting it is
+/// are real but the package is vestigial over the network through V3.1.0 b14. Emitting it is
 /// non-stock behavior (see docs/MISSING_FEATURES.md).
 pub fn buildHordeEventBody(buf: []u8, event: HordeEvent, x: f32, y: f32, z: f32, max_dist: f32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
@@ -1156,7 +1156,7 @@ pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32
     return .{ .chunk_view_dim = dim, .near_entity_id = near };
 }
 
-/// Stock NetPackageSetBlock body (V3.0.1):
+/// Stock NetPackageSetBlock body (derived V3.0.1, live against V3.1.0 b14):
 /// PlatformUserIdentifierAbs (bool + optional platform/id) |
 /// i16 changeCount | BlockChangeInfo* | i32 localPlayerThatChanged
 ///
@@ -1962,7 +1962,7 @@ pub fn buildGameStatsBody(buf: []u8, players: u16, zombies: u16, day: u32, hours
     return buildGameStatsBodyValues(buf, .{});
 }
 
-/// Full persistent GameStats.Write matching V3.0.1 propertyList order.
+/// Full persistent GameStats.Write matching the propertyList order (V3.1.0 b14).
 pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Reserve i16 length; fill after payload.

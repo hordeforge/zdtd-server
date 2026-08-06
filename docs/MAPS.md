@@ -12,7 +12,7 @@ Data/Worlds/<Name>/
 
 ## Coordinate mapping
 
-Measured against Navezgane spawnpoints (V3.0.1):
+Measured against Navezgane spawnpoints (V3.1.0 b14):
 
 ```text
 DTM index:  dx = worldX + W/2,  dz = worldZ + H/2

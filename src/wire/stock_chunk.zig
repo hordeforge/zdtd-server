@@ -1,11 +1,13 @@
-//! Stock V3.0.1 `Chunk.write(PooledBinaryWriter, bNetwork=true)` encoder.
+//! Stock `Chunk.write(PooledBinaryWriter, bNetwork=true)` encoder.
+//! Derived on V3.0.1, verified against the V3.1.0 b14 client: the live join
+//! streams these chunks and the client meshes them.
 //! Used as NetPackageChunk payload so the stock client can Chunk.read without
 //! client-side generation. See ../../../7dtd-research/docs/save-region.md and Chunk IL dumps.
 
 const std = @import("std");
 const binary = @import("binary.zig");
 
-/// MarchingCubes cctor values (V3.0.1).
+/// MarchingCubes cctor values (unchanged through V3.1.0 b14).
 pub const density_air: u8 = 127; // sbyte 127
 pub const density_terrain: u8 = 0x80; // sbyte -128
 /// Non-terrain solid: stock RepairDensities writes +1 (not terrain density).

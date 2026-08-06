@@ -69,7 +69,7 @@ Key facts zdtd should honor:
 
 ## 4. Staying current
 
-The RE is pinned to stable V3.0.1. After a game update, run
+The RE is pinned to stable V3.1.0 b14. After a game update, run
 `../7dtd-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
 reports changed packages / types / enums so this table and the affected zdtd bodies
 can be revised. The experimental branch already differs (see

@@ -1,4 +1,6 @@
-//! Stock V3.0.1 inventory wire (ItemValue/ItemStack/Bag/Equipment/NetPackagePlayerInventory).
+//! Stock inventory wire (ItemValue/ItemStack/Bag/Equipment/NetPackagePlayerInventory).
+//! Derived on V3.0.1, carried to V3.1.0 b14; version-specific fields are called
+//! out where they differ (see EntityCreationData below).
 //! Encodes bodies only (package id is in the channel frame, not here).
 //!
 //! RE source: Assembly-CSharp ItemValue.Write (save version 9), ItemStack.Write,
@@ -14,7 +16,7 @@ const components = @import("../ecs/components.zig");
 /// Single source: assets/items.zig (catalog owns the pin; wire re-exports).
 pub const items_start_here: i32 = @import("../assets/items.zig").items_start_here;
 
-/// ItemValue.CurrentSaveVersion in V3.0.1.
+/// ItemValue.CurrentSaveVersion (unchanged through V3.1.0 b14).
 pub const item_value_save_version: u8 = 9;
 
 /// Inventory.PUBLIC_SLOTS_PLAYMODE.

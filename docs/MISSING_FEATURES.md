@@ -256,7 +256,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   zdtd does not persist per-TE wire lists, only rebroadcasts the raw package.
 - *AssignIds version skew*: the bundled `assignids_v314.txt` is V3.1.4 while the
   target client is V3.1.0(b14). If block ids differ, registry lookup silently
-  no-ops (blocks place normally, just not power-registered). Supply a V3.0.1
+  no-ops (blocks place normally, just not power-registered). Supply a V3.1.0 b14
   assignids dump for exact id parity. Registry also needs `blocks.xml` loaded.
 - *Power accounting*: watts feed only the existing `resolve()` demand>gen
   consumer-drop heuristic. No per-branch `RequiredPower` summation up the parent
@@ -1030,7 +1030,7 @@ IL class/method they came from.
   deliberately NOT wired into game.zig. The builder is shipped for parity/opt-in
   use; wiring it is left as a documented, clearly-labeled hook, not stock parity.
 - **`NetPackageHordeArmageddon` does not exist.** Grep of the IL for
-  "Armageddon" finds no `NetPackage`; the name is absent from stock V3.0.1. Not
+  "Armageddon" finds no `NetPackage`; the name is absent from stock through V3.1.0 b14. Not
   implemented.
 - **Feral sense is not an FX package.** It is `EAIManager.feralSense: float32`
   plus the `EnumGamePrefs.ZombieFeralSense` gamepref, applied at world/entity

@@ -1,6 +1,6 @@
 //! Stock 7DTD baked heightmap loader (Navezgane / Pregen*).
 //!
-//! Layout (RE + measured on V3.0.1 dedicated Data/Worlds):
+//! Layout (RE + measured on dedicated Data/Worlds, V3.1.0 b14):
 //!   map_info.xml  property HeightMapSize value="W,H"
 //!   dtm.raw       W*H little-endian u16 samples, gameY * 256
 //!   World XZ → DTM: dx = wx + W/2, dz = wz + H/2  (origin at map center)

@@ -9,6 +9,15 @@ round-trip test proves self-consistency, not stock compatibility. A claim about
 stock behaviour needs an IL anchor (method plus line) or an observation from the
 real client.
 
+**Version pin:** the target is stock **V3.1.0 b14**, EAC off, and that is what
+the live gate runs against. IL citations of the form `asm.il:NNNN` refer to the
+V3.1.0 single-file dump whose identity (size, line count, MD5) is recorded in
+[`../../7dtd-research/il/README.md`](../../7dtd-research/il/README.md); those
+line numbers are valid only against that exact file. Citations of the form
+`il/<set>-v3.0.1/...` refer to the older tracked V3.0.1 dump sets, which drift
+from the V3.1.0 dump by roughly 3500 lines in the NetPackage region. Mentions of
+V3.0.1 in these documents are provenance, not a stale pin.
+
 ## Read in this order
 
 New to the project, or picking up work:

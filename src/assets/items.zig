@@ -347,7 +347,7 @@ pub const builtin_defs = [_]ItemDef{
     .{ .id = 12, .name = "questToken", .stack = 20 },
 };
 
-/// Map builtin ECS id → stock items.xml name (V3.0.1 vanilla).
+/// Map builtin ECS id → stock items.xml name (vanilla; names stable through V3.1.0 b14).
 pub fn builtinStockName(item_id: u16) ?[]const u8 {
     return switch (item_id) {
         1 => "resourceScrapIron",

@@ -1,4 +1,4 @@
-//! Stock NetPackageDecoUpdate + DecoObject wire (V3.0.1).
+//! Stock NetPackageDecoUpdate + DecoObject wire (derived V3.0.1, live on V3.1.0 b14).
 //! Client fixed-size worlds only show grass/trees from server deco packages
 //! (client decorateChunkRandom is a no-op when bFixedSize).
 
