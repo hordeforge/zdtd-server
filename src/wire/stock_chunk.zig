@@ -11,7 +11,7 @@ const binary = @import("binary.zig");
 pub const density_air: u8 = 127; // sbyte 127
 pub const density_terrain: u8 = 0x80; // sbyte -128
 /// Non-terrain solid: stock RepairDensities writes +1 (not terrain density).
-pub const density_nontarrain: u8 = 1;
+pub const density_nonterrain: u8 = 1;
 
 /// Stock terrain type ids from bundled AssignIds dump (not XML ordinals).
 const assignids = @import("../assets/assignids_comptime.zig");

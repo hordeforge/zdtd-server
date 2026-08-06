@@ -2120,6 +2120,10 @@ pub const Game = struct {
                 }
                 if (online) continue;
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                // Upgrade a legacy ZPV2 record to the v3 layout (empty prog tail)
+                // so the file is uniformly ZPV3; without this the next merge
+                // pass misparses the tail-less records under v3 semantics.
+                if (!old_v3) try out.append(self.allocator, 0);
                 written += 1;
             }
         }
@@ -2265,6 +2269,7 @@ pub const Game = struct {
                 std.debug.print("zdtd: restore player: truncated at record {d}/{d}\n", .{ i, n });
                 return;
             }
+            const rec_start = off;
             const nl: usize = data[off];
             off += 1;
             if (nl > 32 or off + nl + 16 + 1 > data.len) {
@@ -2317,7 +2322,13 @@ pub const Game = struct {
                     .rally_activated = (qb[6] & 8) != 0,
                 };
             }
-            if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) continue;
+            if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) {
+                // ZPV3 records carry a progression tail after the journal;
+                // consume it for non-matching records too so the scan stays
+                // aligned with the next record.
+                if (v3) off = rec_start + (zpvRecordLen(data, rec_start, true) catch return);
+                continue;
+            }
             const x: f32 = @bitCast(std.mem.readInt(u32, rest[0..4], .little));
             var y: f32 = @bitCast(std.mem.readInt(u32, rest[4..8], .little));
             const z: f32 = @bitCast(std.mem.readInt(u32, rest[8..12], .little));
@@ -10167,6 +10178,68 @@ test "players zpv3 round-trips level xp stats and buffs across restart" {
             try std.testing.expect(!bs.slots[0].remove_on_death);
         }
     }
+}
+
+test "players zpv3 restore skips a preceding record's progression tail" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    // Hand-built ZPV3 file: Alice first WITH a progression tail, then Bot with
+    // one too. The restore scan must consume Alice's tail to reach Bot; before
+    // the fix it misread Alice's tail bytes as a record and bailed corrupt.
+    var buf: [512]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV3");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 2, .little);
+    o += 4;
+    const writeRec = struct {
+        fn call(b: []u8, pos: *usize, name: []const u8, level: u16, xp: u64, food: f32) void {
+            const oo = pos.*;
+            b[oo] = @intCast(name.len);
+            pos.* += 1;
+            @memcpy(b[pos.*..][0..name.len], name);
+            pos.* += name.len;
+            @memset(b[pos.*..][0..16], 0); // xyz + coins
+            pos.* += 16;
+            b[pos.*] = 0; // inv_n
+            pos.* += 1;
+            b[pos.*] = 0; // jn
+            pos.* += 1;
+            b[pos.*] = 1; // prog: tail present
+            pos.* += 1;
+            std.mem.writeInt(u16, b[pos.*..][0..2], level, .little);
+            pos.* += 2;
+            std.mem.writeInt(u64, b[pos.*..][0..8], xp, .little);
+            pos.* += 8;
+            inline for ([_]f32{ food, 100, 50, 100 }) |f| {
+                std.mem.writeInt(u32, b[pos.*..][0..4], @as(u32, @bitCast(f)), .little);
+                pos.* += 4;
+            }
+            b[pos.*] = 0; // buff_n
+            pos.* += 1;
+        }
+    }.call;
+    writeRec(&buf, &o, "Alice", 3, 100, 50);
+    writeRec(&buf, &o, "Bot", 9, 555, 42);
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(std.testing.allocator, zsv, buf[0..o]);
+
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    try std.testing.expectEqual(@as(u16, 9), g.clients[cl.slot].level);
+    try std.testing.expectEqual(@as(u64, 555), g.clients[cl.slot].xp);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].food);
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food_max);
 }
 
 test "land claim removed when keystone breaks and expires offline" {

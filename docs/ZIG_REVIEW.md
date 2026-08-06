@@ -58,6 +58,40 @@
 - Fail closed: plugin fuel/trap disables one module; weather decode rejects mismatched files instead of desyncing the client.
 - One obvious way: text SimCommand grammar and the `ZWTH1` layout are each documented in one place.
 
+### 2026-08-06 feature-wave review (chunk / quest / loot / ZPV3 / trader)
+
+| | |
+|---|---|
+| Date | 2026-08-06 |
+| Mode | Review + targeted fixes |
+| Scope | `src/wire/stock_chunk.zig` (raw-plane memoization, water/density/texture channels, `rawAt`), `src/world/store.zig` `applyWaterSources`, `src/assets/items.zig` (Stacknumber Extends resolve), `src/assets/quests.zig` (template resolution, `parseQuestDefBody`, `sumCoinReward`), `src/ecs/quest.zig` (`ObjectiveWireKind`), `src/ecs/world.zig` (loot_drop_prob gate), `src/assets/maxdamage.zig` (`loot_list_by_name/by_id`, `resolveLootList`), `src/server/game.zig` (ZPV3 save/restore, NPCQuestList `remove_quest`, trader `LockResponse`), `src/assets/entities.zig` (`defaultTrader`, `LootDropProb`), `src/server/zdtd_config.zig` (`[sim] trader_wallet_dukes`) |
+
+#### Verdicts
+
+| Location | Issue | Verdict | Sev |
+|---|---|---|---|
+| `stock_chunk.zig` `encodeNetworkChunk` + memo | `raws_scratch` is a caller-owned `Game.chunk_raws` field; plane filled once, layers/density/water read it. No heap on the stream path; stack arrays only | Clean | - |
+| `stock_chunk.zig` `writeWaterChannel` / `writeDensityChannel` / `writeTextureChannel` | SIMD uniform/pack helpers + scalar tails; stack `[1024]` buffers; named consts for layout | Clean | - |
+| `stock_chunk.zig` `buildNetPackageChunkNew` | `buf.len < 16` pre-check plus a post-encode `total > buf.len` check that can never fire after a successful encode (writer already bounds-checks) | Redundant guard, harmless | P3 |
+| `stock_chunk.zig` `density_nontarrain` | Typo in a `pub const` name | **Fixed**: renamed `density_nonterrain` (no in-tree usages) | P3 |
+| `store.zig` `applyWaterSources` | Pure in-chunk fill, no alloc, bounds-checked `y < y_dim`; init/first-touch path | Clean | - |
+| `items.zig` Extends resolve pass | Two-pass name maps + `max_hops` cap; init/load only, arena keys; child-before-parent handled | Clean | - |
+| `quests.zig` template resolution + `parseQuestDefBody` + `sumCoinReward` | `resolveBody` depth-capped (8); deterministic FNV scatter for goto coords; `reward_coin` fails closed to 0; all init path with `errdefer` arena | Clean | - |
+| `ecs/quest.zig` `ObjectiveWireKind` | Plain wire mirror enum with doc; exhaustive use in the quest builder | Clean | - |
+| `ecs/world.zig` loot gate | Deterministic per-entity roll (net id hash), no RNG; bounded `% 1000` math | Clean | - |
+| `entities.zig` `LootDropProb` parse | Unclamped; a modded negative value panics at the first kill (`@intFromFloat` to u64 in the damage path) | **Fixed**: clamp to `[0,1]`, out-of-range fails closed to 1.0 | P2 |
+| `maxdamage.zig` `loot_list_by_name/by_id` + `resolveLootList` | Hop-capped Extends walk; id merge in the dump pass; `lootListFor` walks the name table only on by_id miss | Clean | - |
+| `game.zig` `savePlayers` | Writes a `ZPV3` header while copying legacy `ZPV2` records verbatim (no prog tail); the next merge pass misparses the tail-less records under v3 semantics and corrupts the file | **Fixed**: append a `prog=0` tail when upgrading a v2 record | P1 |
+| `game.zig` `tryRestorePlayer` | Non-matching `ZPV3` records are skipped without consuming the progression tail, misaligning the scan; restoring any player after another player's record fails or corrupts | **Fixed**: `rec_start` + `zpvRecordLen` skip on non-match; regression test added (`players zpv3 restore skips a preceding record's progression tail`) | P1 |
+| `game.zig` NPCQuestList `remove_quest` + trader `LockResponse` | Index-capped offer scan; `body_buf`-built responses; trader context carries `trader_wallet_dukes` | Clean | - |
+| `zdtd_config.zig` `[sim] trader_wallet_dukes` | Parses, merges, clamps negative to 0 with a log (tested) | Clean | - |
+
+#### Test status (this scope)
+
+- `zig build test` green on the main tree (784 tests, runner seed).
+- The regression test fails against the pre-fix restore scan (verified by temporary revert: restore bails with `truncated inventory at record 1/2`).
+- Note: `scenario inventory move drop place equip` (scenarios.zig:1041, armor mitigation `>= 0.09`) fails in direct binary runs at HEAD with and without this pass's changes (passes under the build-runner seed); pre-existing at HEAD, in the scenarios/plugin area owned by the parallel agent's pass.
+
 ## Summary counts
 
 | Sev | Found | Fixed this pass | Remaining |

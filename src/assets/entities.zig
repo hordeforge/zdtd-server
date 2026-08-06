@@ -281,7 +281,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         }
         var drop_prob: f32 = 1.0;
         if (resolveProp(&classes, name, "LootDropProb", 0)) |lp| {
-            if (xml.parseF32(lp)) |f| drop_prob = f;
+            if (xml.parseF32(lp)) |f| {
+                // Bounds are a kill-path invariant: the sim casts drop_prob*1000
+                // to u64 (ecs/world.zig damage), so a modded negative value would
+                // panic at the first kill. Out-of-range fails closed to 1.0.
+                if (f >= 0 and f <= 1) drop_prob = f;
+            }
         }
         // MoveSpeedAggro "min, max": take max (night chase). MoveSpeed = shamble.
         var chase: f32 = 0;
