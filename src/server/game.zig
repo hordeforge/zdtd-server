@@ -585,11 +585,10 @@ fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
 }
 
 /// The scheduled blood-moon day for the clock (GameStats.blood_moon_day):
-/// 0 when disabled, else the next frequency multiple at/after today.
+/// the jittered horde day of the active cycle (see WorldClock.bloodMoonDayFor),
+/// 0 when disabled.
 fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
-    if (clk.bloodmoon_frequency == 0) return 0;
-    if (clk.day % clk.bloodmoon_frequency == 0) return @intCast(clk.day);
-    return @intCast(((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency);
+    return clk.bloodMoonDayFor(clk.day);
 }
 
 /// Run the stock stability update after a C2S SetBlock mutation and return the

@@ -137,7 +137,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
 | [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
-| [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
+| [Blood moon](#6-blood-moon) | 5 | 14 | 8 | 27 | Horde runs dusk to dawn on the right night; stat 58 carries the jittered horde day so the red moon and warning clock land correctly |
 | [POIs and prefabs](#7-pois-and-prefabs) | 12 | 14 | 6 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
@@ -1057,21 +1057,25 @@ encoding is one day high.
   *Anchors:* `src/server/game.zig:6214`, `:6216`, `:6206`, `:3869`,
   `src/wire/packages.zig:1998`, `src/server/game.zig:2292`
 
-- **Client blood-moon sky FX** `PARTIAL`
+- **Client blood-moon sky FX** `WORKS`
   Entirely client-side: `SkyManager::OnGameStatsChanged` latches bloodmoonDay from
   stat 58 and dusk/dawn from stat 42, and `IsBloodMoonVisible` recomputes the
-  window as `(dusk-4, dawn+2)`. zdtd sends both stats so the mechanism is wired,
-  but the day off-by-one puts the red moon on the wrong night.
+  window as `(dusk-4, dawn+2)`. zdtd sends both stats so the mechanism is wired;
+  stat 58 now carries the jittered horde day (CalcNextDay, not the plain
+  frequency multiple), so the red moon lands on the actual horde night even with
+  BloodMoonRange > 0.
   *Anchors:* `asm.il:2041922`, `asm.il:2042093`, `src/wire/packages.zig:1998`,
+  `src/ecs/aidirector.zig` (`bloodMoonDayFor`), `src/server/game.zig:589`
   `:1983`
 
 - **Blood-moon warning window (red HUD clock)** `PARTIAL`
   Stock has no warning packet: `XUiC_CompassWindow` colours the clock FF0000 when
   `GameStats[BloodMoonDay]` equals the client's current day and
-  `World::BloodMoonWarningHour <= hour` (default 8). Three problems: the day
-  off-by-one puts it on the wrong day; zdtd sends an empty SandboxCode so the
-  client never applies the server's BloodMoonWarning choice; and `BloodMoonWarning`
-  is parsed nowhere in zdtd. Stat 61 is read only by `GameSenseManager`
+  `World::BloodMoonWarningHour <= hour` (default 8). The day is now the jittered
+  horde day, so the clock turns red on the real horde night. Remaining: zdtd
+  sends an empty SandboxCode so the client never applies the server's
+  BloodMoonWarning choice; `BloodMoonWarning` is parsed nowhere in zdtd. Stat 61
+  is read only by `GameSenseManager`
   (SteelSeries LEDs), never by the HUD.
   *Anchors:* `asm.il:1574299`, `asm.il:1248240`, `asm.il:2502629`,
   `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`

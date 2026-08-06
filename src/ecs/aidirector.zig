@@ -88,6 +88,23 @@ pub const WorldClock = struct {
         return @as(i64, cycle) * @as(i64, self.bloodmoon_frequency) + jitter;
     }
 
+    /// The scheduled blood-moon day for the client's stat 58 (GameStats
+    /// BloodMoonDay): the horde day of the active cycle — the next jittered
+    /// cycle day at/after `today`. NOT the plain frequency multiple: with
+    /// BloodMoonRange jitter the horde can land on day c*freq+1, and the old
+    /// multiple put the client's red moon on the wrong night (a non-horde
+    /// multiple lit up, the actual horde night showed nothing). Cycle 0 is
+    /// pre-game; the first horde is cycle 1.
+    pub fn bloodMoonDayFor(self: *const WorldClock, today: u32) i32 {
+        if (self.bloodmoon_frequency == 0) return 0;
+        const base: i64 = @intCast(@max(1, today / self.bloodmoon_frequency));
+        var c: i64 = base;
+        while (true) : (c += 1) {
+            const day = self.bloodMoonDayForCycle(@intCast(c));
+            if (day >= today) return @intCast(day);
+        }
+    }
+
     /// Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000 (+ minutes*1000/60).
     /// Day 1 spans [0, 24000); WorldTimeToDays(wt) = wt/24000 + 1. A day-0
     /// clock (test convention) encodes as 0 rather than underflowing.
@@ -551,4 +568,23 @@ test "director without stage hooks keeps its unstaged behaviour" {
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(dir.bloodmoon_active);
     try std.testing.expectEqual(@as(u32, 4), r.spawned); // BloodMoonEnemyCount / 2
+}
+
+test "bloodMoonDayFor returns the jittered horde day, not the multiple" {
+    // freq 7, range 1: jitter(1) = (1*2654435761) % 2 = 1, so the first horde
+    // is day 8. The old "next frequency multiple" logic said 7, lighting the
+    // client's red moon on a non-horde night and showing nothing on day 8.
+    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .bloodmoon_frequency = 7, .bloodmoon_range = 1 };
+    try std.testing.expectEqual(@as(i32, 8), cl.bloodMoonDayFor(1)); // upcoming
+    try std.testing.expectEqual(@as(i32, 8), cl.bloodMoonDayFor(7)); // the night before
+    try std.testing.expectEqual(@as(i32, 8), cl.bloodMoonDayFor(8)); // horde night
+    try std.testing.expectEqual(@as(i32, 14), cl.bloodMoonDayFor(9)); // next cycle
+    // range 0: pure multiples (the default; bmday-resend scenario unchanged).
+    cl.bloodmoon_range = 0;
+    try std.testing.expectEqual(@as(i32, 7), cl.bloodMoonDayFor(1));
+    try std.testing.expectEqual(@as(i32, 7), cl.bloodMoonDayFor(7));
+    try std.testing.expectEqual(@as(i32, 14), cl.bloodMoonDayFor(8));
+    // frequency 0 = disabled.
+    cl.bloodmoon_frequency = 0;
+    try std.testing.expectEqual(@as(i32, 0), cl.bloodMoonDayFor(1));
 }
