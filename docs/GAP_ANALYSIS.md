@@ -2955,10 +2955,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:3771-5480`, `asm.il:791490-791510`,
   `asm.il:793038-793060`
 
-- **Unhandled C2S packages are dropped with no trace** `PARTIAL`
-  `handlePackage` is a linear if/eql chain that falls off the end for any name it
-  does not know. No counter, no rate-limited log, no evidence event. Contrast the
-  `id >= 189` case, which does log "unmapped package".
+- **Unhandled C2S packages are dropped with no trace** `WORKS` `(2026-08-07)`
+  `handlePackage` is a linear if/eql chain; the fall-through now increments
+  `c2s_unhandled` and rate-limit logs the first and every 100th occurrence with
+  the peer local id, so a new stock client package surfaces instead of
+  vanishing (no evidence event yet).
   *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
 
 - **S2C package emission coverage** `PARTIAL`
