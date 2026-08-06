@@ -134,7 +134,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 12 | 18 | 6 | 36 | Real `quests.xml` loads; 53 client-known defs parse empty (no template inheritance); accept path missing |
+| [Quests](#4-quests) | 14 | 17 | 5 | 36 | Real `quests.xml` loads; template-derived defs non-empty; accept-marker wiring open |
 | [Traders](#5-traders) | 6 | 9 | 11 | 26 | Trader NPC replicates with TraderData on spawn and lock-open; POI placement, restock and per-trader lists open |
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
@@ -143,7 +143,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; lakes wet, no POI water, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **89** | **157** | **99** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **91** | **156** | **98** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -284,15 +284,16 @@ area and the concrete work.
     to 300 sets 800, and a full repair (damage 0) is a no-op
     (`src/server/game.zig:5140-5172`).
 
-15. **Quests: implement `template=` inheritance and the per-objective Write
-    shapes.** 67 of 99 quests are template-derived; 53 client-known defs parse to
-    an empty quest with a hash-derived fake coordinate. And
-    `StockQuestWrite.objective_kinds` is populated nowhere outside a unit test,
-    so every objective is written as `BaseObjective` (2 bytes) where stock has
-    four shapes including two zero-byte ones. Any `tier1_*` quest reaching the
-    join PDF trips `ValidateSizeMarker` and the client marks it Failed
-    (`src/assets/quests.zig:280`, `src/server/game.zig:5981`, asm.il:991300,
-    :988519).
+15. **DONE 2026-08-06 (parser + wire kinds).** Quests: implement `template=`
+    inheritance and the per-objective Write shapes. `template=` now resolves
+    in a two-pass (effective body = template chain + own), so the 67
+    template-derived quests parse non-empty; `objective_kinds` flows from the
+    catalog into `StockQuestWrite` (TreasureChest 8 bytes, POIStayWithin/
+    StayWithin zero-byte, else Base), so a base tier1 zero-byte objective no
+    longer trips `ValidateSizeMarker` on the join PDF. Remaining: the
+    `<variable>` display-param substitution and the NPCQuestList accept-marker
+    wiring (accept currently rides SharedQuest; the trader-offer list still
+    re-offers accepted quests).
 
 16. **Quests: honour the real accept path.** Stock signals acceptance with
     `NPCQuestList` `eventType=RemoveQuest(1)` carrying `tierLevel` and
@@ -397,22 +398,15 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/assets/quests.zig:112`, `asm.il:1391145-1391172`,
   `asm.il:959336-959374`
 
-- **Quest template inheritance (`template=` plus `<variable>`)** `MISSING`
-  `parseQuestDef` never looks at the template attribute and never resolves
-  `<variable>` substitution. 67 of 99 stock quests are template-derived,
-  including every tier2..tier6 clear/fetch/buried-supplies/infested/restore-power
-  quest, all `treasure_*` except `treasure_taylor`, and all
-  `challengegroup_reward_*`. Measured: 73 of 99 parsed defs have
-  `highest_phase=0` and an empty phase graph; 53 carry client-known names. They
-  collapse to `kind=.goto_point, target_count=1, difficulty_tier=0,
-  objective_count=1`. A trader offer for `tier2_fetch` points at an FNV-hash
-  pseudo-random coordinate near the world origin (probe: `(-54,70,26)`). Stock
-  copies Requirements, Actions, Objectives, Events and HighestPhase in
-  `QuestClass::AssignValuesFrom` (Rewards are **not** inherited) and skips the
-  templated quest's own property/action/event/requirement/objective/criteria
-  children.
-  *Anchors:* `src/assets/quests.zig:280`, `:301`, `asm.il:1390370-1390405`,
-  `asm.il:1390442`, `asm.il:991300-991522`
+- **Quest template inheritance (`template=` plus `<variable>`)** `WORKS`
+  `parseCatalog` now resolves `template=` in a two-pass: the effective body is
+  the template chain's content (outermost first) followed by the quest's own
+  body, so objectives/rewards accumulate in stock order and the 67
+  template-derived quests (all tier2..tier6, `treasure_*`,
+  `challengegroup_reward_*`) parse non-empty. `<variable>` display-param
+  substitution (name/subtitle/description keys) is still not resolved.
+  *Anchors:* `src/assets/quests.zig` parseCatalog pre-scan + resolveBody,
+  `Data/Config/quests.xml`
 
 - **Objective type to executable phase kind mapping** `PARTIAL`
   Executes RallyPoint, ClearSleepers, EntityKill, AnimalKill, FetchKeep,
@@ -504,20 +498,16 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/wire/stock_quest.zig:219`, `src/wire/packages.zig:516`,
   `docs/STATUS.md:28`, `asm.il:1005150-1005266`
 
-- **Per-objective Write shape** `PARTIAL`
-  `stock_quest.zig` models three shapes and pins them with a unit test, but
-  `game.zig` never populates `StockQuestWrite.objective_kinds`: the field is set
-  only inside `stock_quest.zig`'s own test. Every objective is therefore written
-  as `BaseObjective` (2 bytes). Stock has **four** shapes: BaseObjective 2 bytes,
-  ObjectivePOIStayWithin 0, ObjectiveStayWithin 0, ObjectiveTreasureChest 8,
-  ObjectiveTime a single u16. Every base tier1 template contains a zero-byte
-  objective. If any lands in the join PDF, `Quest::Read`'s `ValidateSizeMarker`
-  fails, the client logs `Failed loading objectives` and sets the quest to Failed
-  (state 4). Reachable today: opening a trader twice accepts `tier1_clear` into
-  the server journal, written on the next login. The stream does not desync.
-  *Anchors:* `src/wire/stock_quest.zig:76`, `:162`, `src/server/game.zig:5981`,
-  `asm.il:959147-959162`, `asm.il:970493-970499`, `asm.il:978390-978396`,
-  `asm.il:982624-982638`, `asm.il:978866-978874`, `asm.il:988519-988559`
+- **Per-objective Write shape** `WORKS`
+  `game.zig` now populates `StockQuestWrite.objective_kinds` from the catalog:
+  each objective's type maps to BaseObjective (FileVersion + CurrentValue),
+  ObjectiveTreasureChest (8 bytes) or the zero-byte POIStayWithin/StayWithin
+  shape, so a base tier1 template's zero-byte objective no longer trips the
+  client's `ValidateSizeMarker` on the join PDF. ObjectiveTime (u16) stays
+  unmapped (rare; falls back to Base).
+  *Anchors:* `src/assets/quests.zig` buildPhaseGraph kinds, `src/ecs/quest.zig`
+  `ObjectiveWireKind`, `src/server/game.zig` fillStockJournalWrites,
+  `src/wire/stock_quest.zig:76`, `:162`
 
 - **objective_count on the wire for template-derived quests** `PARTIAL`
   `objective_count = countTags(body, "<objective")`, so template-derived quests

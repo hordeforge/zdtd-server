@@ -71,6 +71,19 @@ pub const QuestDef = struct {
     highest_phase: u8 = 0,
     /// Phase number (1-based) per flat objective, length objective_count, for the wire.
     objective_phases: []const u8 = &.{},
+    /// Objective Write subclass per flat objective (length objective_count,
+    /// same order as objective_phases). Mirrors the wire ObjectiveWriteKind;
+    /// ecs stays wire-free, game.zig maps this to the stock enum.
+    objective_kinds: []const ObjectiveWireKind = &.{},
+};
+
+/// Objective Write subclass (Quest.Write CreateQuest): BaseObjective writes
+/// FileVersion + CurrentValue, ObjectiveTreasureChest writes destroyCount +
+/// CurrentRadius (no base call), ObjectivePOIStayWithin writes nothing extra.
+pub const ObjectiveWireKind = enum(u8) {
+    base = 0,
+    treasure_chest = 1,
+    empty = 2,
 };
 
 pub const max_reward_flags: usize = 16;

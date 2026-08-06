@@ -196,6 +196,7 @@ const PhaseGraph = struct {
     phases: []const quest.PhaseSpec,
     highest_phase: u8,
     objective_phases: []const u8,
+    objective_kinds: []const quest.ObjectiveWireKind,
 };
 
 /// Build the ordered phase graph from a quest body, mirroring stock
@@ -211,6 +212,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
+    var obj_kind_bytes: [quest.max_phases]quest.ObjectiveWireKind = undefined;
     var n: usize = 0;
     var highest: u8 = 0;
 
@@ -227,10 +229,18 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
         if (kind == .kill_zombies and target <= 1) target = @as(u16, 3) + @as(u16, tier) * 2;
         objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target };
         obj_phase_bytes[n] = phase;
+        // Objective Write subclass by type (stock CreateQuest). Everything not
+        // listed writes the BaseObjective shape (FileVersion + CurrentValue).
+        obj_kind_bytes[n] = if (std.mem.eql(u8, typ, "TreasureChest"))
+            .treasure_chest
+        else if (std.mem.eql(u8, typ, "POIStayWithin"))
+            .empty
+        else
+            .base;
         if (phase > highest) highest = phase;
         n += 1;
     }
-    if (n == 0 or highest == 0) return .{ .phases = &.{}, .highest_phase = 0, .objective_phases = &.{} };
+    if (n == 0 or highest == 0) return .{ .phases = &.{}, .highest_phase = 0, .objective_phases = &.{}, .objective_kinds = &.{} };
     if (highest > quest.max_phases) highest = quest.max_phases;
 
     const specs = try arena.alloc(quest.PhaseSpec, highest);
@@ -250,7 +260,8 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
     }
 
     const obj_phases = try arena.dupe(u8, obj_phase_bytes[0..n]);
-    return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases };
+    const obj_kinds = try arena.dupe(quest.ObjectiveWireKind, obj_kind_bytes[0..n]);
+    return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds };
 }
 
 fn sumExpReward(body: []const u8) u32 {
@@ -287,16 +298,35 @@ fn parseQuestDef(
     const qid = xml.attr(xml_src, open_lt, "id") orelse return null;
     const gt = std.mem.indexOfPos(u8, xml_src, open_lt, ">") orelse return null;
     const close = std.mem.indexOfPos(u8, xml_src, gt + 1, "</quest>") orelse return null;
-    const body = xml_src[gt + 1 .. close];
+    return parseQuestDefBody(
+        arena,
+        qid,
+        xml.attr(xml_src, open_lt, "name_key"),
+        xml.attr(xml_src, open_lt, "category_key"),
+        xml_src[gt + 1 .. close],
+        numeric_id,
+    );
+}
 
-    const name_key = xml.propertyValue(body, "name_key") orelse xml.attr(xml_src, open_lt, "name_key");
+/// Parse one quest's effective body (template content already merged). `qid`
+/// is the quest name; open-tag name_key/category_key attrs pass through for the
+/// rare quests that use them instead of body properties.
+fn parseQuestDefBody(
+    arena: std.mem.Allocator,
+    qid: []const u8,
+    tag_name_key: ?[]const u8,
+    tag_category: ?[]const u8,
+    body: []const u8,
+    numeric_id: u16,
+) !?quest.QuestDef {
+    const name_key = xml.propertyValue(body, "name_key") orelse tag_name_key;
     const title_src = name_key orelse qid;
     const tier_s = xml.propertyValue(body, "difficulty_tier");
     const tier: u8 = if (tier_s) |t| xml.parseU8(t) orelse 0 else 0;
     const completion = xml.propertyValue(body, "completiontype") orelse "Auto";
     const turn_in = std.mem.eql(u8, completion, "TurnIn");
     const cat = xml.propertyValue(body, "category_key") orelse
-        xml.attr(xml_src, open_lt, "category_key") orelse "quest";
+        tag_category orelse "quest";
 
     const primary = pickPrimaryKind(body);
     var target = primary.target;
@@ -345,6 +375,7 @@ fn parseQuestDef(
         .phases = graph.phases,
         .highest_phase = graph.highest_phase,
         .objective_phases = graph.objective_phases,
+        .objective_kinds = graph.objective_kinds,
     };
 }
 
@@ -402,6 +433,62 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     var defs_tmp: std.ArrayList(quest.QuestDef) = .empty;
     defer defs_tmp.deinit(allocator);
 
+    // Pre-scan quest tags: name → inner body and template, for the two-pass
+    // template resolution below (a derived quest's content comes from the
+    // template; 67 stock quests use it, and without it they parse empty).
+    var quest_body: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer quest_body.deinit(allocator);
+    var quest_tpl: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer quest_tpl.deinit(allocator);
+    {
+        var si: usize = 0;
+        while (si < clean.len) {
+            const qi2 = std.mem.indexOfPos(u8, clean, si, "<quest") orelse break;
+            if (std.mem.startsWith(u8, clean[qi2..], "<quests") or std.mem.startsWith(u8, clean[qi2..], "<quest_list")) {
+                si = qi2 + 7;
+                continue;
+            }
+            const qid2 = xml.attr(clean, qi2, "id") orelse {
+                si = qi2 + 6;
+                continue;
+            };
+            const gt2 = std.mem.indexOfPos(u8, clean, qi2, ">") orelse break;
+            var body_end = gt2 + 1;
+            if (!(gt2 > qi2 and clean[gt2 - 1] == '/')) {
+                const cl2 = std.mem.indexOfPos(u8, clean, gt2, "</quest>") orelse break;
+                body_end = cl2;
+            }
+            try quest_body.put(allocator, try arena.dupe(u8, qid2), clean[gt2 + 1 .. body_end]);
+            if (xml.attr(clean, qi2, "template")) |t| {
+                try quest_tpl.put(allocator, try arena.dupe(u8, qid2), try arena.dupe(u8, t));
+            }
+            si = body_end;
+        }
+    }
+
+    // Effective body for a quest: its template's resolved content first, then
+    // its own, so objectives/rewards accumulate in stock order and a derived
+    // quest is never empty. Chains resolve outermost-first, depth-capped.
+    const resolveBody = struct {
+        fn call(
+            ar: std.mem.Allocator,
+            own: []const u8,
+            name: []const u8,
+            depth: u8,
+            bodies: *const std.StringHashMapUnmanaged([]const u8),
+            tpls: *const std.StringHashMapUnmanaged([]const u8),
+        ) ?[]const u8 {
+            if (depth > 8) return null;
+            const tpl = tpls.get(name) orelse return null;
+            const tbody = bodies.get(tpl) orelse return null;
+            const parent = call(ar, tbody, tpl, depth + 1, bodies, tpls) orelse tbody;
+            const out = ar.alloc(u8, parent.len + own.len) catch return null;
+            @memcpy(out[0..parent.len], parent);
+            @memcpy(out[parent.len..], own);
+            return out;
+        }
+    }.call;
+
     var next_id: u16 = 1;
     var i: usize = 0;
     while (i < clean.len) {
@@ -414,13 +501,38 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
             i = qi + 11;
             continue;
         }
-        if (try parseQuestDef(arena, qi, clean, next_id)) |def| {
+        const qid = xml.attr(clean, qi, "id") orelse {
+            i = qi + 6;
+            continue;
+        };
+        const gt = std.mem.indexOfPos(u8, clean, qi, ">") orelse break;
+        const self_closing = gt > qi and clean[gt - 1] == '/';
+        var body_end = gt + 1;
+        if (!self_closing) {
+            const cl = std.mem.indexOfPos(u8, clean, gt, "</quest>") orelse break;
+            body_end = cl;
+        }
+        if (self_closing) {
+            i = gt + 1;
+            continue; // placeholder/self-closing quests define nothing
+        }
+        const own_body = clean[gt + 1 .. body_end];
+        const eff_body = if (quest_tpl.contains(qid))
+            (resolveBody(arena, own_body, qid, 0, &quest_body, &quest_tpl) orelse own_body)
+        else
+            own_body;
+        if (try parseQuestDefBody(
+            arena,
+            qid,
+            xml.attr(clean, qi, "name_key"),
+            xml.attr(clean, qi, "category_key"),
+            eff_body,
+            next_id,
+        )) |def| {
             try defs_tmp.append(allocator, def);
             next_id +%= 1;
-            if (std.mem.indexOfPos(u8, clean, qi + 6, "</quest>")) |cl| {
-                i = cl + 8;
-                continue;
-            }
+            i = body_end + "</quest>".len;
+            continue;
         }
         i = qi + 6;
     }
@@ -676,4 +788,61 @@ test "load stock quests.xml when present" {
     try std.testing.expect(cat.byName("quest_whiteRiverCitizen1") != null);
     try std.testing.expect(cat.byName("tier1_clear") != null);
     try std.testing.expect(cat.lists.len >= 1);
+}
+
+test "quest template inheritance fills derived quests" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="tpl_base">
+        \\    <property name="name_key" value="Base"/>
+        \\    <objective type="Goto" id="trader" value="5" phase="1"/>
+        \\    <reward type="Exp" value="500"/>
+        \\  </quest>
+        \\  <quest id="derived" template="tpl_base">
+        \\    <reward type="Exp" value="1000"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const b = cat.byName("tpl_base").?;
+    try std.testing.expect(b.objective_count >= 1);
+    const d = cat.byName("derived").?;
+    // The derived quest inherits the template's objective and adds its own
+    // reward, so it is no longer an empty def.
+    try std.testing.expect(d.objective_count >= 1);
+    try std.testing.expect(d.reward_count >= 2);
+}
+
+test "objective write kinds follow objective type" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="mixed">
+        \\    <objective type="Goto" phase="1"/>
+        \\    <objective type="TreasureChest" phase="2"/>
+        \\    <objective type="POIStayWithin" phase="3"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const d = cat.byName("mixed").?;
+    try std.testing.expectEqual(@as(usize, 3), d.objective_kinds.len);
+    try std.testing.expectEqual(quest.ObjectiveWireKind.base, d.objective_kinds[0]);
+    try std.testing.expectEqual(quest.ObjectiveWireKind.treasure_chest, d.objective_kinds[1]);
+    try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[2]);
+}
+
+test "stock quests.xml template quests parse non-empty" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+    if (!fileExists(path)) return;
+    var cat = try loadFromPath(std.testing.allocator, path);
+    defer cat.deinit();
+    // 67 stock quests use template=; the derived challenge rewards must carry
+    // the template's objectives instead of parsing as empty defs.
+    const adv = cat.byName("challengegroup_reward_advanced_survival") orelse return;
+    try std.testing.expect(adv.objective_count >= 1);
+    try std.testing.expect(adv.reward_count >= 1);
+    const homestead = cat.byName("challengegroup_reward_homesteading") orelse return;
+    try std.testing.expect(homestead.objective_count >= 1);
 }

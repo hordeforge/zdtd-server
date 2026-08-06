@@ -50,6 +50,10 @@ observable, on the live stock client:
 - **Progression (T5):** `players.zsv` v3 persists level, XP, food/water and
   active buffs across restarts (server-side `awardXp` ledger; ZPV2 files still
   read; admin wipeplayer handles v3). Round-trip test x2; 765 total.
+- **Quests (T6, parser + wire kinds):** `template=` inheritance resolves in a
+  two-pass (67 derived quests parse non-empty), and per-objective Write shapes
+  flow into the journal wire (TreasureChest/POIStayWithin kinds) so the join
+  PDF no longer trips `ValidateSizeMarker`. Three new tests; 768 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

@@ -7220,6 +7220,7 @@ pub const Game = struct {
     ) usize {
         const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
         if (!self.sim.mask[ps].journal) return 0;
+        var kind_store: [ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
         var n: usize = 0;
         for (self.sim.journal[ps].slots) |s| {
             if (!s.active and !s.completed) continue;
@@ -7301,6 +7302,21 @@ pub const Game = struct {
                 };
                 pn += 2;
             }
+            // Per-objective Write subclass from the catalog (TreasureChest and
+            // POIStayWithin use non-base shapes; everything else is Base).
+            var kinds: []const packages.stock_quest.ObjectiveWriteKind = &.{};
+            if (d.objective_kinds.len > 0) {
+                const klim = @min(d.objective_kinds.len, kind_store.len);
+                var ki: usize = 0;
+                while (ki < klim) : (ki += 1) {
+                    kind_store[ki] = switch (d.objective_kinds[ki]) {
+                        .base => .base,
+                        .treasure_chest => .treasure_chest,
+                        .empty => .empty,
+                    };
+                }
+                kinds = kind_store[0..klim];
+            }
             out[n] = .{
                 .id = d.name,
                 .state = state,
@@ -7309,6 +7325,7 @@ pub const Game = struct {
                 .objective_count = d.objective_count,
                 .first_objective_value = prog,
                 .objective_values = obj_vals,
+                .objective_kinds = kinds,
                 .rewards = reward_store[n][0..rc],
                 .position_data = pos_store[n][0..pn],
                 .rally_marker_activated = s.rally_activated,

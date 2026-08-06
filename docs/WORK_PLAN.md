@@ -207,15 +207,25 @@ each field round-trips; run it twice to prove it is not order dependent.
 
 ## T6. Quests: template inheritance and the accept path
 
+**Status: parser + wire kinds landed 2026-08-06** (768 tests). `template=`
+inheritance resolves in a two-pass (effective body = template chain + own), so
+the 67 template-derived quests parse non-empty; per-objective Write kinds flow
+from the catalog into `StockQuestWrite` (TreasureChest 8 bytes, POIStayWithin/
+StayWithin zero-byte, else Base), so the join PDF no longer trips
+`ValidateSizeMarker`. Remaining for full "done when": the `<variable>`
+display-param substitution and the NPCQuestList accept-marker wiring (accept
+currently rides SharedQuest; the trader offer list still re-offers accepted
+quests).
+
 **Why:** 53 client-known quest defs parse empty because `template=` is not
 resolved, and the accept path is missing, so quests cannot start.
 
 **Change**
-1. Resolve `template=` inheritance when parsing `quests.xml`
-   (`src/assets/quests.zig`).
-2. Implement the accept signal: stock removes the quest from `NPCQuestList` as
-   the acceptance marker rather than sending a dedicated accept package.
-3. Implement the four objective `Write` shapes so the client renders the tracker.
+1. ~~Resolve `template=` inheritance when parsing `quests.xml`~~ **DONE**.
+2. ~~Implement the accept signal~~ **PARTIAL**: sim accept exists and rides
+   SharedQuest; the NPCQuestList removal marker on trader offers is open.
+3. ~~Implement the four objective `Write` shapes~~ **DONE** (TreasureChest,
+   POIStayWithin/StayWithin, Base; ObjectiveTime unmapped).
 
 **Grounding:** reflection-only `ParseObjective`, the four objective Write shapes,
 fail-soft `Quest::Read`, `NPCQuestList` `RemoveQuest` as the accept signal, and
@@ -225,7 +235,7 @@ QuestEvent 9/12/13/14/16, all recorded in
 **Done when:** a player can take a quest from a trader, see it in the journal,
 and complete it.
 
-**Depends on:** T1 (a trader must exist to give the quest).
+**Depends on:** T1 (a trader must exist to give the quest) - landed.
 
 **Proof:** a test that every def in the shipped `quests.xml` parses non-empty,
 plus a scenario driving accept through to completion.
