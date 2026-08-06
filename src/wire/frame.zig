@@ -126,6 +126,77 @@ pub fn parseChannelPayload(data: []const u8, out: []Package) usize {
     return parsePackageStream(stream, count, out);
 }
 
+/// Bytes before the (possibly compressed) package stream: channel + payload
+/// size + compressed + encrypted + package count.
+pub const envelope_len: usize = 9;
+
+/// Single-package envelope with the stock `compressed` flag set. The package
+/// stream is raw-deflated the way `NetConnectionAbs::Compress` does it
+/// (asm.il 788600-788684, Noemax DeflateOutputStream), and the client picks the
+/// inflate path off the same per-envelope flag (asm.il 792605); `payload_size`
+/// counts the compressed bytes, since that is what the receive loop slices
+/// before handing the buffer to `Decompress` (asm.il 788690-788728).
+///
+/// Streaming rather than body-in, bytes-out: the only package that needs this is
+/// the full "blocks" NameIdMapping, ~950 KB uncompressed, which fits no body
+/// buffer. `body_len` must therefore be known before the first byte is pushed.
+///
+/// Pinned between `begin` and `finish`: `comp` holds a pointer to `sink`, so the
+/// struct must not be copied or moved once begun.
+pub const DeflateFramer = struct {
+    buf: []u8,
+    sink: std.Io.Writer,
+    comp: flate.Compress,
+
+    /// Window the deflate matcher needs; callers own the storage.
+    pub const window_len: usize = flate.max_window_len;
+
+    pub fn begin(
+        self: *DeflateFramer,
+        buf: []u8,
+        window: []u8,
+        channel: u8,
+        pkg_id: u16,
+        body_len: usize,
+    ) error{Overflow}!void {
+        // `Compress.init` asserts both of these; turn them into errors so a
+        // mis-sized caller buffer cannot panic a live server.
+        if (buf.len <= envelope_len + 8) return error.Overflow;
+        if (window.len < window_len) return error.Overflow;
+        const content_len: usize = 2 + body_len;
+        if (content_len > std.math.maxInt(i32)) return error.Overflow;
+
+        buf[0] = channel;
+        // payload_size is patched by `finish` once the deflate size is known.
+        @memset(buf[1..5], 0);
+        buf[5] = 1; // compressed
+        buf[6] = 0; // encrypted
+        std.mem.writeInt(u16, buf[7..9], 1, .little); // count
+
+        self.buf = buf;
+        self.sink = .fixed(buf[envelope_len..]);
+        self.comp = flate.Compress.init(&self.sink, window, .raw, .default) catch return error.Overflow;
+
+        var head: [6]u8 = undefined;
+        std.mem.writeInt(i32, head[0..4], @intCast(content_len), .little);
+        std.mem.writeInt(u16, head[4..6], pkg_id, .little);
+        self.comp.writer.writeAll(&head) catch return error.Overflow;
+    }
+
+    /// Sink for the package body. Bytes pushed here must total exactly the
+    /// `body_len` passed to `begin`, or the client's package stream is short.
+    pub fn writer(self: *DeflateFramer) *std.Io.Writer {
+        return &self.comp.writer;
+    }
+
+    pub fn finish(self: *DeflateFramer) error{Overflow}![]u8 {
+        self.comp.finish() catch return error.Overflow;
+        const n = self.sink.end;
+        std.mem.writeInt(i32, self.buf[1..5], @intCast(n), .little);
+        return self.buf[0 .. envelope_len + n];
+    }
+};
+
 /// Frame one package: channel + envelope + single inner package (uncompressed).
 pub fn framePackage(buf: []u8, channel: u8, pkg_id: u16, body: []const u8) error{Overflow}![]u8 {
     const content_len: usize = 2 + body.len;
@@ -168,6 +239,88 @@ test "frame roundtrip pos body size" {
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(@as(u16, 99), pkgs[0].id);
     try std.testing.expectEqual(@as(usize, 30), pkgs[0].body.len);
+}
+
+test "DeflateFramer roundtrips through the inbound parser" {
+    var window: [DeflateFramer.window_len]u8 = undefined;
+    var out: [8192]u8 = undefined;
+    var pkgs: [2]Package = undefined;
+
+    // Empty body: the envelope still has to carry one parseable package.
+    var fr: DeflateFramer = undefined;
+    try fr.begin(&out, &window, 0, 77, 0);
+    const empty = try fr.finish();
+    try std.testing.expectEqual(@as(u8, 1), empty[5]);
+    try std.testing.expectEqual(@as(i32, @intCast(empty.len - envelope_len)), std.mem.readInt(i32, empty[1..5], .little));
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(empty, &pkgs));
+    try std.testing.expectEqual(@as(u16, 77), pkgs[0].id);
+    try std.testing.expectEqual(@as(usize, 0), pkgs[0].body.len);
+
+    // One byte.
+    try fr.begin(&out, &window, 0, 5, 1);
+    try fr.writer().writeByte(0xab);
+    const one = try fr.finish();
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(one, &pkgs));
+    try std.testing.expectEqualSlices(u8, &.{0xab}, pkgs[0].body);
+}
+
+test "DeflateFramer keeps a body far larger than the frame buffer" {
+    var window: [DeflateFramer.window_len]u8 = undefined;
+    // 200 KiB body through a 128 KiB frame buffer, at a compression ratio in the
+    // same band the mapping blob lands in (~6x). That is the whole point of the
+    // streaming framer: the payload never fits a body buffer uncompressed, and
+    // the inbound parser's `max_inflate_ratio` guard still has to accept it.
+    const body_len: usize = 200 * 1024;
+    var out: [128 * 1024]u8 = undefined;
+    var fr: DeflateFramer = undefined;
+    try fr.begin(&out, &window, 0, 123, body_len);
+    var i: usize = 0;
+    while (i < body_len) : (i += 1) {
+        try fr.writer().writeByte(bodyByte(i));
+    }
+    const framed = try fr.finish();
+    try std.testing.expect(framed.len < out.len);
+    try std.testing.expect(framed.len * max_inflate_ratio > body_len);
+
+    var pkgs: [2]Package = undefined;
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(framed, &pkgs));
+    try std.testing.expectEqual(@as(u16, 123), pkgs[0].id);
+    try std.testing.expectEqual(body_len, pkgs[0].body.len);
+    i = 0;
+    while (i < body_len) : (i += 1) {
+        try std.testing.expectEqual(bodyByte(i), pkgs[0].body[i]);
+    }
+}
+
+/// Partly incompressible filler: one noisy byte in four, the rest constant.
+fn bodyByte(i: usize) u8 {
+    if (i % 4 != 0) return 0;
+    const h: u32 = @as(u32, @truncate(i)) *% 2654435761;
+    return @truncate(h >> 24);
+}
+
+test "DeflateFramer rejects undersized buffers and overflows instead of truncating" {
+    var window: [DeflateFramer.window_len]u8 = undefined;
+    var tiny: [16]u8 = undefined;
+    var fr: DeflateFramer = undefined;
+    try std.testing.expectError(error.Overflow, fr.begin(&tiny, &window, 0, 1, 0));
+
+    var small_window: [8]u8 = undefined;
+    var out: [4096]u8 = undefined;
+    try std.testing.expectError(error.Overflow, fr.begin(&out, &small_window, 0, 1, 0));
+
+    // Incompressible body larger than the frame buffer must fail, not truncate.
+    var noise: [4096]u8 = undefined;
+    var seed: u32 = 0x9e3779b9;
+    for (&noise) |*b| {
+        seed = seed *% 1664525 +% 1013904223;
+        b.* = @truncate(seed >> 24);
+    }
+    var frame_buf: [256]u8 = undefined;
+    try fr.begin(&frame_buf, &window, 0, 9, noise.len);
+    const pushed = fr.writer().writeAll(&noise);
+    const finished = if (pushed) |_| fr.finish() else |_| error.Overflow;
+    try std.testing.expectError(error.Overflow, finished);
 }
 
 test "challenge detect" {

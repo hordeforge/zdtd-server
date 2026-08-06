@@ -290,6 +290,25 @@ pub const Chunk = struct {
         self.dirty = true;
     }
 
+    /// Write a decoration cell without moving the terrain surface.
+    ///
+    /// `setBlockRaw` raises `heights` for any solid block above the surface,
+    /// which is right for player edits and wrong for decorations: a 7 tall tree
+    /// would push the column's surface to the treetop, and heights feeds spawn
+    /// placement, void rescue, movement validation and the deco height callback
+    /// itself (trees would then stack on trees). Stock keeps the two apart too:
+    /// `ChunkCluster::addDistantDecorationBlocks` writes through `SetBlockRaw`
+    /// and never touches the terrain height map (asm.il 1126815-1127012).
+    ///
+    /// Density and paint are left as they are, mirroring the stock path's
+    /// `SetDensityRaw(previous density)`.
+    pub fn setBlockDecoRaw(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32) !void {
+        if (y < 0 or y >= y_dim) return;
+        try self.ensureBlocks(allocator);
+        self.blocks.?[blockIndex(lx, y, lz)] = raw;
+        self.dirty = true;
+    }
+
     pub fn isSolid(self: *const Chunk, lx: i32, y: i32, lz: i32) bool {
         const id = self.blockAt(lx, y, lz);
         return id != block_air and id != block_water;
@@ -601,6 +620,13 @@ pub const World = struct {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
         try c.setBlock(self.allocator, t.lx, y, t.lz, id);
+    }
+
+    /// World-space `Chunk.setBlockDecoRaw` (surface height preserved).
+    pub fn setBlockDecoWorld(self: *World, x: i32, y: i32, z: i32, raw: u32) !void {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        try c.setBlockDecoRaw(self.allocator, t.lx, y, t.lz, raw);
     }
 
     pub fn blockWorld(self: *World, x: i32, y: i32, z: i32) !u16 {

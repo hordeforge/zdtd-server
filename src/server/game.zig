@@ -11,6 +11,7 @@ const wire_frame = @import("../wire/frame.zig");
 const wire_binary = @import("../wire/binary.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
+const deco_mirror = @import("../world/deco_mirror.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
 const parallel_util = @import("../util/parallel.zig");
@@ -161,6 +162,14 @@ pub const InitOptions = struct {
     /// whose AssignIds ids differ from our bundled dump: a mismatched block id
     /// throws inside the client world-load coroutine, not just missing trees.
     deco_trees: bool = true,
+    /// Mirror the join deco burst into the server block store, so collision and
+    /// harvest agree with what the client renders. Off = deco is render-only.
+    deco_mirror: bool = true,
+    /// Negotiate block ids with the client by sending a "blocks" NameIdMapping
+    /// before the config files, instead of trusting the client's local
+    /// blocks.xml to assign the same ids as our bundled AssignIds dump.
+    /// Off = today's behaviour (client assigns locally, server hopes it matches).
+    block_id_mapping: bool = true,
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim below.
     game_difficulty: u8 = 2,
@@ -260,12 +269,10 @@ const sanitizePlayerName = c2s_text.sanitizePlayerName;
 const chatMsgOk = c2s_text.chatMsgOk;
 const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
 
-/// Runtime AssignIds block ids for the join-time deco burst (see `decoTreeIds`).
-const DecoTreeIds = struct { oak: u16, dead: u16 };
-/// Deco placement sparsity: one candidate cell in `deco_every_n`. Not stock
-/// density (stock drives it from biome m_DistantDecoBlocks + Perlin noise);
-/// deliberate, deterministic, and cheap enough for one 15×15-chunk join pass.
-const deco_every_n: u32 = 29;
+/// Ceiling on DecoObjects one join burst may place. The count is data driven now
+/// (biomes.xml probabilities), so a modded biome file with dense distant-deco
+/// entries must not turn the join into hundreds of packages.
+const deco_objects_per_join: usize = 8192;
 
 /// A placed land-claim block: protects blocks within land_claim_size around the
 /// keystone for its owner. Owner is the player entity id that placed it.
@@ -360,6 +367,10 @@ pub const Game = struct {
     // Mixed-surface stock chunks (per-cell density) exceed 64KiB easily.
     send_buf: [262144]u8 = undefined,
     body_buf: [524288]u8 = undefined,
+    /// Deflate match window for the compressed "blocks" NameIdMapping frame.
+    deflate_window: [wire_frame.DeflateFramer.window_len]u8 = undefined,
+    /// Duplicate-id bitset for the same mapping (one bit per Block.MAX_BLOCKS id).
+    nameid_seen: [packages.stock_nameid.max_blocks / 8]u8 = undefined,
     /// Stable copy of the C2S payload under dispatch. Package.body slices alias
     /// this (or the original when oversized) for the whole handlePackage loop;
     /// mid-handler ACK drains must not overwrite the live body storage.
@@ -470,6 +481,10 @@ pub const Game = struct {
     wire_chunks: bool = true,
     /// See InitOptions.deco_trees.
     deco_trees: bool = true,
+    /// See InitOptions.deco_mirror.
+    deco_mirror: bool = true,
+    /// See InitOptions.block_id_mapping.
+    block_id_mapping: bool = true,
     /// Set on PlayerData receipt; flushed on the periodic save tick (not per packet).
     players_dirty: bool = false,
     /// Last blood-moon-music state broadcast (edge-triggered).
@@ -523,6 +538,8 @@ pub const Game = struct {
             .max_players = max_pl,
             .wire_chunks = opts.wire_chunks,
             .deco_trees = opts.deco_trees,
+            .deco_mirror = opts.deco_mirror,
+            .block_id_mapping = opts.block_id_mapping,
             .terrain_snapshot_on = opts.terrain_snapshot,
             .job_batches = opts.job_batches,
             .password = opts.password,
@@ -916,9 +933,15 @@ pub const Game = struct {
                     if (std.mem.eql(u8, name, "water")) return a.water;
                     return null;
                 }
+                /// blocks.xml IsDistantDecoration, the filter that decides which
+                /// `<decoration>` rows can become DecoObjects at all.
+                fn distantDeco(ctx: ?*anyopaque, name: []const u8) bool {
+                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+                    return self_t.t.isDistantDeco(name);
+                }
             };
             var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-            if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bl| {
+            if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, IdCtx.distantDeco, &id_ctx) catch null) |bl| {
                 self.world.biome_layers_table = bl;
                 // Weather groups must come from the same effective biomes.xml we
                 // serve, since groupIndex is a document ordinal in that file.
@@ -932,10 +955,11 @@ pub const Game = struct {
                     .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
                 });
                 const burnt = bl.stackFor(9);
-                std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d}\n", .{
+                std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
                     bl.default_stack.n,
                     burnt.n,
                     if (burnt.n > 0) burnt.layers[0].block_id else 0,
+                    if (bl.hasDecos()) "yes" else "no",
                 });
             }
             if (assets_block_textures.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
@@ -1414,26 +1438,95 @@ pub const Game = struct {
         }
     }
 
-    /// Runtime AssignIds ids for the two deco species we place (hardcode A08/A22).
-    /// Fail closed: null when either name is missing from the live map or resolves
-    /// to air. A block id the client cannot resolve does not degrade, it throws
-    /// inside the client world-load coroutine: `DecoManager.addLoadedDecoration` →
-    /// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
-    /// (asm.il 1262497), and `DecoChunk.UpdateModels` calls
-    /// `Dictionary<string,_>.TryGetValue(GetModelName())` which is null for a null
-    /// Block. Both leave the player stuck loading, which is worse than no trees.
-    fn decoTreeIds(self: *const Game) ?DecoTreeIds {
-        const oak = self.maxdamage.idByName("treeOakSml01") orelse return null;
-        const dead = self.maxdamage.idByName("treeDeadTree02") orelse return null;
-        if (oak == 0 or dead == 0) return null;
-        return .{ .oak = oak, .dead = dead };
+    /// `stock_deco` height callback over the live chunk store. Unreadable columns
+    /// return 0, which the sampler skips (fail closed, no fabricated deco).
+    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
+        const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
+        return g.world.heightWorld(wx, wz) catch 0;
     }
 
-    /// `stock_deco` height callback over the live chunk store. Unreadable columns
-    /// return 0, which `generateAroundIds` skips (fail closed, no fabricated deco).
-    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-        const w: *world_store.World = @ptrCast(@alignCast(ctx orelse return 0));
-        return w.heightWorld(wx, wz) catch 0;
+    /// `stock_deco` species callback: the biome under (wx,wz), then that biome's
+    /// distant-decoration list from biomes.xml. Fail closed at every step, since
+    /// a block id the client cannot resolve does not degrade, it throws inside the
+    /// client world-load coroutine: `DecoManager.addLoadedDecoration` →
+    /// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
+    /// (asm.il 1262497), and `DecoChunk.UpdateModels` looks the model up by name,
+    /// which is null for a null Block. Both leave the player stuck loading, which
+    /// is worse than no trees.
+    fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
+        const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
+        const bm = g.world.biomes orelse return .{};
+        const biome_id = bm.atWorld(wx, wz) orelse return .{};
+        const set = g.world.biome_layers_table.decosFor(biome_id);
+        var out: packages.stock_deco.SpeciesList = .{};
+        for (set.slice()) |d| {
+            if (out.n >= packages.stock_deco.max_species) break;
+            out.items[out.n] = .{ .block_id = d.block_id, .prob = d.prob };
+            out.n += 1;
+        }
+        return out;
+    }
+
+    /// Cell offsets per deco block id for one join burst. The AssignIds map is
+    /// name-keyed, so resolving a block id back to its `MultiBlockDim` costs a
+    /// scan of the whole dump; a burst places thousands of objects but draws them
+    /// from a handful of species, so one scan per distinct id is enough.
+    const DecoDimCache = struct {
+        /// Distinct deco species a burst can encounter across the covered biomes.
+        const cap: usize = 32;
+        ids: [cap]u16 = @splat(0),
+        offsets: [cap]deco_mirror.Offsets = undefined,
+        n: usize = 0,
+
+        fn offsetsFor(self: *DecoDimCache, g: *const Game, id: u16) deco_mirror.Offsets {
+            for (self.ids[0..self.n], self.offsets[0..self.n]) |cached_id, offs| {
+                if (cached_id == id) return offs;
+            }
+            const offs = g.decoOffsetsFor(id);
+            if (self.n < cap) {
+                self.ids[self.n] = id;
+                self.offsets[self.n] = offs;
+                self.n += 1;
+            }
+            return offs;
+        }
+    };
+
+    /// Cell offsets a decoration block occupies, from its blocks.xml
+    /// `MultiBlockDim`. An id with no name in the dump places nothing: without the
+    /// name there is no way to know whether it is a multiblock, and writing a
+    /// bare parent where the client expects children leaves orphan cells.
+    fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
+        var it = self.maxdamage.idNameIterator();
+        while (it.next()) |e| {
+            if (e.id != id) continue;
+            const dim = self.maxdamage.multiBlockDim(e.name);
+            return deco_mirror.offsetsFor(dim.x, dim.y, dim.z);
+        }
+        return .{};
+    }
+
+    /// Write one placed decoration into the block store so collision, harvest and
+    /// the streamed chunk payload agree with what the client renders. The client
+    /// runs the same write itself (`ChunkCluster::addDistantDecorationBlocks`,
+    /// asm.il 1126815) and skips any position that is already a multiblock, so
+    /// doing it first is convergent, not conflicting.
+    fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
+        const offsets = cache.offsetsFor(self, @truncate(o.block_raw));
+        if (offsets.n == 0) return false;
+        const written = deco_mirror.apply(&self.world, .{
+            .x = o.x,
+            .y = o.y,
+            .z = o.z,
+            .raw = o.block_raw,
+            .offsets = offsets,
+        }) catch |err| {
+            // A failed mirror is cosmetic drift, never a reason to drop the join.
+            self.harness.counters.inc(.encode_errors);
+            std.debug.print("zdtd: deco mirror failed at {d},{d},{d}: {s}\n", .{ o.x, o.y, o.z, @errorName(err) });
+            return false;
+        };
+        return written > 0;
     }
 
     /// Join-time deco burst, mirroring stock `DecoManager.SendDecosToClient`
@@ -1449,43 +1542,70 @@ pub const Game = struct {
     /// There is no post-join deco path: whatever we do not cover here stays bald
     /// for the session (the same package also marks every client DecoChunk
     /// `isDecorated`, and a fixed-size client generates no deco locally).
+    ///
+    /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
+    /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
     fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-        const ids: DecoTreeIds = blk: {
-            if (self.deco_trees) {
-                if (self.decoTreeIds()) |v| break :blk v;
-            }
+        const deco = packages.stock_deco;
+        const has_species = self.deco_trees and
+            self.world.biomes != null and
+            self.world.biome_layers_table.hasDecos();
+        if (!has_species) {
             // Empty firstPackage is still required: the `isDecorated` marking loop
             // sits inside the `loadedDecos != null` branch, so without it the
             // client keeps retrying local generation it cannot do.
-            const body = try packages.stock_deco.buildDecoUpdate(&self.body_buf, true, &.{});
+            const body = try deco.buildDecoUpdate(&self.body_buf, true, &.{});
             try self.sendGame(peer, "NetPackageDecoUpdate", body);
             std.debug.print(
-                "zdtd: DecoUpdate first=true objs=0 (deco_trees={s}; tree ids unresolved)\n",
-                .{if (self.deco_trees) "on" else "off"},
+                "zdtd: DecoUpdate first=true objs=0 (deco_trees={s} biomemap={s} biome_decos={s})\n",
+                .{
+                    if (self.deco_trees) "on" else "off",
+                    if (self.world.biomes != null) "yes" else "no",
+                    if (self.world.biome_layers_table.hasDecos()) "yes" else "no",
+                },
             );
             return;
-        };
-        const deco = packages.stock_deco;
+        }
+
         const t = world_store.World.worldToChunk(wx, wz);
         const r = self.decoRadiusFor(c);
-        var chunk_objs: [deco.chunk_cells]deco.DecoObj = undefined;
+        // Same window `streamChunksForClient` covers: heightWorld getOrCreate must
+        // not become an unbounded world-gen burst outside the streamed chunks.
+        const window: deco.Window = .{
+            .x0 = (t.pos.x - r) * deco.chunk_side,
+            .z0 = (t.pos.z - r) * deco.chunk_side,
+            .x1 = (t.pos.x + r + 1) * deco.chunk_side,
+            .z1 = (t.pos.z + r + 1) * deco.chunk_side,
+        };
+        const sampler: deco.Sampler = .{
+            .height_at = decoHeightAt,
+            .species_at = decoSpeciesAt,
+            .ctx = self,
+        };
+
+        const seed = self.worldSeed();
+        var chunk_objs: [deco.attempts_per_deco_chunk]deco.DecoObj = undefined;
         var pw = try deco.PackageWriter.init(&self.body_buf, deco.zdtd_decos_per_package);
+        var dim_cache: DecoDimCache = .{};
         var total: usize = 0;
-        var dz: i32 = -r;
-        while (dz <= r) : (dz += 1) {
-            var dx: i32 = -r;
-            while (dx <= r) : (dx += 1) {
-                const n = deco.generateForTerrainChunkIds(
-                    &chunk_objs,
-                    t.pos.x + dx,
-                    t.pos.z + dz,
-                    decoHeightAt,
-                    &self.world,
-                    deco_every_n,
-                    ids.oak,
-                    ids.dead,
-                );
+        var mirrored: usize = 0;
+        var capped = false;
+        var dcz = deco.worldToDecoChunk(window.z0);
+        const dcz_end = deco.worldToDecoChunk(window.z1 - 1);
+        const dcx_end = deco.worldToDecoChunk(window.x1 - 1);
+        while (dcz <= dcz_end and !capped) : (dcz += 1) {
+            var dcx = deco.worldToDecoChunk(window.x0);
+            while (dcx <= dcx_end and !capped) : (dcx += 1) {
+                const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, seed, window, sampler);
                 for (chunk_objs[0..n]) |o| {
+                    if (total >= deco_objects_per_join) {
+                        capped = true;
+                        break;
+                    }
+                    // Mirror before streaming: the chunk payload the client gets
+                    // must already contain the blocks it is about to be told to
+                    // render, or the two disagree until the next edit.
+                    if (self.deco_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
                     if (pw.full()) {
                         try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
                         self.pollNetOnce();
@@ -1499,9 +1619,17 @@ pub const Game = struct {
         // least one firstPackage=true to allocate + drain + mark decorated.
         try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
         std.debug.print(
-            "zdtd: DecoUpdate objs={d} pkgs={d} r={d} oak={d} dead={d}\n",
-            .{ total, pw.sent, r, ids.oak, ids.dead },
+            "zdtd: DecoUpdate objs={d} pkgs={d} r={d} mirrored={d} capped={}\n",
+            .{ total, pw.sent, r, mirrored, capped },
         );
+    }
+
+    /// Seed the deco sampler keys off, so a chunk decorates identically across
+    /// joins and restarts. The worldgen seed when there is one, else the world
+    /// name hash: either way it is stable for the life of the save.
+    fn worldSeed(self: *const Game) u64 {
+        if (self.world.worldgen) |wg| return wg.seed;
+        return std.hash.Wyhash.hash(0, self.world_name);
     }
 
     /// Chunk radius covered by the join deco burst. Same clamp as
@@ -3715,6 +3843,10 @@ pub const Game = struct {
                 c.joined = true;
                 self.tryRestorePlayer(c);
             }
+            // Before the configs: the client only runs Block::AssignIds after the
+            // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
+            // 2014542), and stock sends the mapping at this same point.
+            self.sendBlockIdMapping(peer);
             try self.sendLocalConfigFiles(peer);
             const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
             try self.sendGame(peer, "NetPackageWorldInfo", wi);
@@ -5330,6 +5462,110 @@ pub const Game = struct {
         }
         const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);
         try self.sendGame(peer, "NetPackageWorldSpawnPoints", body);
+    }
+
+    /// Send the full "blocks" NameIdMapping so the client assigns exactly the ids
+    /// our AssignIds dump names, instead of us trusting its local blocks.xml to
+    /// land on the same numbers.
+    ///
+    /// `GameManager::IdMappingReceived` (asm.il 1892715-1892767) turns name
+    /// "blocks" into a fresh `NameIdMapping(null, Block.MAX_BLOCKS)` and loads the
+    /// blob into it; `Block::AssignIds` then takes the mapping branch
+    /// (asm.il 101408-101432). Stock sends this at the same point in the join,
+    /// `GameManager/'<RequestToEnterGame>d__195'::MoveNext` IL_01e3
+    /// (asm.il 1872978-1873018), before the config files, because the client only
+    /// runs `AssignIds` from `WorldStaticData/'<LoadBlocks>d__16'::MoveNext`
+    /// IL_0058 (asm.il 2014542) after the ConfigFile package arrives.
+    ///
+    /// All or nothing. A partial blob is worse than none: `LoadFromArray` swallows
+    /// the exception (asm.il 1178553-1178629), leaves `Block.nameIdMapping`
+    /// non-null, and `assignIdsFromMapping` + `assignLeftOverBlocks` then silently
+    /// renumber every block the blob failed to name. So any validation failure,
+    /// an empty dump, or a compressed size that does not fit `send_buf` all skip
+    /// the package entirely and leave today's LoadLocal behaviour in place.
+    fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) void {
+        if (!self.block_id_mapping) return;
+        const nameid = packages.stock_nameid;
+        if (self.maxdamage.idNameCount() == 0) {
+            std.debug.print("zdtd: blocks IdMapping skipped (no AssignIds dump loaded)\n", .{});
+            return;
+        }
+        const summary = nameid.measure(self.maxdamage.idNameIterator(), &self.nameid_seen) catch |err| {
+            std.debug.print("zdtd: blocks IdMapping skipped ({s}); client keeps local ids\n", .{@errorName(err)});
+            return;
+        };
+
+        // NetPackageIdMapping body: name | i32 dataLen | data (asm.il 822416-822438).
+        const map_name = "blocks";
+        // One-byte 7-bit length prefix; the writer below emits exactly one byte.
+        comptime std.debug.assert(map_name.len < 0x80);
+        const body_len = 1 + map_name.len + 4 + summary.bytes;
+        // Framed into body_buf, not send_buf: the deflated mapping lands around
+        // 255 KiB, which leaves no headroom in the 256 KiB send_buf if the dump
+        // grows. body_buf is 512 KiB and idle here (the config files that use it
+        // are sent after this returns).
+        var fr: wire_frame.DeflateFramer = undefined;
+        fr.begin(&self.body_buf, &self.deflate_window, 0, packages.idOf("NetPackageIdMapping").?, body_len) catch |err| {
+            std.debug.print("zdtd: blocks IdMapping frame init failed: {s}\n", .{@errorName(err)});
+            return;
+        };
+        const w = fr.writer();
+        const ok = blk: {
+            w.writeByte(@intCast(map_name.len)) catch break :blk false;
+            w.writeAll(map_name) catch break :blk false;
+            w.writeInt(i32, @intCast(summary.bytes), .little) catch break :blk false;
+            nameid.write(w, self.maxdamage.idNameIterator(), summary) catch break :blk false;
+            break :blk true;
+        };
+        if (!ok) {
+            std.debug.print(
+                "zdtd: blocks IdMapping does not fit body_buf ({d} raw bytes); client keeps local ids\n",
+                .{summary.bytes},
+            );
+            return;
+        }
+        const framed = fr.finish() catch |err| {
+            std.debug.print("zdtd: blocks IdMapping deflate failed: {s}\n", .{@errorName(err)});
+            return;
+        };
+        self.sendFramedReliable(peer, "NetPackageIdMapping", framed) catch |err| {
+            std.debug.print("zdtd: blocks IdMapping send failed: {s}\n", .{@errorName(err)});
+            return;
+        };
+        std.debug.print(
+            "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
+            .{ summary.count, summary.bytes, framed.len },
+        );
+    }
+
+    /// Send an already-framed envelope on the reliable channel, pumping the window
+    /// the same way `sendGame` does. Separate from `sendGame` because the compressed
+    /// mapping frame is built by the streaming framer, not from a body buffer.
+    fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8) anyerror!void {
+        var attempts: u32 = 0;
+        while (attempts < 960) : (attempts += 1) {
+            peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
+                error.WindowFull => {
+                    peer.resendPending(&self.net.sock) catch {
+                        self.harness.counters.inc(.net_send_errors);
+                    };
+                    self.pollNetOnce();
+                    if (attempts % 4 == 3) clock.sleepNs(500_000);
+                    continue;
+                },
+                else => {
+                    self.harness.counters.inc(.net_send_errors);
+                    return err;
+                },
+            };
+            self.harness.counters.add(.net_packets_out, 1);
+            self.harness.counters.add(.net_bytes_out, framed.len);
+            self.pollNetAfterSend();
+            return;
+        }
+        self.harness.counters.inc(.reliable_window_drops);
+        std.debug.print("zdtd: reliable window drop pkg={s} (framed)\n", .{pkg_name});
+        return error.WindowFull;
     }
 
     fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
@@ -8230,6 +8466,73 @@ test "terrain snapshot hit equals the locked pathSolidAt result" {
     _ = Game.pathSolidAt(g, 4000, 4000);
     try std.testing.expectEqual(@as(u64, 1), g.terrain_snap.misses.load(.monotonic));
     try std.testing.expectEqual(before + 1, g.world.chunks.count());
+}
+
+test "deco burst is biome driven and mirrors into the block store" {
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Without a biome map there is nothing to drive density: fail closed.
+    try std.testing.expect(g.world.biomes == null);
+    try std.testing.expectEqual(@as(usize, 0), Game.decoSpeciesAt(g, 0, 0).n);
+
+    // One-biome map covering the join window, and one distant-deco species that
+    // always passes the roll so the placement path is actually exercised.
+    const biome_id: u8 = 3;
+    const side: i32 = 64;
+    const cells = try std.testing.allocator.alloc(u8, @intCast(side * side));
+    @memset(cells, biome_id);
+    g.world.biomes = .{
+        .width = side,
+        .height = side,
+        .r = cells,
+        .allocator = std.testing.allocator,
+        .half_w = @divTrunc(side, 2),
+        .half_h = @divTrunc(side, 2),
+        .scale = 16,
+    };
+    const tree_id: u16 = 24629; // treeOakSml01 in the bundled dump
+    var set: assets_biome_layers.DecoSet = .{};
+    set.blocks[0] = .{ .block_id = tree_id, .prob = 1.0 };
+    set.n = 1;
+    g.world.biome_layers_table.decos[biome_id] = set;
+    try std.testing.expect(g.world.biome_layers_table.hasDecos());
+    try std.testing.expectEqual(@as(usize, 1), Game.decoSpeciesAt(g, 0, 0).n);
+    try std.testing.expectEqual(tree_id, Game.decoSpeciesAt(g, 0, 0).items[0].block_id);
+
+    // The mirror needs the dump to resolve the id back to a MultiBlockDim.
+    g.maxdamage.tryMergeBundledAssignIds(std.testing.allocator);
+    if (g.maxdamage.idNameCount() == 0) return error.SkipZigTest;
+
+    var cache: Game.DecoDimCache = .{};
+    const h = try g.world.heightWorld(3, 5);
+    const o: packages.stock_deco.DecoObj = .{
+        .x = 3,
+        .y = @intCast(h + 1),
+        .z = 5,
+        .real_y = @floatFromInt(h + 1),
+        .block_raw = tree_id,
+    };
+    // The world dir survives between runs (deinit saves chunks), so clear the
+    // target cell rather than assume a pristine column.
+    try g.world.setBlockDecoWorld(3, @intCast(h + 1), 5, g.world.terrain_ids.air);
+    try std.testing.expect(g.mirrorDeco(&cache, o));
+    try std.testing.expectEqual(tree_id, try g.world.blockWorld(3, @intCast(h + 1), 5));
+    // Terrain surface must not follow the tree up.
+    try std.testing.expectEqual(h, try g.world.heightWorld(3, 5));
+    // Cached: a second object of the same species must not rescan the dump, and
+    // must still be skipped because the anchor is now a decoration.
+    try std.testing.expectEqual(@as(usize, 1), cache.n);
+    try std.testing.expect(!g.mirrorDeco(&cache, o));
+
+    // An id with no name in the dump places nothing rather than a bare parent.
+    const unknown: packages.stock_deco.DecoObj = .{ .x = 9, .y = 60, .z = 9, .real_y = 60, .block_raw = 0xfffe };
+    try std.testing.expect(!g.mirrorDeco(&cache, unknown));
+    try std.testing.expect(try g.world.blockWorld(9, 60, 9) != 0xfffe);
 }
 
 test "[perf] switches run on the live step path" {

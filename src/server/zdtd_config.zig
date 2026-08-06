@@ -40,6 +40,12 @@ pub const Feature = struct {
     /// Join-time deco tree objects. Off falls back to the empty firstPackage
     /// (bald world) for clients whose block AssignIds differ from our dump.
     deco_trees: ?bool = null,
+    /// Write the join deco burst into the server block store. Off leaves deco
+    /// render-only, so server collision and harvest do not see the trees.
+    deco_mirror: ?bool = null,
+    /// Send the full "blocks" NameIdMapping before the config files. Off falls
+    /// back to the client assigning block ids from its own local blocks.xml.
+    block_id_mapping: ?bool = null,
 };
 
 /// Performance switches (docs/SCALE_ARCHITECTURE.md). All default off: each one
@@ -203,6 +209,10 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
             f.feature.wire_chunks = try parseBool(val);
         } else if (std.mem.eql(u8, key, "deco_trees")) {
             f.feature.deco_trees = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "deco_mirror")) {
+            f.feature.deco_mirror = try parseBool(val);
+        } else if (std.mem.eql(u8, key, "block_id_mapping")) {
+            f.feature.block_id_mapping = try parseBool(val);
         } else {
             return unknownKey(section, key);
         }
@@ -290,6 +300,8 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
         opts.guard.hard_repeat = @intCast(@min(v, @as(u32, std.math.maxInt(u16))));
     if (f.feature.wire_chunks) |v| opts.wire_chunks = v;
     if (f.feature.deco_trees) |v| opts.deco_trees = v;
+    if (f.feature.deco_mirror) |v| opts.deco_mirror = v;
+    if (f.feature.block_id_mapping) |v| opts.block_id_mapping = v;
     if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
@@ -377,6 +389,8 @@ test "parse stream and authority" {
         \\[feature]
         \\wire_chunks = false
         \\deco_trees = no
+        \\deco_mirror = no
+        \\block_id_mapping = false
         \\[mode]
         \\name = "default"
     ;
@@ -395,6 +409,8 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u32, 40), f.authority.guard_hard_repeat.?);
     try std.testing.expectEqual(false, f.feature.wire_chunks.?);
     try std.testing.expectEqual(false, f.feature.deco_trees.?);
+    try std.testing.expectEqual(false, f.feature.deco_mirror.?);
+    try std.testing.expectEqual(false, f.feature.block_id_mapping.?);
     try std.testing.expectEqualStrings("default", f.mode.name.?);
 }
 
@@ -413,6 +429,8 @@ test "applyToInitOptions deco_trees only when set" {
         peer_stale_ms: u64 = 3000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
+        deco_mirror: bool = true,
+        block_id_mapping: bool = true,
         async_chunk_flush: bool = false,
         terrain_snapshot: bool = false,
         job_batches: bool = false,
@@ -427,6 +445,19 @@ test "applyToInitOptions deco_trees only when set" {
     defer off.deinit();
     applyToInitOptions(&off, &o);
     try std.testing.expectEqual(false, o.deco_trees);
+    // The deco mirror and the blocks mapping are independent kill switches: one
+    // regressing must not force the other off.
+    try std.testing.expectEqual(true, o.deco_mirror);
+    try std.testing.expectEqual(true, o.block_id_mapping);
+    var no_map = try parse(std.testing.allocator, "[feature]\nblock_id_mapping = no\n");
+    defer no_map.deinit();
+    applyToInitOptions(&no_map, &o);
+    try std.testing.expectEqual(false, o.block_id_mapping);
+    try std.testing.expectEqual(true, o.deco_mirror);
+    var no_mirror = try parse(std.testing.allocator, "[feature]\ndeco_mirror = no\n");
+    defer no_mirror.deinit();
+    applyToInitOptions(&no_mirror, &o);
+    try std.testing.expectEqual(false, o.deco_mirror);
 }
 
 test "loadFromPath rejects oversized file" {
@@ -562,6 +593,8 @@ test "guard policy merges from [authority] and clamps" {
         peer_stale_ms: u64 = 3000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
+        deco_mirror: bool = true,
+        block_id_mapping: bool = true,
         async_chunk_flush: bool = false,
         terrain_snapshot: bool = false,
         job_batches: bool = false,
@@ -620,6 +653,8 @@ test "[perf] switches default off and merge only when set" {
         peer_stale_ms: u64 = 3000,
         wire_chunks: bool = true,
         deco_trees: bool = true,
+        deco_mirror: bool = true,
+        block_id_mapping: bool = true,
         async_chunk_flush: bool = false,
         terrain_snapshot: bool = false,
         job_batches: bool = false,

@@ -26,6 +26,30 @@ pub const Stack = struct {
     }
 };
 
+/// Distant-decoration entries a biome can spawn. Only `<decoration type="block">`
+/// rows whose Block carries `IsDistantDecoration` survive: that is exactly the
+/// filter `BiomeDefinition::AddDecoBlock` applies when it builds the
+/// `m_DistantDecoBlocks` list (asm.il 1249700-1249740), and that list is the only
+/// one `DecoManager::decorateChunkRandom` samples (asm.il 1266097-1266179). It is
+/// what keeps grass (prob .85 / .99) out of the deco burst.
+pub const max_deco_per_biome: usize = 12;
+
+pub const DecoBlock = struct {
+    block_id: u16,
+    /// biomes.xml `prob`, as written. The sampler applies stock's `* 0.125f * 16f`.
+    prob: f32,
+};
+
+pub const DecoSet = struct {
+    n: u8 = 0,
+    blocks: [max_deco_per_biome]DecoBlock = undefined,
+
+    /// XML order preserved: the stock sampler walks this list last to first.
+    pub fn slice(self: *const DecoSet) []const DecoBlock {
+        return self.blocks[0..self.n];
+    }
+};
+
 /// Pine-forest-like fallback when biomes.xml is not loaded.
 pub fn defaultStack() Stack {
     return .{
@@ -115,6 +139,9 @@ pub const Table = struct {
     /// Parallel to weather_ids.
     weather_groups: [max_weather_biomes]WeatherGroupSet = [_]WeatherGroupSet{.{}} ** max_weather_biomes,
     weather_n: u8 = 0,
+    /// biomemap id → distant-decoration set (empty when the biome declares none,
+    /// or when nothing in it resolved: no fabricated species).
+    decos: [max_biomemap_id]DecoSet = [_]DecoSet{.{}} ** max_biomemap_id,
     loaded: bool = false,
 
     pub fn deinit(self: *Table) void {
@@ -126,6 +153,22 @@ pub const Table = struct {
             return self.stacks[biome_id];
         if (self.default_stack.n > 0) return self.default_stack;
         return defaultStack();
+    }
+
+    /// Distant-decoration set for a biomemap id. Empty (not a fallback) when the
+    /// biome has none: an unknown biome must place nothing rather than borrow
+    /// another biome's species.
+    pub fn decosFor(self: *const Table, biome_id: u8) DecoSet {
+        if (biome_id >= max_biomemap_id) return .{};
+        return self.decos[biome_id];
+    }
+
+    /// True when at least one biome resolved a distant-decoration species.
+    pub fn hasDecos(self: *const Table) bool {
+        for (self.decos) |d| {
+            if (d.n > 0) return true;
+        }
+        return false;
     }
 
     /// Fill column blocks[0..h] inclusive from layers (surface at y=h).
@@ -368,11 +411,81 @@ fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const 
     return st;
 }
 
+/// Body of the biome's own `<decorations>` group, i.e. the one that is not
+/// inside a `<subbiome>`. That is the group `IBiomeProvider::GetBiomeOrSubAt`
+/// resolves to wherever no subbiome noise hits, which is most of the biome.
+/// zdtd does not evaluate subbiome noise, so the first subbiome's group is only
+/// used as a fallback when the biome declares none of its own (the same
+/// approximation `parseStackBody` already makes for `<layers>`).
+fn decorationsBody(body: []const u8) ?[]const u8 {
+    var first_in_sub: ?[]const u8 = null;
+    var i: usize = 0;
+    var sub_end: usize = 0;
+    while (i < body.len) {
+        const di = std.mem.indexOfPos(u8, body, i, "<decorations>") orelse break;
+        const close = std.mem.indexOfPos(u8, body, di, "</decorations>") orelse break;
+        const inner = body[di + 13 .. close];
+        // Is this group inside a <subbiome> that has not closed yet?
+        if (di >= sub_end) {
+            sub_end = 0;
+            var si: usize = 0;
+            while (std.mem.indexOfPos(u8, body, si, "<subbiome")) |sb| {
+                if (sb > di) break;
+                const se = std.mem.indexOfPos(u8, body, sb, "</subbiome>") orelse body.len;
+                if (sb < di and di < se) {
+                    sub_end = se;
+                    break;
+                }
+                si = sb + 9;
+            }
+        }
+        if (sub_end == 0) return inner;
+        if (first_in_sub == null) first_in_sub = inner;
+        i = close + 14;
+    }
+    return first_in_sub;
+}
+
+fn parseDecoBody(
+    body: []const u8,
+    id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
+    is_distant_deco: *const fn (?*anyopaque, []const u8) bool,
+    ctx: ?*anyopaque,
+) DecoSet {
+    var set: DecoSet = .{};
+    const decos = decorationsBody(body) orelse return set;
+    var i: usize = 0;
+    while (i < decos.len and set.n < max_deco_per_biome) {
+        const di = std.mem.indexOfPos(u8, decos, i, "<decoration") orelse break;
+        i = di + 11;
+        // type="prefab" rows name a POI, not a block: no DecoObject to send.
+        const kind = xml.attr(decos, di, "type") orelse continue;
+        if (!std.mem.eql(u8, kind, "block")) continue;
+        const bname = xml.attr(decos, di, "blockname") orelse continue;
+        const prob_s = xml.attr(decos, di, "prob") orelse continue;
+        const prob = xml.parseF32(prob_s) orelse continue;
+        if (prob <= 0) continue;
+        if (!is_distant_deco(ctx, bname)) continue;
+        // Unresolvable id would NRE the client's world-load coroutine; drop it.
+        const bid = id_by_name(ctx, bname) orelse continue;
+        if (bid == 0) continue;
+        set.blocks[set.n] = .{ .block_id = bid, .prob = prob };
+        set.n += 1;
+    }
+    return set;
+}
+
+fn noDistantDeco(_: ?*anyopaque, _: []const u8) bool {
+    return false;
+}
+
 /// Load biomes.xml: biomemap id→name, then each biome's top-level layers.
+/// `is_distant_deco` gates `<decorations>` parsing; pass null to skip it.
 pub fn loadFromPath(
     allocator: std.mem.Allocator,
     path: []const u8,
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
+    is_distant_deco: ?*const fn (?*anyopaque, []const u8) bool,
     ctx: ?*anyopaque,
 ) !Table {
     const raw = try io_fs.readFileAll(allocator, path);
@@ -409,6 +522,9 @@ pub fn loadFromPath(
     defer stacks_by_name.deinit(allocator);
     var bodies_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
     defer bodies_by_name.deinit(allocator);
+    var decos_by_name: std.StringHashMapUnmanaged(DecoSet) = .{};
+    defer decos_by_name.deinit(allocator);
+    const deco_ok = is_distant_deco orelse noDistantDeco;
     i = 0;
     while (i < clean.len) {
         const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
@@ -425,6 +541,10 @@ pub fn loadFromPath(
             try stacks_by_name.put(allocator, bname, st);
         }
         try bodies_by_name.put(allocator, bname, body);
+        const ds = parseDecoBody(body, id_by_name, deco_ok, ctx);
+        if (ds.n > 0) {
+            try decos_by_name.put(allocator, bname, ds);
+        }
         i = close + 8;
     }
 
@@ -440,6 +560,9 @@ pub fn loadFromPath(
         const nm = name_by_id[id] orelse continue;
         if (stacks_by_name.get(nm)) |st| {
             table.stacks[id] = st;
+        }
+        if (decos_by_name.get(nm)) |ds| {
+            table.decos[id] = ds;
         }
         const body = bodies_by_name.get(nm) orelse continue;
         if (table.weather_n >= max_weather_biomes) continue;
@@ -459,22 +582,23 @@ pub fn tryLoad(
     game_dir: ?[]const u8,
     config_dir: ?[]const u8,
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
+    is_distant_deco: ?*const fn (?*anyopaque, []const u8) bool,
     ctx: ?*anyopaque,
 ) !?Table {
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "biomes.xml", game_dir, config_dir) orelse return null;
     if (paths.override_dirs.len == 0) {
-        return loadFromPath(allocator, base, id_by_name, ctx) catch null;
+        return loadFromPath(allocator, base, id_by_name, is_distant_deco, ctx) catch null;
     }
     const merged = try paths.readConfigXml(allocator, "biomes.xml", game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
     io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/biomes.xml";
     {
-        io_fs.writeFile(allocator, cp, merged) catch return loadFromPath(allocator, base, id_by_name, ctx) catch null;
+        io_fs.writeFile(allocator, cp, merged) catch return loadFromPath(allocator, base, id_by_name, is_distant_deco, ctx) catch null;
     }
-    return loadFromPath(allocator, cp, id_by_name, ctx) catch null;
+    return loadFromPath(allocator, cp, id_by_name, is_distant_deco, ctx) catch null;
 }
 
 fn testId(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -517,9 +641,95 @@ test "fillColumn burnt_forest surface" {
     try std.testing.expectEqual(@as(u16, 0), col[61]);
 }
 
+/// Stand-in for maxdamage's resolved `IsDistantDecoration`: trees yes, the
+/// high-probability grass and shrub rows no.
+fn testDistantDeco(_: ?*anyopaque, name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "tree") and
+        !std.mem.eql(u8, name, "treeShortGrass") and
+        !std.mem.eql(u8, name, "treeTallGrassDiagonal");
+}
+
+fn testDecoId(_: ?*anyopaque, name: []const u8) ?u16 {
+    if (std.mem.eql(u8, name, "treeOak")) return 24629;
+    if (std.mem.eql(u8, name, "treeJuniper")) return 24630;
+    if (std.mem.eql(u8, name, "treeShortGrass")) return 24700;
+    if (std.mem.eql(u8, name, "treeTallGrassDiagonal")) return 24701;
+    if (std.mem.eql(u8, name, "terrForestGround")) return assignids.terr_forest_ground;
+    return null;
+}
+
+test "decorations parse keeps distant deco in XML order" {
+    const src =
+        \\<biomes>
+        \\<biomemap id="03" name="pine_forest"/>
+        \\<biomemap id="05" name="desert"/>
+        \\<biome name="pine_forest">
+        \\  <subbiome noise=".01, 0, .2">
+        \\    <decorations>
+        \\      <decoration type="block" blockname="treeOak" prob=".9"/>
+        \\    </decorations>
+        \\  </subbiome>
+        \\  <decorations>
+        \\    <decoration type="prefab" name="rock_form02" prob=".001"/>
+        \\    <decoration type="block" blockname="treeJuniper" prob=".06" rotatemax="7"/>
+        \\    <decoration type="block" blockname="treeOak" prob=".07" rotatemax="7"/>
+        \\    <decoration type="block" blockname="treeMissingFromDump" prob=".5"/>
+        \\    <decoration type="block" blockname="treeTallGrassDiagonal" prob=".99"/>
+        \\    <decoration type="block" blockname="treeShortGrass" prob=".85"/>
+        \\  </decorations>
+        \\</biome>
+        \\<biome name="desert">
+        \\  <layers><layer depth="1" blockname="terrForestGround"/></layers>
+        \\</biome>
+        \\</biomes>
+    ;
+    const path = ".zdtd_test_biomes_deco.xml";
+    try io_fs.writeFile(std.testing.allocator, path, src);
+    defer io_fs.deleteFile(std.testing.allocator, path);
+
+    var t = try loadFromPath(std.testing.allocator, path, testDecoId, testDistantDeco, null);
+    defer t.deinit();
+    try std.testing.expect(t.hasDecos());
+
+    // Biome-level group wins over the subbiome group (GetBiomeOrSubAt default).
+    const pine = t.decosFor(3);
+    try std.testing.expectEqual(@as(u8, 2), pine.n);
+    try std.testing.expectEqual(@as(u16, 24630), pine.slice()[0].block_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.06), pine.slice()[0].prob, 1e-6);
+    try std.testing.expectEqual(@as(u16, 24629), pine.slice()[1].block_id);
+    // Grass and the unresolvable name are both dropped, never fabricated.
+    for (pine.slice()) |d| {
+        try std.testing.expect(d.block_id != 24700 and d.block_id != 24701);
+    }
+    // A biome with no <decorations> inherits nothing.
+    try std.testing.expectEqual(@as(u8, 0), t.decosFor(5).n);
+    // Unmapped biome ids stay empty rather than borrowing another biome.
+    try std.testing.expectEqual(@as(u8, 0), t.decosFor(9).n);
+    try std.testing.expectEqual(@as(u8, 0), t.decosFor(max_biomemap_id).n);
+}
+
+test "decorations parse without a distant-deco filter yields nothing" {
+    const src =
+        \\<biomes>
+        \\<biomemap id="03" name="pine_forest"/>
+        \\<biome name="pine_forest">
+        \\  <decorations>
+        \\    <decoration type="block" blockname="treeOak" prob=".07"/>
+        \\  </decorations>
+        \\</biome>
+        \\</biomes>
+    ;
+    const path = ".zdtd_test_biomes_nodeco.xml";
+    try io_fs.writeFile(std.testing.allocator, path, src);
+    defer io_fs.deleteFile(std.testing.allocator, path);
+    var t = try loadFromPath(std.testing.allocator, path, testDecoId, null, null);
+    defer t.deinit();
+    try std.testing.expect(!t.hasDecos());
+}
+
 test "load stock biomes.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/biomes.xml";
-    const t = loadFromPath(std.testing.allocator, p, testId, null) catch return error.SkipZigTest;
+    const t = loadFromPath(std.testing.allocator, p, testId, null, null) catch return error.SkipZigTest;
     try std.testing.expect(t.loaded);
     const burnt = t.stackFor(9);
     try std.testing.expect(burnt.n >= 3);

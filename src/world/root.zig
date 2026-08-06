@@ -20,6 +20,7 @@ pub const biomes = @import("biomes.zig");
 pub const weather = @import("weather.zig");
 pub const worldgen = @import("worldgen.zig");
 pub const noise = @import("noise.zig");
+pub const deco_mirror = @import("deco_mirror.zig");
 
 test {
     _ = store;
@@ -37,4 +38,5 @@ test {
     _ = weather;
     _ = worldgen;
     _ = noise;
+    _ = deco_mirror;
 }
