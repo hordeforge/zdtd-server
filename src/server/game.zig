@@ -8176,6 +8176,7 @@ pub const Game = struct {
             .default_tex = TexCtx.def,
             .default_tex_ctx = &tex_ctx,
             .dens_at = BlockCtx.dens,
+            .water_block_id = self.world.terrain_ids.water,
         });
         const before_out = self.harness.counters.get(.net_packets_out);
         try self.sendGame(peer, "NetPackageChunk", body);

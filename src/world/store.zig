@@ -145,6 +145,32 @@ pub const Chunk = struct {
         try self.setBlockTexDens(allocator, lx, y, lz, raw, tex, null);
     }
 
+    /// Fill lake water from the water_info.xml sources: every column whose
+    /// terrain surface sits below a source surface gets water blocks from the
+    /// bed up to that surface (the water channel mass is derived from the
+    /// block type at encode time). Must run after heights are final, i.e. after
+    /// `Sources.applyToChunkHeights` and block materialization.
+    pub fn applyWaterSources(self: *Chunk, cx: i32, cz: i32, sources: *const water_mod.Sources, water_id: u16) void {
+        const base_x = cx * 16;
+        const base_z = cz * 16;
+        const radius: i32 = 12;
+        const blocks = self.blocks orelse return;
+        var lz: i32 = 0;
+        while (lz < 16) : (lz += 1) {
+            var lx: i32 = 0;
+            while (lx < 16) : (lx += 1) {
+                const wy = sources.waterYNear(base_x + lx, base_z + lz, radius) orelse continue;
+                const idx: usize = @intCast(lx + lz * 16);
+                const h = self.heights[idx];
+                if (h >= wy) continue; // land or shoreline at/above the surface
+                var y: i32 = @as(i32, h) + 1;
+                while (y <= wy and y < y_dim) : (y += 1) {
+                    blocks[blockIndex(lx, y, lz)] = water_id;
+                }
+            }
+        }
+    }
+
     pub fn setBlockTexDens(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32, tex: u64, dens: ?u8) !void {
         try self.setBlockRaw(allocator, lx, y, lz, raw);
         if (tex != 0 or self.textures != null) {
@@ -623,6 +649,7 @@ pub const World = struct {
                 }
                 if (self.water) |*wt| {
                     wt.applyToChunkHeights(pos.x, pos.z, &gop.value_ptr.heights);
+                    gop.value_ptr.applyWaterSources(pos.x, pos.z, wt, self.terrain_ids.water);
                 }
             }
             // Player edits / first-touch cache win over regen (heights-only or
@@ -1339,4 +1366,26 @@ test "navezgane heights agree with the blocks in the same column" {
         // float above the highest block it actually placed.
         try std.testing.expect(@as(i32, h) <= top);
     }
+}
+
+test "water sources fill lake columns with water blocks" {
+    // Chunk bed at y=60, water source surface y=70 at column (5,5): water must
+    // fill 61..70; air above; far columns outside radius stay dry. A shore cell
+    // with bed at 71 (above the surface) keeps terrain, no water.
+    var chunk: Chunk = .{ .pos = .{ .x = 0, .z = 0 } };
+    chunk.heights = .{60} ** 256;
+    chunk.heights[0] = 71; // shore cell at (0,0): bed above the water surface
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try chunk.ensureBlocksWithStack(arena.allocator(), biome_layers.defaultStack());
+    var pts = [_]water_mod.WaterPoint{.{ .x = 5, .y = 70, .z = 5 }};
+    const sources = water_mod.Sources{ .points = pts[0..], .allocator = undefined };
+    chunk.applyWaterSources(0, 0, &sources, block_water);
+    try std.testing.expectEqual(@as(u32, block_water), chunk.blocks.?[blockIndex(5, 61, 5)]);
+    try std.testing.expectEqual(@as(u32, block_water), chunk.blocks.?[blockIndex(5, 70, 5)]);
+    try std.testing.expectEqual(@as(u32, block_air), chunk.blocks.?[blockIndex(5, 71, 5)]);
+    // Shore cell (0,0): bed 71 >= surface 70, keeps its terrain block (dirt 5).
+    try std.testing.expectEqual(@as(u32, block_dirt), chunk.blocks.?[blockIndex(0, 70, 0)]);
+    // Column (15,15) is outside the radius-12 source ring (dx=10,dz=10 → 200 > 144).
+    try std.testing.expectEqual(@as(u32, block_air), chunk.blocks.?[blockIndex(15, 65, 15)]);
 }

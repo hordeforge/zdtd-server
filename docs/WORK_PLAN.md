@@ -150,10 +150,19 @@ values, including one item that inherits through two levels.
 
 ## T4. World: put water in the world
 
+**Status: landed 2026-08-06** (764 tests). Lake/river water writes from the
+`water_info.xml` sources at chunk generation (`Chunk.applyWaterSources`: water
+blocks from the lake bed up to the source surface) and the chunk water channel
+carries the full static mass (19500) per water cell. Tested: the lake-column
+fill and the water-channel encode against the stock layout. A Navezgane loadgen
+smoke passes with the water channel live. Still open for full "done when": the
+prefab `.tts` water plane (POI pools) and the flowing-water sim; the stock
+client visual check (water renders, swimming) is queued in the visual round.
+
 **Why:** no water block is ever written, so lakes and rivers are dry holes.
 
-**Change:** write water blocks from the world's water sources during chunk
-generation, and carry the water channel in the chunk package.
+**Change:** ~~write water blocks from the world's water sources during chunk
+generation, and carry the water channel in the chunk package~~ **DONE**.
 
 **Grounding:** the water plane in the stock chunk payload (see
 [WIRE_CHUNK.md](WIRE_CHUNK.md)) and `water_info.xml` in the world directory.

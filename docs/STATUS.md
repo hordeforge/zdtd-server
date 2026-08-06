@@ -44,6 +44,9 @@ observable, on the live stock client:
 - **Items (T3):** absent `Stacknumber` defaults to stock's 500 and inherits
   through `Extends` (two-pass resolve); the "bag slot waste" residual is closed.
   New stock-file test; 762 total.
+- **Water (T4):** lakes and rivers now fill from `water_info.xml` sources at
+  chunk generation, and the chunk water channel carries the full static mass
+  (POI water planes and the fluid sim remain open). Two new tests; 764 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

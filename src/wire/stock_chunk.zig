@@ -35,6 +35,11 @@ pub fn densityForBlock(id: u16) u8 {
 }
 
 const layers_n: usize = 64;
+
+/// Full static water mass. WaterUtils.GetWaterLevel gates visible water at
+/// mass > 195 and GetStableMassBelow clamps at 19500, so static lake cells
+/// carry the full value (light-mesh-water.md section 4).
+pub const water_mass_full: u16 = 19500;
 const cells_per_layer: usize = 1024; // 16*16*4
 
 /// Block rawData provider: (lx, y, lz) -> full BlockValue.rawData (type + rot + meta).
@@ -65,6 +70,9 @@ pub const EncodeOpts = struct {
     /// Optional density override (TTS). Null → densityForBlock(type).
     dens_at: ?DensAtFn = null,
     biome: u8 = 3, // pine forest-ish placeholder
+    /// AssignIds water block id; 0 disables the water channel (all-zero).
+    /// When set, cells whose block type is water carry water_mass_full.
+    water_block_id: u16 = 0,
 };
 
 fn texAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u64 {
@@ -386,8 +394,9 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     try writeChannelSame(&w, 2, &[_]u8{ 0, 0 });
     // textures[0] bpv=6: TTS paint, else blocks.xml default Texture packing.
     try writeTextureChannel(&w, opts);
-    // water bpv=2 same 0
-    try writeChannelSame(&w, 2, &[_]u8{ 0, 0 });
+    // water bpv=2: per-cell WaterValue mass. Static lake cells carry the full
+    // mass; air/other cells 0. Same-value 0 layers stay tiny.
+    try writeWaterChannel(&w, opts);
 
     // true → client runs light rebuild; false + bright seed still meshes immediately.
     try w.writeBool(true); // NeedsLightCalculation
@@ -499,6 +508,49 @@ fn writeTextureChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     }
 }
 
+/// Water channel (bpv=2): per-cell WaterValue mass, encoded like the texture
+/// channel. A layer with no water writes presence 1 + same-value u16 0; a layer
+/// with water writes presence 0 + two byte-planes (lo, hi) of u16 masses.
+fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
+    var band: usize = 0;
+    while (band < layers_n) : (band += 1) {
+        const y0: i32 = @intCast(band * 4);
+        var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
+        var has_water = false;
+        if (opts.water_block_id != 0) {
+            var ly: i32 = 0;
+            while (ly < 4) : (ly += 1) {
+                var lz: i32 = 0;
+                while (lz < 16) : (lz += 1) {
+                    var lx: i32 = 0;
+                    while (lx < 16) : (lx += 1) {
+                        const raw = blockAt(opts, lx, y0 + ly, lz);
+                        if (@as(u16, @truncate(raw)) == opts.water_block_id) {
+                            vals[layerCell(lx, ly, lz)] = water_mass_full;
+                            has_water = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (!has_water) {
+            try w.writeByte(1); // presence: same-value
+            try w.writeU16(0);
+            continue;
+        }
+        try w.writeByte(0); // presence: full byte-planes
+        var plane_buf: [cells_per_layer]u8 = undefined;
+        var j: usize = 0;
+        while (j < 2) : (j += 1) {
+            var c: usize = 0;
+            while (c < cells_per_layer) : (c += 1) {
+                plane_buf[c] = @truncate(vals[c] >> @intCast(j * 8));
+            }
+            try w.writeBytes(&plane_buf);
+        }
+    }
+}
+
 /// NetPackageChunk body: overwrite=false + dataLen + stock Chunk.write payload.
 /// First delivery must use overwrite=false so client allocates+reads during package.read.
 pub fn buildNetPackageChunkNew(buf: []u8, opts: EncodeOpts) ![]u8 {
@@ -587,6 +639,51 @@ test "stock chunk emits per-block textureFull for painted blocks" {
     // (Can't assert 0x61 absent globally since block ids may coincide; assert the
     // painted encoding is strictly larger due to a non-uniform texture band.)
     try std.testing.expect(payload.len > unpainted.len);
+}
+
+test "stock chunk water channel carries full mass for water cells" {
+    // A water block at (1,66,3) (band 16) must switch that band from the
+    // same-value 3 bytes to presence 0 + two u16 byte-planes, with the full
+    // static mass (19500 = 0x4C2C) at the water cell.
+    const Ctx = struct {
+        fn at(_: ?*anyopaque, lx: i32, y: i32, lz: i32) u32 {
+            if (lx == 1 and y == 66 and lz == 3) return 240; // water
+            if (y == 0) return stock_terr_bedrock;
+            if (y <= 60) return 1; // stone
+            return stock_air;
+        }
+    };
+    var heights: [256]u8 = .{60} ** 256;
+    var raw_w: [524288]u8 = undefined;
+    var raw_d: [524288]u8 = undefined;
+    const water = try encodeNetworkChunk(&raw_w, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .block_at = Ctx.at,
+        .block_ctx = null,
+        .water_block_id = 240,
+    });
+    const dry = try encodeNetworkChunk(&raw_d, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .block_at = Ctx.at,
+        .block_ctx = null,
+    });
+    // One band (16) switches from 3 same-value bytes to 1 + 2*1024 full bytes
+    // (a layer has cells_per_layer = 1024 cells; planes are 1024 bytes each).
+    try std.testing.expectEqual(dry.len + 2046, water.len);
+    // The dry water channel is 64 same-value layers of 3 bytes, preceded by the
+    // identical prefix and followed by the 15-byte const tail.
+    const wch = dry.len - 64 * 3 - 15;
+    const band16 = wch + 16 * 3;
+    try std.testing.expectEqual(@as(u8, 0), water[band16]); // presence: full
+    const cell = layerCell(1, 2, 3);
+    try std.testing.expectEqual(@as(u8, 0x2C), water[band16 + 1 + cell]); // lo plane
+    try std.testing.expectEqual(@as(u8, 0x4C), water[band16 + 1 + 1024 + cell]); // hi plane
+    // Bands 0..15 stay same-value 0.
+    try std.testing.expectEqual(@as(u8, 1), water[wch + 15 * 3]);
 }
 
 test "stock chunk emits upper24 for construction ids >= 256" {

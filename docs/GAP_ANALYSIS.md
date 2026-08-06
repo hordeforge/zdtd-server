@@ -83,9 +83,11 @@ the surface. Still open: `part_*` decorations are not painted, sleeper triggers
 are partial, and per-block facing uses one remap table where stock resolves it
 virtually per BlockShape.
 
-**There is no water.** No water block is ever written, the chunk water channel is
-uniform zero, and `water_info.xml` is used only to raise terrain, so every lake
-and pond is a flat dry dirt plain.
+**Water is in lakes but not POIs.** Lake and river water now writes from the
+`water_info.xml` sources at chunk generation (water blocks below the surface),
+and the chunk water channel carries the full static mass, so Navezgane's 39
+sources render wet. Still dry: prefab `.tts` water planes (POI pools, flooded
+basements, water tanks) and the flowing-water sim.
 
 **Loot is mostly meaningful now.** Containers roll their own `blocks.xml`
 LootList (a gun safe rolls `smallSafes`, a chest rolls `woodenChest`), and
@@ -136,7 +138,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
+| [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; lakes wet, no POI water, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
 | **Total** | **89** | **157** | **99** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
@@ -223,10 +225,14 @@ area and the concrete work.
    case against the stock file. The "bag slot waste" playtest residual is
    closed. DamageEntity/FuelValue/eat cvars still read direct-only.
 
-8. **World: put water in the world.** No water block is ever written,
-   `water_info.xml` only raises heights, the `.tts` water plane is skipped, and
-   the chunk water channel is uniform zero. 39 Navezgane sources render dry
-   (`src/world/water.zig:34-57`, `src/wire/stock_chunk.zig:388`).
+8. **DONE 2026-08-06.** World: put water in the world. Lake/river water now
+   writes from the `water_info.xml` sources at chunk generation
+   (`Chunk.applyWaterSources`: water blocks from the lake bed up to the source
+   surface), and the chunk water channel carries the full static mass (19500)
+   per water cell instead of uniform zero
+   (`src/wire/stock_chunk.zig` `writeWaterChannel`, `water_block_id`).
+   Navezgane's 39 sources render wet; a Navezgane loadgen smoke passes. Still
+   open: prefab `.tts` water planes (POI pools) and the flowing-water sim.
 
 9. **Progression / net: save what a player is.**
    The `players.zsv` v2 record is name, position, coins, inventory, journal. Add

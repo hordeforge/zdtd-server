@@ -44,6 +44,8 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       on `LootDropProb` (.04).
 - [x] **Items (T3)**: `Stacknumber` defaults to 500 and inherits through
       `Extends` (leaf, one-hop and two-hop cases tested against the stock file).
+- [x] **Water (T4)**: lakes/rivers fill from `water_info.xml` sources at chunk
+      generation; the chunk water channel carries the full static mass.
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.
