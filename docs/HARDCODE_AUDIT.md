@@ -10,7 +10,7 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
 | **A** (stock data) | ~12 | 0 | 0 | A12 vehicle fallback + **A29 trader pricing** + A22 deco skew + A20 dukes fixed |
-| **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, new quest heuristics (B25-B26) |
+| **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, quest kill-count heuristic (B25) |
 | **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
 | Spot-check | Result |
@@ -135,7 +135,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 | B22 | CLI + file for caps | P1 | **Done:** file via `zdtd_config`; no per-cap CLI flags (InitOptions from toml) |
 | B23–B24 | port offset, APM | P3 | Open |
 | B25 | quest kill-count boost `3 + tier*2` | P3 | **New 08-07**: `assets/quests.zig:226,342`: kill objectives without explicit count get `3 + tier*2`. No RE cite found for the tier boost (stock default kill count for a count-less objective is unverified; research quest docs list no default). Documented zdtd approximation; add a RE basis, verify against stock, or move to config. |
-| B26 | quest goto fallback position (FNV `%200 -100`) | P3 | **New 08-07**: `assets/quests.zig:350-361`: goto_point quests without a runtime target get tx/ty/tz defaults 50/70/50 + FNV-derived offset; client gets a marker at an invented spot. Fail closed (no offer) would be more stock-honest; FNV is pure algorithm, the position is sim scaffolding. |
+| B26 | quest goto fallback position (FNV `%200 -100`) | P3 | **Fixed** | goto_point / stay_within / craft quests without a static def position now bind the nearest real POI at accept (`World.nearestPoi` hook wired to the prefab index; stock RandomPOIGoto picks the POI at hand-out). The goto check, NavObject marker and save-restore re-resolve all use the bound POI center; the FNV offset survives only as the no-POI-data fallback for offline/test worlds. |
 | B27 | `LootRespawnDays` undocumented | P3 | **New 08-07**: config.zig parses + clamps + applies it, but `docs/GAME_OPTIONS.md` "Applied to the sim" table has no row. Doc gap (success criterion "GAME_OPTIONS lists every new key"). |
 | B28 | quest offer name gate `isStockClientQuestName` | P3 | **New 08-07**: `game.zig:7823` prefix filter (`quest_`, `tier`, `intro_`, `test_`, `challengegroup_reward_`) proxies the client's quest catalog; fail-closed (drops unknown), but duplicate stock-name knowledge; re-verify against the connected client's quests.xml |
 
@@ -261,9 +261,9 @@ markup ratios (A29) here (Bucket A).
 5. ~~A11 AI floors.~~ A12 vehicle speeds from vehicles.xml only.
 6. Drop recipe unlock extras when `source==xml` (A13).
 7. ~~Quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) landed (A20).~~
-8. **A29:** price from `EconomicValue × BuyMarkup`/`OverrideBuyMarkup`, sell from `× EconomicSellScale × SellMarkdown` (loot-economy.md §5); econ 0 → not sellable. Wire `reset_interval` (A30) into `traderRestock`.
-9. **B27:** add the `LootRespawnDays` row to GAME_OPTIONS.md (doc-only fix).
-10. Re-verify B25/B26/B28 against stock quest behavior; drop `"woodenChest"` fallback (A31) or make it fail closed.
+8. ~~**A29/A30:** price from `EconomicValue × BuyMarkup`/`OverrideBuyMarkup`; `reset_interval` wired into `traderRestock`.~~ Residual A29: `EconomicSellScale` and the quality-lerp terms still absent (sell prices approximate).
+9. ~~**B27:** `LootRespawnDays` row added to GAME_OPTIONS.md.~~
+10. ~~**B26:** goto quests bind the nearest real POI at accept.~~ Re-verify B25/B28 against stock quest behavior.
 
 ---
 

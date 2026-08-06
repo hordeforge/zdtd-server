@@ -326,7 +326,15 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     const d = w.catalog.byId(def_id).?;
     // Place the quest in a POI so rally objectives and the client's POI marker
     // have a real rect (stock picks the POI when the quest is handed out).
-    if (w.poiAt(d.tx, d.tz)) |rect| s.poi = rect;
+    if (w.poiAt(d.tx, d.tz)) |rect| {
+        s.poi = rect;
+    } else if (d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft) {
+        // No static def position (stock RandomPOIGoto / ClosestPOIGoto pick the
+        // POI at hand-out): bind the nearest real POI so the goto check and
+        // NavObject marker point somewhere reachable instead of an invented
+        // FNV spot (audit B26). No POI data → poi stays unset, def marker wins.
+        if (w.nearestPoi(w.transform[ps].x, w.transform[ps].z)) |rect| s.poi = rect;
+    }
     // Phase graph: land the player on the first actionable (non-auto) phase.
     if (d.phases.len > 0) skipAutoPhases(w, ps, s, d);
     return true;
@@ -539,18 +547,22 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
     for (&j.slots) |*s| {
         if (!s.active or s.completed or s.ready_turn_in) continue;
         const d = w.catalog.byId(s.def_id) orelse continue;
+        // Goto target: the quest's bound POI center when one was placed on
+        // accept (audit B26), else the def marker position.
+        const gx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
+        const gz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
         if (d.phases.len > 0) {
             const spec = currentPhaseSpec(d, s) orelse continue;
             if (spec.kind != .goto_point) continue;
-            const dx = px - d.tx;
-            const dz = pz - d.tz;
+            const dx = px - gx;
+            const dz = pz - gz;
             if (dx * dx + dz * dz < 16.0) bumpPhase(w, ps, s, d, .goto_point, spec.required);
             continue;
         }
         // fetch_trader starter uses Goto trader as phase 1.
         if (d.kind != .goto_point and !(d.kind == .fetch_trader and s.phase == 1)) continue;
-        const dx = px - d.tx;
-        const dz = pz - d.tz;
+        const dx = px - gx;
+        const dz = pz - gz;
         if (dx * dx + dz * dz < 16.0) {
             if (d.kind == .fetch_trader and d.objective_count >= 2) {
                 s.phase = 2;
@@ -2598,6 +2610,48 @@ test "quest phase graph auto-skips leading scaffolding on accept" {
 fn testPoiRect(_: ?*anyopaque, x: f32, z: f32) ?c.PoiRect {
     const rect: c.PoiRect = .{ .x = 0, .y = 60, .z = 0, .size_x = 64, .size_y = 20, .size_z = 64 };
     return if (rect.containsXZ(x, z)) rect else null;
+}
+
+/// Nearest-POI hook for the B26 goto placement test.
+fn testNearestPoi(_: ?*anyopaque, _: f32, _: f32) ?c.PoiRect {
+    return .{ .x = 100, .y = 60, .z = 200, .size_x = 40, .size_y = 20, .size_z = 40 };
+}
+
+test "goto quest binds the nearest real POI instead of an invented spot" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .goto_point, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 40,
+        .kind = .goto_point,
+        .name = "gp",
+        .title = "GP",
+        .target_count = 1,
+        .reward_coin = 10,
+        .tx = 0, // no static position; the bound POI must win
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 40, .source = .builtin };
+    w.nearest_poi_fn = &testNearestPoi;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 40));
+    const s = questFindActive(&w, 0, 40).?;
+    // Accept bound the nearest real POI (100,200) with its 40x40 footprint.
+    try std.testing.expect(s.poi.valid());
+    try std.testing.expectEqual(@as(f32, 100), s.poi.x);
+    try std.testing.expectEqual(@as(f32, 200), s.poi.z);
+    // The def marker (0,0) is not the target: standing there does nothing.
+    questTickGoto(&w, 0, 0, 70, 0);
+    try std.testing.expect(questHasActive(&w, 0, 40));
+    // Arriving at the POI center completes the goto quest.
+    questTickGoto(&w, 0, 120, 70, 220);
+    try std.testing.expect(!questHasActive(&w, 0, 40));
+    try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
 }
 
 const rally_phases = [_]quest.PhaseSpec{

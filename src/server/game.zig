@@ -977,6 +977,8 @@ pub const Game = struct {
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;
+        self.sim.nearest_poi_ctx = self;
+        self.sim.nearest_poi_fn = &nearestPoiAtWorld;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -1756,6 +1758,38 @@ pub const Game = struct {
         return null;
     }
 
+    /// Nearest quest-eligible POI to (x,z) over the whole prefab index. Quest
+    /// defs without a static position (stock RandomPOIGoto / ClosestPOIGoto)
+    /// bind this on accept, so the marker and goto check point at a real POI
+    /// instead of an invented spot (audit B26). City parts stay excluded.
+    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const pf = if (g.world.prefabs) |*p| p else return null;
+        var best: ?ecs.components.PoiRect = null;
+        var best_d: f32 = std.math.inf(f32);
+        for (pf.items, 0..) |d, i| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            const b = pf.boundsXZ(i);
+            const cx = (@as(f32, @floatFromInt(b.x0)) + @as(f32, @floatFromInt(b.x1))) * 0.5;
+            const cz = (@as(f32, @floatFromInt(b.z0)) + @as(f32, @floatFromInt(b.z1))) * 0.5;
+            const dx = cx - x;
+            const dz = cz - z;
+            const dist = dx * dx + dz * dz;
+            if (dist < best_d) {
+                best_d = dist;
+                best = .{
+                    .x = @floatFromInt(b.x0),
+                    .y = @floatFromInt(d.y),
+                    .z = @floatFromInt(b.z0),
+                    .size_x = @floatFromInt(b.x1 - b.x0),
+                    .size_y = @floatFromInt(d.size_y),
+                    .size_z = @floatFromInt(b.z1 - b.z0),
+                };
+            }
+        }
+        return best;
+    }
+
     /// ECS path step hook: feet Y the body would stand at after moving one cell,
     /// or null when the move is blocked. Models step-up, drop and headroom, so a
     /// wall, a POI roof and a crawlspace are all impassable while a slope is not.
@@ -2487,9 +2521,18 @@ pub const Game = struct {
                     self.sim.journal[ps].slots[fq] = quests[fq];
                     // The POI rect is derived from the world, not persisted:
                     // re-resolve it so a restored quest keeps its rally rect.
+                    // Defs without a static position re-bind the nearest POI
+                    // (audit B26), matching what questAccept did at hand-out.
                     const qd = self.sim.catalog.byId(quests[fq].def_id) orelse continue;
                     if (self.sim.poiAt(qd.tx, qd.tz)) |rect| {
                         self.sim.journal[ps].slots[fq].poi = rect;
+                    } else if (qd.kind == .goto_point or qd.kind == .stay_within or qd.kind == .craft) {
+                        if (self.sim.nearestPoi(
+                            self.sim.transform[ps].x,
+                            self.sim.transform[ps].z,
+                        )) |rect| {
+                            self.sim.journal[ps].slots[fq].poi = rect;
+                        }
                     }
                 }
             }
@@ -7805,9 +7848,13 @@ pub const Game = struct {
                 .goto_point, .kill_zombies, .fetch_item, .craft, .stay_within, .block_activate => "quest",
             };
             const use_def_pos = d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft;
-            const lx: f32 = if (use_def_pos) d.tx else @floatFromInt(self.world.primarySpawn().x);
+            // A POI-bound quest (audit B26) marks the placed POI center; defs
+            // without one keep the def marker position.
+            const gx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
+            const gz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
+            const lx: f32 = if (use_def_pos) gx else @floatFromInt(self.world.primarySpawn().x);
             const ly: f32 = if (use_def_pos) d.ty else @floatFromInt(self.world.primarySpawn().y);
-            const lz: f32 = if (use_def_pos) d.tz else @floatFromInt(self.world.primarySpawn().z);
+            const lz: f32 = if (use_def_pos) gz else @floatFromInt(self.world.primarySpawn().z);
             // entityId tags marker to player for client cleanup.
             const body = try packages.buildNavObjectAdd(
                 self.body_buf[8192..8704],
@@ -7958,11 +8005,15 @@ pub const Game = struct {
             // in a POI, the rect ObjectiveRallyPoint scans for its rally block.
             var pn: usize = 0;
             if (d.kind == .goto_point or d.kind == .kill_zombies or d.kind == .fetch_item) {
+                // Goto target: the bound POI center (audit B26) or the def
+                // marker when no POI data exists.
+                const gx: f32 = if (d.kind == .goto_point and s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
+                const gz: f32 = if (d.kind == .goto_point and s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
                 pos_store[n][pn] = .{
                     .kind = packages.stock_quest.position_data_location,
-                    .x = if (d.kind == .goto_point) d.tx else self.sim.transform[ps].x,
+                    .x = if (d.kind == .goto_point) gx else self.sim.transform[ps].x,
                     .y = if (d.kind == .goto_point) d.ty else self.sim.transform[ps].y,
-                    .z = if (d.kind == .goto_point) d.tz else self.sim.transform[ps].z,
+                    .z = if (d.kind == .goto_point) gz else self.sim.transform[ps].z,
                 };
                 pn += 1;
             }

@@ -184,6 +184,12 @@ pub const World = struct {
     /// their rally objectives stay scaffolding instead of stalling.
     poi_ctx: ?*anyopaque = null,
     poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
+    /// Nearest quest-eligible POI to a world XZ (Game wires the prefabs index).
+    /// Used to place goto/POI quests that have no static def position (stock
+    /// RandomPOIGoto picks the POI when the quest is handed out). Unset → no
+    /// POI data, so those quests fall back to their def marker position.
+    nearest_poi_ctx: ?*anyopaque = null,
+    nearest_poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.
@@ -381,6 +387,14 @@ pub const World = struct {
     pub fn poiAt(self: *const World, x: f32, z: f32) ?c.PoiRect {
         const f = self.poi_fn orelse return null;
         const r = f(self.poi_ctx, x, z) orelse return null;
+        return if (r.valid()) r else null;
+    }
+
+    /// Nearest quest-eligible POI rect to world (x,z), or null when unset.
+    /// Quest placement uses this for defs without a static position.
+    pub fn nearestPoi(self: *const World, x: f32, z: f32) ?c.PoiRect {
+        const f = self.nearest_poi_fn orelse return null;
+        const r = f(self.nearest_poi_ctx, x, z) orelse return null;
         return if (r.valid()) r else null;
     }
 

@@ -561,10 +561,13 @@ because the per-objective Write shapes are wrong.
 - **Quest.PositionData** `PARTIAL`
   Location, POIPosition and POISize are written and the POI rect is resolved from
   `prefabs.xml` at accept time. Missing: `PositionDataTypes.QuestGiver` (0) is
-  never written, and the Location for goto_point quests is the FNV-hash-of-id
-  coordinate in a +/-100 box around the world origin, not a real POI. The compass
-  and map marker point at an arbitrary spot near (0,0).
-  *Anchors:* `src/server/game.zig:6390`, `src/assets/quests.zig:313`,
+  never written. Goto-target positions are no longer invented: goto_point /
+  stay_within / craft quests bind the nearest real POI at accept
+  (`World.nearestPoi` over the prefab index, audit B26), and the Location,
+  NavObject marker and goto check all use the bound POI center. The FNV-hash
+  coordinate survives only as the no-POI-data fallback for offline/test worlds.
+  *Anchors:* `src/server/game.zig:8015-8038`, `src/ecs/systems.zig:326-338`,
+  `src/ecs/world.zig:391-399`, `src/assets/quests.zig:350-361`,
   `src/wire/stock_quest.zig:12`, `:614`
 
 - **NetPackageNPCQuestList FetchList + QuestPacketEntry wire** `WORKS`
@@ -915,13 +918,16 @@ parsed, and quest offering is unwired.
   `src/server/game.zig:8452-8457`, `src/ecs/aidirector.zig:213-251`,
   `asm.il:863657-863767`, `asm.il:863770-863910`, `Data/Config/traders.xml:1240`
 
-- **Open hours and the closed-door behaviour** `MISSING`
-  Nothing reads or models open_time/close_time. Stock's `TraderInfo::get_IsOpen`
-  compares `worldTime % 24000` against the open/close hours;
-  `EntityTrader::OnUpdateLive` plays a warning then flips `TraderArea.SetClosed`,
-  raising the bars and force-unlocking anyone in the window; `OnEntityActivated`
-  refuses to open when closed and shows a "next time" tooltip.
-  *Anchors:* `src/` (no reference), `asm.il:862122-862230`,
+- **Open hours and the closed-door behaviour** `PARTIAL`
+  `open_time`/`close_time` are parsed per `<trader_info>` and the lock-open path
+  refuses to open the trade window outside them (`traderIsOpen` compares
+  `worldTime % 24000` against the hours like stock's `TraderInfo::get_IsOpen`;
+  vending machines and traders without hours stay open). Missing the stock
+  visuals: `TraderArea.SetClosed` (raising bars, force-unlocking anyone in the
+  window) and the "next time" tooltip, which depend on the TraderArea /
+  `NetPackageWorldAreas` row below.
+  *Anchors:* `src/server/game.zig` (`traderIsOpen`), `src/assets/traders.zig`
+  (`TraderInfo.open_time`), `asm.il:862122-862230`,
   `asm.il:531811-531898`, `asm.il:531397-531420`, `asm.il:861688-861690`
 
 - **TraderArea replication (NetPackageWorldAreas)** `MISSING`
