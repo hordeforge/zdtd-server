@@ -313,6 +313,11 @@ pub const InitOptions = struct {
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
+    /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
+    /// modules; ADR 0020). Empty = no Wasm plugins.
+    plugin_modules: []const []const u8 = &.{},
+    /// Per-call budget for Wasm plugins (fuel + max linear-memory pages).
+    plugin_budget: plugin_mod.wasm.Budget = .{},
 
     // [perf] switches (zdtd.toml). All default off; each is gated on apm
     // evidence from the always-on sections/counters that ship with them.
@@ -451,6 +456,78 @@ const Client = struct {
     puid_native: platform_user.Stored = .{},
 };
 
+// --- Wasm plugin host callbacks (ADR 0020) ---------------------------------
+// The plugin layer hands these back the HostCtx; `data` is this Game. All run
+// on the main tick/net thread. queue only appends to the fixed sim command
+// buffer (drained once per tick by the ecs schedule); it never touches the sim
+// directly, so plugin calls cannot race or reenter the tick.
+
+const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
+
+fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
+    _ = ctx;
+    const tag = wasm_log_level_tags[@min(@as(usize, level), wasm_log_level_tags.len - 1)];
+    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, msg });
+}
+
+fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
+    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    return g.tick_n;
+}
+
+/// Max bytes of one queued command string from a guest (bounds the tokenizer).
+const max_plugin_cmd_len: usize = 128;
+
+fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return));
+    if (cmd.len > max_plugin_cmd_len) {
+        std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
+        return;
+    }
+    const op = parsePluginCommand(cmd) orelse {
+        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd});
+        return;
+    };
+    // Fixed 64-slot buffer (ecs/command.zig); drops when full, by named cap.
+    _ = g.sim.commands.push(op);
+}
+
+/// Text SimCommand grammar (PLUGIN_API.md): `spawn x y z hp`, `despawn id`,
+/// `damage id amount`. Allocation-free; unknown or malformed input returns null
+/// and the caller drops it. Extra trailing tokens are malformed, not ignored.
+fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
+    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
+    const verb = it.next() orelse return null;
+    if (std.mem.eql(u8, verb, "spawn")) {
+        const x = it.next() orelse return null;
+        const y = it.next() orelse return null;
+        const z = it.next() orelse return null;
+        const hp = it.next() orelse return null;
+        if (it.next() != null) return null;
+        return .{ .spawn_zombie = .{
+            .x = std.fmt.parseFloat(f32, x) catch return null,
+            .y = std.fmt.parseFloat(f32, y) catch return null,
+            .z = std.fmt.parseFloat(f32, z) catch return null,
+            .hp = std.fmt.parseFloat(f32, hp) catch return null,
+        } };
+    }
+    if (std.mem.eql(u8, verb, "despawn")) {
+        const id = it.next() orelse return null;
+        if (it.next() != null) return null;
+        return .{ .despawn = .{ .net_id = std.fmt.parseInt(i32, id, 10) catch return null } };
+    }
+    if (std.mem.eql(u8, verb, "damage")) {
+        const id = it.next() orelse return null;
+        const amt = it.next() orelse return null;
+        if (it.next() != null) return null;
+        return .{ .damage = .{
+            .net_id = std.fmt.parseInt(i32, id, 10) catch return null,
+            .amount = std.fmt.parseFloat(f32, amt) catch return null,
+        } };
+    }
+    return null;
+}
+
 pub const Game = struct {
     allocator: std.mem.Allocator,
     net: ln_server.Server = .{},
@@ -459,6 +536,11 @@ pub const Game = struct {
     sim: ecs.World = .{},
     /// Static plugin host, in-tree test scaffolding (ADR 0020; no dynlib).
     plugins: plugin_mod.PluginHost = .{},
+    /// Wasm plugin runtime (ADR 0020): modules loaded from config at init.
+    wasm_plugins: plugin_mod.wasm.WasmHost = .{},
+    /// Host callback context for Wasm guests; callbacks recover *Game from
+    /// `data` and live in game.zig, so the plugin layer stays Game-free.
+    wasm_ctx: plugin_mod.wasm.HostCtx = undefined,
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},
     /// P4 observe ring (admin `evidence` dumps JSONL lines).
@@ -480,6 +562,10 @@ pub const Game = struct {
     // Mixed-surface stock chunks (per-cell density) exceed 64KiB easily.
     send_buf: [262144]u8 = undefined,
     body_buf: [524288]u8 = undefined,
+    /// Chunk-encode raw-plane scratch (memoized per-cell BlockValue, shared by
+    /// the block layers and the density/water channels). Pre-allocated; no
+    /// hot-path heap. 256 KB of the Game allocation.
+    chunk_raws: [65536]u32 = undefined,
     /// Deflate match window for the compressed "blocks" NameIdMapping frame.
     deflate_window: [wire_frame.DeflateFramer.window_len]u8 = undefined,
     /// Duplicate-id bitset for the same mapping (one bit per Block.MAX_BLOCKS id).
@@ -702,6 +788,12 @@ pub const Game = struct {
             .peer_stale_ms = opts.peer_stale_ms,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
+            .wasm_ctx = .{
+                .data = @ptrCast(self),
+                .log_fn = &wasmLog,
+                .tick_fn = &wasmTick,
+                .queue_fn = &wasmQueue,
+            },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
         self.sim.director.difficulty = opts.game_difficulty;
@@ -1397,6 +1489,11 @@ pub const Game = struct {
 
         // Static plugins after world/assets are ready (sample_hello logs once).
         self.plugins.enableStaticDefaults();
+        // Wasm plugins from config ([plugin] modules, ADR 0020): load once at
+        // init (allocation allowed here), then enable. loadAll logs and skips
+        // a missing or unloadable module, so one bad file does not kill boot.
+        self.wasm_plugins.loadAll(self.allocator, opts.plugin_modules, &self.wasm_ctx, opts.plugin_budget);
+        self.wasm_plugins.enable();
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
@@ -1922,6 +2019,7 @@ pub const Game = struct {
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.land_claims_n = 0;
         self.plugins.shutdown();
+        self.wasm_plugins.shutdown();
         self.sim.deinit();
         self.blocks.deinit();
         self.items.deinit();
@@ -7069,6 +7167,7 @@ pub const Game = struct {
         c.move_tick = self.tick_n;
         if (first_join) {
             self.plugins.playerJoin(@intCast(c.slot), eid);
+            self.wasm_plugins.playerJoin(@intCast(c.slot), eid);
         }
         const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).
@@ -8428,6 +8527,7 @@ pub const Game = struct {
             .default_tex_ctx = &tex_ctx,
             .dens_at = BlockCtx.dens,
             .water_block_id = self.world.terrain_ids.water,
+            .raws_scratch = &self.chunk_raws,
         });
         const before_out = self.harness.counters.get(.net_packets_out);
         try self.sendGame(peer, "NetPackageChunk", body);
@@ -9494,6 +9594,9 @@ pub const Game = struct {
             if (self.tick_n % 10 == 0) try self.broadcastTurretSync();
             // Null on_tick hooks are a branch only (sample_hello is enable-only).
             self.plugins.onTick();
+            // Wasm plugin hooks run late in the tick, after the sim settles;
+            // their queued commands are drained by the next tick's schedule.
+            self.wasm_plugins.onTick();
         }
 
         try self.replicate();

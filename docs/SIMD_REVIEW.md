@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | Date | 2026-08-04 |
+| Updated | 2026-08-06 (review-only refresh; anchors moved, new loops classified) |
 | Zig | 0.16 |
 | Mode | Review + **P1 kernels shipped** in `stock_chunk.zig` |
 | Prompt | [`prompts/simd-review.md`](prompts/simd-review.md) |
@@ -23,6 +24,7 @@
 | S01 | `layerIsUniformU8` in `writeDensityChannel` | `src/wire/stock_chunk.zig` |
 | S02 | `layerAnyNonAirU32`, `layerIsUniformU32`, `layerNeedsUpperU32`, `packLowerU8` | same |
 | S03 | `layerIsUniformU64`, `packTexturePlane` | same |
+| S10 | `observerMask` `@Vector(64, i32)` + `observerMaskRef` oracle | `src/ecs/interest.zig` |
 | S04 | deferred (fillHeights still scalar `heightAt`; comment + single index loop) | `src/world/worldgen.zig` |
 
 Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane match scalar`, encode regression.
@@ -31,8 +33,9 @@ Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane
 
 | Location | What | Verdict |
 |---|---|---|
+| `src/ecs/interest.zig:76-88` | `observerMask` `@Vector(64, i32)` abs/compare/reduce | Shipped; `observerMaskRef` scalar oracle proves agreement |
 | `src/world/dem.zig:28-29` | `tile_offsets` / `tile_counts` init `@splat(0)` | Array init sugar, not a hot kernel |
-| Rest of `src/` | none | Green field |
+| `src/wire/stock_chunk.zig:121-248` | SIMD helpers S01-S03 (uniform/any/pack) | Shipped (see candidate table) |
 
 `@memcpy` / `@memset` already used appropriately in `store.zig`, `tts.zig`, `worldgen.zig` (keep; not replaced by manual SIMD).
 
@@ -42,11 +45,11 @@ Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane
 
 | ID | Location | What | N / shape | Hot? | Fit | Sev | Notes |
 |---|---|---|---|---|---|---|---|
-| S01 | `wire/stock_chunk.zig` `writeDensityChannel` ~439-467 | Per cell density u8, 64 layers × 1024 cells | 64×1024 u8 | **Y** stream | **high** | **P1** | Contiguous fill of `dens[1024]`; often uniform early-out already helps |
-| S02 | `wire/stock_chunk.zig` `encodeNetworkChunk` block layer ~271-330 | any-air scan + lower/upper pack | 64×1024 u32 | **Y** stream | **high** | **P1** | `any` scan and uniform detect are pure maps; packing is byte extract |
-| S03 | `wire/stock_chunk.zig` `writeTextureChannel` ~469-503 | textureFull u64 per cell → 6 planes | 64×1024 u64 | **Y** stream | med-high | **P1** | Plane extract is shift+truncate; good SIMD; watch LE |
-| S04 | `world/worldgen.zig` `fillHeights` ~272-286 | 16×16 height from noise | 256 f32→u8 | proc stream | **high** | **P1** | Batch coords; **must** stay seed-bit-identical (see determinism) |
-| S05 | `world/worldgen.zig` `generateChunkBlocks` ~301-330 | column stamp into blocks[] | 256×H u32 | proc | med | **P2** | Inner y loop short; outer 256 columns; `@memset` already |
+| S01 | `wire/stock_chunk.zig` `writeDensityChannel` ~448-472 | Per cell density u8, 64 layers × 1024 cells | 64×1024 u8 | **Y** stream | **high** | **P1** | **Shipped** (uniform check via `layerIsUniformU8`); fill stays scalar, fn-pointer bound (`densityAt` → `blockAt` / `dens_at` hook) |
+| S02 | `wire/stock_chunk.zig` `encodeNetworkChunk` block layer ~288-337 | any-air scan + lower/upper pack | 64×1024 u32 | **Y** stream | **high** | **P1** | **Shipped** (`layerAnyNonAirU32`, `layerIsUniformU32`, `layerNeedsUpperU32`, `packLowerU8`); `packUpper24` stays scalar (strided store) |
+| S03 | `wire/stock_chunk.zig` `writeTextureChannel` ~478-509 | textureFull u64 per cell → 6 planes | 64×1024 u64 | **Y** stream | med-high | **P1** | **Shipped** (`layerIsUniformU64`, `packTexturePlane`); fill stays scalar, fn-pointer bound (`texAt`) |
+| S04 | `world/worldgen.zig` `fillHeights` ~272-290 | coarse sample grid (~825 fBm) + per-column top-down scan of interpolated field | 256 cols × scan | proc stream | **high** | **P1** | Batch coords; **must** stay seed-bit-identical (see determinism). Impl changed since 2026-08-04 (was 256 `heightAt` calls); still deferred |
+| S05 | `world/worldgen.zig` `generateChunkBlocks` ~301-339 | column stamp into blocks[] | 256×H u32 | proc | med | **P2** | Cell-major trilerp; inner y loop short; `@memset` already |
 | S06 | `world/noise.zig` `fbm2`/`ridged2` | octave sums | few octaves | via S04 | med | **P2** | Better to batch **cells** than SIMD inside one noise2 (branchy lattice) |
 | S07 | `world/noise.zig` `noise2`/`contrib2` | simplex contrib | 1 sample | via S04 | low alone | **P2** | SIMD as 4-8 independent (x,y) samples, not inside grad |
 | S08 | `ecs/systems.zig` `nearestPlayerSnap` ~79-99 | dx²+dz² min over players | P≪16 | tick AI | med | **P2** | Tiny P; SIMD only if many zombies × players matrix |
@@ -61,6 +64,38 @@ Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane
 | S17 | `world/biomes.zig` / DTM sample | grid sample | map load / query | sometimes | med | **P2** | If profiling shows cost |
 | S18 | DEM height math | tile samples | stream | med | **P2** | After DEM hot in apm |
 | S19 | Light channel fill | if uniform clears | chunk | stream | low | **P3** | Often `@memset` |
+| S20 | `wire/stock_chunk.zig` `writeWaterChannel` ~514-552 (new 2026-08-06) | per band: blockAt scan + u16 mass fill, then 2 byte-planes | 64×1024 cells | **Y** stream | **low** | **skip** | Fill is fn-pointer bound (`blockAt`); plane extract only runs on water-bearing bands (rare), 2×1024 u16→u8 scalar is fine. No SIMD shape without dense precomputed raws |
+| S21 | `world/store.zig` `Chunk.applyWaterSources` ~153-172 (new 2026-08-06) | 16×16 column scan, `waterYNear` + bed-to-surface fill | 256 cols | map load | **low** | **skip** | Runs once per chunk at load (not tick/stream); sparse (`orelse continue`), lookup bound, not a dense numeric loop |
+| S22 | `assets/quests.zig` parsers `parseCatalog` ~424 / `parseQuestDefBody` ~324 / `buildPhaseGraph` ~206 / `sumCoinReward` ~271 / `parseRewardKinds` ~407 (new 2026-08-06) | XML text scan + tag find | var bytes | parse-once | **no** | **skip** | Init-time text parse, no numeric kernel; SIMD forbidden on parse per review rules |
+
+---
+
+## Refresh 2026-08-06 (review only)
+
+Pass covered commits c8e95bd (water channel), 6c44abb (quest parse), 44b5c81
+(quest accept marker), 537da95 (progression persist). **No code changed**;
+uncommitted plugin work (`src/plugin/root.zig`, `src/plugin/wasm.zig`,
+`assets/fixtures/plugin_*`) untouched.
+
+| New / moved loop | Verdict | One-line cost argument |
+|---|---|---|
+| `writeWaterChannel` (S20, stock_chunk.zig:514) | **skip** | 64 bands × 1024 `blockAt` fn-pointer calls per chunk encode; only the u16 compare is vectorizable and only with precomputed raws; plane extract is cold (water bands rare) |
+| `writeDensityChannel` fill (S01, stock_chunk.zig:448) | **skip** | Uniform check already SIMD (shipped S01); fill is `densityAt` fn-pointer bound (`dens_at` hook forces per-cell scalar), no SIMD shape |
+| `writeTextureChannel` fill (S03, stock_chunk.zig:478) | **skip** | Uniform + 6-plane pack already SIMD (shipped S03); fill is `texAt` fn-pointer bound |
+| `Chunk.applyWaterSources` (S21, store.zig:153) | **skip** | Once per chunk at map load, 256 columns, sparse `orelse continue`, cost in `waterYNear` lookup not arithmetic |
+| quests.zig parsers (S22) | **skip** | Parse-once XML text scan at map load, no numeric kernel |
+
+Non-SIMD observation: `writeDensityChannel` and `writeWaterChannel` each
+re-call `blockAt` over all 64 layers that the block-layer loop
+(`encodeNetworkChunk` ~288-337) already computed and discarded per band. That
+recompute (2 × 65536 fn-pointer calls per chunk encode) is the real cost on the
+stream path, but the fix is scalar memoization or a shared dense raw plane, not
+SIMD. Tracked outside this review.
+
+Anchors refreshed in the candidate table: S01-S03 (+9..+17 from the water
+channel insert), S04 (impl changed to coarse grid + per-column scan; still
+deferred on f32 seed policy), S05 (+9), S08/S10 unchanged. S10
+`observerMask` confirmed in tree with `observerMaskRef` scalar oracle + tests.
 
 ---
 

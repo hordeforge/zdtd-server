@@ -73,6 +73,13 @@ pub const EncodeOpts = struct {
     /// AssignIds water block id; 0 disables the water channel (all-zero).
     /// When set, cells whose block type is water carry water_mass_full.
     water_block_id: u16 = 0,
+    /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
+    /// encodeNetworkChunk fills it once and shares it with the block-layer loop
+    /// and the density/water channels so blockAt is not re-invoked per channel.
+    raws: ?*const [65536]u32 = null,
+    /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Null
+    /// disables the memoization: channels fall back to the block_at callback.
+    raws_scratch: ?*[65536]u32 = null,
 };
 
 fn texAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u64 {
@@ -86,7 +93,7 @@ fn texAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u64 {
     }
     // Optional defaults only when every face byte is a valid paint id (0..255 already).
     if (opts.default_tex) |df| {
-        const tid = blockType(blockAt(opts, lx, y, lz));
+        const tid = blockType(rawAt(opts, lx, y, lz));
         if (tid == stock_air or isTerrainType(tid)) return 0;
         return df(opts.default_tex_ctx, tid);
     }
@@ -107,6 +114,14 @@ fn defaultBlockAt(heights: *const [256]u8, lx: i32, y: i32, lz: i32) u32 {
 fn blockAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
     if (opts.block_at) |f| return f(opts.block_ctx, lx, y, lz);
     return defaultBlockAt(opts.heights, lx, y, lz);
+}
+
+/// BlockValue at a cell: the precomputed dense plane when present (encodeNetworkChunk
+/// fills it once per chunk), else the block_at callback. Hot stream path: the
+/// density and water channels read the plane instead of re-invoking blockAt.
+fn rawAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
+    if (opts.raws) |r| return r[@intCast(lx + lz * 16 + y * 256)];
+    return blockAt(opts, lx, y, lz);
 }
 
 fn blockType(raw: u32) u16 {
@@ -284,19 +299,40 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     try w.writeI32(opts.cz);
     try w.writeU64(opts.ticks);
 
+    // Dense raw plane, filled once when the caller supplies scratch: the 64
+    // block-layer bands, the density channel and the water channel all read the
+    // same per-cell BlockValue, and re-invoking the block_at callback per
+    // channel triples the lookup cost on the stream path. Without scratch the
+    // channels fall back to the callback (tests and cold paths).
+    var opts_memo = opts;
+    if (opts.raws_scratch) |scratch| {
+        var i: usize = 0;
+        while (i < scratch.len) : (i += 1) {
+            const lx: i32 = @intCast(i % 16);
+            const lz: i32 = @intCast((i / 16) % 16);
+            const y: i32 = @intCast(i / 256);
+            scratch[i] = blockAt(opts, lx, y, lz);
+        }
+        opts_memo.raws = scratch;
+    }
+
     // 64 block layers
     var layer_i: usize = 0;
     while (layer_i < layers_n) : (layer_i += 1) {
         const y0: i32 = @intCast(layer_i * 4);
         // Fill dense raw plane (layer cell order), then SIMD any/uniform/pack.
         var raws: [cells_per_layer]u32 = undefined;
-        var ly: i32 = 0;
-        while (ly < 4) : (ly += 1) {
-            var lz: i32 = 0;
-            while (lz < 16) : (lz += 1) {
-                var lx: i32 = 0;
-                while (lx < 16) : (lx += 1) {
-                    raws[layerCell(lx, ly, lz)] = blockAt(opts, lx, y0 + ly, lz);
+        if (opts_memo.raws) |plane| {
+            @memcpy(raws[0..], plane[@as(usize, @intCast(y0)) * 256 ..][0..cells_per_layer]);
+        } else {
+            var ly: i32 = 0;
+            while (ly < 4) : (ly += 1) {
+                var lz: i32 = 0;
+                while (lz < 16) : (lz += 1) {
+                    var lx: i32 = 0;
+                    while (lx < 16) : (lx += 1) {
+                        raws[layerCell(lx, ly, lz)] = blockAt(opts, lx, y0 + ly, lz);
+                    }
                 }
             }
         }
@@ -442,7 +478,7 @@ fn densityAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u8 {
     if (opts.dens_at) |f| {
         if (f(opts.block_ctx, lx, y, lz)) |d| return d;
     }
-    return densityForBlock(blockType(blockAt(opts, lx, y, lz)));
+    return densityForBlock(blockType(rawAt(opts, lx, y, lz)));
 }
 
 fn writeDensityChannel(w: *binary.Writer, opts: EncodeOpts) !void {
@@ -524,7 +560,7 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
                 while (lz < 16) : (lz += 1) {
                     var lx: i32 = 0;
                     while (lx < 16) : (lx += 1) {
-                        const raw = blockAt(opts, lx, y0 + ly, lz);
+                        const raw = rawAt(opts, lx, y0 + ly, lz);
                         if (@as(u16, @truncate(raw)) == opts.water_block_id) {
                             vals[layerCell(lx, ly, lz)] = water_mass_full;
                             has_water = true;
