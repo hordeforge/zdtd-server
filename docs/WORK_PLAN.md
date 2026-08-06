@@ -124,11 +124,18 @@ hop, and that `LootDropProb` is respected across a seeded sample.
 
 ## T3. Items: default Stacknumber to 500 and resolve Extends
 
+**Status: landed 2026-08-06** (762 tests). Absent `Stacknumber` defaults to
+stock's 0x1f4 = 500 and resolves through the `Extends` chain (two-pass, up to
+24 hops). Tested against the stock items.xml: leaf (500), one-hop
+(`ammoArrowExploding` 75), two-hop (`meleeHandZombieFeral` 1), and the builtin
+stone axe. The "bag slot waste" residual is closed. DamageEntity/FuelValue/eat
+cvars remain direct-only (follow-up if a templated item misbehaves).
+
 **Why:** 1159 of 1413 items lack a direct `Stacknumber`, so almost every item in
 the game stacks to 1.
 
-**Change:** default an absent `Stacknumber` to 0x1f4 = 500 and resolve the
-`Extends` chain when reading item properties (`src/assets/items.zig:424`).
+**Change:** ~~default an absent `Stacknumber` to 0x1f4 = 500 and resolve the
+`Extends` chain when reading item properties~~ **DONE**.
 
 **Grounding:** `ItemClass` default (asm.il:749089) and the stock `Extends`
 resolution order.

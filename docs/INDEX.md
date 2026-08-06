@@ -131,6 +131,6 @@ Core playable loop     DONE  stock client joins, renders and plays Navezgane
 M7-M10 core            DONE
 M11 interest/scale     PARTIAL  dirty bitsets and observer masks shipped;
                                 spatial cell hash and the bot gate remain
-M12-M15 depth/ops      PARTIAL  see GAP_ANALYSIS: 88 WORKS / 157 PARTIAL / 100 MISSING
+M12-M15 depth/ops      PARTIAL  see GAP_ANALYSIS: 89 WORKS / 157 PARTIAL / 99 MISSING
 M16 / planet M2+       OPEN / parked
 ```

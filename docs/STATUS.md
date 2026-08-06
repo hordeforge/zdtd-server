@@ -41,6 +41,9 @@ observable, on the live stock client:
   `smallSafes`, chest `woodenChest`); zombie bags resolve the stock chain to
   `zPackReg` and drop only on `LootDropProb` (.04), so most kills drop nothing.
   Three new tests; 761 total.
+- **Items (T3):** absent `Stacknumber` defaults to stock's 500 and inherits
+  through `Extends` (two-pass resolve); the "bag slot waste" residual is closed.
+  New stock-file test; 762 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 

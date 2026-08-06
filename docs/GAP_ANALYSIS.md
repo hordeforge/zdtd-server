@@ -134,11 +134,11 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 10 | 15 | 7 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 10 | 14 | 11 | 35 | Containers roll their own tables; death bags rare and real; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **88** | **157** | **100** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **89** | **157** | **99** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -215,11 +215,13 @@ area and the concrete work.
    `NetEntityDistributionEntry::updatePlayerEntity` does (asm.il:801228-801276)
    (`src/server/game.zig:8871-8891`).
 
-7. **Items: default `Stacknumber` to 500 and resolve `Extends`.**
-   `items.zig:424` defaults an absent `Stacknumber` to 1; stock's `ItemClass`
-   defaults to 0x1f4 = 500 (asm.il:749089) and inherits through `Extends`, which
-   zdtd does not resolve at all. 1159 of 1413 items lack a direct value and 1144
-   use `Extends`. This is the observed "bag slot waste" playtest residual.
+7. **DONE 2026-08-06.** Items: default `Stacknumber` to 500 and resolve
+   `Extends`. Absent `Stacknumber` now defaults to stock's 0x1f4 = 500
+   (asm.il:749089) and inherits through the `Extends` chain (two-pass resolve,
+   children-before-parents safe, up to 24 hops). Test asserts a leaf (500), a
+   one-hop (`ammoArrowExploding` 75) and a two-hop (`meleeHandZombieFeral` 1)
+   case against the stock file. The "bag slot waste" playtest residual is
+   closed. DamageEntity/FuelValue/eat cvars still read direct-only.
 
 8. **World: put water in the world.** No water block is ever written,
    `water_info.xml` only raises heights, the `.tts` water plane is skipped, and
@@ -1818,19 +1820,19 @@ unvalidated, and durability, mods and repair do not exist.
   `meleeToolRepairT0StoneAxe == 65537` against the real file.
   *Anchors:* `src/assets/items.zig:371-534`, `:11-14`, `:239-248`
 
-- **items.xml Stacknumber to server max stack** `PARTIAL`
-  Only a direct `<property name="Stacknumber">` on the item itself is read and the
-  default when absent is 1. Stock `ItemClass` defaults to 0x1f4 = 500 and inherits
-  through Extends. 254 of 1413 items carry it directly; 1159 do not and 608 of
-  those would be >1 in stock. Player-visible as the "bag slot waste" playtest
-  residual: server-side deposits spread one item per slot for most classes.
-  *Anchors:* `src/assets/items.zig:422-427`, `:112-117`, `asm.il:749074-749091`,
-  `asm.il:674835-674858`
+- **items.xml Stacknumber to server max stack** `WORKS`
+  Absent `Stacknumber` defaults to stock's 0x1f4 = 500 (asm.il:749089) and
+  resolves through the Extends chain (two-pass, children-before-parents safe,
+  up to 24 hops). The "bag slot waste" playtest residual is closed: most
+  classes now stack like stock.
+  *Anchors:* `src/assets/items.zig:424-430` + resolve pass, `:112-117`,
+  `asm.il:749074-749091`
 
-- **items.xml Extends inheritance** `MISSING`
-  `loadFromPath` never resolves Extends; each `<item>` block is read in isolation.
-  1144 of 1413 stock items use it, so every inherited Stacknumber, DamageEntity,
-  FuelValue and eat property is lost.
+- **items.xml Extends inheritance** `PARTIAL`
+  `loadFromPath` resolves `Stacknumber` through Extends; DamageEntity,
+  FuelValue and the eat cvars are still read direct-only, so inherited values
+  for those properties are lost (melee damage and fuel for templated items).
+  1144 of 1413 stock items use Extends.
   *Anchors:* `src/assets/items.zig:408-463`, `Data/Config/items.xml`
 
 - **EconomicValue, DamageEntity, FuelValue, ItemActionEat cvars** `WORKS`

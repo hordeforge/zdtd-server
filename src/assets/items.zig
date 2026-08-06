@@ -13,6 +13,9 @@ pub const items_start_here: i32 = 65536;
 /// First free item id after Blocks.ItemsStartHere (assignLeftOverItems pre-increments).
 pub const stock_first_item_type: i32 = items_start_here + 1;
 
+/// ItemClass.Stacknumber default when no property declares one (asm.il:749089).
+pub const stock_default_stack: u16 = 0x1f4; // 500
+
 fn typeFromBuiltinId(item_id: u16) i32 {
     if (item_id == 0) return 0;
     return items_start_here + @as(i32, item_id);
@@ -48,6 +51,8 @@ pub const ItemTable = struct {
     /// All stock items from XML (name → absolute type), for IdMapping export.
     stock_names: []const []const u8 = &.{},
     stock_types: []const i32 = &.{},
+    /// Resolved Stacknumber per stock_names row (Extends chain, default 500).
+    stock_stacks: []const u16 = &.{},
 
     pub fn deinit(self: *ItemTable) void {
         if (self.arena_ptr) |ap| {
@@ -388,6 +393,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_types.deinit(allocator);
     var stock_stacks: std.ArrayList(u16) = .empty;
     defer stock_stacks.deinit(allocator);
+    // Stacknumber Extends resolution: own value (0 = none declared) and the
+    // item's Extends target per stock_names row, resolved after the loop.
+    var own_stacks: std.ArrayList(u16) = .empty;
+    defer own_stacks.deinit(allocator);
+    var ext_names: std.ArrayList([]const u8) = .empty;
+    defer ext_names.deinit(allocator);
     var stock_econs: std.ArrayList(u16) = .empty;
     defer stock_econs.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
@@ -421,10 +432,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         if (!exists) {
             // Stacknumber + EconomicValue from this item's property block.
             const item_end = std.mem.indexOfPos(u8, clean, ii + 6, "<item ") orelse clean.len;
-            var stack: u16 = 1;
-            if (xml.propertyValue(clean[ii..item_end], "Stacknumber")) |v| {
-                stack = xml.parseU16(v) orelse 1;
+            const stack_own = xml.propertyValue(clean[ii..item_end], "Stacknumber");
+            var stack: u16 = stock_default_stack;
+            if (stack_own) |v| {
+                stack = xml.parseU16(v) orelse stock_default_stack;
             }
+            try own_stacks.append(allocator, if (stack_own != null) stack else 0);
+            const ext = xml.propertyValue(clean[ii..item_end], "Extends");
+            try ext_names.append(allocator, if (ext) |e| try arena.dupe(u8, e) else "");
             var econ: u16 = 0;
             if (xml.propertyValue(clean[ii..item_end], "EconomicValue")) |v| {
                 econ = xml.parseU16(v) orelse 0;
@@ -460,6 +475,33 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             next_stock += 1;
         }
         i = ii + 6;
+    }
+
+    // Resolve Stacknumber through the Extends chain (stock items.xml declares
+    // ~1144 Extends properties; a child can precede its parent in the file, so
+    // this is a second pass). An item with no Stacknumber anywhere inherits the
+    // ItemClass default of 500 (asm.il:749089).
+    {
+        var own_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_map.deinit(allocator);
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer ext_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (own_stacks.items[idx] != 0) try own_map.put(allocator, n, own_stacks.items[idx]);
+            if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
+        }
+        const max_hops: usize = 24;
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_map.get(cur)) |s| {
+                    stock_stacks.items[idx] = s;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
     }
 
     // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
@@ -523,6 +565,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     @memcpy(sn, stock_names.items);
     const st = try arena.alloc(i32, stock_types.items.len);
     @memcpy(st, stock_types.items);
+    const ss = try arena.alloc(u16, stock_stacks.items.len);
+    @memcpy(ss, stock_stacks.items);
 
     return .{
         .defs = defs,
@@ -530,6 +574,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .source = .xml,
         .stock_names = sn,
         .stock_types = st,
+        .stock_stacks = ss,
     };
 }
 
@@ -585,4 +630,26 @@ test "load stock items.xml when present" {
     const map = try t.writeNameIdMapping(&buf);
     try std.testing.expect(map.len > 16);
     try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, map[0..4], .little));
+}
+
+test "stock items.xml Stacknumber default and Extends resolution" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    const stackOf = struct {
+        fn f(tab: *const ItemTable, name: []const u8) u16 {
+            for (tab.stock_names, 0..) |n, i| {
+                if (std.mem.eql(u8, n, name)) return tab.stock_stacks[i];
+            }
+            return 0;
+        }
+    }.f;
+    // Leaf with no Stacknumber and no Extends: ItemClass default 500.
+    try std.testing.expectEqual(@as(u16, 500), stackOf(&t, "meleeToolRepairT0StoneAxe"));
+    // One Extends hop: ammoArrowExploding -> ammoArrowIron (75).
+    try std.testing.expectEqual(@as(u16, 75), stackOf(&t, "ammoArrowExploding"));
+    // Two hops: meleeHandZombieFeral -> meleeHandZombie01 -> meleeHandMaster (1).
+    try std.testing.expectEqual(@as(u16, 1), stackOf(&t, "meleeHandZombieFeral"));
+    // The builtin stone axe (id 8) inherits the resolved stack via its stock alias.
+    try std.testing.expectEqual(@as(u16, 500), t.byId(8).?.stack);
 }
