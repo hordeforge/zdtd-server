@@ -1569,3 +1569,69 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
 
     std.debug.print("PASS workstation: queue depth {d}, craft complete acknowledged\n", .{st.queue_len});
 }
+
+test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_unload");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_unload", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const ps = g.sim.slotOfNetId(ca.entity_id).?;
+    const px = g.sim.transform[ps].x;
+    const py = g.sim.transform[ps].y;
+    const pz = g.sim.transform[ps].z;
+
+    // Two mobs the client can see. Only one of them walks away.
+    const near_id = g.sim.spawnZombie(px + 4, py, pz + 4, 50).?;
+    const gone_id = g.sim.spawnZombie(px + 8, py, pz + 8, 50).?;
+    const near_s = g.sim.slotOfNetId(near_id).?;
+    const gone_s = g.sim.slotOfNetId(gone_id).?;
+
+    cap.clear();
+    try g.replicateNow();
+    try std.testing.expect(ca.known_entities.isSet(near_s));
+    try std.testing.expect(ca.known_entities.isSet(gone_s));
+
+    // Walk one mob far outside the interest box. It stays alive, so the death
+    // path (the only thing that used to clear known_entities) never runs.
+    g.sim.transform[gone_s].x = px + 4000;
+    g.sim.transform[gone_s].z = pz + 4000;
+
+    cap.clear();
+    try g.replicateNow();
+    try std.testing.expect(g.sim.slotOfNetId(gone_id) != null);
+
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+    const rm = cap.findPkgIdEntity(rm_id, gone_id);
+    try std.testing.expect(rm != null);
+    // NetPackageEntityRemove::write is entityId i32 then reason u8, and
+    // EnumRemoveEntityReason.Unloaded = 1 (asm.il:817290-817301, :1227761).
+    try std.testing.expectEqual(@as(usize, 5), rm.?.len);
+    try std.testing.expectEqual(@as(u8, 1), rm.?[4]);
+    try std.testing.expect(!ca.known_entities.isSet(gone_s));
+
+    // The mob still in range keeps its client-side entity.
+    try std.testing.expect(cap.findPkgIdEntity(rm_id, near_id) == null);
+    try std.testing.expect(ca.known_entities.isSet(near_s));
+
+    // And the removal is one-shot: no per-tick remove/spawn flip-flop.
+    const sp_id = packages.idOf("NetPackageEntitySpawn").?;
+    cap.clear();
+    try g.replicateNow();
+    try std.testing.expect(cap.findPkgIdEntity(rm_id, gone_id) == null);
+    try std.testing.expect(cap.findPkgIdEntity(sp_id, gone_id) == null);
+
+    std.debug.print(
+        "PASS interest-unload: id={d} removed with Unloaded, id={d} still tracked\n",
+        .{ gone_id, near_id },
+    );
+}

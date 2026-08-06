@@ -105,12 +105,12 @@ exist, so day 1 and day 70 spawn identical enemies at identical counts.
 | [Traders](#5-traders) | 3 | 9 | 14 | 26 | No trader NPC exists on the client; the whole area is downstream of that |
 | [Blood moon](#6-blood-moon) | 1 | 18 | 8 | 27 | Fires on schedule, ends at midnight, no gamestage escalation, red moon on the wrong night |
 | [POIs and prefabs](#7-pois-and-prefabs) | 7 | 16 | 9 | 32 | Every POI is present but built from wrong ids, wrong rotation, wrong height |
-| [Entities and AI](#8-entities-and-ai) | 14 | 21 | 14 | 49 | Real fights, real A*; population is ~6 classes, one animal species, frozen ghosts |
+| [Entities and AI](#8-entities-and-ai) | 15 | 20 | 14 | 49 | Real fights, real A*; population is ~6 classes and one animal species |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 7 | 16 | 12 | 35 | Chests open; content wrong at the source; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 4 | 11 | 22 | 37 | Nothing a player can feel; combat damage never reaches the client |
 | [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; no water, no collapse, repair damages your base |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works and the 189-name map is exact; invisible to browsers, thin persistence |
-| **Total** | **74** | **160** | **111** | **345** | Core loop playable; depth, content fidelity and persistence are the gap |
+| **Total** | **75** | **159** | **111** | **345** | Core loop playable; depth, content fidelity and persistence are the gap |
 
 ---
 
@@ -164,10 +164,11 @@ area and the concrete work.
    (`src/ecs/world.zig:683`).
 
 6. **Entities / net: send `EntityRemove(Unloaded)` when a mob leaves interest.**
-   `known_entities` is only cleared by death, so every zombie that wanders out of
-   the ~96 m box stands frozen in the client world forever. Small fix, most
-   immediately visible defect in a normal session
-   (`src/server/game.zig:7952-7964`).
+   `DONE`. The replicate pass now mirrors spawn-on-approach: a mob outside a
+   client's interest box gets `NetPackageEntityRemove(entityId, Unloaded)` sent to
+   that one client and its `known_entities` bit dropped, the way stock's
+   `NetEntityDistributionEntry::updatePlayerEntity` does (asm.il:801228-801276)
+   (`src/server/game.zig:7876-7900`).
 
 7. **Items: default `Stacknumber` to 500 and resolve `Extends`.**
    `items.zig:424` defaults an absent `Stacknumber` to 1; stock's `ItemClass`
@@ -1369,10 +1370,9 @@ walls with A*, chew cover, die and drop loot, and POI sleepers wake on entry (al
 six of those are PASS in the 83-case real-client playtest), but the population
 behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
-gamestage, no wandering hordes, no screamers, and mobs that leave interest range
-become permanent frozen ghosts in the client world.
+gamestage, no wandering hordes, and no screamers.
 
-**14 WORKS · 21 PARTIAL · 14 MISSING**
+**15 WORKS · 20 PARTIAL · 14 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -1687,14 +1687,17 @@ become permanent frozen ghosts in the client world.
   *Anchors:* `src/server/game.zig:4936-4970`, `:8076-8098`,
   `src/wire/packages.zig:861-876`
 
-- **No EntityRemove(Unloaded) when a mob leaves interest range** `PARTIAL`
-  `known_entities` is only cleared by intersecting with the alive bitset (death)
-  and two admin/respawn paths. A zombie that wanders out of the ~96 m box keeps its
-  client-side entity, stops receiving PosAndRot, and is never removed: it stands
-  frozen in the client world indefinitely. The `unloaded` reason exists in the wire
-  helper and is never used for this.
-  *Anchors:* `src/server/game.zig:7952-7964`, `:7857-7864`,
-  `src/wire/packages.zig:861-867`
+- **EntityRemove(Unloaded) when a mob leaves interest range** `WORKS`
+  The replicate pass runs an unload sweep next to spawn-on-approach: any mob a
+  client knows but whose cell is outside that client's `view_radius` box gets
+  `NetPackageEntityRemove(entityId, Unloaded)` on the reliable channel, and the
+  `known_entities` bit clears only once the send succeeded, so a failed send
+  retries instead of leaving a ghost. Stock does the same per player in
+  `NetEntityDistributionEntry::updatePlayerEntity`. An observer whose own entity
+  slot cannot be resolved is skipped rather than treated as sitting in cell (0,0),
+  which would evict its whole known set.
+  *Anchors:* `src/server/game.zig:7876-7900`, `src/wire/packages.zig:861-880`,
+  `asm.il:801228-801276`, `asm.il:1227761`
 
 - **Corpse dwell time (TimeStayAfterDeath)** `MISSING`
   zdtd broadcasts EntityRemove the instant HP hits 0. Stock

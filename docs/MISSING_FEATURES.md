@@ -327,7 +327,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Line of sight / hearing / smell | MISSING |
 | Stealth / crouch | MISSING |
 | Group AI / pack behavior | MISSING |
-| Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24) |
+| Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
 | Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |
 | Ragdoll / death loot bags | PARTIAL (loot ECD bag; no ragdoll) |
 | XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |

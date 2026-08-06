@@ -7810,6 +7810,10 @@ pub const Game = struct {
         // below), not per entity × client in each interest loop.
         var obs_cx: [max_clients]i32 = .{0} ** max_clients;
         var obs_cz: [max_clients]i32 = .{0} ** max_clients;
+        // Whether the cell above is real. An unresolved observer keeps (0,0),
+        // which the unload pass below must not read as "everything is far away":
+        // that would evict the client's whole known set from the origin cell.
+        var obs_ok: [max_clients]bool = .{false} ** max_clients;
         for (&self.clients, 0..) |*cl, ci| {
             // Empty/joining slots have no entity; skip before the net-id lookup.
             if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
@@ -7817,6 +7821,7 @@ pub const Game = struct {
                 const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
                 obs_cx[ci] = oc.cx;
                 obs_cz[ci] = oc.cz;
+                obs_ok[ci] = true;
             }
         }
 
@@ -7865,6 +7870,35 @@ pub const Game = struct {
                     self.harness.counters.inc(.packages_encoded);
                 } else |_| {
                     self.harness.counters.inc(.encode_errors);
+                }
+            }
+
+            // Mirror of spawn-on-approach. Stock NetEntityDistributionEntry::
+            // updatePlayerEntity drops a player that has left the tracking box
+            // from trackedPlayers and sends that one player
+            // NetPackageEntityRemove(entityId, Unloaded) (asm.il:801228-801276;
+            // EnumRemoveEntityReason.Unloaded = 1 at asm.il:1227761). Without it
+            // the mob keeps a client-side ghost that never gets another
+            // PosAndRot and stands frozen in the world forever.
+            if (is_mob) {
+                for (&self.clients, 0..) |*cl, ci| {
+                    if (!cl.known_entities.isSet(i)) continue;
+                    if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
+                    const peer = cl.peer orelse continue;
+                    if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
+                    const rb = packages.buildRemoveBodyReason(
+                        &self.body_buf,
+                        self.sim.network_id[i].id,
+                        .unloaded,
+                    ) catch {
+                        self.harness.counters.inc(.encode_errors);
+                        continue;
+                    };
+                    // Reliable: a dropped removal is a permanent ghost, and the
+                    // bit only clears once the peer has actually been told.
+                    try self.sendGame(peer, "NetPackageEntityRemove", rb);
+                    cl.known_entities.unset(i);
+                    self.harness.counters.inc(.packages_encoded);
                 }
             }
 
