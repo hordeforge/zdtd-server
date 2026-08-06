@@ -70,6 +70,16 @@ observable, on the live stock client:
   unhandled dir=1** (70 handled in game.zig). 775 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
+- **Visual round (stock client, 2026-08-06):** the automated playtest
+  (`7dtd-playtest`, Steam + Proton, EAC off) ran the demo suite against zdtd on
+  Navezgane: 80-81 of 83 cases PASS across runs, including join, mesh, ground,
+  walk/sprint/sneak/jump, dig/place, block damage, quest journal, weather,
+  water plane, deco, craft, vehicles, power, blood-moon music, and the trader
+  NPC visible to the client (`class=npcTraderJen`). Residual failures are
+  demo-suite timing (the trader now owns the spawn-adjacent "nearest target"
+  slot; the harness target pick was fixed to prefer zombies) and an
+  item-drop EntityItem timing case. Fixing the harness's combat targeting is a
+  suite change, not a server defect.
 
 **Gates at this pin:** `make check` exit 0 · 772 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
