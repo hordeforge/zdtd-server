@@ -85,6 +85,16 @@ pub const CounterId = enum(u16) {
     path_replans_denied,
     /// C2S AddRemoveBuff dropped: bad body, foreign entity, or unknown name.
     buff_rejects,
+    /// Entities the replicate pass considered (dirty ∪ mobs off heartbeat, all
+    /// live entities on it). Grows with world change, not with the slot table.
+    replicate_candidates,
+    /// Framed replication packages handed to a peer (EntitySpawn + PosAndRot +
+    /// Speeds + AliveFlags). Divided by packages_encoded this is the fan-out
+    /// ratio: serialize-once means it rises with players while encodes do not.
+    replicate_fanouts,
+    /// Candidates that wanted a motion send but had no observer in range, so
+    /// the encode was skipped. Pure interest savings.
+    replicate_encodes_skipped,
     _,
 };
 

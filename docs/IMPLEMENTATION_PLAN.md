@@ -215,12 +215,19 @@ Holding: item_id / slot index
 #### M11.2 Dirty bitsets + encode once **[shipped]**
 ```text
 dirty: POS | ROT | FLAGS | HP | SPAWN | REMOVE
-for each entity needing send (dirty or heartbeat):
+candidates = heartbeat ? alive_bits : dirty_bits ∪ mobs   (slot-ascending)
+for each candidate:
+  mask = observerMask(client cells, radii, active)         (one word)
   encode shared buffer once; frame once
-  for each interested client: sendFramedDroppable (no re-encode)
-clear pos/rot/spawn/flags after fan-out
+  for each set bit in mask: sendFramedDroppable (no re-encode)
+clear pos/rot/spawn/flags over dirty_bits after fan-out
 ```
-`src/server/game.zig` `replicate` + `src/ecs/interest.zig` helpers.
+`src/server/game.zig` `replicate`, `World.alive_bits` / `dirty_bits`
+(`markDirty` is the single write funnel), `interest.observerMask`.
+Mob motion deliberately stays on the heartbeat: marking `stepToward` dirty
+would move mob PosAndRot from tick%10 to tick%2 and change packet volume.
+apm evidence: `replicate_candidates`, `replicate_fanouts`,
+`replicate_encodes_skipped` (docs/APM.md).
 
 #### M11.3 Connection map **[shipped]**
 - `World.net_to_slot` O(1) NetId → Slot.
@@ -235,7 +242,8 @@ Chunk stream: named caps shipped; async workers still open.
 
 ### Acceptance
 - [ ] 128 bots join and move 5 minutes without death spiral.  
-- [ ] apm: replicate time scales ~O(entities_dirty × interest) not O(players²).  
+- [x] apm: replicate time scales ~O(entities_dirty × interest) not O(players²).
+      Pinned by the two replicate scenarios in `src/server/scenarios.zig`.  
 - [ ] Compare shape to stock measured-scaling (design input only).  
 
 ---

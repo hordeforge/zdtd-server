@@ -51,7 +51,7 @@ Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane
 | S07 | `world/noise.zig` `noise2`/`contrib2` | simplex contrib | 1 sample | via S04 | low alone | **P2** | SIMD as 4-8 independent (x,y) samples, not inside grad |
 | S08 | `ecs/systems.zig` `nearestPlayerSnap` ~52-70 | dx²+dz² min over players | P≪16 | tick AI | med | **P2** | Tiny P; SIMD only if many zombies × players matrix |
 | S09 | `ecs/systems.zig` despawn / quest range loops | dist_sq vs radius | max_entities | tick | med | **P2** | SoA x/z columns; mask alive first (bitset) |
-| S10 | `ecs/interest.zig` `markNearbyDirty` ~49-57 | cell range vs all entities | max_entities | tick | med | **P2** | Cell math integer; batch transform.x/z |
+| S10 | `ecs/interest.zig` `observerMask` | entity cell vs all client cells | max_clients (64) | tick | med | **DONE** | `@Vector(64, i32)` compares reduced to one observer word; `observerMaskRef` is the scalar oracle |
 | S11 | `ecs/systems.zig` AI full tick | FSM + A* | entities | tick | **low** | **Reject** | Divergent branches; use `parallel.forRanges` only |
 | S12 | `ecs/path.zig` A* | graph search | expands | chase | **low** | **Reject** | Irregular; not SIMD |
 | S13 | `wire/binary.zig` 7-bit strings | varint strings | var | net | **no** | **Reject** | |

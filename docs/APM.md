@@ -53,6 +53,24 @@ Perf-evidence counters (always on, independent of the `[perf]` switches):
 | `sleeper_volumes_scanned` | Sleeper volumes tested per scan pass |
 | `te_scan_cells` | Cells walked by the one-time storage-TE chunk scan |
 | `path_replans` | A* replans issued by the AI phase |
+| `replicate_candidates` | Entities the replicate pass considered (dirty ∪ mobs off heartbeat, all live entities on it) |
+| `replicate_fanouts` | Framed replication packages handed to a peer (EntitySpawn, PosAndRot, Speeds, AliveFlags) |
+| `replicate_encodes_skipped` | Candidates that wanted a motion send but had no observer in range |
+
+The replication trio is the M11 acceptance check. Cost must track *entities
+that changed × interested peers*, not players squared:
+
+- `replicate_candidates / ticks` follows world change, not the slot table. Add
+  static entities and the off-heartbeat figure must not move.
+- `replicate_fanouts / packages_encoded` is the fan-out ratio. Adding a viewer
+  raises fan-outs and leaves encodes flat: serialize-once means each package is
+  built once and memcpy'd per peer. If encodes start scaling with player count,
+  a per-peer encode has crept back in.
+- `replicate_encodes_skipped` is pure interest savings (an entity nobody can
+  see is never serialized).
+
+`src/server/scenarios.zig` pins both shapes so a regression fails `make check`
+rather than showing up as a frame-time drift under load.
 
 Extend the enum as features land. Prefer append-only ids for stable JSON keys.
 `apm.report.max_text_bytes` / `max_json_bytes` are derived from the enums at

@@ -346,7 +346,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Allies | PARTIAL (identity-keyed AllyStore + AllyResponse; not persisted) |
 | Spatial hash for queries | MISSING (broadcastNear radius only) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
-| Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate + dirty-clear + interest still O(512)) |
+| Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate walks `World.alive_bits`/`dirty_bits` and the dirty clear is O(changed); the interest *query* is still a per-entity observer mask, no cell hash) |
 | NetId → slot map (O(1)) | HAVE (`World.net_to_slot`; documented linear fallback only when the map is degraded) |
 | Interest-aware tick budgets | MISSING |
 
@@ -717,10 +717,12 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Spatial interest (chunk/grid) | PARTIAL (radius filter; no cell hash) |
 | Serialize-once shared buffers | MISSING (M11 open) |
 | Dirty flags (POS/ROT/FLAGS/HP) | PARTIAL (spawn dirty + known_entities; HP drains into player `EntityStatChanged` each tick; full bitset open) |
+| Serialize-once shared buffers | HAVE (`Game.replicate` is entity-outer: encode + frame once, memcpy fan-out per interested peer; docs/adr/0008) |
+| Dirty flags (POS/ROT/FLAGS/HP) | HAVE (`World.dirty_bits` mirrors `dirty[]` through `markDirty`; off-heartbeat replicate visits dirty ∪ mobs only. Mob motion stays heartbeat-only by design: marking `stepToward` dirty would take mob PosAndRot from tick%10 to tick%2) |
 | RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
 | Velocity packages | MISSING |
 | Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |
-| entityId → connection map O(1) | MISSING |
+| entityId → connection map O(1) | MISSING (`clientFor` still scans 64 client slots per datagram; measured as noise next to the per-entity work) |
 | NetId → slot hashmap | HAVE (`World.net_to_slot`; linear fallback only when the map is degraded) |
 | Parallel AI / turrets / save | HAVE |
 | Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
@@ -888,8 +890,10 @@ Do not plan these as product features of zdtd:
 6. Workstation RecipeQueue C2S depth (lock contention shipped).
 
 ### P2: Multiplayer CPU (M11)
-Dirty bitsets, serialize-once interest, persistent thread pool, O(1) NetId map,
-32-128 bot apm gate. See IMPLEMENTATION_PLAN M11 + TODO near-term scale.
+Shipped: dirty bitsets, serialize-once interest, per-entity observer masks,
+persistent thread pool, O(1) NetId map. Open: spatial cell hash for the interest
+query (M11.1) and the 32-128 bot apm gate (M11.5). See IMPLEMENTATION_PLAN M11 +
+TODO near-term scale.
 
 ### P3: Ops and polish
 Full telnet surface, Steam browser, party membership (a Party/PartyManager

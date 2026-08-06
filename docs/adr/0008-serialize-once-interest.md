@@ -17,9 +17,14 @@ is per-connection re-encode of identical bytes.
    buffer, then **frame/scatter** the same payload to each interested peer
    (memcpy / LiteNet send), not re-run builders per connection.
 2. **Interest is spatial** (`ecs/interest.zig` cell grid + radius) plus per-client
-   known-entity sets for first-entry spawn.
-3. **Dirty bits** (`components.Dirty`) gate pos/rot/spawn/flags; clear after the
-   serialize-once pass. Heartbeat PosAndRot when clean (named period).
+   known-entity sets for first-entry spawn. The per-entity result is one
+   `interest.observerMask` word (one bit per client slot), the same shape as
+   stock's `NetEntityDistributionEntry.trackedPlayers`; spawn-on-approach,
+   observer presence and fan-out all walk that word instead of the client table.
+3. **Dirty bits** (`components.Dirty`, indexed by `World.dirty_bits`) gate
+   pos/rot/spawn/flags; clear after the serialize-once pass. Heartbeat PosAndRot
+   when clean (named period). Off-heartbeat passes visit only dirty entities plus
+   mobs, in slot-ascending order so send order is unchanged.
 4. **No self-echo** of a player's own movement packages unless stock requires it.
 5. Stream queues (chunks, deco) use **named caps** so one peer cannot stall the
    50 ms tick.

@@ -175,7 +175,8 @@ v1 failed because it could not retrofit query-based interest,
 SCALE_ARCHITECTURE 3-0). The existing pieces are already the right shape:
 
 - **Grid interest** (`ecs/interest.zig`): 32m cells, `inRange` cell-radius
-  test, `markNearbyDirty`. This becomes the region's "who observes what" index.
+  test, `observerMask` (one bit per client slot). This becomes the region's
+  "who observes what" index.
 - **Per-client `known_entities` bitset** (STATUS): the client's subscription
   set. Diffed each tick → spawn-on-approach, despawn-on-leave.
 - **Dirty flags** (`ecs/world.zig` `dirty` column): only changed entities

@@ -114,10 +114,12 @@ reads the group length (one mechanism, no parallel counter).
 
 Wired today: `systems.snapshotPlayers` (twice per tick), the `systemTurrets`
 zombie-list build, `systemDespawnFar` (via `copyKindInto`, it destroys),
-`Game.tickZombieBlockDamage`, `Game.broadcastVehiclePositions`. Still open scans:
-the replicate entity pass, motion dirty-clear, `clearDeadKnownEntities`,
-`interest.markNearbyDirty` (they need an all-kinds alive group, and iterating
-7 kind groups would be kind-major, not slot-ascending), and `systemZombieAi`
+`Game.tickZombieBlockDamage`, `Game.broadcastVehiclePositions`. The replicate
+entity pass, motion dirty-clear and `clearDeadKnownEntities` do not use groups
+either (iterating 7 kind groups would be kind-major, not slot-ascending); they
+walk `World.alive_bits` / `World.dirty_bits`, word-packed sets maintained by
+`spawnBase` / `destroy` / `reviveSlot` and the `markDirty` funnel, which keeps
+slot order and costs O(live) or O(changed). Still an open scan: `systemZombieAi`
 (its predicate is `mask.zombie_ai`, a bit mutated after spawn, so it would need
 maintenance points that do not exist).
 

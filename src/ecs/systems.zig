@@ -619,7 +619,7 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
         w.destroy(i);
         n += 1;
     }
-    if (n > 0 and w.mask[ps].dirty) w.dirty[ps].inv = true;
+    if (n > 0) w.markDirty(ps, .{ .inv = true });
     return n;
 }
 
@@ -666,7 +666,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                     w.inventory[ps] = inventory_before;
                     return false;
                 }
-                if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+                w.markDirty(ps, .{ .inv = true });
             }
             stock.entries[e].count -= qty;
             w.wallet[ps].coins -= cost;
@@ -684,7 +684,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                     w.inventory[ps] = inventory_before;
                     return false;
                 }
-                if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+                w.markDirty(ps, .{ .inv = true });
             }
             stock.entries[e].count += qty;
             w.wallet[ps].coins += gain;

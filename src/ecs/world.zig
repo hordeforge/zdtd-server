@@ -95,6 +95,15 @@ pub const World = struct {
     /// True when any destroy() ran since beginTick. Replicate skips the
     /// known_entities reconcile when no slots were freed this tick.
     any_freed_this_tick: bool = false,
+    /// Live slots as one word-packed set, mirroring `alive[]`. Replication
+    /// walks set bits instead of probing every slot, so an idle server pays
+    /// for the entities it has, not for the slot table it was sized with.
+    /// Owned by spawnBase / destroy / reviveSlot; never written elsewhere.
+    alive_bits: std.StaticBitSet(max_entities) = std.StaticBitSet(max_entities).initEmpty(),
+    /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
+    /// per-tick replicate pass build its candidate set and clear the motion
+    /// bits in O(changed) rather than O(max_entities).
+    dirty_bits: std.StaticBitSet(max_entities) = std.StaticBitSet(max_entities).initEmpty(),
     /// O(1) NetId → Slot (0xFFFF = empty).
     net_to_slot: std.AutoHashMap(i32, Slot) = undefined,
     net_map_init: bool = false,
@@ -274,6 +283,7 @@ pub const World = struct {
         // Mark dead before notifying: a listener that cascades into destroy()
         // on this same slot would otherwise recurse without bound.
         self.alive[slot] = false;
+        self.alive_bits.unset(slot);
         self.freed_this_tick[slot] = true;
         self.any_freed_this_tick = true;
         // Drop from the group here too, so a death listener iterating a group
@@ -295,9 +305,11 @@ pub const World = struct {
         // By id: two turrets can share a cell, and removeAt would take the wrong one.
         if (self.mask[slot].turret) _ = self.power.removeById(self.turret[slot].power_node);
         self.alive[slot] = false;
+        self.alive_bits.unset(slot);
         self.freed_this_tick[slot] = true;
         self.mask[slot] = .{};
         self.dirty[slot] = .{};
+        self.dirty_bits.unset(slot);
         if (self.entity_count > 0) self.entity_count -= 1;
     }
 
@@ -308,6 +320,7 @@ pub const World = struct {
         if (slot >= max_entities or !self.mask[slot].kind) return;
         if (!self.alive[slot]) {
             self.alive[slot] = true;
+            self.alive_bits.set(slot);
             self.entity_count +%= 1;
         }
         self.kind_groups.insert(self.kind[slot], slot);
@@ -428,6 +441,7 @@ pub const World = struct {
         const nid = self.next_net_id;
         self.next_net_id += 1;
         self.alive[s] = true;
+        self.alive_bits.set(s);
         self.entity_count +%= 1;
         self.kind_groups.insert(kind, s);
         if (!self.entity_cap_warned and self.entity_count >= entity_warn_at) {
@@ -453,6 +467,7 @@ pub const World = struct {
         self.kind[s] = kind;
         self.flags[s] = .{ .bits = 8 };
         self.dirty[s] = .{ .spawn = true, .pos = true };
+        self.dirty_bits.set(s);
         const cid: u16 = switch (kind) {
             .player => 0,
             .zombie => 1,
@@ -692,7 +707,7 @@ pub const World = struct {
         // report killed again (double DropOnDeath bags / quest XP / loot).
         if (self.health[s].hp <= 0) return .{};
         self.health[s].hp -= amount;
-        if (self.mask[s].dirty) self.dirty[s].hp = true;
+        self.markDirty(s, .{ .hp = true });
         if (self.health[s].hp <= 0) {
             // Drop loot bag for zombies/animals (caller must S2C stock ECD + Bag).
             if ((self.kind[s] == .zombie or self.kind[s] == .animal) and self.mask[s].transform) {
@@ -741,10 +756,7 @@ pub const World = struct {
         const s = self.slotOfNetId(net_id) orelse return;
         if (!self.mask[s].transform) return;
         self.transform[s] = .{ .x = x, .y = y, .z = z, .yaw = yaw };
-        if (self.mask[s].dirty) {
-            self.dirty[s].pos = true;
-            self.dirty[s].rot = true;
-        }
+        self.markDirty(s, .{ .pos = true, .rot = true });
     }
 
     pub fn countKind(self: *const World, kind: Kind) u32 {
@@ -765,8 +777,11 @@ pub const World = struct {
         return self.network_id[slot].id;
     }
 
+    /// The single sanctioned way to raise a dirty bit: writing `dirty[]` behind
+    /// this funnel drifts `dirty_bits`, and replication would then miss or
+    /// re-visit the slot.
     pub fn markDirty(self: *World, slot: Slot, bits: c.Dirty) void {
-        if (!self.alive[slot]) return;
+        if (slot >= max_entities or !self.alive[slot]) return;
         self.mask[slot].dirty = true;
         if (bits.pos) self.dirty[slot].pos = true;
         if (bits.rot) self.dirty[slot].rot = true;
@@ -775,6 +790,19 @@ pub const World = struct {
         if (bits.spawn) self.dirty[slot].spawn = true;
         if (bits.remove) self.dirty[slot].remove = true;
         if (bits.inv) self.dirty[slot].inv = true;
+        if (bits.any()) self.dirty_bits.set(slot);
+    }
+
+    /// Resync `dirty_bits[slot]` after a caller cleared bits in `dirty[slot]`
+    /// directly (the replicate post-pass). Lowering a bit has no funnel of its
+    /// own because the clear set differs per caller.
+    pub fn syncDirtyBit(self: *World, slot: Slot) void {
+        if (slot >= max_entities) return;
+        if (self.alive[slot] and self.dirty[slot].any()) {
+            self.dirty_bits.set(slot);
+        } else {
+            self.dirty_bits.unset(slot);
+        }
     }
 };
 
@@ -927,6 +955,66 @@ test "beginTick clears locals" {
     w.locals.interest_n = 9;
     w.beginTick();
     try std.testing.expectEqual(@as(u8, 0), w.locals.interest_n);
+}
+
+test "alive_bits and dirty_bits survive random spawn destroy churn" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    // Empty world: both sets start clear.
+    try std.testing.expectEqual(@as(usize, 0), w.alive_bits.count());
+    try std.testing.expectEqual(@as(usize, 0), w.dirty_bits.count());
+
+    var prng = std.Random.DefaultPrng.init(0xb175e75);
+    const rnd = prng.random();
+    var op: usize = 0;
+    while (op < 4000) : (op += 1) {
+        switch (rnd.uintLessThan(u8, 4)) {
+            0 => _ = w.spawnZombie(rnd.float(f32) * 100, 70, rnd.float(f32) * 100, 40),
+            1 => w.destroy(rnd.uintLessThan(Slot, max_entities)),
+            2 => w.markDirty(rnd.uintLessThan(Slot, max_entities), .{ .pos = true, .inv = true }),
+            else => {
+                const s = rnd.uintLessThan(Slot, max_entities);
+                if (w.alive[s]) {
+                    w.dirty[s] = .{};
+                    w.syncDirtyBit(s);
+                }
+            },
+        }
+        // beginTick releases freed slots so allocSlot can recycle them.
+        if (op % 37 == 0) w.beginTick();
+    }
+    // Fill to capacity so the full-table edge is covered too.
+    while (w.spawnZombie(1, 70, 1, 40) != null) {}
+
+    var s: Slot = 0;
+    while (s < max_entities) : (s += 1) {
+        try std.testing.expectEqual(w.alive[s], w.alive_bits.isSet(s));
+        try std.testing.expectEqual(w.alive[s] and w.dirty[s].any(), w.dirty_bits.isSet(s));
+    }
+    try std.testing.expectEqual(@as(usize, max_entities), w.alive_bits.count());
+}
+
+test "slot recycle does not inherit the previous tenant's dirty bit" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const id = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(id).?;
+    w.markDirty(s, .{ .hp = true, .inv = true });
+    w.destroy(s);
+    try std.testing.expect(!w.alive_bits.isSet(s));
+    try std.testing.expect(!w.dirty_bits.isSet(s));
+    // markDirty on a dead slot is a no-op, so a stale caller cannot resurrect it.
+    w.markDirty(s, .{ .pos = true });
+    try std.testing.expect(!w.dirty_bits.isSet(s));
+    // Recycled slot starts from spawnBase's spawn|pos, nothing carried over.
+    w.beginTick();
+    const id2 = w.spawnZombie(1, 70, 1, 40).?;
+    const s2 = w.slotOfNetId(id2).?;
+    try std.testing.expectEqual(s, s2);
+    try std.testing.expect(w.dirty_bits.isSet(s2));
+    try std.testing.expect(!w.dirty[s2].hp and !w.dirty[s2].inv);
 }
 
 test "generation-counted handle invalidates after destroy" {

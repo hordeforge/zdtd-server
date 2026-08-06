@@ -88,7 +88,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### M11 multiplayer CPU (1.0 scale gate)
 
-- [x] Dirty bitsets + serialize-once interest (entity-outer encode once, framed fan-out; clear pos/rot/spawn/flags after pass; `ecs/interest.zig` needsPosSend)
+- [x] Dirty bitsets + serialize-once interest (`World.alive_bits`/`dirty_bits` behind the `markDirty` funnel; entity-outer encode once, framed fan-out over one `interest.observerMask` word per entity; dirty clear is O(changed); apm `replicate_candidates`/`replicate_fanouts`/`replicate_encodes_skipped`)
 - [x] Persistent thread pool (`util/parallel.zig` Io mutex/cond workers; no spawn/join per `forRanges`)
 - [x] O(1) NetId → slot map (`World.net_to_slot`; already shipped)
 - [x] Chunk stream named caps (`max_streamed_chunks`, `chunk_stream_radius_{min,max}`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`)
@@ -462,8 +462,9 @@ From **zig-ecs (Entt)**:
   `query.zig`: `groupSlice` / `forEachKindGroup` / `copyKindInto`. Wired into
   `snapshotPlayers`, `systemTurrets` zombie list, `systemDespawnFar`,
   `tickZombieBlockDamage`, `broadcastVehiclePositions`. Open: no all-kinds alive
-  group, so the replicate pass / motion dirty-clear / `clearDeadKnownEntities` /
-  `interest.markNearbyDirty` stay O(capacity); no mask groups (`mask.zombie_ai`
+  group, but the replicate pass / motion dirty-clear / `clearDeadKnownEntities`
+  now ride `World.alive_bits` / `dirty_bits` instead of O(capacity) slot walks
+  (word-packed, still slot-ascending); no mask groups (`mask.zombie_ai`
   is mutated after spawn), so `systemZombieAi` stays an open scan; no owning
   group (rejected, fixed slots); still no spatial hash. View stays the default
   and the documented fallback for loops that spawn/destroy while iterating.  

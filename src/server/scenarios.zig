@@ -2007,3 +2007,127 @@ test "scenario replace-stack buff re-add restarts instead of duplicating" {
     try std.testing.expectEqual(@as(u8, 0), g.sim.buffs[ps].count());
     std.debug.print("PASS buff stacking: replace restarted one instance, client remove ended it\n", .{});
 }
+
+test "scenario replicate serialize-once: a second viewer costs fan-out, not encodes" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_rep_once");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rep_once", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+
+    // Heartbeat motion pass (tick % 2 == 0 for motion, % 5 == 0 for heartbeat).
+    g.tick_n = 10;
+    // Settle: the first pass hands out EntitySpawn, later passes only move things.
+    try g.replicateNow();
+    try g.replicateNow();
+
+    const enc0 = g.harness.counters.get(.packages_encoded);
+    const fan0 = g.harness.counters.get(.replicate_fanouts);
+    try g.replicateNow();
+    const enc_one = g.harness.counters.get(.packages_encoded) - enc0;
+    const fan_one = g.harness.counters.get(.replicate_fanouts) - fan0;
+    try std.testing.expect(enc_one > 0);
+    try std.testing.expect(fan_one > 0);
+
+    // Second viewer at the same spawn: it sees the same entities as A.
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    try std.testing.expect(cb.entity_id != ca.entity_id);
+    try g.replicateNow();
+    try g.replicateNow();
+
+    cap_a.clear();
+    cap_b.clear();
+    const enc1 = g.harness.counters.get(.packages_encoded);
+    const fan1 = g.harness.counters.get(.replicate_fanouts);
+    try g.replicateNow();
+    const enc_two = g.harness.counters.get(.packages_encoded) - enc1;
+    const fan_two = g.harness.counters.get(.replicate_fanouts) - fan1;
+
+    // Fan-out follows viewers; encodes must not. Only the two player entities
+    // gained an observer, so the encode delta is a small constant. A per-peer
+    // encode would instead scale the whole pass with the viewer count.
+    try std.testing.expect(fan_two > fan_one);
+    try std.testing.expect(enc_two < enc_one * 2);
+    try std.testing.expect(enc_two <= enc_one + 8);
+    // Both peers really received the shared entities, not just one of them.
+    const pos_id = packages.idOf("NetPackageEntityPosAndRot").?;
+    try std.testing.expect(cap_a.findPkgIdEntity(pos_id, cb.entity_id) != null);
+    try std.testing.expect(cap_b.findPkgIdEntity(pos_id, ca.entity_id) != null);
+    std.debug.print(
+        "PASS replicate serialize-once: encodes {d}→{d}, fan-out {d}→{d} for 1→2 viewers\n",
+        .{ enc_one, enc_two, fan_one, fan_two },
+    );
+}
+
+test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_rep_dirty");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rep_dirty", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const py = g.sim.transform[ps].y;
+    const pz = g.sim.transform[ps].z;
+
+    // Static, non-mob entities in interest range: no spawn-on-approach, so the
+    // only reason to visit them off heartbeat would be a dirty transform.
+    const bags = 24;
+    var bag_ids: [bags]i32 = undefined;
+    for (&bag_ids, 0..) |*id, k| {
+        id.* = g.sim.spawnLootBag(px + @as(f32, @floatFromInt(k % 4)), py, pz + 1, 7, 1).?;
+    }
+
+    // Heartbeat pass first: it both clears the spawn dirty bits and shows the
+    // candidate count when everything is in play.
+    g.tick_n = 10;
+    try g.replicateNow();
+    const hb0 = g.harness.counters.get(.replicate_candidates);
+    try g.replicateNow();
+    const cand_heartbeat = g.harness.counters.get(.replicate_candidates) - hb0;
+    try std.testing.expect(cand_heartbeat >= bags);
+
+    // Off-heartbeat motion pass with nothing dirty: the bags are not candidates.
+    g.tick_n = 12;
+    const off0 = g.harness.counters.get(.replicate_candidates);
+    try g.replicateNow();
+    const cand_off = g.harness.counters.get(.replicate_candidates) - off0;
+    try std.testing.expect(cand_off + bags <= cand_heartbeat);
+
+    // One bag moves: it is back in the candidate set and still goes on the wire
+    // with the same PosAndRot body a stock client already expects.
+    cap.clear();
+    g.sim.setPos(bag_ids[3], px + 2, py, pz + 3, 0);
+    const dirty0 = g.harness.counters.get(.replicate_candidates);
+    try g.replicateNow();
+    try std.testing.expectEqual(cand_off + 1, g.harness.counters.get(.replicate_candidates) - dirty0);
+
+    const pos_id = packages.idOf("NetPackageEntityPosAndRot").?;
+    const body = cap.findPkgIdEntity(pos_id, bag_ids[3]);
+    try std.testing.expect(body != null);
+    const parsed = try packages.parsePosAndRotBody(body.?);
+    try std.testing.expectEqual(bag_ids[3], parsed.entity_id);
+    try std.testing.expect(@abs(parsed.x - (px + 2)) < 0.01);
+    try std.testing.expect(@abs(parsed.z - (pz + 3)) < 0.01);
+    std.debug.print(
+        "PASS replicate dirty gate: candidates heartbeat={d} off={d} after one move={d}\n",
+        .{ cand_heartbeat, cand_off, cand_off + 1 },
+    );
+}

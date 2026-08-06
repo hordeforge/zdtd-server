@@ -3,9 +3,6 @@
 //! Decision: docs/adr/0008-serialize-once-interest.md.
 
 const std = @import("std");
-const World = @import("world.zig").World;
-const Slot = @import("world.zig").Slot;
-const max_entities = @import("world.zig").max_entities;
 const Dirty = @import("components.zig").Dirty;
 
 pub const cell_size: f32 = 32.0;
@@ -52,16 +49,62 @@ pub fn clearAfterReplicate(d: *Dirty) void {
     d.flags = false;
 }
 
-/// For each alive entity, set dirty.pos when far from last_sent (caller tracks).
-pub fn markNearbyDirty(w: *World, px: f32, pz: f32, radius_cells: i32) void {
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
-        if (!w.alive[i] or !w.mask[i].transform) continue;
-        if (!inRange(px, pz, w.transform[i].x, w.transform[i].z, radius_cells)) continue;
-        if (w.mask[i].dirty) {
-            w.dirty[i].pos = true;
-        }
+/// Bit set of observers, one bit per client slot (bit k = client k).
+pub fn ObserverMask(comptime lanes: comptime_int) type {
+    return std.meta.Int(.unsigned, lanes);
+}
+
+/// Which of `lanes` observers have entity cell (ecx,ecz) in interest range,
+/// as one word. This is stock's per-entity `trackedPlayers` set computed on
+/// the fly (NetEntityDistributionEntry::SendToPlayers, asm.il:800867): the
+/// caller then walks set bits instead of re-testing every client slot for
+/// spawn-on-approach, observer presence and fan-out.
+///
+/// `active` masks off slots with no joined peer; their cell/radius entries are
+/// ignored, so callers need not keep them meaningful. Per-lane semantics are
+/// exactly `cellsInRange`, including a negative radius never matching.
+pub fn observerMask(
+    comptime lanes: comptime_int,
+    cx: *const [lanes]i32,
+    cz: *const [lanes]i32,
+    radius: *const [lanes]i32,
+    active: ObserverMask(lanes),
+    ecx: i32,
+    ecz: i32,
+) ObserverMask(lanes) {
+    if (active == 0) return 0;
+    const V = @Vector(lanes, i32);
+    const U = @Vector(lanes, u32);
+    const zero: V = @splat(0);
+    const r: V = radius.*;
+    // @abs of the signed delta, compared unsigned: mirrors cellsInRange, and a
+    // negative radius has no unsigned counterpart so it is rejected outright.
+    const ru: U = @intCast(@max(r, zero));
+    const dx: U = @abs(@as(V, cx.*) - @as(V, @splat(ecx)));
+    const dz: U = @abs(@as(V, cz.*) - @as(V, @splat(ecz)));
+    const hit = (dx <= ru) & (dz <= ru) & (r >= zero);
+    const bits: ObserverMask(lanes) = @bitCast(hit);
+    return bits & active;
+}
+
+/// Scalar reference for `observerMask`. Tests only: the vector form is the one
+/// on the tick path, and this exists to prove they agree.
+pub fn observerMaskRef(
+    comptime lanes: comptime_int,
+    cx: *const [lanes]i32,
+    cz: *const [lanes]i32,
+    radius: *const [lanes]i32,
+    active: ObserverMask(lanes),
+    ecx: i32,
+    ecz: i32,
+) ObserverMask(lanes) {
+    var out: ObserverMask(lanes) = 0;
+    for (0..lanes) |k| {
+        const bit = @as(ObserverMask(lanes), 1) << @intCast(k);
+        if (active & bit == 0) continue;
+        if (cellsInRange(cx[k], cz[k], ecx, ecz, radius[k])) out |= bit;
     }
+    return out;
 }
 
 test "interest cell range" {
@@ -95,6 +138,59 @@ test "needsPosSend dirty and heartbeat" {
     const moved: Dirty = .{ .pos = true };
     try std.testing.expect(needsPosSend(moved, 1));
     try std.testing.expect(needsPosSend(moved, 3));
+}
+
+test "observerMask matches the scalar reference over random observers" {
+    const lanes = 64;
+    var cx: [lanes]i32 = undefined;
+    var cz: [lanes]i32 = undefined;
+    var rad: [lanes]i32 = undefined;
+    var prng = std.Random.DefaultPrng.init(0x11ce_5e11);
+    const rnd = prng.random();
+    var round: usize = 0;
+    while (round < 512) : (round += 1) {
+        for (0..lanes) |k| {
+            cx[k] = rnd.intRangeAtMost(i32, -40, 40);
+            cz[k] = rnd.intRangeAtMost(i32, -40, 40);
+            // Include negative radii: an unconfigured client must never match.
+            rad[k] = rnd.intRangeAtMost(i32, -2, 9);
+        }
+        const active = rnd.int(u64);
+        const ecx = rnd.intRangeAtMost(i32, -40, 40);
+        const ecz = rnd.intRangeAtMost(i32, -40, 40);
+        try std.testing.expectEqual(
+            observerMaskRef(lanes, &cx, &cz, &rad, active, ecx, ecz),
+            observerMask(lanes, &cx, &cz, &rad, active, ecx, ecz),
+        );
+    }
+}
+
+test "observerMask edges: empty active, radius zero, cross-origin, last lane" {
+    const lanes = 64;
+    var cx: [lanes]i32 = .{7} ** lanes;
+    var cz: [lanes]i32 = .{7} ** lanes;
+    var rad: [lanes]i32 = .{3} ** lanes;
+    // No joined peers: no observer regardless of geometry.
+    try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, 0, 7, 7));
+    // Radius 0 is same-cell only.
+    rad[0] = 0;
+    cx[0] = 0;
+    cz[0] = 0;
+    try std.testing.expectEqual(@as(u64, 1), observerMask(lanes, &cx, &cz, &rad, 1, 0, 0));
+    try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, 1, 1, 0));
+    // Negative cells are adjacent across the origin, not folded onto it.
+    rad[1] = 1;
+    cx[1] = -1;
+    cz[1] = 0;
+    try std.testing.expectEqual(@as(u64, 2), observerMask(lanes, &cx, &cz, &rad, 2, 0, 0));
+    try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, 2, 2, 0));
+    // Lane 63 must land in the top bit, not fall off the word.
+    cx[63] = 100;
+    cz[63] = 100;
+    rad[63] = 1;
+    const top = @as(u64, 1) << 63;
+    try std.testing.expectEqual(top, observerMask(lanes, &cx, &cz, &rad, top, 100, 101));
+    try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, top, 100, 103));
 }
 
 test "clearAfterReplicate keeps hp inv remove" {

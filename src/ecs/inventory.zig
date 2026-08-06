@@ -265,7 +265,7 @@ pub fn applyEatProps(w: *World, ps: Slot, props: EatProps) Result {
     }
     if (props.food_health > 0) {
         w.health[ps].hp = @min(w.health[ps].max_hp, w.health[ps].hp + props.food_health);
-        if (w.mask[ps].dirty) w.dirty[ps].hp = true;
+        w.markDirty(ps, .{ .hp = true });
     }
     return .{
         .ok = true,
@@ -478,7 +478,7 @@ pub fn applyTransactionEx(
 }
 
 fn markInv(w: *World, ps: Slot) void {
-    if (w.mask[ps].dirty) w.dirty[ps].inv = true;
+    w.markDirty(ps, .{ .inv = true });
 }
 
 fn recordInv(w: *World, peer: usize, item_id: u16, delta: i16, cause: InvCause) void {
