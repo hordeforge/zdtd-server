@@ -8424,6 +8424,20 @@ pub const Game = struct {
             if (tt.entries.len == 0) return;
             fill = tt.entries; // fallback traderAlways
         }
+        // Stock GetBuyPrice/GetSellPrice (loot-economy.md): buy = econ x
+        // BuyMarkup (per-trader OverrideBuyMarkup wins), sell = econ x
+        // SellMarkdown (OverrideSellMarkdown wins). The previous econ/10 and
+        // econ/50 constants priced ~30x and ~10x low versus the client display.
+        var buy_markup: f32 = 1.0;
+        var sell_markup: f32 = 0.02;
+        if (info_id != 0) {
+            if (tt.traderInfo(info_id)) |ti| {
+                if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
+                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+            }
+        }
+        if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
+        if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
         for (fill) |e| {
             if (n >= ecs.components.max_stock) break;
             const iid = self.ecsIdFromItemName(e.name);
@@ -8432,8 +8446,8 @@ pub const Game = struct {
             self.sim.trader_stock[s].entries[n] = .{
                 .item = iid,
                 .count = e.count,
-                .price = if (econ > 0) @min(econ / 10, 65535) else 5,
-                .sell = if (econ > 0) @max(econ / 50, 1) else 1,
+                .price = if (econ > 0) @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * buy_markup)), 65535)) else 5,
+                .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * sell_markup)), 65535)))) else 1,
             };
             n += 1;
         }

@@ -62,6 +62,10 @@ pub const TraderTable = struct {
     groups: []const Group = &.{},
     /// Per-trader `<trader_info>` blocks keyed by id.
     trader_infos: []const TraderInfo = &.{},
+    /// Root `<traders>` economy row: default buy/sell multipliers (stock
+    /// GetBuyPrice/GetSellPrice; per-trader Override* wins when set).
+    buy_markup: f32 = 0,
+    sell_markdown: f32 = 0,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *TraderTable) void {
@@ -237,6 +241,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     }
     if (groups.items.len == 0) return error.OpenFailed;
 
+    // Root `<traders>` economy row (buy_markup / sell_markdown) used by the
+    // per-item price math unless a trader_info Override* is set.
+    var root_buy_markup: f32 = 0;
+    var root_sell_markdown: f32 = 0;
+    if (std.mem.indexOfPos(u8, clean, 0, "<traders")) |tr| {
+        root_buy_markup = std.fmt.parseFloat(f32, xml.attr(clean, tr, "buy_markup") orelse "0") catch 0;
+        root_sell_markdown = std.fmt.parseFloat(f32, xml.attr(clean, tr, "sell_markdown") orelse "0") catch 0;
+    }
+
     // Per-trader `<trader_info>` blocks: id + hours/vending/player-owned attrs
     // + the `<trader_items>` refs that make that trader's own stock.
     var trader_infos: std.ArrayList(TraderInfo) = .empty;
@@ -277,7 +290,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     const gsl = try arena.alloc(Group, groups.items.len);
     @memcpy(gsl, groups.items);
 
-    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl };
+    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl, .buy_markup = root_buy_markup, .sell_markdown = root_sell_markdown };
 
     // Expand traderAlways into entries (primary stock list).
     var expand_buf: [max_expand]Entry = undefined;
