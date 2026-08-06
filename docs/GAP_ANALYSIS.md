@@ -2688,9 +2688,11 @@ counter and land claims are each broken in specific, noticeable ways.
   whenever `GetGameManager() != null`, and `ChunkStabilityEnabled` is
   `bPersistent=false` with default true so it is not in the GameStats blob), so an
   unsupported structure can collapse client-side and desync from the authoritative
-  server plane.
+  server plane. The stock algorithm is now derived
+  (`../7dtd-research/docs/stability.md`, dumps + commit 989b9e3): per-block byte
+  plane, 15 full / 0 falls, spread rules, removal recompute, falling-block pump.
   *Anchors:* `src/world/deco_mirror.zig:19-22`, `asm.il:1125631-1125637`,
-  `asm.il:1919743`, `asm.il:1095834-1095844`
+  `asm.il:1919743`, `asm.il:1095834-1095844`, `../7dtd-research/docs/stability.md`
 
 - **Structural collapse / falling blocks** `MISSING`
   No falling-block entity, no `AddFallingBlock` equivalent, no `LetBlocksFall`. Cut
