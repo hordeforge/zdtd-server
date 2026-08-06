@@ -198,6 +198,36 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario SetBlock lower damage repairs instead of adding" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_repair");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_repair", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    var frame_buf: [512]u8 = undefined;
+    var body: [64]u8 = undefined;
+    // Place stone near spawn (in reach, no claim).
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 70, 250, world_store.block_stone)));
+    try std.testing.expect((try g.world.blockWorld(250, 70, 250)) == world_store.block_stone);
+    // Damage to 50.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, 250, 70, 250, world_store.block_stone, 50, 0, 0)));
+    try std.testing.expectEqual(@as(u16, 50), g.getBlockHp(250, 70, 250));
+    // Repair: the client reports the new LOWER absolute damage (ItemActionRepair
+    // negates the amount). The server must apply 20, not add 20 to 50.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, 250, 70, 250, world_store.block_stone, 20, 0, 0)));
+    try std.testing.expectEqual(@as(u16, 20), g.getBlockHp(250, 70, 250));
+    // A further damage advance still works.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, 250, 70, 250, world_store.block_stone, 80, 0, 0)));
+    try std.testing.expectEqual(@as(u16, 80), g.getBlockHp(250, 70, 250));
+}
+
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_sc_switch");

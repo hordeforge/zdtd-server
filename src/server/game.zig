@@ -288,6 +288,7 @@ pub const InitOptions = struct {
     land_claim_size: u16 = 41,
     land_claim_online_durability_modifier: u16 = 4,
     land_claim_offline_durability_modifier: u16 = 4,
+    land_claim_expiry_days: u16 = 3,
     /// When set, enables procedural terrain (terrain_source=proc). Ignored if map_dir loads.
     worldgen_seed: ?u64 = null,
     /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
@@ -376,6 +377,8 @@ const LandClaim = struct {
     z: i32,
     owner_entity: i32,
     owner_online: bool = true,
+    /// In-game day the owner was last seen online (expiry base when offline).
+    owner_seen_day: u32 = 0,
 };
 
 const Client = struct {
@@ -522,9 +525,12 @@ pub const Game = struct {
     land_claim_size: u16 = 41,
     land_claim_online_dur: u16 = 4,
     land_claim_offline_dur: u16 = 4,
+    land_claim_expiry_days: u16 = 3,
     /// Active land claims: owner peer-persistent id keyed by claim block position.
     land_claims: [max_land_claims]LandClaim = undefined,
     land_claims_n: usize = 0,
+    /// Last in-game day the land-claim expiry pass ran (day roll detection).
+    claims_last_day: u32 = 0,
     /// Air drop scheduling: next drop at this world-hour (0 disables).
     air_drop_interval_hours: u16 = 72,
     next_air_drop_hour: u64 = 0,
@@ -671,6 +677,7 @@ pub const Game = struct {
             .land_claim_size = opts.land_claim_size,
             .land_claim_online_dur = opts.land_claim_online_durability_modifier,
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
+            .land_claim_expiry_days = opts.land_claim_expiry_days,
             .air_drop_interval_hours = opts.air_drop_frequency,
             .authority_mode = opts.authority_mode,
             .guard = opts.guard,
@@ -3875,13 +3882,62 @@ pub const Game = struct {
             if (claim.x == x and claim.y == y and claim.z == z) {
                 claim.owner_entity = owner_entity;
                 claim.owner_online = true;
+                claim.owner_seen_day = self.sim.director.clock.day;
                 return;
             }
         }
         // Cap: drop new claim rather than grow heap on place path.
         if (self.land_claims_n >= max_land_claims) return;
-        self.land_claims[self.land_claims_n] = .{ .x = x, .y = y, .z = z, .owner_entity = owner_entity };
+        self.land_claims[self.land_claims_n] = .{
+            .x = x,
+            .y = y,
+            .z = z,
+            .owner_entity = owner_entity,
+            .owner_seen_day = self.sim.director.clock.day,
+        };
         self.land_claims_n += 1;
+    }
+
+    /// A destroyed keystone no longer protects: drop the claim entirely. The
+    /// in-memory-only table is a known gap (claims do not persist across a
+    /// restart); removal still matters for the running session.
+    fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
+        var i: usize = 0;
+        while (i < self.land_claims_n) : (i += 1) {
+            if (self.land_claims[i].x == x and self.land_claims[i].y == y and self.land_claims[i].z == z) {
+                self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
+                self.land_claims_n -= 1;
+                return;
+            }
+        }
+    }
+
+    /// Mark every claim owned by `entity` online/offline and refresh the seen
+    /// day when coming online (expiry base).
+    fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {
+        const day = self.sim.director.clock.day;
+        for (self.land_claims[0..self.land_claims_n]) |*claim| {
+            if (claim.owner_entity != entity) continue;
+            claim.owner_online = online;
+            if (online) claim.owner_seen_day = day;
+        }
+    }
+
+    /// Day-roll expiry: a claim whose owner has been offline for more than
+    /// land_claim_expiry_days is released (0 disables).
+    fn expireClaims(self: *Game) void {
+        if (self.land_claim_expiry_days == 0) return;
+        const day = self.sim.director.clock.day;
+        var i: usize = 0;
+        while (i < self.land_claims_n) {
+            const claim = &self.land_claims[i];
+            if (!claim.owner_online and (day - claim.owner_seen_day) > self.land_claim_expiry_days) {
+                self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
+                self.land_claims_n -= 1;
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Process pending UDP events (acks free window; data delivered to onData).
@@ -3966,7 +4022,7 @@ pub const Game = struct {
         return (xu << 32) | (yu << 16) | (zu & 0xffff);
     }
 
-    fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {
+    pub fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {
         const key = packBlockKey(x, y, z);
         var i: usize = 0;
         while (i < self.block_hp_n) : (i += 1) {
@@ -5945,21 +6001,31 @@ pub const Game = struct {
                     out_dmg = 0;
                     self.clearBlockHp(b.x, b.y, b.z);
                     mutated = true;
-                    if (cur_id != 0) self.noteBlockBreak(c);
+                    if (cur_id != 0) {
+                        self.noteBlockBreak(c);
+                        self.removeClaimAt(b.x, b.y, b.z);
+                    }
                 } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                     // Stock DamageBlock: wire damage is absolute BlockValue.damage
                     // (d = old + points). Client may send absolute after local apply
                     // or a progressive value; take max(wire, cur) then scale delta.
                     const wire_abs = b.damage;
                     const base_cur = if (cur_id != 0) cur_id else b.block_id;
-                    var abs = if (wire_abs > cur_dmg) wire_abs else cur_dmg;
-                    if (wire_abs > cur_dmg and self.block_damage_player != 100) {
-                        const delta: u32 = @as(u32, wire_abs - cur_dmg) * self.block_damage_player / 100;
-                        abs = @intCast(@min(@as(u32, cur_dmg) + delta, 65535));
-                    } else if (wire_abs <= cur_dmg and wire_abs > 0) {
-                        // Treat as delta add when wire did not advance absolute.
-                        const scaled: u32 = @as(u32, wire_abs) * self.block_damage_player / 100;
-                        abs = @intCast(@min(@as(u32, cur_dmg) + @max(scaled, 1), 65535));
+                    var abs: u16 = cur_dmg;
+                    if (wire_abs > cur_dmg) {
+                        // Damage advance: scale the delta by block_damage_player.
+                        if (self.block_damage_player != 100) {
+                            const delta: u32 = @as(u32, wire_abs - cur_dmg) * self.block_damage_player / 100;
+                            abs = @intCast(@min(@as(u32, cur_dmg) + delta, 65535));
+                        } else {
+                            abs = wire_abs;
+                        }
+                    } else if (wire_abs < cur_dmg) {
+                        // Repair (ItemActionRepair negates the repair amount,
+                        // IL_056f): the wire carries the new LOWER absolute
+                        // damage. Never treat a lower value as a delta to add
+                        // (world-chunks.md, 2026-08-06).
+                        abs = wire_abs;
                     }
                     var max_hp = self.maxDamageForBlock(base_cur);
                     if (self.claimCovering(b.x, b.z)) |claim| {
@@ -5970,6 +6036,7 @@ pub const Game = struct {
                     }
                     if (abs >= max_hp) {
                         self.noteBlockBreak(c);
+                        self.removeClaimAt(b.x, b.y, b.z);
                         place_id = 0;
                         out_dmg = 0;
                         self.clearBlockHp(b.x, b.y, b.z);
@@ -6802,6 +6869,8 @@ pub const Game = struct {
         // (and, for seat 0, undriveable) for the rest of the session.
         self.unseatRider(self.clients[slot].entity_id) catch {};
         self.clearLocksForPeer(slot);
+        // Offline claims start their expiry clock and lose the online HP bonus.
+        self.markClaimsForEntity(self.clients[slot].entity_id, false);
         self.clients[slot] = .{};
         self.refreshInfoPlayers();
     }
@@ -6978,6 +7047,7 @@ pub const Game = struct {
         // First join: bLoaded=true so ToPlayer applies bag. Death re-bundle: false.
         const first_join = !c.entered;
         c.entered = true;
+        self.markClaimsForEntity(eid, true);
         // Spawn/respawn resets movement envelope (teleport budget).
         c.move_valid = false;
         c.move_x = @floatFromInt(sx2);
@@ -9320,6 +9390,11 @@ pub const Game = struct {
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
             self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
+            // Land-claim expiry on the in-game day roll (owner offline too long).
+            if (self.claims_last_day != self.sim.director.clock.day) {
+                self.claims_last_day = self.sim.director.clock.day;
+                self.expireClaims();
+            }
             if (self.terrain_snapshot_on) {
                 const now = self.terrain_snap.misses.load(.monotonic);
                 self.harness.counters.add(.terrain_snap_misses, now -| self.snap_misses_seen);
@@ -9937,6 +10012,48 @@ test "players zpv3 round-trips level xp stats and buffs across restart" {
             try std.testing.expect(!bs.slots[0].remove_on_death);
         }
     }
+}
+
+test "land claim removed when keystone breaks and expires offline" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.sim.director.clock.day = 30;
+    g.registerClaim(250, 70, 250, cl.entity_id);
+    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    // Breaking a non-keystone block does not remove the claim.
+    g.removeClaimAt(249, 70, 250);
+    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    // Breaking the keystone removes it (claim disappears with its block).
+    g.removeClaimAt(250, 70, 250);
+    try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
+    // Expiry: an offline claim past the window is released on the day roll.
+    g.registerClaim(250, 70, 250, cl.entity_id);
+    g.markClaimsForEntity(cl.entity_id, false);
+    g.land_claims[0].owner_seen_day = g.sim.director.clock.day - 10;
+    g.expireClaims();
+    try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
+    // Expiry disabled (0) keeps even a very old offline claim.
+    g.registerClaim(250, 70, 250, cl.entity_id);
+    g.land_claim_expiry_days = 0;
+    g.markClaimsForEntity(cl.entity_id, false);
+    g.land_claims[0].owner_seen_day = 1;
+    g.expireClaims();
+    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    // An online claim never expires.
+    g.land_claim_expiry_days = 3;
+    g.markClaimsForEntity(cl.entity_id, true);
+    g.land_claims[0].owner_seen_day = 1;
+    g.expireClaims();
+    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
 }
 
 test "offline init failure restores deterministic sim globals" {

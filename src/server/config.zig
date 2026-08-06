@@ -73,6 +73,7 @@ pub const Config = struct {
     land_claim_size: u16 = 41, // LandClaimSize (blocks per side, must be odd)
     land_claim_online_durability_modifier: u16 = 4, // LandClaimOnlineDurabilityModifier
     land_claim_offline_durability_modifier: u16 = 4, // LandClaimOfflineDurabilityModifier
+    land_claim_expiry_days: u16 = 3, // LandClaimExpiryDays (0 = never)
 
     /// Owned storage when loaded from file.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
@@ -283,6 +284,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     }
     if (prop(raw, "LandClaimOnlineDurabilityModifier")) |v| cfg.land_claim_online_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_online_durability_modifier);
     if (prop(raw, "LandClaimOfflineDurabilityModifier")) |v| cfg.land_claim_offline_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_offline_durability_modifier);
+    if (prop(raw, "LandClaimExpiryDays")) |v| cfg.land_claim_expiry_days = clampRange(xml.parseU16(v), 0, 365, cfg.land_claim_expiry_days);
     if (prop(raw, "ZdtdAuthorityMode")) |v| {
         if (AuthorityMode.parse(v)) |m| {
             cfg.authority_mode = m;
