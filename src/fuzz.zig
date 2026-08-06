@@ -227,6 +227,12 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(ws.melt_n <= ws.melt.len);
         for (ws.queue[0..ws.queue_n]) |q| try std.testing.expect(q.recipeBlob().len <= workstations.recipe_blob_max);
     } else |_| {}
+    if (stock_te.parsePoweredTriggerTeBody(input)) |trig| {
+        // Wires are copied into a fixed array; a client-declared count must
+        // never make the parser report more than it stored.
+        try std.testing.expect(trig.wire_n <= trig.wires.len);
+        try std.testing.expect(trig.wire_n <= trig.wire_total);
+    } else |_| {}
 }
 
 const inv_corpus = [_][]const u8{

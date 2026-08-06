@@ -3322,6 +3322,17 @@ pub const Game = struct {
         self.block_raw_n += 1;
     }
 
+    /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
+    /// without meta (the sparse store only holds cells that carry it).
+    fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
+        const key = packBlockKey(x, y, z);
+        var i: usize = 0;
+        while (i < self.block_raw_n) : (i += 1) {
+            if (self.block_raw_key[i] == key) return self.block_raw[i];
+        }
+        return 0;
+    }
+
     fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
         const key = packBlockKey(x, y, z);
         var i: usize = 0;
@@ -4398,6 +4409,48 @@ pub const Game = struct {
                 );
                 return;
             } else |_| {}
+            // TileEntityPoweredTrigger (TileEntityType.Trigger = 19): delay /
+            // duration / reset from the trigger's own UI. Tried last and gated on
+            // the outer teBlockId resolving to a registered power block, so this
+            // reader can never swallow a storage or workstation payload.
+            if (stock_te.parsePoweredTriggerTeBody(body)) |trig| {
+                const bid: u16 = if (trig.block_id > 0 and trig.block_id <= 65535)
+                    @intCast(trig.block_id)
+                else
+                    return;
+                const props = self.power_registry.lookup(bid) orelse return;
+                if (props.trigger_type == null) return;
+                // Stock only ever writes TriggerTypes 0..4 (asm.il:900244).
+                if (trig.trigger_type > stock_te.trigger_type_trip_wire) return;
+                const tp = self.sim.playerByPeer(c.slot) orelse return;
+                const tpos = self.sim.transform[tp];
+                const gdx = @as(f32, @floatFromInt(trig.world_x)) - tpos.x;
+                const gdy = @as(f32, @floatFromInt(trig.world_y)) - tpos.y;
+                const gdz = @as(f32, @floatFromInt(trig.world_z)) - tpos.z;
+                const g_d2 = gdx * gdx + gdy * gdy + gdz * gdz;
+                if (g_d2 > self.max_edit_range * self.max_edit_range) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(g_d2), self.max_edit_range);
+                    return;
+                }
+                // A Switch carries no delay/duration on the wire; its state is the
+                // block meta, which arrives on the SetBlock path instead.
+                if (trig.trigger_type != stock_te.trigger_type_switch and
+                    trig.trigger_type != stock_te.trigger_type_timer_relay)
+                {
+                    _ = self.sim.power.setTriggerConfigAt(
+                        trig.world_x,
+                        trig.world_y,
+                        trig.world_z,
+                        trig.property1,
+                        trig.property2,
+                    );
+                    if (trig.reset_trigger) _ = self.sim.power.resetTriggerAt(trig.world_x, trig.world_y, trig.world_z);
+                }
+                self.sim.power.resolve();
+                try self.broadcastPoweredTriggerTe(trig.world_x, trig.world_y, trig.world_z);
+                return;
+            } else |_| {}
             // Unparsed TE payload: drop (stock formats only).
             return;
         }
@@ -5042,6 +5095,32 @@ pub const Game = struct {
                 }
                 const cur_id = self.world.blockWorld(b.x, b.y, b.z) catch 0;
                 const cur_dmg = self.getBlockHp(b.x, b.y, b.z);
+                const cur_raw = self.blockRawAt(b.x, b.y, b.z);
+                // Meta-only edit: same block, same damage, different BlockValue meta.
+                // BlockSwitch::updateState flips meta bit 0x2 and SetBlockRPCs the
+                // whole value (asm.il:136663), so this must not run through the
+                // place/dig chain that clears HP, re-registers claims and rebuilds
+                // containers. Apply the raw, drive the power gate, echo it back.
+                if (cur_id != 0 and b.block_id == cur_id and b.damage == cur_dmg and b.raw != 0 and b.raw != cur_raw) {
+                    self.setBlockRaw(b.x, b.y, b.z, b.raw);
+                    const on = (packages.blockMeta(b.raw) & packages.block_meta_on) != 0;
+                    if (self.sim.power.setSwitchAt(b.x, b.y, b.z, on)) {
+                        self.sim.power.resolve();
+                    }
+                    if (packages.buildSetBlockBodyRaw(
+                        self.body_buf[0..96],
+                        b.x,
+                        b.y,
+                        b.z,
+                        b.raw,
+                        cur_dmg,
+                        editor_ent,
+                        editor_ent,
+                    )) |sb| {
+                        try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
+                    } else |_| {}
+                    continue;
+                }
                 var place_id: u16 = b.block_id;
                 var out_dmg: u16 = 0;
                 var mutated = false;
@@ -5124,12 +5203,20 @@ pub const Game = struct {
                 }
 
                 if (mutated) {
-                    if (packages.buildSetBlockBodyDamage(
+                    // Echo the stored rawData when it still describes this block, so
+                    // rotation and meta survive the authoritative reply instead of
+                    // being rebuilt from the bare id.
+                    const stored_raw = self.blockRawAt(b.x, b.y, b.z);
+                    const echo_raw: u32 = if (place_id != 0 and (stored_raw & 0xffff) == place_id)
+                        stored_raw
+                    else
+                        @as(u32, place_id);
+                    if (packages.buildSetBlockBodyRaw(
                         self.body_buf[0..96],
                         b.x,
                         b.y,
                         b.z,
-                        place_id,
+                        echo_raw,
                         out_dmg,
                         editor_ent,
                         editor_ent,
@@ -7021,6 +7108,71 @@ pub const Game = struct {
         try self.broadcast("NetPackageTileEntity", body);
     }
 
+    /// zdtd's Block::ActivateBlock (asm.il:127088 / 137044): rewrite meta bit 0x1
+    /// (isPowered) and bit 0x2 (isOn) into the stored BlockValue and SetBlockRPC it,
+    /// so lights, traps and switches visibly react to the grid. Strictly edge
+    /// triggered: a node that did not flip costs one comparison and no packet.
+    fn broadcastPowerVisuals(self: *Game) void {
+        var i: usize = 0;
+        while (i < self.sim.power.node_n) : (i += 1) {
+            const n = &self.sim.power.nodes[i];
+            const on = ecs.electric.nodeIsOn(n.*);
+            if (n.net_synced and n.net_on == on and n.net_powered == n.powered) continue;
+            n.net_synced = true;
+            n.net_on = on;
+            n.net_powered = n.powered;
+            const block_id = self.world.blockWorld(n.x, n.y, n.z) catch continue;
+            if (block_id == 0) continue;
+            const stored = self.blockRawAt(n.x, n.y, n.z);
+            const base: u32 = if ((stored & 0xffff) == block_id) stored else @as(u32, block_id);
+            var meta = packages.blockMeta(base) &
+                ~(packages.block_meta_on | packages.block_meta_powered);
+            if (on) meta |= packages.block_meta_on;
+            if (n.powered) meta |= packages.block_meta_powered;
+            const raw = packages.withBlockMeta(base, meta);
+            self.setBlockRaw(n.x, n.y, n.z, raw);
+            const dmg = self.getBlockHp(n.x, n.y, n.z);
+            const sb = packages.buildSetBlockBodyRaw(self.body_buf[0..96], n.x, n.y, n.z, raw, dmg, -1, -1) catch continue;
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(n.x), @floatFromInt(n.z), self.interest_range) catch {
+                self.harness.counters.inc(.net_send_errors);
+            };
+        }
+    }
+
+    /// Echo a powered trigger's authoritative state to nearby clients
+    /// (StreamModeWrite.ToClient). Silently does nothing when the cell holds no
+    /// registered trigger: nothing to describe, and the stock client drops a TE
+    /// update for a position where it holds no TileEntity anyway.
+    fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
+        const ni = self.sim.power.indexOfPosition(x, y, z) orelse return;
+        const node = self.sim.power.nodes[ni];
+        const block_id = self.world.blockWorld(x, y, z) catch return;
+        const props = self.power_registry.lookup(block_id) orelse return;
+        const tt = props.trigger_type orelse return;
+        // Wire list is the child edges zdtd tracks; the parent link is undirected
+        // here, so parentPos stays zero rather than inventing a direction.
+        var wires: [stock_te.max_te_wires]stock_te.Vec3i = undefined;
+        var wire_n: usize = 0;
+        var w: usize = 0;
+        while (w < self.sim.power.wire_n and wire_n < wires.len) : (w += 1) {
+            const wire = self.sim.power.wires[w];
+            const other: u16 = if (wire.a == node.id) wire.b else if (wire.b == node.id) wire.a else continue;
+            const oi = self.sim.power.indexOfId(other) orelse continue;
+            const on = self.sim.power.nodes[oi];
+            wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
+            wire_n += 1;
+        }
+        const body = stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{
+            .power_item_type = ecs.powerblocks.powerItemTypeOf(tt),
+            .wires = wires[0..wire_n],
+            .is_powered = node.powered,
+            .trigger_type = @intFromEnum(tt),
+            .property1 = node.delay_idx,
+            .property2 = node.duration_idx,
+        }) catch return;
+        try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
+    }
+
     /// Open/sync a world container to one peer (stock TE body).
     pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
         const cont = self.containers.get(.{ .x = x, .y = y, .z = z }) orelse return;
@@ -7904,6 +8056,7 @@ pub const Game = struct {
             // Power fuel/SoC/timers every tick (props from blocks.xml via registry).
             const daylight = !self.sim.director.clock.isNight();
             _ = self.sim.power.tick(dt, daylight);
+            self.broadcastPowerVisuals();
             self.reapStaleLocks();
             if (r.turret_kills > 0) {
                 for (&self.clients) |*cl| {
@@ -8557,4 +8710,37 @@ test "[perf] switches run on the live step path" {
     while (i < 3) : (i += 1) try g.step();
     // Snapshot rebuild is on the live path, not dead code.
     try std.testing.expect(g.harness.prof.histOf(.terrain_snap).count >= 3);
+}
+
+test "power visuals rewrite block meta once per state change" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/power_visuals", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try g.world.setBlockWorld(8, 70, 8, world_store.block_stone);
+    const id = g.sim.power.addNodeAt(.consumer, 8, 70, 8, 10).?;
+    const ni = g.sim.power.indexOfId(id).?;
+    g.sim.power.nodes[ni].powered = true;
+
+    g.broadcastPowerVisuals();
+    const raw = g.blockRawAt(8, 70, 8);
+    try std.testing.expectEqual(world_store.block_stone, @as(u16, @truncate(raw & 0xffff)));
+    try std.testing.expectEqual(
+        packages.block_meta_on | packages.block_meta_powered,
+        packages.blockMeta(raw),
+    );
+
+    // Nothing flipped: the second pass must not touch the block or emit a packet.
+    g.clearBlockRaw(8, 70, 8);
+    g.broadcastPowerVisuals();
+    try std.testing.expectEqual(@as(u32, 0), g.blockRawAt(8, 70, 8));
+
+    // Losing power is an edge, so it writes meta 0 again.
+    g.sim.power.nodes[ni].powered = false;
+    g.broadcastPowerVisuals();
+    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
 }

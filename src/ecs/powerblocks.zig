@@ -6,6 +6,31 @@ const electric = @import("electric.zig");
 
 pub const max_power_entries: usize = 256;
 
+/// Stock PowerTrigger/TriggerTypes (asm.il:900244). The byte rides the
+/// TileEntityPoweredTrigger payload and decides which optional fields follow it.
+pub const TriggerType = enum(u8) {
+    @"switch" = 0,
+    pressure_plate = 1,
+    timer_relay = 2,
+    motion = 3,
+    trip_wire = 4,
+};
+
+/// Registry column sentinel for "this block is not a PowerTrigger tile entity".
+const trigger_type_none: u8 = 0xff;
+
+/// Stock PowerItem/PowerItemTypes byte for a trigger's PowerItem. PowerTrigger
+/// reports Trigger=3 (asm.il:900326), PowerPressurePlate 11 (asm.il:901440) and
+/// PowerTripWireRelay 10 (asm.il:901576); the TE payload carries this byte, not
+/// the TriggerTypes one.
+pub fn powerItemTypeOf(t: TriggerType) u8 {
+    return switch (t) {
+        .pressure_plate => 11,
+        .trip_wire => 10,
+        else => 3,
+    };
+}
+
 /// Full power props for one block id (from blocks.xml via maxdamage Table).
 pub const Resolved = struct {
     kind: electric.NodeKind,
@@ -20,14 +45,25 @@ pub const Resolved = struct {
     output_per_stack: f32 = 0,
     /// PressurePlate / TripWire / MotionSensor / Trigger: step-actuated gate.
     is_trigger: bool = false,
+    /// Switch / ConsumerToggle: player-latched gate (BlockSwitch meta bit 0x2).
+    is_switch: bool = false,
+    /// Stock TriggerTypes for the TE payload; null when the block has no
+    /// TileEntityPoweredTrigger (generators, relays, plain consumers).
+    trigger_type: ?TriggerType = null,
 
     /// Fill PowerNode capacity/burn/energy from stock props. watts already on node.
     pub fn applyToNode(self: Resolved, node: *electric.PowerNode) void {
         node.is_trigger = self.is_trigger;
+        node.is_switch = self.is_switch;
         if (self.is_trigger) {
             // Idle gate: BFS reaches the plate when wired, but does not flood past
             // until activateTriggerAt sets pulse_left.
             node.on = true;
+        }
+        if (self.is_switch) {
+            // A freshly placed switch has meta 0, so it starts latched off and
+            // the client's rendered state and the grid agree from tick one.
+            node.on = false;
         }
         switch (self.kind) {
             .generator => {
@@ -75,7 +111,9 @@ pub const Resolved = struct {
 
 /// Map blocks.xml Class string → PowerGrid NodeKind.
 /// Generator/SolarPanel → generator; BatteryBank → battery;
-/// Powered/ElectricWire/TimerRelay → relay; other powered classes → consumer.
+/// Powered/ElectricWire/TimerRelay/Switch → relay; other powered classes → consumer.
+/// A Switch gates the branch below it rather than drawing from it, so it is a
+/// relay; ConsumerToggle is a load you can switch off, so it stays a consumer.
 /// Class=Light decorative blocks are excluded (no RequiredPower/MaxPower).
 pub fn kindFromClass(cls: []const u8) ?electric.NodeKind {
     if (std.mem.eql(u8, cls, "Generator") or std.mem.eql(u8, cls, "SolarPanel"))
@@ -83,8 +121,10 @@ pub fn kindFromClass(cls: []const u8) ?electric.NodeKind {
     if (std.mem.eql(u8, cls, "BatteryBank")) return .battery;
     if (std.mem.eql(u8, cls, "Powered") or
         std.mem.eql(u8, cls, "ElectricWire") or
-        std.mem.eql(u8, cls, "TimerRelay"))
+        std.mem.eql(u8, cls, "TimerRelay") or
+        std.mem.eql(u8, cls, "Switch"))
         return .relay;
+    if (std.mem.eql(u8, cls, "ConsumerToggle")) return .consumer;
     if (std.mem.eql(u8, cls, "Consumer") or
         std.mem.eql(u8, cls, "Trigger") or
         std.mem.eql(u8, cls, "Timer") or
@@ -106,6 +146,26 @@ pub fn classIsTrigger(cls: []const u8) bool {
         std.mem.eql(u8, cls, "Trigger");
 }
 
+/// Player-latched gate classes. Kept apart from classIsTrigger: a switch must not
+/// fire when a player walks over it, only when they activate the block.
+pub fn classIsSwitch(cls: []const u8) bool {
+    return std.mem.eql(u8, cls, "Switch") or std.mem.eql(u8, cls, "ConsumerToggle");
+}
+
+/// blocks.xml Class → stock TriggerTypes for blocks backed by a
+/// TileEntityPoweredTrigger. Everything else has no trigger payload.
+pub fn triggerTypeFromClass(cls: []const u8) ?TriggerType {
+    if (classIsSwitch(cls)) return .@"switch";
+    if (std.mem.eql(u8, cls, "PressurePlate")) return .pressure_plate;
+    if (std.mem.eql(u8, cls, "TimerRelay") or std.mem.eql(u8, cls, "Timer")) return .timer_relay;
+    if (std.mem.eql(u8, cls, "MotionSensor")) return .motion;
+    if (std.mem.eql(u8, cls, "TripWire")) return .trip_wire;
+    // Class=Trigger has no dedicated stock TriggerTypes value; treat it as the
+    // pressure plate it behaves like rather than inventing a byte.
+    if (std.mem.eql(u8, cls, "Trigger")) return .pressure_plate;
+    return null;
+}
+
 /// Resolved id → power props, built once at load from maxdamage Table.
 pub const Registry = struct {
     ids: [max_power_entries]u16 = undefined,
@@ -116,6 +176,8 @@ pub const Registry = struct {
     output_per_charge: [max_power_entries]f32 = undefined,
     output_per_stack: [max_power_entries]f32 = undefined,
     is_trigger: [max_power_entries]bool = undefined,
+    is_switch: [max_power_entries]bool = undefined,
+    trigger_type: [max_power_entries]u8 = undefined,
     n: usize = 0,
 
     fn push(
@@ -128,6 +190,8 @@ pub const Registry = struct {
         opc: f32,
         ops: f32,
         is_trigger: bool,
+        is_switch: bool,
+        trigger_type: ?TriggerType,
     ) void {
         if (r.n >= max_power_entries) return;
         r.ids[r.n] = id;
@@ -138,6 +202,8 @@ pub const Registry = struct {
         r.output_per_charge[r.n] = opc;
         r.output_per_stack[r.n] = ops;
         r.is_trigger[r.n] = is_trigger;
+        r.is_switch[r.n] = is_switch;
+        r.trigger_type[r.n] = if (trigger_type) |t| @intFromEnum(t) else trigger_type_none;
         r.n += 1;
     }
 
@@ -176,6 +242,8 @@ pub const Registry = struct {
                 std.mem.swap(f32, &r.output_per_charge[j], &r.output_per_charge[j - 1]);
                 std.mem.swap(f32, &r.output_per_stack[j], &r.output_per_stack[j - 1]);
                 std.mem.swap(bool, &r.is_trigger[j], &r.is_trigger[j - 1]);
+                std.mem.swap(bool, &r.is_switch[j], &r.is_switch[j - 1]);
+                std.mem.swap(u8, &r.trigger_type[j], &r.trigger_type[j - 1]);
             }
         }
     }
@@ -196,32 +264,34 @@ pub const Registry = struct {
                     continue;
                 };
                 const p = propsFromTable(table, name);
-                r.push(id, kind, p[0], p[1], p[2], p[3], p[4], classIsTrigger(cls));
+                r.push(id, kind, p[0], p[1], p[2], p[3], p[4], classIsTrigger(cls), classIsSwitch(cls), triggerTypeFromClass(cls));
             }
             if (r.n > 0) {
                 r.sortById();
                 return r;
             }
         }
-        // Offline fallback: resolve known names if Class map empty.
-        const fallback = [_]struct { []const u8, electric.NodeKind, bool }{
-            .{ "generatorbank", .generator, false },
-            .{ "solarbank", .generator, false },
-            .{ "batterybank", .battery, false },
-            .{ "electricwirerelay", .relay, false },
-            .{ "electricfencepost", .relay, false },
-            .{ "electrictimerrelay", .relay, false },
-            .{ "switch", .consumer, false },
-            .{ "pressureplate", .consumer, true },
-            .{ "autoTurret", .consumer, false },
-            .{ "dartTrap", .consumer, false },
-            .{ "bladeTrap", .consumer, false },
+        // Offline fallback: resolve known names if Class map empty. The Class
+        // string is spelled out so the trigger/switch columns come from the same
+        // mapping the Class-driven scan uses.
+        const fallback = [_]struct { []const u8, electric.NodeKind, []const u8 }{
+            .{ "generatorbank", .generator, "Generator" },
+            .{ "solarbank", .generator, "SolarPanel" },
+            .{ "batterybank", .battery, "BatteryBank" },
+            .{ "electricwirerelay", .relay, "ElectricWire" },
+            .{ "electricfencepost", .relay, "ElectricWire" },
+            .{ "electrictimerrelay", .relay, "TimerRelay" },
+            .{ "switch", .relay, "Switch" },
+            .{ "pressureplate", .consumer, "PressurePlate" },
+            .{ "autoTurret", .consumer, "RangedTrap" },
+            .{ "dartTrap", .consumer, "RangedTrap" },
+            .{ "bladeTrap", .consumer, "RangedTrap" },
         };
         for (fallback) |e| {
             if (r.n >= max_power_entries) break;
             if (table.idByName(e[0])) |id| {
                 const p = propsFromTable(table, e[0]);
-                r.push(id, e[1], p[0], p[1], p[2], p[3], p[4], e[2]);
+                r.push(id, e[1], p[0], p[1], p[2], p[3], p[4], classIsTrigger(e[2]), classIsSwitch(e[2]), triggerTypeFromClass(e[2]));
             }
         }
         r.sortById();
@@ -240,6 +310,11 @@ pub const Registry = struct {
                     .output_per_charge = self.output_per_charge[i],
                     .output_per_stack = self.output_per_stack[i],
                     .is_trigger = self.is_trigger[i],
+                    .is_switch = self.is_switch[i],
+                    .trigger_type = if (self.trigger_type[i] == trigger_type_none)
+                        null
+                    else
+                        @enumFromInt(self.trigger_type[i]),
                 };
             }
         }
@@ -326,7 +401,58 @@ test "kindFromClass mapping" {
     try std.testing.expectEqual(electric.NodeKind.battery, kindFromClass("BatteryBank").?);
     try std.testing.expectEqual(electric.NodeKind.relay, kindFromClass("ElectricWire").?);
     try std.testing.expectEqual(electric.NodeKind.consumer, kindFromClass("RangedTrap").?);
+    try std.testing.expectEqual(electric.NodeKind.relay, kindFromClass("Switch").?);
+    try std.testing.expectEqual(electric.NodeKind.consumer, kindFromClass("ConsumerToggle").?);
     try std.testing.expectEqual(@as(?electric.NodeKind, null), kindFromClass("Light"));
+}
+
+test "triggerTypeFromClass maps to the stock TriggerTypes byte" {
+    try std.testing.expectEqual(TriggerType.@"switch", triggerTypeFromClass("Switch").?);
+    try std.testing.expectEqual(TriggerType.@"switch", triggerTypeFromClass("ConsumerToggle").?);
+    try std.testing.expectEqual(TriggerType.pressure_plate, triggerTypeFromClass("PressurePlate").?);
+    try std.testing.expectEqual(TriggerType.pressure_plate, triggerTypeFromClass("Trigger").?);
+    try std.testing.expectEqual(TriggerType.timer_relay, triggerTypeFromClass("TimerRelay").?);
+    try std.testing.expectEqual(TriggerType.motion, triggerTypeFromClass("MotionSensor").?);
+    try std.testing.expectEqual(TriggerType.trip_wire, triggerTypeFromClass("TripWire").?);
+    try std.testing.expectEqual(@as(?TriggerType, null), triggerTypeFromClass("Generator"));
+    try std.testing.expectEqual(@as(?TriggerType, null), triggerTypeFromClass("NotAClass"));
+    // A switch is a gate, never a step-actuated plate.
+    try std.testing.expect(classIsSwitch("Switch"));
+    try std.testing.expect(!classIsTrigger("Switch"));
+    try std.testing.expect(!classIsSwitch("PressurePlate"));
+}
+
+test "registry carries switch columns through the id sort" {
+    var stub: StubTable = .{
+        .rows = &[_]StubTable.Row{
+            .{ .name = "switch", .id = 19300, .watts = 0, .class = "Switch" },
+            .{ .name = "pressureplate", .id = 19100, .watts = 1, .class = "PressurePlate" },
+            .{ .name = "generatorbank", .id = 19200, .watts = 100, .class = "Generator" },
+        },
+    };
+    try stub.power_class_by_name.put(std.testing.allocator, "switch", "Switch");
+    try stub.power_class_by_name.put(std.testing.allocator, "pressureplate", "PressurePlate");
+    try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+    defer stub.power_class_by_name.deinit(std.testing.allocator);
+    const reg = Registry.build(&stub);
+    // sortById hand-swaps every parallel column; a missed one scrambles rows.
+    try std.testing.expectEqual(@as(u16, 19100), reg.ids[0]);
+    try std.testing.expectEqual(@as(u16, 19300), reg.ids[2]);
+    const sw = reg.lookup(19300).?;
+    try std.testing.expect(sw.is_switch);
+    try std.testing.expect(!sw.is_trigger);
+    try std.testing.expectEqual(TriggerType.@"switch", sw.trigger_type.?);
+    const plate = reg.lookup(19100).?;
+    try std.testing.expect(plate.is_trigger);
+    try std.testing.expect(!plate.is_switch);
+    try std.testing.expectEqual(TriggerType.pressure_plate, plate.trigger_type.?);
+    const gen = reg.lookup(19200).?;
+    try std.testing.expectEqual(@as(?TriggerType, null), gen.trigger_type);
+    // A placed switch starts latched off so its meta (0) and the grid agree.
+    var node: electric.PowerNode = .{ .kind = .relay };
+    sw.applyToNode(&node);
+    try std.testing.expect(node.is_switch);
+    try std.testing.expect(!node.on);
 }
 
 test "classIsTrigger and registry is_trigger on pressure plate" {

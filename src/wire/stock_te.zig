@@ -783,3 +783,319 @@ test "storage te encode decode roundtrip" {
     try std.testing.expectEqual(@as(u16, 12), parsed.items[0].count);
     try std.testing.expectEqual(@as(i32, stock_inv.items_start_here + 7), parsed.items[0].type_id);
 }
+
+/// TileEntityPoweredTrigger network payload (TileEntityType.Trigger = 19).
+///
+/// TileEntity::write network modes emit chunkPos only; the u16 version and
+/// heapMapUpdateTime are Persistency-only (asm.il:1312529). TileEntityPowered
+/// then writes i32 const 1 | bool isPlayerPlaced | u8 PowerItemType | u8 wireCount
+/// | wireCount x Vector3i | Vector3i parentPos | [ToClient] bool IsPowered |
+/// f32 CenteredPitch | f32 CenteredYaw (asm.il:1322177). TileEntityPoweredTrigger
+/// appends u8 TriggerType, then PlatformUserIdentifierAbs ownerID when the type is
+/// Motion, then the per-direction tail (asm.il:1326015 write / 1325813 read):
+///
+///   ToServer  (client -> server, read as FromClient): non-Switch types write
+///     Property1 u8, Property2 u8, ResetTrigger bool; Motion appends i32 TargetType.
+///   ToClient  (server -> client, read as FromServer): TripWire writes a bool
+///     "parent is a TripWireRelay" first; TimerRelay writes StartTime/EndTime,
+///     any other non-Switch type writes TriggerPowerDelay/TriggerPowerDuration;
+///     Motion appends i32 TargetType.
+///
+/// Property1/Property2 are TimerRelay StartTime/EndTime for TriggerType 2 and
+/// TriggerPowerDelay/TriggerPowerDuration otherwise (asm.il:1326249, 1326317).
+/// Stock reads only two bytes for a TimerRelay where the client wrote three, so a
+/// trailing byte is normal and must not fail the parse.
+pub const trigger_type_switch: u8 = 0;
+pub const trigger_type_timer_relay: u8 = 2;
+pub const trigger_type_motion: u8 = 3;
+pub const trigger_type_trip_wire: u8 = 4;
+pub const max_te_wires: usize = 8;
+
+pub const Vec3i = struct { x: i32 = 0, y: i32 = 0, z: i32 = 0 };
+
+pub const PoweredTriggerTe = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    is_player_placed: bool = false,
+    power_item_type: u8 = 0,
+    /// Wires kept up to max_te_wires; wire_total is what the sender declared.
+    wires: [max_te_wires]Vec3i = [_]Vec3i{.{}} ** max_te_wires,
+    wire_n: usize = 0,
+    wire_total: u8 = 0,
+    parent: Vec3i = .{},
+    pitch: f32 = 0,
+    yaw: f32 = 0,
+    trigger_type: u8 = trigger_type_switch,
+    /// TimerRelay StartTime, else TriggerPowerDelay index.
+    property1: u8 = 0,
+    /// TimerRelay EndTime, else TriggerPowerDuration index.
+    property2: u8 = 0,
+    reset_trigger: bool = false,
+    target_type: i32 = 0,
+};
+
+/// Server-side view of a powered trigger, for the ToClient echo.
+pub const PoweredTriggerState = struct {
+    is_player_placed: bool = true,
+    power_item_type: u8 = 0,
+    wires: []const Vec3i = &.{},
+    parent: Vec3i = .{},
+    pitch: f32 = 0,
+    yaw: f32 = 0,
+    is_powered: bool = false,
+    trigger_type: u8 = trigger_type_switch,
+    property1: u8 = 0,
+    property2: u8 = 0,
+    /// TripWire only: whether the parent PowerItem is another TripWireRelay.
+    tripwire_parent: bool = false,
+    target_type: i32 = 0,
+};
+
+fn readVec3i(r: *binary.Reader) binary.ReadError!Vec3i {
+    return .{ .x = try r.readI32(), .y = try r.readI32(), .z = try r.readI32() };
+}
+
+fn writeVec3i(w: *binary.Writer, v: Vec3i) !void {
+    try w.writeI32(v.x);
+    try w.writeI32(v.y);
+    try w.writeI32(v.z);
+}
+
+/// PlatformUserIdentifierAbs::FromStream (asm.il:30604): a false bool is the whole
+/// value; otherwise a platform byte and two length-prefixed strings follow.
+fn skipPlatformUser(r: *binary.Reader) binary.ReadError!void {
+    if (!try r.readBool()) return;
+    _ = try r.readByte();
+    try r.skipString();
+    try r.skipString();
+}
+
+/// Parse a C2S NetPackageTileEntity body as TileEntityPoweredTrigger, i.e.
+/// TileEntity/StreamModeRead.FromClient (2). Untrusted input: every field is
+/// bounded by the declared payload length and a short body is an error.
+pub fn parsePoweredTriggerTeBody(body: []const u8) binary.ReadError!PoweredTriggerTe {
+    var r: binary.Reader = .{ .data = body };
+    var out: PoweredTriggerTe = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+
+    // TileEntity::write network mode: chunkPos only.
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    // TileEntityPowered: the leading i32 is a constant 1 on the wire, and the
+    // reader only uses it as "pitch/yaw follow" (asm.il:1322032 IL_0089).
+    const has_orientation = try pr.readI32();
+    out.is_player_placed = try pr.readBool();
+    out.power_item_type = try pr.readByte();
+    out.wire_total = try pr.readByte();
+    // A wire list must fit the payload: 12 bytes each, and the trailing
+    // parentPos still has to be there.
+    if (pr.remaining() < @as(usize, out.wire_total) * 12 + 12) return error.EndOfStream;
+    var i: usize = 0;
+    while (i < out.wire_total) : (i += 1) {
+        const v = try readVec3i(&pr);
+        if (i < out.wires.len) {
+            out.wires[i] = v;
+            out.wire_n = i + 1;
+        }
+    }
+    out.parent = try readVec3i(&pr);
+    // IsPowered is ToClient-only; FromClient goes straight to pitch/yaw.
+    if (has_orientation > 0) {
+        out.pitch = try pr.readF32();
+        out.yaw = try pr.readF32();
+    }
+    out.trigger_type = try pr.readByte();
+    if (out.trigger_type == trigger_type_motion) try skipPlatformUser(&pr);
+    if (out.trigger_type == trigger_type_timer_relay) {
+        out.property1 = try pr.readByte(); // StartTime
+        out.property2 = try pr.readByte(); // EndTime
+    } else if (out.trigger_type != trigger_type_switch) {
+        out.property1 = try pr.readByte(); // TriggerPowerDelay
+        out.property2 = try pr.readByte(); // TriggerPowerDuration
+        out.reset_trigger = try pr.readBool();
+    }
+    if (out.trigger_type == trigger_type_motion) out.target_type = try pr.readI32();
+    return out;
+}
+
+/// Build the authoritative S2C body for a powered trigger, i.e.
+/// TileEntity/StreamModeWrite.ToClient (2).
+pub fn buildPoweredTriggerTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    te_block_id: i32,
+    st: PoweredTriggerState,
+) ![]u8 {
+    var payload: [1024]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeI32(1); // TileEntityPowered writes this constant
+    try pw.writeBool(st.is_player_placed);
+    try pw.writeByte(st.power_item_type);
+    const wire_n = @min(st.wires.len, 255);
+    try pw.writeByte(@intCast(wire_n));
+    for (st.wires[0..wire_n]) |v| try writeVec3i(&pw, v);
+    try writeVec3i(&pw, st.parent);
+    try pw.writeBool(st.is_powered);
+    try pw.writeF32(st.pitch);
+    try pw.writeF32(st.yaw);
+    try pw.writeByte(st.trigger_type);
+    // Motion carries an ownerID; a null PlatformUserIdentifierAbs is one 0 byte.
+    if (st.trigger_type == trigger_type_motion) try pw.writeBool(false);
+    if (st.trigger_type == trigger_type_trip_wire) try pw.writeBool(st.tripwire_parent);
+    if (st.trigger_type != trigger_type_switch) {
+        try pw.writeByte(st.property1);
+        try pw.writeByte(st.property2);
+    }
+    if (st.trigger_type == trigger_type_motion) try pw.writeI32(st.target_type);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+/// Encode a C2S powered-trigger body (StreamModeWrite.ToServer = 1). Tests and the
+/// fuzz corpus need the client half of the exchange; the server never sends it.
+fn buildPoweredTriggerTeBodyToServer(
+    buf: []u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    te_block_id: i32,
+    te: PoweredTriggerTe,
+) ![]u8 {
+    var payload: [1024]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeI32(1);
+    try pw.writeBool(te.is_player_placed);
+    try pw.writeByte(te.power_item_type);
+    try pw.writeByte(@intCast(te.wire_n));
+    for (te.wires[0..te.wire_n]) |v| try writeVec3i(&pw, v);
+    try writeVec3i(&pw, te.parent);
+    try pw.writeF32(te.pitch);
+    try pw.writeF32(te.yaw);
+    try pw.writeByte(te.trigger_type);
+    if (te.trigger_type == trigger_type_motion) try pw.writeBool(false);
+    if (te.trigger_type != trigger_type_switch) {
+        try pw.writeByte(te.property1);
+        try pw.writeByte(te.property2);
+        try pw.writeBool(te.reset_trigger);
+    }
+    if (te.trigger_type == trigger_type_motion) try pw.writeI32(te.target_type);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, te.handle, world_x, world_y, world_z, te_block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+test "powered trigger C2S body roundtrips every stock trigger type" {
+    const types = [_]u8{ 0, 1, 2, 3, 4 };
+    for (types) |t| {
+        var buf: [512]u8 = undefined;
+        var src: PoweredTriggerTe = .{
+            .handle = 3,
+            .is_player_placed = true,
+            .power_item_type = 3,
+            .parent = .{ .x = 1, .y = 70, .z = 2 },
+            .pitch = 0.25,
+            .yaw = -1.5,
+            .trigger_type = t,
+            .property1 = 2,
+            .property2 = 5,
+            .reset_trigger = true,
+            .target_type = 9,
+        };
+        src.wires[0] = .{ .x = 4, .y = 71, .z = 5 };
+        src.wire_n = 1;
+        const body = try buildPoweredTriggerTeBodyToServer(&buf, 10, 70, -3, 19300, src);
+        const p = try parsePoweredTriggerTeBody(body);
+        try std.testing.expectEqual(@as(u8, 3), p.handle);
+        try std.testing.expectEqual(@as(i32, 10), p.world_x);
+        try std.testing.expectEqual(@as(i32, 19300), p.block_id);
+        try std.testing.expect(p.is_player_placed);
+        try std.testing.expectEqual(@as(u8, 3), p.power_item_type);
+        try std.testing.expectEqual(@as(usize, 1), p.wire_n);
+        try std.testing.expectEqual(@as(i32, 71), p.wires[0].y);
+        try std.testing.expectEqual(@as(i32, 70), p.parent.y);
+        try std.testing.expectApproxEqAbs(@as(f32, -1.5), p.yaw, 0.001);
+        try std.testing.expectEqual(t, p.trigger_type);
+        if (t == trigger_type_switch) {
+            // A Switch carries no delay/duration/reset tail at all.
+            try std.testing.expectEqual(@as(u8, 0), p.property1);
+            try std.testing.expect(!p.reset_trigger);
+        } else {
+            try std.testing.expectEqual(@as(u8, 2), p.property1);
+            try std.testing.expectEqual(@as(u8, 5), p.property2);
+            // TimerRelay reads StartTime/EndTime and stops: stock never reads its
+            // ResetTrigger byte back, so the trailing byte is simply left over.
+            try std.testing.expectEqual(t != trigger_type_timer_relay, p.reset_trigger);
+        }
+        const want_target: i32 = if (t == trigger_type_motion) 9 else 0;
+        try std.testing.expectEqual(want_target, p.target_type);
+    }
+}
+
+test "powered trigger S2C body carries IsPowered and the type tail" {
+    var buf: [512]u8 = undefined;
+    const wires = [_]Vec3i{.{ .x = 1, .y = 2, .z = 3 }};
+    const body = try buildPoweredTriggerTeBody(&buf, 255, 10, 70, -3, 19300, .{
+        .power_item_type = 3,
+        .wires = wires[0..],
+        .is_powered = true,
+        .trigger_type = trigger_type_trip_wire,
+        .property1 = 1,
+        .property2 = 4,
+        .tripwire_parent = true,
+        .target_type = 7,
+    });
+    // Outer header: handle u8 + Vector3i + blockId i32 + payloadLen i32 = 21 bytes.
+    try std.testing.expectEqual(@as(u8, 255), body[0]);
+    const pay_len = std.mem.readInt(i32, body[17..21], .little);
+    try std.testing.expectEqual(@as(usize, @intCast(pay_len)), body.len - 21);
+    // ToClient adds IsPowered before pitch/yaw and drops ResetTrigger, so it is
+    // one byte longer than the same trigger going the other way.
+    var c2s_buf: [512]u8 = undefined;
+    var src: PoweredTriggerTe = .{ .trigger_type = trigger_type_trip_wire, .property1 = 1, .property2 = 4 };
+    src.wires[0] = .{ .x = 1, .y = 2, .z = 3 };
+    src.wire_n = 1;
+    const c2s = try buildPoweredTriggerTeBodyToServer(&c2s_buf, 10, 70, -3, 19300, src);
+    try std.testing.expectEqual(c2s.len + 1, body.len);
+}
+
+test "powered trigger body rejects truncation and oversized wire counts" {
+    var buf: [512]u8 = undefined;
+    var src: PoweredTriggerTe = .{ .trigger_type = trigger_type_motion, .property1 = 1, .property2 = 2 };
+    src.wires[0] = .{ .x = 1, .y = 2, .z = 3 };
+    src.wire_n = 1;
+    const body = try buildPoweredTriggerTeBodyToServer(&buf, 0, 70, 0, 19300, src);
+    // Every prefix short of the full body must fail rather than parse garbage.
+    var cut: usize = 0;
+    while (cut < body.len) : (cut += 1) {
+        try std.testing.expectError(error.EndOfStream, parsePoweredTriggerTeBody(body[0..cut]));
+    }
+    // A wire count that cannot fit the remaining payload is rejected up front.
+    var oversized: [512]u8 = undefined;
+    @memcpy(oversized[0..body.len], body);
+    oversized[21 + 12 + 4 + 1 + 1] = 0xff; // wireCount byte
+    try std.testing.expectError(error.EndOfStream, parsePoweredTriggerTeBody(oversized[0..body.len]));
+}
