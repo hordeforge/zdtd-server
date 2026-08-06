@@ -1305,3 +1305,38 @@ test "navezgane spawn chunk carries its POI blocks" {
     }
     try std.testing.expect(non_air > 0);
 }
+
+test "navezgane heights agree with the blocks in the same column" {
+    // The client stood in mid air with no collider under it while the server
+    // held it several blocks above the terrain top, which is what a heights
+    // plane that disagrees with the painted blocks looks like.
+    const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    if (!io_fs.fileExistsSimple(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+
+    var w = try World.init(std.testing.allocator, "worlds/zdtd_height_test");
+    defer w.deinit();
+    try w.loadStockMapEx(map_dir, null);
+
+    // Sampled around the first authored spawn point, where the mismatch showed.
+    const spots = [_][2]i32{
+        .{ -270, 461 }, .{ -269, 459 }, .{ -273, 449 }, .{ -265, 455 }, .{ -280, 452 },
+    };
+    for (spots) |p2| {
+        const h = try w.heightWorld(p2[0], p2[1]);
+        const t2 = World.worldToChunk(p2[0], p2[1]);
+        const ch = try w.getOrCreate(t2.pos);
+        // Topmost non-air cell in the column: what a client collider rests on.
+        var top: i32 = -1;
+        var y: i32 = 255;
+        while (y >= 0) : (y -= 1) {
+            if (ch.blockAt(t2.lx, y, t2.lz) != 0) {
+                top = y;
+                break;
+            }
+        }
+        try std.testing.expect(top >= 0);
+        // heights is the surface the server stands entities on, so it must not
+        // float above the highest block it actually placed.
+        try std.testing.expect(@as(i32, h) <= top);
+    }
+}
