@@ -5157,6 +5157,11 @@ pub const Game = struct {
             const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
             try self.sendGame(peer, "NetPackageWorldInfo", wi);
             try self.sendWorldSpawnPoints(peer);
+            // Stock sends World.TraderAreas right after SpawnPoints and before
+            // GameStats (GameManager/<RequestToEnterGame>d__195 MoveNext,
+            // protocol.md step 12); the client builds the safe zones and the
+            // closing-time teleports from it.
+            try self.sendWorldAreas(peer);
             const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
             try self.sendGame(peer, "NetPackageWorldTime", wt);
             try self.sendGameStats(peer);
@@ -7095,6 +7100,51 @@ pub const Game = struct {
         }
         const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);
         try self.sendGame(peer, "NetPackageWorldSpawnPoints", body);
+    }
+
+    /// Build and send NetPackageWorldAreas from the trader POIs on the loaded
+    /// map (stock: World.TraderAreas, one TraderArea per TraderArea=True
+    /// prefab). Position = the decoration origin, size = the prefab size,
+    /// protect padding = TraderAreaProtect - 2 (GetProtectPadding), and the
+    /// teleport volumes from TeleportVolumeStart/Size (local cells).
+    fn sendWorldAreas(self: *Game, peer: *ln_peer.Peer) !void {
+        const pf = if (self.world.prefabs) |*p| p else return;
+        var areas: [8]packages.TraderAreaEntry = undefined;
+        var vols: [8][8]packages.TraderTeleport = undefined;
+        var n: usize = 0;
+        for (pf.items) |d| {
+            if (n >= areas.len) break;
+            if (world_store.prefabs.isPart(d.name)) continue;
+            const qd = pf.questData(d.name) orelse continue;
+            if (!qd.is_trader_area) continue;
+            var vn: usize = 0;
+            while (vn < qd.teleport_n and vn < vols[n].len) : (vn += 1) {
+                vols[n][vn] = .{
+                    .start_x = qd.teleport_start[vn][0],
+                    .start_y = qd.teleport_start[vn][1],
+                    .start_z = qd.teleport_start[vn][2],
+                    .size_x = qd.teleport_size[vn][0],
+                    .size_y = qd.teleport_size[vn][1],
+                    .size_z = qd.teleport_size[vn][2],
+                };
+            }
+            areas[n] = .{
+                .pos_x = d.x,
+                .pos_y = d.stampY(),
+                .pos_z = d.z,
+                .size_x = @intCast(d.size_x),
+                .size_y = @intCast(d.size_y),
+                .size_z = @intCast(d.size_z),
+                .pad_x = @intCast(qd.protect_padding[0] - 2),
+                .pad_y = qd.protect_padding[1],
+                .pad_z = @intCast(qd.protect_padding[2] - 2),
+                .teleports = vols[n][0..vn],
+            };
+            n += 1;
+        }
+        if (n == 0) return;
+        const body = try packages.buildWorldAreasBody(self.body_buf[0..2048], areas[0..n]);
+        try self.sendGame(peer, "NetPackageWorldAreas", body);
     }
 
     /// Send the full "blocks" NameIdMapping so the client assigns exactly the ids

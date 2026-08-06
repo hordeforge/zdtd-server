@@ -24,7 +24,21 @@ pub const QuestData = struct {
     trader_z: i32 = -1,
     /// ThemeTags trader identity ("traderBob" → npcTraderBob), "" when none.
     trader_tag: []const u8 = "",
+    /// Trader compound: true when the POI XML says TraderArea=True. The area's
+    /// wire shape (NetPackageWorldAreas / TraderArea.Write) needs the protect
+    /// padding and the teleport volumes below.
+    is_trader_area: bool = false,
+    /// `TraderAreaProtect` padding ("0,0,0"); the wire writes
+    /// (padding - 2) in x/z (TraderArea::GetProtectPadding).
+    protect_padding: [3]i8 = .{ 0, 0, 0 },
+    /// `TeleportVolumeStart` / `TeleportVolumeSize` #-lists, local prefab
+    /// cells (start s8, size u8 on the wire). Up to max_teleport_volumes.
+    teleport_start: [max_teleport_volumes][3]i8 = .{.{ 0, 0, 0 }} ** max_teleport_volumes,
+    teleport_size: [max_teleport_volumes][3]u8 = .{.{ 0, 0, 0 }} ** max_teleport_volumes,
+    teleport_n: u8 = 0,
 };
+
+pub const max_teleport_volumes: usize = 8;
 
 /// City parts (driveways, roads, sewer caps, ...) are the stock `part_*`
 /// naming: never quest POIs, skipped for painting and sleeper-volume budget,
@@ -49,6 +63,42 @@ fn traderCellOf(content: []const u8) ?[3]i32 {
     }
     if (n != 3) return null;
     return cell;
+}
+
+/// Parse "x, y, z" into a triple; null on malformed input.
+fn parseVec3i(v: []const u8) ?[3]i32 {
+    var out: [3]i32 = .{ 0, 0, 0 };
+    var it = std.mem.tokenizeScalar(u8, v, ',');
+    var n: usize = 0;
+    while (it.next()) |tok| : (n += 1) {
+        if (n >= 3) break;
+        out[n] = std.fmt.parseInt(i32, std.mem.trim(u8, tok, " "), 10) catch return null;
+    }
+    if (n != 3) return null;
+    return out;
+}
+
+/// Parse the `TeleportVolumeStart` / `TeleportVolumeSize` #-lists into the
+/// bounded arrays (stock trader POIs carry up to 6 volumes).
+fn parseVolumeLists(
+    starts: []const u8,
+    sizes: []const u8,
+    out_start: *[max_teleport_volumes][3]i8,
+    out_size: *[max_teleport_volumes][3]u8,
+    out_n: *u8,
+) void {
+    var s_it = std.mem.tokenizeScalar(u8, starts, '#');
+    var z_it = std.mem.tokenizeScalar(u8, sizes, '#');
+    var n: usize = 0;
+    while (s_it.next()) |s| : (n += 1) {
+        if (n >= max_teleport_volumes) break;
+        const z = z_it.next() orelse break;
+        const sp = parseVec3i(s) orelse continue;
+        const zp = parseVec3i(z) orelse continue;
+        out_start[n] = .{ @intCast(sp[0]), @intCast(sp[1]), @intCast(sp[2]) };
+        out_size[n] = .{ @intCast(zp[0]), @intCast(zp[1]), @intCast(zp[2]) };
+    }
+    out_n.* = @intCast(n);
 }
 
 /// Runtime block id for a stock block name (AssignIds space), null when the
@@ -296,6 +346,24 @@ pub const Index = struct {
                         qd.trader_tag = self.allocator.dupe(u8, v) catch "";
                     }
                 }
+                // Trader compound area (NetPackageWorldAreas): the protect
+                // padding and the teleport volumes the client needs to build
+                // the safe zone and the closing-time teleport.
+                if (xml_util.propertyValue(content, "TraderArea")) |v| {
+                    qd.is_trader_area = std.mem.eql(u8, v, "True");
+                }
+                if (xml_util.propertyValue(content, "TraderAreaProtect")) |v| {
+                    if (parseVec3i(v)) |p| {
+                        qd.protect_padding = .{ @intCast(p[0]), @intCast(p[1]), @intCast(p[2]) };
+                    }
+                }
+                parseVolumeLists(
+                    xml_util.propertyValue(content, "TeleportVolumeStart") orelse "",
+                    xml_util.propertyValue(content, "TeleportVolumeSize") orelse "",
+                    &qd.teleport_start,
+                    &qd.teleport_size,
+                    &qd.teleport_n,
+                );
             }
         }
         self.quest_cache.put(name, qd) catch {
@@ -868,8 +936,17 @@ test "trader POI data: cell and class tag from the stock install" {
     // Rotation maps the local cell to the world offset used at spawn.
     const r = tts.rotateLocalXZ(qd.trader_x, qd.trader_z, 60, 60, 2);
     try std.testing.expectEqual(@as(i32, 60 - 1 - 37), r.x);
+    // Trader compound area: TraderArea=True, protect padding and the six
+    // teleport volumes from the XML #-lists.
+    try std.testing.expect(qd.is_trader_area);
+    try std.testing.expectEqual(@as(i8, 0), qd.protect_padding[0]);
+    try std.testing.expectEqual(@as(u8, 6), qd.teleport_n);
+    try std.testing.expectEqual(@as(i8, 7), qd.teleport_start[0][0]);
+    try std.testing.expectEqual(@as(u8, 52), qd.teleport_size[0][0]);
+    try std.testing.expectEqual(@as(i8, 54), qd.teleport_start[5][0]);
     // A non-trader POI has no trader cell.
     const plain = idx.questData("part_5m_water_tower").?;
     try std.testing.expectEqual(@as(i32, -1), plain.trader_x);
     try std.testing.expect(plain.trader_tag.len == 0);
+    try std.testing.expect(!plain.is_trader_area);
 }

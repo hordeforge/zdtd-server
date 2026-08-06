@@ -136,7 +136,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
-| [Traders](#5-traders) | 8 | 10 | 8 | 26 | Per-trader stock, hours, wallet and POI placement land; TraderArea volumes and vending open |
+| [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
 | [POIs and prefabs](#7-pois-and-prefabs) | 12 | 14 | 6 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
@@ -935,12 +935,19 @@ parsed, and quest offering is unwired.
   (`TraderInfo.open_time`), `asm.il:862122-862230`,
   `asm.il:531811-531898`, `asm.il:531397-531420`, `asm.il:861688-861690`
 
-- **TraderArea replication (NetPackageWorldAreas)** `MISSING`
-  The package name is in the id table but there is no builder and no send site.
-  Without it the client has no protect bounds, no teleport volumes and no
-  IsClosed state: no safe zone, no zombie exclusion, no auto-teleport at closing.
-  *Anchors:* `src/wire/packages.zig:251`, `asm.il:847341-847513`,
-  `asm.il:1207080+`
+- **TraderArea replication (NetPackageWorldAreas)** `PARTIAL`
+  The body is built and sent in the join bundle right after SpawnPoints (stock
+  order): `byte cVersion=1`, `i16 count`, per area Position i32x3, PrefabSize
+  i16x3, GetProtectPadding s8x3, teleport volumes (u8 count + startPos s8x3 /
+  size u8x3) — layout extracted from the IL dump
+  (`NetPackageWorldAreas::write` IL=31, `TraderArea::Write` IL=111). Data comes
+  from the trader POIs' XML (`TraderAreaProtect`, `TeleportVolumeStart/Size`).
+  The client now has the safe-zone bounds and teleport volumes. Missing:
+  `IsClosed` state sync and the closing-time `SetClosed` force-unlock /
+  auto-teleport, which ride the TraderAreaStates updates, not this package.
+  *Anchors:* `src/wire/packages.zig` (`buildWorldAreasBody`),
+  `src/server/game.zig` (`sendWorldAreas`), `src/world/prefabs.zig`
+  (`QuestData.is_trader_area`), `../7dtd-research il dump` `TraderArea.il.txt:721`
 
 - **Vending machines** `MISSING`
   `te_types.trader = 2` is a named constant only; no vending TE is ever emitted
