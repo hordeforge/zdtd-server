@@ -92,6 +92,41 @@
 - The regression test fails against the pre-fix restore scan (verified by temporary revert: restore bails with `truncated inventory at record 1/2`).
 - Note: `scenario inventory move drop place equip` (scenarios.zig:1041, armor mitigation `>= 0.09`) fails in direct binary runs at HEAD with and without this pass's changes (passes under the build-runner seed); pre-existing at HEAD, in the scenarios/plugin area owned by the parallel agent's pass.
 
+### 2026-08-07 scope review (restock cadence / quest POI binding / tick cadences / loot fail-closed)
+
+| | |
+|---|---|
+| Date | 2026-08-07 |
+| Mode | Review only (no fixes applied) |
+| Scope | Commits `f35ada0` (per-trader restock cadence), `7d48944` (A22 block-id coverage guard test), `df7cf5a` (A31 loot fail-closed), `fe546fb` (B26 quest POI binding), `8014945` + `ac7aca2` (B13 tick cadences) |
+| Result | No P0/P1. Three P2 (all narrow). No hot-path allocations found |
+| Line numbers | Committed HEAD (`git show HEAD:<path>`), not the working tree, which carries a parallel agent's in-flight edits in `game.zig` and `zdtd_config.zig` |
+
+#### Verdicts
+
+| Location | Issue | Idiomatic fix | Sev |
+|---|---|---|---|
+| `src/ecs/systems.zig:563-569` | `questTickGoto` applies the new POI-center target (`gx/gz`) to `fetch_trader` phase-1 quests as well as POI-goto kinds. `s.poi` binds at accept for **every** kind (`poiAt(d.tx, d.tz)`, pre-existing), so a fetch_trader def whose position sits inside a prefab now bumps phase-1 only near that POI's center, which can be far from the trader NPC the client's `go_to_trader` marker points at. `sendQuestNavObjects` (`use_def_pos`) and PositionData (`goto_point` only) scope POI-center use correctly; this branch does not. No test covers fetch_trader with a bound poi (the phase-graph tests never wire `poi_fn`) | Gate `gx/gz` on `d.kind == .goto_point` in the phase-1 branch and keep `d.tx/d.tz` for `fetch_trader`; add a test with `w.poi_fn` wired that accepts a fetch_trader quest and completes phase 1 at the trader position | P2 |
+| `src/server/game.zig:10419-10421` | `tickWorkstations(0.5)` keeps the hardcoded 2 Hz dt while the gate cadence is now configurable: setting `sleeper_tick_ticks` away from 10 decouples burn rate from wall time (20 ticks × 0.5 s = 2x burn) | `dt = @as(f32, @floatFromInt(self.sleeper_tick_ticks)) * 0.05` (0.05 s per 20 TPS tick), keeping the default 10 → 0.5 unchanged | P2 |
+| `src/assets/maxdamage.zig:757-800` | A22 guard test hand-rolls line splitting + `startsWith` while `xml_util` already provides `stripComments` / `nextElement` / `attr`. The `startsWith(line, "<block name=")` prefix is attribute-order dependent (a row with another attribute first is silently skipped, weakening the guard), and the `<!--` check handles full-line comments only; a comment line containing `<block name=...>` could false-fail. Uses `io_fs.readFileAll` correctly (house abstraction, `SkipZigTest` on missing install) | Reuse `xml_util.stripComments` + `nextElement(..., "<block ", "</block>")` + `attr(body, "name")`, skipping rows where `attr(body, "shapes")` is present; matches the loader's own parser ("one obvious way") | P2 |
+| `src/ecs/systems.zig:731` | `day < stock.last_restock_day + @as(u32, @intCast(stock.reset_interval))`: u32 `+` wraps at absurd day values (Debug trap, ReleaseFast wraps silently). The `@intCast` itself is guarded by the `reset_interval > 0` check, so it is safe. Unreachable in practice (4.29e9 in-game days) | `if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) continue;` is overflow-free and reads as "days since last restock" | P3 |
+| `src/server/game.zig:1816-1847` | `nearestPoiAtWorld` is an O(n) scan over the whole prefab index (1559 instances in Navezgane) at every quest accept. Call sites verified: accept (`systems.zig:336`) and save-restore (`game.zig:2581`) only; `questTickGoto` and `sendQuestNavObjects` never call it, so it is off the per-tick/per-packet path. ~30-60 µs per accept, fine under the 50 ms budget. Degenerate edge: `World.nearestPoi` filters `r.valid()` after selection, so a zero-XZ nearest prefab would null the whole call instead of the next-best rect (theoretical: `boundsXZ` is always positive for real prefabs) | Acceptable as-is; a load-time grid bucket over POI centers is YAGNI until accept volume grows. Optional: skip degenerate rects inside the scan loop | P3 |
+| `src/server/zdtd_config.zig:381-395` | The three new zero-checks (`sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`) mirror the existing `motion_replicate_period_ticks` pattern exactly (0 → 1 with a log): consistent. Two gaps: no test zeroes the new keys, and `sanitizeInitOptions` runs only in `main` (`main.zig:606`), so a direct `InitOptions{... = 0}` into `Game.createWithOptions` reaches `% 0` on the tick path (pre-existing exposure shared by all period fields) | Add a zero-case assert for the new keys; optionally clamp/assert in `Game.createWithOptions` | P3 |
+| `src/server/game.zig:9404, 9432, 9493` | Fail-closed loot: `if (ll) |ll|` at the two fill sites vs `orelse return` in `maybeRespawnContainer`. Both keep `touched_day` untouched on the fail-closed path (it is set only inside `fillContainerFromLoot`), matching the scenario expectation | Consistent and correct as-is; `orelse return` is the cleaner of the two forms | - |
+| `src/server/scenarios.zig:2767-2788` | Loot-respawn scenario branches at runtime on whether the fixture block resolves a LootList (`has_loot_list`), so the fail-closed branch only runs in the builtin/offline environment and the refill branch only with stock data | Optional: a dedicated fixture block with no LootList to force the fail-closed branch deterministically | P3 |
+| `src/ecs/world.zig:391-399`, `src/ecs/components.zig:544-556` | `nearestPoi` hook mirrors `poiAt`; `///` docs state null semantics and field names match the `poi_ctx`/`poi_fn` pattern. `TraderStock.reset_interval`/`last_restock_day` carry interval semantics and ownership of the math in docs | Clean | - |
+| `src/server/game.zig:8652-8657` | `fillTraderFromXml` copies `ti.reset_interval` inside the `|ti|` branch (null-safe) and stamps `last_restock_day` at fill so a fresh window keeps its stock; comment explains the window | Clean | - |
+| `src/ecs/aidirector.zig:231, 267` | `traderRestock` runs on the day-roll guard inside `Director.tick` (not per tick), fixed-size entity scan, no alloc; the change only added the per-trader gate | Clean | - |
+
+#### Hot-path memory
+
+None found. Verified call sites: `questTickGoto` runs per accepted move packet but reads the pre-bound `s.poi` (float math only, no `nearestPoi`, no alloc); `sendQuestNavObjects` is join/death-rebundle only and encodes into `body_buf`; `nearestPoiAtWorld` is accept-time and save-restore only; `lootListFor` is a read-only HashMap get on the by-id fast path (pre-existing cost on the chunk-stream container fill in `sendContainersInChunk`); `traderRestock` runs on day roll only.
+
+#### Comptime / inline / anytype / I/O
+
+- No new comptime, `inline`, or `anytype` surface in the reviewed commits.
+- The A22 test reads via `io_fs.readFileAll`; no new raw FS or syscalls anywhere in scope. Test-only hardcodes (Steam path, `no_id` names) match the sibling `loadFromBlocksXml` tests' pattern (`SkipZigTest` on missing install).
+
 ## Summary counts
 
 | Sev | Found | Fixed this pass | Remaining |
