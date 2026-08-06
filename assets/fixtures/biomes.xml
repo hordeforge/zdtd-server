@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Minimal offline fixture for biome_layers loading (weather storm SM tests).
+  One biomemap id (pine_forest) with a layer stack plus the five weather groups
+  the storm machine cycles (default / rainheavy / stormbuild / storm / bloodMoon).
+  Block names resolve through the loaded assignids dump; a name that does not
+  resolve is skipped, which is what keeps the layer stack non-empty here.
+-->
+<biomes>
+  <biomemap id="1" name="pine_forest"/>
+  <biome name="pine_forest">
+    <layers>
+      <layer depth="1" blockname="terrForestGround"/>
+      <layer depth="3" blockname="terrDirt"/>
+      <layer depth="0" blockname="terrStone"/>
+      <layer depth="3" blockname="terrBedrock"/>
+    </layers>
+    <weather>
+      <weather name="default" prob="80" duration="6"><Wind range="3,22"/></weather>
+      <weather name="rainheavy" prob="20" duration="2"><Wind range="30,35"/></weather>
+      <weather name="stormbuild" prob="0" duration="0.2"><Wind range="25,25"/></weather>
+      <weather name="storm" prob="0" duration="1.1" delay="26,36"><Wind range="40,40"/></weather>
+      <weather name="bloodMoon" prob="0"><Wind range="15,20"/></weather>
+    </weather>
+  </biome>
+</biomes>

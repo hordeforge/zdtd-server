@@ -4233,8 +4233,10 @@ is on main and gated; what follows "Open:" is the honest remainder.
    "Received mapping data for: blocks", then "Block IDs with mapping" and a sane
    block-id total), and the one-shot join burst is still the only deco window.
 2. **Weather storm / bloodMoon group state machine** SHIPPED
-   (`src/world/weather.zig`). Open: persist storm state across restart (stock
-   `WeatherManager::Save`/`Load`), and `ForceWeather` / `SetStorm` admin commands.
+   (`src/world/weather.zig`). Storm state is persisted (`weather.zwt`, ZWTH1)
+   and restored across restart; stock `WeatherManager::Save`/`Load` was not
+   mirrored (own format, same fields). Open: `ForceWeather` / `SetStorm` admin
+   commands.
 3. **Path A\*** SHIPPED: grid A* over a body-aware step predicate (step-up, drop
    and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
    gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,

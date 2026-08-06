@@ -1233,6 +1233,7 @@ pub const Game = struct {
                     .storm_frequency = @as(f32, @floatFromInt(gs_defaults.storm_freq)) / 100.0,
                     .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
                 });
+                self.restoreWeather();
                 const burnt = bl.stackFor(9);
                 std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
                     bl.default_stack.n,
@@ -2017,6 +2018,7 @@ pub const Game = struct {
         self.sampleFlushCounters();
         self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
+        self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
         self.land_claims_n = 0;
         self.plugins.shutdown();
         self.wasm_plugins.shutdown();
@@ -3216,6 +3218,10 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save block meta", e);
                 };
+                self.saveWeather() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save weather", e);
+                };
                 self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
             },
             .kick => |k| {
@@ -3579,6 +3585,10 @@ pub const Game = struct {
                 self.saveBlockMeta() catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save block meta", e);
+                };
+                self.saveWeather() catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save weather", e);
                 };
                 self.savePlayers() catch |e| {
                     save_failed = true;
@@ -4213,6 +4223,34 @@ pub const Game = struct {
             self.block_raw_key[i] = self.block_raw_key[self.block_raw_n];
             self.block_raw[i] = self.block_raw[self.block_raw_n];
             return;
+        }
+    }
+
+    /// Persist the storm state machine so a restart resumes the storm cycle
+    /// instead of re-rolling the opening groups. File: `weather.zwt` (ZWTH1).
+    /// Saved on the periodic save path and at deinit; restored right after
+    /// initFrom in initWithOptions.
+    fn saveWeather(self: *const Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir});
+        var buf: [1024]u8 = undefined;
+        const enc = try self.world.weather.encode(&buf);
+        try io_fs.writeFile(self.allocator, p, enc);
+    }
+
+    /// Restore `weather.zwt` over the freshly seeded manager. A missing file is
+    /// a fresh world (keep the roll); a corrupt or table-mismatched file is
+    /// dropped with a log line (fail closed, weather.zig decode never half-applies).
+    fn restoreWeather(self: *Game) void {
+        var path: [512]u8 = undefined;
+        const p = std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir}) catch return;
+        if (!io_fs.fileExistsSimple(p)) return;
+        var buf: [1024]u8 = undefined;
+        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch return;
+        if (self.world.weather.decode(bytes, &self.world.biome_layers_table)) {
+            std.debug.print("zdtd: weather state restored ({d} biomes)\n", .{self.world.weather.n});
+        } else {
+            std.debug.print("zdtd: weather.zwt unreadable or mismatched; keeping fresh roll\n", .{});
         }
     }
 
@@ -9613,6 +9651,7 @@ pub const Game = struct {
             }
             self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
+            self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
             if (self.players_dirty) {
                 self.players_dirty = false;
                 self.savePlayers() catch |e| logPersistErr(self, "save players", e);

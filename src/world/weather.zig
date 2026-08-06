@@ -281,6 +281,101 @@ pub const Manager = struct {
     fn randomFloat(self: *Manager) f32 {
         return @as(f32, @floatFromInt(self.rand.next() >> 8)) / @as(f32, 1 << 24);
     }
+
+    /// Persistence (world `weather.zwt`): encode the live per-biome states plus the
+    /// schedule-relevant manager fields so a restart resumes the storm cycle instead
+    /// of re-rolling the opening groups. Layout is fixed and little-endian:
+    ///
+    ///   "ZWTH1"                      4 bytes
+    ///   u8 n                         1
+    ///   per state in slot order      49 bytes each:
+    ///     u8 biome_id, u8 group_index, u8 remaining_seconds, u8 storm_state,
+    ///     u8 has_storm, i64 storm_world_time, i64 storm_duration,
+    ///     i64 next_rand_world_time, 5 x f32 params
+    ///   u32 rand_state               4
+    ///   i64 last_update_world_time   8
+    ///   u8 blood_moon_forced         1
+    ///
+    /// Decode validates against the same biome table that seeded the manager and
+    /// fails closed (manager untouched) on any corrupt or out-of-range field, so a
+    /// hand-edited or truncated file can never desync the client.
+    pub fn encode(self: *const Manager, buf: []u8) ![]const u8 {
+        const need = save_header_bytes + save_state_bytes * @as(usize, self.n);
+        if (buf.len < need) return error.BufferTooSmall;
+        var o: usize = 0;
+        @memcpy(buf[0..save_magic_len], save_magic);
+        o = save_magic_len;
+        buf[o] = self.n;
+        o += 1;
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const st = &self.states[i];
+            buf[o] = st.biome_id;
+            buf[o + 1] = st.group_index;
+            buf[o + 2] = st.remaining_seconds;
+            buf[o + 3] = st.storm_state;
+            buf[o + 4] = if (st.storm_world_time != null) 1 else 0;
+            std.mem.writeInt(i64, buf[o + 5 ..][0..8], st.storm_world_time orelse 0, .little);
+            std.mem.writeInt(i64, buf[o + 13 ..][0..8], st.storm_duration, .little);
+            std.mem.writeInt(i64, buf[o + 21 ..][0..8], st.next_rand_world_time, .little);
+            var p: usize = 0;
+            while (p < 5) : (p += 1) {
+                std.mem.writeInt(u32, buf[o + 29 + p * 4 ..][0..4], @as(u32, @bitCast(st.params[p])), .little);
+            }
+            o += save_state_bytes;
+        }
+        std.mem.writeInt(u32, buf[o..][0..4], self.rand.state, .little);
+        std.mem.writeInt(i64, buf[o + 4 ..][0..8], self.last_update_world_time, .little);
+        buf[o + 12] = if (self.blood_moon_forced) 1 else 0;
+        return buf[0 .. o + 13];
+    }
+
+    /// Restore a previously encoded state. `table` must be the same effective
+    /// biomes.xml the manager was seeded from (slot is a document ordinal). Returns
+    /// false and leaves the manager untouched when the file is truncated, has the
+    /// wrong magic, or any field is out of range for the table.
+    pub fn decode(self: *Manager, bytes: []const u8, table: *const biome_layers.Table) bool {
+        if (bytes.len < save_header_bytes) return false;
+        if (!std.mem.eql(u8, bytes[0..save_magic_len], save_magic)) return false;
+        const n: usize = bytes[save_magic_len];
+        if (n > max_biomes or n > table.weather_n) return false;
+        const need = save_header_bytes + save_state_bytes * n;
+        if (bytes.len < need) return false;
+
+        var out: [max_biomes]BiomeState = [_]BiomeState{.{}} ** max_biomes;
+        var o: usize = save_magic_len + 1;
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            var st: BiomeState = .{};
+            st.biome_id = bytes[o];
+            st.group_index = bytes[o + 1];
+            st.remaining_seconds = bytes[o + 2];
+            st.storm_state = bytes[o + 3];
+            if (st.storm_state > 2) return false;
+            const has_storm = bytes[o + 4] != 0;
+            st.storm_world_time = if (has_storm) std.mem.readInt(i64, bytes[o + 5 ..][0..8], .little) else null;
+            st.storm_duration = std.mem.readInt(i64, bytes[o + 13 ..][0..8], .little);
+            st.next_rand_world_time = std.mem.readInt(i64, bytes[o + 21 ..][0..8], .little);
+            var p: usize = 0;
+            while (p < 5) : (p += 1) {
+                st.params[p] = @bitCast(std.mem.readInt(u32, bytes[o + 29 + p * 4 ..][0..4], .little));
+                if (!std.math.isFinite(st.params[p])) return false;
+            }
+            // The biome must still be a weather biome at this slot with this id.
+            if (i >= table.weather_n) return false;
+            if (table.weather_ids[i] != st.biome_id) return false;
+            if (st.group_index >= table.weather_groups[i].n) return false;
+            st.slot = @intCast(i);
+            out[i] = st;
+            o += save_state_bytes;
+        }
+        self.states = out;
+        self.n = @intCast(n);
+        self.rand.state = std.mem.readInt(u32, bytes[o..][0..4], .little);
+        self.last_update_world_time = std.mem.readInt(i64, bytes[o + 4 ..][0..8], .little);
+        self.blood_moon_forced = bytes[o + 12] != 0;
+        return true;
+    }
 };
 
 /// Tick count from a computed float, saturating so a modded duration or a tiny
@@ -289,6 +384,11 @@ fn clampTicks(v: f32) i64 {
     if (!std.math.isFinite(v)) return 0;
     return @intFromFloat(std.math.clamp(v, -2.0e9, 2.0e9));
 }
+
+pub const save_magic = "ZWTH1";
+pub const save_magic_len = save_magic.len;
+pub const save_state_bytes = 49;
+const save_header_bytes: usize = save_magic_len + 1 + 4 + 8 + 1;
 
 /// 60 / DayNightLength scaling (BiomeWeather::ServerTimeUpdate IL_004d).
 fn scaleTicks(ticks: i64, time_scale: f32) i64 {
@@ -452,4 +552,92 @@ test "empty table leaves the manager inert" {
     try std.testing.expectEqual(@as(u8, 0), m.n);
     m.tick(&t, 5000, true);
     try std.testing.expectEqual(@as(u8, 0), m.n);
+}
+
+test "weather encode/decode round trips a storming state" {
+    const t = testTable();
+    var m: Manager = .{};
+    m.initFrom(&t, .{ .seed = 7 });
+    // Push one biome into an active storm so the restore must carry it.
+    m.states[0].storm_state = 2;
+    m.states[0].group_index = t.weather_groups[0].findIndex("storm").?;
+    m.states[0].storm_world_time = 1_000;
+    m.states[0].storm_duration = 30_000;
+    m.states[0].remaining_seconds = 12;
+    m.states[0].params = .{ 61.5, 100, 40, 10, 0.5 };
+    m.last_update_world_time = 900;
+
+    var buf: [1024]u8 = undefined;
+    const enc = try m.encode(&buf);
+
+    var restored: Manager = .{};
+    try std.testing.expect(restored.decode(enc, &t));
+    try std.testing.expectEqual(m.n, restored.n);
+    try std.testing.expectEqual(m.rand.state, restored.rand.state);
+    try std.testing.expectEqual(m.last_update_world_time, restored.last_update_world_time);
+    try std.testing.expectEqual(m.blood_moon_forced, restored.blood_moon_forced);
+    const a = &m.states[0];
+    const b = &restored.states[0];
+    try std.testing.expectEqual(a.biome_id, b.biome_id);
+    try std.testing.expectEqual(a.group_index, b.group_index);
+    try std.testing.expectEqual(a.remaining_seconds, b.remaining_seconds);
+    try std.testing.expectEqual(a.storm_state, b.storm_state);
+    try std.testing.expectEqual(a.storm_world_time, b.storm_world_time);
+    try std.testing.expectEqual(a.storm_duration, b.storm_duration);
+    try std.testing.expectEqual(a.next_rand_world_time, b.next_rand_world_time);
+    try std.testing.expectApproxEqAbs(a.params[0], b.params[0], 0.001);
+    try std.testing.expectApproxEqAbs(a.params[4], b.params[4], 0.001);
+
+    // A restored manager replays the same schedule as the original: same rng
+    // state means the next group rolls and storm gaps are identical.
+    var wt: i64 = 5_000;
+    while (wt <= 40_000) : (wt += 1_000) {
+        m.tick(&t, wt, false);
+        restored.tick(&t, wt, false);
+        try std.testing.expectEqual(m.states[0].group_index, restored.states[0].group_index);
+        try std.testing.expectEqual(m.states[0].storm_state, restored.states[0].storm_state);
+        try std.testing.expectEqual(m.states[0].storm_world_time, restored.states[0].storm_world_time);
+    }
+}
+
+test "weather decode rejects corrupt and mismatched files" {
+    const t = testTable();
+    var m: Manager = .{};
+    m.initFrom(&t, .{ .seed = 7 });
+    var buf: [1024]u8 = undefined;
+    const enc = try m.encode(&buf);
+
+    // Truncated payload.
+    try std.testing.expect(!m.decode(enc[0 .. enc.len - 1], &t));
+    // Wrong magic.
+    var bad_magic: [64]u8 = undefined;
+    @memcpy(bad_magic[0..4], "XXXX");
+    try std.testing.expect(!m.decode(bad_magic[0..save_header_bytes], &t));
+    // biome_id not matching the table slot.
+    const enc_copy = try std.testing.allocator.dupe(u8, enc);
+    defer std.testing.allocator.free(enc_copy);
+    enc_copy[save_magic_len + 1] = 200; // first biome_id out of the table
+    try std.testing.expect(!m.decode(enc_copy, &t));
+    // storm_state out of range (0..2).
+    const enc2 = try m.encode(&buf);
+    var mut = try std.testing.allocator.dupe(u8, enc2);
+    defer std.testing.allocator.free(mut);
+    mut[save_magic_len + 1 + 3] = 9;
+    try std.testing.expect(!m.decode(mut, &t));
+    // A failed decode leaves the manager untouched.
+    const n_before = m.n;
+    try std.testing.expect(!m.decode(mut, &t));
+    try std.testing.expectEqual(n_before, m.n);
+}
+
+test "weather disabled storms survive a round trip" {
+    const t = testTable();
+    var m: Manager = .{};
+    m.initFrom(&t, .{ .seed = 3, .storm_frequency = 0 });
+    try std.testing.expect(m.states[0].storm_world_time == null);
+    var buf: [1024]u8 = undefined;
+    const enc = try m.encode(&buf);
+    var restored: Manager = .{};
+    try std.testing.expect(restored.decode(enc, &t));
+    try std.testing.expect(restored.states[0].storm_world_time == null);
 }

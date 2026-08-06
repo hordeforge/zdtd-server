@@ -11,6 +11,7 @@ const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
 const io_fs = @import("../util/io_fs.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
 const platform_user = @import("../wire/platform_user.zig");
 const ally_mod = @import("ally.zig");
@@ -2485,4 +2486,59 @@ test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel
         "PASS wasm-plugins: modules=2 disabled=1 zombies {d}->{d} ticks={d}\n",
         .{ z_before, z_after, g.tick_n },
     );
+}
+
+test "scenario weather storm state survives a restart" {
+    // Storm SM persistence (TODO residual): force biome 0 into an active storm,
+    // deinit saves weather.zwt, and a fresh Game in the same world resumes the
+    // storm instead of re-rolling the opening groups.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    // Cycle 1: push biome 0 into an active storm; deinit persists it.
+    // config_dir points at the offline biomes.xml fixture so the table has
+    // weather groups (the flat builtin table has none).
+    {
+        const g = try game_mod.Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
+            .config_dir = "assets/fixtures",
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expect(g.world.weather.n >= 1);
+        const set = world_weather.Manager.groupsFor(&g.world.biome_layers_table, &g.world.weather.states[0]);
+        const storm_idx = set.findIndex("storm") orelse return error.TestUnexpectedResult;
+        g.world.weather.states[0].storm_state = 2;
+        g.world.weather.states[0].group_index = @intCast(storm_idx);
+        g.world.weather.states[0].storm_world_time = 1_000;
+        g.world.weather.states[0].storm_duration = 40_000;
+        g.world.weather.states[0].remaining_seconds = 7;
+        g.world.weather.states[0].params[0] = 55.25;
+    }
+
+    // Cycle 2: the restored manager carries the storm, not a fresh roll.
+    {
+        const g2 = try game_mod.Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
+            .config_dir = "assets/fixtures",
+        });
+        defer {
+            g2.deinit();
+            std.testing.allocator.destroy(g2);
+        }
+        try std.testing.expectEqual(g2.world.weather.states[0].storm_state, @as(u8, 2));
+        try std.testing.expectEqual(g2.world.weather.states[0].remaining_seconds, @as(u8, 7));
+        try std.testing.expectEqual(g2.world.weather.states[0].storm_world_time, @as(?i64, 1_000));
+        try std.testing.expectApproxEqAbs(@as(f32, 55.25), g2.world.weather.states[0].params[0], 0.001);
+        // The schedule keeps running from the restored state: after 30 ticks the
+        // same storm is still up (storm_world_time 1000 is past due, so the
+        // manager re-enters the storm branch, not a fresh random group).
+        var t: u64 = 0;
+        while (t < 30) : (t += 1) try g2.step();
+        try std.testing.expectEqual(g2.world.weather.states[0].storm_state, @as(u8, 2));
+        try std.testing.expect(g2.world.weather.states[0].group_index < g2.world.biome_layers_table.weather_groups[0].n);
+    }
+    std.debug.print("PASS weather-restart: storm state restored across restart\n", .{});
 }

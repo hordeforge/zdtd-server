@@ -266,7 +266,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 |---|---|---|
 | P1 | Deco trees | Blocked on DecoManager.Read NRE RE; empty firstPackage only until object wire matches V3.1.0 |
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
-| P2 | Weather storm SM | Shipped (`world/weather.zig`): stormbuild → storm → reschedule per biome, random group rolls, blood-moon override. Not persisted across restart |
+| P2 | Weather storm SM | Shipped (`world/weather.zig`): stormbuild → storm → reschedule per biome, random group rolls, blood-moon override; state persisted (`weather.zwt`) and restored across restart |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |

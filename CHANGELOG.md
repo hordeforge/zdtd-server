@@ -49,6 +49,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   command reports the policy state, and `guardclear <slot>` releases a peer.
   See `docs/AUTHORITY.md`.
 - An experimental, statically linked native plugin host skeleton is included.
+- Weather and storm state now survives a server restart: the per-biome storm
+  machine (`weather.zwt`) resumes the storm cycle instead of re-rolling the
+  opening weather groups.
   The in-tree `sample_hello` plugin is enabled by default and can be disabled
   with the gamemode `enable_sample_plugin` setting. Out-of-tree packaging and
   a stable dynamic ABI are not supported yet. See `docs/PLUGIN_API.md`.

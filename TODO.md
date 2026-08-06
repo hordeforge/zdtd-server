@@ -66,6 +66,10 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       looping module within one tick; queued `SimCommand`s land in the sim.
       C-built fixtures prove a non-Zig module end to end (hello queues spawns
       that the sim applies; looper cut off by `OutOfFuel`).
+- [x] **Storm persistence**: `weather.zwt` (ZWTH1) saves the per-biome storm
+      machine (group index, storm state, schedule fields, rng state); restored
+      right after the fresh seed at init, saved on the periodic save path, admin
+      save and deinit. Fail-closed decode keeps the fresh roll on corrupt input.
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.
@@ -127,10 +131,13 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Residual non-demo (still open)
 
-- [ ] Weather/storm SM state not persisted: on restart each biome resets to its
-      default weather group instead of resuming the storm cycle
-      (`world/weather.zig`; GAP §11 storm rows WORKS, STATUS residual). Small:
-      save per-biome group index + remaining seconds with the world store.
+- [x] ~~Weather/storm SM state not persisted: on restart each biome resets to its
+      default weather group instead of resuming the storm cycle~~ **Shipped
+      2026-08-06**: `world/weather.zig` encode/decode (`weather.zwt`, ZWTH1)
+      saves per-biome group index, storm state and schedule fields; restored
+      right after the fresh seed in `initWithOptions`, saved on the periodic
+      save path, admin save and deinit. Fail-closed decode (table-matched,
+      bounds-checked) so a corrupt file keeps the fresh roll.
 - [ ] GameStats.BloodMoonDay not re-sent on day roll: a client connected past
       its first blood moon keeps a stale value (GAP §6, PARTIAL row).
 
