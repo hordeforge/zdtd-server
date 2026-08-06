@@ -7,6 +7,7 @@ const apm = @import("../apm/root.zig");
 const clock = @import("../util/clock.zig");
 const ln_server = @import("../litenet/server.zig");
 const ln_peer = @import("../litenet/peer.zig");
+const ln_packet = @import("../litenet/packet.zig");
 const wire_frame = @import("../wire/frame.zig");
 const wire_binary = @import("../wire/binary.zig");
 const packages = @import("../wire/packages.zig");
@@ -3825,6 +3826,25 @@ pub const Game = struct {
     /// or the next stream tick resends). Everything else is join/state-critical:
     /// dropping e.g. SignDataResponse leaves the client stuck on "Starting Game"
     /// (worldInfoCo blocks until isLastBatch=true).
+    /// Stock EntityPlayer/NetConnectionAbs `get_ReliableDelivery` overrides
+    /// (asm.il 816202-816208, 793041-793050): these five S2C packages ride the
+    /// Unreliable delivery method, not the 64-slot reliable window. Routing
+    /// them off the window is what keeps 20 Hz motion spam from competing with
+    /// chunks and join-critical control traffic for ACK slots.
+    fn isUnreliablePackage(pkg_name: []const u8) bool {
+        const names = [_][]const u8{
+            "NetPackageEntityPosAndRot",
+            "NetPackageEntityRelPosAndRot",
+            "NetPackageEntityRotation",
+            "NetPackageEntitySpeeds",
+            "NetPackageEntityStatsBuff",
+        };
+        for (names) |n| {
+            if (std.mem.eql(u8, pkg_name, n)) return true;
+        }
+        return false;
+    }
+
     fn isDroppablePackage(pkg_name: []const u8) bool {
         // NOT droppable: NetPackageDecoUpdate. DecoManager.Read only allocates
         // loadedDecos on firstPackage=true; dropping that one NREs every
@@ -3863,6 +3883,20 @@ pub const Game = struct {
         // inferred error-set cycles with onData).
         // Streaming: ~8ms budget then soft-drop. Critical: keep pumping ACKs up
         // to ~120ms; one long send beats a client wedged on "Starting Game".
+        // Motion packages (stock get_ReliableDelivery=false) never enter the
+        // window: send unreliable, falling back to reliable only if the frame
+        // exceeds the single-datagram cap (does not happen for the five).
+        if (isUnreliablePackage(pkg_name)) {
+            if (framed.len <= ln_packet.max_single_user) {
+                peer.sendUnreliable(&self.net.sock, framed) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    return err;
+                };
+                self.harness.counters.add(.net_packets_out, 1);
+                self.harness.counters.add(.net_bytes_out, framed.len);
+                return;
+            }
+        }
         const droppable = isDroppablePackage(pkg_name);
         // Chunks are large multi-fragment; allow longer window drain than chat/etc.
         const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
@@ -9033,6 +9067,23 @@ pub const Game = struct {
 
     /// Fan-out already-framed user payload to one peer (no re-encode). Soft-drops
     /// WindowFull the same way as droppable streaming packages.
+    /// Unreliable fan-out for the motion frames (PosAndRot / Speeds): fire and
+    /// forget, never touches the reliable window. Oversized or failed sends are
+    /// dropped (motion is replaced by the next tick's frame anyway).
+    fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
+        if (framed.len > ln_packet.max_single_user) {
+            // Oversized motion frame: fall back to the droppable reliable path
+            // rather than silently dropping something the client waits for.
+            self.sendFramedDroppable(peer, framed);
+            return;
+        }
+        peer.sendUnreliable(&self.net.sock, framed) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
+        self.harness.counters.add(.net_packets_out, 1);
+        self.harness.counters.add(.net_bytes_out, framed.len);
+    }
+
     fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
         const max_attempts: u32 = 64;
         var attempts: u32 = 0;
@@ -9139,17 +9190,26 @@ pub const Game = struct {
             const p = c.peer orelse continue;
             if (!c.joined) continue;
             if (except_slot) |ex| if (c.slot == ex) continue;
-            p.sendReliable(&self.net.sock, framed) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                const n = self.harness.counters.get(.net_send_errors);
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
-                        .{ name, p.local_id, n, @errorName(err) },
-                    );
-                }
-                continue;
-            };
+            if (isUnreliablePackage(name) and framed.len <= ln_packet.max_single_user) {
+                // Motion relay (stock get_ReliableDelivery=false): fire and
+                // forget; a dropped frame is replaced by the next tick.
+                p.sendUnreliable(&self.net.sock, framed) catch {
+                    self.harness.counters.inc(.net_send_errors);
+                    continue;
+                };
+            } else {
+                p.sendReliable(&self.net.sock, framed) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    const n = self.harness.counters.get(.net_send_errors);
+                    if (n == 1 or n % 100 == 0) {
+                        std.debug.print(
+                            "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
+                            .{ name, p.local_id, n, @errorName(err) },
+                        );
+                    }
+                    continue;
+                };
+            }
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
@@ -9601,8 +9661,8 @@ pub const Game = struct {
             while (m != 0) : (m &= m - 1) {
                 const ci = @ctz(m);
                 const peer = self.clients[ci].peer orelse continue;
-                self.sendFramedDroppable(peer, pos_framed);
-                if (speeds_framed) |sf| self.sendFramedDroppable(peer, sf);
+                self.sendFramedUnreliable(peer, pos_framed);
+                if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
                 if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
                 self.harness.counters.add(.replicate_fanouts, per_viewer);
             }

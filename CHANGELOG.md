@@ -55,6 +55,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - The scheduled blood-moon day is re-sent to connected clients when it rolls,
   so a client that joined mid-cycle no longer keeps a stale red-moon HUD day
   after its first horde.
+- Quest rewards are real: the journal writes the actual reward ItemStacks
+  (stock item ids and counts) instead of empty stacks, and turning a quest in
+  grants the items into the inventory, the exp into the level ledger, and the
+  wallet dukes on top of the existing coin credit.
   The in-tree `sample_hello` plugin is enabled by default and can be disabled
   with the gamemode `enable_sample_plugin` setting. Out-of-tree packaging and
   a stable dynamic ABI are not supported yet. See `docs/PLUGIN_API.md`.
@@ -113,6 +117,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   within the 3 s sweep instead of holding the tick, and the block-IdMapping
   WindowFull drops seen under loadgen reconnect floods no longer stall the
   server.
+- Per-package delivery method: the five S2C motion packages (EntityPosAndRot,
+  EntityRelPosAndRot, EntityRotation, EntitySpeeds, EntityStatsBuff) that stock
+  sends with `get_ReliableDelivery=false` now ride `Peer.sendUnreliable` from
+  `sendGame`, `broadcastExcept` and the replicate fan-out, so 20 Hz position
+  spam no longer occupies or retransmits inside the 64-slot reliable window
+  shared with chunks and join-critical control traffic.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.

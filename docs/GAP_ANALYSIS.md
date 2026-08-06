@@ -143,8 +143,8 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 10 | 15 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **100** | **150** | **95** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 12 | 29 | 11 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **101** | **150** | **94** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -487,11 +487,14 @@ because the per-objective Write shapes are wrong.
 - **Rewards: counting and per-reward wire shape flags** `PARTIAL`
   The count and shape are right (LootItem 498, Item 132, Exp 85, Quest 6,
   ShowMessageWindow 4, SkillPoints 1, Skill 1; only Item/LootItem carry an
-  ItemStack). The **content** is missing: `reward_coin` is invented as
-  `max(10, sum(Exp)/20)` rather than the actual `casinoCoin` reward, every
-  ItemStack is written empty, and LootItem groups, ischosen/isfixed selection and
-  RewardQuest chaining are unmodelled. Turning a quest in pays a made-up number
-  and hands over nothing.
+  ItemStack). `reward_coin` is the sum of the actual `casinoCoin` Item rewards
+  (no invented formula). 2026-08-06: the journal now writes **real ItemStacks**
+  (stock item name resolved through the negotiated items table; unknown names
+  keep the stock Empty stack) and turning in pays the rewards out: the wallet
+  coins in the sim, Item/LootItem stacks into the player inventory and Exp into
+  the xp ledger via a tick-end drain of the completed-quest ring (scenario
+  `quest-rewards`). Still open: LootItem group weights, ischosen/isfixed
+  selection and RewardQuest chaining.
   *Anchors:* `src/assets/quests.zig:364`, `:307`, `src/server/game.zig:6350`,
   `:6356`
 
@@ -2830,7 +2833,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**11 WORKS · 29 PARTIAL · 12 MISSING**
+**12 WORKS · 29 PARTIAL · 11 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3049,14 +3052,18 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/litenet/packet.zig:24-25`, `:236-249`,
   `src/litenet/peer.zig:436-469`, `:551-565`, `asm.il:854255-854262`
 
-- **Per-package delivery method (unreliable motion)** `MISSING`
+- **Per-package delivery method (unreliable motion)** `WORKS` `(2026-08-07)`
   Stock overrides `get_ReliableDelivery` to false for exactly five packages:
   EntityPosAndRot, EntityRelPosAndRot, EntityRotation, EntitySpeeds,
   EntityStatsBuff, and `NetConnectionAbs` passes that flag to SendData, which
-  selects DeliveryMethod.Unreliable(4). zdtd sends every S2C package through
-  `sendGame` to `Peer.sendReliable`; `sendUnreliable` and `sendSequenced` exist with
-  zero callers. 20 Hz position spam occupies and retransmits inside the same
-  64-slot window as chunks and control packages.
+  selects DeliveryMethod.Unreliable(4). `sendGame` and `broadcastExcept` now
+  route those five names through `Peer.sendUnreliable` (single-datagram fire
+  and forget; oversized frames fall back to the reliable path), and the
+  replicate fan-out sends the PosAndRot/Speeds frames via
+  `sendFramedUnreliable`. 20 Hz motion no longer occupies or retransmits
+  inside the 64-slot reliable window shared with chunks and join-critical
+  control traffic. Residual: `sendSequenced` still has no callers; the C2S
+  RelPos path is not relayed (peers learn positions from the sim replicate).
   *Anchors:* `src/server/game.zig:2976-3040`, `src/litenet/peer.zig:197-215`,
   `asm.il:816202-816208`, `asm.il:793041-793050`
 
