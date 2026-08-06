@@ -1635,3 +1635,69 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
         .{ gone_id, near_id },
     );
 }
+
+test "scenario zombie melee reaches the client as EntityStatChanged, then death and respawn" {
+    // Regression for the "zombies cannot hurt you" gap: server-side melee moved
+    // health[].hp and nothing was ever sent, so the victim's client saw no damage,
+    // no death screen, and the server-side corpse could not fight back.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_hp_repl");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_hp_repl", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const stat_id = packages.idOf("NetPackageEntityStatChanged").?;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const p = g.sim.transform[ps];
+    _ = g.sim.spawnZombie(p.x + 1, p.y, p.z, 40).?;
+
+    cap.clear();
+    var t: u32 = 0;
+    while (t < 60 and g.sim.health[ps].hp >= 100) : (t += 1) try g.step();
+    try std.testing.expect(g.sim.health[ps].hp < 100);
+
+    // Stock NetPackageEntityStatChanged::write (asm.il:201967, GetLength 21 at
+    // :202120): entityId i32 (NetPackageEntityTargeted) | instigatorId i32 |
+    // EnumStat u8 | value f32 | max f32 | maxModifier f32.
+    const hit = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoDamageStatPackage;
+    try std.testing.expectEqual(@as(usize, 21), hit.len);
+    // A dedicated server has no local player, so the instigator is -1 (asm.il:199661).
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, hit[4..8], .little));
+    try std.testing.expectEqual(@as(u8, 0), hit[8]); // EnumStat.Health
+    const hurt_hp: f32 = @bitCast(std.mem.readInt(u32, hit[9..13], .little));
+    const hurt_max: f32 = @bitCast(std.mem.readInt(u32, hit[13..17], .little));
+    try std.testing.expect(hurt_hp > 0 and hurt_hp < 100);
+    try std.testing.expectEqual(@as(f32, 100), hurt_max);
+    try std.testing.expectEqual(@as(f32, 0), @as(f32, @bitCast(std.mem.readInt(u32, hit[17..21], .little))));
+
+    // Fatal hit: hp 0 must reach the client, that is what starts the death flow.
+    cap.clear();
+    g.sim.health[ps].hp = 1;
+    t = 0;
+    while (t < 60 and g.sim.health[ps].hp > 0) : (t += 1) try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.health[ps].hp);
+    try std.testing.expect(g.sim.alive[ps]); // corpse keeps its entity for respawn
+    const dead = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoDeathStatPackage;
+    try std.testing.expectEqual(@as(f32, 0), @as(f32, @bitCast(std.mem.readInt(u32, dead[9..13], .little))));
+
+    // Respawn still heals and still tells the client.
+    cap.clear();
+    var spawn_body: [2]u8 = undefined;
+    std.mem.writeInt(i16, spawn_body[0..2], 4, .little);
+    var fb: [64]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", &spawn_body));
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].hp);
+    const alive_again = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoRespawnStatPackage;
+    try std.testing.expectEqual(@as(f32, 100), @as(f32, @bitCast(std.mem.readInt(u32, alive_again[9..13], .little))));
+
+    std.debug.print(
+        "PASS hp replication: hurt={d:.0}/{d:.0} then hp=0 then respawn hp={d:.0}\n",
+        .{ hurt_hp, hurt_max, g.sim.health[ps].hp },
+    );
+}

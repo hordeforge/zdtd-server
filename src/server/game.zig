@@ -7763,6 +7763,71 @@ pub const Game = struct {
         }
     }
 
+    /// Drain the hp dirty bit into stock EntityStatChanged(Health) packages.
+    ///
+    /// Stock never sends from the code that changed a stat: the setter raises
+    /// Stat.Changed and the entity's own tick polls it, sends, then clears it
+    /// (EntityStats::TickWait asm.il:199393, PlayerEntityStats::TickWait
+    /// asm.il:200440). dirty.hp is that Changed flag, so AI melee, C2S damage
+    /// and admin damage all reach the client through this one pass.
+    ///
+    /// SendStatChangePacket (asm.il:199650) uses instigator -1 on a dedicated
+    /// server and passes `_inRangeOnly = enumStat != 0`, so Health goes to every
+    /// player tracking the entity **and** to the entity itself, range regardless.
+    fn replicatePlayerHealth(self: *Game) void {
+        var i: ecs.Slot = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
+            // Cleared even when nothing goes out (no observers, not a player):
+            // stock clears Stat.Changed right after the poll, and a bit left set
+            // would re-send the same value on every later tick.
+            self.sim.dirty[i].hp = false;
+            // Player vitals only. Stock also runs EntityStats::TickWait for NPCs;
+            // zdtd still keeps zombie hp server-side, so nothing consumes the bit
+            // for them (docs/MISSING_FEATURES.md, entity lifecycle).
+            if (!self.sim.mask[i].player or !self.sim.mask[i].health) continue;
+            if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
+            const nid = self.sim.network_id[i].id;
+            if (nid <= 0) continue;
+            const body = packages.buildEntityStatChangedBody(
+                self.body_buf[0..32],
+                nid,
+                -1,
+                .health,
+                self.sim.health[i].hp,
+                self.sim.health[i].max_hp,
+                0,
+            ) catch {
+                self.harness.counters.inc(.encode_errors);
+                continue;
+            };
+            self.harness.counters.inc(.packages_encoded);
+            const tp = self.sim.transform[i];
+            for (&self.clients) |*cl| {
+                if (!cl.joined or !cl.entered) continue;
+                const peer = cl.peer orelse continue;
+                // No owner skip here (motion has one): the victim's own client is
+                // exactly who needs this, it drives the flinch and the death screen.
+                const owner = self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot));
+                if (!owner and !self.clientObserves(cl, tp.x, tp.z)) continue;
+                // Reliable: a dropped hp=0 leaves the player alive on their own
+                // screen but dead to the server, unable to fight back.
+                self.sendGame(peer, "NetPackageEntityStatChanged", body) catch {
+                    self.harness.counters.inc(.net_send_errors);
+                };
+            }
+        }
+    }
+
+    /// True when (wx,wz) is inside this client's interest box.
+    fn clientObserves(self: *const Game, cl: *const Client, wx: f32, wz: f32) bool {
+        if (cl.entity_id <= 0) return false;
+        const oi = self.sim.slotOfNetId(cl.entity_id) orelse return false;
+        if (!self.sim.mask[oi].transform) return false;
+        const op = self.sim.transform[oi];
+        return interest.inRange(op.x, op.z, wx, wz, cl.view_radius);
+    }
+
     /// M11 serialize-once interest: for each entity that needs a motion send,
     /// encode PosAndRot (and zombie Speeds/AliveFlags) once, frame once, then
     /// fan-out framed bytes to interested peers. Cost ~ O(dirty × interest), not
@@ -7791,6 +7856,9 @@ pub const Game = struct {
                 };
             }
         }
+        // Health before the motion gate: a hit must reach the victim on the tick
+        // it lands, and the gate's early returns would swallow it every other tick.
+        self.replicatePlayerHealth();
         // Motion every other tick so join/control packages keep window room.
         if (self.tick_n % self.motion_replicate_period_ticks != 0) {
             self.clearDeadKnownEntities();
