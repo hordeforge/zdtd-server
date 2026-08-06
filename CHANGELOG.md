@@ -59,6 +59,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (stock item ids and counts) instead of empty stacks, and turning a quest in
   grants the items into the inventory, the exp into the level ledger, and the
   wallet dukes on top of the existing coin credit.
+- Quest `<action>` elements are parsed (type, phase, properties) and the
+  phase-gated UnlockPOI action fires server-side, releasing the quest's POI
+  lock on the phase it names (the phase-4 turn-in release no longer leaves the
+  POI reserved). SetCVar / ShowMessageWindow are client-owned and recorded;
+  SpawnGSEnemy / GameEvent remain recorded-unfired until the spawn/event
+  subsystems land.
   The in-tree `sample_hello` plugin is enabled by default and can be disabled
   with the gamemode `enable_sample_plugin` setting. Out-of-tree packaging and
   a stable dynamic ABI are not supported yet. See `docs/PLUGIN_API.md`.
@@ -123,6 +129,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `sendGame`, `broadcastExcept` and the replicate fan-out, so 20 Hz position
   spam no longer occupies or retransmits inside the 64-slot reliable window
   shared with chunks and join-critical control traffic.
+- Inbound fragment reassembly: the peer now holds two assembly slots keyed by
+  frag_id instead of one, so a second large C2S message (a Bag plus a
+  PlayerInventory during a loot transfer) no longer clears the first assembly
+  and silently loses a message that was already ACKed. A third concurrent
+  message drops with an `asm_drops` counter; a regression test interleaves two
+  messages and reassembles both whole.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
