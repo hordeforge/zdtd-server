@@ -966,7 +966,9 @@ pub const Game = struct {
                     try refs.append(allocator, .{
                         .name = d.name,
                         .x = d.x,
-                        .y = d.y,
+                        // Sleeper volume starts are prefab-local, so they follow
+                        // the stamped body down through YOffset.
+                        .y = d.stampY(),
                         .z = d.z,
                         .rot = d.rot,
                         .size_x = d.size_x,
@@ -984,7 +986,7 @@ pub const Game = struct {
                         try refs.append(allocator, .{
                             .name = d.name,
                             .x = d.x,
-                            .y = d.y,
+                            .y = d.stampY(),
                             .z = d.z,
                             .rot = d.rot,
                             .size_x = d.size_x,

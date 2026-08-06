@@ -265,7 +265,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Flat default world | HAVE | sea_level height plane |
 | Stock DTM load (Navezgane/Pregen) | HAVE | u16 LE gameY×256, center origin |
 | Spawnpoints.xml | HAVE | first spawn |
-| prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint |
+| prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint; prefab `.xml` `YOffset` applied to the stamp origin (caves/mines/bunkers land below grade) |
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
@@ -589,7 +589,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 |---|---|
 | quests.xml | PARTIAL loader |
 | map_info + dtm + spawns | HAVE |
-| prefabs.xml + tts sizes | PARTIAL |
+| prefabs.xml + tts sizes + prefab YOffset | PARTIAL |
 | water_info.xml | PARTIAL |
 | blocks.xml | HAVE (`maxdamage` MaxPower/RequiredPower, ids) |
 | items.xml / item_modifiers | HAVE (`assets/items.zig`; modifiers partial) |
