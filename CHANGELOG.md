@@ -52,6 +52,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Weather and storm state now survives a server restart: the per-biome storm
   machine (`weather.zwt`) resumes the storm cycle instead of re-rolling the
   opening weather groups.
+- The scheduled blood-moon day is re-sent to connected clients when it rolls,
+  so a client that joined mid-cycle no longer keeps a stale red-moon HUD day
+  after its first horde.
   The in-tree `sample_hello` plugin is enabled by default and can be disabled
   with the gamemode `enable_sample_plugin` setting. Out-of-tree packaging and
   a stable dynamic ABI are not supported yet. See `docs/PLUGIN_API.md`.

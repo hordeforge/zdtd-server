@@ -2589,3 +2589,40 @@ test "scenario weather storm state survives a restart" {
     }
     std.debug.print("PASS weather-restart: storm state restored across restart\n", .{});
 }
+
+test "scenario blood moon day re-send fires on the day roll" {
+    // GAP §6: a client that joined mid-cycle must get a fresh GameStats blob
+    // when the scheduled blood-moon day rolls, or its red-moon HUD day stays
+    // stale forever. Force the clock past the first horde and step.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_bmday");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmday", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const gs_id = packages.idOf("NetPackageGameStats").?;
+
+    // First step records the initial scheduled day (day 1, freq 7 -> 7)
+    // without broadcasting (lazy init).
+    try g.step();
+    try std.testing.expectEqual(@as(i32, 7), g.last_bm_day);
+    cap.clear();
+
+    // Simulate a client that sat past the first horde: day 8, stale 7.
+    g.sim.director.clock.day = 8;
+    g.sim.director.clock.hours = 1.0;
+    g.last_bm_day = 7;
+    try g.step();
+
+    // The roll must re-send the GameStats blob with the next scheduled day.
+    try std.testing.expect(cap.findPkgId(gs_id) != null);
+    try std.testing.expectEqual(@as(i32, 14), g.last_bm_day);
+    std.debug.print("PASS bmday-resend: day 8 re-sent GameStats (BloodMoonDay 7 -> 14)\n", .{});
+}

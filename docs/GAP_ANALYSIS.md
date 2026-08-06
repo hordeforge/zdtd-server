@@ -265,8 +265,11 @@ area and the concrete work.
     the horde night. `setDayLightLength` implements `CalcDuskDawnHours`
     (0/24 → (22,4); dusk 22 / DL / 12+DL/2; dawn = clamp(dusk-DL,0,23)).
     CalcNextDay jitter is non-negative like stock. Unit tests over the window
-    and the wire day; 772 tests green. Still open: BloodMoonDay re-send on day
-    roll (the client keeps a stale value after its first blood moon).
+    and the wire day; 772 tests green. BloodMoonDay re-send on the day roll is
+    now shipped: `bloodMoonDayFor` is one authority for the scheduled day, and
+    step() re-broadcasts NetPackageGameStats to entered peers when it changes,
+    so a client that sat past its first horde gets the next red-moon day instead
+    of a stale HUD value (scenario `bmday-resend`).
 
 12. **Everywhere: raise or remove the fixed-size caps.**
     64 damaged blocks world-wide, 128 block rotations world-wide (both FIFO with

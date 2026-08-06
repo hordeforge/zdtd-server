@@ -357,13 +357,16 @@ pub const min_damage_gap_ns: u64 = 80_000_000;
 pub const damage_burst_max: u8 = 4;
 pub const default_peer_stale_ms: u64 = 3000;
 /// Reliable-window retry pacing: the first `window_fast_attempts` retries pump
-/// ACKs with no sleep (LAN round trips are sub-ms, so a live peer drains in a
-/// few passes), then a short sleep paces the rest. The old fixed 0.5 s sleep
-/// wedged the single-threaded tick for up to two minutes per stuck peer and
-/// starved reapStalePeers, which is what turns a reconnect flood into repeated
-/// IdMapping WindowFull drops.
-const window_fast_attempts: u32 = 64;
-const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms after the fast window
+/// ACKs with no sleep (LAN round trips are sub-ms, so a live peer usually
+/// drains in a few passes), then a 1 ms sleep every 4th attempt paces the
+/// rest. The pacing matters for clients whose LiteNetLib Update cycle batches
+/// ACKs every ~15 ms: without it, a small mapping's outer budget exhausted in
+/// microseconds before the first ACK could arrive and dropped every join.
+/// The old fixed 0.5 s sleep wedged the single-threaded tick for up to two
+/// minutes per stuck peer and starved reapStalePeers, which is what turns a
+/// reconnect flood into repeated IdMapping WindowFull drops.
+const window_fast_attempts: u32 = 16;
+const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms every 4th attempt after the fast window
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
@@ -549,6 +552,14 @@ fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
     };
 }
 
+/// The scheduled blood-moon day for the clock (GameStats.blood_moon_day):
+/// 0 when disabled, else the next frequency multiple at/after today.
+fn bloodMoonDayFor(clk: anytype) i32 {
+    if (clk.bloodmoon_frequency == 0) return 0;
+    if (clk.day % clk.bloodmoon_frequency == 0) return @intCast(clk.day);
+    return @intCast(((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency);
+}
+
 /// Run the stock stability update after a C2S SetBlock mutation and return the
 /// count of fallen blocks. A removed block (old != air) relaxes the region and
 /// may fell neighbours; a placed block (new != air) takes its stability from
@@ -687,6 +698,10 @@ pub const Game = struct {
     land_claims_n: usize = 0,
     /// Last in-game day the land-claim expiry pass ran (day roll detection).
     claims_last_day: u32 = 0,
+    /// Last GameStats.blood_moon_day broadcast (GAP §6: re-send on day roll so a
+    /// client that sat through its first horde does not keep a stale HUD day).
+    /// -1 = not yet computed (first tick records without broadcasting).
+    last_bm_day: i32 = -1,
     /// Air drop scheduling: next drop at this world-hour (0 disables).
     air_drop_interval_hours: u16 = 72,
     next_air_drop_hour: u64 = 0,
@@ -6852,11 +6867,14 @@ pub const Game = struct {
     /// the same way `sendGame` does. Separate from `sendGame` because the compressed
     /// mapping frame is built by the streaming framer, not from a body buffer.
     fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8) anyerror!void {
-        // A live peer drains the whole fragmented message inside one sendReliable
-        // (the inner per-part pump waits for ACKs); the outer budget only escapes
-        // a stuck window, so it stays small to bound the tick wedge per peer.
+        // A live peer drains a small mapping inside a few outer attempts once
+        // the 1 ms pacing lets its ACK cycle run; a large one (Navezgane,
+        // ~200 fragments) drains inside one sendReliable via the inner per-part
+        // pump. The outer budget also escapes a stuck window: it stays bounded
+        // (~230 ms of paced attempts) so the stale-peer sweep reclaims a dead
+        // peer instead of the tick holding for minutes.
         var attempts: u32 = 0;
-        while (attempts < 64) : (attempts += 1) {
+        while (attempts < 960) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
                 error.WindowFull => {
                     peer.resendPending(&self.net.sock) catch {
@@ -7501,20 +7519,21 @@ pub const Game = struct {
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).
     /// HUD day still comes from WorldTime; BloodMoonDay is the scheduled BM day.
     fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void {
+        const vals = self.gameStatsValues();
+        const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], vals);
+        try self.sendGame(peer, "NetPackageGameStats", gs);
+    }
+
+    /// The bPersistent GameStats values (stock defaults otherwise).
+    fn gameStatsValues(self: *const Game) packages.GameStatsValues {
         const clk = self.sim.director.clock;
-        const bm_day: i32 = if (clk.bloodmoon_frequency == 0)
-            0
-        else if (clk.day % clk.bloodmoon_frequency == 0)
-            @intCast(clk.day)
-        else
-            @intCast(((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency);
-        const vals: packages.GameStatsValues = .{
+        return .{
             .game_difficulty = self.sim.director.difficulty,
             .blood_moon_enemy_count = self.sim.director.bloodmoon_enemy_count,
             .enemy_difficulty = self.sim.director.enemy_difficulty,
             .day_light_length = @intFromFloat(clk.dusk - clk.dawn),
             .day_night_length = @intFromFloat(clk.seconds_per_hour * 24.0 / 60.0),
-            .blood_moon_day = bm_day,
+            .blood_moon_day = bloodMoonDayFor(clk),
             .block_damage_player = self.block_damage_player,
             .block_damage_ai = self.block_damage_ai,
             .block_damage_ai_bm = self.block_damage_ai_bm,
@@ -7526,8 +7545,14 @@ pub const Game = struct {
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .air_drop_frequency = self.air_drop_interval_hours,
         };
-        const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], vals);
-        try self.sendGame(peer, "NetPackageGameStats", gs);
+    }
+
+    /// Re-send the GameStats blob to every entered peer when the scheduled
+    /// blood-moon day rolls (a client that joined mid-cycle and sat past its
+    /// first horde would otherwise keep the stale red-moon HUD day forever).
+    fn broadcastGameStats(self: *Game) !void {
+        const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], self.gameStatsValues());
+        try self.broadcast("NetPackageGameStats", gs);
     }
 
     /// Map markers for active journal quests (stock class names only).
@@ -9689,6 +9714,18 @@ pub const Game = struct {
             if (self.claims_last_day != self.sim.director.clock.day) {
                 self.claims_last_day = self.sim.director.clock.day;
                 self.expireClaims();
+            }
+            // BloodMoonDay re-send on the day roll (GAP §6): a client that
+            // joined mid-cycle keeps the stale red-moon HUD day otherwise.
+            {
+                const bm = bloodMoonDayFor(self.sim.director.clock);
+                if (self.last_bm_day != bm) {
+                    if (self.last_bm_day >= 0) self.broadcastGameStats() catch |err| {
+                        self.harness.counters.inc(.net_send_errors);
+                        std.debug.print("zdtd: broadcastGameStats failed: {s}\n", .{@errorName(err)});
+                    };
+                    self.last_bm_day = bm;
+                }
             }
             if (self.terrain_snapshot_on) {
                 const now = self.terrain_snap.misses.load(.monotonic);

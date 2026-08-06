@@ -141,8 +141,12 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
       right after the fresh seed in `initWithOptions`, saved on the periodic
       save path, admin save and deinit. Fail-closed decode (table-matched,
       bounds-checked) so a corrupt file keeps the fresh roll.
-- [ ] GameStats.BloodMoonDay not re-sent on day roll: a client connected past
-      its first blood moon keeps a stale value (GAP §6, PARTIAL row).
+- [x] ~~GameStats.BloodMoonDay not re-sent on day roll: a client connected past
+      its first blood moon keeps a stale value~~ **Shipped 2026-08-06**:
+      `bloodMoonDayFor` is the single scheduled-day authority and step()
+      re-broadcasts NetPackageGameStats to entered peers when it changes, so
+      the red-moon HUD day refreshes after the first horde (scenario
+      `bmday-resend`).
 
 ### Parity polish (client-visible)
 
