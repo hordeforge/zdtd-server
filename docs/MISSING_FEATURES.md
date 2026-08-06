@@ -873,41 +873,52 @@ Do not plan these as product features of zdtd:
 **P0 join/play gate: CLOSED** (STATUS 2026-07-23). Do not re-open from stale rows.
 
 ### P1: Depth the client still notices
-1. Deco: trees ship in the join burst (idByName + kill switch). Remaining: `blocks` NameIdMapping so ids can be negotiated instead of trusted, biome-driven density, mirroring deco into the server world store, and a live-client playtest.  
-2. Weather storm/bloodMoon group SM: SHIPPED (`src/world/weather.zig`). Remaining:
-   persist storm state across restart (stock `WeatherManager::Save`/`Load`), and
-   `ForceWeather` / `SetStorm` admin commands.  
-1. Deco: `blocks` NameIdMapping, biome-driven density and the world-store mirror all ship. Remaining: a live-client playtest (client log must show "Received mapping data for: blocks" then "Block IDs with mapping" and a sane block-id total), and the one-shot join window is still the only deco window.  
-2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
-3. Path A* (or better than greedy) + more EAI task types.  
-4. Quest objective-type coverage (Craft/StayWithin/Rally wired; POIStayWithin and unmodelled types still auto, and quests.xml `<action>` elements are still unparsed).  
-3. Path A*: DONE. Grid A* over a body-aware step predicate (step-up/drop/headroom), 8-cell waypoint buffer, deterministic per-tick node budget; EAI gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Remaining: navmesh, jump/climb, data-driven per-class task graphs (5.2.1).  
-4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
-5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  
-6. Workstation: the C2S/S2C body is now complete (fixed stock array lengths,
-   trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the craft tick
-   follows `HandleRecipeQueue`/`cycleRecipeQueue`. Remaining: the server trusts
-   the client's `Recipe` blob for output type/count/time instead of validating it
-   against `recipes.xml`, non-burning stations (workbench) do not advance
-   server-side because the Module gate is not on the wire, and no live-client
-   playtest has confirmed the forge UI end to end.
-4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
-5. Power: trigger TE wire (shipped: Switch meta gate on SetBlock, delay/duration from ClientTriggerData, edge-triggered meta broadcast of grid state). Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a live-client playtest of the S2C TE leg (needs tile entities in the chunk stream).  
-6. Workstation RecipeQueue C2S depth (lock contention shipped).
+
+Each row is current as of the 2026-08-06 wave. Where a row says SHIPPED the work
+is on main and gated; what follows "Open:" is the honest remainder.
+
+1. **Deco** SHIPPED: `blocks` NameIdMapping, biome-driven density and the
+   world-store mirror. Open: a live-client playtest (the client log must show
+   "Received mapping data for: blocks", then "Block IDs with mapping" and a sane
+   block-id total), and the one-shot join burst is still the only deco window.
+2. **Weather storm / bloodMoon group state machine** SHIPPED
+   (`src/world/weather.zig`). Open: persist storm state across restart (stock
+   `WeatherManager::Save`/`Load`), and `ForceWeather` / `SetStorm` admin commands.
+3. **Path A\*** SHIPPED: grid A* over a body-aware step predicate (step-up, drop
+   and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
+   gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,
+   jump and climb, data-driven per-class task graphs (5.2.1).
+4. **Quest objective coverage** PARTIAL: Craft, StayWithin and Rally execute.
+   Open: POIStayWithin and the unmodelled types still auto-complete, quests.xml
+   `<action>` elements are unparsed, 53 client-known defs parse empty because
+   template inheritance is not resolved, and the accept path is missing
+   (see GAP_ANALYSIS section 4).
+5. **Power trigger TE wire** SHIPPED: Switch meta gate on SetBlock, delay and
+   duration from ClientTriggerData, edge-triggered meta broadcast of grid state.
+   Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a
+   live-client playtest of the S2C TE leg (needs tile entities in the chunk
+   stream).
+6. **Workstation RecipeQueue** SHIPPED: the C2S/S2C body is complete (fixed stock
+   array lengths, trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the
+   craft tick follows `HandleRecipeQueue` / `cycleRecipeQueue`. Open: the server
+   trusts the client's `Recipe` blob for output type, count and time instead of
+   validating against recipes.xml; non-burning stations (workbench) do not advance
+   server side because the Module gate is not on the wire; no live-client playtest
+   of the forge UI.
 
 ### P2: Multiplayer CPU (M11)
-Shipped: dirty bitsets, serialize-once interest, per-entity observer masks,
+
+SHIPPED: dirty bitsets, serialize-once interest, per-entity observer masks,
 persistent thread pool, O(1) NetId map. Open: spatial cell hash for the interest
-query (M11.1) and the 32-128 bot apm gate (M11.5). See IMPLEMENTATION_PLAN M11 +
-TODO near-term scale.
+query (M11.1) and the 32-128 bot apm gate (M11.5). See IMPLEMENTATION_PLAN M11.
 
 ### P3: Ops and polish
-Full telnet surface, Steam browser, party membership (a Party/PartyManager
-equivalent driving S2C `NetPackagePartyData`), ally persistence, PUID-keyed
-player saves, gamestages, buffs depth, vehicle multi-seat, Encryption*
-(optional).
-Full telnet surface, Steam browser, party PlatformUserId, gamestage inputs
-(below), buffs depth, vehicle multi-seat, Encryption* (optional).
+
+SHIPPED this wave: full stock telnet console surface, party PlatformUserId,
+gamestages (inputs below), buffs depth, vehicle multi-seat.
+Open: Steam server browser registration, the buffs remainder (triggered_effect
+VM, cvar sync, immunity and damage-type gates, buff persistence across sessions),
+Encryption* (optional).
 
 #### Gamestage: what is in and what is still missing
 
@@ -944,12 +955,6 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
   per-session Client state, so the streak restarts on reconnect.
 - Party grouping ignores stock's same-`PrefabInstance` requirement (zdtd has no
   per-player POI tracking); distance alone decides.
-Full telnet surface, Steam browser, party PlatformUserId, gamestages, buffs
-remainder (triggered_effect VM, cvar sync, immunity/damage-type gates, buff
-persistence across sessions), vehicle multi-seat, Encryption* (optional).
-Steam browser, party PlatformUserId, gamestages, buffs
-depth, vehicle multi-seat, Encryption* (optional).
-depth, Encryption* (optional).
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.

@@ -95,6 +95,20 @@ exist, so day 1 and day 70 spawn identical enemies at identical counts.
 
 ---
 
+## 1a. What has landed since this analysis
+
+This document was written at head `60153a0` on 2026-08-06. The following ranked
+items shipped afterwards and are marked DONE in section 3: 1 (damage
+replication), 3 (blocks.nim id remap), 4 (rotation direction and YOffset), 6
+(EntityRemove on unload) and 17 (gamestages). Also landed: buffs depth, vehicle
+multi-seat, party PlatformUserId, the stock telnet console surface and the M11
+replication CPU work.
+
+The per-area feature tables below have **not** been rescored for those changes,
+so treat a PARTIAL or MISSING row in an area touched by the list above as
+"check the code first". The counts in the scorecard are as of `60153a0`.
+The live task list is [WORK_PLAN.md](WORK_PLAN.md).
+
 ## 2. Scorecard
 
 345 features catalogued across nine areas.
@@ -119,7 +133,7 @@ exist, so day 1 and day 70 spawn identical enemies at identical counts.
 Ranked across all areas by player impact, highest first. Each entry names the
 area and the concrete work.
 
-1. **Player progression / entities: replicate AI-inflicted damage.**
+1. **DONE 2026-08-06.** Player progression / entities: replicate AI-inflicted damage.
    `applyDeferredDamage` subtracts from `health[].hp` and never sets or emits
    anything; `Dirty.hp` is written in one place and read in none. Emit
    `NetPackageEntityStatChanged` for player HP from the tick replicate pass, the
@@ -136,14 +150,14 @@ area and the concrete work.
    channel-1 `LockResponse` context. Everything else in traders and most of
    quests is downstream of this.
 
-3. **POIs: remap prefab block ids through `<name>.blocks.nim`.**
+3. **DONE 2026-08-06.** POIs: remap prefab block ids through `<name>.blocks.nim` (also converts pre-v18 BlockValue layouts).
    `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
    runtime `AssignIds` range; it is not. 203350 of 952260 painted cells (21.4%)
    over a 120-POI sample are the wrong block, live-confirmed on the client
    (`src/world/prefabs.zig:118`, stock does it at `Prefab::loadIdMapping`,
    asm.il:928850).
 
-4. **POIs: fix rotation direction and apply `YOffset`.**
+4. **DONE 2026-08-06.** POIs: rotation direction and `YOffset`.
    zdtd rotates +90*r where stock rotates -90*r, so rotations 1 and 3 are swapped
    for 709 of 1559 decorations (`src/world/tts.zig:272` vs
    `Prefab::offsetToCoordRotated` asm.il:915424). Separately, `paintDecoration`
@@ -163,7 +177,7 @@ area and the concrete work.
    regular zombie) instead of dropping a bag on every kill
    (`src/ecs/world.zig:683`).
 
-6. **Entities / net: send `EntityRemove(Unloaded)` when a mob leaves interest.**
+6. **DONE 2026-08-06.** Entities / net: `EntityRemove(Unloaded)` when a mob leaves interest.
    `DONE`. The replicate pass now mirrors spawn-on-approach: a mob outside a
    client's interest box gets `NetPackageEntityRemove(entityId, Unloaded)` sent to
    that one client and its `known_entities` bit dropped, the way stock's
@@ -241,7 +255,7 @@ area and the concrete work.
     the server journal never matches what the player took
     (`src/server/game.zig:5326`, `:5364`).
 
-17. **Entities / blood moon / progression: parse `gamestages.xml`.**
+17. **DONE 2026-08-06.** Entities / blood moon / progression: parse `gamestages.xml`.
     It is only a filename in `xml_patch.zig:99`. Without it `GroupGenericZombie`
     (4781 uses in prefab XML) falls through to `zombieBoe`, the `BloodMoonHorde`
     spawner's wave structure does not exist, and the world never escalates. The

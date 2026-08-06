@@ -1,12 +1,47 @@
 # Status: stock-client join and play path
 
-**Date pin:** 2026-08-05  
+**Date pin:** 2026-08-06  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **~519** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
+**Unit tests:** `zig build test` → **537** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
 `IMPLEMENTATION_PLAN.md` (phased plan). Doc index: [INDEX.md](INDEX.md).
+
+## Wave 2026-08-06
+
+Landed on main, each gated on `zig build` + `make check` and, where it is
+observable, on the live stock client:
+
+- **Join path closed on the real client.** Three defects, in order of discovery:
+  a soft-dropped chunk was still recorded as streamed so it was never resent,
+  leaving a hole in the mesh halo (no collision mesh, free-fall, origin thrash);
+  GameStats reported `GameState=0` (Loading) while the client runs
+  `updateRespawn` only at `1` (Running); and chunks streamed only from the spawn
+  bundle, losing a race against `OnAddedToWorld` setting `bSpawned`. The client
+  now renders Navezgane and plays: HUD, compass, hotbar, block damage, pickups.
+- **POI fidelity.** Prefab footprints turned counter-clockwise where stock turns
+  clockwise, swapping rotations 1 and 3 for 709 of Navezgane's 1559 decorations;
+  per-block facing needed `CalcRotation(rot, 4 - r)` to match. Prefab ids are now
+  remapped through `<name>.blocks.nim` (21.4% of painted cells were the wrong
+  block over a 120-POI sample), pre-v18 `BlockValue` layouts are converted, and
+  `YOffset` is applied so caves, mines and bunkers sit below the surface.
+- **Combat and replication.** Player HP changes reach the client, mobs that leave
+  a client's interest box are unloaded instead of standing frozen forever, and
+  the replicate pass gained alive/dirty bitsets with per-entity observer masks.
+- **Features:** deco NameIdMapping + biome density + world-store mirror, weather
+  storm/bloodMoon state machine, quest rally objectives, workstation RecipeQueue,
+  power trigger TE wire, A* pathfinding, gamestages, buffs depth, vehicle
+  multi-seat, party PlatformUserId, stock telnet console surface.
+- **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
+  [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
+
+**Gates at this pin:** `make check` exit 0 · 537 unit tests · live stock-client
+gate **23/23** · playtest full suite green on a fresh world.
+
+**Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are traders (no
+trader NPC reaches the client), quest accept and template inheritance, water,
+and player persistence.
 
 **Conflict rule:** if STATUS and MISSING/IMPLEMENTATION_PLAN disagree on whether a
 gate or feature shipped, **STATUS wins**. Refresh the inventory docs when closing

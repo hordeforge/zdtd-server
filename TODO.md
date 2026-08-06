@@ -8,13 +8,43 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
 | [docs/MISSING_FEATURES.md](docs/MISSING_FEATURES.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 345 features scored WORKS/PARTIAL/MISSING with anchors |
+| [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-05):** unit + scenarios · stock join green · playtest-zdtd demo **pass=83 fail=0** (20260804q) · 33/33 C2S · WebUI/http · phase_gate + movement · plugins + P3 ECS · evidence ring + throttle. Open: chili full +15 proof on live client, deco objects **live-client playtest** (join burst implemented, [DECO_NRE.md](docs/DECO_NRE.md)), IsSpawned soak. Evidence: [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+**Gates (2026-08-06):** `make check` exit 0 · 537 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md) wave 2026-08-06.
 
 ### Freeze (core playable)
 
 Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE fixture, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat (+15 chili S2C), or animator human soak reopens work.
+
+### Shipped this wave (2026-08-06)
+
+Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
+
+- [x] **Join path closed on the real client**: dropped chunks are no longer
+      recorded as streamed, `GameState=Running` is reported, and chunks stream
+      before the spawn. The client renders and plays Navezgane.
+- [x] **POI fidelity**: clockwise prefab rotation with `CalcRotation(rot, 4-r)`
+      facing, `<name>.blocks.nim` id remap plus pre-v18 BlockValue conversion,
+      and `YOffset` applied to the stamp origin.
+- [x] **Combat and replication**: player HP reaches the client,
+      `EntityRemove(Unloaded)` on leaving interest, alive/dirty bitsets with
+      per-entity observer masks.
+- [x] **Features**: deco NameIdMapping + biome density + world-store mirror,
+      weather state machine, quest rally objectives, workstation RecipeQueue,
+      power trigger TE wire, A* pathing, gamestages, buffs depth, vehicle
+      multi-seat, party PlatformUserId, stock telnet console surface.
+- [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
+      [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
+      with `*-review.md` names so the review-loop tool discovers them.
+
+### Next up
+
+The ranked, handoff-ready list lives in [docs/WORK_PLAN.md](docs/WORK_PLAN.md).
+Wave 1 is T1 traders (unblocks most of traders and quests), then T2 loot tables
+and T3 item stack sizes in parallel. Harness tasks W1-W3 are cheap and
+independent; do W3 first if `make check` flakiness is costing time.
 
 ### Shipped this wave (2026-08-04..05)
 
