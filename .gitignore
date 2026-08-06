@@ -2,6 +2,8 @@
 zig-out/
 .zig-cache/
 .zdtd_cfg_cache/
+# Fetched Zig packages (zig fetch --global-cache-dir); regenerable, ~19 MB
+zig-pkg/
 *.o
 *.a
 # Release integrity sidecar (written next to zig-out/bin/zdtd by `make release`)
