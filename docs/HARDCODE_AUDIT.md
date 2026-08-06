@@ -1,16 +1,17 @@
 # Hardcode audit (Bucket A / B / OK)
 
-Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
-`docs/prompts/hardcoded-data-review.md` + systematic `rg` / file reads against
-`src/`, stock `Data/Config`, `docs/ASSETS.md`, `docs/GAME_OPTIONS.md`.
+Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
+2026-08-04). Method: `docs/prompts/hardcoded-data-review.md` + systematic
+`rg` / file reads against `src/`, stock `Data/Config`,
+`docs/ASSETS.md`, `docs/GAME_OPTIONS.md`, `../7dtd-research/docs/loot-economy.md`.
 
 ## Executive summary
 
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
-| **A** (stock data) | ~9 | 1 | 1 | A22 residual (P0); A12 vehicle fallback (P1); A20 dukes fixed |
-| **B** (zdtd policy) | ~11 | 0 | 1 | Stream/authority/feature/perf/sim via `zdtd.toml`; A19 wallet now configurable; residual open consts (AI bands, tick throttles, caps) |
-| **OK** | 28+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants |
+| **A** (stock data) | ~12 | 1 | 2 | A22 residual (P0); A12 vehicle fallback + **A29 trader pricing** (P1); A20 dukes fixed |
+| **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, new quest heuristics (B25-B26) |
+| **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
 | Spot-check | Result |
 |---|---|
@@ -24,11 +25,20 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | `loot_drop_prob` | **A OK**: loaded from entityclasses.xml `LootDropProb`; default 1.0 only when absent |
 | `ObjectiveWireKind` | **OK**: Quest.Write subclass shapes (base/treasure_chest/empty); quests.zig classifiers read `type=` strings |
 | `players.zsv` ZPV3 | **OK**: zdtd-owned save format (ADR 0011); not stock data, not operator config |
+| trader stock list / hours / sell gate | **A clean**: per-trader `<trader_items>` refs via `npc.xml` trader_id; `open_time`/`close_time` gate (`worldTime%24000`), `allow_sell` gate, `is_vending` always-open; fallback `traderAlways` |
+| **trader price/sell** (`econ/10`, `econ/50`) | **A29 P1**: invented ratios vs stock `EconomicValue × BuyMarkup` / `× EconomicSellScale`; client displays one price, server charges another (GAP_ANALYSIS "roughly 30x low buy, 10x low sell") |
+| quest rewards (coin / exp / items) | **A clean**: coin = sum of `<reward type="Item" id="casinoCoin">`, exp/item from parsed `RewardSpec`; payout fail-closed on `ecsIdByName` miss |
+| quest offer list / tier gate | **A clean**: `quest_list` from npc.xml, tier filter on parsed `difficulty_tier`; class-hash fallback only when npc.xml absent |
+| blood moon + loot respawn | **B clean**: `BloodMoonFrequency/EnemyCount/Range`, `LootRespawnDays` via stock serverconfig keys (config.zig), applied to director / container re-roll; horde rows from gamestages.xml + spawning.xml |
+| claims persistence | **OK**: `claims.zlc` zdtd-owned format (like ZPV3); keystone id resolved by AssignIds name |
+| litenet fragments / ordered / dual-stack | **OK**: protocol RE constants; `IPV6_V6ONLY=0` kernel option (not stock data / not config) |
 | bare `assignids.*` on production paths | **Reduced**: IdCtx pins only if dump empty; place fails closed when dump loaded |
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation (this audit pass):** unit suite is **771** tests (`zig build test`, 2026-08-06). Count drifts; see [STATUS.md](STATUS.md).
+**Validation (this audit pass):** unit suite ~**800** (`zig build test`; STATUS.md
+and changelog report 796-807 while a parallel wave is landing; prior pass 771).
+Count drifts; see [STATUS.md](STATUS.md).
 
 ---
 
@@ -50,6 +60,20 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | A23 | Removed production Steam `defaultGameDir`; `--world-name` requires `--game-dir` or `--map`. |
 | B01–B07 | Stream/interest/edit/claimed-damage/peer_stale as `InitOptions` + `Game` fields (`default_*` consts). Hot path reads `self.*`. Array bound = `max_streamed_chunks_cap`. |
 | - | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
+
+---
+
+## 2026-08-07 wave re-audit (traders / quests / loot / blood moon / litenet)
+
+Trader and quest waves are **mostly clean**: stock list, hours, sell gate,
+reward payout, tier gate, loot respawn, blood moon and claims persistence all
+load from `traders.xml` / `npc.xml` / `quests.xml` / prefab XML /
+`gamestages.xml` / `spawning.xml` / stock serverconfig keys, and fail closed on
+name-resolution misses. New actionable findings this pass: **A29 P1** (trader
+price/sell ratios, the one real wrong-value risk), A30-A31 P3, B25-B28 P3
+(quest heuristics + doc gap). No prior open row was fixed by these waves; A19 /
+A20 stay fixed, A22 stays partial. Litenet constants and the dual-stack
+`IPV6_V6ONLY=0` socket option are protocol/kernel pins (OK).
 
 ---
 
@@ -82,6 +106,9 @@ Date: 2026-08-06 (re-audit; prior pass 2026-08-04). Method:
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
 | A24 | NONE loaders | P2 | Open | When feature lands |
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |
+| A29 | trader price/sell ratios `econ/10`, `econ/50` | P1 | **New 08-07** | `game.zig:8454-8455` `fillTraderFromXml`: buy = EconomicValue/10, sell = EconomicValue/50, fallback 5/1 when econ 0. Stock RE (loot-economy.md §5, XUiM_Trader `GetBuyPrice`/`GetSellPrice` 1830470): buy = econ × `TraderInfo.BuyMarkup` (or `OverrideBuyMarkup`), sell = econ × `EconomicSellScale` × `SellMarkdown`; econ 0 = not purchasable. Loader parses `override_buy_markup`/`override_sell_markup` but nothing applies them. Client shows econ × markup while server charges econ/10 → displayed vs charged price desync (GAP_ANALYSIS "30x low buy, 10x low sell"). Fix: apply traders.xml markups + RE statics; econ 0 → fail closed. Do not move ratios to zdtd.toml (A, not B). |
+| A30 | trader `reset_interval` parsed-unused | P3 | **New 08-07** | `traders.zig` parses `reset_interval` (stock traders.xml: 1/3 days); `systems.zig:708 traderRestock` ignores it: flat zdtd policy (soft cap 50, +10 per restock, wallet to spawn default). Restock cadence should follow the XML interval; the 50/10 policy itself is Bucket B. |
+| A31 | loot respawn fallback `"woodenChest"` | P3 | **New 08-07** | `game.zig:9285 maybeRespawnContainer`: block with no `LootList` re-rolls to stock group name `"woodenChest"` instead of failing closed (empty container). Prefer skip / empty per "missing beats fake"; name string, not an id, so severity low. |
 
 ### Loader inventory vs stock Config
 
@@ -98,25 +125,31 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 |---|---|---|---|
 | B01–B07 | stream/interest/edit/claimed/stale | P1 | **Done:** Game fields + `[stream]` / `[authority]` in `zdtd.toml` |
 | B08–B12 | lock stale/channels, join gap, craft cap | P2 | Open consts; A19 wallet done via `[sim]` |
-| B13 | tick throttles % N | P1 | Partial: stream/motion periods on Game; save/worldtime still bare |
-| B14–B21 | AI bands, caps, buffers | P2–P3 | Open (`[net]`/`[ai]`/`[caps]` draft sections still unknown-key) |
+| B13 | tick throttles % N | P1 | Partial: stream/motion/world-time/vehicle periods on Game; `% 10` sleeper/turret (`game.zig:10201-10208, 10278, 2596`) and `% 100` save (`10316`) still bare consts; draft `[net] sleeper_tick_ticks / turret_sync_ticks` keys not in the parser |
+| B14–B21 | AI bands, caps, buffers | P2–P3 | Open: draft `[net]`/`[ai]`/`[caps]` sections removed from example; unknown toml keys now **abort** (`error.UnknownTomlKey`), so the draft keys are unusable until parsed |
 | B22 | CLI + file for caps | P1 | **Done:** file via `zdtd_config`; no per-cap CLI flags (InitOptions from toml) |
 | B23–B24 | port offset, APM | P3 | Open |
+| B25 | quest kill-count boost `3 + tier*2` | P3 | **New 08-07**: `assets/quests.zig:226,342`: kill objectives without explicit count get `3 + tier*2`. No RE cite found for the tier boost (stock default kill count for a count-less objective is unverified; research quest docs list no default). Documented zdtd approximation; add a RE basis, verify against stock, or move to config. |
+| B26 | quest goto fallback position (FNV `%200 -100`) | P3 | **New 08-07**: `assets/quests.zig:350-361`: goto_point quests without a runtime target get tx/ty/tz defaults 50/70/50 + FNV-derived offset; client gets a marker at an invented spot. Fail closed (no offer) would be more stock-honest; FNV is pure algorithm, the position is sim scaffolding. |
+| B27 | `LootRespawnDays` undocumented | P3 | **New 08-07**: config.zig parses + clamps + applies it, but `docs/GAME_OPTIONS.md` "Applied to the sim" table has no row. Doc gap (success criterion "GAME_OPTIONS lists every new key"). |
+| B28 | quest offer name gate `isStockClientQuestName` | P3 | **New 08-07**: `game.zig:7823` prefix filter (`quest_`, `tier`, `intro_`, `test_`, `challengegroup_reward_`) proxies the client's quest catalog; fail-closed (drops unknown), but duplicate stock-name knowledge; re-verify against the connected client's quests.xml |
 
-### `zdtd.toml` (core shipped; residual keys still draft)
+### `zdtd.toml` (shipped surface; B13 throttles still bare)
 
 Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../zdtd.toml.example).
 Operator docs: [GAME_OPTIONS.md](GAME_OPTIONS.md). Precedence:
 
 ```text
 CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
-     >  --serverconfig keys  >  code defaults (InitOptions / default_*)
+     >  mode pack  >  --serverconfig keys  >  code defaults (InitOptions / default_*)
 ```
 
-Parsed today: `[stream]`, `[authority]`, `[feature]`, `[perf]`, `[sim]`
-(`trader_wallet_dukes` only). Keys under `[net]`, `[ai]`, `[caps]`, and the
-`[sim]` draft keys `craft_max_times` / `save_every_ticks` are residual
-(unknown-key warn if present).
+Parsed today: `[stream]`, `[authority]` (incl. `guard_*`), `[feature]`,
+`[perf]`, `[sim]` (`trader_wallet_dukes`), `[mode]`, `[plugin]`. Unknown
+sections/keys now **abort** startup (`error.UnknownTomlKey`); the draft
+`[net]` / `[ai]` / `[caps]` sections and `[sim] craft_max_times` /
+`save_every_ticks` from the 08-06 draft were dropped from the example and are
+rejected if present (B13/B14-B21 residuals remain code consts).
 
 ```toml
 [stream]
@@ -130,51 +163,38 @@ interest_range_blocks = 160.0
 max_edit_range_blocks = 96.0
 max_claimed_damage = 200
 peer_stale_ms = 3000
-lock_stale_ms = 120000
-lock_channels = 16
-join_rate_gap_ms = 500
+guard_enforce = false
+guard_window_ticks = 1200
+guard_hard_repeat = 25
 
-[sim]
-craft_max_times = 20
-trader_wallet_dukes = 5000
-save_every_ticks = 100
-
-[net]
-world_time_send_ticks = 20
-vehicle_pos_send_ticks = 5
-turret_sync_ticks = 10
-sleeper_tick_ticks = 10
-entity_interest_half_ticks = 2
-deco_stream_ticks = 5
-litenet_port_offset = 2
-
-[ai]
-full_range_blocks = 64.0
-sense_range_blocks = 48.0
-mid_range_blocks = 15.0
-attack_range_blocks = 2.0
-despawn_range_blocks = 200.0
-
-[caps]
-max_entities = 512
-max_quests = 512
-max_phases = 32
-max_sleeper_volumes = 8192
-max_peers = 64
-max_workers = 8
-min_parallel_items = 24
+[feature]
+wire_chunks = true
+deco_trees = true
+deco_mirror = true
+block_id_mapping = true
 
 [perf]
 async_chunk_flush = false
 terrain_snapshot = false
 job_batches = false
 
-[feature]
-deco_trees = false
-wire_chunks = true
+[sim]
+# trader_wallet_dukes = 5000
+
+[mode]
+# name = "default"
+
+[plugin]
+# modules = "path/to/x.wasm"
 ```
 
-Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A).
+Stock-named serverconfig keys parse in `config.zig` (gameplay options,
+B6): the new-wave tunables already ride them, e.g. `BloodMoonFrequency` /
+`BloodMoonEnemyCount` / `BloodMoonRange` (director), `LootRespawnDays`
+(container re-roll), `LandClaim*` (claims durability/expiry), `AirDropFrequency`.
+
+Do **not** put MaxFuel, biome colors, item ids, EconomicValue, or the trader
+markup ratios (A29) here (Bucket A).
 
 ---
 
@@ -201,6 +221,12 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 | LootDropProb default 1.0 | XML path resolves `LootDropProb` from entityclasses; fallback only for entities without it / offline |
 | `ecs/quest.zig ObjectiveWireKind` | Quest.Write CreateQuest subclass shapes (base / treasure_chest / empty); classifiers read quests.xml `type=` strings |
 | `players.zsv` ZPV3 layout | zdtd-owned persistence format (ADR 0011), like ZCH3; not stock data |
+| litenet fragment / ordered / MTU consts (`max_payload` 512K, `window_size` 64, `max_packet_size` 1327, `protocol_id` 13) | LiteNet protocol RE |
+| `IPV6_V6ONLY = 0` dual-stack bind (`litenet/udp_socket.zig`) | Kernel socket option (stock LiteNetLib sets dual-stack); not stock data, not config |
+| `quests.zig` `objectiveScore` priorities | zdtd sim-collapse ranking of stock objective `type=` strings (QuestKind allowed); relative weights, no stock source to load |
+| `traderQuestList` class-hash fallback (`game.zig:8032`) | Unity hash from stock names + stock quest_list names; offline fallback only when npc.xml absent |
+| `quests.zig` max_tier 6 / quests_per_tier 10 fallbacks | Match stock `quests.xml` root attrs (`max_quest_tier="6" quests_per_tier="10"`); XML path loads them |
+| `claims.zlc` layout | zdtd-owned persistence format like ZPV3; keystone id resolved via AssignIds name, not numeric |
 
 ---
 
@@ -217,6 +243,7 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 2. **B13 residual** world-time / save / sleeper `% N` not all Game fields.
 3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). AI bands / tick %N still open.
 4. **A07** biome default stack pins before XML (acceptable offline).
+5. **A29 (new 08-07)** trader price/sell ratios `econ/10` `econ/50` do not match stock `EconomicValue × markup`; client display vs server charge desync. Known gap (GAP_ANALYSIS), not yet fixed.
 
 ---
 
@@ -225,10 +252,13 @@ Do **not** put MaxFuel, biome colors, item ids, or EconomicValue here (Bucket A)
 1. ~~World init terrain ids (A05).~~
 2. ~~`zdtd.toml` loader for B01–B07 + feature.~~
 3. ~~A19 wallet → `[sim] trader_wallet_dukes` (done).~~
-4. Extend toml for AI bands / tick throttles / caps (B08–B14, draft `[net]`/`[ai]`/`[caps]`).
+4. Extend toml for AI bands / tick throttles / caps (B08–B14, draft `[net]`/`[ai]`/`[caps]`; unknown-key abort means the drafts need parser support first).
 5. ~~A11 AI floors.~~ A12 vehicle speeds from vehicles.xml only.
 6. Drop recipe unlock extras when `source==xml` (A13).
 7. ~~Quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) landed (A20).~~
+8. **A29:** price from `EconomicValue × BuyMarkup`/`OverrideBuyMarkup`, sell from `× EconomicSellScale × SellMarkdown` (loot-economy.md §5); econ 0 → not sellable. Wire `reset_interval` (A30) into `traderRestock`.
+9. **B27:** add the `LootRespawnDays` row to GAME_OPTIONS.md (doc-only fix).
+10. Re-verify B25/B26/B28 against stock quest behavior; drop `"woodenChest"` fallback (A31) or make it fail closed.
 
 ---
 
