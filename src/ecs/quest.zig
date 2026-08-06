@@ -68,6 +68,10 @@ pub const QuestDef = struct {
     /// wire writes real ItemStacks from these and turn-in pays them out.
     rewards: [max_reward_flags]RewardSpec = [_]RewardSpec{.{}} ** max_reward_flags,
     reward_n: u8 = 0,
+    /// Parsed `<action>` list in document order (length action_n). UnlockPOI
+    /// fires server-side on phase entry; the rest are recorded for the client.
+    actions: [max_actions]QuestActionSpec = [_]QuestActionSpec{.{}} ** max_actions,
+    action_n: u8 = 0,
     /// Ordered phase graph (index i == phase i+1). Empty = legacy single-kind path
     /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 982816).
     phases: []const PhaseSpec = &.{},
@@ -91,6 +95,9 @@ pub const ObjectiveWireKind = enum(u8) {
 };
 
 pub const max_reward_flags: usize = 16;
+/// Max `<action>` elements per quest (stock quests carry at most 2; cap for
+/// modded files).
+pub const max_actions: usize = 8;
 
 /// One `<reward>` element kind (quests.xml `type` attribute).
 pub const RewardKind = enum(u8) {
@@ -110,6 +117,29 @@ pub const RewardSpec = struct {
     kind: RewardKind = .other,
     item_name: []const u8 = "", // Item/LootItem id attr (catalog arena slice)
     value: u32 = 0, // count for items, amount for exp/skill
+};
+
+/// One `<action>` element kind (quests.xml `type` attribute). Server-side
+/// firing is implemented only for the kinds that touch world state; the rest
+/// are parsed and recorded (the owning player's client runs them locally in
+/// stock, or they need a subsystem zdtd does not have yet).
+pub const QuestActionKind = enum(u8) {
+    unlock_poi,
+    set_cvar,
+    show_message_window,
+    spawn_gs_enemy,
+    game_event,
+    other,
+};
+
+/// One `<action>` element. `phase` gates UnlockPOI (stock fires the action
+/// when the quest reaches that phase); name/value carry the cvar, message,
+/// event or gamestage properties.
+pub const QuestActionSpec = struct {
+    kind: QuestActionKind = .other,
+    phase: u8 = 0,
+    name: []const u8 = "",
+    value: []const u8 = "",
 };
 
 pub const QuestList = struct {

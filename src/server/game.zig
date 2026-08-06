@@ -7409,8 +7409,13 @@ pub const Game = struct {
         var qbuf: [2]packages.stock_quest.StockQuestWrite = undefined;
         var reward_store: [2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire = undefined;
         var obj_val_store: [2][ecs.quest.max_phases]u8 = undefined;
+        // Caller-frame storage for every slice StockQuestWrite points into:
+        // the journal writer reads them after this frame's callees return, so
+        // a callee-local store would dangle (kind_store used to live inside
+        // fillStockJournalWrites and the body writer could read garbage).
+        var kind_store: [2][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
         var pos_store: [2][max_quest_position_data]packages.stock_quest.PositionEntry = undefined;
-        const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &pos_store);
+        const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
         // Cap always_unlocked list so PlayerId stays under body_buf slice.
         var unlock_names: [64][]const u8 = undefined;
         const unlock_n = self.recipes.appendAlwaysUnlocked(&unlock_names);
@@ -7677,11 +7682,11 @@ pub const Game = struct {
         out: []packages.stock_quest.StockQuestWrite,
         reward_store: *[2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire,
         obj_val_store: *[2][ecs.quest.max_phases]u8,
+        kind_store: *[2][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind,
         pos_store: *[2][max_quest_position_data]packages.stock_quest.PositionEntry,
     ) usize {
         const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
         if (!self.sim.mask[ps].journal) return 0;
-        var kind_store: [ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
         var n: usize = 0;
         for (self.sim.journal[ps].slots) |s| {
             if (!s.active and !s.completed) continue;
@@ -7781,13 +7786,13 @@ pub const Game = struct {
                 const klim = @min(d.objective_kinds.len, kind_store.len);
                 var ki: usize = 0;
                 while (ki < klim) : (ki += 1) {
-                    kind_store[ki] = switch (d.objective_kinds[ki]) {
+                    kind_store[n][ki] = switch (d.objective_kinds[ki]) {
                         .base => .base,
                         .treasure_chest => .treasure_chest,
                         .empty => .empty,
                     };
                 }
-                kinds = kind_store[0..klim];
+                kinds = kind_store[n][0..klim];
             }
             out[n] = .{
                 .id = d.name,

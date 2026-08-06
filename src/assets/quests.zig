@@ -358,7 +358,9 @@ fn parseQuestDefBody(
     const obj_count = countTags(body, "<objective");
     var reward_has_item: [quest.max_reward_flags]bool = .{false} ** quest.max_reward_flags;
     var reward_specs: [quest.max_reward_flags]quest.RewardSpec = [_]quest.RewardSpec{.{}} ** quest.max_reward_flags;
-    const rew_count = parseRewardKinds(body, &reward_has_item, &reward_specs);
+    const rew_count = parseRewardKinds(arena, body, &reward_has_item, &reward_specs);
+    var action_specs: [quest.max_actions]quest.QuestActionSpec = [_]quest.QuestActionSpec{.{}} ** quest.max_actions;
+    const act_count = parseActions(arena, body, &action_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier);
 
@@ -380,6 +382,8 @@ fn parseQuestDefBody(
         .reward_has_item = reward_has_item,
         .rewards = reward_specs,
         .reward_n = rew_count,
+        .actions = action_specs,
+        .action_n = act_count,
         .phases = graph.phases,
         .highest_phase = graph.highest_phase,
         .objective_phases = graph.objective_phases,
@@ -400,7 +404,7 @@ fn countTags(body: []const u8, tag: []const u8) u8 {
 }
 
 /// Parse `<reward type="…">` list. Item/LootItem need ItemStack after RewardIndex.
-fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool, rewards: *[quest.max_reward_flags]quest.RewardSpec) u8 {
+fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[quest.max_reward_flags]bool, rewards: *[quest.max_reward_flags]quest.RewardSpec) u8 {
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len and n < quest.max_reward_flags) {
@@ -413,8 +417,9 @@ fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool, r
             spec.kind = if (std.mem.eql(u8, typ, "Item")) .item else .loot_item;
             has_item[n] = true;
             // The stock `id` attribute is the item name (e.g. casinoCoin); the
-            // wire and payout resolve it through the items table later.
-            spec.item_name = xml.attr(open, 0, "id") orelse "";
+            // wire and payout resolve it through the items table later. The
+            // name is arena-duped: the quest body dies when parseCatalog ends.
+            if (xml.attr(open, 0, "id")) |rid| spec.item_name = arena.dupe(u8, rid) catch "";
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
         } else if (std.mem.eql(u8, typ, "Exp")) {
             spec.kind = .exp;
@@ -434,6 +439,54 @@ fn parseRewardKinds(body: []const u8, has_item: *[quest.max_reward_flags]bool, r
         rewards[n] = spec;
         n += 1;
         i = gt + 1;
+    }
+    return n;
+}
+
+/// Parse `<action type="…">` elements with their inner `<property>` pairs
+/// (phase, cvar, value, message, event, gamestage_list, ...). Unknown types are
+/// recorded as `.other` so modded actions never crash the parse. String fields
+/// are arena-duped: the quest body dies when parseCatalog ends.
+fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_actions]quest.QuestActionSpec) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < body.len and n < quest.max_actions) {
+        const at = std.mem.indexOfPos(u8, body, i, "<action") orelse break;
+        const gt = std.mem.indexOfPos(u8, body, at, ">") orelse break;
+        const open = body[at .. gt + 1];
+        const typ = xml.attr(open, 0, "type") orelse "";
+        var spec: quest.QuestActionSpec = .{};
+        if (std.mem.eql(u8, typ, "UnlockPOI")) {
+            spec.kind = .unlock_poi;
+        } else if (std.mem.eql(u8, typ, "SetCVar")) {
+            spec.kind = .set_cvar;
+        } else if (std.mem.eql(u8, typ, "ShowMessageWindow")) {
+            spec.kind = .show_message_window;
+        } else if (std.mem.eql(u8, typ, "SpawnGSEnemy")) {
+            spec.kind = .spawn_gs_enemy;
+        } else if (std.mem.eql(u8, typ, "GameEvent")) {
+            spec.kind = .game_event;
+        } else {
+            spec.kind = .other;
+        }
+        // Inner <property name= value=> pairs until the matching </action>.
+        const close = std.mem.indexOfPos(u8, body, gt, "</action>") orelse (gt + 1);
+        const inner = body[gt + 1 .. close];
+        if (xml.propertyValue(inner, "phase")) |p| spec.phase = xml.parseU8(p) orelse 0;
+        if (xml.propertyValue(inner, "cvar")) |c| spec.name = arena.dupe(u8, c) catch "";
+        if (xml.propertyValue(inner, "value")) |v| spec.value = arena.dupe(u8, v) catch "";
+        if (xml.propertyValue(inner, "message")) |m| {
+            if (spec.name.len == 0) spec.name = arena.dupe(u8, m) catch "";
+        }
+        if (xml.propertyValue(inner, "event")) |e| {
+            if (spec.name.len == 0) spec.name = arena.dupe(u8, e) catch "";
+        }
+        if (xml.propertyValue(inner, "gamestage_list")) |g| {
+            if (spec.name.len == 0) spec.name = arena.dupe(u8, g) catch "";
+        }
+        out[n] = spec;
+        n += 1;
+        i = close + "</action>".len;
     }
     return n;
 }
@@ -926,4 +979,35 @@ test "stock quests.xml template quests parse non-empty" {
     try std.testing.expect(adv.reward_count >= 1);
     const homestead = cat.byName("challengegroup_reward_homesteading") orelse return;
     try std.testing.expect(homestead.objective_count >= 1);
+}
+
+test "quest actions parse types, phases and properties" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="poi_quest">
+        \\    <action type="UnlockPOI">
+        \\      <property name="phase" value="4"/>
+        \\    </action>
+        \\    <action type="SetCVar">
+        \\      <property name="cvar" value="StarterQuest"/>
+        \\      <property name="value" value="1"/>
+        \\    </action>
+        \\    <action type="SpawnGSEnemy">
+        \\      <property name="gamestage_list" value="SleeperGSList"/>
+        \\      <property name="count" value="1-2"/>
+        \\    </action>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture);
+    defer cat.deinit();
+    const d = cat.byName("poi_quest").?;
+    try std.testing.expectEqual(@as(u8, 3), d.action_n);
+    try std.testing.expectEqual(quest.QuestActionKind.unlock_poi, d.actions[0].kind);
+    try std.testing.expectEqual(@as(u8, 4), d.actions[0].phase);
+    try std.testing.expectEqual(quest.QuestActionKind.set_cvar, d.actions[1].kind);
+    try std.testing.expectEqualStrings("StarterQuest", d.actions[1].name);
+    try std.testing.expectEqualStrings("1", d.actions[1].value);
+    try std.testing.expectEqual(quest.QuestActionKind.spawn_gs_enemy, d.actions[2].kind);
+    try std.testing.expectEqualStrings("SleeperGSList", d.actions[2].name);
 }

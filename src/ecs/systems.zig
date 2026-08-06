@@ -261,6 +261,25 @@ fn skipAutoPhases(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) v
         }
         s.phase += 1;
         s.progress = 0;
+        firePhaseActions(w, ps, s, d);
+    }
+}
+
+/// Fire quest actions for the phase the quest just entered. Only UnlockPOI is
+/// server-side: it releases the quest's POI lock (stock QuestActionUnlockPOI,
+/// asm.il 1390421-1390429), which is why the phase-4 action on turn-in quests
+/// must not sit ignored. The other kinds run on the owning client (SetCVar,
+/// ShowMessageWindow) or need a subsystem zdtd does not have (SpawnGSEnemy,
+/// GameEvent), so they are parsed and recorded but not fired here.
+fn firePhaseActions(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
+    var i: usize = 0;
+    while (i < @min(@as(usize, d.action_n), quest.max_actions)) : (i += 1) {
+        const a = d.actions[i];
+        if (a.kind != .unlock_poi) continue;
+        if (a.phase != 0 and a.phase != s.phase) continue;
+        if (!s.poi.valid()) continue;
+        const eid: i32 = if (w.mask[ps].network_id) w.network_id[ps].id else -1;
+        questPoiUnlock(w, eid, s.poi.x, s.poi.z);
     }
 }
 
@@ -273,6 +292,7 @@ fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef
     }
     s.phase += 1;
     s.progress = 0;
+    firePhaseActions(w, ps, s, d);
     skipAutoPhases(w, ps, s, d);
 }
 
@@ -2936,4 +2956,66 @@ test "multi-seat: a destroyed rider releases its seat on the next tick" {
     systemVehicles(&w, 0.05);
     try std.testing.expectEqual(@as(u8, 4), w.vehicle[vs].freeSeats());
     try std.testing.expectEqual(@as(f32, 0), w.vehicle[vs].speed);
+}
+
+test "unlock_poi action releases the quest POI lock on phase entry" {
+    // A phase-2 UnlockPOI action (stock QuestActionUnlockPOI, asm.il
+    // 1390421-1390429): locking the quest POI then advancing into phase 2 must
+    // release the lock, not leave the POI reserved forever.
+    const unlock_phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .kill_zombies, .required = 1 },
+    };
+    const unlock_actions = [_]quest.QuestActionSpec{
+        .{ .kind = .unlock_poi, .phase = 2 },
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 31,
+        .kind = .kill_zombies,
+        .name = "unlocker",
+        .title = "U",
+        .target_count = 2,
+        .reward_coin = 10,
+        .tx = 10,
+        .ty = 70,
+        .tz = 10,
+        .objective_count = 2,
+        .phases = &unlock_phases,
+        .highest_phase = 2,
+        .objective_phases = &[_]u8{ 1, 2 },
+        .actions = unlock_actions,
+        .action_n = 1,
+    }};
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &defs, .starter_id = 31, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    try std.testing.expect(questAccept(&w, 0, 31));
+    const s = questFindActive(&w, 0, 31).?;
+    try std.testing.expect(s.poi.valid());
+    questPoiLock(&w, p, s.poi.x, s.poi.z);
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, questCheckPoiLockout(&w, p, s.poi.x, s.poi.z).reason);
+    // One kill advances to phase 2, firing the UnlockPOI action. The lock then
+    // drops its quester and enters the stock grace window (last quester out
+    // starts `unlock_grace`), so `check` still reports quest_lock briefly.
+    questOnZombieKilled(&w, 0);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    var idx: ?usize = null;
+    for (w.poi_locks.entries[0..w.poi_locks.n], 0..) |*e, i| {
+        if (e.rect.containsXZ(s.poi.x, s.poi.z)) {
+            idx = i;
+            break;
+        }
+    }
+    try std.testing.expect(idx != null);
+    try std.testing.expectEqual(@as(u8, 0), w.poi_locks.entries[idx.?].quester_n);
+    try std.testing.expect(!w.poi_locks.entries[idx.?].locked);
 }
