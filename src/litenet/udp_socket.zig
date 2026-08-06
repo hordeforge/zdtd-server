@@ -19,11 +19,24 @@ pub const Socket = struct {
         errdefer self.io_impl.deinit();
         const io_rt = self.io_impl.io();
 
-        const any: IpAddress = .{ .ip4 = .unspecified(port) };
-        var sock = try any.bind(io_rt, .{
+        // Dual-stack: bind IPv6 unspecified with V6ONLY=0 so both IPv4-mapped
+        // and native IPv6 clients reach the server (stock LiteNetLib sets the
+        // dual-stack flag). Fall back to IPv4-only when the host has no IPv6.
+        var sock: net.Socket = undefined;
+        var is6 = false;
+        if ((IpAddress{ .ip6 = .unspecified(port) }).bind(io_rt, .{
             .mode = .dgram,
             .protocol = .udp,
-        });
+        })) |s6| {
+            sock = s6;
+            is6 = true;
+        } else |_| {
+            const any4: IpAddress = .{ .ip4 = .unspecified(port) };
+            sock = try any4.bind(io_rt, .{
+                .mode = .dgram,
+                .protocol = .udp,
+            });
+        }
         errdefer sock.close(io_rt);
 
         // SO_REUSEADDR: BindOptions has no reuse flag (listen-only); set via posix.
@@ -34,6 +47,22 @@ pub const Socket = struct {
             posix.SO.REUSEADDR,
             std.mem.asBytes(&yes),
         ) catch {};
+        // Dual-stack on the v6 socket: accept v4-mapped addresses too. Best
+        // effort: a kernel without dual-stack keeps a v6-only socket, which
+        // still serves native IPv6 clients.
+        if (is6) {
+            const off: c_int = 0;
+            // std.posix.setsockopt maps EINVAL to unreachable, but restricted
+            // hosts return EINVAL for a post-bind V6ONLY=0; probe through the
+            // errno-returning syscall instead and accept refusal either way.
+            _ = posix.errno(posix.system.setsockopt(
+                sock.handle,
+                posix.IPPROTO.IPV6,
+                posix.IPV6.V6ONLY,
+                @ptrCast(&off),
+                @sizeOf(c_int),
+            ));
+        }
 
         self.sock = sock;
         self.local = sock.address;
@@ -101,4 +130,28 @@ test "hashIp stable for loopback" {
     try std.testing.expectEqual(hashIp(&a), hashIp(&b));
     const c: IpAddress = .{ .ip4 = .loopback(27016) };
     try std.testing.expect(hashIp(&a) != hashIp(&c));
+}
+
+test "openAndBind dual-stack round-trips a loopback datagram" {
+    var s: Socket = .{};
+    const port = try s.openAndBind(0);
+    defer s.close();
+    var rx: [64]u8 = undefined;
+    var from: IpAddress = undefined;
+    const v6 = std.meta.activeTag(s.local) == .ip6;
+    const dst: IpAddress = if (v6)
+        .{ .ip6 = .loopback(port) }
+    else
+        .{ .ip4 = .loopback(port) };
+    try s.sendTo("ping", &dst);
+    const n = try s.recvFrom(&rx, &from);
+    try std.testing.expectEqual(@as(usize, 4), n);
+    try std.testing.expect(std.mem.eql(u8, rx[0..n], "ping"));
+    // A dual-stack socket also accepts a native IPv6 client datagram.
+    if (v6) {
+        const v6dst: IpAddress = .{ .ip6 = .loopback(port) };
+        try s.sendTo("v6", &v6dst);
+        const n2 = try s.recvFrom(&rx, &from);
+        try std.testing.expectEqual(@as(usize, 2), n2);
+    }
 }
