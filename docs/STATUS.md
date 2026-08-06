@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-06  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **788** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **796** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -91,13 +91,35 @@ observable, on the live stock client:
   item-drop EntityItem timing case. Fixing the harness's combat targeting is a
   suite change, not a server defect.
 
-**Gates at this pin:** `make check` exit 0 · 772 unit tests · live stock-client
+## Wave 2026-08-07 (reliable transport + quest rewards)
+
+- **Reliable transport (litenet):** four gaps closed on the S2C/C2S path. The
+  five motion packages ride `sendUnreliable` (stock `get_ReliableDelivery=false`),
+  so 20 Hz position spam no longer competes with chunks and join-critical
+  control traffic for the 64-slot window. WindowFull retries pace at 1 ms after
+  16 fast attempts instead of a 0.5 s sleep, bounding a stuck peer's tick wedge
+  to ~240 ms so the stale-peer sweep reclaims it (the repeated block-IdMapping
+  drops under loadgen reconnect floods are gone). Inbound fragmented messages
+  reassemble in two slots keyed by frag_id (a Bag plus a PlayerInventory during
+  a loot transfer no longer clear each other). Inbound reliable payloads
+  deliver in order: out-of-order seqs hold in a window-bounded buffer and drain
+  on the gap, so WAN reordering cannot apply SetBlock / inventory transactions
+  out of sequence.
+- **Quests (rewards + actions):** `<reward>` entries parse kinds, item names and
+  values into `RewardSpec`s, paid out at tick end (wallet coins on completion,
+  items/exp through the ledger); `<action>` elements parse with phase/cvar/
+  value/message properties and UnlockPOI fires on phase entry. Template-derived
+  quests resolve `<variable>` overrides (last occurrence wins) so difficulty
+  tier flows through `param1="difficulty"` and `tier2_fetch` reports 2.
+- 796 unit tests (the exact count comes from running the cached binary).
+
+**Gates at this pin:** `make check` exit 0 · 796 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are trader depth
-(POI placement, restock, per-trader lists, quest offering; the NPC now
-replicates with TraderData on both S2C paths, WORK_PLAN T1), quest accept and
-template inheritance, water, and player persistence.
+(POI placement, restock, per-trader lists; the NPC replicates with TraderData
+on both S2C paths and quest rewards/actions now pay out, WORK_PLAN T1), and
+player persistence depth.
 
 **Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
 whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs
