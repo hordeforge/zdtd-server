@@ -310,7 +310,7 @@ kill after damage).
 
 Prioritize by playability value and current STATUS/TODO gaps.
 
-### Tier 0 — Smoke (`smoke`)  ~1–2 min after in-game
+### Tier 0: Smoke (`smoke`)  ~1–2 min after in-game
 
 | Case | Assert |
 |---|---|
@@ -321,7 +321,7 @@ Prioritize by playability value and current STATUS/TODO gaps.
 
 Replaces minimal join confidence; runs on every local "did I break join?" loop.
 
-### Tier 1 — Core loop (`core`)  ~3–8 min
+### Tier 1: Core loop (`core`)  ~3–8 min
 
 | Case | Assert |
 |---|---|
@@ -335,7 +335,7 @@ Replaces minimal join confidence; runs on every local "did I break join?" loop.
 | buffs | Buffs manager live |
 | holding_echo | change held slot if possible; no client error flood |
 
-### Tier 2 — Combat / entities (`combat`)
+### Tier 2: Combat / entities (`combat`)
 
 | Case | Assert |
 |---|---|
@@ -345,7 +345,7 @@ Replaces minimal join confidence; runs on every local "did I break join?" loop.
 | player_death | admin damage/kill player → death UI / hp 0 → respawn path |
 | spawn_on_approach | move toward sleeper/director spawn; ECD appears once |
 
-### Tier 3 — Economy / TE (`economy`)
+### Tier 3: Economy / TE (`economy`)
 
 | Case | Assert |
 |---|---|
@@ -355,7 +355,7 @@ Replaces minimal join confidence; runs on every local "did I break join?" loop.
 | trader | tele to trader; TraderData UI / stock list non-empty; no Read underrun |
 | quest_progress | trigger objective; journal phase/value changes |
 
-### Tier 4 — Persistence (`persist`)
+### Tier 4: Persistence (`persist`)
 
 | Case | Assert |
 |---|---|
@@ -366,7 +366,7 @@ Replaces minimal join confidence; runs on every local "did I break join?" loop.
 Orchestrator owns mid-suite **server restart**; client may reconnect via
 connect auto-join if env still set, or full pair restart between cases.
 
-### Tier 5 — World fidelity (`world`)
+### Tier 5: World fidelity (`world`)
 
 | Case | Assert |
 |---|---|
@@ -375,14 +375,14 @@ connect auto-join if env still set, or full pair restart between cases.
 | weather_optional | biome weather array if implemented (xfail until STATUS green) |
 | deco_optional | deco trees (xfail while suppressed) |
 
-### Tier 6 — Multiplayer / load (`mp`)
+### Tier 6: Multiplayer / load (`mp`)
 
 | Case | Assert |
 |---|---|
 | two_clients_see | optional second client or loadgen bot; other entity PosAndRot visible |
 | concurrent_bots | loadgen N bots + playtest smoke still DONE with 0 NRE |
 
-### Tier 7 — Soak (`soak`)
+### Tier 7: Soak (`soak`)
 
 Longer walk, random yaw, periodic dig, 15–60 min; fail on first NRE/underrun
 or tick budget breach (server apm dump).
@@ -498,7 +498,7 @@ not touch wire or sim behavior; keep unit tests as the fast loop.
 
 ## 10. Implementation plan (phased)
 
-### Phase A — Split and harden — **DONE (code landed)**
+### Phase A: Split and harden (**DONE**, code landed)
 
 1. ~~Create `7dtd-playtest` repo/mod skeleton~~ → `../7dtd-playtest/`
 2. ~~Move play driver out of connect~~ → `PlayTestDriver.cs` removed
@@ -510,7 +510,7 @@ not touch wire or sim behavior; keep unit tests as the fast loop.
 **Exit gate:** `make -C 7dtd-playtest playtest-core` on a game-bearing machine
 with built zdtd; dig/place must **confirm** via `GetBlock` wait.
 
-### Phase B — Admin dual oracle (2–4 days)
+### Phase B: Admin dual oracle (2–4 days)
 
 1. Admin `blockget` / `playerpos` (and wipeinv if cheap).
 2. Suites: combat (spawnentity + observe), give+inv dual check.
@@ -519,14 +519,14 @@ with built zdtd; dig/place must **confirm** via `GetBlock` wait.
 
 **Exit:** combat + at least one economy case green or honest xfail.
 
-### Phase C — Catalog depth (ongoing)
+### Phase C: Catalog depth (ongoing)
 
 1. Add cases from section 6 mapped to TODO/MISSING rows.
 2. persist suite with controlled restart.
 3. xfail markers tied to MISSING section ids.
 4. STATUS table: replace "11/11" with `playtest core N/N` + suite matrix.
 
-### Phase D — MP / soak (after core stable)
+### Phase D: MP / soak (after core stable)
 
 1. Optional second client or loadgen co-run.
 2. Soak profile + apm dump attach.

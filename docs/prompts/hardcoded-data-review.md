@@ -87,7 +87,7 @@ Read first (in order):
 
 ---
 
-## Bucket A — Stock game data (load from install)
+## Bucket A: Stock game data (load from install)
 
 ### What counts as stock data
 
@@ -332,7 +332,7 @@ rule (solar has no MaxFuel → no fuel budget; day gate is separate). Do not inv
 
 ---
 
-## Bucket B — zdtd-owned config (our files, not TFP)
+## Bucket B: zdtd-owned config (our files, not TFP)
 
 Bucket B is **everything operators or engineers should tune without editing
 Zig**, that is **not** stock content. If you leave it as a bare `const` in
@@ -340,7 +340,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 
 ### What counts as Bucket B
 
-#### B1 — Net / stream / interest (20 TPS budget)
+#### B1: Net / stream / interest (20 TPS budget)
 
 | Concern | Typical code today | Config key ideas |
 |---|---|---|
@@ -353,7 +353,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Reliable send retries | chunk max_attempts | `chunk_send_max_attempts` |
 | Body / recv buffer sizes | if policy not RE-fixed | only if not wire-mandated |
 
-#### B2 — Session / peers / ports
+#### B2: Session / peers / ports
 
 | Concern | Typical code | Config key ideas |
 |---|---|---|
@@ -363,7 +363,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Max clients | `max_peers` | stock `ServerMaxPlayerCount` when wired |
 | Join phase timeouts | if any | `join_timeout_ms` |
 
-#### B3 — Sim policy (not in stock XML, or stock name unused)
+#### B3: Sim policy (not in stock XML, or stock name unused)
 
 | Concern | Typical code | Notes |
 |---|---|---|
@@ -375,7 +375,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Land claim numbers | already serverconfig | keep in stock-named keys |
 | Blood moon / difficulty | already serverconfig | keep |
 
-#### B4 — Persistence / paths / ops
+#### B4: Persistence / paths / ops
 
 | Concern | Config key ideas |
 |---|---|
@@ -387,7 +387,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Log verbosity | `log_level` / package trace flags |
 | Feature flags | `wire_chunks`, deco enable, weather send, proc worldgen seed |
 
-#### B5 — Worldgen / scale (when unparked)
+#### B5: Worldgen / scale (when unparked)
 
 | Concern | Config key ideas |
 |---|---|
@@ -396,7 +396,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Prefetch ring | `worldgen_prefetch_radius` |
 | DEM blend weights | after WORLDGEN W6 |
 
-#### B6 — Already stock serverconfig (do not invent parallel names)
+#### B6: Already stock serverconfig (do not invent parallel names)
 
 If stock already has the property name, **Bucket B fix = wire it through
 `config.zig`**, not a new `zdtd_*` synonym:
@@ -439,7 +439,7 @@ See `docs/GAME_OPTIONS.md`. Finding = "default in Zig but not loaded" or
 Agent should refine after the hunt; start from this skeleton:
 
 ```toml
-# zdtd.toml — zdtd-only operator tunables (not stock serverconfig)
+# zdtd.toml: zdtd-only operator tunables (not stock serverconfig)
 # Precedence: CLI > this file (world dir then CWD) > code defaults
 
 [stream]
@@ -652,9 +652,9 @@ Always produce:
      types, defaults, clamps, precedence, load order
    - Ordered implementation plan (small PRs; A P0/P1 before B extraction if
      ids/balance wrong; B can parallelize when independent)
-2. **`docs/ASSETS.md`** — if loader contracts change
-3. **`docs/GAME_OPTIONS.md`** — if serverconfig or zdtd.toml keys change
-4. **`docs/STATUS.md` / `TODO.md`** — if play surface or backlog changes
+2. **`docs/ASSETS.md`**: if loader contracts change
+3. **`docs/GAME_OPTIONS.md`**: if serverconfig or zdtd.toml keys change
+4. **`docs/STATUS.md` / `TODO.md`**: if play surface or backlog changes
 
 ### 6. Implementation (only if user asked)
 

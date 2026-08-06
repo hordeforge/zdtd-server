@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-06  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **537** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
+**Unit tests:** `zig build test` → **758** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly). Recount after large ECS/webui waves.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -36,16 +36,16 @@ observable, on the live stock client:
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 
-**Gates at this pin:** `make check` exit 0 · 537 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 758 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are traders (no
 trader NPC reaches the client), quest accept and template inheritance, water,
 and player persistence.
 
-**Conflict rule:** if STATUS and MISSING/IMPLEMENTATION_PLAN disagree on whether a
-gate or feature shipped, **STATUS wins**. Refresh the inventory docs when closing
-work; do not re-open a STATUS PASS from a stale MISSING row.
+**Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
+whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs
+when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 
 ---
 
@@ -79,7 +79,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Automated in-client playtest | **PASS (2026-08-06)** | V3.1.0 b14 pin. Live gate **23/23** on a fresh world each run (`FRESH=1`); the client renders and plays Navezgane. The earlier demo residuals are closed: the deco S2C NRE is resolved ([archive/DECO_NRE.md](archive/DECO_NRE.md)) and the join hang is fixed (GameState=Running plus chunks before the spawn). Still open: full MinEvents eat amount (chili +15). |
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; `tcp_listen` + `std.http.Server`; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | Authority spine (P4.0) | **PASS (first cut)** | `phase_gate` matrix; movement envelope; reject counters in apm/webui; `ZdtdAuthorityMode`; inv ledger ring |
-| Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm/dynlib parked ADR 0010 p2 |
+| Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; plugins are Wasm-only per ADR 0020, no runtime wired (WORK_PLAN T9) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
@@ -222,16 +222,16 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
 | P2 | Weather storm SM | Shipped (`world/weather.zig`): stormbuild → storm → reschedule per biome, random group rolls, blood-moon override. Not persisted across restart |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
-| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks) |
+| P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
-| P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
+| P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P3 | Party membership + ally persistence | PUID flows login → PersistentPlayerState → AllyStore; party packages carry no PUID (entity-id keyed) so party needs Party state, not identity |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
-| Parked | Wasm / dynlib plugins | ADR 0010 phase 2; static host shipped |
+| Parked | Wasm plugin runtime | ADR 0020: Wasm-only, no runtime wired yet; static host stays as test scaffolding (WORK_PLAN T9) |
 | Multi-ms | Worldgen W2–W7 | W0/W1 shipped; density/climate/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +

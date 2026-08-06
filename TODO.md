@@ -12,7 +12,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-06):** `make check` exit 0 · 537 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md) wave 2026-08-06.
+**Gates (2026-08-06):** `make check` exit 0 · 758 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md) wave 2026-08-06.
 
 ### Freeze (core playable)
 

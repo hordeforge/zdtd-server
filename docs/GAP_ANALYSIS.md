@@ -15,7 +15,8 @@ pass" was **not** accepted as evidence for any wire claim, because zdtd encodes
 and decodes with the same code.
 
 **Conflict rule.** [STATUS.md](STATUS.md) remains the living hub for shipped
-gates. Where a row here contradicts [GAP_ANALYSIS.md](GAP_ANALYSIS.md),
+gates. Where a row here contradicts
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md),
 this document is newer and cites its evidence inline; where it contradicts a
 STATUS **PASS**, the disagreement is called out explicitly in the relevant
 section and in [Not verified](#not-verified).

@@ -208,7 +208,7 @@ Drain ≤ K cmds per tick (e.g. 4) so one operator cannot stall sim.
 
 ## Implementation plan (phased)
 
-### WU0 — Skeleton (1–2 PRs)
+### WU0: Skeleton (1–2 PRs)
 
 - [x] `src/server/webui.zig` (minimal HTTP/1.1, non-blocking poll from Game.step)
 - [x] CLI: `--webui-port 0` (off), `--webui-bind 127.0.0.1`, `--webui-secret`
@@ -226,7 +226,7 @@ curl -sS http://127.0.0.1:8080/healthz
 curl -sS http://127.0.0.1:8080/readyz
 ```
 
-### WU1 — Read-only dashboard
+### WU1: Read-only dashboard
 
 - [x] Tick-end `WebSnapshot` fill (`Game.fillWebuiSnap` → `webui.publishSnap`)
 - [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML)
@@ -245,7 +245,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/partials/sta
 curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 ```
 
-### WU2 — Commands
+### WU2: Commands
 
 - [x] Shared command parse path (admin TCP + web POST via `setAdminHandler` → `runAdminLine`)
 - [x] `POST /api/cmd` form `line`+`csrf`; same-request HTML reply
@@ -255,7 +255,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 
 **Exit:** give/kick/settime from browser matches admin TCP semantics.
 
-### WU3 — UX polish
+### WU3: UX polish
 
 - [ ] Alpine modals for destructive cmds
 - [ ] Player row actions
@@ -263,7 +263,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 - [ ] Basic CSS (readable dark theme, no framework lock-in)
 - [ ] Embed vendor JS (htmx, alpine) for offline ops
 
-### WU4 — Optional depth (park until asked)
+### WU4: Optional depth (park until asked)
 
 - [ ] Ban list UI
 - [ ] Config viewer (effective knobs, restart-required tags)

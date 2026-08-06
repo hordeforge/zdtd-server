@@ -10,7 +10,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 |---|---:|---:|---:|---|
 | **A** (stock data) | ~12 | 2 | ~6 | P0 deco version pin + terrain module pins residual |
 | **B** (zdtd policy) | ~12 | 0 | ~2 | Stream/authority/feature via `zdtd.toml` + InitOptions; residual open consts (locks, AI bands, caps) |
-| **OK** | 22+ | — | — | Wire / RE / physics / offline pins |
+| **OK** | 22+ | - | - | Wire / RE / physics / offline pins |
 
 | Spot-check | Result |
 |---|---|
@@ -40,7 +40,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A17 | `ecsIdFromItemName` 6/7 aliases only when `items.source == .builtin`. |
 | A23 | Removed production Steam `defaultGameDir`; `--world-name` requires `--game-dir` or `--map`. |
 | B01–B07 | Stream/interest/edit/claimed-damage/peer_stale as `InitOptions` + `Game` fields (`default_*` consts). Hot path reads `self.*`. Array bound = `max_streamed_chunks_cap`. |
-| — | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
+| - | Compile fixes incidental: dem test `got`→`head`, `@floatFromInt` result types on respawn. |
 
 ---
 
