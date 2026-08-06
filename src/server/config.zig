@@ -31,6 +31,18 @@ pub const Config = struct {
     game_world: []const u8 = "",
     password: []const u8 = "",
     admin_port: u16 = 0,
+    /// Stock telnet console (EnumGamePrefs TelnetEnabled 0x44 / TelnetPort 0x45 /
+    /// TelnetPassword 0x59, asm.il:1903853-1903951). TelnetPort wins over the zdtd
+    /// AdminPort alias when TelnetEnabled is true; see docs/GAME_OPTIONS.md.
+    telnet_enabled: bool = false,
+    telnet_port: u16 = 0,
+    /// Empty = no auth. Stock TelnetConsole::.ctor (asm.il ~270735) binds loopback
+    /// when the password is empty and INADDR_ANY only when one is set.
+    telnet_password: []const u8 = "",
+    /// TelnetFailedLoginLimit 0xA5: failed logins before the session is dropped.
+    telnet_failed_login_limit: u8 = 10,
+    /// TelnetFailedLoginsBlocktime 0xA6, minutes a source address stays blocked.
+    telnet_failed_logins_blocktime: u16 = 10,
     /// Align with Game/InitOptions default and chunk_stream_radius_min (7).
     view_radius: i32 = 7,
     authority_mode: AuthorityMode = .correct,
@@ -99,6 +111,11 @@ const known_serverconfig_names = [_][]const u8{
     "GameWorld",
     "ServerPassword",
     "AdminPort",
+    "TelnetEnabled",
+    "TelnetPort",
+    "TelnetPassword",
+    "TelnetFailedLoginLimit",
+    "TelnetFailedLoginsBlocktime",
     "ViewRadius",
     "GameDifficulty",
     "BloodMoonFrequency",
@@ -220,6 +237,22 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
             break :blk cfg.admin_port;
         };
     }
+    if (prop(raw, "TelnetEnabled")) |v| cfg.telnet_enabled = parseXmlBool(v) orelse blk: {
+        std.debug.print("zdtd: serverconfig TelnetEnabled '{s}' invalid; keeping {}\n", .{ v, cfg.telnet_enabled });
+        break :blk cfg.telnet_enabled;
+    };
+    if (prop(raw, "TelnetPort")) |v| {
+        cfg.telnet_port = xml.parseU16(v) orelse blk: {
+            std.debug.print("zdtd: serverconfig TelnetPort '{s}' invalid; keeping {d}\n", .{ v, cfg.telnet_port });
+            break :blk cfg.telnet_port;
+        };
+    }
+    // Never trimmed and never logged: the value is the console credential.
+    if (prop(raw, "TelnetPassword")) |v| cfg.telnet_password = try arena.dupe(u8, v);
+    if (prop(raw, "TelnetFailedLoginLimit")) |v|
+        cfg.telnet_failed_login_limit = clampU8(xml.parseU16(v), 1, 255, cfg.telnet_failed_login_limit);
+    if (prop(raw, "TelnetFailedLoginsBlocktime")) |v|
+        cfg.telnet_failed_logins_blocktime = clampRange(xml.parseU16(v), 0, 1440, cfg.telnet_failed_logins_blocktime);
     if (prop(raw, "ViewRadius")) |v| cfg.view_radius = clampRange(xml.parseU16(v), 1, 16, @intCast(cfg.view_radius));
     if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8(xml.parseU16(v), 0, 5, cfg.game_difficulty);
     if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8(xml.parseU16(v), 0, 255, cfg.blood_moon_frequency);
@@ -267,6 +300,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
     const raw = try io_fs.readFileInto(allocator, path, read_buf);
     if (raw.len > max_serverconfig_bytes) return error.ServerConfigTooLarge;
     return parse(allocator, raw);
+}
+
+/// Stock serverconfig booleans are written "true"/"false" (case-insensitive);
+/// the XML writer also emits 0/1 for some properties. Anything else is a typo,
+/// and a typo must not silently read as "enabled".
+fn parseXmlBool(s: []const u8) ?bool {
+    if (std.ascii.eqlIgnoreCase(s, "true") or std.mem.eql(u8, s, "1")) return true;
+    if (std.ascii.eqlIgnoreCase(s, "false") or std.mem.eql(u8, s, "0")) return false;
+    return null;
 }
 
 fn clampU8(v: ?u16, lo: u16, hi: u16, dflt: u8) u8 {
@@ -429,4 +471,57 @@ test "parse rejects missing ServerSettings root" {
         error.BadServerConfig,
         parse(std.testing.allocator, "<property name=\"ServerPort\" value=\"27002\"/>"),
     );
+}
+
+test "parse telnet properties" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="TelnetEnabled" value="true"/>
+        \\  <property name="TelnetPort" value="8081"/>
+        \\  <property name="TelnetPassword" value="hunter2"/>
+        \\  <property name="TelnetFailedLoginLimit" value="3"/>
+        \\  <property name="TelnetFailedLoginsBlocktime" value="45"/>
+        \\</ServerSettings>
+    ;
+    var cfg = try parse(std.testing.allocator, xml_src);
+    defer cfg.deinit();
+    try std.testing.expect(cfg.telnet_enabled);
+    try std.testing.expectEqual(@as(u16, 8081), cfg.telnet_port);
+    try std.testing.expectEqualStrings("hunter2", cfg.telnet_password);
+    try std.testing.expectEqual(@as(u8, 3), cfg.telnet_failed_login_limit);
+    try std.testing.expectEqual(@as(u16, 45), cfg.telnet_failed_logins_blocktime);
+}
+
+test "telnet defaults stay closed when properties are absent or malformed" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="TelnetEnabled" value="yes please"/>
+        \\  <property name="TelnetPort" value="notaport"/>
+        \\  <property name="TelnetPassword" value=""/>
+        \\</ServerSettings>
+    ;
+    var cfg = try parse(std.testing.allocator, xml_src);
+    defer cfg.deinit();
+    // A malformed boolean must not read as enabled.
+    try std.testing.expect(!cfg.telnet_enabled);
+    try std.testing.expectEqual(@as(u16, 0), cfg.telnet_port);
+    // Empty password is "no auth", never "auth with the empty string".
+    try std.testing.expectEqual(@as(usize, 0), cfg.telnet_password.len);
+    try std.testing.expectEqual(@as(u8, 10), cfg.telnet_failed_login_limit);
+
+    var bare = try parse(std.testing.allocator, "<ServerSettings></ServerSettings>");
+    defer bare.deinit();
+    try std.testing.expect(!bare.telnet_enabled);
+    try std.testing.expectEqual(@as(u16, 0), bare.telnet_port);
+    try std.testing.expectEqual(@as(usize, 0), bare.telnet_password.len);
+}
+
+test "parseXmlBool accepts stock spellings only" {
+    try std.testing.expectEqual(@as(?bool, true), parseXmlBool("true"));
+    try std.testing.expectEqual(@as(?bool, true), parseXmlBool("TRUE"));
+    try std.testing.expectEqual(@as(?bool, true), parseXmlBool("1"));
+    try std.testing.expectEqual(@as(?bool, false), parseXmlBool("False"));
+    try std.testing.expectEqual(@as(?bool, false), parseXmlBool("0"));
+    try std.testing.expectEqual(@as(?bool, null), parseXmlBool(""));
+    try std.testing.expectEqual(@as(?bool, null), parseXmlBool("on"));
 }

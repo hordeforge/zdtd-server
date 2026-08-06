@@ -1027,6 +1027,17 @@ fn adminReplyLooksFailed(reply: []const u8) bool {
     const first = std.mem.indexOfScalar(u8, reply, '\n') orelse reply.len;
     const line = std.mem.trimEnd(u8, reply[0..first], " \t\r");
     const prefixes = [_][]const u8{
+        // Stock console error shapes (SdtdConsole::executeCommand, asm.il:269448;
+        // the per-command arity/validation errors). Keep in sync with the
+        // .unknown / .err_text / .wrong_args arms of Game.runAdminLine.
+        "*** ERROR:",
+        "Wrong number of arguments,",
+        "Invalid sub command",
+        "No sub command given.",
+        "Day must be",
+        "Hour must be",
+        "Minute must be",
+        "Invalid value for single argument variant:",
         "unknown command",
         "bad arguments",
         "no player",
@@ -2070,8 +2081,22 @@ test "command result marks known failures and is keyboard-scrollable" {
     const fail = try renderCmdReply(&buf, "frob", "unknown command 'frob'. 'help' for list.\n");
     try std.testing.expect(std.mem.indexOf(u8, fail, "class=\"cmd-out err\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, fail, "role=\"alert\"") != null);
-    try std.testing.expect(adminReplyLooksFailed("bad arguments to 'kick'. usage: kick <slot>\n"));
+    try std.testing.expect(adminReplyLooksFailed("bad arguments to 'inv'. usage: inv <slot>\n"));
     try std.testing.expect(!adminReplyLooksFailed("kicked\n"));
+    // Stock console error shapes must light the failure indicator too.
+    try std.testing.expect(adminReplyLooksFailed("*** ERROR: unknown command 'frob'\n"));
+    try std.testing.expect(adminReplyLooksFailed("Wrong number of arguments, expected 1 or 3, found 2.\n"));
+    try std.testing.expect(adminReplyLooksFailed("Invalid sub command \"frob\".\n"));
+    try std.testing.expect(adminReplyLooksFailed("No sub command given.\n"));
+    try std.testing.expect(adminReplyLooksFailed("Day must be >= 1\n"));
+    try std.testing.expect(adminReplyLooksFailed("Hour must be <= 23\n"));
+    try std.testing.expect(adminReplyLooksFailed("Minute must be <= 59\n"));
+    try std.testing.expect(adminReplyLooksFailed("Invalid value for single argument variant: \"noon\"\n"));
+    // Successful stock replies must not.
+    try std.testing.expect(!adminReplyLooksFailed("Kicking Player Alice: rude\n"));
+    try std.testing.expect(!adminReplyLooksFailed("Total of 0 in the game\n"));
+    try std.testing.expect(!adminReplyLooksFailed("Set time to 12000\n"));
+    try std.testing.expect(!adminReplyLooksFailed("Ban list entries:\n"));
     var s: Server = .{};
     var log_buf: [2048]u8 = undefined;
     const log = try renderConsoleLog(&log_buf, &s);

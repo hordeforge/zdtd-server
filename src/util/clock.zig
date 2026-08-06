@@ -52,6 +52,14 @@ pub fn monoNs() u64 {
     return @as(u64, @intCast(ts.sec)) *% 1_000_000_000 +% @as(u64, @intCast(ts.nsec));
 }
 
+/// Unix seconds. Only for values that must survive a restart (ban expiry); the
+/// monotonic clock is the right one for anything measuring elapsed time.
+pub fn wallSeconds() i64 {
+    var ts: posix.timespec = undefined;
+    if (posix.system.clock_gettime(posix.CLOCK.REALTIME, &ts) != 0) return 0;
+    return @intCast(ts.sec);
+}
+
 /// Best-effort sleep for `ns` nanoseconds. Under virtual clock, advances time
 /// by `ns` and returns immediately (no real sleep).
 pub fn sleepNs(ns: u64) void {

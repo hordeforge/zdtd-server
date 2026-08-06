@@ -38,9 +38,9 @@ pub fn chatMsgOk(msg: []const u8) bool {
 /// console, which is a separate trust boundary.
 pub fn isPlayerConsoleCommand(verb: []const u8) bool {
     return eqAny(verb, &.{
-        "help",        "commands",  "?",   "gettime", "gt",      "listplayers", "lp",
-        "listents",    "le",        "say", "s",       "version", "dm",          "cm",
-        "settempunit", "debugmenu",
+        "help",        "commands",  "?",             "gettime", "gt",      "listplayers", "lp",
+        "listents",    "le",        "say",           "s",       "version", "dm",          "cm",
+        "settempunit", "debugmenu", "listplayerids", "lpi",
     });
 }
 
@@ -54,6 +54,23 @@ test "player console policy rejects administrative mutations" {
     try std.testing.expect(!isPlayerConsoleCommand("killall"));
     try std.testing.expect(!isPlayerConsoleCommand("kick"));
     try std.testing.expect(!isPlayerConsoleCommand("ban"));
+}
+
+test "player console allows only the read-only stock additions" {
+    try std.testing.expect(isPlayerConsoleCommand("listplayerids"));
+    try std.testing.expect(isPlayerConsoleCommand("lpi"));
+    // Every mutating or permission-bearing stock verb stays admin-console-only.
+    try std.testing.expect(!isPlayerConsoleCommand("admin"));
+    try std.testing.expect(!isPlayerConsoleCommand("whitelist"));
+    try std.testing.expect(!isPlayerConsoleCommand("kickall"));
+    try std.testing.expect(!isPlayerConsoleCommand("setgamepref"));
+    try std.testing.expect(!isPlayerConsoleCommand("sg"));
+    try std.testing.expect(!isPlayerConsoleCommand("getgamepref"));
+    try std.testing.expect(!isPlayerConsoleCommand("gg"));
+    try std.testing.expect(!isPlayerConsoleCommand("mem"));
+    try std.testing.expect(!isPlayerConsoleCommand("chunkcache"));
+    try std.testing.expect(!isPlayerConsoleCommand("cc"));
+    try std.testing.expect(!isPlayerConsoleCommand("shutdown"));
 }
 
 test "sanitizePlayerName drops control characters" {

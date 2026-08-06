@@ -7,7 +7,7 @@
   Missing or unreadable --serverconfig path is a fatal error (no silent defaults).
 
   Password is ServerPassword (LiteNet Connect key). Never commit real secrets.
-  AdminPort opens an unauthenticated console on 127.0.0.1 only (not for shared hosts).
+  The console binds 127.0.0.1 only while TelnetPassword is empty (not for shared hosts).
   Typos of applied property names print a stderr hint; other stock keys are ignored.
   See docs/GAME_OPTIONS.md for the full property list and ranges.
 -->
@@ -18,8 +18,16 @@
   <property name="GameName" value="zdtd"/>
   <!-- Stock world folder name under --game-dir/Data/Worlds/ (e.g. Navezgane) -->
   <property name="GameWorld" value=""/>
-  <!-- Unauthenticated TCP admin on 127.0.0.1; 0 = disabled -->
+  <!-- zdtd alias for the console port; 0 = disabled -->
   <property name="AdminPort" value="0"/>
+  <!-- Stock telnet console. TelnetPort wins over AdminPort when enabled.
+       An empty TelnetPassword means no login and a 127.0.0.1 bind; setting one
+       enables the stock login prompt and binds all interfaces. -->
+  <property name="TelnetEnabled" value="false"/>
+  <property name="TelnetPort" value="8081"/>
+  <property name="TelnetPassword" value=""/>
+  <property name="TelnetFailedLoginLimit" value="10"/>
+  <property name="TelnetFailedLoginsBlocktime" value="10"/>
   <property name="ViewRadius" value="7"/>
 
   <property name="GameDifficulty" value="2"/>

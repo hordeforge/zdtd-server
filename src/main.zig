@@ -28,7 +28,7 @@ const help_text =
     \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
     \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
     \\  --mode NAME           gamemode pack modes/<NAME>.toml (data-only; see docs/GAME_OPTIONS.md)
-    \\  --admin-port N        TCP admin console on 127.0.0.1 (0 = off; give/tele/save/kick/say)
+    \\  --admin-port N        stock telnet console (0 = off; loopback unless TelnetPassword is set)
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
     \\  --webui-bind ADDR     webui bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
     \\  --webui-secret STR    shared secret, min 8 chars (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
@@ -386,7 +386,15 @@ pub fn main(init: std.process.Init.Minimal) !void {
         };
         if (cfg_owned) |c| {
             if (!port_cli) port = c.port;
-            if (!admin_port_cli and c.admin_port != 0) admin_port = c.admin_port;
+            // Stock TelnetPort wins over the zdtd AdminPort alias when telnet is
+            // enabled; AdminPort stays the fallback for existing zdtd configs.
+            if (!admin_port_cli) {
+                if (c.telnet_enabled and c.telnet_port != 0) {
+                    admin_port = c.telnet_port;
+                } else if (c.admin_port != 0) {
+                    admin_port = c.admin_port;
+                }
+            }
             // GameName is only the save display name (resolveWorldName reads it
             // from cfg directly); GameWorld alone selects map identity.
             // GameWorld only fills map identity when CLI did not set --world-name.
@@ -481,6 +489,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .view_radius = cfg.view_radius,
         .max_players = cfg.max_players,
         .password = cfg.password,
+        .telnet_password = cfg.telnet_password,
+        .telnet_failed_login_limit = cfg.telnet_failed_login_limit,
+        .game_world = if (cfg.game_world.len > 0) cfg.game_world else "Navezgane",
         .game_difficulty = cfg.game_difficulty,
         .blood_moon_frequency = cfg.blood_moon_frequency,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
@@ -577,7 +588,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             .{},
         );
     }
-    if (admin_port != 0) {
+    if (admin_port != 0 and init_opts.telnet_password.len == 0) {
         std.debug.print(
             "zdtd: warning: AdminPort {d} opens unauthenticated console on 127.0.0.1 (not for shared hosts)\n",
             .{admin_port},

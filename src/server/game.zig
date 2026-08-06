@@ -43,6 +43,7 @@ const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
 const admin_mod = @import("admin.zig");
+const admin_cmds = @import("admin_cmds.zig");
 const webui_mod = @import("webui.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
@@ -70,6 +71,45 @@ const max_land_claims: usize = 256;
 /// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
 const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
+
+/// `help` index. Stock names and descriptions where the verb exists in stock
+/// (ConsoleCmdHelp, asm.il 226623); zdtd-only verbs are marked so an operator can
+/// tell parity from extension at a glance.
+const admin_help_index = [_]admin_cmds.HelpEntry{
+    .{ .names = "admin", .description = "Manage user permission levels" },
+    .{ .names = "apm, metrics", .description = "zdtd: server APM counters and section latency" },
+    .{ .names = "ban", .description = "Manage ban entries" },
+    .{ .names = "chunkcache, cc", .description = "Display cached chunks" },
+    .{ .names = "evidence, ev", .description = "zdtd: recent authority reject evidence ring" },
+    .{ .names = "getgamepref, gg", .description = "Gets game preferences" },
+    .{ .names = "gettime, gt", .description = "Get the current game time" },
+    .{ .names = "give", .description = "zdtd: drop an item stack at a player's feet" },
+    .{ .names = "guardclear, gc", .description = "zdtd: clear guard quarantine on a peer slot" },
+    .{ .names = "guardstats, gs", .description = "zdtd: C2S authority reject counters" },
+    .{ .names = "help", .description = "Help on console and specific commands" },
+    .{ .names = "inv", .description = "zdtd: dump a joined peer's inventory slots" },
+    .{ .names = "kick", .description = "Kicks user with optional reason" },
+    .{ .names = "kickall", .description = "Kicks all users with optional reason" },
+    .{ .names = "kill", .description = "Kill an entity by id" },
+    .{ .names = "killall, ka", .description = "Kill all AI entities" },
+    .{ .names = "listents, le", .description = "lists all entities" },
+    .{ .names = "listplayerids, lpi", .description = "Lists all players with their IDs for ingame commands" },
+    .{ .names = "listplayers, lp", .description = "lists all players" },
+    .{ .names = "mem", .description = "Prints memory information" },
+    .{ .names = "save", .description = "zdtd: save player records" },
+    .{ .names = "saveworld, sa", .description = "Saves the world manually" },
+    .{ .names = "say", .description = "Sends a message to all connected clients" },
+    .{ .names = "setgamepref, sg", .description = "Sets a game pref" },
+    .{ .names = "settime, st", .description = "Set the current game time" },
+    .{ .names = "shutdown", .description = "shuts down the game server" },
+    .{ .names = "spawnentity, se", .description = "spawns an entity" },
+    .{ .names = "status", .description = "zdtd: one-line load and error counters" },
+    .{ .names = "tele, tp", .description = "zdtd: teleport a player (stock tp is client-only)" },
+    .{ .names = "unban", .description = "zdtd: drop a raw IPv4 ban" },
+    .{ .names = "version", .description = "Get the currently running version" },
+    .{ .names = "whitelist", .description = "Manage whitelist entries" },
+    .{ .names = "wipeplayer", .description = "zdtd: erase a player record by login name" },
+};
 
 /// Persist failures are non-fatal but never silent: lost world/player/container
 /// state must show up in the server log. Counter always increments; log is
@@ -147,6 +187,12 @@ pub const InitOptions = struct {
     quests_path: ?[]const u8 = null,
     view_radius: i32 = default_view_radius,
     admin_port: u16 = 0,
+    /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
+    /// non-empty enables the stock login and the INADDR_ANY bind.
+    telnet_password: []const u8 = "",
+    telnet_failed_login_limit: u8 = 10,
+    /// GameWorld, shown in the telnet greeting block.
+    game_world: []const u8 = "Navezgane",
     /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
     webui_port: u16 = 0,
     webui_bind: []const u8 = "127.0.0.1",
@@ -493,6 +539,11 @@ pub const Game = struct {
     world_name: []const u8 = "zdtd",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
+    /// Stock operator lists (`admin`, `ban`, `whitelist`), persisted beside
+    /// players.zsv so a restart keeps permissions and live bans.
+    admin_list: admin_cmds.PermissionList = .{},
+    whitelist: admin_cmds.PermissionList = .{},
+    ban_list: admin_cmds.BanList = .{},
     /// When non-null, adminReply also appends into this buffer (webui cmd responses).
     admin_reply_sink: ?[]u8 = null,
     admin_reply_len: usize = 0,
@@ -1165,15 +1216,36 @@ pub const Game = struct {
                 std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
             };
         }
+        self.loadAdminLists();
         if (opts.admin_port != 0) {
+            // Stock TelnetConsole::.ctor (asm.il ~270735): a password is what moves
+            // the console off loopback, so `auth` must be set before `listen`.
+            self.admin.auth = .{
+                .password = opts.telnet_password,
+                .fail_limit = opts.telnet_failed_login_limit,
+            };
+            self.admin.greeting = .{
+                .version = version.stock_wire_announce,
+                .compat_version = version.stock_wire,
+                .server_ip = if (self.admin.public()) "Any" else "127.0.0.1",
+                .server_port = port,
+                .max_players = self.max_players,
+                .game_mode = "GameModeSurvival",
+                .world = opts.game_world,
+                .game_name = self.world_name,
+                .difficulty = opts.game_difficulty,
+            };
             self.admin.listen(opts.admin_port) catch |err| {
                 std.debug.print("zdtd: warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ opts.admin_port, err });
             };
             if (self.admin.port != 0) {
-                // Loopback only; no password on this console (give/kick/shutdown).
                 std.debug.print(
-                    "zdtd: admin console 127.0.0.1:{d} (unauthenticated; loopback only)\n",
-                    .{self.admin.port},
+                    "zdtd: admin console {s}:{d} ({s})\n",
+                    .{
+                        if (self.admin.public()) "0.0.0.0" else "127.0.0.1",
+                        self.admin.port,
+                        if (self.admin.public()) "password required" else "unauthenticated; loopback only",
+                    },
                 );
             }
         }
@@ -2527,6 +2599,251 @@ pub const Game = struct {
         return self.admin_reply_len;
     }
 
+    /// Stock `ban add|remove|list` (ConsoleCmdBan, asm.il 209578-210270). The list
+    /// is by identity and survives restart; the IP ban table still does the
+    /// immediate enforcement for the connection that is being dropped.
+    fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
+        switch (sub) {
+            .list => {
+                self.ban_list.expire(clock.wallSeconds());
+                self.adminWrite(admin_cmds.writeBanList, .{&self.ban_list});
+            },
+            .remove => |t| {
+                var idb: [96]u8 = undefined;
+                const id = self.adminTargetId(t, &idb);
+                _ = self.ban_list.remove(id);
+                self.saveAdminLists();
+                var b: [160]u8 = undefined;
+                const s = std.fmt.bufPrint(&b, "{s} removed from ban list.\n", .{id}) catch return;
+                self.adminReply(s);
+            },
+            .add => |a| {
+                var idb: [96]u8 = undefined;
+                const id = self.adminTargetId(a.target, &idb);
+                const now = clock.wallSeconds();
+                const until = std.math.add(i64, now, a.seconds) catch std.math.maxInt(i64);
+                if (!self.ban_list.add(id, until, a.reason)) {
+                    self.adminReply("ban list full\n");
+                    return;
+                }
+                self.saveAdminLists();
+                // Online target: drop the session and hold its address too, so a
+                // reconnect before the next join check cannot slip through.
+                switch (self.resolveAdminTarget(a.target)) {
+                    .slot => |slot| {
+                        if (self.clients[slot].peer) |p| self.banIp(peerIpKey(p));
+                        self.dropClientSlot(slot);
+                    },
+                    else => {},
+                }
+                var tb: [24]u8 = undefined;
+                var b: [256]u8 = undefined;
+                const s = std.fmt.bufPrint(&b, "{s} banned until {s}, reason: {s}.\n", .{
+                    id, admin_cmds.formatUnix(&tb, until), a.reason,
+                }) catch return;
+                self.adminReply(s);
+            },
+        }
+    }
+
+    fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 {
+        return try std.fmt.bufPrint(buf, "{s}/{s}", .{ self.world.world_dir, name });
+    }
+
+    /// All three lists are rewritten together: they are small, and a single call
+    /// site means no command can mutate one and forget to persist it.
+    fn saveAdminLists(self: *Game) void {
+        self.saveAdminListFile("admins.zsv", admin_cmds.serializePermissions, &self.admin_list);
+        self.saveAdminListFile("whitelist.zsv", admin_cmds.serializePermissions, &self.whitelist);
+        self.saveAdminListFile("bans.zsv", admin_cmds.serializeBans, &self.ban_list);
+    }
+
+    fn saveAdminListFile(self: *Game, name: []const u8, comptime ser: anytype, list: anytype) void {
+        var path_buf: [512]u8 = undefined;
+        const path = self.adminListsPath(&path_buf, name) catch return;
+        var buf: [16 * 1024]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&buf);
+        ser(&w, list) catch |e| return logPersistErr(self, "serialize admin list", e);
+        io_fs.writeFile(self.allocator, path, w.buffered()) catch |e|
+            logPersistErr(self, "save admin list", e);
+    }
+
+    /// Reads the three lists at startup. A missing file is normal; a corrupt line
+    /// is skipped and reported, never applied, so a damaged file cannot grant
+    /// permissions or silently drop a live ban without a warning.
+    fn loadAdminLists(self: *Game) void {
+        const now = clock.wallSeconds();
+        self.readAdminList("admins.zsv", "admin", struct {
+            fn f(g: *Game, text: []const u8, _: i64) admin_cmds.LoadResult {
+                return admin_cmds.deserializePermissions(&g.admin_list, text);
+            }
+        }.f, now);
+        self.readAdminList("whitelist.zsv", "whitelist", struct {
+            fn f(g: *Game, text: []const u8, _: i64) admin_cmds.LoadResult {
+                return admin_cmds.deserializePermissions(&g.whitelist, text);
+            }
+        }.f, now);
+        self.readAdminList("bans.zsv", "ban", struct {
+            fn f(g: *Game, text: []const u8, t: i64) admin_cmds.LoadResult {
+                return admin_cmds.deserializeBans(&g.ban_list, text, t);
+            }
+        }.f, now);
+    }
+
+    fn readAdminList(
+        self: *Game,
+        name: []const u8,
+        label: []const u8,
+        load: *const fn (*Game, []const u8, i64) admin_cmds.LoadResult,
+        now: i64,
+    ) void {
+        var path_buf: [512]u8 = undefined;
+        const path = self.adminListsPath(&path_buf, name) catch return;
+        const text = io_fs.readFileAll(self.allocator, path) catch |e| {
+            if (e != error.FileNotFound) logPersistErr(self, "load admin list", e);
+            return;
+        };
+        defer self.allocator.free(text);
+        const res = load(self, text, now);
+        if (res.skipped != 0) {
+            std.debug.print(
+                "zdtd: warning: {d} corrupt {s} list entries skipped (not applied)\n",
+                .{ res.skipped, label },
+            );
+        }
+    }
+
+    /// Stock `getgamepref` (asm.il 220877): "GamePref.{0} = {1}" per pref, filtered
+    /// by substring. Only prefs zdtd actually applies are listed; printing a stock
+    /// name zdtd ignores would tell an operator a lie.
+    fn replyGamePrefs(self: *Game, filter: []const u8) void {
+        self.gamePref(filter, "ServerPort", "{d}", .{self.info_port});
+        self.gamePref(filter, "ServerMaxPlayerCount", "{d}", .{self.max_players});
+        self.gamePref(filter, "GameName", "{s}", .{self.world_name});
+        self.gamePref(filter, "ViewRadius", "{d}", .{self.view_radius});
+        self.gamePref(filter, "GameDifficulty", "{d}", .{self.sim.director.difficulty});
+        self.gamePref(filter, "DayNightLength", "{d}", .{
+            @as(u32, @intFromFloat(@round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0))),
+        });
+        self.gamePref(filter, "TelnetPort", "{d}", .{self.admin.port});
+    }
+
+    fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
+        if (filter.len != 0 and std.ascii.indexOfIgnoreCase(name, filter) == null) return;
+        var vb: [96]u8 = undefined;
+        const v = std.fmt.bufPrint(&vb, fmt, args) catch return;
+        self.adminWrite(admin_cmds.writeGamePref, .{ name, v });
+    }
+
+    /// Stock `mem` (asm.il 235864). zdtd has no Unity heap, so the Unity-only
+    /// fields report 0 rather than a made-up number; the separators are stock's
+    /// so a scraper still finds the counts it can use.
+    fn replyMem(self: *Game) void {
+        var players: usize = 0;
+        var zombies: usize = 0;
+        var entities: usize = 0;
+        var s: ecs.Slot = 0;
+        while (s < ecs.max_entities) : (s += 1) {
+            if (!self.sim.alive[s]) continue;
+            entities += 1;
+            switch (self.sim.kind[s]) {
+                .player => players += 1,
+                .zombie => zombies += 1,
+                else => {},
+            }
+        }
+        self.adminWrite(admin_cmds.writeMem, .{admin_cmds.MemStats{
+            .minutes = clock.monoNs() / std.time.ns_per_min,
+            .fps = protocol.ticks_per_second,
+            .heap_mb = 0,
+            .max_mb = 0,
+            .chunks = self.world.chunks.count(),
+            .chunk_game_objects = 0,
+            .players = players,
+            .zombies = zombies,
+            .entities = entities,
+            .entities_of_type = entities,
+            .items = 0,
+            .collision_objects = 0,
+            .rss_mb = 0,
+        }});
+    }
+
+    /// Render one `admin_cmds` formatter straight into the admin reply stream.
+    /// Sized for the largest single formatter output, a full `ban list`
+    /// (admin_cmds.max_entries rows of id + reason + timestamp).
+    fn adminWrite(self: *Game, comptime f: anytype, args: anytype) void {
+        var buf: [16 * 1024]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&buf);
+        @call(.auto, f, .{&w} ++ args) catch return;
+        self.adminReply(w.buffered());
+    }
+
+    /// Stock console target resolution (ConsoleHelper::ParseParamPartialNameOrId,
+    /// asm.il:268297): entity id, peer slot or (partial) player name.
+    const TargetResult = union(enum) { slot: usize, none, ambiguous };
+
+    fn resolveAdminTarget(self: *const Game, t: admin_mod.Target) TargetResult {
+        switch (t) {
+            .id => |n| {
+                if (n < 0) return .none;
+                const u: usize = @intCast(n);
+                if (u < max_clients and self.clients[u].joined) return .{ .slot = u };
+                for (&self.clients, 0..) |*cl, i| {
+                    if (cl.joined and cl.entity_id == n) return .{ .slot = i };
+                }
+                return .none;
+            },
+            .name => |nm| {
+                if (nm.len == 0) return .none;
+                for (&self.clients, 0..) |*cl, i| {
+                    if (cl.joined and std.ascii.eqlIgnoreCase(cl.name[0..cl.name_len], nm)) return .{ .slot = i };
+                }
+                var hit: ?usize = null;
+                for (&self.clients, 0..) |*cl, i| {
+                    if (!cl.joined) continue;
+                    if (std.ascii.indexOfIgnoreCase(cl.name[0..cl.name_len], nm) == null) continue;
+                    if (hit != null) return .ambiguous;
+                    hit = i;
+                }
+                return if (hit) |h| .{ .slot = h } else .none;
+            },
+        }
+    }
+
+    /// The stock error lines a miss produces, so tooling can branch on them.
+    fn adminTargetError(self: *Game, t: admin_mod.Target, res: TargetResult) void {
+        var tb: [96]u8 = undefined;
+        const tok = switch (t) {
+            .id => |n| std.fmt.bufPrint(&tb, "{d}", .{n}) catch "?",
+            .name => |nm| nm,
+        };
+        var b: [256]u8 = undefined;
+        const s = switch (res) {
+            .ambiguous => std.fmt.bufPrint(&b, "\"{s}\" matches multiple player names.\n", .{tok}),
+            else => std.fmt.bufPrint(&b, "\"{s}\" is not a valid entity id, player name or user id.\n", .{tok}),
+        } catch return;
+        self.adminReply(s);
+    }
+
+    /// Identity a ban/permission entry is stored under: the login name when the
+    /// target is online, otherwise the operator's own token. zdtd has no stock
+    /// platform user id to key on, and inventing one would be a lie on the wire.
+    /// Always copied into `buf`: callers kick the client afterwards, which clears
+    /// the name the slice would otherwise point at.
+    fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const u8 {
+        const src: []const u8 = switch (self.resolveAdminTarget(t)) {
+            .slot => |i| self.clients[i].name[0..self.clients[i].name_len],
+            else => switch (t) {
+                .id => |n| return std.fmt.bufPrint(buf, "{d}", .{n}) catch "?",
+                .name => |nm| nm,
+            },
+        };
+        const n = @min(src.len, buf.len);
+        @memcpy(buf[0..n], src[0..n]);
+        return buf[0..n];
+    }
+
     fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         const trimmed = std.mem.trim(u8, line, " \t");
         const verb_end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
@@ -2534,26 +2851,29 @@ pub const Game = struct {
         std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
         const cmd = admin_mod.parseCommand(line);
         switch (cmd) {
-            .help => self.adminReply(
-                \\commands:
-                \\  status  guardstats  evidence  guardclear|gc <slot>  apm|metrics  list  listplayers|lp  listents|le  inv <slot>  version
-                \\  gettime|gt  settime|st <day|night|ticks|D H M>  gamestage [slot]
-                \\  give <slot> <itemId> [count]  tele|tp <slot> <x> <y> <z>  say <msg>
-                \\  kick <slot>  ban <slot>  unban <iphex>
-                \\  wipeplayer <name>
-                \\  kill <id>  killall|ka  spawnentity|se <slot|entityId> <class>
-                \\  save  saveworld|sa  shutdown  quit|exit
-                \\
-            ),
+            .help => {
+                var buf: [4096]u8 = undefined;
+                var w: std.Io.Writer = .fixed(&buf);
+                admin_cmds.writeHelp(&w, &admin_help_index) catch return;
+                self.adminReply(w.buffered());
+            },
             .unknown => {
                 // Surface the first token so typos are obvious (matches player console).
                 const bad_verb = if (verb_end > 0) trimmed[0..verb_end] else trimmed;
-                var ub: [160]u8 = undefined;
+                self.adminWrite(admin_cmds.writeUnknownCommand, .{bad_verb});
+            },
+            .err_text => |e| {
+                var eb: [320]u8 = undefined;
+                const s = std.fmt.bufPrint(&eb, "{s}{s}{s}\n", .{ e.prefix, e.token, e.suffix }) catch return;
+                self.adminReply(s);
+            },
+            .wrong_args => |a| {
+                var eb: [96]u8 = undefined;
                 const s = std.fmt.bufPrint(
-                    &ub,
-                    "unknown command '{s}'. 'help' for list.\n",
-                    .{bad_verb},
-                ) catch "unknown command. 'help' for list.\n";
+                    &eb,
+                    "Wrong number of arguments, expected {s}, found {d}.\n",
+                    .{ a.expected, a.found },
+                ) catch return;
                 self.adminReply(s);
             },
             .bad_args => |verb| {
@@ -2648,26 +2968,87 @@ pub const Game = struct {
                 };
                 self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
             },
-            .kick => |peer| {
-                if (peer >= max_clients or self.clients[peer].peer == null) {
-                    self.adminReply("no player in slot\n");
-                    return;
-                }
-                self.dropClientSlot(peer);
-                self.adminReply("kicked\n");
+            .kick => |k| {
+                const res = self.resolveAdminTarget(k.target);
+                const slot = switch (res) {
+                    .slot => |i| i,
+                    else => return self.adminTargetError(k.target, res),
+                };
+                var kb: [192]u8 = undefined;
+                const s = std.fmt.bufPrint(&kb, "Kicking Player {s}: {s}\n", .{
+                    self.clients[slot].name[0..self.clients[slot].name_len], k.reason,
+                }) catch "Kicking Player\n";
+                self.adminReply(s);
+                self.dropClientSlot(slot);
             },
-            .ban => |peer| {
-                if (peer >= max_clients or self.clients[peer].peer == null) {
-                    self.adminReply("no player in slot\n");
-                    return;
+            .kickall => |reason| {
+                for (&self.clients, 0..) |*cl, i| {
+                    if (!cl.joined) continue;
+                    var kb: [192]u8 = undefined;
+                    const s = std.fmt.bufPrint(&kb, "Kicking Player {s}: {s}\n", .{
+                        cl.name[0..cl.name_len], reason,
+                    }) catch "Kicking Player\n";
+                    self.adminReply(s);
+                    self.dropClientSlot(i);
                 }
-                self.banIp(peerIpKey(self.clients[peer].peer.?));
-                self.dropClientSlot(peer);
-                self.adminReply("banned\n");
             },
+            .ban => |sub| self.runBanCommand(sub),
             .unban => |ip| {
                 self.unbanIp(ip);
                 self.adminReply("unbanned\n");
+            },
+            .admin => |sub| switch (sub) {
+                .list => self.adminWrite(admin_cmds.writeAdminList, .{&self.admin_list}),
+                .add => |a| {
+                    var idb: [96]u8 = undefined;
+                    const id = self.adminTargetId(a.target, &idb);
+                    if (!self.admin_list.add(id, a.level)) {
+                        self.adminReply("permissions list full\n");
+                        return;
+                    }
+                    self.saveAdminLists();
+                    var b: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(&b, "{s} added with permission level of {d}.\n", .{ id, a.level }) catch return;
+                    self.adminReply(s);
+                },
+                .remove => |t| {
+                    var idb: [96]u8 = undefined;
+                    const id = self.adminTargetId(t, &idb);
+                    const removed = self.admin_list.remove(id);
+                    if (removed) self.saveAdminLists();
+                    var b: [160]u8 = undefined;
+                    const s = if (removed)
+                        std.fmt.bufPrint(&b, "{s} removed from permissions list.\n", .{id}) catch return
+                    else
+                        std.fmt.bufPrint(&b, "{s} was not on permissions list.\n", .{id}) catch return;
+                    self.adminReply(s);
+                },
+            },
+            .whitelist => |sub| switch (sub) {
+                .list => self.adminWrite(admin_cmds.writeWhitelist, .{&self.whitelist}),
+                .add => |t| {
+                    var idb: [96]u8 = undefined;
+                    const id = self.adminTargetId(t, &idb);
+                    if (!self.whitelist.add(id, 0)) {
+                        self.adminReply("whitelist full\n");
+                        return;
+                    }
+                    self.saveAdminLists();
+                    var b: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(&b, "{s} added to whitelist.\n", .{id}) catch return;
+                    self.adminReply(s);
+                },
+                .remove => |t| {
+                    var idb: [96]u8 = undefined;
+                    const id = self.adminTargetId(t, &idb);
+                    const removed = self.whitelist.remove(id);
+                    if (removed) self.saveAdminLists();
+                    var b: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(&b, "{s} {s} the whitelist.\n", .{
+                        id, if (removed) "removed from" else "was not on",
+                    }) catch return;
+                    self.adminReply(s);
+                },
             },
             .wipeplayer => |nm| {
                 // Drop any online session with this login name first so the next
@@ -2691,24 +3072,53 @@ pub const Game = struct {
                 std.debug.print("zdtd: wipeplayer records={d} kicked={d}\n", .{ removed, kicked });
             },
             .list, .listplayers => {
-                // Stock-ish: include id= so playtest orch re.findall(r"id\s*=\s*(\d+)") works.
+                // ConsoleCmdListPlayers::Execute (asm.il 231241) field order.
                 // Names stay on admin/webui replies only (never process stdout; PlayerLogin logs name_len).
                 var n: usize = 0;
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined) continue;
-                    var lb: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(&lb, "{d}. id={d}, {s}, pos=(?, ?, ?), remote=False, health=100, slot={d}\n", .{
-                        n, cl.entity_id, cl.name[0..cl.name_len], i,
-                    }) catch continue;
-                    self.adminReply(s);
+                    const ps = self.sim.playerByPeer(i);
+                    const t = if (ps) |p| self.sim.transform[p] else ecs.components.Transform{};
+                    const hp: i32 = if (ps) |p| @intFromFloat(self.sim.health[p].hp) else 0;
+                    self.adminWrite(admin_cmds.writePlayerRow, .{ n, admin_cmds.PlayerRow{
+                        .entity_id = cl.entity_id,
+                        .name = cl.name[0..cl.name_len],
+                        .x = t.x,
+                        .y = t.y,
+                        .z = t.z,
+                        .rot_y = t.yaw,
+                        .health = hp,
+                    } });
                     n += 1;
                 }
-                if (n == 0) self.adminReply("Total of 0 in the game\n") else {
-                    var tb: [48]u8 = undefined;
-                    const s = std.fmt.bufPrint(&tb, "Total of {d} in the game\n", .{n}) catch "end\n";
-                    self.adminReply(s);
-                }
+                self.adminWrite(admin_cmds.writeTotal, .{n});
             },
+            .listplayerids => {
+                var n: usize = 0;
+                for (&self.clients) |*cl| {
+                    if (!cl.joined) continue;
+                    self.adminWrite(admin_cmds.writePlayerIdRow, .{ n, cl.entity_id, cl.name[0..cl.name_len] });
+                    n += 1;
+                }
+                self.adminWrite(admin_cmds.writeTotal, .{n});
+            },
+            .getgamepref => |filter| self.replyGamePrefs(filter),
+            .setgamepref => |sp| {
+                // zdtd applies serverconfig at startup only; a runtime write would
+                // report success while the sim kept the old value.
+                var b: [160]u8 = undefined;
+                const s = std.fmt.bufPrint(
+                    &b,
+                    "GamePref.{s} is read-only on zdtd (set {s} in serverconfig.xml and restart).\n",
+                    .{ sp.name, sp.name },
+                ) catch return;
+                self.adminReply(s);
+            },
+            .chunkcache => self.adminWrite(admin_cmds.writeChunkCache, .{
+                self.world.chunks.count(),
+                @as(u64, self.world.chunks.count()) * @sizeOf(world_store.Chunk),
+            }),
+            .mem => self.replyMem(),
             .killall => {
                 const n = self.consoleKillAll();
                 // Also animals (consoleKillAll is zombies-only). No loot bags:
@@ -2793,13 +3203,17 @@ pub const Game = struct {
                 const s = std.fmt.bufPrint(&tb2, "Day {d}, {d:0>2}:{d:0>2}\n", .{ clk.day, hh, mm }) catch return;
                 self.adminReply(s);
             },
-            .settime => |ti| {
+            .settime => |world_time| {
+                // Stock world time: 24000 ticks/day, 1000/hour (asm.il 1926175).
                 const clk = &self.sim.director.clock;
-                if (ti.day > 0) clk.day = ti.day;
-                clk.hours = @as(f32, @floatFromInt(ti.hour)) + @as(f32, @floatFromInt(ti.minute)) / 60.0;
+                clk.day = @intCast(world_time / 24000 + 1);
+                const in_day = world_time % 24000;
+                clk.hours = @as(f32, @floatFromInt(in_day)) / 1000.0;
                 const wt = packages.buildWorldTimeBody(self.body_buf[0..16], clk.worldTimeBits()) catch return;
                 self.broadcast("NetPackageWorldTime", wt) catch {};
-                self.adminReply("time set\n");
+                var b: [64]u8 = undefined;
+                const s = std.fmt.bufPrint(&b, "Set time to {d}\n", .{world_time}) catch return;
+                self.adminReply(s);
             },
             .spawnentity => |sp2| {
                 const nm = line[sp2.name_off..][0..sp2.name_len];
@@ -2868,22 +3282,28 @@ pub const Game = struct {
                 } else self.adminReply("spawn failed (capacity)\n");
             },
             .listents => {
+                // ConsoleCmdListEntities (asm.il 230715) field order + total line.
+                var n: usize = 0;
                 var ei: ecs.Slot = 0;
                 while (ei < ecs.max_entities) : (ei += 1) {
                     if (!self.sim.alive[ei] or !self.sim.mask[ei].network_id) continue;
-                    var lb2: [128]u8 = undefined;
-                    const hp: f32 = if (self.sim.mask[ei].health) self.sim.health[ei].hp else 0;
-                    const s = std.fmt.bufPrint(&lb2, "id={d} kind={s} hp={d:.0} pos=({d:.0},{d:.0},{d:.0})\n", .{
-                        self.sim.network_id[ei].id,
-                        @tagName(self.sim.kind[ei]),
-                        hp,
-                        self.sim.transform[ei].x,
-                        self.sim.transform[ei].y,
-                        self.sim.transform[ei].z,
-                    }) catch continue;
-                    self.adminReply(s);
+                    const t = self.sim.transform[ei];
+                    self.adminWrite(admin_cmds.writeEntityRow, .{ n, admin_cmds.EntityRow{
+                        .entity_id = self.sim.network_id[ei].id,
+                        .name = @tagName(self.sim.kind[ei]),
+                        .x = t.x,
+                        .y = t.y,
+                        .z = t.z,
+                        .rot_y = t.yaw,
+                        .dead = self.sim.mask[ei].health and self.sim.health[ei].hp <= 0,
+                        .health = if (self.sim.mask[ei].health)
+                            @intFromFloat(self.sim.health[ei].hp)
+                        else
+                            null,
+                    } });
+                    n += 1;
                 }
-                self.adminReply("end\n");
+                self.adminWrite(admin_cmds.writeTotal, .{n});
             },
             .saveworld => {
                 var save_failed = false;
@@ -3968,6 +4388,13 @@ pub const Game = struct {
                         c.name_len = sanitizePlayerName(c.name[0..], nm);
                     } else |_| {}
                 }
+            }
+            // Identity ban (`ban add`) outlives the connection an IP ban catches,
+            // so it is checked once the login name is known.
+            if (c.name_len != 0 and self.ban_list.banned(c.name[0..c.name_len], clock.wallSeconds())) {
+                self.harness.counters.inc(.join_fail);
+                self.dropClientSlot(c.slot);
+                return;
             }
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
             try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);

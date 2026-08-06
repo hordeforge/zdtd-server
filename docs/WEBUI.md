@@ -160,10 +160,10 @@ Reuse **exactly** `admin.zig` / `Game` console verbs so TCP and web stay one pat
 |---|---|
 | `lp` / listplayers | Players table (auto) |
 | `wipeplayer <name>` | Erase `players.zsv` record + kick online (confirm dialog) |
-| `kick <slot>` | Row button |
+| `kick <name/id> [reason]` | Row button |
 | `give <slot> <item> <n>` | Form (name resolve via items table) |
 | `tp` / `tele` | Form or "TP to spawn" (admin accepts both) |
-| `settime` | Day/night buttons + custom |
+| `settime day\|night\|<worldtime>` | Day/night buttons + custom |
 | `say` | Broadcast form |
 | `killall` / spawnentity | Confirm modal (Alpine) |
 | `save` / `shutdown` | Confirm + danger class |

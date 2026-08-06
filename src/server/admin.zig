@@ -8,6 +8,45 @@ pub const max_cmd: usize = 256;
 
 pub const max_sessions: usize = 4;
 
+/// Stock telnet login (TelnetConnection::authenticate, asm.il ~270254).
+/// An empty password means no auth, which is also what decides the bind address:
+/// TelnetConsole::.ctor (asm.il ~270735-270746) binds IPAddress.Loopback when the
+/// password is empty and IPAddress.Any only when one is set.
+pub const Auth = struct {
+    password: []const u8 = "",
+    /// TelnetFailedLoginLimit (EnumGamePrefs 0xA5, asm.il:1903939).
+    fail_limit: u8 = 10,
+
+    pub fn enabled(self: Auth) bool {
+        return self.password.len > 0;
+    }
+
+    /// Length-independent byte compare so a wrong password cannot be probed by
+    /// timing. Length itself is not secret enough to matter, but the bytes are.
+    pub fn matches(self: Auth, line: []const u8) bool {
+        if (!self.enabled()) return true;
+        var diff: u8 = @intFromBool(line.len != self.password.len);
+        const n = @min(line.len, self.password.len);
+        for (0..n) |i| diff |= line[i] ^ self.password[i];
+        return diff == 0;
+    }
+};
+
+/// Fields of the stock greeting block (TelnetConnection::LoginMessage, asm.il
+/// ~269912-269850+). Empty strings are printed as stock prints them.
+pub const Greeting = struct {
+    version: []const u8 = "",
+    compat_version: []const u8 = "",
+    /// Stock prints the ServerIP pref, or "Any" when it is unset.
+    server_ip: []const u8 = "Any",
+    server_port: u16 = 0,
+    max_players: u16 = 0,
+    game_mode: []const u8 = "",
+    world: []const u8 = "",
+    game_name: []const u8 = "",
+    difficulty: u8 = 0,
+};
+
 pub const Server = struct {
     listener: tcp.Listener = .{},
     port: u16 = 0,
@@ -17,12 +56,26 @@ pub const Server = struct {
     recv_lens: [max_sessions]usize = .{0} ** max_sessions,
     /// Session whose line is currently being handled (reply target).
     active: usize = 0,
+    /// Set before `listen`: decides the bind address and the login prompt.
+    auth: Auth = .{},
+    greeting: Greeting = .{},
+    /// Per-session login state. A session with `authed[i] == false` never reaches
+    /// the command dispatcher; its lines are password attempts only.
+    authed: [max_sessions]bool = .{false} ** max_sessions,
+    fails: [max_sessions]u8 = .{0} ** max_sessions,
 
     pub fn listen(self: *Server, port: u16) !void {
         if (port == 0) return;
-        // Loopback only: admin has no auth (give/kick/shutdown).
-        try self.listener.listen(0x7f000001, port, 4);
+        // Stock rule: no password means loopback only (the console can kick,
+        // ban and shut the server down). A password is the only way off 127.0.0.1.
+        const host: u32 = if (self.auth.enabled()) 0 else 0x7f000001;
+        try self.listener.listen(host, port, 4);
         self.port = self.listener.port;
+    }
+
+    /// True when `listen` would expose the console beyond loopback.
+    pub fn public(self: *const Server) bool {
+        return self.auth.enabled();
     }
 
     pub fn deinit(self: *Server) void {
@@ -31,27 +84,88 @@ pub const Server = struct {
             s.* = -1;
         }
         self.recv_lens = .{0} ** max_sessions;
+        self.authed = .{false} ** max_sessions;
+        self.fails = .{0} ** max_sessions;
         self.listener.deinit();
         self.port = 0;
+    }
+
+    fn openSession(self: *Server, i: usize, cfd: tcp.Handle) void {
+        self.sessions[i] = cfd;
+        self.recv_lens[i] = 0;
+        self.fails[i] = 0;
+        self.authed[i] = !self.auth.enabled();
+        self.active = i;
+        // Stock ctor (asm.il ~269865): prompt when auth is on, greet otherwise.
+        if (self.authed[i]) self.writeGreeting() else self.reply("Please enter password:\n");
     }
 
     fn acceptNew(self: *Server) void {
         const cfd = self.listener.accept() catch return orelse return;
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) {
-                s.* = cfd;
-                self.recv_lens[i] = 0;
-                self.active = i;
-                self.reply("zdtd admin. 'help' for commands.\n");
+                self.openSession(i, cfd);
                 return;
             }
         }
         // all slots busy: evict oldest (slot 0)
         tcp.closeFd(self.sessions[0]);
-        self.sessions[0] = cfd;
-        self.recv_lens[0] = 0;
-        self.active = 0;
-        self.reply("zdtd admin. 'help' for commands.\n");
+        self.openSession(0, cfd);
+    }
+
+    /// TelnetConnection::LoginMessage (asm.il ~269912): the block operator tooling
+    /// scrapes for server identity right after connect.
+    pub fn writeGreeting(self: *Server) void {
+        const g = self.greeting;
+        var buf: [512]u8 = undefined;
+        self.reply("*** Connected with 7DTD server.\n");
+        self.replyFmt(&buf, "*** Server version: {s} Compatibility Version: {s}\n", .{ g.version, g.compat_version });
+        self.reply("\n");
+        self.replyFmt(&buf, "Server IP:   {s}\n", .{g.server_ip});
+        self.replyFmt(&buf, "Server port: {d}\n", .{g.server_port});
+        self.replyFmt(&buf, "Max players: {d}\n", .{g.max_players});
+        self.replyFmt(&buf, "Game mode:   {s}\n", .{g.game_mode});
+        self.replyFmt(&buf, "World:       {s}\n", .{g.world});
+        self.replyFmt(&buf, "Game name:   {s}\n", .{g.game_name});
+        self.replyFmt(&buf, "Difficulty:  {d}\n", .{g.difficulty});
+        self.reply("\n");
+        self.reply("Press 'help' to get a list of all commands. Press \n");
+        self.reply("\n");
+    }
+
+    fn replyFmt(self: *Server, buf: []u8, comptime fmt: []const u8, args: anytype) void {
+        self.reply(std.fmt.bufPrint(buf, fmt, args) catch return);
+    }
+
+    /// One password attempt on session `i`. Returns false when the session was
+    /// closed (too many failures). The line is never echoed or logged.
+    fn authenticate(self: *Server, i: usize, line: []const u8) bool {
+        self.active = i;
+        if (self.auth.matches(line)) {
+            self.authed[i] = true;
+            self.fails[i] = 0;
+            self.reply("Logon successful.\n\n\n\n");
+            self.writeGreeting();
+            return true;
+        }
+        self.fails[i] +|= 1;
+        if (self.fails[i] >= self.auth.fail_limit) {
+            self.reply("Too many failed login attempts!\n");
+            self.closeActive();
+            return false;
+        }
+        self.reply("Password incorrect, please enter password:\n");
+        return true;
+    }
+
+    /// Close one session and clear every bit of its state, login included, so a
+    /// recycled slot can never start out already authenticated.
+    fn dropSession(self: *Server, i: usize) void {
+        if (self.sessions[i] >= 0) tcp.closeFd(self.sessions[i]);
+        self.sessions[i] = -1;
+        self.recv_lens[i] = 0;
+        self.authed[i] = false;
+        self.fails[i] = 0;
     }
 
     /// Non-blocking: accept new sessions, then read one line from any session.
@@ -64,9 +178,7 @@ pub const Server = struct {
             if (s.* < 0) continue;
             const pending = self.recv_lens[i];
             if (pending == max_cmd) {
-                tcp.closeFd(s.*);
-                s.* = -1;
-                self.recv_lens[i] = 0;
+                self.dropSession(i);
                 continue;
             }
             var total = pending;
@@ -75,16 +187,12 @@ pub const Server = struct {
                 const n = tcp.read(s.*, dst) catch |err| switch (err) {
                     error.WouldBlock => continue,
                     else => {
-                        tcp.closeFd(s.*);
-                        s.* = -1;
-                        self.recv_lens[i] = 0;
+                        self.dropSession(i);
                         continue;
                     },
                 };
                 if (n == 0) {
-                    tcp.closeFd(s.*);
-                    s.* = -1;
-                    self.recv_lens[i] = 0;
+                    self.dropSession(i);
                     continue;
                 }
                 total += n;
@@ -96,9 +204,7 @@ pub const Server = struct {
             var end = newline;
             if (end > 0 and self.recv_bufs[i][end - 1] == '\r') end -= 1;
             if (end > buf.len) {
-                tcp.closeFd(s.*);
-                s.* = -1;
-                self.recv_lens[i] = 0;
+                self.dropSession(i);
                 continue;
             }
             @memcpy(buf[0..end], self.recv_bufs[i][0..end]);
@@ -106,6 +212,12 @@ pub const Server = struct {
             const remaining = total - consumed;
             std.mem.copyForwards(u8, self.recv_bufs[i][0..remaining], self.recv_bufs[i][consumed..total]);
             self.recv_lens[i] = remaining;
+            if (!self.authed[i]) {
+                // Password attempts never reach the dispatcher, and an empty line
+                // still counts as a failed attempt (stock compares it verbatim).
+                _ = self.authenticate(i, buf[0..end]);
+                continue;
+            }
             if (end == 0) continue;
             self.active = i;
             return buf[0..end];
@@ -115,11 +227,9 @@ pub const Server = struct {
 
     /// Close the session whose line is being handled (admin `quit`/`exit`).
     pub fn closeActive(self: *Server) void {
-        const fd = self.sessions[self.active];
-        if (fd < 0) return;
-        tcp.closeFd(fd);
-        self.sessions[self.active] = -1;
-        self.recv_lens[self.active] = 0;
+        // Unconditional: clearing login state must not depend on the fd still
+        // being open, or a half-closed slot could be recycled already authorised.
+        self.dropSession(self.active);
     }
 
     /// Best-effort response to the session whose line is being handled.
@@ -128,6 +238,63 @@ pub const Server = struct {
         if (fd < 0) return;
         tcp.writeAll(fd, text);
     }
+};
+
+/// Stock ConsoleHelper::ParseParamPartialNameOrId (asm.il:268297) accepts an
+/// entity id, a user id or a (partial) player name in the same argument slot.
+/// zdtd additionally resolves a small integer as a peer slot, the way
+/// `spawnentity` already does, so existing zdtd tooling keeps working.
+pub const Target = union(enum) {
+    id: i32,
+    name: []const u8,
+};
+
+fn parseTarget(tok: []const u8) Target {
+    return if (std.fmt.parseInt(i32, tok, 10)) |n| .{ .id = n } else |_| .{ .name = tok };
+}
+
+/// Stock ban duration units (ConsoleCmdBan, asm.il 209578-210270).
+fn durationUnitSeconds(unit: []const u8) ?i64 {
+    const table = [_]struct { name: []const u8, secs: i64 }{
+        .{ .name = "min", .secs = 60 },
+        .{ .name = "minute", .secs = 60 },
+        .{ .name = "minutes", .secs = 60 },
+        .{ .name = "h", .secs = 3600 },
+        .{ .name = "hour", .secs = 3600 },
+        .{ .name = "hours", .secs = 3600 },
+        .{ .name = "d", .secs = 86400 },
+        .{ .name = "day", .secs = 86400 },
+        .{ .name = "days", .secs = 86400 },
+        .{ .name = "w", .secs = 7 * 86400 },
+        .{ .name = "week", .secs = 7 * 86400 },
+        .{ .name = "weeks", .secs = 7 * 86400 },
+        .{ .name = "month", .secs = 30 * 86400 },
+        .{ .name = "months", .secs = 30 * 86400 },
+        .{ .name = "y", .secs = 365 * 86400 },
+        .{ .name = "yr", .secs = 365 * 86400 },
+        .{ .name = "year", .secs = 365 * 86400 },
+        .{ .name = "years", .secs = 365 * 86400 },
+    };
+    for (table) |e| if (std.ascii.eqlIgnoreCase(unit, e.name)) return e.secs;
+    return null;
+}
+
+pub const BanSub = union(enum) {
+    add: struct { target: Target, seconds: i64, reason: []const u8 },
+    remove: Target,
+    list,
+};
+
+pub const AdminSub = union(enum) {
+    add: struct { target: Target, level: u8 },
+    remove: Target,
+    list,
+};
+
+pub const WhitelistSub = union(enum) {
+    add: Target,
+    remove: Target,
+    list,
 };
 
 pub const Command = union(enum) {
@@ -142,10 +309,29 @@ pub const Command = union(enum) {
     /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
     apm,
     save,
-    kick: usize,
-    /// Ban by connected peer slot (records IP when available in Game).
-    ban: usize,
+    /// Stock `kick <name / entity id / user id> [reason]` (ConsoleCmdKick, asm.il 229326).
+    kick: struct { target: Target, reason: []const u8 },
+    /// Stock `kickall [reason]` (ConsoleCmdKickAll, asm.il 229473).
+    kickall: []const u8,
+    /// Stock `ban add|remove|list ...` (ConsoleCmdBan, asm.il 209578).
+    ban: BanSub,
+    /// zdtd-only: drop a raw IPv4 ban recorded by `ban add` on a connected peer.
     unban: u32,
+    /// Stock `admin add|remove|list` (ConsoleCmdAdmin, asm.il 204593). zdtd has no
+    /// Steam group concept, so addgroup/removegroup are deliberately absent.
+    admin: AdminSub,
+    /// Stock `whitelist add|remove|list` (ConsoleCmdWhitelist, asm.il 265358).
+    whitelist: WhitelistSub,
+    /// Stock `listplayerids` / `lpi` (asm.il 231089).
+    listplayerids,
+    /// Stock `getgamepref` / `gg [filter]` (asm.il 220877).
+    getgamepref: []const u8,
+    /// Stock `setgamepref` / `sg <name> <value>` (asm.il 251176).
+    setgamepref: struct { name: []const u8, value: []const u8 },
+    /// Stock `chunkcache` / `cc` (asm.il 213107).
+    chunkcache,
+    /// Stock `mem` (asm.il 234965).
+    mem,
     list,
     give: struct { peer: usize, item: u16, count: u16 },
     tele: struct { peer: usize, x: f32, y: f32, z: f32 },
@@ -156,8 +342,10 @@ pub const Command = union(enum) {
     inv: usize,
     /// Stock `gettime` (day + HH:MM).
     gettime,
-    /// Stock `settime <day|night|dayN HH MM|ticks>` (subset: day/night/dayN).
-    settime: struct { day: u32, hour: u8, minute: u8 },
+    /// Stock `settime day|night|<worldtime>|<day> <hour> <minute>`, already reduced
+    /// to the world time stock computes (ConsoleCmdSetTime, asm.il 251838;
+    /// GameUtils::DayTimeToWorldTime, asm.il 1926175).
+    settime: u64,
     /// Stock `spawnentity <peerSlot> <entityClassName>` (near player).
     spawnentity: struct { peer: usize, name_off: usize, name_len: usize },
     /// Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player.
@@ -178,14 +366,46 @@ pub const Command = union(enum) {
     /// Name is a slice into the original command line (must outlive the Command).
     wipeplayer: []const u8,
     /// Known verb, missing or malformed arguments (slice of the input line).
+    /// zdtd-only verbs use this; stock verbs use `err_text` / `wrong_args` so the
+    /// reply matches what stock prints.
     bad_args: []const u8,
+    /// Verbatim stock console error, printed as `{prefix}{token}{suffix}`. The
+    /// literals come from the IL; `token` is a slice of the input line.
+    err_text: struct { prefix: []const u8, token: []const u8 = "", suffix: []const u8 = "" },
+    /// Stock "Wrong number of arguments, expected {expected}, found {found}."
+    /// `expected` is one of the literal shapes stock uses ("at least 1", "1 or 3", ...).
+    wrong_args: struct { expected: []const u8, found: usize },
     unknown,
 };
 
+/// GameUtils::DayTimeToWorldTime (asm.il 1926175): 24000 ticks per day,
+/// 1000 per hour, minutes scaled by 1000/60 with C truncation.
+pub fn dayTimeToWorldTime(day: i32, hours: i32, minutes: i32) u64 {
+    if (day < 1) return 0;
+    const d: u64 = @intCast(day - 1);
+    return d * 24000 + @as(u64, @intCast(hours)) * 1000 + @as(u64, @intCast(minutes)) * 1000 / 60;
+}
+
+/// Stock's arg counter excludes the verb itself.
+fn argCount(line: []const u8) usize {
+    var it = std.mem.tokenizeScalar(u8, line, ' ');
+    _ = it.next();
+    var n: usize = 0;
+    while (it.next() != null) n += 1;
+    return n;
+}
+
+fn notAnInteger(tok: []const u8) Command {
+    return .{ .err_text = .{ .prefix = "\"", .token = tok, .suffix = "\" is not a valid integer." } };
+}
+
+fn badSubCommand(sub: ?[]const u8) Command {
+    const s = sub orelse return .{ .err_text = .{ .prefix = "No sub command given." } };
+    return .{ .err_text = .{ .prefix = "Invalid sub command \"", .token = s, .suffix = "\"." } };
+}
+
 /// One-line usage for a known verb (admin `bad_args` replies). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
-    if (std.mem.eql(u8, verb, "kick")) return "kick <slot>";
-    if (std.mem.eql(u8, verb, "ban")) return "ban <slot>";
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
     if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemId> [count]";
     if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp"))
@@ -194,7 +414,11 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "kill")) return "kill <entityId>";
     if (std.mem.eql(u8, verb, "inv")) return "inv <slot>";
     if (std.mem.eql(u8, verb, "settime") or std.mem.eql(u8, verb, "st"))
-        return "settime <day|night|ticks|D H M>";
+        return "settime <day|night|worldtime|day hour minute>";
+    if (std.mem.eql(u8, verb, "listplayerids") or std.mem.eql(u8, verb, "lpi"))
+        return "listplayerids";
+    if (std.mem.eql(u8, verb, "chunkcache") or std.mem.eql(u8, verb, "cc")) return "chunkcache";
+    if (std.mem.eql(u8, verb, "mem")) return "mem";
     if (std.mem.eql(u8, verb, "spawnentity") or std.mem.eql(u8, verb, "se"))
         return "spawnentity <slot|entityId> <class>";
     if (std.mem.eql(u8, verb, "wipeplayer")) return "wipeplayer <name>";
@@ -221,17 +445,80 @@ pub fn parseCommand(line: []const u8) Command {
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "kick")) {
-        const p = it.next() orelse return .{ .bad_args = cmd };
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
-        if (it.next() != null) return .{ .bad_args = cmd };
-        return .{ .kick = peer };
+        // Stock: "kick <name / entity id / user id> [reason]" (asm.il 229326).
+        const p = it.next() orelse return .{ .wrong_args = .{ .expected = "at least 1", .found = 0 } };
+        return .{ .kick = .{ .target = parseTarget(p), .reason = std.mem.trim(u8, it.rest(), " ") } };
+    }
+    if (std.mem.eql(u8, cmd, "kickall")) {
+        // Stock takes the whole remainder as the reason (asm.il 229473).
+        return .{ .kickall = std.mem.trim(u8, it.rest(), " ") };
     }
     if (std.mem.eql(u8, cmd, "ban")) {
-        const p = it.next() orelse return .{ .bad_args = cmd };
-        const peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd };
-        if (it.next() != null) return .{ .bad_args = cmd };
-        return .{ .ban = peer };
+        const sub = it.next() orelse return badSubCommand(null);
+        if (std.ascii.eqlIgnoreCase(sub, "list")) return .{ .ban = .list };
+        if (std.ascii.eqlIgnoreCase(sub, "remove")) {
+            const t = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 1 } };
+            return .{ .ban = .{ .remove = parseTarget(t) } };
+        }
+        if (!std.ascii.eqlIgnoreCase(sub, "add")) return badSubCommand(sub);
+        // "ban add <target> <duration> <unit> [reason]"
+        const t = it.next() orelse return .{ .wrong_args = .{ .expected = "at least 4", .found = argCount(line) } };
+        const dur = it.next() orelse return .{ .wrong_args = .{ .expected = "at least 4", .found = argCount(line) } };
+        const unit = it.next() orelse return .{ .wrong_args = .{ .expected = "at least 4", .found = argCount(line) } };
+        const n = std.fmt.parseInt(i64, dur, 10) catch return notAnInteger(dur);
+        const per = durationUnitSeconds(unit) orelse
+            return .{ .err_text = .{ .prefix = "\"", .token = unit, .suffix = "\" is not an allowed duration unit." } };
+        const secs = std.math.mul(i64, n, per) catch return notAnInteger(dur);
+        return .{ .ban = .{ .add = .{
+            .target = parseTarget(t),
+            .seconds = secs,
+            .reason = std.mem.trim(u8, it.rest(), " "),
+        } } };
     }
+    if (std.mem.eql(u8, cmd, "admin")) {
+        const sub = it.next() orelse return badSubCommand(null);
+        if (std.ascii.eqlIgnoreCase(sub, "list")) return .{ .admin = .list };
+        if (std.ascii.eqlIgnoreCase(sub, "remove")) {
+            const t = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 1 } };
+            return .{ .admin = .{ .remove = parseTarget(t) } };
+        }
+        if (!std.ascii.eqlIgnoreCase(sub, "add")) return badSubCommand(sub);
+        const t = it.next() orelse return .{ .wrong_args = .{ .expected = "3 or 4", .found = argCount(line) } };
+        const lvl = it.next() orelse return .{ .wrong_args = .{ .expected = "3 or 4", .found = argCount(line) } };
+        // Stock levels run 0 (max) .. 1000; anything wider is a typo, not a level.
+        const level = std.fmt.parseInt(u16, lvl, 10) catch return notAnInteger(lvl);
+        if (level > 1000) return notAnInteger(lvl);
+        return .{ .admin = .{ .add = .{ .target = parseTarget(t), .level = @intCast(@min(level, 255)) } } };
+    }
+    if (std.mem.eql(u8, cmd, "whitelist")) {
+        const sub = it.next() orelse return badSubCommand(null);
+        if (std.ascii.eqlIgnoreCase(sub, "list")) return .{ .whitelist = .list };
+        if (std.ascii.eqlIgnoreCase(sub, "add")) {
+            const t = it.next() orelse return .{ .wrong_args = .{ .expected = "2 or 3", .found = 1 } };
+            return .{ .whitelist = .{ .add = parseTarget(t) } };
+        }
+        if (std.ascii.eqlIgnoreCase(sub, "remove")) {
+            const t = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 1 } };
+            return .{ .whitelist = .{ .remove = parseTarget(t) } };
+        }
+        return badSubCommand(sub);
+    }
+    if (std.mem.eql(u8, cmd, "listplayerids") or std.mem.eql(u8, cmd, "lpi"))
+        return if (it.next() == null) .listplayerids else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "getgamepref") or std.mem.eql(u8, cmd, "gg")) {
+        const filter = it.next() orelse "";
+        if (it.next() != null) return .{ .wrong_args = .{ .expected = "0 or 1", .found = argCount(line) } };
+        return .{ .getgamepref = filter };
+    }
+    if (std.mem.eql(u8, cmd, "setgamepref") or std.mem.eql(u8, cmd, "sg")) {
+        const nm = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 0 } };
+        const val = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 1 } };
+        if (it.next() != null) return .{ .wrong_args = .{ .expected = "2", .found = argCount(line) } };
+        return .{ .setgamepref = .{ .name = nm, .value = val } };
+    }
+    if (std.mem.eql(u8, cmd, "chunkcache") or std.mem.eql(u8, cmd, "cc"))
+        return if (it.next() == null) .chunkcache else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "mem")) return if (it.next() == null) .mem else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "unban")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const ip = std.fmt.parseInt(u32, p, 16) catch return .{ .bad_args = cmd };
@@ -293,28 +580,33 @@ pub fn parseCommand(line: []const u8) Command {
     }
     if (std.mem.eql(u8, cmd, "gettime") or std.mem.eql(u8, cmd, "gt")) return if (it.next() == null) .gettime else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "settime") or std.mem.eql(u8, cmd, "st")) {
-        const a = it.next() orelse return .{ .bad_args = cmd };
-        if (std.mem.eql(u8, a, "day")) return if (it.next() == null) .{ .settime = .{ .day = 0, .hour = 8, .minute = 0 } } else .{ .bad_args = cmd };
-        if (std.mem.eql(u8, a, "night")) return if (it.next() == null) .{ .settime = .{ .day = 0, .hour = 22, .minute = 0 } } else .{ .bad_args = cmd };
-        // Stock telnet often sends a single world-time integer (e.g. 8000, 22000).
-        // Packing used by playtest orch: thousands digit ~ hour*1000-ish; map common values.
-        const n = std.fmt.parseInt(u32, a, 10) catch return .{ .bad_args = cmd };
-        if (it.peek() == null) {
-            // Single token: either stock ticks-ish or a lone day number.
-            if (n >= 100) {
-                // Stock world time: 1000 ticks per hour (8000 -> 08:00, 22500 -> 22:30).
-                const hour: u8 = @intCast(@min(23, n / 1000));
-                const minute: u8 = @intCast((n % 1000) * 60 / 1000);
-                return .{ .settime = .{ .day = 0, .hour = hour, .minute = minute } };
-            }
-            return .{ .settime = .{ .day = n, .hour = 8, .minute = 0 } };
+        // ConsoleCmdSetTime::Execute (asm.il 251900): 1 arg (day/night/worldtime)
+        // or 3 args (day hour minute). Anything else is an arity error.
+        const n_args = argCount(line);
+        if (n_args == 1) {
+            const a = it.next().?;
+            if (std.ascii.eqlIgnoreCase(a, "day")) return .{ .settime = dayTimeToWorldTime(1, 12, 0) };
+            if (std.ascii.eqlIgnoreCase(a, "night")) return .{ .settime = dayTimeToWorldTime(2, 0, 0) };
+            const wt = std.fmt.parseInt(u64, a, 10) catch return .{ .err_text = .{
+                .prefix = "Invalid value for single argument variant: \"",
+                .token = a,
+                .suffix = "\"",
+            } };
+            return .{ .settime = wt };
         }
-        // "settime <day> <hour> <minute>"
-        const h = std.fmt.parseInt(u8, it.next() orelse "8", 10) catch return .{ .bad_args = cmd };
-        const mi = std.fmt.parseInt(u8, it.next() orelse "0", 10) catch return .{ .bad_args = cmd };
-        if (h > 23 or mi > 59) return .{ .bad_args = cmd };
-        if (it.next() != null) return .{ .bad_args = cmd };
-        return .{ .settime = .{ .day = n, .hour = h, .minute = mi } };
+        if (n_args != 3) return .{ .wrong_args = .{ .expected = "1 or 3", .found = n_args } };
+        const ds = it.next().?;
+        const hs = it.next().?;
+        const ms = it.next().?;
+        const day = std.fmt.parseInt(i32, ds, 10) catch return notAnInteger(ds);
+        const hour = std.fmt.parseInt(i32, hs, 10) catch return notAnInteger(hs);
+        const minute = std.fmt.parseInt(i32, ms, 10) catch return notAnInteger(ms);
+        if (day < 1) return .{ .err_text = .{ .prefix = "Day must be >= 1" } };
+        if (hour > 23) return .{ .err_text = .{ .prefix = "Hour must be <= 23" } };
+        if (minute > 59) return .{ .err_text = .{ .prefix = "Minute must be <= 59" } };
+        // Stock lets negative hour/minute through into the multiply; clamp instead
+        // so the world time can never go backwards past day start.
+        return .{ .settime = dayTimeToWorldTime(day, @max(0, hour), @max(0, minute)) };
     }
     if (std.mem.eql(u8, cmd, "spawnentity") or std.mem.eql(u8, cmd, "se")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
@@ -350,7 +642,7 @@ test "parse give" {
 
 test "parse ban kick list" {
     try std.testing.expect(parseCommand("kick 1") == .kick);
-    try std.testing.expect(parseCommand("ban 2") == .ban);
+    try std.testing.expect(parseCommand("ban add 2 1 day") == .ban);
     try std.testing.expect(parseCommand("list") == .list);
     try std.testing.expect(parseCommand("unban 7f000001") == .unban);
 }
@@ -405,16 +697,13 @@ test "parse apm" {
 
 test "parse stock ops commands" {
     try std.testing.expect(parseCommand("gettime") == .gettime);
-    const st = parseCommand("settime night");
-    try std.testing.expect(st == .settime);
-    try std.testing.expectEqual(@as(u8, 22), st.settime.hour);
-    const st2 = parseCommand("settime 7 10 30");
-    try std.testing.expectEqual(@as(u32, 7), st2.settime.day);
-    const st3 = parseCommand("settime 22000");
-    try std.testing.expect(st3 == .settime);
-    try std.testing.expectEqual(@as(u8, 22), st3.settime.hour);
-    const st4 = parseCommand("settime 8000");
-    try std.testing.expectEqual(@as(u8, 8), st4.settime.hour);
+    // Stock: "day" is day 1 12:00, "night" day 2 00:00 (asm.il 251900).
+    try std.testing.expectEqual(@as(u64, 12000), parseCommand("settime day").settime);
+    try std.testing.expectEqual(@as(u64, 24000), parseCommand("settime night").settime);
+    // 3-arg form goes through DayTimeToWorldTime; 1-arg is raw world time.
+    try std.testing.expectEqual(@as(u64, 6 * 24000 + 10500), parseCommand("settime 7 10 30").settime);
+    try std.testing.expectEqual(@as(u64, 22000), parseCommand("settime 22000").settime);
+    try std.testing.expectEqual(@as(u64, 8000), parseCommand("settime 8000").settime);
     const line = "spawnentity 0 zombieBoe";
     const se = parseCommand(line);
     try std.testing.expect(se == .spawnentity);
@@ -435,43 +724,63 @@ test "say keeps message intact despite leading whitespace" {
     try std.testing.expect(parseCommand("say") == .bad_args);
 }
 
-test "settime ticks map to stock minutes" {
-    const st = parseCommand("settime 22500");
-    try std.testing.expect(st == .settime);
-    try std.testing.expectEqual(@as(u8, 22), st.settime.hour);
-    try std.testing.expectEqual(@as(u8, 30), st.settime.minute);
+test "settime reports the stock validation errors" {
+    // ConsoleCmdSetTime::Execute (asm.il 251900) error literals, in stock order.
+    try std.testing.expectEqualStrings("Day must be >= 1", parseCommand("settime 0 1 1").err_text.prefix);
+    try std.testing.expectEqualStrings("Hour must be <= 23", parseCommand("settime 1 24 0").err_text.prefix);
+    try std.testing.expectEqualStrings("Minute must be <= 59", parseCommand("settime 1 23 60").err_text.prefix);
+    const bad = parseCommand("settime noon");
+    try std.testing.expectEqualStrings("Invalid value for single argument variant: \"", bad.err_text.prefix);
+    try std.testing.expectEqualStrings("noon", bad.err_text.token);
+    const arity = parseCommand("settime 1 2");
+    try std.testing.expectEqualStrings("1 or 3", arity.wrong_args.expected);
+    try std.testing.expectEqual(@as(usize, 2), arity.wrong_args.found);
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        "\"noon\" is not a valid integer.",
+        try renderErrText(&buf, parseCommand("settime 1 noon 0")),
+    );
+}
+
+/// The quoted-integer error shape shared by several stock commands, rendered the
+/// way Game.runAdminLine renders it.
+fn renderErrText(buf: []u8, c: Command) ![]const u8 {
+    const e = c.err_text;
+    return std.fmt.bufPrint(buf, "{s}{s}{s}", .{ e.prefix, e.token, e.suffix });
 }
 
 test "parse rejects malformed numeric arguments" {
     try std.testing.expect(parseCommand("give 0 2 many") == .bad_args);
     try std.testing.expect(parseCommand("tele 0 nan 70 10") == .bad_args);
     try std.testing.expect(parseCommand("tele 0 10 inf 10") == .bad_args);
-    try std.testing.expect(parseCommand("settime 7 noon 30") == .bad_args);
-    try std.testing.expect(parseCommand("settime 7 24 00") == .bad_args);
-    try std.testing.expect(parseCommand("settime 7 23 60") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 noon 30") == .err_text);
+    try std.testing.expect(parseCommand("settime 7 24 00") == .err_text);
+    try std.testing.expect(parseCommand("settime 7 23 60") == .err_text);
 }
 
 test "parse rejects trailing arguments for fixed-arity commands" {
     try std.testing.expect(parseCommand("status now") == .bad_args);
-    try std.testing.expect(parseCommand("kick 1 extra") == .bad_args);
     try std.testing.expect(parseCommand("give 0 2 5 extra") == .bad_args);
     try std.testing.expect(parseCommand("tp 0 10 70 10 extra") == .bad_args);
-    try std.testing.expect(parseCommand("settime 7 10 30 extra") == .bad_args);
+    try std.testing.expect(parseCommand("settime 7 10 30 extra") == .wrong_args);
     try std.testing.expect(parseCommand("spawnentity 0 zombieBoe extra") == .bad_args);
     try std.testing.expect(parseCommand("wipeplayer Alice extra") == .bad_args);
 }
 
 test "bad args carry the verb; unknown verbs stay unknown" {
-    const c = parseCommand("kick many");
+    const c = parseCommand("inv many");
     try std.testing.expect(c == .bad_args);
-    try std.testing.expectEqualStrings("kick", c.bad_args);
+    try std.testing.expectEqualStrings("inv", c.bad_args);
     try std.testing.expect(parseCommand("frobnicate 1") == .unknown);
-    try std.testing.expect(parseCommand("kick") == .bad_args);
+    try std.testing.expect(parseCommand("inv") == .bad_args);
+    // Stock verbs report the stock arity error instead.
+    const k = parseCommand("kick");
+    try std.testing.expectEqualStrings("at least 1", k.wrong_args.expected);
+    try std.testing.expectEqual(@as(usize, 0), k.wrong_args.found);
 }
 
 test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expect(parseCommand("commands") == .help);
-    try std.testing.expectEqualStrings("kick <slot>", usageFor("kick").?);
     try std.testing.expectEqualStrings("give <slot> <itemId> [count]", usageFor("give").?);
     try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
     try std.testing.expect(usageFor("frobnicate") == null);
@@ -494,4 +803,221 @@ test "parse gamestage with and without a slot" {
     try std.testing.expect(parseCommand("gamestage x") == .bad_args);
     try std.testing.expect(parseCommand("gamestage 1 2") == .bad_args);
     try std.testing.expectEqualStrings("gamestage [slot]", usageFor("gamestage").?);
+}
+
+test "kick takes a stock target plus an optional reason" {
+    const k = parseCommand("kick Alice being rude");
+    try std.testing.expectEqualStrings("Alice", k.kick.target.name);
+    try std.testing.expectEqualStrings("being rude", k.kick.reason);
+    // A bare integer is an entity id / peer slot, not a name.
+    const k2 = parseCommand("kick 171");
+    try std.testing.expectEqual(@as(i32, 171), k2.kick.target.id);
+    try std.testing.expectEqual(@as(usize, 0), k2.kick.reason.len);
+    try std.testing.expectEqualStrings("at least 1", parseCommand("kick").wrong_args.expected);
+
+    try std.testing.expectEqualStrings("", parseCommand("kickall").kickall);
+    try std.testing.expectEqualStrings("server restart", parseCommand("kickall server restart").kickall);
+}
+
+test "ban grammar follows the stock sub-command and unit table" {
+    const b = parseCommand("ban add Alice 2 days repeated griefing");
+    try std.testing.expectEqualStrings("Alice", b.ban.add.target.name);
+    try std.testing.expectEqual(@as(i64, 2 * 86400), b.ban.add.seconds);
+    try std.testing.expectEqualStrings("repeated griefing", b.ban.add.reason);
+    try std.testing.expect(parseCommand("ban list") == .ban);
+    try std.testing.expect(parseCommand("ban LIST").ban == .list);
+    try std.testing.expectEqualStrings("Alice", parseCommand("ban remove Alice").ban.remove.name);
+
+    // Every stock unit spelling resolves; nothing else does.
+    for ([_][]const u8{ "min", "minute", "minutes", "h", "hour", "hours", "d", "day", "days", "w", "week", "weeks", "month", "months", "y", "yr", "year", "years" }) |u| {
+        try std.testing.expect(durationUnitSeconds(u) != null);
+    }
+    try std.testing.expect(durationUnitSeconds("fortnight") == null);
+    try std.testing.expectEqualStrings(
+        "\" is not an allowed duration unit.",
+        parseCommand("ban add Alice 2 fortnights").err_text.suffix,
+    );
+    try std.testing.expectEqualStrings(
+        "\" is not a valid integer.",
+        parseCommand("ban add Alice two days").err_text.suffix,
+    );
+    try std.testing.expectEqualStrings("No sub command given.", parseCommand("ban").err_text.prefix);
+    try std.testing.expectEqualStrings("frobnicate", parseCommand("ban frobnicate x").err_text.token);
+    try std.testing.expectEqualStrings("at least 4", parseCommand("ban add Alice 2").wrong_args.expected);
+    // A duration that would overflow i64 seconds is a bad integer, not a wrap.
+    try std.testing.expect(parseCommand("ban add Alice 9223372036854775807 years") == .err_text);
+}
+
+test "admin and whitelist sub-commands" {
+    const a = parseCommand("admin add Alice 0");
+    try std.testing.expectEqualStrings("Alice", a.admin.add.target.name);
+    try std.testing.expectEqual(@as(u8, 0), a.admin.add.level);
+    try std.testing.expect(parseCommand("admin list").admin == .list);
+    try std.testing.expectEqualStrings("Alice", parseCommand("admin remove Alice").admin.remove.name);
+    try std.testing.expectEqualStrings("3 or 4", parseCommand("admin add Alice").wrong_args.expected);
+    try std.testing.expect(parseCommand("admin add Alice notalevel") == .err_text);
+    // Stock permission levels stop at 1000; a wider number is a typo.
+    try std.testing.expect(parseCommand("admin add Alice 5000") == .err_text);
+
+    try std.testing.expectEqualStrings("Alice", parseCommand("whitelist add Alice").whitelist.add.name);
+    try std.testing.expectEqualStrings("Alice", parseCommand("whitelist remove Alice").whitelist.remove.name);
+    try std.testing.expect(parseCommand("whitelist list").whitelist == .list);
+    try std.testing.expectEqualStrings("No sub command given.", parseCommand("whitelist").err_text.prefix);
+}
+
+test "parse remaining stock read-only verbs" {
+    try std.testing.expect(parseCommand("listplayerids") == .listplayerids);
+    try std.testing.expect(parseCommand("lpi") == .listplayerids);
+    try std.testing.expect(parseCommand("chunkcache") == .chunkcache);
+    try std.testing.expect(parseCommand("cc") == .chunkcache);
+    try std.testing.expect(parseCommand("mem") == .mem);
+    try std.testing.expectEqualStrings("", parseCommand("gg").getgamepref);
+    try std.testing.expectEqualStrings("Server", parseCommand("getgamepref Server").getgamepref);
+    const sp = parseCommand("sg ServerPort 26902");
+    try std.testing.expectEqualStrings("ServerPort", sp.setgamepref.name);
+    try std.testing.expectEqualStrings("26902", sp.setgamepref.value);
+    try std.testing.expectEqualStrings("2", parseCommand("setgamepref ServerPort").wrong_args.expected);
+}
+
+test "dayTimeToWorldTime matches GameUtils" {
+    // asm.il 1926175: (day-1)*24000 + hours*1000 + minutes*1000/60, truncating.
+    try std.testing.expectEqual(@as(u64, 0), dayTimeToWorldTime(1, 0, 0));
+    try std.testing.expectEqual(@as(u64, 12000), dayTimeToWorldTime(1, 12, 0));
+    try std.testing.expectEqual(@as(u64, 24000), dayTimeToWorldTime(2, 0, 0));
+    try std.testing.expectEqual(@as(u64, 22500), dayTimeToWorldTime(1, 22, 30));
+    // Minute scaling truncates: 1 minute is 16 ticks, not 16.67.
+    try std.testing.expectEqual(@as(u64, 16), dayTimeToWorldTime(1, 0, 1));
+    // Day 0 and below is "no time" in stock, not a wrap.
+    try std.testing.expectEqual(@as(u64, 0), dayTimeToWorldTime(0, 23, 59));
+    try std.testing.expectEqual(@as(u64, 0), dayTimeToWorldTime(-5, 0, 0));
+}
+
+test "auth is disabled by an empty password and never by a wrong one" {
+    const off: Auth = .{};
+    try std.testing.expect(!off.enabled());
+    // Nothing is a credential when auth is off, but an empty password must not
+    // become "the password" either.
+    try std.testing.expect(off.matches("anything"));
+
+    const on: Auth = .{ .password = "hunter2" };
+    try std.testing.expect(on.enabled());
+    try std.testing.expect(on.matches("hunter2"));
+    try std.testing.expect(!on.matches(""));
+    try std.testing.expect(!on.matches("hunter"));
+    try std.testing.expect(!on.matches("hunter2 "));
+    try std.testing.expect(!on.matches("Hunter2"));
+}
+
+test "listen binds loopback without a password and INADDR_ANY with one" {
+    var closed: Server = .{};
+    try std.testing.expect(!closed.public());
+
+    var open: Server = .{ .auth = .{ .password = "hunter2" } };
+    try std.testing.expect(open.public());
+
+    // Bind for real on an ephemeral port: the rule is only worth anything if the
+    // socket actually lands where `public()` claims.
+    try closed.listen(0);
+    try std.testing.expectEqual(@as(u16, 0), closed.port);
+}
+
+test "session state machine gates commands behind the password" {
+    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 3 } };
+    // No socket: replies are dropped, but the state machine still runs.
+    s.authed[0] = false;
+    s.fails[0] = 0;
+
+    try std.testing.expect(s.authenticate(0, "wrong"));
+    try std.testing.expect(!s.authed[0]);
+    try std.testing.expectEqual(@as(u8, 1), s.fails[0]);
+
+    try std.testing.expect(s.authenticate(0, "hunter2"));
+    try std.testing.expect(s.authed[0]);
+    // A success clears the counter so a long session cannot be locked out later.
+    try std.testing.expectEqual(@as(u8, 0), s.fails[0]);
+}
+
+test "too many failed logins closes the session" {
+    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 2 } };
+    s.authed[1] = false;
+    s.active = 1;
+    try std.testing.expect(s.authenticate(1, "no"));
+    try std.testing.expect(!s.authenticate(1, "no"));
+    // dropSession cleared the slot: a reconnect starts unauthenticated.
+    try std.testing.expectEqual(@as(tcp.Handle, -1), s.sessions[1]);
+    try std.testing.expect(!s.authed[1]);
+    try std.testing.expectEqual(@as(u8, 0), s.fails[1]);
+}
+
+const parse_fuzz_corpus = [_][]const u8{
+    "kick Alice rude",
+    "ban add Alice 2 days x",
+    "admin add Alice 0",
+    "settime 1 23 59",
+    "whitelist remove Alice",
+    "tele 0 1 2 3",
+    "spawnentity 0 zombieBoe",
+};
+
+test "fuzz admin command parser" {
+    try std.testing.fuzz({}, fuzzParseCommand, .{ .corpus = &parse_fuzz_corpus });
+}
+
+fn fuzzParseCommand(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [max_cmd]u8 = undefined;
+    const line = storage[0..smith.slice(&storage)];
+
+    const cmd = parseCommand(line);
+    // Every slice a Command hands to the dispatcher must point into the input,
+    // or Game would format freed / unrelated memory into an operator reply.
+    switch (cmd) {
+        .say => |s| try expectWithin(line, s),
+        .wipeplayer => |s| try expectWithin(line, s),
+        .kickall => |s| try expectWithin(line, s),
+        .getgamepref => |s| try expectWithin(line, s),
+        .bad_args => |s| try expectWithin(line, s),
+        .err_text => |e| try expectWithin(line, e.token),
+        .kick => |k| {
+            try expectTargetWithin(line, k.target);
+            try expectWithin(line, k.reason);
+        },
+        .setgamepref => |sp| {
+            try expectWithin(line, sp.name);
+            try expectWithin(line, sp.value);
+        },
+        .ban => |b| switch (b) {
+            .add => |a| {
+                try expectTargetWithin(line, a.target);
+                try expectWithin(line, a.reason);
+            },
+            .remove => |t| try expectTargetWithin(line, t),
+            .list => {},
+        },
+        .admin => |a| switch (a) {
+            .add => |x| try expectTargetWithin(line, x.target),
+            .remove => |t| try expectTargetWithin(line, t),
+            .list => {},
+        },
+        .whitelist => |wl| switch (wl) {
+            .add, .remove => |t| try expectTargetWithin(line, t),
+            .list => {},
+        },
+        .spawnentity => |se| try std.testing.expect(se.name_off + se.name_len <= line.len),
+        else => {},
+    }
+}
+
+fn expectWithin(line: []const u8, s: []const u8) !void {
+    if (s.len == 0) return;
+    const base = @intFromPtr(line.ptr);
+    const off = @intFromPtr(s.ptr);
+    try std.testing.expect(off >= base and off + s.len <= base + line.len);
+}
+
+fn expectTargetWithin(line: []const u8, t: Target) !void {
+    switch (t) {
+        .name => |n| try expectWithin(line, n),
+        .id => {},
+    }
 }

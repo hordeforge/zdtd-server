@@ -39,7 +39,7 @@ This document is deliberately exhaustive. Status labels:
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders, gamestages | biomes.xml, vehicles.xml | buffs | tables load |
 | Content XML | blocks/items/entities/groups/recipes/loot/quests/traders + buffs | biomes.xml, vehicles.xml | gamestages, buff effect VM | tables load |
 | Persistence | ZCH3 `.zch`, players.zsv v2, containers.zct, blockmeta.zbm | vehicle/turret save | stock .ttc | restart keeps world+player |
-| Admin / browser | admin TCP (kick/ban/give/tele/kill/…) + console | full telnet surface | Steam browser | ops usable |
+| Admin / browser | stock telnet console (greeting, login, stock verbs + output shapes) | client-side console verbs | Steam browser | ops usable |
 
 **Honest bottom line:** core stock loop is playable under EAC-off (join, move,
 dig/build, fight, death/respawn, loot, craft + workstation, trade, persist;
@@ -740,8 +740,8 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 |---|---|
 | CLI port/world/map/game-dir | HAVE |
 | serverconfig.xml stock | HAVE (`config.zig`; GAME_OPTIONS.md) |
-| Telnet / web admin | PARTIAL (admin TCP session, not stock telnet) |
-| Console commands (give, tele, …) | PARTIAL (in-game ConsoleCmd + admin TCP: kick/ban/give/tele/say/kill/inv/spawn/time/…) |
+| Telnet / web admin | PARTIAL (stock greeting + login + bind rule; see §12.1) |
+| Console commands (kick, ban, admin, …) | PARTIAL (stock verbs and output shapes below; client-side verbs MISSING) |
 | Steam server browser listing | MISSING |
 | Query protocol | MISSING |
 | Logs / log rotation | PARTIAL (stdio) |
@@ -749,6 +749,67 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Docker / systemd unit | MISSING |
 | Config hot reload | MISSING |
 | Guard policy (weak signals / quarantine / dry-run kick) | HAVE (`server/guard_policy.zig`; see gaps below) |
+
+### 12.1 Telnet console parity (P3, PARTIAL)
+
+Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
+
+**HAVE**
+
+- Login: `TelnetEnabled` / `TelnetPort` / `TelnetPassword` /
+  `TelnetFailedLoginLimit` / `TelnetFailedLoginsBlocktime` parsed from
+  serverconfig (EnumGamePrefs 0x44/0x45/0x59/0xA5/0xA6, asm.il:1903853-1903951).
+  `TelnetPort` wins over the zdtd `AdminPort` alias when telnet is enabled.
+- Greeting block and login prompts verbatim from `TelnetConnection::LoginMessage`
+  and `::authenticate` (asm.il ~269683-270300): `*** Connected with 7DTD server.`,
+  the version/IP/port/players/mode/world/name/difficulty block,
+  `Please enter password:`, `Password incorrect, please enter password:`,
+  `Too many failed login attempts!`, `Logon successful.`
+- Bind rule from `TelnetConsole::.ctor` (asm.il ~270735): loopback with no
+  password, INADDR_ANY only when one is set. Password compare is constant-time
+  and the password line is never echoed or logged.
+- Stock output shapes: `*** ERROR: unknown command '<cmd>'`, the `help` index
+  (`*** Generic Console Help ***` / `*** List of Commands ***` / `<cmds> => <desc>`),
+  `listplayers` full field order, `listplayerids`, `listents`, `Total of N in the game`,
+  `GamePref.{0} = {1}`, `Chunks:` / `Chunk Memory:`, the `mem` line separators,
+  and the `Wrong number of arguments, expected …, found N.` arity errors.
+- Stock argument grammar: `kick <target> [reason]`, `kickall [reason]`,
+  `ban add|remove|list <target> <duration> <unit> [reason]` with the full stock
+  unit table, `admin add|remove|list`, `whitelist add|remove|list`,
+  `settime day|night|<worldtime>|<day> <hour> <minute>` (world time from
+  `GameUtils::DayTimeToWorldTime`, asm.il:1926175).
+- Admin / whitelist / ban lists persist beside `players.zsv`
+  (`admins.zsv`, `whitelist.zsv`, `bans.zsv`). Bans carry an absolute expiry, so a
+  restart neither resurrects an expired ban nor drops a live one; a corrupt line
+  is skipped and reported, never applied.
+
+**MISSING on purpose (client-side verbs, no meaning on a dedicated server)**
+
+`gfx`, `cam`, `spectator`, `debugmenu`, `showalbedo`, `shownormals`,
+`enablerendering`, `debugshot`, `audio`, `lights`, `water`, `weathersurvival`,
+`teleport`/`tp` in its stock form (stock `tp` moves the *local* player and replies
+"Command can only be used on clients", asm.il 259294).
+
+**MISSING (server-side, not yet done)**
+
+`admin addgroup` / `removegroup` and `whitelist addgroup` / `removegroup` (zdtd has
+no Steam group concept), `commandpermission`/`cp`, `loglevel`, `listthreads`/`lt`,
+`getoptions`, `exportcurrentconfigs`, `help <command>` detail pages,
+`setgamepref` as a real write (zdtd applies serverconfig at startup only, so it
+replies that the pref is read-only rather than reporting a change that did not
+happen).
+
+**Deliberate divergences**
+
+- `tp` stays a zdtd alias of `tele` (teleport another player by slot / entity id).
+  Flipping it to stock's client-only meaning would break zdtd's own WEBUI docs and
+  playtest tooling for no operator gain. Stock's server-side name is `teleportplayer`.
+- zdtd-only verbs keep their names and are marked "zdtd:" in the `help` index:
+  `give`, `inv`, `unban`, `guardstats`, `guardclear`, `evidence`, `apm`,
+  `wipeplayer`, `status`. Stock has no `give` (it has `giveself`/`givexp`).
+- Ban and permission entries are keyed by login name, not a platform user id:
+  zdtd has no stock user id to store, and inventing one would be a fabricated
+  identity in an operator-visible list.
 
 ### Guard policy honest gaps (P4)
 
@@ -876,6 +937,8 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
 Full telnet surface, Steam browser, party PlatformUserId, gamestages, buffs
 remainder (triggered_effect VM, cvar sync, immunity/damage-type gates, buff
 persistence across sessions), vehicle multi-seat, Encryption* (optional).
+Steam browser, party PlatformUserId, gamestages, buffs
+depth, vehicle multi-seat, Encryption* (optional).
 
 ### P4: Planet scale (parked)
 Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.

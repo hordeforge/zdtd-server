@@ -20,7 +20,8 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 | Code defaults | Used when neither CLI nor file sets a value |
 
 Startup prints a one-line effective summary (`password=set|open`, never secrets).
-`AdminPort` binds **127.0.0.1 only** (no auth on the console).
+The console binds **127.0.0.1 only** unless `TelnetPassword` is set, matching
+stock `TelnetConsole::.ctor`; a password is the only way it leaves loopback.
 `ServerMaxPlayerCount` is applied to GSI ads and soft join capacity (capped at 64).
 Out-of-range serverconfig values are clamped with a stderr warning (not silent).
 Unknown stock properties are ignored (stock configs have many keys zdtd does not
@@ -60,7 +61,12 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
 | `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
 | `GameName` / `GameWorld` | zdtd / empty | string | world identity / stock map folder under `--game-dir` |
-| `AdminPort` | 0 | u16 | unauthenticated admin TCP on 127.0.0.1; 0 = off |
+| `AdminPort` | 0 | u16 | zdtd alias for the console port; 0 = off |
+| `TelnetEnabled` | false | bool | enable the stock telnet console (`TelnetPort` then wins over `AdminPort`) |
+| `TelnetPort` | 0 | u16 | stock telnet port; 0 = off |
+| `TelnetPassword` | empty | string | empty = no login and loopback bind; set = stock login prompt and INADDR_ANY bind |
+| `TelnetFailedLoginLimit` | 10 | 1..255 | failed logins before the session is dropped |
+| `TelnetFailedLoginsBlocktime` | 10 | 0..1440 | minutes a source address stays blocked (parsed; enforcement pending) |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
 
 ### Web UI (CLI / env; WU0–WU2 shipped)
