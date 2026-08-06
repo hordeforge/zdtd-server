@@ -52,6 +52,8 @@ fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind
         std.mem.eql(u8, obj_type, "Recipe")) return .craft;
     if (std.mem.eql(u8, obj_type, "StayWithin") or
         std.mem.eql(u8, obj_type, "StayWithinArea")) return .stay_within;
+    if (std.mem.eql(u8, obj_type, "POIBlockActivate") or
+        std.mem.eql(u8, obj_type, "BlockActivate")) return .block_activate;
     if (std.mem.eql(u8, obj_type, "Goto") or
         std.mem.eql(u8, obj_type, "RandomPOIGoto") or
         std.mem.eql(u8, obj_type, "ClosestPOIGoto") or
@@ -85,6 +87,8 @@ fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind 
         std.mem.eql(u8, obj_type, "Recipe")) return .craft;
     if (std.mem.eql(u8, obj_type, "StayWithin") or
         std.mem.eql(u8, obj_type, "StayWithinArea")) return .stay_within;
+    if (std.mem.eql(u8, obj_type, "POIBlockActivate") or
+        std.mem.eql(u8, obj_type, "BlockActivate")) return .block_activate;
     if (std.mem.eql(u8, obj_type, "Goto") or
         std.mem.eql(u8, obj_type, "RandomPOIGoto") or
         std.mem.eql(u8, obj_type, "ClosestPOIGoto") or

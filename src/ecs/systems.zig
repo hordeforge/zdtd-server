@@ -564,30 +564,6 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
     }
 }
 
-pub fn questWriteJournalBody(w: *const World, peer_slot: usize, buf: []u8) ![]u8 {
-    const ps = w.playerByPeer(peer_slot) orelse return error.BadSlot;
-    if (!w.mask[ps].journal) return error.BadSlot;
-    var pos: usize = 2;
-    var count: u16 = 0;
-    for (w.journal[ps].slots) |s| {
-        if (!s.active and !s.completed) continue;
-        if (pos + 6 > buf.len) break;
-        const d = w.catalog.byId(s.def_id) orelse continue;
-        std.mem.writeInt(u16, buf[pos..][0..2], s.def_id, .little);
-        std.mem.writeInt(u16, buf[pos + 2 ..][0..2], s.progress, .little);
-        std.mem.writeInt(u16, buf[pos + 4 ..][0..2], d.target_count, .little);
-        pos += 6;
-        count += 1;
-    }
-    std.mem.writeInt(u16, buf[0..2], count, .little);
-    const coins: u32 = if (w.mask[ps].wallet) w.wallet[ps].coins else 0;
-    if (pos + 4 <= buf.len) {
-        std.mem.writeInt(u32, buf[pos..][0..4], coins, .little);
-        pos += 4;
-    }
-    return buf[0..pos];
-}
-
 pub fn questCoins(w: *const World, peer_slot: usize) u32 {
     const ps = w.playerByPeer(peer_slot) orelse return 0;
     if (!w.mask[ps].wallet) return 0;
@@ -1811,10 +1787,6 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     return out;
 }
 
-pub fn systemPower(w: *World) void {
-    w.power.resolve();
-}
-
 /// Despawn range for director-spawned zombies (stock unloads far spawned zeds).
 pub const despawn_dist_sq: f32 = 200.0 * 200.0;
 
@@ -3018,4 +2990,16 @@ test "unlock_poi action releases the quest POI lock on phase entry" {
     try std.testing.expect(idx != null);
     try std.testing.expectEqual(@as(u8, 0), w.poi_locks.entries[idx.?].quester_n);
     try std.testing.expect(!w.poi_locks.entries[idx.?].locked);
+}
+
+/// A client-raised objective event (NetPackageQuestObjectiveUpdate) advanced
+/// the objective named by `kind` on the active quest with this quest code.
+/// Stock: treasure finish / block activation events mirror the client's own
+/// quest progress into the server journal so it can persist and coordinate.
+pub fn questObjectiveEvent(w: *World, peer_slot: usize, quest_code: i32, kind: quest.PhaseKind) bool {
+    const s = questFindByCode(w, peer_slot, quest_code) orelse return false;
+    const ps = w.playerByPeer(peer_slot) orelse return false;
+    const d = w.catalog.byId(s.def_id) orelse return false;
+    bumpPhase(w, ps, s, d, kind, 1);
+    return true;
 }

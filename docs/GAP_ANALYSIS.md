@@ -618,10 +618,16 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/wire/stock_quest.zig:328`, `src/server/game.zig:4686`,
   `src/wire/stock_quest.zig:559`
 
-- **NetPackageQuestObjectiveUpdate handling** `MISSING`
+- **NetPackageQuestObjectiveUpdate handling** `PARTIAL`
   The stock body is parsed and then discarded (`_ = u;`). Only the legacy
   zdtd-native `{def_id u16, op u8}` fallback does anything, and only for
-  `op==1`. Block-objective and treasure events have no effect.
+  `op==1`. 2026-08-07: `block_activated` now advances the quest's
+  `block_activate` phase (POIBlockActivate is real work, no longer auto
+  scaffolding; scenario `block-obj` proves the phase waits for the event and
+  advances on it). The `treasure_radius_break` / `treasure_complete` events
+  are still recorded-not-applied: the treasure phase completes through the
+  fetch path, and matching the client's treasure dig to the server journal
+  phase needs the same quest-sync RE as the S2C row.
   *Anchors:* `src/server/game.zig:5314`, `src/wire/packages.zig:2742`
 
 - **S2C quest progress updates during a session** `BLOCKED (2026-08-07)`

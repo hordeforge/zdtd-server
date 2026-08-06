@@ -5779,8 +5779,10 @@ pub const Game = struct {
         if (std.mem.eql(u8, name, "NetPackageInventoryDataRequest")) {
             // Stock: KeyHashPair (Guid+hash) + managerToken Guid.
             // Serve TE container slots when Guid matches our deterministic pos-key.
+            std.debug.print("STABDBG invreq len={d}\n", .{body.len});
             if (packages.parseInvDataRequestStock(body)) |req| {
                 if (self.containers.getByGuid(&req.inventory_key)) |cont| {
+                    std.debug.print("STABDBG invreq guid-match respawn={d}\n", .{self.loot_respawn_days});
                     // LootRespawnDays: a looted world container re-rolls here
                     // when its interval has elapsed (before the slots serve).
                     self.maybeRespawnContainer(cont);
@@ -6668,10 +6670,16 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageQuestObjectiveUpdate")) {
-            // Stock wire: treasure/block objective events. Keep ECS sim for loadgen.
-            // Also accept legacy zdtd-native {def_id u16, op u8} for unit fixtures.
+            // Stock wire: treasure/block objective events mirror the client's
+            // own quest progress into the server journal (so it persists and
+            // can coordinate). The block_activated event advances the quest's
+            // block_activate phase; the treasure events are recorded (the
+            // treasure phase completes through the fetch path). Also accept
+            // legacy zdtd-native {def_id u16, op u8} for unit fixtures.
             if (packages.parseQuestObjectiveUpdate(body)) |u| {
-                _ = u;
+                if (u.event_type == .block_activated) {
+                    _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .block_activate);
+                }
             } else |_| {
                 if (packages.parseQuestOp(body)) |op| {
                     if (op.op == 1) _ = systems.questAccept(&self.sim, c.slot, op.def_id);
@@ -7753,7 +7761,7 @@ pub const Game = struct {
             // nav_objects.xml: quest | go_to_trader | return_to_trader
             const nav_class: []const u8 = switch (d.kind) {
                 .fetch_trader => if (s.ready_turn_in) "return_to_trader" else "go_to_trader",
-                .goto_point, .kill_zombies, .fetch_item, .craft, .stay_within => "quest",
+                .goto_point, .kill_zombies, .fetch_item, .craft, .stay_within, .block_activate => "quest",
             };
             const use_def_pos = d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft;
             const lx: f32 = if (use_def_pos) d.tx else @floatFromInt(self.world.primarySpawn().x);
@@ -8922,10 +8930,6 @@ pub const Game = struct {
                 const c: *const world_store.Chunk = @ptrCast(@alignCast(ctx.?));
                 return c.texAt(lx, y, lz);
             }
-            fn dens(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) ?u8 {
-                const c: *const world_store.Chunk = @ptrCast(@alignCast(ctx.?));
-                return c.densAt(lx, y, lz);
-            }
         };
         const TexCtx = struct {
             t: *const assets_block_textures.Table,
@@ -8947,7 +8951,10 @@ pub const Game = struct {
             .tex_at = BlockCtx.tex,
             .default_tex = TexCtx.def,
             .default_tex_ctx = &tex_ctx,
-            .dens_at = BlockCtx.dens,
+            .dens_overrides = if (ch.dens_set != null and ch.densities != null)
+                .{ .bits = ch.dens_set.?, .values = ch.densities.? }
+            else
+                null,
             .water_block_id = self.world.terrain_ids.water,
             .raws_scratch = &self.chunk_raws,
         });
@@ -9057,6 +9064,7 @@ pub const Game = struct {
     fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
         const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, &stacks);
+        std.debug.print("STABDBG fill name={s} n={d} lootsrc={}\n", .{ loot_name, n, self.loot.source });
         var si: usize = 0;
         var i: usize = 0;
         while (i < n and si < cont.slot_count) : (i += 1) {
@@ -9069,6 +9077,11 @@ pub const Game = struct {
         cont.touched_day = self.sim.director.clock.day;
     }
 
+    /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
+    /// container re-rolls its contents when the interval since the touch day
+    /// has elapsed. Player-placed storage never respawns. The next open
+    /// regenerates fresh loot; the cycle-varying seed makes each respawn
+    /// differ while staying deterministic per (pos, cycle).
     /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
     /// container re-rolls its contents when the interval since the touch day
     /// has elapsed. Player-placed storage never respawns. The next open
@@ -9088,8 +9101,11 @@ pub const Game = struct {
         if (!empty) return;
         const day = self.sim.director.clock.day;
         if (day <= cont.touched_day) return;
-        if (day - cont.touched_day < self.loot_respawn_days) return;
-        std.debug.print("STABDBG respawn day={d} touched={d} respawn={d} block={d}\n", .{ day, cont.touched_day, self.loot_respawn_days, cont.block_id });
+        // Wrapping subtraction: a touched_day in the future (or pre-save 0 with
+        // a day wrap) must not panic the tick; the <= guard above already
+        // rejected the future case.
+        const elapsed = day -% cont.touched_day;
+        if (elapsed < self.loot_respawn_days) return;
         const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
         const cycle: u32 = day / self.loot_respawn_days;
         const pos = cont.pos;

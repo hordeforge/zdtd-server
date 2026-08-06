@@ -2833,3 +2833,49 @@ test "scenario trader quest offers follow the trader's class" {
     try std.testing.expect(std.mem.indexOf(u8, body, "quest_rekt_errand") != null);
     std.debug.print("PASS trader-lists: rekt trader offers quest_rekt_errand from trader_rekt_quests\n", .{});
 }
+
+test "scenario block_activated objective event advances the phase" {
+    // POIBlockActivate used to be auto-scaffolding (never waited). With the
+    // block_activate kind, the phase is real work advanced only by the
+    // client's NetPackageQuestObjectiveUpdate block_activated event.
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_blockobj");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_blockobj", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // The join auto-accepts the starter; complete it to free a journal slot.
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    const bid = g.sim.catalog.byName("quest_activate_block").?.id;
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, bid));
+    const s = systems.questFindActive(&g.sim, c.slot, bid).?;
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    // Without the event the block phase does not advance (no longer auto).
+    systems.questOnZombieKilled(&g.sim, c.slot);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    // The client's block_activated event advances it.
+    cap.clear();
+    var ub: [21]u8 = undefined;
+    std.mem.writeInt(i32, ub[0..4], c.entity_id, .little);
+    std.mem.writeInt(i32, ub[4..8], s.quest_code, .little);
+    ub[8] = 2; // block_activated
+    std.mem.writeInt(i32, ub[9..13], 100, .little);
+    std.mem.writeInt(i32, ub[13..17], 70, .little);
+    std.mem.writeInt(i32, ub[17..21], 100, .little);
+    var fbuf: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageQuestObjectiveUpdate", ub[0..21]));
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    std.debug.print("PASS block-obj: block_activated event advanced the quest phase\n", .{});
+}
