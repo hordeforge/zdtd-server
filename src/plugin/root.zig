@@ -1,4 +1,4 @@
-//! Native static plugin host (ADR 0005 skeleton).
+//! Static plugin host, in-tree test scaffolding (ADR 0020; no native ABI).
 //! No dynlib, no Wasm, no stock IModApi.
 //!
 //! Dependency direction: leaf layer below server (server imports plugin, never

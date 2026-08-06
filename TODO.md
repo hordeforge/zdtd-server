@@ -266,7 +266,7 @@ Scale track (docs/SCALE_ARCHITECTURE.md, research-verified 2026-07-22):
 - [x] Workstation TE wire + Recipe parse + 2Hz sim + output materialize
 - [x] WindowFull tiering; admin TCP expansion; sleeper authored markers
 - [x] Rejoin y-clamp; PPD join name; void rescue; PosAndRot authority
-- [x] Playtest driver 11/11; C2S 33/33; PACKAGES.md; BloodmoonMusic (HordeEvent unwired)
+- [x] Playtest driver 11/11; C2S 32/33; PACKAGES.md; BloodmoonMusic (HordeEvent unwired)
 - [x] Deco suppress (AssignIds skew); core loop clean-playable pw38
 - [x] TTS planes; ServerPassword; AssignIds dump; chunk upper24; land claim options
 

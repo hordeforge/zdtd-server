@@ -21,7 +21,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation (this audit pass):** unit suite is **392** tests (`zig build test`). Count drifts; see [STATUS.md](STATUS.md).
+**Validation (this audit pass):** unit suite is **758** tests (`zig build test`, 2026-08-06). Count drifts; see [STATUS.md](STATUS.md).
 
 ---
 

@@ -266,7 +266,7 @@ area and the concrete work.
     so every objective is written as `BaseObjective` (2 bytes) where stock has
     four shapes including two zero-byte ones. Any `tier1_*` quest reaching the
     join PDF trips `ValidateSizeMarker` and the client marks it Failed
-    (`src/assets/quests.zig:280`, `src/server/game.zig:6417`, asm.il:991300,
+    (`src/assets/quests.zig:280`, `src/server/game.zig:5981`, asm.il:991300,
     :988519).
 
 16. **Quests: honour the real accept path.** Stock signals acceptance with
@@ -490,7 +490,7 @@ because the per-objective Write shapes are wrong.
   fails, the client logs `Failed loading objectives` and sets the quest to Failed
   (state 4). Reachable today: opening a trader twice accepts `tier1_clear` into
   the server journal, written on the next login. The stream does not desync.
-  *Anchors:* `src/wire/stock_quest.zig:76`, `:162`, `src/server/game.zig:6417`,
+  *Anchors:* `src/wire/stock_quest.zig:76`, `:162`, `src/server/game.zig:5981`,
   `asm.il:959147-959162`, `asm.il:970493-970499`, `asm.il:978390-978396`,
   `asm.il:982624-982638`, `asm.il:978866-978874`, `asm.il:988519-988559`
 
@@ -609,8 +609,8 @@ because the per-objective Write shapes are wrong.
   record can be overwritten. `max_journal` is 8 slots but
   `fillStockJournalWrites` is called with a 2-entry buffer, so at most the first
   two journal slots ever reach the client.
-  *Anchors:* `src/server/game.zig:6083`, `src/ecs/systems.zig:314`,
-  `src/ecs/components.zig:284`, `:274`, `src/server/game.zig:6084`
+  *Anchors:* `src/server/game.zig:6779`, `src/ecs/systems.zig:314`,
+  `src/ecs/components.zig:284`, `:274`, `src/server/game.zig:6780`
 
 - **Quest journal persistence (players.zsv v2)** `PARTIAL`
   Stores def_id, quest_code, a flags byte, progress and phase, and re-resolves
@@ -1658,7 +1658,7 @@ gamestage, no wandering hordes, and no screamers.
   `replicate()` sends EntitySpawn and PosAndRot for `.animal`, but the
   EntitySpeeds / EntityAliveFlags block is gated on `kind == .zombie`, so the
   client animates animals with movementState 0 while their transform slides.
-  *Anchors:* `src/server/game.zig:7830`, `:7902-7929`
+  *Anchors:* `src/server/game.zig:8826`, `:8927-8952`
 
 - **Night horde** `PARTIAL`
   Every 45 s of night, 2 zombies spawn 18-28 m from each player already flagged
@@ -3026,8 +3026,8 @@ persists so little that a restart visibly damages a built base.
   `sendFramedReliable` / `sendGame` catch WindowFull and re-enter `sendReliable`,
   which restarts the message at part 0 with a fresh frag_id, discarding all
   in-flight parts and burning window slots again.
-  *Anchors:* `src/litenet/peer.zig:217-263`, `src/server/game.zig:5638-5661`,
-  `:2996-3020`
+  *Anchors:* `src/litenet/peer.zig:217-263`, `src/server/game.zig:6285-6308`,
+  `:3526-3550`
 
 - **Inbound fragment reassembly** `PARTIAL`
   Peer holds exactly one in-flight assembly. A second fragmented C2S message with a

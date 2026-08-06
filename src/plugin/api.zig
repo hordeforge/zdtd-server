@@ -1,4 +1,4 @@
-//! Experimental native plugin types (ADR 0005). Static link only; no dynlib/Wasm.
+//! Plugin hook types for the in-tree static host, test scaffolding (ADR 0020: Wasm-only; no native ABI). Static link only; no dynlib/Wasm.
 
 const std = @import("std");
 

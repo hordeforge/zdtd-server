@@ -453,7 +453,7 @@ Not feature-complete 7DTD; **playable**. Status vs 2026-07-23 evidence:
 
 | # | Criterion | State |
 |---|---|---|
-| 1 | Stock client EAC-off joins Navezgane, stands, walks | **MET** (11/11 playtest, 0 NRE) |
+| 1 | Stock client EAC-off joins Navezgane, stands, walks | **MET** (2026-08-06 live gate 23/23, 0 NRE) |
 | 2 | Two players / bots see each other; chat | **MET** (loadgen + stock concurrent) |
 | 3 | Zombies spawn, damage, die; loot | **MET** (ECD bag; path still greedy) |
 | 4 | Dig/build real ids; persists restart | **MET** (ZCH3 `.zch` + blockmeta) |

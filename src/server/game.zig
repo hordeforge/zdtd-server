@@ -424,7 +424,7 @@ pub const Game = struct {
     world: world_store.World,
     /// Entity-component-system sim world.
     sim: ecs.World = .{},
-    /// Static native plugin host (ADR 0005 skeleton; no dynlib).
+    /// Static plugin host, in-tree test scaffolding (ADR 0020; no dynlib).
     plugins: plugin_mod.PluginHost = .{},
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},

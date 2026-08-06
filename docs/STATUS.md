@@ -82,7 +82,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; plugins are Wasm-only per ADR 0020, no runtime wired (WORK_PLAN T9) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
-| C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
+| C2S package coverage | **PASS 32/33** | parity tool: 1 unhandled dir=1 (`NetPackagePlayerDisconnect`, covered by the LiteNet transport-disconnect path, game.zig:3437; explicit handler = WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
@@ -232,7 +232,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
 | Parked | Wasm plugin runtime | ADR 0020: Wasm-only, no runtime wired yet; static host stays as test scaffolding (WORK_PLAN T9) |
-| Multi-ms | Worldgen W2–W7 | W0/W1 shipped; density/climate/POI/WFC track open |
+| Multi-ms | Worldgen W3–W7 | W0/W1/W2 shipped (3D density field); climate/caves/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
 maxdamage merge), stock Chunk.write + upper24, players.zsv v2, TE/blockmeta persist,

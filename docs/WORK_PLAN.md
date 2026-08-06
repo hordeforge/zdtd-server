@@ -268,6 +268,31 @@ module is disabled, and the tick budget holds.
 **Out of scope:** WASI, hot reload, a plugin marketplace, and any hook not
 already in `src/plugin/api.zig`.
 
+## T10. C2S: handle NetPackagePlayerDisconnect explicitly
+
+**Why:** the parity coverage lists one unhandled dir=1 package:
+`NetPackagePlayerDisconnect` (PACKAGES.md header). The client sends it as its
+quit signal; zdtd currently lets the LiteNet peer-death poll (game.zig:3437)
+clean the player up instead. That works, but it leaves the C2S surface one
+package short and delays teardown until the transport notices.
+
+**Change:** add a `NetPackagePlayerDisconnect` case in `game.zig` onData that
+takes the same removal path as the transport poll (slot teardown, player save,
+`EntityRemove` broadcast). Accept it only for the sender's own peer; drop it for
+any other id. Then update the PACKAGES.md header via the parity tooling.
+
+**Grounding:** stock handler sits on the client quit path
+(`../7dtd-research/docs/inventories/netpackages.md`,
+`../7dtd-research/docs/protocol-packages.md`); the transport poll it would
+replace is game.zig:3437.
+
+**Done when:** parity `--coverage` reports 0 unhandled dir=1, and a client quit
+removes the player immediately rather than at the next peer-death poll.
+
+**Proof:** parity coverage run; a scenario that sends the package for the
+sender's own id and asserts the player slot is freed before the transport
+timeout.
+
 ## W1. Harness: rebuild suite fixtures on a fresh world
 
 **Why:** the playtest harness now starts every run from a fresh world, which is
@@ -312,6 +337,7 @@ unique per-run directory.
 - **Wave 2 (session has meaning):** T5, T6 (needs T1), T7.
 - **Wave 3 (world integrity):** T4, T8.
 - **Independent, whenever a modding story is wanted:** T9 (Wasm runtime).
+- **Tiny, any time:** T10 (C2S disconnect), alongside the harness work.
 - **Harness, any time and cheap:** W1, W2, W3. Do W3 first if `make check`
   flakiness is costing you time.
 
