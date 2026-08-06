@@ -312,6 +312,14 @@ pub const InitOptions = struct {
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
+    /// 2 Hz class of sim side-work (zdtd.toml [stream] sleeper_tick_ticks):
+    /// prefab sleeper volumes, airdrops + zombie block damage, workstations.
+    sleeper_tick_ticks: u64 = default_sleeper_tick_ticks,
+    /// Turret state broadcast cadence (zdtd.toml [stream] turret_sync_ticks).
+    turret_sync_ticks: u64 = default_turret_sync_ticks,
+    /// Periodic world flush so dig/build survives a crash (zdtd.toml
+    /// [stream] save_interval_ticks).
+    save_interval_ticks: u64 = default_save_interval_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
@@ -352,6 +360,9 @@ pub const default_motion_replicate_period_ticks: u64 = 2;
 /// (zdtd.toml [stream] world_time_send_ticks / vehicle_pos_send_ticks).
 pub const default_world_time_send_ticks: u64 = 20;
 pub const default_vehicle_pos_send_ticks: u64 = 5;
+pub const default_sleeper_tick_ticks: u64 = 10;
+pub const default_turret_sync_ticks: u64 = 10;
+pub const default_save_interval_ticks: u64 = 100;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 pub const default_max_edit_range: f32 = 96;
@@ -820,6 +831,9 @@ pub const Game = struct {
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
+    sleeper_tick_ticks: u64 = default_sleeper_tick_ticks,
+    turret_sync_ticks: u64 = default_turret_sync_ticks,
+    save_interval_ticks: u64 = default_save_interval_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
@@ -897,6 +911,9 @@ pub const Game = struct {
             .motion_replicate_period_ticks = opts.motion_replicate_period_ticks,
             .world_time_send_ticks = opts.world_time_send_ticks,
             .vehicle_pos_send_ticks = opts.vehicle_pos_send_ticks,
+            .sleeper_tick_ticks = opts.sleeper_tick_ticks,
+            .turret_sync_ticks = opts.turret_sync_ticks,
+            .save_interval_ticks = opts.save_interval_ticks,
             .spawn_area_radius_max = opts.spawn_area_radius_max,
             .max_claimed_damage = opts.max_claimed_damage,
             .max_edit_range = opts.max_edit_range,
@@ -10392,15 +10409,15 @@ pub const Game = struct {
                 self.harness.counters.add(.terrain_snap_misses, now -| self.snap_misses_seen);
                 self.snap_misses_seen = now;
             }
-            // Prefab sleeper volumes (every ~0.5s).
-            if (self.tick_n % 10 == 0) self.tickSleeperVolumes();
-            // Air drops + zombie block damage at 2Hz.
-            if (self.tick_n % 10 == 0) {
+            // Prefab sleeper volumes (zdtd.toml [stream] sleeper_tick_ticks).
+            if (self.tick_n % self.sleeper_tick_ticks == 0) self.tickSleeperVolumes();
+            // Air drops + zombie block damage at the same cadence.
+            if (self.tick_n % self.sleeper_tick_ticks == 0) {
                 self.tickAirDrop();
                 self.tickZombieBlockDamage();
             }
-            // Workstation burn/craft at 2Hz; dirty stations re-broadcast state.
-            if (self.tick_n % 10 == 0) {
+            // Workstation burn/craft; dirty stations re-broadcast state.
+            if (self.tick_n % self.sleeper_tick_ticks == 0) {
                 self.tickWorkstations(0.5) catch |err| {
                     self.harness.counters.inc(.net_send_errors);
                     std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
@@ -10470,7 +10487,7 @@ pub const Game = struct {
                 }
             }
             if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
-            if (self.tick_n % 10 == 0) try self.broadcastTurretSync();
+            if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
             // Null on_tick hooks are a branch only (sample_hello is enable-only).
             self.plugins.onTick();
             // Wasm plugin hooks run late in the tick, after the sim settles;
@@ -10508,7 +10525,7 @@ pub const Game = struct {
 
         try self.replicate();
         // Periodic world flush so dig/build survives crash without explicit admin save.
-        if (self.tick_n % 100 == 0) {
+        if (self.tick_n % self.save_interval_ticks == 0) {
             const ss = apm.profiler.scope(&self.harness.prof, .save_io);
             defer ss.end();
             {
