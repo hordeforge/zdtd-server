@@ -17,7 +17,7 @@
 //! `density()` oracle and chunk borders cannot seam. That is a structural
 //! property, and "chunk fill matches density oracle" is the test that pins it.
 //!
-//! Honest gaps (see docs/MISSING_FEATURES.md): no fluids/aquifers (a density
+//! Honest gaps (see docs/GAP_ANALYSIS.md): no fluids/aquifers (a density
 //! dip below sea level is a dry pit, W4), single biome only (W3), caves are
 //! implicit in the noise rather than carved (W4), and surface material is
 //! applied per column from its topmost solid block, so overhang shelves and

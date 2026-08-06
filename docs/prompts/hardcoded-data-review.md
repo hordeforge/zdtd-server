@@ -32,7 +32,7 @@ Read first (in order):
 | `AGENTS.md` | Clean-room, fail closed, package ids dynamic, rule 13 assets |
 | `docs/ASSETS.md` | What loaders exist; id spaces; fail-closed table |
 | `docs/STATUS.md` | What works now (do not regress join/chunk/inv) |
-| `docs/MISSING_FEATURES.md` | Known gaps vs stock |
+| `docs/GAP_ANALYSIS.md` | Known gaps vs stock |
 | `docs/GAME_OPTIONS.md` | Existing serverconfig / options surface |
 | `docs/WORLDGEN.md` | Proc gen is on-the-fly stream (if touching gen constants) |
 | `../7dtd-research/docs/protocol.md` (+ package notes) | Wire ground truth |

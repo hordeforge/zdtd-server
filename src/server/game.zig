@@ -3593,7 +3593,7 @@ pub const Game = struct {
 
     /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
     /// quest modifiers are zero: biomes.xml GameStageMod/Bonus and quests.xml
-    /// GameStageMod/Bonus are not parsed yet (docs/MISSING_FEATURES.md).
+    /// GameStageMod/Bonus are not parsed yet (docs/GAP_ANALYSIS.md).
     fn gameStageOf(self: *const Game, slot: usize) i32 {
         if (slot >= self.clients.len) return 1;
         const c = &self.clients[slot];
@@ -8546,7 +8546,7 @@ pub const Game = struct {
             self.sim.dirty[i].hp = false;
             // Player vitals only. Stock also runs EntityStats::TickWait for NPCs;
             // zdtd still keeps zombie hp server-side, so nothing consumes the bit
-            // for them (docs/MISSING_FEATURES.md, entity lifecycle).
+            // for them (docs/GAP_ANALYSIS.md, entity lifecycle).
             if (!self.sim.mask[i].player or !self.sim.mask[i].health) continue;
             if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
             const nid = self.sim.network_id[i].id;

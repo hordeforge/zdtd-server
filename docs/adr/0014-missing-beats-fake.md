@@ -26,7 +26,7 @@ gaps, not a visually busy fake world.
    invent world data (server owns playability gaps).
 3. **Stock content from install data** (XML, AssignIds, DTM, TTS), not
    hand-copied tables. Fail closed on unknown names (ADR 0010, ASSETS.md).
-4. **Document gaps** in STATUS / MISSING_FEATURES / TODO rather than faking
+4. **Document gaps** in STATUS / GAP_ANALYSIS / TODO rather than faking
    completion in wire or UI.
 
 ## Consequences

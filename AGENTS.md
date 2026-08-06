@@ -9,7 +9,7 @@
 | Architecture | [`docs/zig-clone.md`](docs/zig-clone.md) |
 | Wire | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
-| Gaps / plan | [`docs/MISSING_FEATURES.md`](docs/MISSING_FEATURES.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
+| Gaps / plan | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
 | Backlog | [`TODO.md`](TODO.md) |
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
@@ -238,7 +238,7 @@ Full index: [`docs/INDEX.md`](docs/INDEX.md). **STATUS wins** if inventory docs 
 |---|---|
 | [`docs/STATUS.md`](docs/STATUS.md) | What works now (gates + shipped surface) |
 | [`TODO.md`](TODO.md) | Open backlog (shipped log below the fold) |
-| [`docs/MISSING_FEATURES.md`](docs/MISSING_FEATURES.md) | Full gap inventory vs stock |
+| [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Full gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased plan (M7+; post-playable stack) |
 | [`docs/AUTHORITY.md`](docs/AUTHORITY.md) | Server-authoritative C2S gates + mode |
 | [`docs/APM.md`](docs/APM.md) | Native metrics harness |

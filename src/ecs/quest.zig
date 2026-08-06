@@ -24,7 +24,7 @@ pub const max_phases: usize = 32;
 /// `rally` waits for the client's rally-marker activation, but only when the
 /// quest instance carries a POI rect; without one it degrades to scaffolding.
 /// `auto` = scaffolding-only phase (unmodelled objective / empty) that
-/// auto-completes on entry (see honest gaps in docs/MISSING_FEATURES.md).
+/// auto-completes on entry (see honest gaps in docs/GAP_ANALYSIS.md).
 pub const PhaseKind = enum(u8) {
     kill_zombies,
     goto_point,

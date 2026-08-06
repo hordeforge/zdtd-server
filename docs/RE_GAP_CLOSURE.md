@@ -1,6 +1,6 @@
 # RE gap closure: research specs for zdtd's open items
 
-**Purpose:** map each PARTIAL/MISSING item in [`MISSING_FEATURES.md`](MISSING_FEATURES.md)
+**Purpose:** map each PARTIAL/MISSING item in [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md)
 to the reverse-engineering doc that now fully specifies it, so a gap can be closed
 against a spec instead of guesswork. The stock RE corpus at `../7dtd-research/docs/`
 was expanded to cover every dedicated codepath (2026-07 pass); this bridges it to
@@ -82,7 +82,7 @@ held-entity feature), so version-gate the wire where noted.
 
 | Doc | Role |
 |---|---|
-| [MISSING_FEATURES.md](MISSING_FEATURES.md) | The gap inventory this closes against |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap inventory this closes against |
 | [PACKAGES.md](PACKAGES.md) | zdtd's package implementation status |
 | `../7dtd-research/docs/INDEX.md` | Full stock RE hub |
 | `../7dtd-research/docs/protocol-packages.md` | Per-package wire bodies + census |

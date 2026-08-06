@@ -4,7 +4,7 @@
 **Game line:** stock client **V3.1.0 b14**, EAC off, Navezgane, direct IP.
 **IL reference:** `/home/maci/.cache/zdtd-scratch/asm.il` (2026-08-05 dump). Line
 numbers in this document refer to **that** dump. Older ranges quoted in
-[MISSING_FEATURES.md](MISSING_FEATURES.md) drift by roughly 3500 lines in the
+[GAP_ANALYSIS.md](GAP_ANALYSIS.md) drift by roughly 3500 lines in the
 NetPackage region; re-check before trusting a cited line from an older doc.
 **Stock XML reference:** `.../7 Days to Die Dedicated Server/Data/`.
 
@@ -15,7 +15,7 @@ pass" was **not** accepted as evidence for any wire claim, because zdtd encodes
 and decodes with the same code.
 
 **Conflict rule.** [STATUS.md](STATUS.md) remains the living hub for shipped
-gates. Where a row here contradicts [MISSING_FEATURES.md](MISSING_FEATURES.md),
+gates. Where a row here contradicts [GAP_ANALYSIS.md](GAP_ANALYSIS.md),
 this document is newer and cites its evidence inline; where it contradicts a
 STATUS **PASS**, the disagreement is called out explicitly in the relevant
 section and in [Not verified](#not-verified).
@@ -30,11 +30,11 @@ Status labels, used exactly as defined:
 
 ---
 
-**Relationship to the other gap docs:** this file owns the per-feature scoring
-and its anchors. [MISSING_FEATURES.md](MISSING_FEATURES.md) owns the long-form
-narrative and priority bands; [WORK_PLAN.md](WORK_PLAN.md) owns the tasks. On the
-state of a single feature this file wins, because it is rescored against the
-code; on whether a gate shipped, [STATUS.md](STATUS.md) wins.
+**Where things live:** this is the gap document. Sections 4 to 12 score each
+feature against the code with anchors; Appendix A carries the long-form area
+narratives, the priority bands and the deep dives, merged here from the former
+MISSING_FEATURES.md. [WORK_PLAN.md](WORK_PLAN.md) owns the tasks and
+[STATUS.md](STATUS.md) owns whether a gate shipped, which wins on that question.
 
 ## 1. Honest summary
 
@@ -697,7 +697,7 @@ warning.
   disallowed direction, so an inbound one is logged as
   `[NET] Received package {0} which is only allowed to be sent to the server` and
   dropped before read. Every `sendTraderSnapshot` call is a no-op plus a client
-  warning. `MISSING_FEATURES.md:588-605` and `STATUS.md:143` claim this window
+  warning. `GAP_ANALYSIS.md:588-605` and `STATUS.md:143` claim this window
   shows real `traderAlways` stock; that claim is not supported by the IL and there
   is no client-log observation of it.
   *Anchors:* `src/server/game.zig:5482-5527`, `src/wire/packages.zig:643-668`,
@@ -724,7 +724,7 @@ warning.
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
   `loadFromPath` scans every `<trader_item_group>` and `expandGroup` resolves
   child refs recursively with a depth limit and a visited set. The docs are stale
-  here: `MISSING_FEATURES.md:535` and `:612` say group refs are skipped; they are
+  here: `GAP_ANALYSIS.md:535` and `:612` say group refs are skipped; they are
   expanded, with a test against the real stock file.
   *Anchors:* `src/assets/traders.zig:114-177`, `:54-82`, `:183-201`,
   `Data/Config/traders.xml:1179-1194`
@@ -977,7 +977,7 @@ encoding is one day high.
   never emits it either. No player impact relative to stock. The repo doc cites a
   stale line range.
   *Anchors:* `src/wire/packages.zig:930`, `asm.il:822185`, `asm.il:518546`,
-  `docs/MISSING_FEATURES.md:889`
+  `docs/GAP_ANALYSIS.md:889`
 
 - **Blood-moon weather override** `WORKS`
   `Manager.tick` pushes every biome's next storm at least 5000 ticks past now and
@@ -2190,7 +2190,7 @@ skills or vitals survives a relog let alone a restart.
   No gamestage anywhere. The spawn path explicitly comments "no gamestage scaling:
   zdtd has no gamestage, gsScale=1", and `gamestages.xml` is in the not-loaded
   list. Zombie difficulty never responds to player level.
-  *Anchors:* `src/server/game.zig:7044`, `docs/MISSING_FEATURES.md`
+  *Anchors:* `src/server/game.zig:7044`, `docs/GAP_ANALYSIS.md`
 
 - **buffs.xml catalog and passive_effect parse** `PARTIAL`
   482 buff defs load (483 raw `<buff `, 482 after comment stripping, matching the
@@ -3355,12 +3355,12 @@ nobody re-opens a closed row from a stale one.
 
 | Doc row | This analysis says |
 |---|---|
-| `MISSING_FEATURES.md:588-605` and `STATUS.md:143`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
-| `MISSING_FEATURES.md:535` and `:612`: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
-| `MISSING_FEATURES.md:339`: "Player respawn rules | HAVE" | PARTIAL: fixed spawn point, zeroed food and water, no bedroll |
-| `MISSING_FEATURES.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | Understates it: the bag content is a hardcoded single scrap and the real stock backpack request is refused |
+| `GAP_ANALYSIS.md:588-605` and `STATUS.md:143`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
+| `GAP_ANALYSIS.md:535` and `:612`: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
+| `GAP_ANALYSIS.md:339`: "Player respawn rules | HAVE" | PARTIAL: fixed spawn point, zeroed food and water, no bedroll |
+| `GAP_ANALYSIS.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | Understates it: the bag content is a hardcoded single scrap and the real stock backpack request is refused |
 | `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path that is actually broken |
-| `MISSING_FEATURES.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
+| `GAP_ANALYSIS.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
 | `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
 | `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | There are four: BaseObjective, POIStayWithin (empty), StayWithin (also empty, unnamed in the repo), TreasureChest, plus ObjectiveTime's single u16 |
 
@@ -3374,5 +3374,1121 @@ nobody re-opens a closed row from a stale one.
 - No zdtd source was modified by any auditor; `git status --porcelain` was clean
   after each audit. Probes were built in scratchpad copies and deleted.
 
+---
 
+## Appendix A. Area narratives and deep dives
 
+Merged from the former GAP_ANALYSIS.md on 2026-08-06. This is the long-form
+background: why an area looks the way it does, what stock does that zdtd does
+not, and the deep dives. Per-feature state lives in sections 4 to 12 above and
+wins on any disagreement; these narratives carry reasoning, not scoring.
+
+Status tags used below: **HAVE** shipped enough to exercise, **PARTIAL** exists
+but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal.
+
+### 1. Network / LiteNet
+
+| Item | Status | Notes |
+|---|---|---|
+| UDP bind / poll | HAVE | `litenet/linux_udp.zig` |
+| ConnectRequest/Accept (game ordinals) | HAVE | property ids match game LiteNet |
+| Reliable ordered channel | PARTIAL | window/retransmit + ACK-pumped multi-frag; ordered hold buffer deferred |
+| Unreliable / sequenced channels | PARTIAL | unreliable send; sequenced first-cut channel 1 |
+| MTU / fragmentation | HAVE | large chunks via sendReliable resume + pump_fn (14-37 KB POI) |
+| C2S deflate envelope | HAVE | `frame.zig` inflates stock compressed batches (zlib/raw/gzip) |
+| LiteNet Merged packets | HAVE | unpack `[prop][u16 len][subpacket]*` |
+| Connect reject / full server | PARTIAL | peer slot limit; password reject `[0,0]` |
+| Per-IP join rate limit | HAVE | ~500 ms/IP; loopback exempt |
+| Disconnect / timeout cleanup | PARTIAL | alive flags; soft cleanup |
+| NAT punch / Steam relay | OUT | later / never for open clone |
+| EAC package path | OUT | residual RE only |
+
+---
+
+### 2. Join, auth, session
+
+| Item | Status | Notes |
+|---|---|---|
+| Challenge `0xCA` + Guid16 echo | HAVE | |
+| `NetPackagePackageIds` map | HAVE | **negotiated** 189-name list (full stock subset) |
+| `NetPackagePlayerLogin` parse | PARTIAL | full field walk (asm.il 832140): name + both `PlatformUserIdentifierAbs`; auth tokens skipped (no authorizer chain) |
+| `PlayerLoginAnswer` | HAVE | simple ok/fail string |
+| `PlayerId` | PARTIAL | may not match stock body |
+| `PlayerSpawnedInWorld` | PARTIAL | spawn coords; not full stock fields |
+| `RequestToSpawnPlayer` | PARTIAL | ignores chunk view dim / profile v5 |
+| Platform auth (EOS / Steam ticket) | MISSING | |
+| Server password | HAVE | LiteNet Connect key (`ConnectionRequestCheck`); rejectInvalidPassword `[0,0]` |
+| Encryption (`Encryption*`) | MISSING | optional platform RSA+AES residual (not ServerPassword; EAC-off OK) |
+| Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
+| Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; no whitelist file |
+| `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
+| Reconnect resume | PARTIAL | players.zsv v2 keyed **by login name**, not by identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration; tracked in §10 |
+| Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
+
+---
+
+### 3. Package surface (~194 stock vs ~189 zdtd)
+
+### 3.1 Implemented names (zdtd `default_mappings`)
+
+Join/core: PackageIds, PlayerLogin, PlayerLoginAnswer, PlayerId, PlayerSpawnedInWorld, RequestToSpawnPlayer, EntityPosAndRot, EntityRelPosAndRot, EntityAliveFlags, DamageEntity, EntityRemove, SetBlock, Chunk, WorldTime, SimpleChat, EntityLookAt.
+
+Extended (simplified bodies): QuestObjectiveUpdate, NPCQuestList, TraderData, EntitySpawn, VehicleSpawn, VehiclePositions, VehicleDataSync, TurretSpawn, TurretSync, WireActions, WireToolActions.
+
+### 3.2 Missing packages by functional area
+
+Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only).
+
+#### World / terrain / deco
+| Package | Priority for stock client |
+|---|---|
+| `NetPackageChunk` **stock layout** | HAVE (`stock_chunk.zig` + upper24; DTM + TTS; CGO green) |
+| `NetPackageChunkRemove` / `ChunkRemoveAll` | PARTIAL (ChunkRemove key streaming; no RemoveAll) |
+| `NetPackageChunkClusterInfo` | P2 |
+| `NetPackageWorldInfo` / game mode / seed | HAVE (fixedSizeCC closes overlay gate) |
+| `NetPackageBiomeIntensity` | PARTIAL (interleaved in chunk path) |
+| `NetPackageDecoUpdate` / deco reset | PARTIAL (join-time burst around spawn. Species and density are biome-driven: biomes.xml `<decorations>` filtered by resolved `IsDistantDecoration`, sampled with stock's `decorateChunkRandom` shape (128x128 deco chunks, 1000 attempts, `prob * 0.125f * 16f`). Placed deco is mirrored into the block store (`[feature] deco_mirror`) with stock's `ischild`/parent packing for multiblocks. Client still has ONE deco window: `loadedDecos` is nulled at the end of `OnWorldLoaded`, so nothing outside the join view square is ever decorated. Residuals: deterministic PRNG instead of `GameRandom`, no `CheckOreNoiseAt`, rotation always 0, subbiome noise not evaluated. `DecoResetWorldChunk` on view unload removed (not stock). See [DECO_NRE.md](archive/DECO_NRE.md)) |
+| `NetPackageIdMapping` "blocks" | HAVE (full AssignIds dump sent before the config files, in the stock slot; envelope raw-deflated like `NetConnectionAbs::Compress`. All-or-nothing with `[feature] block_id_mapping` kill switch. Needs one live V3.1.x client run to confirm) |
+| `NetPackageWater*` (if any in build) | P2 |
+| `NetPackageDynamicMesh` | P3 / skip headless |
+
+#### Entity lifecycle
+| Package | Priority |
+|---|---|
+| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../7dtd-research/docs/protocol-packages.md` 5.1 |
+| `NetPackageEntitySpawnResponse` | P1 (builder shipped; place/throw only: never on join: client ProcessPackage calls ItemValue.ItemClass on empty item → NRE) |
+| `NetPackageEntityTeleport` | P1 |
+| `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | P1 |
+| `NetPackageEntityRotation` | P2 |
+| `NetPackageEntityAnimationData` | P2 |
+| `NetPackageEntityRagdoll` | P2 |
+| `NetPackageEntityAttach` / detach | P1 (vehicles, seats) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health also replicates from the tick pass whenever `dirty.hp` is set, so AI melee, C2S damage and death reach the client the way `EntityStats::TickWait` polls `Stat.Changed` (asm.il:199393); NPC stats and buffs deferred) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buff set is server-owned via AddRemoveBuff) |
+| `NetPackageEntityAttach` / detach | HAVE (server resolves slot, replies AttachClient/DetachClient) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buffs deferred) |
+| `NetPackageEntityStealth` | P2 |
+| `NetPackageEntityCollect` | P1 (loot) |
+| `NetPackageEntityWaypointList` / map markers | P2 |
+| `NetPackageEntityAddExp*` / skills | P2 |
+| `NetPackageEntityAwardKillServer` | P2 |
+
+#### Combat / hazards
+| Package | Priority |
+|---|---|
+| `NetPackageDamageEntity` full field semantics | PARTIAL (head parse/build) |
+| `NetPackageExplosionInitiate` / `ExplosionClient` | PARTIAL (initiate dig + client FX; nested blob shallow) |
+| `NetPackageAddRemoveBuff` / `EntityStatsBuff` | PARTIAL (AddRemoveBuff C2S validated + S2C relay/expiry; EntityStatsBuff full-list sync on join; PDF `buffData` still empty, no cvar section) |
+| `NetPackageEmitSmell` | P3 |
+| Blood / infection / wetness packages | P2 |
+
+#### Inventory / items / crafting
+| Package | Priority for stock client |
+|---|---|
+| Player inventory sync family | HAVE (PDF + C2S PlayerInventory; client-authoritative hold) |
+| `NetPackageHoldingItem` | HAVE (S2C echo) |
+| Drop / pickup / bag containers | HAVE (loot ECD bag; Bag C2S-only) |
+| Craft / recipe / unlock | PARTIAL (InvTx + workstation TE + unlock list) |
+| Toolbelt / bag / equipment slots | HAVE |
+| Item quality / mods / durability | PARTIAL (quality/meta in players.zsv v2; mods shallow) |
+| Loot container open/close | HAVE (LockRequest + TE stream) |
+
+#### Blocks / building
+| Package | Priority |
+|---|---|
+| `NetPackageSetBlock` multi-block / shape / rotation | PARTIAL (multi parse; rotation meta sparse) |
+| Block damage / upgrade / paint | PARTIAL (HP accumulate; upgrade/paint open) |
+| `NetPackageAnimateBlock` / `BlockTrigger` | PARTIAL (BlockTrigger C2S handled) |
+| Stability / support collapse | MISSING |
+| Land claim / bedroll / keystones | PARTIAL (LandClaim options; bedroll open) |
+| Door / hatch / storage open state | PARTIAL (chest open pair; generic door shallow) |
+
+#### AI director / events / sleepers
+| Package | Priority |
+|---|---|
+| Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
+| Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
+| Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
+| Party / ally (`AllyRequest/Response`) | PARTIAL (echo first cut) |
+
+#### Quests / traders / dialog (stock)
+| Package | Priority |
+|---|---|
+| Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; see §6.1 gaps) |
+| Trader inventory stock format (stock TraderData) | PARTIAL (entity-id envelope + TraderData v2 primary entries now parse in the stock window; gaps below) |
+| Dialog / NPC interaction | P1 |
+| Quest POI marker / rally | PARTIAL (`NetPackageQuestEvent` rally-marker + Lock/UnlockPOI handled; POIPosition/POISize on Quest.Write; rally engages only for quests placed in a prefab) |
+
+#### Vehicles / mounts
+| Package | Priority |
+|---|---|
+| Stock vehicle packages (beyond simplified trio) | P1 |
+| Seats multi-occupant | HAVE (base seats from vehicles.xml; no seat-mod budget) |
+| Fuel / storage as items | P1 |
+| Vehicle damage / parts | P2 |
+
+#### Electricity / traps
+| Package | Priority |
+|---|---|
+| Placeable stock electrical blocks (SetBlock → PowerGrid node) | HAVE |
+| Stock `NetPackageWireActions` SetParent/RemoveParent → parent/child wiring | HAVE |
+| Wired powered state (BFS flood from generators) | HAVE |
+| `NetPackageWireToolActions` (visual handshake) | PARTIAL (peer rebroadcast only) |
+| Powered door / light / trap blocks | PARTIAL (registered as consumers, no actuation) |
+| Battery charge state | P2 |
+
+**Landed (Electrical block placement parity):** when a player `SetBlock`s a
+stock electrical block (`generatorbank`, `solarbank`, `batterybank`,
+`electricwirerelay`, `autoTurret`, pressure plates, traps, …), a matching
+`PowerGrid` node is registered at the block world position (`addNodeAt`,
+idempotent) and dropped on removal (`removeAt`, compacts incident wires). Node
+kind comes from the block `Class` in stock `blocks.xml`
+(`src/ecs/powerblocks.zig`); watts are real block properties (`MaxPower` for
+sources, `RequiredPower` for consumers, parsed in `maxdamage.loadFromBlocksXml`).
+Real `NetPackageWireActions` bodies drive wiring: `SetParent` (op 0) connects
+child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
+`SendWires` (op 2) is a visual no-op. Grounded in
+`NetPackageWireActions::read`/`ProcessPackage` (asm.il:842779, 842922, 843021).
+
+**Honest gaps (documented, not faked):**
+- *Generator fuel*: `PowerGenerator` ramps output via
+  `CurrentFuel`/`MaxFuel`/`OutputPerFuel`/`TickPowerGeneration` (asm.il:892750).
+  zdtd treats a generator as constant `MaxPower` while `.on`. No fuel burn, no
+  `ShouldAutoTurnOff`, no ramp.
+- *Battery charge state*: `PowerItemTypes.BatteryBank` state-of-charge /
+  charge-discharge is not modeled; `.battery` is a passive passthrough node.
+- *Trigger/timer/toggle actuation*: PARTIAL. PressurePlate / TripWire /
+  MotionSensor / Trigger are `is_trigger` gates: BFS powers the plate when
+  wired, but does not flood past until `activateTriggerAt` (player step via
+  `noteAcceptedMove`) opens it. The gate now honours the trigger's stock
+  `TriggerPowerDelay` / `TriggerPowerDuration` (`triggerDelaySeconds` /
+  `triggerDurationSeconds`, asm.il:900414 and 900579): Always latches until a
+  reset, a numeric duration holds for its seconds, and Triggered still falls
+  back to `default_trigger_pulse_s` because zdtd has no "contact released"
+  event. Class=Switch / ConsumerToggle register as `is_switch` gates driven by
+  BlockValue meta bit 0x2, which arrives on the SetBlock path
+  (`BlockSwitch::updateState` -> `SetBlockRPC`, asm.il:136663), not as a TE
+  payload. Grid state goes back out as zdtd's `Block::ActivateBlock` equivalent:
+  an edge-triggered `NetPackageSetBlock` rewriting meta bit 0x1 (isPowered) and
+  0x2 (isOn) per node (asm.il:127088 / 137044 / 1323820). The
+  TileEntityPoweredTrigger ClientTriggerData payload is encoded and decoded in
+  `wire/stock_te.zig` (both directions, asm.il:1325813 / 1326015).
+  Gaps: `PowerTimerRelay` StartTime/EndTime hour semantics (Property1/Property2
+  are carried but a TimerRelay still runs on the old `armTimer` period), Motion
+  sensor ownerID and TargetTypes filtering (TargetType is parsed and echoed, not
+  enforced), multi-parent directed edges, and the S2C TE leg only lands where
+  the client already holds a TileEntity: zdtd streams chunks with tile-entity
+  count 0 (`stock_chunk.zig`), and `NetPackageTileEntity::ProcessPackage`
+  (asm.il:842860) drops an update for a position with no TileEntity. That leg is
+  unverified against a live client; the SetBlock/meta legs are the ones that
+  render today.
+- *RemoveParent precision*: stock removes exactly the child→parent edge
+  (`PowerItem.RemoveSelfFromParent`, asm.il:843033). zdtd wires are undirected,
+  so `removeParentAt` drops all edges incident to the node. Matches the common
+  single-wire case; multi-parent topologies differ.
+- *TileEntity wire-data persistence / SendWires visual path*
+  (`CreateWireDataFromPowerItem`/`SendWireData`, asm.il:842993) is client visual;
+  zdtd does not persist per-TE wire lists, only rebroadcasts the raw package.
+- *AssignIds version skew*: the bundled `assignids_v314.txt` is V3.1.4 while the
+  target client is V3.1.0(b14). If block ids differ, registry lookup silently
+  no-ops (blocks place normally, just not power-registered). Supply a V3.1.0 b14
+  assignids dump for exact id parity. Registry also needs `blocks.xml` loaded.
+- *Power accounting*: watts feed only the existing `resolve()` demand>gen
+  consumer-drop heuristic. No per-branch `RequiredPower` summation up the parent
+  tree, no `StackPower`/priority.
+
+#### Chat / UI / config
+| Package | Priority |
+|---|---|
+| `NetPackageChat` (vs SimpleChat) | P1 |
+| `NetPackageGameMessage` / tips | P2 |
+| `NetPackageConfigFile` / id mapping blocks-items | HAVE (LoadLocal list) |
+| `NetPackageGameStats` | HAVE (full bPersistent blob; HUD day = WorldTime) |
+| Console cmd client/server | P2 |
+| XUi remote windows | P3 |
+
+#### Auth / platform / misc
+| Package | Priority |
+|---|---|
+| AuthState / AuthConfirmation | P1 |
+| Discord / Twitch families | OUT / P3 |
+| Editor / prefab editor packages | OUT |
+| EAC | OUT |
+
+**Gap size:** ~189/194 named (~97%). The named subset covers the full stock
+client join + play path; remaining unnamed types are editor/EAC/platform.
+
+---
+
+### 4. World representation and maps
+
+| Item | Status | Notes |
+|---|---|---|
+| Flat default world | HAVE | sea_level height plane |
+| Stock DTM load (Navezgane/Pregen) | HAVE | u16 LE gameY×256, center origin |
+| Spawnpoints.xml | HAVE | first spawn |
+| prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint; prefab `.xml` `YOffset` applied to the stamp origin (caves/mines/bunkers land below grade) |
+| `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
+| prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint |
+| `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; prefab-local ids remapped by name via `<name>.blocks.nim` (`Prefab::loadIdMapping`), pre-18 files converted from `BlockValueV3` |
+| water_info.xml | PARTIAL | height hints only |
+| biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
+| RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
+| Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
+| Density / stability / shape / paint | PARTIAL | density channel; stability/falling MISSING |
+| Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
+| Stock `NetPackageChunk` blob | HAVE | `stock_chunk.zig` + upper24; live CGO |
+| `.ttc` region files | MISSING | custom ZCH3 `.zch` + blockmeta |
+| RegionFileRaw headers / sectors | MISSING | RE partial |
+| Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
+| Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
+| Water flow / physics | MISSING | |
+| Falling blocks | MISSING | |
+| POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
+| Land claim / bedroll spawn | PARTIAL | LandClaim options + keystone deny; bedroll ownership MISSING |
+| World borders / difficulty tiers | MISSING | |
+
+---
+
+### 5. ECS simulation (entity systems)
+
+### 5.1 Present components / systems
+
+HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, ZombieAi, Vehicle, Turret, TraderStock, Flags; systems AI (LOD chase/melee), Director clock/hordes, vehicles stick, power BFS, turrets; parallel AI/turrets/save; max 512 entities.
+
+### 5.2 Missing entity / AI features
+
+| Item | Status |
+|---|---|
+| Entity class system (`entityclasses.xml`) | HAVE (`assets/entities.zig`) |
+| Archetypes / gamestages / spawning.xml | PARTIAL (`assets/gamestages.zig` + spawning.xml `<biome>`/`<entityspawner>`; archetypes MISSING) |
+| Animals / special infected / bosses | PARTIAL (animals spawner + cap; bosses MISSING) |
+| EAI task graphs | PARTIAL (see 5.2.1) |
+| Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
+| Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |
+| MoveHelper physics / collision | MISSING |
+| Gravity / swimming / climbing | PARTIAL (void rescue teleport; vehicle gravity) |
+| Line of sight / hearing / smell | MISSING |
+| Stealth / crouch | MISSING |
+| Group AI / pack behavior | MISSING |
+| Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
+| Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |
+| Ragdoll / death loot bags | PARTIAL (loot ECD bag; no ragdoll) |
+| XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |
+| Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
+| Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
+| Equipment / armor mitigation | PARTIAL (equip slots; mitigation shallow) |
+| Projectile / ranged combat | MISSING |
+| Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
+| Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
+| Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
+| Party (membership) | MISSING (PartyActions/PartyData echoed to sender; no Party state) |
+| Allies | PARTIAL (identity-keyed AllyStore + AllyResponse; not persisted) |
+| Spatial hash for queries | MISSING (broadcastNear radius only) |
+| Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
+| Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate walks `World.alive_bits`/`dirty_bits` and the dirty clear is O(changed); the interest *query* is still a per-entity observer mask, no cell hash) |
+| NetId → slot map (O(1)) | HAVE (`World.net_to_slot`; documented linear fallback only when the map is degraded) |
+| Interest-aware tick budgets | MISSING |
+
+#### 5.2.1 EAI task graphs (PARTIAL)
+
+IL line numbers in this section are `asm.il` (V3.1.0 b14) unless a citation says
+otherwise. Older EAI citations in this file and in `src/ecs/` were taken from
+`asm_v301.il`, whose numbering is offset by roughly +680 for these classes
+(EAIBreakBlock is asm_v301.il:425121 but asm.il:425801); check which dump you
+are reading before quoting a line.
+
+`AiCtx.work` (`src/ecs/systems.zig`) ports stock's prioritized task-selection
+loop `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874): an
+ordered task table with `{priority, MutexBits, executeDelay, continuous}` per
+task, "best task" selection by priority + mutex overlap, per-task re-eval
+timer, and Start/Update/CanExecute/Continue hooks. The winning task is
+projected onto the coarse `ZombieAi.state` enum so all downstream replication
+stays unchanged.
+
+Eight real tasks are registered in the comptime `zombie_tasks` table, in the
+stock AITask order: BreakBlock, DestroyArea, RunawayWhenHurt (MutexBits=1 from
+its .ctor, EAIBase defaults for executeDelay/continuous; asm.il:435616, flee
+distance 20 from `EAIRunAway::.ctor`, asm.il:434801),
+ApproachAndAttackTarget (chase+melee, MutexBits=3, executeDelay=0.1,
+non-continuous; asm.il:421798), Territorial, ApproachSpot, Look (MutexBits=1,
+executeDelay 0.5 from the EAIBase::Init default, continuous; asm.il:429858),
+and Wander (MutexBits=1, continuous; asm.il:438104). Chase preempts wander on
+sensing a player; wander resumes when the target is lost (mutex release),
+exactly reproducing stock's emergent order. RunawayWhenHurt is gated on
+`kind == .animal`, standing in for the fact that only the passive-animal
+classes carry it in `entityclasses.xml` while zdtd runs animals on the zombie
+table.
+
+The head of the stock AITarget list is modeled too. `EAISetAsTargetIfHurt`
+(asm.il:435831; CanExecute ends :436139, Start ends :436169) promotes the
+attacker to the attack target for the 400-tick window `Start` passes to
+`SetAttackTarget` (asm.il:436155). `NetPackageDamageEntity::read` carries
+`attackerEntityId` (asm.il:810693), so `World.damageFrom` records it as the
+revenge target and `applyRevengeTarget` overrides the nearest-player pick while
+it is fresh, keeping CanExecute's "attacker is a different entity type" gate. It
+is applied as a target-selection override rather than a second task table,
+because zdtd collapses the whole AITarget list into `nearestPlayerSnap`. The
+`class=` filter is not modeled: zdtd damage attribution only ever names a player
+or a turret.
+
+`Reset()` and a `Continue() != CanExecute()` split are both modeled, because
+Look needs them: `EAITaskList::OnUpdateTasks` calls `action.Reset()` on the same
+path that clears `isExecuting` (asm.il:437713, IL_006F), and only two Reset
+overrides in the whole assembly seed `EAIManager.lookTime` -
+`EAIWander::Reset` (RandomRange(0.5, 5), asm.il:438383) and
+`EAIApproachSpot::Reset` (5 + rand\*3, asm.il:424395). Wander's own
+`Continue()` (asm.il:438318) is a real override that stops on the 30 s cap and
+on "path finished"; before Look landed, zdtd reused CanExecute for both, so
+wander never terminated on arrival. The resulting loop is stock's: wander until
+the destination is reached (or preempted by a chase), then stand still and slew
+body yaw (`Entity::SeekYaw`, asm.il:399475) toward a fresh +/-60 deg pick every
+0.7 s (asm.il:429984-430001) for the owed 0.5-5 s (5-8 s after an investigate
+spot), then wander again. Only body yaw is involved, which zdtd already
+replicates via `NetPackageEntityPosAndRot`.
+
+Honest gaps:
+
+- **Grid A\* (no navmesh).** Approach replans via `path.aStarToward` on a
+  coarse XZ grid when `World.step_fn` is set. The predicate is a *move* test,
+  not a solid-cell test: `store.Chunk.standableY` returns the feet Y the body
+  would occupy in the destination column, so step-up (1), drop (3) and
+  2-cell headroom are all part of the search, and the followed path carries its
+  Y (entities now walk terrain instead of floating at spawn height). Without a
+  hook the grid is open and flat and movement falls back to straight
+  `stepToward`. One solve fills an 8-cell waypoint buffer that is followed
+  across ticks, so a chase costs roughly one search per 8 m rather than one per
+  metre; replans happen when the buffer empties, the goal leaves its cell, or a
+  blocked path is due for a retry (~0.35 s). A per-tick node budget
+  (`World.path_replans_per_tick` = 16 solves x `path_max_expand` = 96
+  expansions) admits replans by a stride derived from last tick's demand;
+  admission is a pure function of slot and tick number, never a shared atomic,
+  because the AI phase runs on parallel ranges and a countdown would make chase
+  paths depend on worker scheduling. Refused ticks keep walking the buffer and
+  are counted as `path_replans_denied`. Nodes are still keyed on XZ only, so a
+  column reachable at two heights resolves to whichever the search found first.
+  No navmesh, no jump/climb, no stock pathCounter/relocateTicks fidelity.
+- **Five EAI tasks stay unimplemented, each on a hard missing dependency.**
+  - *EAIDodge* (asm.il:426512): CanExecute reads the target's
+    `avatarController.IsAnimationToDodge()` and Start calls
+    `StartAnimationDodge` - client animator state the server does not have.
+    Independently dead data: no entity in stock `entityclasses.xml` or
+    `npc.xml` declares a Dodge AITask.
+  - *EAILeap* (asm.il:429498, MutexBits 3, executeDelay 1+rand): needs
+    `jumpMaxDistance`, `moveHelper.BlockedFlags`, `navigator.getPath()`,
+    `BodyDamage::IsAnyLegMissing`, a capsule `Physics.Raycast` (mask
+    0x40810000) and `moveHelper.StartJump`. zdtd has no vertical movement
+    integration (see "MoveHelper physics / collision" above). Users:
+    zombieSpider, animalMountainLion.
+  - *EAIRangedAttackTarget* (asm.il:433404, MutexBits 0b1011, cooldown 3,
+    attackDuration 20, minRange 4, maxRange 25): sequences anim states then
+    calls `UseHoldingItem`/`IsHoldingItemInUse`; the projectile comes from the
+    held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
+    Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
+  - *EAIRunawayFromEntity* (asm.il:435190, base EAIRunAway asm.il:434778):
+    needs a fear-source scan over nearby entity classes (`EAIRunAway::FindFleePos`
+    plus the class filter), which zdtd's single nearest-player sense cannot
+    express. Its sibling *EAIRunawayWhenHurt* (asm.il:435616) is implemented:
+    see the revenge-target note below.
+  - *EAIApproachDistraction* (asm.il:423700): needs `EntityAlive.distraction`
+    to be a dropped `EntityItem` whose `ItemClass.IsEatDistraction` is true,
+    plus `AINoiseSeekDist` (8 for zombieTemplateMale). zdtd has no dropped-item
+    entity carrying item-class flags.
+
+  (There is no EAISeekSmell class in stock; do not add one.)
+- **Look is body-yaw only.** `EAILook::Continue`'s `lookAtTicks` / 40-tick
+  `SetLookPosition` branch (asm.il:430022-430072) aims the head/eye rig; zdtd
+  replicates body yaw only, so only the `turnTicks`/SeekYaw branch is ported.
+  Look's `IsAlert` double-drain of waitTicks and its `bodyDamage.CurrentStun`
+  bail (asm.il:429937-429978) are also dropped: Approach always preempts Look
+  before it could be alert, and there is no stun model.
+- **SeekYaw is per-tick, not the stock two-phase slew.** Stock stores
+  `yawSeekAngle`/`yawSeekAngleEnd`/`yawSeekTimeMax` and interpolates inside
+  `Entity`'s own update; `seekYawStep` applies the same speed law (quadratic
+  slowdown inside 35 deg, 20 deg/s floor) directly per tick. Same endpoint and
+  same rate law, different integration. `MaxTurnSpeed` is pinned to the
+  zombieTemplateMale value 250 deg/s because `World.EntityClass` carries no
+  per-class turn speed; stock values span 100-420 across classes.
+- **No data-driven per-class task graphs.** Stock builds the list from
+  `entityclasses.xml` `AITask-N`/`AITarget-N` strings via
+  `EAIManager::ParseTasks`/`CreateInstance` (asm.il:430620), and
+  `EAITaskList::AddTask` (asm.il:430495) uses the 1-based list index as the
+  priority. The stock dedicated-server config ships that XML
+  (`Data/Config/entityclasses.xml`); zombieTemplateMale's list is
+  `BreakBlock | DestroyArea | Territorial | ApproachDistraction |
+  ApproachAndAttackTarget | ApproachSpot | Look | Wander`, i.e. priorities
+  1..8 in that order. Parsing it per class is unimplemented for scope reasons,
+  not for lack of data: priority/MutexBits/executeDelay/continuous are
+  hardcoded in the comptime `zombie_tasks` table. That table compresses
+  priorities to {1,1,1,2,2,2,2} (same pairwise `isBestTask` relations for the
+  implemented subset), orders Territorial *after* Approach, and adds a "no
+  sensed player" clause to `territorialCanExecute` that stock's
+  `EAITerritorial::CanExecute` (asm.il:437973, home distance only) does not
+  have - in stock, Territorial (priority 3) genuinely preempts a chase.
+- **Single-task executing set.** `executingTasks` is collapsed to one
+  `active_task` TaskId. Exact for the current table (BreakBlock mutex 0 can
+  switch with Approach via table order; movement tasks including Look are all
+  mutex 0b01 and therefore exclusive anyway), but a continuous
+  non-conflicting task would need a task bitset.
+- **Ultra-far LOD bypasses selection.** Beyond `full_ai_dist_sq * 4` the work
+  loop forces `active_task = .wander` without consulting CanExecute, so distant
+  zombies never look around and a pending `look_time` sits unconsumed until
+  they come back in range.
+- **Sensing collapsed.** The stock `targetTasks` list
+  (EAISetNearestEntityAsTarget / corpse / SetAsTargetIfHurt sorter,
+  asm.il:430171) is folded into the existing single-nearest-player sense
+  (`nearestPlayerSnap`, `sense_dist_sq`). No multi-candidate sorting, corpse
+  targeting, feralSense range scaling, or group/ally awareness.
+- **Timing approximated.** The stock fixed 0.05s/20Hz tick and
+  `executeWaitTime` accumulation are replaced by zdtd's variable
+  `dt*active_scale` LOD throttle on `decision_cd`; `executeDelayScale` is fixed
+  at the 0.85 base without the GameRandom jitter. Aggro persistence uses the
+  coarse `alert` flag plus a "target entity still exists" check, not a
+  `chaseTimeMax`/`homeTimeout` countdown.
+
+### 5.3 AIDirector depth
+
+| Item | Status |
+|---|---|
+| World clock + blood moon day%7 | PARTIAL |
+| Night horde near players | PARTIAL (simple spawn) |
+| Scout daytime | PARTIAL |
+| Gamestage scaling | PARTIAL (player/party stage, scout tier, blood-moon stage, sleeper groups, loot prob bands; see 5.x gamestage gaps) |
+| Heat map / activity | MISSING |
+| Wandering horde paths | MISSING |
+| Feral sense / blood moon music sync | MISSING |
+| Sleeper wake cascade | MISSING |
+| Persistent director state save | MISSING |
+
+---
+
+### 6. Quests, traders, dialog
+
+| Item | Status |
+|---|---|
+| Builtin 3 quests | HAVE (real phase graphs) |
+| Load stock `quests.xml` catalog | PARTIAL (~defs mapped; many templates shallow) |
+| Multi-phase objectives | PARTIAL (real ordered phase graph; see gaps below) |
+| ClearSleepers volume clear | PARTIAL (kill counter drives the kill phase; no volume/spawn sim) |
+| Fetch container / treasure | PARTIAL (fetch phase counter; no container/treasure sim) |
+| RandomPOIGoto / rally markers | PARTIAL (Goto phase by location; RallyPoint executes via `NetPackageQuestEvent` when the quest lands in a prefab, otherwise still scaffolding) |
+| TurnIn at correct trader NPC | PARTIAL (any trader open) |
+| Stock quest wire packages | MISSING (zdtd-native journal body) |
+| Localization.csv titles | MISSING |
+| Reward choice / loot groups | MISSING |
+| Trader tiers / quest_list offers | PARTIAL (lists parsed, not driven UI) |
+| `traders.xml` inventory | PARTIAL (`traderAlways` direct items populate the stock TraderData window; group rolls skipped) |
+| Duke tokens / currency stock | PARTIAL (coins wallet) |
+| NPC dialog trees | MISSING |
+| Challenges system | MISSING |
+
+### 6.1 Multi-phase objective execution (honest gaps)
+
+Quests now carry a faithful ordered phase graph (`QuestDef.phases`,
+`highest_phase`, `objective_phases`), built from the objective `phase` attribute
+or nested `<property name="phase">`. `QuestProgress` advances phase-by-phase
+mirroring stock `Quest.refreshQuestCompletion` / `Quest.AdvancePhase`
+(asm.il 983645-983904 / 982816): a phase completes when its tracked count
+objective reaches the required value, then the sim advances; at the highest phase
+a `TurnIn` quest becomes ready-turn-in (completed on trader interact) and an
+`AutoComplete` quest completes. Legacy phase-less defs keep the single-kind path.
+Remaining gaps:
+
+- **One advancing objective per phase.** Stock `refreshQuestCompletion` requires
+  ALL non-optional current-phase objectives complete. We track a single progress
+  counter per phase (the highest-scored non-auto objective, e.g. `tier1_clear`
+  phase 3 collapses ClearSleepers + POIStayWithin to ClearSleepers).
+- **Phase-0 always-active objectives.** Stock counts `Phase==0` in every phase's
+  check; missing-phase objectives are approximated as phase 1, not active across
+  all phases.
+- **Scaffolding phases auto-complete.** POIStayWithin and empty intermediate
+  phases map to `PhaseKind.auto` and complete on entry. RallyPoint is now
+  `PhaseKind.rally` and waits for the client's `TryRallyMarker`, but only when
+  the quest instance carries a POI rect: the server resolves one from
+  prefabs.xml at accept time, and a quest that lands outside every prefab keeps
+  the old auto-skip so it cannot stall (the client only emits the event when it
+  finds a `Rally` indexed block inside the quest's POI rect,
+  `QuestJournal.HasQuestAtRallyPosition` asm.il 1006297).
+- **UnlockPOI is an action, not an objective.** Stock resolves `<action>` via
+  the `QuestAction` prefix (asm.il 1390609), so `QuestActionUnlockPOI`
+  (asm.il 956062) never was a phase. Its server half is the POI lockout table:
+  the `UnlockPOI` quest event releases the lock. `<action>` elements are still
+  not parsed from quests.xml, so nothing triggers an unlock but the client.
+- **POI lockout reasons are partial.** `questCheckPoiLockout` reports
+  `QuestLock` (live lock in `ecs/poi_lock.zig`) and `PlayerInside` (another
+  player standing in the prefab rect). `Bedroll` and `LandClaim` need home /
+  claim tracking the server does not have, so they never fire. Party members
+  are not exempt from `PlayerInside` because zdtd tracks no parties.
+- **Objective-type coverage.** Executed: ClearSleepers/EntityKill/AnimalKill
+  (kill), Goto family (goto/trader), Fetch family + TreasureChest (fetch),
+  InteractWithNPC/ReturnToNPC (trader-interact). Mapped to `auto` or ignored:
+  Craft, Assemble, BlockPlace/Pickup/Activate/Upgrade, Repair, Scrap, Buff, Wear,
+  Time, SkillsPurchased, GameEvent, TwitchVote, ExchangeItemFrom, OpenWindow.
+- **Completed-phase wire value.** Completed objectives are sent as
+  `CurrentValue=255` (>= typical client required). Objectives whose stock required
+  Value exceeds 255 (large-radius / time) would display complete prematurely.
+- **No fail / optional tracking.** `ForcePhaseFinish` → quest Failed and Optional
+  `OptionalComplete` are not modeled; quests never auto-fail on phase timeout.
+
+### Trader UI parity (stock `NetPackageTraderData`) honest gaps
+
+The wire envelope now matches stock (`NetPackageTraderData.write`, asm.il
+839492-839540): entity-trader packages emit `bool(true) + i32 entityId + bool
+hasTraderData` and the entity id XORs the tePosition (no stray Vector3i), so the
+already-correct full `TraderData` v2 body (`buildTraderDataStock`) parses and the
+real `traderAlways` stock plus base econ prices show in the client window. Still
+not stock:
+
+- **Per-item markup / price drift**: stock adjusts `Entry.Markup` at runtime
+  (Increase +100 on buy, Decrease -4 on sell, asm.il 856828-856866) from demand.
+  zdtd always sends `Markup=0`, so prices are static base econ values with no
+  supply/demand drift.
+- **TierItemGroups**: stock `TraderData.TierItemGroups` (`List<ItemStack[]>`,
+  written u8 count + WriteItemStack per group, asm.il 857562-857587) unlocks
+  deeper stock as trader tier rises. zdtd always writes 0 groups: only the flat
+  `traderAlways` PrimaryInventory shows, no tier-gated restock depth.
+- **Trader wallet / economy**: `AvailableMoney` is a fixed placeholder pool
+  (`trader_wallet_dukes = 5000`) that does not regenerate per stock-day, is not
+  persisted, and is not spent on player sells (`trade()` credits the player
+  wallet directly).
+- **Restock depth**: `systems.traderRestock` grows every entry +10/day toward a
+  flat cap of 50, ignoring stock per-item count ranges (`count="a,b"`) and
+  marketTier/tender rules.
+- **Group refs in `traders.xml`** (`<item group=...>`) are skipped by
+  `assets/traders.zig` (only direct `<item name=...>` under `traderAlways`),
+  so stock is a subset of stock's rolled-group inventory.
+
+---
+
+### 7. Vehicles, electricity, turrets, blocks as systems
+
+| Item | Status |
+|---|---|
+| Vehicle kinds + enter/drive | PARTIAL (arcade physics) |
+| Stock vehicle definitions XML | MISSING |
+| Multi-seat | HAVE (seat0..N from vehicles.xml, driver is seat 0) |
+| Storage / fuel items | PARTIAL fuel float only |
+| Vehicle collision / terrain stick | PARTIAL (server gravity + terrain-top clamp; no entity/block-side collision) |
+| Placeable vehicle as entity spawn stock | PARTIAL |
+| Power grid BFS | HAVE (flood from generators, demand>gen drop) |
+| Placeable electrical blocks in world | HAVE (SetBlock → PowerGrid node, real watts) |
+| Stock `NetPackageWireActions` SetParent/RemoveParent | HAVE |
+| Wire tool stock UX packages | PARTIAL (WireToolActions = peer visual rebroadcast) |
+| Battery charge / solar | PARTIAL (solar = generator node; no battery SoC) |
+| Turret placeable block + power | PARTIAL (entity + node) |
+| Ammo items / reload | PARTIAL (ammo counter) |
+| Blade / junk turret variants | MISSING |
+
+---
+
+### 8. Inventory, items, crafting, loot
+
+| Item | Status |
+|---|---|
+| Item id table from `items.xml` | HAVE (`assets/items.zig`) |
+| Block id table | HAVE (AssignIds dump + `maxdamage`) |
+| Recipes / crafting queue | PARTIAL (`assets/recipes.zig` + workstation) |
+| Loot containers / `loot.xml` | HAVE (`assets/loot.zig`) |
+| Quality / mods / durability | PARTIAL (quality/meta persist; mods shallow) |
+| Stacking / bag size | PARTIAL (items.xml Stacknumber) |
+| Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see WIRE_WORKSTATION) |
+| Schematic unlocks | PARTIAL (always_unlocked recipe list on join) |
+| Trader buy against real item defs | PARTIAL (traderAlways + EconomicValue; group rolls deferred) |
+
+**Largest remaining “feels like a game” gaps:** AI path A*, quest objective
+type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
+
+---
+
+### 9. Content / assets pipeline
+
+| Asset | Status |
+|---|---|
+| quests.xml | PARTIAL loader |
+| map_info + dtm + spawns | HAVE |
+| prefabs.xml + tts sizes + prefab YOffset | PARTIAL |
+| water_info.xml | PARTIAL |
+| blocks.xml | HAVE (`maxdamage` MaxPower/RequiredPower, ids) |
+| items.xml / item_modifiers | HAVE (`assets/items.zig`; modifiers partial) |
+| entityclasses / entitygroups | HAVE (`assets/entities.zig`, `entitygroups.zig`) |
+| biomes.xml / biomes.png | HAVE (colors + layers + biomes.png) |
+| traders.xml | HAVE (groups + expand) |
+| vehicles.xml | PARTIAL (load + spawn HP/speed) |
+| gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
+| buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
+| buffs / progression | PARTIAL (typed catalog + stack/duration/update_rate + passives + XP curve; no triggered_effect VM) |
+| recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
+| Localization.csv | MISSING |
+| materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
+| sounds / music (server triggers) | MISSING |
+| nav_objects.xml | MISSING |
+| worldglobal / weathersurvival | MISSING |
+| shapes / painting | PARTIAL (painting.xml atlas; shapes via AssignIds/TTS) |
+
+Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve (see ASSETS.md).
+
+---
+
+### 10. Persistence and player data
+
+| Item | Status |
+|---|---|
+| `.zch` height overlay | HAVE |
+| Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
+| Stock region `.ttc` | MISSING |
+| Player profile / inventory save | HAVE (players.zsv v2 quality/meta + journal) |
+| Bedroll / last logout pos | PARTIAL (logout pos; bedroll ownership MISSING) |
+| Map ownership / claims | PARTIAL (LandClaim keystone + deny) |
+| AIDirector / sleeper save blobs | MISSING |
+| Quest journal save | HAVE (players.zsv v2) |
+| Vehicle / turret persistence | MISSING |
+| Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
+| Multi-world / instance | MISSING |
+| Player save key | PARTIAL (login name; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
+| Ally relationships | MISSING (in-memory only; stock persists them in PersistentPlayerList) |
+
+---
+
+### 11. Replication, interest, performance
+
+| Item | Status |
+|---|---|
+| Broadcast all transforms | PARTIAL (except owner for PosAndRot; broadcastNear 160) |
+| Spatial interest (chunk/grid) | PARTIAL (radius filter; no cell hash) |
+| Serialize-once shared buffers | HAVE (`Game.replicate` is entity-outer: encode + frame once, memcpy fan-out per interested peer; docs/adr/0008) |
+| Dirty flags (POS/ROT/FLAGS/HP) | HAVE (`World.dirty_bits` mirrors `dirty[]` through `markDirty`; off-heartbeat replicate visits dirty ∪ mobs only. Mob motion stays heartbeat-only by design: marking `stepToward` dirty would take mob PosAndRot from tick%10 to tick%2) |
+| RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
+| Velocity packages | MISSING |
+| Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |
+| entityId → connection map O(1) | MISSING (`clientFor` still scans 64 client slots per datagram; measured as noise next to the per-entity work) |
+| NetId → slot hashmap | HAVE (`World.net_to_slot`; linear fallback only when the map is degraded) |
+| Parallel AI / turrets / save | HAVE |
+| Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
+| Async region I/O | PARTIAL (`world/chunk_flush.zig` behind `[perf] async_chunk_flush`, default off: one joined writer thread, per-key FIFO, `waitKey` gate on read/evict. Encode stays on the tick thread; still one file per chunk, no stock-style region file) |
+| Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; one surface Y per column, answering only the surface footing case. Walls and building interiors are out of the body's step/drop band and fall back to the locked hook, as does anything outside the 256-chunk / radius-2 window) |
+| Path worker pool | MISSING (A* already runs inside the parallel AI batch. A *deferred* solve phase is still not built, but the per-tick node budget it was waiting on now exists: `World.pathBudgetAdmits` spreads replans by a slot/tick stride and refused bodies follow their stored waypoint buffer, so a delayed replan no longer means a straight-line chase. `path_replans` / `path_replans_denied` counters ship as the evidence. docs/SCALE_ARCHITECTURE.md) |
+| TE loot / prefab-storage scan as a job batch | MISSING (`te_scan` section + `te_scan_cells` counter ship as evidence; the `found >= 32` early return makes an exactly-equivalent parallel scan fiddly) |
+| Metrics apm harness | HAVE (`src/apm/`) |
+| Tracy zones over apm sections | PARTIAL (`-Dtracy` + operator-supplied `-Dtracy-src`; 12 `Section` zones + per-tick frame mark only. No plots/locks/alloc/GPU zones, nothing inside ecs job workers, and CI never builds the on path. `docs/APM.md`) |
+| 128-bot scale bench harness | MISSING (loadgen mixed 2-bot green; 128 open) |
+
+---
+
+### 12. Admin, ops, hosting
+
+| Item | Status |
+|---|---|
+| CLI port/world/map/game-dir | HAVE |
+| serverconfig.xml stock | HAVE (`config.zig`; GAME_OPTIONS.md) |
+| Telnet / web admin | PARTIAL (stock greeting + login + bind rule; see §12.1) |
+| Console commands (kick, ban, admin, …) | PARTIAL (stock verbs and output shapes below; client-side verbs MISSING) |
+| Steam server browser listing | MISSING |
+| Query protocol | MISSING |
+| Logs / log rotation | PARTIAL (stdio) |
+| Graceful shutdown save | HAVE (save tick + deinit persist) |
+| Docker / systemd unit | MISSING |
+| Config hot reload | MISSING |
+| Guard policy (weak signals / quarantine / dry-run kick) | HAVE (`server/guard_policy.zig`; see gaps below) |
+
+### 12.1 Telnet console parity (P3, PARTIAL)
+
+Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
+
+**HAVE**
+
+- Login: `TelnetEnabled` / `TelnetPort` / `TelnetPassword` /
+  `TelnetFailedLoginLimit` / `TelnetFailedLoginsBlocktime` parsed from
+  serverconfig (EnumGamePrefs 0x44/0x45/0x59/0xA5/0xA6, asm.il:1903853-1903951).
+  `TelnetPort` wins over the zdtd `AdminPort` alias when telnet is enabled.
+- Greeting block and login prompts verbatim from `TelnetConnection::LoginMessage`
+  and `::authenticate` (asm.il ~269683-270300): `*** Connected with 7DTD server.`,
+  the version/IP/port/players/mode/world/name/difficulty block,
+  `Please enter password:`, `Password incorrect, please enter password:`,
+  `Too many failed login attempts!`, `Logon successful.`
+- Bind rule from `TelnetConsole::.ctor` (asm.il ~270735): loopback with no
+  password, INADDR_ANY only when one is set. Password compare is constant-time
+  and the password line is never echoed or logged.
+- Stock output shapes: `*** ERROR: unknown command '<cmd>'`, the `help` index
+  (`*** Generic Console Help ***` / `*** List of Commands ***` / `<cmds> => <desc>`),
+  `listplayers` full field order, `listplayerids`, `listents`, `Total of N in the game`,
+  `GamePref.{0} = {1}`, `Chunks:` / `Chunk Memory:`, the `mem` line separators,
+  and the `Wrong number of arguments, expected …, found N.` arity errors.
+- Stock argument grammar: `kick <target> [reason]`, `kickall [reason]`,
+  `ban add|remove|list <target> <duration> <unit> [reason]` with the full stock
+  unit table, `admin add|remove|list`, `whitelist add|remove|list`,
+  `settime day|night|<worldtime>|<day> <hour> <minute>` (world time from
+  `GameUtils::DayTimeToWorldTime`, asm.il:1926175).
+- Admin / whitelist / ban lists persist beside `players.zsv`
+  (`admins.zsv`, `whitelist.zsv`, `bans.zsv`). Bans carry an absolute expiry, so a
+  restart neither resurrects an expired ban nor drops a live one; a corrupt line
+  is skipped and reported, never applied.
+
+**MISSING on purpose (client-side verbs, no meaning on a dedicated server)**
+
+`gfx`, `cam`, `spectator`, `debugmenu`, `showalbedo`, `shownormals`,
+`enablerendering`, `debugshot`, `audio`, `lights`, `water`, `weathersurvival`,
+`teleport`/`tp` in its stock form (stock `tp` moves the *local* player and replies
+"Command can only be used on clients", asm.il 259294).
+
+**MISSING (server-side, not yet done)**
+
+`admin addgroup` / `removegroup` and `whitelist addgroup` / `removegroup` (zdtd has
+no Steam group concept), `commandpermission`/`cp`, `loglevel`, `listthreads`/`lt`,
+`getoptions`, `exportcurrentconfigs`, `help <command>` detail pages,
+`setgamepref` as a real write (zdtd applies serverconfig at startup only, so it
+replies that the pref is read-only rather than reporting a change that did not
+happen).
+
+**Deliberate divergences**
+
+- `tp` stays a zdtd alias of `tele` (teleport another player by slot / entity id).
+  Flipping it to stock's client-only meaning would break zdtd's own WEBUI docs and
+  playtest tooling for no operator gain. Stock's server-side name is `teleportplayer`.
+- zdtd-only verbs keep their names and are marked "zdtd:" in the `help` index:
+  `give`, `inv`, `unban`, `guardstats`, `guardclear`, `evidence`, `apm`,
+  `wipeplayer`, `status`. Stock has no `give` (it has `giveself`/`givexp`).
+- Ban and permission entries are keyed by login name, not a platform user id:
+  zdtd has no stock user id to store, and inventing one would be a fabricated
+  identity in an operator-visible list.
+
+### Guard policy honest gaps (P4)
+
+Landed: severity ladder with a structural "weak signals never kick" property,
+per-peer tick-windowed gates (2 distinct Strong or N Hard), per-surface
+quarantine bits enforced at 5 C2S sites, an IL-grounded `NetPackagePlayerDenied`
+kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
+`[authority] guard_*` switches. Full contract in
+[AUTHORITY.md](AUTHORITY.md#guard-policy-p4).
+
+| Gap | Why it stays a gap |
+|---|---|
+| Efficiency detectors (aimbot / ESP / rotation time series) | Stock wire is too coarse and zdtd does not sample rotation. Only the block-destroy-rate weak signal exists, and it is record-only. |
+| Quarantine persistence across reconnect | Bits live on the client slot, which is reset to `.{}` on disconnect. Persisting them needs a `players.zsv` schema change. Reconnect churn is a `.flood` signal; the kick gate is the answer, not faked persistence. |
+| Ban ladder / ban duration / appeal path | `NetPackagePlayerDenied.banUntil` is always 0 and the IP ban list stays operator-only. `EacViolation`/`EacBan` are never emitted (no EAC integration; explicit non-goal). |
+| Forensic evidence trail | The ring is global, 64 entries, and ring writes are deduplicated per (detector, surface) per window. `evidence` is a sample; the counts that drove a decision live in the per-peer state and the apm counters. |
+| Load shed under the virtual clock | Only the real-time `run()` overrun branch arms it, so `--ticks` / scenario runs never exercise it end to end. Only its predicate is unit-tested. It is a coarse availability valve, not a scheduler. |
+| Kick message delivery | Best-effort. zdtd has no stock `ConnectionManager` teardown (ModEvents, AuthorizationManager, save-on-disconnect). A lost reliable send leaves the client to time out with no reason string. |
+| Weak-signal thresholds | `weak_break_rate_per_window = 900` is a heuristic; nothing in the IL defines a legitimate harvest rate. Tuning knob, not detection ground truth. |
+| serverconfig.xml properties for the policy | Deliberately absent. The switches are Bucket B (zdtd.toml `[authority]`) so there is one obvious way to set them. |
+| webui mirror of the policy line | Not extended in this pass; only admin `guardstats` shows the rungs and per-slot bits. |
+
+---
+
+### 13. Validation and client compatibility
+
+| Item | Status |
+|---|---|
+| Unit / scenario tests | HAVE (**434** total; see STATUS for pass/fail pin) |
+| Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
+| Stock client join + stand | **PASS** (live gate **23/23** on a fresh world; see STATUS) |
+| Golden wire size checks | PARTIAL (some packages) |
+| Capture regression suite vs stock | MISSING |
+| Multi-version client matrix | MISSING |
+
+---
+
+### 15. Priority bands (post-playable)
+
+**P0 join/play gate: CLOSED** (STATUS 2026-07-23). Do not re-open from stale rows.
+
+### P1: Depth the client still notices
+
+Each row is current as of the 2026-08-06 wave. Where a row says SHIPPED the work
+is on main and gated; what follows "Open:" is the honest remainder.
+
+1. **Deco** SHIPPED: `blocks` NameIdMapping, biome-driven density and the
+   world-store mirror. Open: a live-client playtest (the client log must show
+   "Received mapping data for: blocks", then "Block IDs with mapping" and a sane
+   block-id total), and the one-shot join burst is still the only deco window.
+2. **Weather storm / bloodMoon group state machine** SHIPPED
+   (`src/world/weather.zig`). Open: persist storm state across restart (stock
+   `WeatherManager::Save`/`Load`), and `ForceWeather` / `SetStorm` admin commands.
+3. **Path A\*** SHIPPED: grid A* over a body-aware step predicate (step-up, drop
+   and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
+   gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,
+   jump and climb, data-driven per-class task graphs (5.2.1).
+4. **Quest objective coverage** PARTIAL: Craft, StayWithin and Rally execute.
+   Open: POIStayWithin and the unmodelled types still auto-complete, quests.xml
+   `<action>` elements are unparsed, 53 client-known defs parse empty because
+   template inheritance is not resolved, and the accept path is missing
+   (see GAP_ANALYSIS section 4).
+5. **Power trigger TE wire** SHIPPED: Switch meta gate on SetBlock, delay and
+   duration from ClientTriggerData, edge-triggered meta broadcast of grid state.
+   Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a
+   live-client playtest of the S2C TE leg (needs tile entities in the chunk
+   stream).
+6. **Workstation RecipeQueue** SHIPPED: the C2S/S2C body is complete (fixed stock
+   array lengths, trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the
+   craft tick follows `HandleRecipeQueue` / `cycleRecipeQueue`. Open: the server
+   trusts the client's `Recipe` blob for output type, count and time instead of
+   validating against recipes.xml; non-burning stations (workbench) do not advance
+   server side because the Module gate is not on the wire; no live-client playtest
+   of the forge UI.
+
+### P2: Multiplayer CPU (M11)
+
+SHIPPED: dirty bitsets, serialize-once interest, per-entity observer masks,
+persistent thread pool, O(1) NetId map. Open: spatial cell hash for the interest
+query (M11.1) and the 32-128 bot apm gate (M11.5). See IMPLEMENTATION_PLAN M11.
+
+### P3: Ops and polish
+
+SHIPPED this wave: full stock telnet console surface, party PlatformUserId,
+gamestages (inputs below), buffs depth, vehicle multi-seat.
+Open: Steam server browser registration, the buffs remainder (triggered_effect
+VM, cvar sync, immunity and damage-type gates, buff persistence across sessions),
+Encryption* (optional).
+
+#### Gamestage: what is in and what is still missing
+
+In (`src/assets/gamestages.zig`, grounded in asm.il V3.1.0 b14):
+- `<config>`, `<group>`, `<spawner>/<gamestage>/<spawn>` parsing with the IL's
+  spawn defaults `num=1 maxAlive=1 interval=2 duration=0` (`GamesStagesFromXml::
+  ParseSpawn` ~1379611). The gamestages.xml header comment states different
+  defaults and is wrong.
+- `EntityPlayer::get_gameStage` (~503972), `GetLootStage` (~504215),
+  `CalcPartyLevel` (~1093305), `CalcGameStageAround` (~1093351),
+  `GetStage`/`GetBoundIndex` (~1093187), `GameStageGroup::CleanName` (~1093513),
+  `SetAlive` days-alive penalty (~503838).
+- Consumers: sleeper volume groups, blood-moon spawner stage (group + maxAlive),
+  daytime scout tier at 45/85/125 (`SpawnScouts` ~415972), loot.xml
+  `loot_prob_template` bands, and the `gamestage [slot]` admin command
+  (same fields as `ConsoleCmdGameStage::Execute` ~220775).
+- `gameStageBornAtWorldTime` now rides the PlayerId PDF instead of the -1
+  sentinel, so the client's own `gamestage` readout agrees with the server.
+
+Still missing (inputs zdtd does not parse; all are fed as zero/absent, never faked):
+- biomes.xml `GameStageMod` / `GameStageBonus` / `LootStageMod` /
+  `LootStageBonus` / `LootStageMin` / `LootStageMax`.
+- quests.xml `GameStageMod` / `GameStageBonus` (active-quest terms).
+- Prefab `DifficultyTier`, so loot.xml `loot_settings poi_tier_mod` /
+  `poi_tier_bonus` load but are never applied.
+- loot.xml `<lootqualitytemplates>`: item quality by loot stage. zdtd's loot
+  `Stack` carries no quality, so this needs a container/wire change first.
+- EffectManager passive modifiers on both stages (`GlobalGameStageModifier`,
+  `BiomeGameStageModifier`, `GlobalLootStageModifier`, … all pinned at 1).
+- Blood-moon and wandering-horde loot drop bonus counters (`LootBonusEvery`,
+  `LootBonusMaxCount`, `LootBonusScale`, `LootWanderingBonusEvery`,
+  `LootWanderingBonusScale`): parsed into `Config`, not consumed.
+- Cross-session persistence of days survived: `game_stage_born_world_time` is
+  per-session Client state, so the streak restarts on reconnect.
+- Party grouping ignores stock's same-`PrefabInstance` requirement (zdtd has no
+  per-player POI tracking); distance alone decides.
+
+### P4: Planet scale (parked)
+Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.
+
+---
+
+### POI sleeper volumes: what lands, what stays a gap
+
+Implemented (`src/world/sleepers.zig`, `Game.tickSleeperVolumes`):
+- Volume AABBs, group name, and spawn min/max from the real prefab `.xml`
+  (`SleeperVolumeStart` / `SleeperVolumeSize` / `SleeperVolumeGroup`), matching
+  `PrefabVolumes.PrefabSleeperVolumeList::ReadFromProperties` (asm.il ~2498294):
+  `#`-separated `Vector3i` list per volume; group is a comma-split flat token
+  list read as name-only (count defaults 5,5) or `name,min,max` triples.
+- **Authored spawn points**: positions of `Class=Sleeper` marker blocks read from
+  the prefab voxel data (`.tts` types via `.blocks.nim` name map, block name
+  prefix `sleeper*`), grounded in the stock block-scan
+  (`Block.IsSleeperBlock -> SleeperVolume::AddSpawnPoint`, asm.il ~919380). Wake
+  spawns one zombie per marker (capped to the requested count). When no `.tts` or
+  no marker blocks are present, falls back to a deterministic AABB scatter.
+- Group name resolves stock-first: `GameStageGroup::CleanName` → gamestages.xml
+  group → spawner → `GetStage(volume stage)` → first `<spawn>` group →
+  `EntityGroups::GetRandomFromGroup`; then the class table, then the entitygroup
+  table, else the default walker. The volume stage is
+  `Max(0, CalcGameStageAround(players within 100))`. On a stock Navezgane boot
+  all 3124 sleeper volumes resolve through the gamestage chain; before it they
+  all fell through to the default walker, because stock POIs name gamestage
+  groups (`GroupGenericZombie`, `S_-Group_Generic_Zombie`) that entitygroups.xml
+  does not contain.
+
+Honest gaps (no data path in zdtd, not faked):
+- Per-volume gamestage adjust byte (zdtd's .tts/.nim reader does not carry it),
+  and `maxAlive` is a per-burst cap rather than a live per-player population cap.
+- Sleeper respawn (`respawnMap`/`respawnTime`/`cRespawnNever`); one-shot `triggered`.
+- Trigger types (`ETriggerType`) and volume-to-volume wake cascade
+  (`SleeperVolumeTriggeredBy`); zdtd wakes purely on player-inside-AABB.
+- Quest / boss / loot volume flags (`SleeperIsBossVolume`/`SleeperIsLootVolume`/
+  `isQuestExclude`/`isPriority`/`SleeperVolumeGroupId`).
+- Sleeper pose / rotation / look / `spawnMode` (Normal/Bandit/Infested) and
+  `MinScript` (`SVS<i>`): only the marker position + entity class are wired.
+- `spawnCountMin/Max < 0 -> 5,6` runtime reset: malformed-data only, not modeled.
+
+### Blood-moon festivities client FX packages
+
+Ground-truth audit of every FX package name associated with the blood-moon edge
+in stock V3.1.0(b14) (decompiled Assembly-CSharp.dll). Wire formats cited to the
+IL class/method they came from.
+
+### Landed (real, IL-grounded)
+
+- **`NetPackageBloodmoonMusic`** (`buildBloodmoonMusicBody`, packages.zig).
+  Payload after the base header is a single `WriteBool(IsBloodMoonMusicEligible)`
+  (1 byte), `PackageDirection=ToClient`, per `NetPackageBloodmoonMusic::write`.
+  Wired on the blood-moon rising/falling edge in game.zig `step()` (every 20
+  ticks, gated on `director.bloodmoon_active` vs `bloodmoon_sent`).
+- **`NetPackageHordeEvent`** (`buildHordeEventBody` + `HordeEvent` enum,
+  packages.zig). Payload is `Write((uint8)m_event)` then `m_pos.x/y/z` and
+  `m_maxDist` as f32 = 17 bytes, per `NetPackageHordeEvent::write` (fields
+  `m_event: AIDirector/HordeEvent`, `m_pos: Vector3`, `m_maxDist: float32`).
+  Enum `AIDirector/HordeEvent`: `None=0 Warn1=1 Warn2=2 Spawn=3`. Client
+  `EntityPlayerLocal.HandleHordeEvent` plays `Enemies/Horde/horde_spawn_warning`
+  on Warn2 and `Enemies/Horde/horde_spawn` + camera shake on Spawn (stock audio
+  banks, no custom assets). `ProcessPackage` fires only if
+  `(localPos - m_pos).sqrMagnitude <= m_maxDist^2`.
+
+### Honest gaps
+
+- **`NetPackageHordeEvent` has no stock server sender (vestigial).** All 26 IL
+  occurrences are inside the class body (818538-818735); there is no
+  `GetPackage<NetPackageHordeEvent>()` anywhere in the assembly. The builder and
+  client handler are real, but stock never emits the package. Auto-broadcasting
+  it on the blood-moon edge would be **non-stock server behavior**, so it is
+  deliberately NOT wired into game.zig. The builder is shipped for parity/opt-in
+  use; wiring it is left as a documented, clearly-labeled hook, not stock parity.
+- **`NetPackageHordeArmageddon` does not exist.** Grep of the IL for
+  "Armageddon" finds no `NetPackage`; the name is absent from stock through V3.1.0 b14. Not
+  implemented.
+- **Feral sense is not an FX package.** It is `EAIManager.feralSense: float32`
+  plus the `EnumGamePrefs.ZombieFeralSense` gamepref, applied at world/entity
+  init, not sent on the blood-moon edge. Nothing to build.
+- **`NetPackageBossEvent` is not blood-moon-driven.** It is the
+  `GameEventManager` boss-group system (senders at IL 582104-584753, all inside
+  `GameEventManager`), keyed on `BossEventTypes`. Out of scope; hooking it to the
+  blood-moon edge would fabricate boss groups with no backing sim. Not wired.
+- **`NetPackageBloodmoonMusic` per-player eligibility is not modeled (PARTIAL).**
+  Stock `DynamicMusic.Conductor.Update` computes per-player eligibility from
+  `EntityPlayer.bloodMoonParty` via `PlayerEligibleForBloodmoonCache` and targets
+  each player individually. zdtd broadcasts one global bool. Pre-existing
+  approximation, not a regression.
+
+### Vehicle physics (terrain-follow + collision)
+
+zdtd's server-authoritative vehicle sim (`src/ecs/systems.zig systemVehicles`)
+is a zdtd extension: stock does NOT simulate vehicles server-side. Stock
+`EntityVehicle` is Unity client-side (VPEngine, WheelColliders, Rigidbody);
+`NetPackageVehiclePositions::ProcessPackage` (asm.il:841203-841225) only feeds
+positions into the local player WaypointCollection, so the server relays
+positions and never simulates. The clamped `transform.y` propagates unchanged
+through the existing `broadcastVehiclePositions` (`src/server/game.zig`), no wire
+change.
+
+LANDED (feasible core):
+- Vertical physics in `systemVehicles`: gravity accumulator
+  `Vehicle.vy += cGravity * dt` with `cGravity = -9.81`
+  (`EntityVehicle::cGravity`, asm.il:536018), plus a terrain-top clamp that
+  prevents both sinking below and floating above the ground sample.
+- Ground height via an optional ECS hook (`World.ground_fn`, `World.groundY`)
+  that Game backs with the block store (`heightAtWorld` -> `Chunk.heightAt + 1`).
+  Unset (headless / unit tests) means no terrain data, so physics is skipped
+  and no fake flat floor is invented.
+
+HONEST GAPS (Unity client-side in stock, no server representation / no assets):
+- **Suspension / wheel / engine physics.** Stock drives a Unity VPEngine with
+  rpm/rpmMax/rpmDrag, per-wheel motor/brake torque, Force/Motor triggers and
+  WheelColliders (asm.il:535043 field block). The core keeps the arcade
+  speed/steer integral in `vehicleControl` plus scalar gravity. Not reproduced.
+- **Gyrocopter thrust / flight.** Stock lifts via input-up motor force
+  (`EntityVehicle` Force/Trigger InputUp). The core ground-clamps the gyrocopter
+  like every other kind, so it cannot ascend yet.
+- **Entity-entity / block-side collision.** Stock uses Unity colliders and
+  `EntityVehicle::FindCollisionEntity` via GetComponent/GetComponentInParent
+  (asm.il:543188). The core does terrain-top collision only (no vehicle-vehicle,
+  vehicle-zombie, or block-side collision).
+- **Slope alignment (pitch/roll).** `Transform` carries only yaw
+  (`src/ecs/components.zig`); the body stays axis-flat and does not tilt to
+  terrain normals. The clamp follows height per (x,z) sample only.
+- **Water buoyancy / fluid handling.** The height query treats the terrain top
+  as the only surface.
+
+### Platform identity, party and allies
+
+`PlatformUserIdentifierAbs` is the only real player identity on the wire. One
+codec owns it (`src/wire/platform_user.zig`); nothing else may hand-roll the
+four fields.
+
+LANDED (real, IL-grounded):
+- **PUID codec.** `FromStream` (asm.il 30604): bool present, and a false bool is
+  the whole value. Otherwise u8 UserIdentifierVersion (read then popped), string
+  platform, string id, then `ReadCustomData`. `ToStream` (asm.il 31206) writes a
+  lone 0 for null, else `1, 1, platform, id`. `WriteCustomData` /
+  `ReadCustomData` (asm.il 30544 / 30553) are empty base bodies with no override
+  anywhere in the assembly, so `inclCustomData` costs zero bytes.
+- **Login.** `NetPackagePlayerLogin::read` (asm.il 832140) is walked in full:
+  name, native PUID, native token, crossplatform PUID, crossplatform token,
+  version, compVersion, u64 discordUserId. Both identities are stored per client;
+  the two tokens are skipped because zdtd runs no authorizer chain.
+- **PersistentPlayerState.** PrimaryId is `ClientInfo.InternalId` (crossplatform
+  else native, asm.il 783909, matching `getPersistentPlayerID` asm.il 1886263)
+  and NativeId is `ClientInfo.PlatformId`, per `CreatePlayerData` (asm.il 890568,
+  called at asm.il 1885235). A client that sent no identity still gets a stable
+  synthetic id so the entityId → name mapping (GMSG join line, party UI names)
+  cannot regress.
+- **Allies.** `NetPackageAllyRequest` (asm.il 886226) is decoded, the sender is
+  required to speak for its own identity, and `AllyStore::ComputeTransition`
+  (asm.il 885142) / `GetStatus` / `SetStatus` (asm.il 885392 / 885424) drive a
+  real relationship table (`src/server/ally.zig`). The result goes out as
+  `NetPackageAllyResponse` (asm.il 886390). A client-sent AllyResponse is dropped:
+  its direction is ToClient (asm.il 886358).
+
+HONEST GAPS:
+- **Party membership.** `NetPackagePartyActions` (asm.il 829049) and
+  `NetPackagePartyData` (asm.il 829470) carry **no** PlatformUserId; both are
+  purely entity-id keyed. zdtd holds no `Party` state, so both are echoed to the
+  sender and no S2C `PartyData` is ever constructed. What is missing is a
+  Party/PartyManager equivalent (AcceptInvite / ChangeLead / LeaveParty /
+  KickFromParty / JoinAutoParty), not identity. This is also why party members
+  are not exempt from the POI `PlayerInside` lockout (`src/ecs/systems.zig`).
+- **Ally persistence.** Relationships live in the server process only; stock
+  saves them in `PersistentPlayerList`. They reset on restart.
+- **Player save key.** Persistence is still keyed on the login name, so a client
+  can claim another player's save by picking their name. Stock loads the PDF from
+  `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration
+  with a name-keyed fallback for existing players.
+- **Platform verification.** Neither auth token is decoded or checked, so an
+  identity is a claim, not a proof (EAC-off scope; see §2).
+- **Reported read calls.** `docs/PACKAGES.md` under-reports these packages
+  because `PlatformUserIdentifierAbs::FromStream` is a static call, not a
+  `BinaryReader` virtual: the AllyRequest row shows only `ReadBoolean;`.
+### Vehicle seats (multi-occupant)
+
+`components.Vehicle.seats` is a fixed `[6]i32` of rider net ids; seat 0 is the
+driver (`EntityVehicle::AttachEntityToSelf` sets `hasDriver` only for slot 0,
+asm.il:542176) and 1..n-1 are passengers. Seat allocation in
+`systems.vehicleAttach` mirrors `Entity::AttachEntityToSelf` (asm.il:406554): a
+negative request takes the lowest free seat, re-requesting the held seat is a
+no-op, an out-of-range request fails. `seat_count` comes from the contiguous
+`seatN` classes in vehicles.xml (`Vehicle::SetSeats`, asm.il:1344168), giving
+Bicycle/Minibike/Motorcycle 1, Gyrocopter 2, Truck4x4 4.
+
+On the wire the server is authoritative, as stock is: a client sends
+`AttachType` 0 with slot -1 (`EntityVehicle::EnterVehicle`, asm.il:541872) or
+type 2 with `vehicleId = -1, slot = -1` (`Entity::SendDetach`, asm.il:406816),
+and the server answers everyone with type 1 carrying the RESOLVED seat or type 3
+(asm.il:844722). The client parents the rider to the seat transform itself
+(`EntityVehicle::GetAttachedToInfo`, asm.il:542503), so the seat index is the
+only thing the server has to get right for a passenger to render in place.
+
+HONEST GAPS:
+- **No `VehicleSeats` mod budget.** `Vehicle::SetSeats` allows extra seats when
+  `EffectManager.GetValue(PassiveEffects::VehicleSeats, ...)` (asm.il:733849) is
+  non-zero. zdtd has no vehicle mod slots, so the budget is fixed at 0 and only
+  base seats count: a Truck4x4 is 4 seats, never 6.
+- **Occupancy is not persisted.** A restart leaves every seat empty.
+- **Explicit requests for an occupied seat are refused, not honoured.** Stock
+  overwrites the array entry (asm.il:406554 IL_005d), which would unseat another
+  player on a client's say-so. The stock client never sends a positive slot.
+- **`NetPackageVehicleDataSync` payload stays opaque.** The framing is parsed
+  and validated (asm.il:844254) and the body is relayed to other peers, but the
+  `EntityVehicle::ReadSyncData` blob is not decoded.
+
+### V3.1.0 wire note (2026-08-02)
+
+`NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
+payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md` §6.12
+and the research topic docs.
+
+**Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
+`readOuterTeHeader`) for storage + workstation builders/parsers. Tests: 306/306.

@@ -1,7 +1,7 @@
 # zdtd docs index
 
 **Conflict rule:** [STATUS.md](STATUS.md) is the living hub. If STATUS and
-MISSING_FEATURES / IMPLEMENTATION_PLAN disagree on whether something shipped,
+GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on whether something shipped,
 **STATUS wins**. Refresh the inventory docs when closing work.
 
 **Evidence rule:** zdtd encodes and decodes with the same code, so a green
@@ -32,9 +32,8 @@ New to the project, or picking up work:
 | Doc | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | What works now (gates + shipped surface). Wins on conflict |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | 345 features scored WORKS/PARTIAL/MISSING, with anchors |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap document: 345 features scored WORKS/PARTIAL/MISSING with anchors, plus the area narratives and deep dives |
 | [WORK_PLAN.md](WORK_PLAN.md) | Handoff-ready tasks: files, grounding, done-when, proof |
-| [MISSING_FEATURES.md](MISSING_FEATURES.md) | Long-form gap inventory and priority bands |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) | Open items turned into research specs |
 | [../TODO.md](../TODO.md) | Open backlog first; shipped log below the fold |

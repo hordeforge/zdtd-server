@@ -1,6 +1,6 @@
 # Implementation plan (close the gaps)
 
-**Companion:** [MISSING_FEATURES.md](MISSING_FEATURES.md) (what is missing).  
+**Companion:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (what is missing).  
 **Living hub:** [STATUS.md](STATUS.md) (wins on conflict) · open work: [TODO.md](../TODO.md) · [INDEX.md](INDEX.md).  
 **Architecture:** SoA ECS only (`src/ecs/`), stock client wire (EAC off), no mods.  
 **Validate with:** unit/scenarios, `7dtd-loadgen`, stock client (EAC off), `src/apm/` dumps.
@@ -47,7 +47,7 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 7. **No TFP asset shipping.** Load from user `game-dir` at runtime.  
 8. **Tests with each package:** unit parse/build + scenario smoke + apm counters.  
 9. **Parallelism** only with disjoint writes or deferred apply (see ECS.md).  
-10. **Honest docs:** update MISSING_FEATURES when a gap closes.
+10. **Honest docs:** update GAP_ANALYSIS when a gap closes.
 
 ---
 
@@ -397,7 +397,7 @@ Avoid one 2k-line packages.zig.
 Fail CI scenario if idle step p99 > 2 ms (regression guard).
 
 ### C5. Documentation updates per phase
-- Close rows in MISSING_FEATURES.  
+- Close rows in GAP_ANALYSIS.  
 - SYSTEMS / MAPS / ASSETS as behavior changes.  
 - README status line.
 
@@ -473,7 +473,7 @@ Full map: [INDEX.md](INDEX.md).
 | Doc | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | Living hub (wins on conflict) |
-| [MISSING_FEATURES.md](MISSING_FEATURES.md) | Exhaustive gap list |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Exhaustive gap list |
 | [../TODO.md](../TODO.md) | Open backlog |
 | [ECS.md](ECS.md) | Sim architecture |
 | [zig-clone.md](zig-clone.md) | M0–M6 + architecture |

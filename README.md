@@ -29,7 +29,7 @@ See [docs/STATUS.md](docs/STATUS.md).
 | [docs/RELEASES.md](docs/RELEASES.md) | Version, compatibility, support, and release policy |
 | [CHANGELOG.md](CHANGELOG.md) | Consumer-visible changes and migrations |
 | [TODO.md](TODO.md) | Open backlog |
-| [docs/MISSING_FEATURES.md](docs/MISSING_FEATURES.md) | Gap inventory |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7–M16 (post-playable) |
 
 ```bash
@@ -77,7 +77,7 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 | [`docs/STATUS.md`](docs/STATUS.md) | What works now (wins on conflict) |
 | [`docs/INDEX.md`](docs/INDEX.md) | Full doc map |
 | [`TODO.md`](TODO.md) | Open backlog |
-| [`docs/MISSING_FEATURES.md`](docs/MISSING_FEATURES.md) | Gap inventory vs stock |
+| [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
 | [`docs/ECS.md`](docs/ECS.md) / [`docs/zig-clone.md`](docs/zig-clone.md) | Sim + architecture |
 | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) | Envelope, join, goldens |

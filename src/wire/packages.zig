@@ -958,7 +958,7 @@ pub const HordeEvent = enum(u8) {
 /// so m_pos at origin with a large m_maxDist reaches every receiving client.
 /// NOTE: stock server has NO sender for this package; the wire format and client handler
 /// are real but the package is vestigial over the network through V3.1.0 b14. Emitting it is
-/// non-stock behavior (see docs/MISSING_FEATURES.md).
+/// non-stock behavior (see docs/GAP_ANALYSIS.md).
 pub fn buildHordeEventBody(buf: []u8, event: HordeEvent, x: f32, y: f32, z: f32, max_dist: f32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromEnum(event));

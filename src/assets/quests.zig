@@ -65,7 +65,7 @@ fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind
     return null;
 }
 
-/// Map a stock objective type -> executable phase kind (see docs/MISSING_FEATURES.md
+/// Map a stock objective type -> executable phase kind (see docs/GAP_ANALYSIS.md
 /// for the objective types that still collapse to `.auto`).
 fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind {
     // ObjectiveRallyPoint (asm.il 1391077 resolves type="RallyPoint" by prefix).

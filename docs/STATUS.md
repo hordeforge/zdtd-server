@@ -5,7 +5,7 @@
 **Unit tests:** `zig build test` → **537** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang). Recount after large ECS/webui waves.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
-This is the hub for "what works now" vs `MISSING_FEATURES.md` (full inventory) and
+This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
 `IMPLEMENTATION_PLAN.md` (phased plan). Doc index: [INDEX.md](INDEX.md).
 
 ## Wave 2026-08-06
@@ -59,7 +59,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | Terrain floor textures (MicroSplat) | **PASS** | `fixedSizeCC=false` → FromRaw loads splat*.png (not Dummy); surface id 8=terrBurntForestGround; grey clay was null splat controls |
 | POI/construction block textures | **PASS** | u32 rawData + upper24 when bits 8..31 set; TTS paint+density; non-terrain density ≥0; filler skipped on paint |
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
-| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (MISSING_FEATURES.md) |
+| Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (GAP_ANALYSIS.md) |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
 | Unit tests | **PASS** | 2026-08-05 wave: inventory place wood + craft scenarios green; snapshot/EAI/evidence/webui http added (run `zig build test` for exact count). |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
@@ -264,7 +264,7 @@ Full map: [INDEX.md](INDEX.md).
 | Doc | Role |
 |---|---|
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
-| [MISSING_FEATURES.md](MISSING_FEATURES.md) | Gap inventory (honest PARTIAL sections) |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [PACKAGES.md](PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |

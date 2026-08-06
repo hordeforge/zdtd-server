@@ -147,7 +147,7 @@ Open: navmesh parity, jump and climb, data-driven per-class task graphs.
 Computed from level, days survived and deaths with party weighting, and consumed
 by sleeper volume groups, the blood-moon spawner tier, daytime scout tiers and
 loot probability bands. Several stock inputs are parsed but not applied; the list
-is in [MISSING_FEATURES.md](MISSING_FEATURES.md) under the gamestage subsection.
+is in [GAP_ANALYSIS.md](GAP_ANALYSIS.md) under the gamestage subsection.
 
 ## Honesty
 

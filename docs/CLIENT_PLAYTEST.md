@@ -388,7 +388,7 @@ Longer walk, random yaw, periodic dig, 15–60 min; fail on first NRE/underrun
 or tick budget breach (server apm dump).
 
 **xfail / skip policy:** cases for known MISSING features are tagged `xfail`
-with a MISSING_FEATURES section id. Suite stays green while documenting the
+with a GAP_ANALYSIS section id. Suite stays green while documenting the
 gap; flipping xfail→pass is the STATUS update.
 
 ---

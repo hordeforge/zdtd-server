@@ -6,7 +6,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | Doc | Role |
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
-| [docs/MISSING_FEATURES.md](docs/MISSING_FEATURES.md) | Gap inventory |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
 | [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 345 features scored WORKS/PARTIAL/MISSING with anchors |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
@@ -216,7 +216,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] Lock pos-key + stale timeout; solar day gate; persistent parallel pool (Io mutex/cond)
 
 ### Recent (2026-07-23)
-- [x] **Stock EAI prioritized task graphs**: replaced the ad-hoc `switch (ai.state)` in `AiCtx.work` (`src/ecs/systems.zig`) with a faithful port of `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874). Each zombie runs an ordered comptime task table (`zombie_tasks`) of `{priority, MutexBits, executeDelay, continuous}` cells with Start/Update/CanExecute/Continue hooks; every tick the best task is (re)selected by priority + mutex overlap (`(a.mutex & b.mutex)==0` = compatible) and projected back onto the coarse `ZombieAi.state` so all downstream replication (EntitySpeeds/AliveFlags, block-damage, despawn) is unchanged. Two real tasks: ApproachAndAttackTarget (chase+melee, mutex 0b11, delay 0.1, non-continuous; asm.il:421798) and Wander (mutex 0b01, continuous; asm.il:438104). Chase preempts wander on sensing a player; wander resumes on target loss via the mutex-release path. Director-seeded aggro (`alert && target_id>=0`) survives as long as the target entity exists. New `TaskId` enum + one `active_task` byte on `ZombieAi` (reuses `decision_cd` as the re-eval timer). +3 tests (189 total). Gaps documented (MISSING_FEATURES 5.2.1): greedy path kept (no A\*), only 2 of stock's task types real, no data-driven per-class `AITask` XML, sensing collapsed to nearest-player, timing/chaseTimeMax approximated.
+- [x] **Stock EAI prioritized task graphs**: replaced the ad-hoc `switch (ai.state)` in `AiCtx.work` (`src/ecs/systems.zig`) with a faithful port of `EAITaskList::OnUpdateTasks` + `isBestTask` (asm.il:437713, :437874). Each zombie runs an ordered comptime task table (`zombie_tasks`) of `{priority, MutexBits, executeDelay, continuous}` cells with Start/Update/CanExecute/Continue hooks; every tick the best task is (re)selected by priority + mutex overlap (`(a.mutex & b.mutex)==0` = compatible) and projected back onto the coarse `ZombieAi.state` so all downstream replication (EntitySpeeds/AliveFlags, block-damage, despawn) is unchanged. Two real tasks: ApproachAndAttackTarget (chase+melee, mutex 0b11, delay 0.1, non-continuous; asm.il:421798) and Wander (mutex 0b01, continuous; asm.il:438104). Chase preempts wander on sensing a player; wander resumes on target loss via the mutex-release path. Director-seeded aggro (`alert && target_id>=0`) survives as long as the target entity exists. New `TaskId` enum + one `active_task` byte on `ZombieAi` (reuses `decision_cd` as the re-eval timer). +3 tests (189 total). Gaps documented (GAP_ANALYSIS 5.2.1): greedy path kept (no A\*), only 2 of stock's task types real, no data-driven per-class `AITask` XML, sensing collapsed to nearest-player, timing/chaseTimeMax approximated.
 - [x] **Electrical block placement parity**: placing a stock electrical block (`generatorbank`, `solarbank`, `batterybank`, `electricwirerelay`, `autoTurret`, plates/traps, …) now registers a `PowerGrid` node at the block world position and removes it on break (`electric.addNodeAt`/`removeAt`, idempotent + wire-compacting). Node kind from block `Class` in stock `blocks.xml` (`src/ecs/powerblocks.zig`); watts are real block props (`MaxPower` sources, `RequiredPower` consumers, parsed in `maxdamage.loadFromBlocksXml`). Real `NetPackageWireActions` bodies drive wiring: SetParent (op 0) `connectByPos(child,parent[0])`, RemoveParent (op 1) `removeParentAt(child)`, SendWires (op 2) no-op; grounded in asm.il:842779/842922/843021. `NetPackageWireToolActions` = peer visual rebroadcast only. Legacy custom wire op kept for demo. Gaps (documented, not faked): generator fuel ramp, battery SoC, trigger/timer/toggle actuation, undirected RemoveParent, AssignIds V3.1.4↔V3.0.1 skew (silent no-op on mismatch). +5 tests (180 total).
 - [x] **POI/construction blocks rendered as untextured grey clay** (whole houses smooth marching-cubes terrain material): chunk block-layer only wrote the low 8 bits of each id (`stock_chunk.zig` hardcoded `upper24=false`), so every id ≥ 256 truncated to `id & 0xFF` → a wrong (usually terrain) block. Fix: emit the 3072 B/cell interleaved `m_Upper24Bits` array (`id>>8,>>16,>>24`) whenever a layer has any id ≥ 256, matching decompiled `ChunkBlockLayer.Read`. Terrain ids (<256) unaffected, that is why floor looked fine but houses didn't. Live: CGO 0→25, house textures correct.
 - [x] **Large POI chunks failed to send** (side effect of the above: upper24 grew chunks to 14-37 KB → many fragments overflowed the 64-slot reliable window → holed chunk disk → CGO 0). Fix: `Peer.sendReliable` now resumes the same fragment stream and pumps ACKs mid-message via a `pump_fn` callback (`Game.pumpAcks`) instead of restarting; `body_buf` 256→512 KB. Live: 0 failed chunk sends.
@@ -351,7 +351,7 @@ All items below shipped. Kept as historical checklist.
   phase-by-phase per `Quest.refreshQuestCompletion`/`AdvancePhase` (goto → kill →
   fetch → trader-interact), TurnIn at highest phase; leading `.auto` scaffolding
   auto-skips; per-objective CurrentValue emitted (completed=255). Legacy
-  phase-less defs keep single-kind path. Gaps in MISSING_FEATURES §6.1:
+  phase-less defs keep single-kind path. Gaps in GAP_ANALYSIS §6.1:
   one advancing objective per phase, RallyPoint/StayWithin/UnlockPOI auto, no
   fail/optional tracking, unmapped types (Craft/Repair/Buff/…).
 
@@ -387,7 +387,7 @@ All items below shipped. Kept as historical checklist.
   stray Vector3i that desynced the client read), so the full stock TraderData v2
   body now parses and real `traderAlways` stock shows. Removed unused
   `buildTraderDataEntityOnly` foot-gun. Markup sent as 0 (honest neutral: no
-  per-item demand source). Gaps in docs/MISSING_FEATURES.md: markup drift,
+  per-item demand source). Gaps in docs/GAP_ANALYSIS.md: markup drift,
   TierItemGroups, trader wallet economy, restock depth, group refs.
 
 - [x] **SharedQuest quest_code**  

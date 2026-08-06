@@ -113,7 +113,7 @@ pub fn cleanName(buf: *[max_name_len]u8, name: []const u8) []const u8 {
 /// EntityPlayer::get_gameStage (asm.il ~503972). `days_alive` must already be
 /// clamped to [0, level] by the caller (daysAlive helper below).
 /// Biome/quest terms are the caller's; zdtd passes zeros where the input tables
-/// are not parsed yet (see docs/MISSING_FEATURES.md).
+/// are not parsed yet (see docs/GAP_ANALYSIS.md).
 pub const StageInputs = struct {
     level: u16 = 1,
     days_alive: u16 = 0,

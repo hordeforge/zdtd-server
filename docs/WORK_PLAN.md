@@ -25,7 +25,7 @@ each gap.
    if a second consecutive run fails (see Known traps).
 5. Update the rows this work makes stale: the matching
    [GAP_ANALYSIS.md](GAP_ANALYSIS.md) entry, the
-   [MISSING_FEATURES.md](MISSING_FEATURES.md) priority row, and
+   [GAP_ANALYSIS.md](GAP_ANALYSIS.md) priority row, and
    [STATUS.md](STATUS.md) if a gate changes.
 6. Commit on `feat/<slug>` with a plain human message: subject line, then body
    explaining what and why, citing the IL anchors.

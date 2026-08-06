@@ -720,7 +720,7 @@ pub fn traderRestock(w: *World) void {
 //
 // Six real tasks: BreakBlock, DestroyArea, ApproachAndAttackTarget, Territorial,
 // ApproachSpot, Wander. Rest of stock EAI (Look, Dodge, Leap, RangedAttack, ...)
-// remains a gap (docs/MISSING_FEATURES.md). BreakBlock/DestroyArea use mutex 0
+// remains a gap (docs/GAP_ANALYSIS.md). BreakBlock/DestroyArea use mutex 0
 // so isBestTask allows them while Approach executes when path_blocked; movement
 // tasks still share bit 0. Collapsing executingTasks to one TaskId stays exact
 // for this set.
