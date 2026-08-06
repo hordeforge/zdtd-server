@@ -90,7 +90,7 @@ startup so misspelled operator settings cannot silently use defaults.
 
 | Section | Keys (subset) | Effect |
 |---|---|---|
-| `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, period ticks, … | Chunk stream caps (clamped to compile cap 169) |
+| `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`, `motion_replicate_period_ticks`, `world_time_send_ticks`, `vehicle_pos_send_ticks`, `sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`, `spawn_area_radius_max` | Chunk stream caps (clamped to compile cap 169) + broadcast/side-work cadences in ticks. `sleeper_tick_ticks` gates prefab sleeper volumes, airdrops and workstations; `turret_sync_ticks` gates turret state broadcasts; `save_interval_ticks` gates the periodic world flush |
 | `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE_ARCHITECTURE.md` |

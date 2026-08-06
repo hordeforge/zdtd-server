@@ -14,6 +14,11 @@ stream_radius_min = 7
 stream_radius_max = 9
 # chunk_stream_period_ticks = 5
 # motion_replicate_period_ticks = 2
+# world_time_send_ticks = 20
+# vehicle_pos_send_ticks = 5
+# sleeper_tick_ticks = 10
+# turret_sync_ticks = 10
+# save_interval_ticks = 100
 # spawn_area_radius_max = 8
 
 [authority]

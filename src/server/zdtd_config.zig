@@ -16,6 +16,12 @@ pub const Stream = struct {
     chunk_stream_period_ticks: ?u64 = null,
     motion_replicate_period_ticks: ?u64 = null,
     spawn_area_radius_max: ?i32 = null,
+    /// 2 Hz sim side-work cadence (sleeper volumes, airdrops, workstations).
+    sleeper_tick_ticks: ?u64 = null,
+    /// Turret state broadcast cadence.
+    turret_sync_ticks: ?u64 = null,
+    /// Periodic world flush cadence (crash-survival save).
+    save_interval_ticks: ?u64 = null,
 };
 
 pub const Authority = struct {
@@ -172,6 +178,12 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
             f.stream.motion_replicate_period_ticks = try parseU64(val);
         } else if (std.mem.eql(u8, key, "spawn_area_radius_max")) {
             f.stream.spawn_area_radius_max = try parseI32(val);
+        } else if (std.mem.eql(u8, key, "sleeper_tick_ticks")) {
+            f.stream.sleeper_tick_ticks = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "turret_sync_ticks")) {
+            f.stream.turret_sync_ticks = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "save_interval_ticks")) {
+            f.stream.save_interval_ticks = try parseU64(val);
         } else {
             return unknownKey(section, key);
         }
@@ -302,6 +314,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.chunk_stream_period_ticks) |v| opts.chunk_stream_period_ticks = v;
     if (f.stream.motion_replicate_period_ticks) |v| opts.motion_replicate_period_ticks = v;
     if (f.stream.spawn_area_radius_max) |v| opts.spawn_area_radius_max = v;
+    if (f.stream.sleeper_tick_ticks) |v| opts.sleeper_tick_ticks = v;
+    if (f.stream.turret_sync_ticks) |v| opts.turret_sync_ticks = v;
+    if (f.stream.save_interval_ticks) |v| opts.save_interval_ticks = v;
     if (f.authority.interest_range_blocks) |v| opts.interest_range = v;
     if (f.authority.max_edit_range_blocks) |v| opts.max_edit_range = v;
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
@@ -365,6 +380,18 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.motion_replicate_period_ticks == 0) {
         std.debug.print("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
         opts.motion_replicate_period_ticks = 1;
+    }
+    if (opts.sleeper_tick_ticks == 0) {
+        std.debug.print("zdtd: sleeper_tick_ticks=0 invalid; using 1\n", .{});
+        opts.sleeper_tick_ticks = 1;
+    }
+    if (opts.turret_sync_ticks == 0) {
+        std.debug.print("zdtd: turret_sync_ticks=0 invalid; using 1\n", .{});
+        opts.turret_sync_ticks = 1;
+    }
+    if (opts.save_interval_ticks == 0) {
+        std.debug.print("zdtd: save_interval_ticks=0 invalid; using 1\n", .{});
+        opts.save_interval_ticks = 1;
     }
     if (opts.spawn_area_radius_max < 1) {
         std.debug.print("zdtd: spawn_area_radius_max={d} invalid; using 1\n", .{opts.spawn_area_radius_max});
@@ -451,6 +478,9 @@ test "applyToInitOptions deco_trees only when set" {
         chunk_stream_radius_max: i32 = 9,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         interest_range: f32 = 160,
         max_edit_range: f32 = 96,
@@ -547,6 +577,9 @@ test "sanitizeInitOptions repairs bad radii" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         max_claimed_damage: i32 = 200,
         max_edit_range: f32 = 96,
@@ -576,6 +609,9 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         max_claimed_damage: i32 = 200,
         max_edit_range: f32 = std.math.nan(f32),
@@ -598,6 +634,9 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         max_claimed_damage: i32 = 200,
         max_edit_range: f32 = 96,
@@ -619,6 +658,9 @@ test "guard policy merges from [authority] and clamps" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         interest_range: f32 = 160,
         max_edit_range: f32 = 96,
@@ -680,6 +722,9 @@ test "[perf] switches default off and merge only when set" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         interest_range: f32 = 160,
         max_edit_range: f32 = 96,
@@ -728,6 +773,9 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_period_ticks: u64 = 5,
         motion_replicate_period_ticks: u64 = 2,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
         spawn_area_radius_max: i32 = 8,
         interest_range: f32 = 160,
         max_edit_range: f32 = 96,

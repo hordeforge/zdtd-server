@@ -10,7 +10,7 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
 | **A** (stock data) | ~12 | 0 | 0 | A12 vehicle fallback + **A29 trader pricing** + A22 deco skew + A20 dukes fixed |
-| **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, quest kill-count heuristic (B25) |
+| **B** (zdtd policy) | ~14 | 0 | 0 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, caps |
 | **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
 | Spot-check | Result |
@@ -130,7 +130,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 |---|---|---|---|
 | B01–B07 | stream/interest/edit/claimed/stale | P1 | **Done:** Game fields + `[stream]` / `[authority]` in `zdtd.toml` |
 | B08–B12 | lock stale/channels, join gap, craft cap | P2 | Open consts; A19 wallet done via `[sim]` |
-| B13 | tick throttles % N | P1 | Partial: stream/motion/world-time/vehicle periods on Game; `% 10` sleeper/turret (`game.zig:10201-10208, 10278, 2596`) and `% 100` save (`10316`) still bare consts; draft `[net] sleeper_tick_ticks / turret_sync_ticks` keys not in the parser |
+| B13 | tick throttles % N | P1 | **Done** | All four remaining cadences are Game fields fed from `zdtd.toml [stream]`: `sleeper_tick_ticks` (10, sleeper volumes + airdrops + workstations), `turret_sync_ticks` (10), `save_interval_ticks` (100, world flush). Keys parse, merge, sanitize (0 → 1) and are listed in GAME_OPTIONS + the example file. |
 | B14–B21 | AI bands, caps, buffers | P2–P3 | Open: draft `[net]`/`[ai]`/`[caps]` sections removed from example; unknown toml keys now **abort** (`error.UnknownTomlKey`), so the draft keys are unusable until parsed |
 | B22 | CLI + file for caps | P1 | **Done:** file via `zdtd_config`; no per-cap CLI flags (InitOptions from toml) |
 | B23–B24 | port offset, APM | P3 | Open |
@@ -139,7 +139,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 | B27 | `LootRespawnDays` undocumented | P3 | **New 08-07**: config.zig parses + clamps + applies it, but `docs/GAME_OPTIONS.md` "Applied to the sim" table has no row. Doc gap (success criterion "GAME_OPTIONS lists every new key"). |
 | B28 | quest offer name gate `isStockClientQuestName` | P3 | **Fixed** | The gate now short-circuits to true when the catalog loaded from stock `quests.xml` (server and client read the same file, so every def is client-known by construction); the prefix filter remains only as the builtin/offline-catalog proxy. |
 
-### `zdtd.toml` (shipped surface; B13 throttles still bare)
+### `zdtd.toml` (shipped surface)
 
 Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../zdtd.toml.example).
 Operator docs: [GAME_OPTIONS.md](GAME_OPTIONS.md). Precedence:
@@ -245,8 +245,8 @@ markup ratios (A29) here (Bucket A).
 ### P1
 
 1. ~~**A10–A11**~~ **Done.** **A12** vehicle speed switch residuals remain.
-2. **B13 residual** world-time / save / sleeper `% N` not all Game fields.
-3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). AI bands / tick %N still open.
+2. ~~**B13**~~ **Done:** sleeper/turret/save cadences are `[stream]` keys.
+3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). AI bands still open.
 4. **A07** biome default stack pins before XML (acceptable offline).
 5. **A29 (new 08-07)** trader price/sell ratios `econ/10` `econ/50` do not match stock `EconomicValue × markup`; client display vs server charge desync. Known gap (GAP_ANALYSIS), not yet fixed.
 
