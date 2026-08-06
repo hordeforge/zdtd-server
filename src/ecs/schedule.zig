@@ -30,6 +30,9 @@ pub const TickResult = struct {
     /// A* replans this tick. Evidence for the deferred path-solve phase gap
     /// (docs/SCALE_ARCHITECTURE.md); not used by the sim itself.
     path_replans: u32 = 0,
+    /// Replans refused by the per-tick A* node budget. Non-zero means the AI
+    /// phase is demand-limited and chases are following stale buffers.
+    path_replans_denied: u32 = 0,
 };
 
 /// Run full sim tick: beginTick → director → ai → vehicles → turrets →
@@ -63,6 +66,7 @@ pub fn run(w: *World, dt: f32) TickResult {
         .despawned_n = de_n,
         .commands_applied = cmd.applied,
         .path_replans = w.path_replans.load(.monotonic),
+        .path_replans_denied = w.path_replans_denied.load(.monotonic),
     };
     @memcpy(out.killed_ids[0..tk.killed_n], tk.killed_ids[0..tk.killed_n]);
     @memcpy(out.loot_bag_ids[0..tk.loot_n], tk.loot_bag_ids[0..tk.loot_n]);

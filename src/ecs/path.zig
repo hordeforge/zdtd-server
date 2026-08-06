@@ -1,13 +1,24 @@
 //! Lightweight grid path helpers for zombie chase (greedy, BFS, A*).
+//!
+//! The grid is 2D (XZ) but every cell carries the feet Y a body would stand at,
+//! supplied by the `StepFn` move predicate. Nodes are still keyed on (x,z)
+//! alone: a column reachable at two heights (a bridge over a tunnel) resolves to
+//! whichever height the search reached first. That keeps the node table and the
+//! caps unchanged and is accurate for the surface-plus-POI shapes zdtd has.
 
 const std = @import("std");
 
 pub const max_path: usize = 32;
 
-pub const Point = struct { x: i32, z: i32 };
+pub const Point = struct { x: i32, z: i32, y: i32 };
 
-/// `solid(ctx, x, z)` true = cell blocks movement.
-pub const SolidFn = *const fn (?*anyopaque, i32, i32) bool;
+/// `step(ctx, from_x, from_z, from_y, to_x, to_z)` returns the feet Y a body
+/// standing at (from_x, from_y, from_z) would occupy after moving one cell to
+/// (to_x, to_z), or null when the move is blocked: a wall, no headroom, or a
+/// drop deeper than the body takes. A plain "is this cell solid" test cannot
+/// express step-up, drop or a POI floor under a roof, so the predicate returns
+/// the destination height rather than a bool.
+pub const StepFn = *const fn (?*anyopaque, i32, i32, i32, i32, i32) ?i32;
 
 pub const Path = struct {
     points: [max_path]Point = undefined,
@@ -61,54 +72,52 @@ const NodeMap = struct {
     }
 };
 
-/// Greedy walk toward goal. `solid` true = blocked.
+/// Greedy walk toward goal, following the move predicate one cell at a time.
 pub fn greedyToward(
     path: *Path,
     sx: i32,
     sz: i32,
+    sy: i32,
     gx: i32,
     gz: i32,
     max_steps: usize,
     ctx: ?*anyopaque,
-    solid: SolidFn,
+    step: StepFn,
 ) void {
     path.clear();
     var x = sx;
     var z = sz;
+    var y = sy;
     var steps: usize = 0;
     const limit = @min(max_steps, max_path);
     while (steps < limit) : (steps += 1) {
         const dx = gx - x;
         const dz = gz - z;
         if (dx == 0 and dz == 0) break;
-        var nx = x;
-        var nz = z;
-        if (@abs(dx) >= @abs(dz)) {
-            nx += if (dx > 0) @as(i32, 1) else -1;
+        const along_x = @abs(dx) >= @abs(dz);
+        // Preferred move first, then the two sidesteps on the other axis.
+        var cand: [3][2]i32 = undefined;
+        if (along_x) {
+            cand[0] = .{ x + if (dx > 0) @as(i32, 1) else -1, z };
+            cand[1] = .{ x, z + if (dz >= 0) @as(i32, 1) else -1 };
+            cand[2] = .{ x, z + if (dz >= 0) @as(i32, -1) else 1 };
         } else {
-            nz += if (dz > 0) @as(i32, 1) else -1;
+            cand[0] = .{ x, z + if (dz > 0) @as(i32, 1) else -1 };
+            cand[1] = .{ x + if (dx >= 0) @as(i32, 1) else -1, z };
+            cand[2] = .{ x + if (dx >= 0) @as(i32, -1) else 1, z };
         }
-        if (solid(ctx, nx, nz)) {
-            if (@abs(dx) >= @abs(dz)) {
-                nz = z + if (dz >= 0) @as(i32, 1) else -1;
-                nx = x;
-                if (solid(ctx, nx, nz)) {
-                    nz = z + if (dz >= 0) @as(i32, -1) else 1;
-                    if (solid(ctx, nx, nz)) break;
-                }
-            } else {
-                nx = x + if (dx >= 0) @as(i32, 1) else -1;
-                nz = z;
-                if (solid(ctx, nx, nz)) {
-                    nx = x + if (dx >= 0) @as(i32, -1) else 1;
-                    if (solid(ctx, nx, nz)) break;
-                }
-            }
+        var moved = false;
+        for (cand) |cd| {
+            const ny = step(ctx, x, z, y, cd[0], cd[1]) orelse continue;
+            path.points[path.len] = .{ .x = cd[0], .z = cd[1], .y = ny };
+            path.len += 1;
+            x = cd[0];
+            z = cd[1];
+            y = ny;
+            moved = true;
+            break;
         }
-        path.points[path.len] = .{ .x = nx, .z = nz };
-        path.len += 1;
-        x = nx;
-        z = nz;
+        if (!moved) break;
     }
 }
 
@@ -117,29 +126,28 @@ pub fn bfsToward(
     path: *Path,
     sx: i32,
     sz: i32,
+    sy: i32,
     gx: i32,
     gz: i32,
     max_expand: usize,
     ctx: ?*anyopaque,
-    solid: SolidFn,
+    step: StepFn,
 ) void {
     path.clear();
     if (sx == gx and sz == gz) return;
     const max_nodes: usize = 256;
     var qx: [max_nodes]i32 = undefined;
     var qz: [max_nodes]i32 = undefined;
+    var qy: [max_nodes]i32 = undefined;
     var parent: [max_nodes]i32 = .{-1} ** max_nodes;
-    var seen_x: [max_nodes]i32 = undefined;
-    var seen_z: [max_nodes]i32 = undefined;
     var seen_n: usize = 0;
     var qh: usize = 0;
     var qt: usize = 0;
     var seen: NodeMap = .{};
     qx[qt] = sx;
     qz[qt] = sz;
+    qy[qt] = sy;
     qt += 1;
-    seen_x[0] = sx;
-    seen_z[0] = sz;
     seen.put(sx, sz, 0);
     seen_n = 1;
     var found: i32 = -1;
@@ -148,6 +156,7 @@ pub fn bfsToward(
     while (qh < qt and expanded < max_expand) : (expanded += 1) {
         const cx = qx[qh];
         const cz = qz[qh];
+        const cy = qy[qh];
         const ci: i32 = @intCast(qh);
         qh += 1;
         if (cx == gx and cz == gz) {
@@ -157,24 +166,23 @@ pub fn bfsToward(
         for (dirs) |d| {
             const nx = cx + d[0];
             const nz = cz + d[1];
-            if (solid(ctx, nx, nz)) continue;
-            if (seen.get(seen_x[0..seen_n], seen_z[0..seen_n], nx, nz) != null) continue;
-            if (qt >= max_nodes or seen_n >= max_nodes) break;
+            if (seen.get(qx[0..seen_n], qz[0..seen_n], nx, nz) != null) continue;
+            const ny = step(ctx, cx, cz, cy, nx, nz) orelse continue;
+            if (qt >= max_nodes) break;
             qx[qt] = nx;
             qz[qt] = nz;
+            qy[qt] = ny;
             parent[qt] = ci;
-            seen_x[seen_n] = nx;
-            seen_z[seen_n] = nz;
             seen.put(nx, nz, seen_n);
             seen_n += 1;
             qt += 1;
         }
     }
     if (found < 0) {
-        greedyToward(path, sx, sz, gx, gz, max_path, ctx, solid);
+        greedyToward(path, sx, sz, sy, gx, gz, max_path, ctx, step);
         return;
     }
-    reconstruct(path, &qx, &qz, &parent, found);
+    reconstruct(path, &qx, &qz, &qy, &parent, found);
 }
 
 fn manhattan(ax: i32, az: i32, bx: i32, bz: i32) u32 {
@@ -227,28 +235,27 @@ fn openPop(heap: []OpenEntry, n: *usize) ?OpenEntry {
 /// Grid A* on 4-neighborhood, Manhattan heuristic. Deterministic equal-f ties
 /// (lower node index wins). Caps expand/node table; greedy fallback.
 /// Open set is a binary heap (was linear scan extract-min each expand).
+/// Returns the number of nodes expanded so callers can meter a tick budget.
 pub fn aStarToward(
     path: *Path,
     sx: i32,
     sz: i32,
+    sy: i32,
     gx: i32,
     gz: i32,
     max_expand: usize,
     ctx: ?*anyopaque,
-    solid: SolidFn,
-) void {
+    step: StepFn,
+) usize {
     path.clear();
-    if (sx == gx and sz == gz) return;
-    if (solid(ctx, gx, gz)) {
-        greedyToward(path, sx, sz, gx, gz, max_path, ctx, solid);
-        return;
-    }
+    if (sx == gx and sz == gz) return 0;
 
     const max_nodes: usize = 256;
     // Heap may hold stale entries after g improves; size above node cap.
     const heap_cap: usize = 512;
     var nx_arr: [max_nodes]i32 = undefined;
     var nz_arr: [max_nodes]i32 = undefined;
+    var ny_arr: [max_nodes]i32 = undefined;
     var g_cost: [max_nodes]u32 = .{std.math.maxInt(u32)} ** max_nodes;
     var parent: [max_nodes]i32 = .{-1} ** max_nodes;
     var closed: [max_nodes]bool = .{false} ** max_nodes;
@@ -261,6 +268,7 @@ pub fn aStarToward(
 
     nx_arr[0] = sx;
     nz_arr[0] = sz;
+    ny_arr[0] = sy;
     g_cost[0] = 0;
     n_nodes = 1;
     node_map.put(sx, sz, 0);
@@ -282,6 +290,7 @@ pub fn aStarToward(
 
         const cx = nx_arr[ci];
         const cz = nz_arr[ci];
+        const cy = ny_arr[ci];
         if (cx == gx and cz == gz) {
             found = @intCast(ci);
             break;
@@ -290,18 +299,18 @@ pub fn aStarToward(
         for (dirs) |d| {
             const nx = cx + d[0];
             const nz = cz + d[1];
-            if (solid(ctx, nx, nz)) continue;
             if (manhattan(sx, sz, nx, nz) > span) continue;
 
             const tent_g = g_cost[ci] + 1;
             const existing = node_map.get(nx_arr[0..n_nodes], nz_arr[0..n_nodes], nx, nz);
-            const ni: usize = blk: {
-                if (existing) |e| {
-                    if (closed[e]) continue;
-                    if (tent_g >= g_cost[e]) continue;
-                    break :blk e;
-                }
-                if (n_nodes >= max_nodes) continue;
+            if (existing) |e| {
+                if (closed[e]) continue;
+                if (tent_g >= g_cost[e]) continue;
+            } else if (n_nodes >= max_nodes) continue;
+            // Probe last: it is the expensive call (terrain lock / column scan)
+            // and the cheap rejects above already dropped most neighbours.
+            const ny = step(ctx, cx, cz, cy, nx, nz) orelse continue;
+            const ni: usize = existing orelse blk: {
                 const e = n_nodes;
                 nx_arr[e] = nx;
                 nz_arr[e] = nz;
@@ -309,6 +318,7 @@ pub fn aStarToward(
                 n_nodes += 1;
                 break :blk e;
             };
+            ny_arr[ni] = ny;
             g_cost[ni] = tent_g;
             parent[ni] = @intCast(ci);
             const f = tent_g + manhattan(nx, nz, gx, gz);
@@ -317,16 +327,18 @@ pub fn aStarToward(
     }
 
     if (found < 0) {
-        greedyToward(path, sx, sz, gx, gz, max_path, ctx, solid);
-        return;
+        greedyToward(path, sx, sz, sy, gx, gz, max_path, ctx, step);
+        return expanded;
     }
-    reconstruct(path, &nx_arr, &nz_arr, &parent, found);
+    reconstruct(path, &nx_arr, &nz_arr, &ny_arr, &parent, found);
+    return expanded;
 }
 
 fn reconstruct(
     path: *Path,
     xs: *const [256]i32,
     zs: *const [256]i32,
+    ys: *const [256]i32,
     parent: *const [256]i32,
     found: i32,
 ) void {
@@ -334,9 +346,10 @@ fn reconstruct(
     var cn: usize = 0;
     var cur: i32 = found;
     while (cur >= 0 and cn < max_path) {
-        chain[cn] = .{ .x = xs[@intCast(cur)], .z = zs[@intCast(cur)] };
+        const i: usize = @intCast(cur);
+        chain[cn] = .{ .x = xs[i], .z = zs[i], .y = ys[i] };
         cn += 1;
-        cur = parent[@intCast(cur)];
+        cur = parent[i];
     }
     var i: isize = @intCast(cn);
     i -= 2;
@@ -346,34 +359,46 @@ fn reconstruct(
     }
 }
 
-const test_open = struct {
-    fn s(_: ?*anyopaque, _: i32, _: i32) bool {
-        return false;
-    }
-}.s;
+/// Flat open grid: every move succeeds and keeps the current height.
+pub fn openStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, _: i32, _: i32) ?i32 {
+    return from_y;
+}
 
 const test_wall = struct {
-    fn s(_: ?*anyopaque, x: i32, z: i32) bool {
-        return x == 2 and z >= 0 and z <= 2;
+    fn s(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+        if (x == 2 and z >= 0 and z <= 2) return null;
+        return from_y;
     }
 }.s;
 
 const test_wall_wide = struct {
-    fn s(_: ?*anyopaque, x: i32, z: i32) bool {
-        return x == 2 and z >= -2 and z <= 2;
+    fn s(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+        if (x == 2 and z >= -2 and z <= 2) return null;
+        return from_y;
+    }
+}.s;
+
+/// Terrain ramp: column height is x (one step up per cell east), so the body
+/// can walk east but never climb the two-block ledge at x == 5.
+const test_ramp = struct {
+    fn s(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+        const h: i32 = if (x >= 5) 6 else x;
+        if (h - from_y > 1) return null;
+        return h;
     }
 }.s;
 
 test "greedy path moves toward" {
     var p: Path = .{};
-    greedyToward(&p, 0, 0, 5, 0, 16, null, test_open);
+    greedyToward(&p, 0, 0, 64, 5, 0, 16, null, openStep);
     try std.testing.expect(p.len >= 5);
     try std.testing.expectEqual(@as(i32, 1), p.points[0].x);
+    try std.testing.expectEqual(@as(i32, 64), p.points[0].y);
 }
 
 test "bfs path around obstacle" {
     var p: Path = .{};
-    bfsToward(&p, 0, 0, 4, 0, 200, null, test_wall);
+    bfsToward(&p, 0, 0, 64, 4, 0, 200, null, test_wall);
     try std.testing.expect(p.len >= 4);
     for (p.points[0..p.len]) |pt| {
         try std.testing.expect(!(pt.x == 2 and pt.z >= 0 and pt.z <= 2));
@@ -382,7 +407,7 @@ test "bfs path around obstacle" {
 
 test "aStar path around simple obstacle" {
     var p: Path = .{};
-    aStarToward(&p, 0, 0, 4, 0, 200, null, test_wall_wide);
+    _ = aStarToward(&p, 0, 0, 64, 4, 0, 200, null, test_wall_wide);
     try std.testing.expect(p.len >= 4);
     for (p.points[0..p.len]) |pt| {
         try std.testing.expect(!(pt.x == 2 and pt.z >= -2 and pt.z <= 2));
@@ -394,9 +419,96 @@ test "aStar path around simple obstacle" {
 
 test "aStar open field is straight" {
     var p: Path = .{};
-    aStarToward(&p, 0, 0, 3, 0, 64, null, test_open);
+    const expanded = aStarToward(&p, 0, 0, 64, 3, 0, 64, null, openStep);
     try std.testing.expectEqual(@as(usize, 3), p.len);
     try std.testing.expectEqual(@as(i32, 1), p.points[0].x);
     try std.testing.expectEqual(@as(i32, 2), p.points[1].x);
     try std.testing.expectEqual(@as(i32, 3), p.points[2].x);
+    try std.testing.expect(expanded > 0 and expanded <= 64);
+}
+
+test "aStar carries feet height up a ramp and refuses the ledge" {
+    var p: Path = .{};
+    _ = aStarToward(&p, 0, 0, 0, 4, 0, 200, null, test_ramp);
+    try std.testing.expectEqual(@as(usize, 4), p.len);
+    for (p.points[0..p.len], 1..) |pt, i| {
+        try std.testing.expectEqual(@as(i32, @intCast(i)), pt.y);
+    }
+    // x == 5 is a two-block ledge from x == 4: unreachable, so A* falls back to
+    // greedy and stops at the wall instead of teleporting up it.
+    var q: Path = .{};
+    _ = aStarToward(&q, 0, 0, 0, 8, 0, 200, null, test_ramp);
+    for (q.points[0..q.len]) |pt| try std.testing.expect(pt.x < 5);
+}
+
+test "aStar is deterministic for the same inputs" {
+    var a: Path = .{};
+    var b: Path = .{};
+    const ea = aStarToward(&a, -3, -3, 64, 6, 5, 200, null, test_wall_wide);
+    const eb = aStarToward(&b, -3, -3, 64, 6, 5, 200, null, test_wall_wide);
+    try std.testing.expectEqual(ea, eb);
+    try std.testing.expectEqual(a.len, b.len);
+    try std.testing.expectEqualSlices(Point, a.points[0..a.len], b.points[0..b.len]);
+}
+
+test "aStar never returns a step the predicate refused" {
+    // Deterministic sweep over pseudo-random blocked grids and height fields.
+    // The fuzz target in src/fuzz.zig drives the same invariants from a seed;
+    // this keeps them covered in the ordinary test run.
+    const Grid = struct {
+        seed: u32,
+        fn h(self: *const @This(), x: i32, z: i32) u32 {
+            const ux: u32 = @bitCast(x);
+            const uz: u32 = @bitCast(z);
+            return (ux *% 0x9e3779b1) ^ (uz *% 0x85ebca77) ^ (self.seed *% 0xc2b2ae35);
+        }
+        fn step(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+            const self: *const @This() = @ptrCast(@alignCast(ctx.?));
+            const v = self.h(x, z);
+            if (v % 5 == 0) return null;
+            const y: i32 = 60 + @as(i32, @intCast((v >> 8) % 4));
+            if (y > from_y + 1 or y < from_y - 3) return null;
+            return y;
+        }
+    };
+    var seed: u32 = 1;
+    while (seed <= 200) : (seed += 1) {
+        var grid: Grid = .{ .seed = seed };
+        const sx: i32 = @intCast(seed % 7);
+        const sz: i32 = @intCast((seed / 7) % 7);
+        const gx: i32 = sx + @as(i32, @intCast(seed % 11)) - 5;
+        const gz: i32 = sz + @as(i32, @intCast((seed / 11) % 11)) - 5;
+        const sy: i32 = 60 + @as(i32, @intCast((grid.h(sx, sz) >> 8) % 4));
+        var p: Path = .{};
+        _ = aStarToward(&p, sx, sz, sy, gx, gz, 96, &grid, Grid.step);
+        var px = sx;
+        var pz = sz;
+        var py = sy;
+        for (p.points[0..p.len]) |pt| {
+            try std.testing.expectEqual(@as(u32, 1), @abs(pt.x - px) + @abs(pt.z - pz));
+            const allowed = Grid.step(&grid, px, pz, py, pt.x, pt.z) orelse
+                return error.PathCrossesBlockedCell;
+            try std.testing.expectEqual(allowed, pt.y);
+            px = pt.x;
+            pz = pt.z;
+            py = pt.y;
+        }
+    }
+}
+
+test "aStar sealed goal falls back to greedy without reaching it" {
+    const Sealed = struct {
+        fn s(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+            if (x == 2) return null;
+            return from_y;
+        }
+    };
+    var p: Path = .{};
+    const expanded = aStarToward(&p, 0, 0, 64, 4, 0, 96, null, Sealed.s);
+    try std.testing.expect(expanded > 0);
+    for (p.points[0..p.len]) |pt| try std.testing.expect(pt.x != 2);
+    if (p.len > 0) {
+        const last = p.points[p.len - 1];
+        try std.testing.expect(!(last.x == 4 and last.z == 0));
+    }
 }

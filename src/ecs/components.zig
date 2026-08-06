@@ -68,12 +68,27 @@ pub const TaskId = enum(u8) {
     approach_attack,
     territorial,
     approach_spot,
+    /// EAIRunawayWhenHurt (asm.il:435616). Passive animals flee the entity that
+    /// hurt them; not in the zombie AITask list, so it is gated on kind.animal.
+    runaway,
     /// EAILook (asm.il:429858). Stand still and turn body yaw for the seconds
     /// Wander/ApproachSpot Reset() owed. Sits between ApproachSpot and Wander
     /// exactly as in the stock zombie AITask list (entityclasses.xml:562-571).
     look,
     wander,
 };
+
+/// Waypoints buffered from one A* solve. Eight cells is roughly the distance a
+/// chasing zombie covers in one replan interval, so the buffer empties about
+/// when the cooldown expires.
+pub const path_wp_max: usize = 8;
+
+/// One planned cell: world block XZ plus the feet Y the body stands at there.
+pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
+
+/// EAISetAsTargetIfHurt::Start passes 400 ticks to SetAttackTarget
+/// (asm.il:436155, ldc.i4 0x190), i.e. 20 s at the stock 20 Hz AI tick.
+pub const revenge_window_s: f32 = 20.0;
 
 pub const ZombieAi = struct {
     state: AiState = .idle,
@@ -100,10 +115,17 @@ pub const ZombieAi = struct {
     has_path: bool = false,
     /// Seconds until next A* replan (chase only).
     path_replan_cd: f32 = 0,
-    /// Next waypoint cell (world block xz) while following a planned path.
-    path_wp_x: i32 = 0,
-    path_wp_z: i32 = 0,
-    path_wp_valid: bool = false,
+    /// Cells of the last solve not yet walked. One search feeds up to
+    /// path_wp_max steps, so a chase pays one A* per ~8 m of travel instead of
+    /// per metre, and a tick refused by the node budget still has somewhere to
+    /// walk.
+    path_wp: [path_wp_max]PathWp = [_]PathWp{.{}} ** path_wp_max,
+    path_wp_n: u8 = 0,
+    path_wp_i: u8 = 0,
+    /// Goal cell the buffer was planned for; a goal that moves off it forces a
+    /// replan even mid-buffer.
+    path_goal_cx: i32 = 0,
+    path_goal_cz: i32 = 0,
     /// True when chase replan found no detour and the cell toward the goal is solid.
     /// Feeds EAIBreakBlock / DestroyArea; Game.tickZombieBlockDamage keys on chase/attack.
     path_blocked: bool = false,
@@ -121,6 +143,24 @@ pub const ZombieAi = struct {
     look_yaw: f32 = 0,
     /// EAIWander.time (asm.il:438366): seconds the current wander has run.
     wander_time: f32 = 0,
+    /// EntityAlive.revengeTarget net id (-1 = none), set by World.damageFrom.
+    /// EAISetAsTargetIfHurt (asm.il:435831) promotes it to the attack target.
+    revenge_target: i32 = -1,
+    /// Seconds the revenge target stays valid. Stock's SetAttackTarget window
+    /// is 400 ticks (asm.il:436155 ldc.i4 0x190) = 20 s at 20 Hz.
+    revenge_time: f32 = 0,
+
+    /// Drop any buffered path (arrive, preempt, mover stop).
+    pub fn clearPath(self: *ZombieAi) void {
+        self.path_wp_n = 0;
+        self.path_wp_i = 0;
+    }
+
+    /// Next unwalked waypoint, or null when the buffer is spent.
+    pub fn currentWp(self: *const ZombieAi) ?PathWp {
+        if (self.path_wp_i >= self.path_wp_n) return null;
+        return self.path_wp[self.path_wp_i];
+    }
 };
 
 pub const VehicleKind = enum(u8) {
