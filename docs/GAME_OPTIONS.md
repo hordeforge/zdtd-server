@@ -47,6 +47,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `ZombieMove` / `ZombieMoveNight` / `ZombieFeralMove` / `ZombieBMMove` | 0/3/3/3 | 0..4 | zombie speed per day/night/feral/blood-moon → `World.zombie_speed_scale` |
 | `EnemyDifficulty` | 0 | 0..1 | 1 = feral (always feral speed) |
 | `LootAbundance` | 100 | 1..1000 | percent multiplier on rolled loot stack counts (`LootTable.scaleCount`) |
+| `LootRespawnDays` | 7 | 0..365 | days after a world container is touched until it re-rolls loot on its next open (0 = never respawn; `Game.loot_respawn_days`, `maybeRespawnContainer`) |
 | `XPMultiplier` | 100 | 1..1000 | scales server XP awarded per kill (`Game.awardXp`, `Client.xp`) |
 | `BlockDamagePlayer` | 100 | 1..1000 | scales player dig damage in `NetPackageSetBlock` |
 | `BlockDamageAI` | 100 | 0..1000 | zombies chew through cover blocks (`tickZombieBlockDamage`) |
