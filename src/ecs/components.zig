@@ -544,6 +544,13 @@ pub const TraderStock = struct {
     wallet: i32 = 0,
     /// Restock target the wallet regrows toward (initial spawn amount).
     wallet_default: i32 = 0,
+    /// traders.xml `<trader_info>` ResetInterval: -1 = never restock, 0 =
+    /// daily (spawn default), >0 = days between restocks. The timer row
+    /// (systems.traderRestock) owns the math.
+    reset_interval: i32 = 0,
+    /// Game day of the last restock; traderRestock skips a trader until
+    /// day >= last_restock_day + reset_interval (0 interval always restocks).
+    last_restock_day: u32 = 0,
     entries: [max_stock]StockEntry = defaultStock(),
     n: usize = 5,
 };

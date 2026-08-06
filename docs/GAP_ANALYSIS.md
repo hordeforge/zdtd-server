@@ -820,8 +820,9 @@ parsed, and quest offering is unwired.
   trader's window from its own list (Jen's food, Bob's vehicles, Rekt's etc.)
   with `traderAlways` as the fallback; the lock-open path denies outside the
   trader's open hours (vending machines always open) and `allow_sell=false`
-  blocks selling to that trader. override_buy/sell_markup and reset_interval
-  are parsed but not applied: the pricing and restock rows own that math.
+  blocks selling to that trader. override_buy/sell_markup feed the pricing row
+  (below) and reset_interval is copied onto the stock row and drives
+  `systems.traderRestock`'s cadence (-1 never, 0 daily, N every N days).
   *Anchors:* `src/assets/traders.zig:249-288`, `src/assets/npc.zig`,
   `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
   `:1469`, `:1472`, `:1488`
@@ -900,15 +901,19 @@ parsed, and quest offering is unwired.
   `asm.il:1830586-1830600`
 
 - **Restock timer** `PARTIAL`
-  `traderRestock` adds +10 to every existing entry each in-game day, capped at 50.
-  Stock does a full reroll on the channel-1 lock when
+  `traderRestock` respects each trader's `<trader_info>` `reset_interval`
+  (-1 never, 0 every day roll, N every N days; `fillTraderFromXml` copies it
+  into `TraderStock.reset_interval` and stamps `last_restock_day` at fill), so
+  the cadence is stock-faithful. The refill itself stays a refill: it adds +10
+  to every existing entry capped at 50 and restores the money pool, where stock
+  does a full reroll on the channel-1 lock when
   `worldTime - lastInventoryUpdate >= ResetIntervalInTicks` (3 days for humans, 1
   for vending) via `HandleFullReset` plus `SpawnTierGroup`. zdtd never introduces
-  new items, never drops sold-out ones, and never respects the cadence. Trader
-  stock is not persisted either.
-  *Anchors:* `src/ecs/systems.zig:693-706`, `src/ecs/aidirector.zig:154`, `:181`,
-  `src/server/game.zig:1751`, `asm.il:863657-863767`, `asm.il:863770-863910`,
-  `Data/Config/traders.xml:1240`
+  new items and never drops sold-out ones (the inventory-roll and depth rows own
+  that). Trader stock is not persisted either.
+  *Anchors:* `src/ecs/systems.zig:711-736`, `src/ecs/components.zig:538-556`,
+  `src/server/game.zig:8452-8457`, `src/ecs/aidirector.zig:213-251`,
+  `asm.il:863657-863767`, `asm.il:863770-863910`, `Data/Config/traders.xml:1240`
 
 - **Open hours and the closed-door behaviour** `MISSING`
   Nothing reads or models open_time/close_time. Stock's `TraderInfo::get_IsOpen`

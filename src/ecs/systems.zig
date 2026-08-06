@@ -704,12 +704,21 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
     return false;
 }
 
-/// Restock trader inventories toward default counts (daily).
+/// Restock trader inventories toward default counts, gated per trader by the
+/// traders.xml `<trader_info>` ResetInterval (fillTraderFromXml copies it into
+/// TraderStock.reset_interval): -1 never restocks, 0 restocks every day roll,
+/// N > 0 restocks when day >= last_restock_day + N.
 pub fn traderRestock(w: *World) void {
+    const day = w.director.clock.day;
     var i: Slot = 0;
     while (i < max_entities) : (i += 1) {
         if (!w.alive[i] or !w.mask[i].trader_stock) continue;
         var stock = &w.trader_stock[i];
+        if (stock.reset_interval < 0) continue;
+        if (stock.reset_interval > 0) {
+            if (day < stock.last_restock_day + @as(u32, @intCast(stock.reset_interval))) continue;
+        }
+        stock.last_restock_day = day;
         var e: usize = 0;
         while (e < stock.n) : (e += 1) {
             // Grow toward a soft cap of 50 for stackables.
@@ -2782,6 +2791,50 @@ test "trader wallet debits on sell, credits on buy and refuses overdraft" {
     w.trader_stock[ts].wallet = 0;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
+}
+
+test "traderRestock honors per-trader reset_interval (never vs every N days)" {
+    var w: World = .{};
+    defer w.deinit();
+    const never_id = w.spawnTrader("TraderNever", 100, 70, 100, 0, 1000).?;
+    const three_id = w.spawnTrader("TraderThree", 200, 70, 200, 0, 1000).?;
+    const sn = w.slotOfNetId(never_id).?;
+    const st = w.slotOfNetId(three_id).?;
+    // Counts < 50 are topped up by a restock; watch entry 0 (default 20).
+    w.trader_stock[sn].entries[0].count = 1;
+    w.trader_stock[st].entries[0].count = 1;
+    w.trader_stock[sn].reset_interval = -1; // never
+    w.trader_stock[st].reset_interval = 3; // every 3 days
+
+    // Day 1, spawn day: neither has reached a window (never never does).
+    w.director.clock.day = 1;
+    w.trader_stock[sn].wallet = 0;
+    w.trader_stock[st].wallet = 0;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[sn].wallet);
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[st].wallet);
+    try std.testing.expectEqual(@as(u16, 1), w.trader_stock[st].entries[0].count);
+
+    // Day 4: last=0 + 3 opens the window for the 3-day trader only.
+    w.director.clock.day = 4;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[sn].wallet);
+    try std.testing.expectEqual(@as(i32, 1000), w.trader_stock[st].wallet);
+    try std.testing.expectEqual(@as(u16, 11), w.trader_stock[st].entries[0].count);
+    try std.testing.expectEqual(@as(u32, 4), w.trader_stock[st].last_restock_day);
+
+    // Day 5: next window is day 7, so the drained pool stays drained.
+    w.trader_stock[st].wallet = 0;
+    w.trader_stock[st].entries[0].count = 1;
+    w.director.clock.day = 5;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[st].wallet);
+    try std.testing.expectEqual(@as(u16, 1), w.trader_stock[st].entries[0].count);
+
+    // Day 7: window reopens.
+    w.director.clock.day = 7;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 1000), w.trader_stock[st].wallet);
 }
 
 test "zombie melee marks the victim hp dirty so replication can see it" {

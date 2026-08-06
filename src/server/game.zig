@@ -8440,6 +8440,11 @@ pub const Game = struct {
                     const en = tt.expandTraderRefs(ti, &per_trader);
                     fill = per_trader[0..en];
                 }
+                // Per-trader RestockInterval drives systems.traderRestock
+                // (-1 = never, 0 = daily, N = every N days). The window opens
+                // N days after fill, so the fresh stock survives its first days.
+                self.sim.trader_stock[s].reset_interval = ti.reset_interval;
+                self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
             }
         }
         if (fill.len == 0) {
