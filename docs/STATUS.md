@@ -60,10 +60,15 @@ observable, on the live stock client:
   blood-moon day through dawn of the next, crossing the midnight rollover — and
   `worldTimeBits` encodes `(day-1)*24000` so the client HUD day, BloodMoonDay
   and the red moon align. Dusk/dawn follow `CalcDuskDawnHours`. 772 total.
+- **World integrity (T8, part):** land claims now disappear with their keystone
+  (`removeClaimAt`) and offline claims expire past `LandClaimExpiryDays`;
+  `markClaimsForEntity` tracks owner online state; block repair takes the lower
+  wire damage as the new absolute (repair heals instead of weakening). Claim
+  persistence, the client lpBlocks overlay and the stability plane remain open.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 
-**Gates at this pin:** `make check` exit 0 · 758 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 772 unit tests · live stock-client
 gate **23/23** · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md). The largest are trader depth

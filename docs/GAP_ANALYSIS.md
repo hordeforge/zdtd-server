@@ -141,9 +141,9 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 14 | 10 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 15 | 22 | 14 | 51 | Walk, dig, build, persist; lakes wet, no POI water, repair damages your base |
+| [World systems](#11-world-systems) | 19 | 19 | 13 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, no collapse |
 | [Net and ops](#12-net-and-ops) | 11 | 29 | 12 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **95** | **153** | **97** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **99** | **150** | **96** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -248,11 +248,14 @@ area and the concrete work.
    the budget), and identity stays login-name keyed per ADR 0017 rather than
    platform user id.
 
-10. **World: make land claims real.** There is no `removeClaim`, so a destroyed
-    keystone leaves a permanent 41x41 no-edit zone; claims are never persisted;
-    and the player-data blob writes `lpBlocks count = 0` so the client shows no
-    boundary and gives no feedback when an edit is silently rejected
-    (`src/server/game.zig:3158-3170`, `:416-417`, `src/wire/stock_inv.zig:846`).
+10. **DONE 2026-08-06.** World: make land claims real. `removeClaimAt` drops the
+    claim when the keystone breaks and `expireClaims` releases offline claims
+    past `LandClaimExpiryDays` (0 disables); `markClaimsForEntity` tracks
+    owner online state so the offline durability modifier is live. Test covers
+    keystone break, offline expiry and online-never-expires. Still open: claim
+    persistence across restart and the client lpBlocks overlay
+    (`src/server/game.zig` removeClaimAt/expireClaims,
+    `src/wire/stock_inv.zig:846`).
 
 11. **DONE 2026-08-06.** Blood moon / world: fix the night window and the day
     encoding. `isBloodMoonNight` mirrors stock `IsBloodMoonTime`: dusk on
@@ -280,11 +283,12 @@ area and the concrete work.
     player-placed door, wedge and shape re-renders unrotated for a second client
     or after a relog (`src/world/store.zig:260-262`, `:653-658`).
 
-14. **World: fix block repair.** Stock repair calls `Block::DamageBlock` with a
-    negated amount and sends the new **lower** absolute damage (asm.il:657520,
-    :96545). zdtd treats a lower wire value as a delta to add, so repairing 500
-    to 300 sets 800, and a full repair (damage 0) is a no-op
-    (`src/server/game.zig:5140-5172`).
+14. **DONE 2026-08-06.** World: fix block repair. Stock repair calls
+    `Block::DamageBlock` with a negated amount and sends the new **lower**
+    absolute damage (asm.il:657520, :96545). zdtd now treats a lower wire value
+    as the new absolute damage instead of a delta to add, so repairing 500 to
+    300 sets 300 and a full repair (damage 0) clears the damage
+    (`src/server/game.zig:6024`).
 
 15. **DONE 2026-08-06 (parser + wire kinds).** Quests: implement `template=`
     inheritance and the per-objective Write shapes. `template=` now resolves
@@ -2706,16 +2710,15 @@ counter and land claims are each broken in specific, noticeable ways.
   *Anchors:* `src/server/game.zig:5057-5241`, `:461-463`, `:3268-3283`,
   `:3235-3245`
 
-- **Block repair (ItemActionRepair)** `PARTIAL`
-  Broken. Stock repair calls `Block::DamageBlock` with a **negated** repair amount
-  and SetBlockRPCs the resulting **lower** absolute damage, so C2S SetBlock carries
-  damage < current. zdtd treats `wire_abs <= cur_dmg and wire_abs > 0` as a delta to
-  **add**, so repairing a block from 500 down to 300 sets it to 800; and a full
-  repair (wire damage 0) matches neither sub-branch, leaving `abs = cur_dmg` so
-  nothing changes. Hitting your base with a repair tool makes it weaker or does
-  nothing.
-  *Anchors:* `src/server/game.zig:5140-5172`, `:5150-5154`,
-  `asm.il:657520-657583`, `asm.il:96545-96562`, `asm.il:96797-96812`
+- **Block repair (ItemActionRepair)** `WORKS`
+  Stock repair calls `Block::DamageBlock` with a **negated** repair amount and
+  SetBlockRPCs the resulting **lower** absolute damage, so C2S SetBlock carries
+  damage < current. zdtd now takes the wire value as the new absolute damage
+  when it is lower (never adds a lower value as a delta), so repairing 500 to
+  300 sets 300 and a full repair (0) clears the damage; the block's hp then
+  rises toward max on the next damage write.
+  *Anchors:* `src/server/game.zig:6024` repair branch, `asm.il:657520-657583`,
+  `asm.il:96545-96562`, `asm.il:96797-96812`
 
 - **Block upgrade (frame to reinforced)** `PARTIAL`
   Works only incidentally: stock turns an over-repaired block into
@@ -2753,20 +2756,20 @@ counter and land claims are each broken in specific, noticeable ways.
   per-item block-damage multiplier.
   *Anchors:* `src/server/game.zig:5243-5310`
 
-- **Land claim keystone registration, edit deny, durability modifier** `PARTIAL`
+- **Land claim keystone registration, edit deny, durability modifier** `WORKS`
   Placing a keystoneBlock registers a claim; `claimCovering` does a Chebyshev test
   against LandClaimSize/2 and blocks edits by anyone but the owner; the owner's
   blocks get max_hp multiplied by the online/offline durability modifier. Cap of
-  256 claims, new claims silently dropped past that.
-  *Anchors:* `src/server/game.zig:3143-3170`, `:5099-5101`, `:5156-5161`,
+  256 claims, new claims silently dropped past that (documented limit).
+  *Anchors:* `src/server/game.zig` registerClaim/claimCovering,
   `:5995-6005`
 
-- **Land claim removal when the keystone is destroyed** `PARTIAL`
-  Broken. There is no `removeClaim` anywhere. Break the keystone and the claim
-  entry survives, so a 41x41 area stays permanently un-editable by everyone except
-  the (possibly departed) original owner for the life of the process.
-  `land_claims_n` is only ever reset wholesale at init.
-  *Anchors:* `src/server/game.zig:3158-3170`, `:1704`, `:5181-5183`
+- **Land claim removal when the keystone is destroyed** `WORKS`
+  `removeClaimAt` drops the claim when the keystone breaks (SetBlock damage >= max
+  hp or block id 0) and `expireClaims` releases offline claims past
+  `LandClaimExpiryDays` on the day roll; expiry 0 disables it. Test covers
+  keystone break, non-keystone break, offline expiry and online-never-expires.
+  *Anchors:* `src/server/game.zig` removeClaimAt/expireClaims, test at `:10017`
 
 - **Land claim persistence** `MISSING`
   Claims live in a fixed in-memory array and are never written to disk. A restart
@@ -2781,18 +2784,18 @@ counter and land claims are each broken in specific, noticeable ways.
   client-side feedback: an edit inside someone else's claim just silently fails.
   *Anchors:* `src/wire/stock_inv.zig:846`, `:885`
 
-- **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `MISSING`
-  All five are written into the GameStats blob so the client displays them, but
-  none is enforced. A player can place unlimited claims, adjacent to anyone's, and
-  claims never expire or decay.
+- **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `PARTIAL`
+  ExpiryTime is enforced (`expireClaims` on the day roll, offline only); the other
+  four (claim Count, DeadZone, DecayMode, OfflineDelay) are written into the
+  GameStats blob so the client displays them, but are not enforced.
   *Anchors:* `src/wire/packages.zig:1916-1920`, `:1984-1991`,
-  `src/server/game.zig:3158-3170`
+  `src/server/game.zig` expireClaims
 
-- **Land claim owner_online tracking** `PARTIAL`
-  `owner_online` is initialised true and set true again on re-register, but never
-  set false on disconnect. LandClaimOfflineDurabilityModifier is therefore dead
-  code: an offline owner's base always uses the online multiplier.
-  *Anchors:* `src/server/game.zig:284`, `:3162`, `:5158`
+- **Land claim owner_online tracking** `WORKS`
+  `markClaimsForEntity` sets `owner_online` false on disconnect and true on join,
+  refreshing `owner_seen_day` (the expiry base); the offline durability modifier
+  is therefore live.
+  *Anchors:* `src/server/game.zig` markClaimsForEntity
 
 - **Chunk / block persistence across restart** `WORKS`
   ZCH3 chunk saves carry the full u32 block plane plus texture and density

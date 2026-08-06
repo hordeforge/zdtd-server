@@ -271,16 +271,25 @@ the wrap at day boundaries, plus a live observation note.
 
 ## T8. World: land claims, block repair, stability
 
+**Status: parts 1-2 landed 2026-08-06** (verified against the code; the
+parallel worktree commits landed them together with the world-integrity work).
+Land claims disappear with their keystone (`removeClaimAt`) and offline claims
+expire past `LandClaimExpiryDays` on the day roll (0 disables);
+`markClaimsForEntity` tracks owner online state so the offline durability
+modifier is live; block repair takes the lower wire damage as the new absolute
+(repair heals instead of weakening). Tests cover the claim lifecycle.
+Part 3 (stability plane + falling blocks) remains open: it is a large
+subsystem (StabilityCalculator flood-fill, fallingBlock entities), and the
+stock client already runs its own stability, so a partial server-side plane
+would desync rather than help.
+
 Three independent world-integrity fixes, smallest first.
 
-1. **Land claims** have no `removeClaim`, so a destroyed claim block keeps
-   protecting its area forever. Add removal and expiry.
-2. **Block repair** currently damages the block: stock repair calls
-   `Block::DamageBlock` with a negated amount, which zdtd does not negate
-   (`ItemActionRepair`, recorded in `../7dtd-research/docs/world-chunks.md`).
-3. **Stability plane and falling blocks**: unsupported structures never collapse.
-   Note that stock keeps `ChunkStabilityEnabled` non-persistent and runs
-   stability on clients too.
+1. ~~**Land claims** have no `removeClaim`~~ **DONE** (removal + expiry).
+2. ~~**Block repair** currently damages the block~~ **DONE** (lower absolute).
+3. **Stability plane and falling blocks** `OPEN`: unsupported structures never
+   collapse server-side. Note that stock keeps `ChunkStabilityEnabled`
+   non-persistent and runs stability on clients too.
 
 **Done when:** a claim disappears with its block, repairing raises block health,
 and cutting a support drops the structure.

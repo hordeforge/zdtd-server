@@ -54,6 +54,10 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
 - [x] **Blood moon (T7)**: horde runs dusk-to-dawn across the rollover
       (IsBloodMoonTime); WorldTime day encoding `(day-1)*24000`; CalcDuskDawnHours
       and non-negative CalcNextDay jitter.
+- [x] **World integrity (T8 part)**: land claims removed with the keystone and
+      expire offline (`LandClaimExpiryDays`), owner online tracked, block repair
+      takes the lower wire damage as new absolute. Stability/collapse remains
+      open (large subsystem; client-side collapse already desyncs).
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.
