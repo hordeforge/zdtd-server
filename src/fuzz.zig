@@ -1240,3 +1240,57 @@ fn fuzzAStar(_: void, smith: *std.testing.Smith) !void {
 test "fuzz gamestages.xml parser" {
     try std.testing.fuzz({}, fuzzGameStages, .{ .corpus = &gamestages_xml_corpus });
 }
+
+fn fuzzGameStages(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var t = gamestages_xml.loadFromSlice(std.testing.allocator, storage[0..len]) catch return;
+    defer t.deinit();
+    const probe = smith.value(i32);
+    // Ladders must stay sorted and carry at least one spawn, else the sleeper
+    // and director lookups would pick a stage stock would never pick.
+    for (t.spawners) |s| {
+        var prev: i32 = std.math.minInt(i32);
+        for (s.stages) |st| {
+            try std.testing.expect(st.stage_num >= prev);
+            try std.testing.expect(st.spawns.len > 0);
+            prev = st.stage_num;
+        }
+        if (s.getStage(probe)) |st| try std.testing.expect(st.stage_num <= probe);
+    }
+    var scratch = [_]i32{ probe, smith.value(i32), smith.value(i32) };
+    _ = gamestages_xml.partyLevel(t.config, &scratch);
+    _ = gamestages_xml.playerStage(t.config, .{ .level = smith.value(u16), .days_alive = smith.value(u16) });
+    var name_buf: [gamestages_xml.max_name_len]u8 = undefined;
+    _ = gamestages_xml.cleanName(&name_buf, storage[0..@min(len, gamestages_xml.max_name_len)]);
+}
+
+const gamestages_xml_corpus = [_][]const u8{
+    "",
+    "<gamestages/>",
+    \\<gamestages>
+    \\  <config difficultyBonus="1.2" startingWeight="1" diminishingReturns="0.5"/>
+    \\  <group name="1GroupGenericZombie" spawner="SleeperGSList"/>
+    \\  <spawner name="SleeperGSList">
+    \\    <gamestage stage="1"><spawn group="ZombiesAll" num="300" maxAlive="8"/></gamestage>
+    \\    <gamestage stage="14"><spawn group="ZombiesNight"/></gamestage>
+    \\  </spawner>
+    \\</gamestages>
+    ,
+    // unclosed spawner / gamestage
+    "<gamestages><spawner name=\"a\"><gamestage stage=\"1\">",
+    // stage numbers that do not parse, negative, and overflowing
+    "<spawner name=\"a\"><gamestage stage=\"-5\"><spawn group=\"g\"/></gamestage>" ++
+        "<gamestage stage=\"99999999999999\"><spawn group=\"g\"/></gamestage></spawner>",
+    // thousands separators and absurd counts
+    "<spawner name=\"a\"><gamestage stage=\"1\"><spawn group=\"g\" num=\"65,535\" maxAlive=\"9999999\"/></gamestage></spawner>",
+    // group rows missing one half of the pair
+    "<group name=\"x\"/><group spawner=\"y\"/><group name=\"\" spawner=\"z\"/>",
+    // spawn with empty group name, self-closing spawner
+    "<spawner name=\"a\"/><spawner name=\"b\"><gamestage stage=\"1\"><spawn group=\"\"/></gamestage></spawner>",
+    // comments and control bytes
+    "<!-- c --><gamestages>\x00<config daysAliveChangeWhenKilled=\"nan\"/>\x01</gamestages>",
+    // very long group name (exceeds max_name_len, must be rejected not truncated silently)
+    "<group name=\"" ++ ("S_" ** 200) ++ "\" spawner=\"s\"/>",
+};
