@@ -336,16 +336,24 @@ already in `src/plugin/api.zig`.
 
 ## T10. C2S: handle NetPackagePlayerDisconnect explicitly
 
-**Why:** the parity coverage lists one unhandled dir=1 package:
-`NetPackagePlayerDisconnect` (PACKAGES.md header). The client sends it as its
-quit signal; zdtd currently lets the LiteNet peer-death poll (game.zig:3437)
-clean the player up instead. That works, but it leaves the C2S surface one
-package short and delays teardown until the transport notices.
+**Status: landed 2026-08-06** (775 tests). The `NetPackagePlayerDisconnect`
+handler in `game.zig` onData validates the body's entity id is the sender's
+own, saves the player immediately, and takes the same slot-teardown path as the
+transport peer-death poll (dropClientSlot: rider unseat, lock clear, claims
+offline, slot clear). Parity `--coverage` now reports **0 unhandled dir=1**
+(70 handled), so the C2S surface is fully covered.
 
-**Change:** add a `NetPackagePlayerDisconnect` case in `game.zig` onData that
+**Why:** the parity coverage lists one unhandled dir=1 package:
+`NetPackagePlayerDisconnect` (PACKAGES.md). The client sends it when quitting;
+zdtd lets the LiteNet peer-death poll (game.zig:3437) clean the player up
+instead, which works but leaves the C2S surface one package short and delays
+cleanup until the transport notices.
+
+**Change:** ~~add a `NetPackagePlayerDisconnect` case in `game.zig` onData that
 takes the same removal path as the transport poll (slot teardown, player save,
 `EntityRemove` broadcast). Accept it only for the sender's own peer; drop it for
-any other id. Then update the PACKAGES.md header via the parity tooling.
+any other id. Then update the PACKAGES.md header via the parity tooling~~
+**DONE**.
 
 **Grounding:** stock handler sits on the client quit path
 (`../7dtd-research/docs/inventories/netpackages.md`,

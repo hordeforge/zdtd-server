@@ -65,6 +65,9 @@ observable, on the live stock client:
   `markClaimsForEntity` tracks owner online state; block repair takes the lower
   wire damage as the new absolute (repair heals instead of weakening). Claim
   persistence, the client lpBlocks overlay and the stability plane remain open.
+- **C2S (T10):** `NetPackagePlayerDisconnect` handled on the quit path (own
+  entity only, immediate save + slot teardown). Parity coverage is now **0
+  unhandled dir=1** (70 handled in game.zig). 775 total.
 - **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 
@@ -115,7 +118,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Static plugins + P3 ECS | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; plugins are Wasm-only per ADR 0020, no runtime wired (WORK_PLAN T9) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
-| C2S package coverage | **PASS 32/33** | parity tool: 1 unhandled dir=1 (`NetPackagePlayerDisconnect`, covered by the LiteNet transport-disconnect path, game.zig:3437; explicit handler = WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
+| C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (70 handled in game.zig; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical

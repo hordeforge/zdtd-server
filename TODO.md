@@ -58,6 +58,8 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
       expire offline (`LandClaimExpiryDays`), owner online tracked, block repair
       takes the lower wire damage as new absolute. Stability/collapse remains
       open (large subsystem; client-side collapse already desyncs).
+- [x] **C2S (T10)**: `NetPackagePlayerDisconnect` handled on the quit path (own
+      entity only, immediate save + slot teardown); parity 0 unhandled dir=1.
 - [x] **Docs**: [GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and
       [WORK_PLAN.md](docs/WORK_PLAN.md); review prompts moved to `docs/prompts/`
       with `*-review.md` names so the review-loop tool discovers them.

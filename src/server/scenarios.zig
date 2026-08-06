@@ -198,6 +198,33 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_disconnect");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_disconnect", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.clients[c.slot].joined);
+    var fbuf: [64]u8 = undefined;
+    var body: [4]u8 = undefined;
+    // A foreign entity id is dropped: the slot stays joined.
+    std.mem.writeInt(i32, body[0..4], c.entity_id + 999, .little);
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackagePlayerDisconnect", &body));
+    try std.testing.expect(g.clients[c.slot].joined);
+    // The sender's own id frees the slot immediately (transport poll fallback
+    // would wait up to peer_stale_ms).
+    std.mem.writeInt(i32, body[0..4], c.entity_id, .little);
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackagePlayerDisconnect", &body));
+    try std.testing.expect(!g.clients[c.slot].joined);
+}
+
 test "scenario SetBlock lower damage repairs instead of adding" {
     io_fs.mkdirPathSimple("worlds");
     io_fs.mkdirPathSimple("worlds/zdtd_sc_repair");

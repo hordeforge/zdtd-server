@@ -5600,6 +5600,19 @@ pub const Game = struct {
             self.players_dirty = true;
             return;
         }
+        if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect")) {
+            // Stock quit signal (extends PlayerData: entity id, netpackages.md).
+            // Take the same removal path as the transport peer-death poll, but
+            // immediately and after saving, so a quit is never lost to the
+            // autosave interval. Accept only the sender's own entity.
+            if (body.len >= 4) {
+                const eid = std.mem.readInt(i32, body[0..4], .little);
+                if (eid != c.entity_id) return;
+            }
+            self.savePlayers() catch |e| logPersistErr(self, "save players", e);
+            self.dropClientSlot(c.slot);
+            return;
+        }
         if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
             try self.handleAddRemoveBuff(c, body);
             return;
