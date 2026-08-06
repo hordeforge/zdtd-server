@@ -71,6 +71,7 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [zig-clone.md](zig-clone.md) | M0-M6 architecture derived from the RE |
+| [STATE_MACHINES.md](STATE_MACHINES.md) | All stateful lifecycles with diagrams (join, AI, quests, weather, plugins, peer) |
 | [ECS.md](ECS.md) | SoA simulation |
 | [SYSTEMS.md](SYSTEMS.md) | Systems overview |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
