@@ -12,6 +12,7 @@ const wire_frame = @import("../wire/frame.zig");
 const wire_binary = @import("../wire/binary.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
+const world_tts = @import("../world/tts.zig");
 const deco_mirror = @import("../world/deco_mirror.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
@@ -1221,6 +1222,11 @@ pub const Game = struct {
             self.npc.deinit();
             self.npc = nt;
         }
+        // Trader POIs on a stock map: spawn each POI's trader NPC at its
+        // IndexedBlockOffsets "Trader" cell so a player walking to a compound
+        // finds the trader, not an empty building (needs prefabs + entities +
+        // npc tables, hence after the loads above).
+        self.spawnPoiTraders();
         if (assets_painting.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
             self.painting.deinit();
             self.painting = pt;
@@ -1731,6 +1737,35 @@ pub const Game = struct {
         defer g.terrain_mu.unlock();
         const ch = g.world.getOrCreate(t.pos) catch return 61;
         return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
+    }
+
+    /// Spawn each trader POI's NPC at its IndexedBlockOffsets "Trader" cell.
+    /// The local cell is rotated by the prefab rotation and added to the
+    /// decoration origin (same mapping paintDecoration uses); the class comes
+    /// from ThemeTags ("traderBob" → npcTraderBob) with the per-trader
+    /// trader_info id and stock from npc.xml + traders.xml.
+    fn spawnPoiTraders(self: *Game) void {
+        const pf = if (self.world.prefabs) |*p| p else return;
+        for (pf.items) |d| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            const qd = pf.questData(d.name) orelse continue;
+            if (qd.trader_tag.len == 0) continue;
+            var cname_buf: [64]u8 = undefined;
+            // "traderBob" → "npcTraderBob".
+            const cname = std.fmt.bufPrint(&cname_buf, "npcTrader{s}", .{qd.trader_tag[6..]}) catch continue;
+            const def = self.entities.byName(cname) orelse continue;
+            const r = world_tts.rotateLocalXZ(qd.trader_x, qd.trader_z, d.size_x, d.size_z, d.rot);
+            const wx: f32 = @floatFromInt(d.x + r.x);
+            const wy: f32 = @floatFromInt(d.stampY() + qd.trader_y);
+            const wz: f32 = @floatFromInt(d.z + r.z);
+            const nid = self.sim.spawnTrader(cname, wx, wy, wz, self.npc.traderIdForClass(cname), self.trader_wallet_dukes) orelse continue;
+            if (self.sim.slotOfNetId(nid)) |s| {
+                self.sim.class_id[s].hash = def.hash;
+                self.sim.class_id[s].loot_list = def.loot_list;
+            }
+            self.fillTraderFromXml(nid);
+            std.debug.print("zdtd: POI trader {s} at ({d},{d},{d}) entity={d}\n", .{ d.name, wx, @as(i32, @intFromFloat(wy)), wz, nid });
+        }
     }
 
     /// ECS POI hook: prefab footprint covering world (x,z), or null outside
@@ -8535,6 +8570,33 @@ pub const Game = struct {
             n += 1;
         }
         if (n > 0) self.sim.trader_stock[s].n = @intCast(n);
+    }
+
+    test "trader POIs spawn their NPC classes on a stock map" {
+        const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+        const map = game_dir ++ "/Data/Worlds/Navezgane";
+        if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
+        io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_traders", 0, .{
+            .map_dir = map,
+            .game_dir = game_dir,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // Pad trader plus the five trader POIs (Jen/Bob/Hugh/Joel/Rekt), each
+        // carrying its own class hash and trader_info stock.
+        var n: usize = 0;
+        var saw_bob = false;
+        var si: ecs.Slot = 0;
+        while (si < ecs.max_entities) : (si += 1) {
+            if (!g.sim.alive[si] or !g.sim.mask[si].trader) continue;
+            n += 1;
+            if (g.sim.class_id[si].hash == packages.stock_entity.class_npc_trader_bob) saw_bob = true;
+        }
+        try std.testing.expect(n >= 6);
+        try std.testing.expect(saw_bob);
     }
 
     test "per-trader stock and hours come from trader_info + npc.xml" {

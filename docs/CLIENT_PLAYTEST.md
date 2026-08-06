@@ -643,6 +643,14 @@ registering rather than failing. That is tracked as W1 and W2 in
 The same loadgen workload ran against the stock V3.1.0 dedicated server and
 against zdtd, to compare the join/walk path on the real protocol.
 
+**Re-verified 2026-08-07 at HEAD** (trader per-info stock, quest-POI data and
+the per-trader wallet landed since): the same workload
+(`--join --count 2 --actions 20 --seed 4242`) joins both bots on zdtd
+(walks=23 each, 0 deaths, 0 respawns). The `NetPackageIdMapping` send still
+logs the known `WindowFull` under the bot reconnect flood and is non-fatal:
+the client falls back to its local blocks.xml ids and the join completes
+(GAP-tracked; retry pacing in `sendFramedReliable`).
+
 Workload: `7dtd-loadgen --join --count 2 --actions 20 --seed 4242`
 (`--mode wander`, 150 s timeout). Stock leg: stock dedi, Navezgane, EAC off,
 LiteNet port 26902. zdtd leg: flat default world, LiteNet port 27004.

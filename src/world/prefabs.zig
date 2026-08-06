@@ -6,6 +6,7 @@
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
+const xml_util = @import("../assets/xml_util.zig");
 const tts = @import("tts.zig");
 
 /// Quest-facing data from the prefab's `<name>.xml` (stock PrefabManager keeps
@@ -16,21 +17,38 @@ pub const QuestData = struct {
     tags: []const u8 = "",
     /// Stock DifficultyTier (1..6), 0 when absent.
     tier: u8 = 0,
+    /// Local cell of the prefab's trader NPC (`IndexedBlockOffsets` class
+    /// "Trader"), -1/0/-1 when the POI has no trader.
+    trader_x: i32 = -1,
+    trader_y: i32 = 0,
+    trader_z: i32 = -1,
+    /// ThemeTags trader identity ("traderBob" → npcTraderBob), "" when none.
+    trader_tag: []const u8 = "",
 };
 
-/// City parts (driveways, roads, sewer caps, ...) are never quest POIs.
+/// City parts (driveways, roads, sewer caps, ...) are the stock `part_*`
+/// naming: never quest POIs, skipped for painting and sleeper-volume budget,
+/// and given a flat pad and fallback size.
 pub fn isPart(name: []const u8) bool {
     return std.mem.startsWith(u8, name, "part_");
 }
 
-/// Read the `value="..."` attribute of a `<property name="X" value="Y"/>` tag
-/// whose name attribute contains `needle`. Returns a slice into `raw`.
-fn propertyValueAfter(raw: []const u8, needle: []const u8) ?[]const u8 {
-    const ni = std.mem.indexOf(u8, raw, needle) orelse return null;
-    const vi = std.mem.indexOfPos(u8, raw, ni, "value=\"") orelse return null;
+/// Local cell of the trader NPC from `IndexedBlockOffsets class="Trader"`:
+/// the first nested `name="N" value="x, y, z"`. Null when the POI has none.
+fn traderCellOf(content: []const u8) ?[3]i32 {
+    const ci = std.mem.indexOf(u8, content, "class=\"Trader\"") orelse return null;
+    const vi = std.mem.indexOfPos(u8, content, ci, "value=\"") orelse return null;
     const start = vi + 7;
-    const end = std.mem.indexOfScalarPos(u8, raw, start, '"') orelse return null;
-    return raw[start..end];
+    const end = std.mem.indexOfScalarPos(u8, content, start, '"') orelse return null;
+    var cell: [3]i32 = .{ 0, 0, 0 };
+    var it = std.mem.tokenizeScalar(u8, content[start..end], ',');
+    var n: usize = 0;
+    while (it.next()) |tok| : (n += 1) {
+        if (n >= 3) break;
+        cell[n] = std.fmt.parseInt(i32, std.mem.trim(u8, tok, " "), 10) catch return null;
+    }
+    if (n != 3) return null;
+    return cell;
 }
 
 /// Runtime block id for a stock block name (AssignIds space), null when the
@@ -87,6 +105,7 @@ pub const Index = struct {
         var qit = self.quest_cache.iterator();
         while (qit.next()) |e| {
             if (e.value_ptr.tags.len != 0) self.allocator.free(e.value_ptr.tags);
+            if (e.value_ptr.trader_tag.len != 0) self.allocator.free(e.value_ptr.trader_tag);
         }
         self.quest_cache.deinit();
         self.allocator.free(self.items);
@@ -122,7 +141,7 @@ pub const Index = struct {
             // sits on, which stays at ground level even when the prefab body is
             // stamped 30+ blocks below it (caves, mines, bunkers).
             const ground: u8 = @intCast(@min(255, @max(0, d.y)));
-            const is_part = std.mem.startsWith(u8, d.name, "part_");
+            const is_part = isPart(d.name);
             // Full POIs get a 1-block pad above listed ground; parts only flatten to ground.
             const target: u8 = if (is_part) ground else @intCast(@min(255, @as(u16, ground) + 1));
             var lz: i32 = 0;
@@ -258,16 +277,30 @@ pub const Index = struct {
             const raw = io_fs.readFileAll(self.allocator, path) catch null;
             if (raw) |content| {
                 defer self.allocator.free(content);
-                if (propertyValueAfter(content, "name=\"QuestTags\"")) |v| {
+                if (xml_util.propertyValue(content, "QuestTags")) |v| {
                     qd.tags = self.allocator.dupe(u8, v) catch "";
                 }
-                if (propertyValueAfter(content, "name=\"DifficultyTier\"")) |v| {
+                if (xml_util.propertyValue(content, "DifficultyTier")) |v| {
                     qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
+                }
+                // Trader POIs: the NPC's local cell lives in the
+                // IndexedBlockOffsets class "Trader" entry, the class identity
+                // in ThemeTags ("traderBob" → npcTraderBob).
+                if (traderCellOf(content)) |cell| {
+                    qd.trader_x = cell[0];
+                    qd.trader_y = cell[1];
+                    qd.trader_z = cell[2];
+                }
+                if (xml_util.propertyValue(content, "ThemeTags")) |v| {
+                    if (std.mem.startsWith(u8, v, "trader") and v.len > 6) {
+                        qd.trader_tag = self.allocator.dupe(u8, v) catch "";
+                    }
                 }
             }
         }
         self.quest_cache.put(name, qd) catch {
             if (qd.tags.len != 0) self.allocator.free(qd.tags);
+            if (qd.trader_tag.len != 0) self.allocator.free(qd.trader_tag);
             return null;
         };
         return self.quest_cache.get(name);
@@ -291,7 +324,7 @@ pub const Index = struct {
             if (b.x1 <= base_x or b.x0 >= base_x + 16 or b.z1 <= base_z or b.z0 >= base_z + 16) continue;
             const d = self.items[i];
             // Skip driveway/road parts: huge and low value for play; full POIs first.
-            if (std.mem.startsWith(u8, d.name, "part_")) continue;
+            if (isPart(d.name)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
             tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, set_block, ctx);
         }
@@ -311,7 +344,7 @@ pub const Index = struct {
             const b = self.boundsXZ(i);
             if (b.x1 <= base_x or b.x0 >= base_x + 16 or b.z1 <= base_z or b.z0 >= base_z + 16) continue;
             const d = self.items[i];
-            if (std.mem.startsWith(u8, d.name, "part_")) continue;
+            if (isPart(d.name)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
             const origin_y = d.stampY();
             for (tb.tile_entities) |te| {
@@ -535,7 +568,7 @@ fn fillSizesFromTts(idx: *Index) !void {
                 break;
             }
         }
-        if (!found and std.mem.startsWith(u8, d.name, "part_")) {
+        if (!found and isPart(d.name)) {
             sx = 4;
             sy = 2;
             sz = 4;
@@ -818,4 +851,25 @@ test "quest data and part filter from the stock install" {
     try std.testing.expect(isPart("part_driveway_01"));
     try std.testing.expect(!isPart("AAA_utility_waterworks"));
     try std.testing.expect(!isPart("house_old_01"));
+}
+
+test "trader POI data: cell and class tag from the stock install" {
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!fileExists(root ++ "/POIs/trader_bob.xml")) return error.SkipZigTest;
+    var idx = try parseXml(std.testing.allocator,
+        \\<prefabs><decoration type="model" name="trader_bob" position="0,0,0" rotation="2" /></prefabs>
+    , root);
+    defer idx.deinit();
+    const qd = idx.questData("trader_bob").?;
+    try std.testing.expectEqual(@as(i32, 37), qd.trader_x);
+    try std.testing.expectEqual(@as(i32, 2), qd.trader_y);
+    try std.testing.expectEqual(@as(i32, 24), qd.trader_z);
+    try std.testing.expectEqualStrings("traderBob", qd.trader_tag);
+    // Rotation maps the local cell to the world offset used at spawn.
+    const r = tts.rotateLocalXZ(qd.trader_x, qd.trader_z, 60, 60, 2);
+    try std.testing.expectEqual(@as(i32, 60 - 1 - 37), r.x);
+    // A non-trader POI has no trader cell.
+    const plain = idx.questData("part_5m_water_tower").?;
+    try std.testing.expectEqual(@as(i32, -1), plain.trader_x);
+    try std.testing.expect(plain.trader_tag.len == 0);
 }

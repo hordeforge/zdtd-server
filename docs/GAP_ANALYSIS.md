@@ -136,7 +136,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
-| [Traders](#5-traders) | 7 | 9 | 10 | 26 | Per-trader stock and hours from traders.xml `<trader_info>` + npc.xml; POI placement and restock open |
+| [Traders](#5-traders) | 8 | 10 | 8 | 26 | Per-trader stock, hours, wallet and POI placement land; TraderArea volumes and vending open |
 | [Blood moon](#6-blood-moon) | 4 | 15 | 8 | 27 | Horde runs dusk to dawn on the right night; BloodMoonDay re-send + FX polish open |
 | [POIs and prefabs](#7-pois-and-prefabs) | 12 | 14 | 6 | 32 | Ids, rotation and height now correct; part_* decorations and sleeper triggers remain |
 | [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
@@ -732,13 +732,18 @@ parsed, and quest offering is unwired.
 
 **6 WORKS · 9 PARTIAL · 11 MISSING**
 
-- **Trader placement in POIs** `MISSING`
-  `src/world/` has zero trader references. The only trader in the world is one
-  hardcoded `spawnTrader("Trader Jen", spawn.x+12, spawn.y, spawn.z+8)` at world
-  init. Navezgane ships five trader POIs; a player who walks to a compound finds
-  an empty building.
-  *Anchors:* `src/server/game.zig:1137`, `Data/Worlds/Navezgane/prefabs.xml`
-  (trader_jen/bob/hugh/joel/rekt)
+- **Trader placement in POIs** `WORKS`
+  Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
+  cell (rotated by the prefab rotation and added to the decoration origin,
+  same mapping as the block paint), with the class from ThemeTags
+  (`traderBob` → `npcTraderBob`), the per-trader trader_info id from npc.xml
+  and its own stock filled. All five Navezgane trader compounds spawn their
+  trader (scenario `trader POIs spawn their NPC classes on a stock map`).
+  Remaining: the TraderArea protect/teleport volumes and closed-door visuals
+  (the WorldAreas row).
+  *Anchors:* `src/server/game.zig` (`spawnPoiTraders`), `src/world/prefabs.zig`
+  (`QuestData.trader_*`), `Data/Prefabs/POIs/trader_bob.xml`
+  (`IndexedBlockOffsets class="Trader"`)
 
 - **Trader entity replicated to the stock client** `WORKS`
   Both ECD emitters (`sendStockEntitySpawns`, the replicate spawn-on-approach
