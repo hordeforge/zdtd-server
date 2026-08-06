@@ -51,9 +51,16 @@ pub fn build(b: *std.Build) void {
     });
     wireApmOptions(root_mod, build_opts, tracy_cpp);
 
+    // Wasm plugin runtime (ADR 0020, zwasm v2). Anything linking it needs
+    // .use_llvm = true: Zig 0.16's self-hosted x86 backend fails on
+    // R_X86_64_PC64 (PLUGIN_API.md "Known constraint").
+    const zwasm_dep = b.dependency("zwasm", .{ .target = target, .optimize = optimize });
+    root_mod.addImport("zwasm", zwasm_dep.module("zwasm"));
+
     const exe = b.addExecutable(.{
         .name = "zdtd",
         .root_module = root_mod,
+        .use_llvm = true,
     });
     b.installArtifact(exe);
 
@@ -73,8 +80,10 @@ pub fn build(b: *std.Build) void {
         .strip = false,
     });
     wireApmOptions(test_mod, build_opts, tracy_cpp);
+    test_mod.addImport("zwasm", zwasm_dep.module("zwasm"));
     const unit_tests = b.addTest(.{
         .root_module = test_mod,
+        .use_llvm = true,
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
