@@ -47,6 +47,8 @@ observable, on the live stock client:
 - **Loot (T2):** containers roll their own `blocks.xml` LootList (gun safe
   `smallSafes`, chest `woodenChest`); zombie bags resolve the stock chain to
   `zPackReg` and drop only on `LootDropProb` (.04), so most kills drop nothing.
+  Storage blocks with no resolvable LootList stay empty on both initial fill
+  and the LootRespawnDays re-roll (fail closed, no invented `woodenChest`).
   Three new tests; 761 total.
 - **Items (T3):** absent `Stacknumber` defaults to stock's 500 and inherits
   through `Extends` (two-pass resolve); the "bag slot waste" residual is closed.
@@ -62,7 +64,12 @@ observable, on the live stock client:
   flow into the journal wire (TreasureChest/POIStayWithin kinds) so the join
   PDF no longer trips `ValidateSizeMarker`. The stock accept marker
   (`NPCQuestList RemoveQuest` with tier + index) is wired and the offer list
-  excludes active quests. Five new tests; 769 total.
+  excludes active quests. Goto-point quests without a static position
+  (stock `RandomPOIGoto` / `ClosestPOIGoto`) bind the nearest real POI at
+  accept; the NavObject marker, `PositionData` Location and the goto check all
+  use the bound POI center, so markers point somewhere reachable instead of an
+  invented spot. A stock `quests.xml` catalog skips the client-name prefix
+  gate (server and client read the same file). Five new tests; 769 total.
 - **Blood moon (T7):** the horde now runs stock `IsBloodMoonTime` — dusk on the
   blood-moon day through dawn of the next, crossing the midnight rollover — and
   `worldTimeBits` encodes `(day-1)*24000` so the client HUD day, BloodMoonDay
