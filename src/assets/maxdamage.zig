@@ -770,29 +770,26 @@ test "every placeable blocks.xml name resolves in the AssignIds dump" {
     // (cntChickenCoop) are placeable-looking rows with no client AssignIds entry.
     const no_id = [_][]const u8{ "cntChickenCoop", "terrFertileGrassExample" };
 
-    const raw = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    const file = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer std.testing.allocator.free(file);
+    const raw = xml.stripComments(std.testing.allocator, file) catch return error.SkipZigTest;
     defer std.testing.allocator.free(raw);
     var missing: usize = 0;
     var checked: usize = 0;
-    var lines = std.mem.splitScalar(u8, raw, '\n');
-    while (lines.next()) |raw_line| {
-        const line = std.mem.trim(u8, raw_line, " \t\r");
-        if (std.mem.startsWith(u8, line, "<!--")) continue;
-        if (std.mem.startsWith(u8, line, "<block name=")) {
-            // Shape groups declare `shapes="…"` on the same line and are a
-            // metadata shape list, not a placeable block id.
-            if (std.mem.indexOf(u8, line, "shapes=") != null) continue;
-            const name = line["<block name=\"".len..];
-            const end = std.mem.indexOf(u8, name, "\"") orelse continue;
-            const bname = name[0..end];
-            var skip = false;
-            for (no_id) |n| {
-                if (std.mem.eql(u8, bname, n)) skip = true;
-            }
-            if (skip) continue;
-            checked += 1;
-            if (t.idByName(bname) == null) missing += 1;
+    var i: usize = 0;
+    while (xml.nextElement(raw, i, "<block ", "</block>")) |el| {
+        i = el.next_i;
+        const name = xml.attr(raw, el.open_at, "name") orelse continue;
+        // Shape groups declare `shapes="…"` and are a metadata shape list,
+        // not a placeable block id.
+        if (xml.attr(raw, el.open_at, "shapes") != null) continue;
+        var skip = false;
+        for (no_id) |n| {
+            if (std.mem.eql(u8, name, n)) skip = true;
         }
+        if (skip) continue;
+        checked += 1;
+        if (t.idByName(name) == null) missing += 1;
     }
     try std.testing.expect(checked > 1000);
     try std.testing.expectEqual(@as(usize, 0), missing);

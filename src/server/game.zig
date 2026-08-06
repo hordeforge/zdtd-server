@@ -10417,7 +10417,9 @@ pub const Game = struct {
             }
             // Workstation burn/craft; dirty stations re-broadcast state.
             if (self.tick_n % self.sleeper_tick_ticks == 0) {
-                self.tickWorkstations(0.5) catch |err| {
+                // dt follows the configured cadence (0.05 s per tick) so burn
+                // speed stays wall-clock correct when sleeper_tick_ticks != 10.
+                self.tickWorkstations(@as(f32, @floatFromInt(self.sleeper_tick_ticks)) * 0.05) catch |err| {
                     self.harness.counters.inc(.net_send_errors);
                     std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
                 };

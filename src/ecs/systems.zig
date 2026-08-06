@@ -548,9 +548,12 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
         if (!s.active or s.completed or s.ready_turn_in) continue;
         const d = w.catalog.byId(s.def_id) orelse continue;
         // Goto target: the quest's bound POI center when one was placed on
-        // accept (audit B26), else the def marker position.
-        const gx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
-        const gz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
+        // accept (audit B26), else the def marker position. Only POI-goto
+        // kinds use the bound rect; a fetch_trader phase-1 "go to trader"
+        // target is the trader spot, never a covering prefab center.
+        const use_poi = d.kind == .goto_point and s.poi.valid();
+        const gx: f32 = if (use_poi) s.poi.x + s.poi.size_x * 0.5 else d.tx;
+        const gz: f32 = if (use_poi) s.poi.z + s.poi.size_z * 0.5 else d.tz;
         if (d.phases.len > 0) {
             const spec = currentPhaseSpec(d, s) orelse continue;
             if (spec.kind != .goto_point) continue;
@@ -728,7 +731,9 @@ pub fn traderRestock(w: *World) void {
         var stock = &w.trader_stock[i];
         if (stock.reset_interval < 0) continue;
         if (stock.reset_interval > 0) {
-            if (day < stock.last_restock_day + @as(u32, @intCast(stock.reset_interval))) continue;
+            // Wrapping-safe window test: day - last < interval, never a
+            // last + interval u32 add that could wrap in ReleaseFast.
+            if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) continue;
         }
         stock.last_restock_day = day;
         var e: usize = 0;
@@ -2652,6 +2657,39 @@ test "goto quest binds the nearest real POI instead of an invented spot" {
     questTickGoto(&w, 0, 120, 70, 220);
     try std.testing.expect(!questHasActive(&w, 0, 40));
     try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
+}
+
+test "fetch_trader goto target stays the def spot, not a covering POI center" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 41,
+        .kind = .fetch_trader,
+        .name = "ft",
+        .title = "FT",
+        .target_count = 1,
+        .reward_coin = 20,
+        .tx = 0,
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 2,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 41, .source = .builtin };
+    // testPoiRect covers (0,0)-(64,64), so accept binds it even for a
+    // fetch_trader (poiAt(d.tx, d.tz) runs for every kind).
+    w.poi_fn = &testPoiRect;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 41));
+    const s = questFindActive(&w, 0, 41).?;
+    try std.testing.expect(s.poi.valid());
+    // Standing at the POI center (32,32) must not advance phase 1: the "go to
+    // trader" target is the def spot, never a covering prefab center.
+    questTickGoto(&w, 0, 32, 70, 32);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    // The def spot advances phase 1 -> phase 2 (ready to turn in).
+    questTickGoto(&w, 0, 0, 70, 0);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expect(s.ready_turn_in);
 }
 
 const rally_phases = [_]quest.PhaseSpec{
