@@ -40,7 +40,7 @@ Join auto-accepts `catalog.starter_id`. Systems: `questAccept*`, `questOn*`.
 | RewardItem/LootItem | RewardIndex u8 **+** ItemStack (not index-only) |
 | `NetPackageNPCQuestList` | FetchList + `QuestPacketEntry` offers (not zdtd-native journal body) |
 | `NetPackageSharedQuest` | Share/remove; server accept-by-name + forward to target |
-| `NetPackageQuestObjectiveUpdate` | Stock treasure/block layout; legacy op kept for fixtures |
+| `NetPackageQuestObjectiveUpdate` | Stock treasure/block layout; legacy op kept for fixtures (builder in `wire/packages.zig`) |
 
 ## Traders (`trader_stock` component on trader entities)
 

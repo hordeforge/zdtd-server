@@ -75,6 +75,7 @@ Where the world and its data come from.
 | [SYSTEMS.md](SYSTEMS.md) | Systems overview |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |
+| [PLUGIN_DEV.md](PLUGIN_DEV.md) | Writing a plugin: hooks, limits, and building a .wasm from any language |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 

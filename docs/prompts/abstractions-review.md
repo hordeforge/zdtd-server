@@ -260,7 +260,7 @@ If you cannot name it without "Manager", "Helper", "Util2", "Base", rethink.
 
 | Layer | Good abstractions | Bad abstractions |
 |---|---|---|
-| `util/` | io_fs, parallel, owned_arena, clock | Game rules, package ids |
+| `util/` | io_fs, parallel, clock | Game rules, package ids |
 | `wire/` | binary Reader/Writer, stock_* builders, PackageIds | World mutation, XML |
 | `assets/` | XML tables, tryLoad, paths + overrides | Tick systems |
 | `ecs/` | components, systems fns, interest helpers | Sockets, raw FS |

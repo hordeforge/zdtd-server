@@ -2,7 +2,7 @@
 
 Direction: ToServer=client→server (server MUST handle), ToClient=server→client
 (server may send), Both=either. `handled` = a case in game.zig onData;
-**Totals:** 190 stock catalog rows; 33 ToServer (all handled: True); handled cases 69; S2C emitted 47.  
+**Totals:** 190 stock catalog rows; 33 ToServer (32 handled: NetPackagePlayerDisconnect unhandled); handled cases 69; S2C emitted 46.  
 **Join map:** `packages.default_mappings` has **189** names (runtime `package_maps=189`). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
 `sent` = zdtd emits it S2C. Regenerate with ../7dtd-research/tools/parity + this script.
 
@@ -137,9 +137,9 @@ and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 | NetPackagePersistentPlayerPositions | ToClient |  |  | `ReadInt32;SU.ReadVector3i;` |
 | NetPackagePersistentPlayerState | ToClient |  | sent | `ReadByte;PersistentPlayerData.Read;` |
 | NetPackagePickupBlock | ? |  |  | `SU.ReadVector3i;ReadUInt32;ReadInt32;` |
-| NetPackagePlayerData | ToServer | handled | sent | `` |
+| NetPackagePlayerData | ToServer | handled |  | `` |
 | NetPackagePlayerDenied | ToClient |  |  | `ReadInt32;ReadInt32;ReadInt64;ReadString;` |
-| NetPackagePlayerDisconnect | ToServer | handled |  | `` |
+| NetPackagePlayerDisconnect | ToServer |  |  | `` |
 | NetPackagePlayerEquipment | ? | handled |  | `NetPackageEntityTargeted.read;Equipment.Read;` |
 | NetPackagePlayerId | ToClient |  | sent | `ReadInt32;ReadInt16;ReadInt32;` |
 | NetPackagePlayerInventory | ToServer | handled |  | `ReadBoolean;ReadBoolean;Bag.Read;ReadBoolean;ReadInt32;ReadI` |
@@ -189,7 +189,7 @@ and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 | NetPackageVehicleCount | ? |  |  | `ReadInt32;ReadInt32;ReadInt32;` |
 | NetPackageVehicleDataSync | ? | handled |  | `ReadInt32;ReadInt32;ReadUInt16;ReadUInt16;get_BaseStream;SU.` |
 | NetPackageVehiclePositions | ? |  | sent | `ReadInt32;ReadInt32;SU.ReadVector3;` |
-| NetPackageVehicleSpawn | ? | handled | sent | `ReadInt32;SU.ReadVector3;SU.ReadVector3;ItemValue.Read;ReadI` |
+| NetPackageVehicleSpawn | ? | handled |  | `ReadInt32;SU.ReadVector3;SU.ReadVector3;ItemValue.Read;ReadI` |
 | NetPackageWallVolume | ToClient |  |  | `ReadInt32;WallVolume.Read;` |
 | NetPackageWallVolumeRemove | ToClient |  |  | `ReadInt32;` |
 | NetPackageWaterSet | ? |  |  | `ReadInt32;ReadUInt16;WaterSetInfo.Read;` |

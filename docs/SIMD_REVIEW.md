@@ -23,7 +23,7 @@
 | S01 | `layerIsUniformU8` in `writeDensityChannel` | `src/wire/stock_chunk.zig` |
 | S02 | `layerAnyNonAirU32`, `layerIsUniformU32`, `layerNeedsUpperU32`, `packLowerU8` | same |
 | S03 | `layerIsUniformU64`, `packTexturePlane` | same |
-| S04 | deferred (fillHeights still scalar `heightAt`; comment + single index loop) | `worldgen.zig` |
+| S04 | deferred (fillHeights still scalar `heightAt`; comment + single index loop) | `src/world/worldgen.zig` |
 
 Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane match scalar`, encode regression.
 
@@ -42,14 +42,14 @@ Tests: `simd layerIsUniform and anyNonAir`, `simd packLower and packTexturePlane
 
 | ID | Location | What | N / shape | Hot? | Fit | Sev | Notes |
 |---|---|---|---|---|---|---|---|
-| S01 | `wire/stock_chunk.zig` `writeDensityChannel` ~336-368 | Per cell density u8, 64 layers × 1024 cells | 64×1024 u8 | **Y** stream | **high** | **P1** | Contiguous fill of `dens[1024]`; often uniform early-out already helps |
-| S02 | `wire/stock_chunk.zig` `encodeNetworkChunk` block layer ~150-205 | any-air scan + lower/upper pack | 64×1024 u32 | **Y** stream | **high** | **P1** | `any` scan and uniform detect are pure maps; packing is byte extract |
-| S03 | `wire/stock_chunk.zig` `writeTextureChannel` ~375-414 | textureFull u64 per cell → 6 planes | 64×1024 u64 | **Y** stream | med-high | **P1** | Plane extract is shift+truncate; good SIMD; watch LE |
-| S04 | `world/worldgen.zig` `fillHeights` ~53-62 | 16×16 height from noise | 256 f32→u8 | proc stream | **high** | **P1** | Batch coords; **must** stay seed-bit-identical (see determinism) |
-| S05 | `world/worldgen.zig` `generateChunkBlocks` ~71-87 | column stamp into blocks[] | 256×H u32 | proc | med | **P2** | Inner y loop short; outer 256 columns; `@memset` already |
+| S01 | `wire/stock_chunk.zig` `writeDensityChannel` ~439-467 | Per cell density u8, 64 layers × 1024 cells | 64×1024 u8 | **Y** stream | **high** | **P1** | Contiguous fill of `dens[1024]`; often uniform early-out already helps |
+| S02 | `wire/stock_chunk.zig` `encodeNetworkChunk` block layer ~271-330 | any-air scan + lower/upper pack | 64×1024 u32 | **Y** stream | **high** | **P1** | `any` scan and uniform detect are pure maps; packing is byte extract |
+| S03 | `wire/stock_chunk.zig` `writeTextureChannel` ~469-503 | textureFull u64 per cell → 6 planes | 64×1024 u64 | **Y** stream | med-high | **P1** | Plane extract is shift+truncate; good SIMD; watch LE |
+| S04 | `world/worldgen.zig` `fillHeights` ~272-286 | 16×16 height from noise | 256 f32→u8 | proc stream | **high** | **P1** | Batch coords; **must** stay seed-bit-identical (see determinism) |
+| S05 | `world/worldgen.zig` `generateChunkBlocks` ~301-330 | column stamp into blocks[] | 256×H u32 | proc | med | **P2** | Inner y loop short; outer 256 columns; `@memset` already |
 | S06 | `world/noise.zig` `fbm2`/`ridged2` | octave sums | few octaves | via S04 | med | **P2** | Better to batch **cells** than SIMD inside one noise2 (branchy lattice) |
 | S07 | `world/noise.zig` `noise2`/`contrib2` | simplex contrib | 1 sample | via S04 | low alone | **P2** | SIMD as 4-8 independent (x,y) samples, not inside grad |
-| S08 | `ecs/systems.zig` `nearestPlayerSnap` ~52-70 | dx²+dz² min over players | P≪16 | tick AI | med | **P2** | Tiny P; SIMD only if many zombies × players matrix |
+| S08 | `ecs/systems.zig` `nearestPlayerSnap` ~79-99 | dx²+dz² min over players | P≪16 | tick AI | med | **P2** | Tiny P; SIMD only if many zombies × players matrix |
 | S09 | `ecs/systems.zig` despawn / quest range loops | dist_sq vs radius | max_entities | tick | med | **P2** | SoA x/z columns; mask alive first (bitset) |
 | S10 | `ecs/interest.zig` `observerMask` | entity cell vs all client cells | max_clients (64) | tick | med | **DONE** | `@Vector(64, i32)` compares reduced to one observer word; `observerMaskRef` is the scalar oracle |
 | S11 | `ecs/systems.zig` AI full tick | FSM + A* | entities | tick | **low** | **Reject** | Divergent branches; use `parallel.forRanges` only |

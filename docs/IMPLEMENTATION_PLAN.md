@@ -12,23 +12,23 @@ Milestones **M0–M6** (bot wire) and **core M7–M10 / M12–M15 first cuts** a
 **1.0 playable exit criteria are met** except the multiplayer scale gate (M11).
 
 ```text
-Post-playable (2026-07-23)
+Post-playable (2026-08-06)
 
 M7  Stock-client terrain stand          [DONE core]
 M8  Entity spawn + stats + damage       [DONE core / PARTIAL depth]
 M9  Inventory + items + blocks          [DONE core]
 M10 Persistence (columns + player v2)   [DONE]
 M11 Interest + scale (32–128 bots)      [PARTIAL]  ← primary open scale track
-M12 World depth (path, sleepers, loot)  [PARTIAL]  sleepers/loot HAVE; A* open
+M12 World depth (path, sleepers, loot)  [PARTIAL]  sleepers/loot/A* in; navmesh fidelity PARTIAL
 M13 Economy (quests/traders stock wire) [PARTIAL]  multi-phase + TraderData; obj types open
 M14 Vehicles / electricity placeables   [PARTIAL]  place+wire+gravity; fuel/actuation open
 M15 Content breadth + admin/ops         [PARTIAL]  admin TCP + serverconfig; Steam browser open
 M16 Hardening / multi-version / RWG     [OPEN]
 
 Next stack (not the old week-1 chunk RE):
-  1. Parity polish (deco/AssignIds, Weather, GameStats day, quest/EAI/power depth)
-  2. M11 serialize-once + pool + apm @ N bots
-  3. P4 authority spine (formalize existing C2S gates)
+  1. Traders/quests: trader NPC replication (WORK_PLAN T1); quest accept + template inheritance
+  2. Water; player-persistence depth; GameStats sandbox day sync
+  3. M11 128-bot loadgen gate (serialize-once + pool + P4.0 first cut shipped)
   4. Planet-scale M2+ only after M11 numbers (parked)
 ```
 
@@ -410,10 +410,10 @@ Historical week-1..12 chunk/inventory stack is **done** (see STATUS). Current or
 | Band | PRs |
 |---|---|
 | Now | See [WORK_PLAN.md](WORK_PLAN.md) for the current ranked tasks |
-| Next | M11.2 dirty + serialize-once; M11.4 persistent pool; O(1) NetId map; apm section budgets |
-| Then | M11.5 32-bot then 128-bot loadgen gate; power fuel/actuation; lock contention |
-| Later | P4 guard spine (policy + ledgers around existing gates); telnet surface; multi-version matrix |
-| Parked | PLANET_SCALE M2 gateway/shards; Encryption*; Steam browser; RWG |
+| Next | M11.5 32-bot then 128-bot loadgen gate; power fuel/actuation; lock contention |
+| Then | quest objective types + trader group rolls; workstation recipe validation; multi-version matrix |
+| Later | P4 guard spine beyond the first cut (policy + ledgers) |
+| Parked | PLANET_SCALE M2 gateway/shards; Encryption*; Steam browser / full telnet; RWG |
 
 If scale pain shows before fidelity, pull M11 ahead of quest/power depth.
 

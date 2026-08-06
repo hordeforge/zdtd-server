@@ -14,7 +14,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0007](0007-player-inventory-c2s-trust.md) | Player inventory C2S trust (interim) | accepted |
 | [0008](0008-serialize-once-interest.md) | Serialize-once interest fan-out | accepted |
 | [0009](0009-dynamic-package-ids.md) | Dynamic package name → id maps | accepted |
-| [0010](0010-data-config-zig-plugins.md) | Stock data + config + Zig systems; Wasm guest mods later | accepted |
+| [0010](0010-data-config-zig-plugins.md) | Stock data + config + Zig systems; Wasm guest mods later | accepted (plugin/dynlib part superseded by 0020) |
 | [0011](0011-custom-zch-world-overlay.md) | Custom ZCH world overlay (not stock region saves) | accepted |
 | [0012](0012-single-threaded-tick.md) | Single-threaded 20 TPS tick + bounded parallel helpers | accepted |
 | [0013](0013-clean-room-litenet.md) | Clean-room LiteNet stack (no stock LiteNetLib runtime) | accepted |

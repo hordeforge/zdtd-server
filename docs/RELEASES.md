@@ -16,8 +16,9 @@ zdtd uses Semantic Versioning for the operator-facing server contract:
   patch bump.
 - The Zig module facades under `src/*/root.zig` are development interfaces until
   1.0. Symbols described as proposed, experimental, or internal are not stable.
-  The static plugin host skeleton is shipped but experimental. There is no
-  supported out-of-tree plugin packaging or stable dynamic ABI yet.
+  The static plugin host skeleton is shipped but experimental (plugins are
+  Wasm-only per [ADR 0020](adr/0020-wasm-only-plugin-api.md)). There is no
+  supported out-of-tree plugin packaging or stable plugin ABI yet.
 
 The product version and stock wire version are separate. `src/version.zig`
 contains both. `build.zig.zon` repeats the product version because Zig package

@@ -44,7 +44,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `DayLightLength` | 18 | 1..23 | daylight window; dawn 04:00, dusk = 4 + value |
 | `MaxSpawnedZombies` | 64 | 1..2048 | server-wide alive-zombie cap (`Director.max_alive`) |
 | `MaxSpawnedAnimals` | 50 | 0..2048 | daytime wildlife cap + spawner (`Director.spawnAnimalsNearPlayers`) |
-| `ZombieMove` / `Night` / `Feral` / `BMMove` | 0/3/3/3 | 0..4 | zombie speed per day/night/feral/blood-moon → `World.zombie_speed_scale` |
+| `ZombieMove` / `ZombieMoveNight` / `ZombieFeralMove` / `ZombieBMMove` | 0/3/3/3 | 0..4 | zombie speed per day/night/feral/blood-moon → `World.zombie_speed_scale` |
 | `EnemyDifficulty` | 0 | 0..1 | 1 = feral (always feral speed) |
 | `LootAbundance` | 100 | 1..1000 | percent multiplier on rolled loot stack counts (`LootTable.scaleCount`) |
 | `XPMultiplier` | 100 | 1..1000 | scales server XP awarded per kill (`Game.awardXp`, `Client.xp`) |

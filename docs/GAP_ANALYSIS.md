@@ -161,11 +161,11 @@ area and the concrete work.
    way stock's `EntityStats::SendStatChangePacket` does (asm.il:199650). Until
    this lands, combat has no stakes and a "dead" player is a ghost who cannot
    fight back (`src/ecs/systems.zig:1280-1291`, `:1433-1447`,
-   `src/server/game.zig:4892`).
+   `src/server/game.zig:5527`).
 
 2. **Traders: replicate the trader entity, then deliver `TraderData`.**
    Un-filter `.trader` from `sendStockEntitySpawns` and the tick spawn path
-   (`src/server/game.zig:6477`, `:7830`), give `class_table[3]` a real
+   (`src/server/game.zig:7178`, `:8829`), give `class_table[3]` a real
    `npcTraderJen` hash, then wire `TraderData` onto `EntityCreationData`
    (`src/wire/stock_entity.zig:250` writes `false` unconditionally) and onto the
    channel-1 `LockResponse` context. Everything else in traders and most of
@@ -175,16 +175,16 @@ area and the concrete work.
    `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
    runtime `AssignIds` range; it is not. 203350 of 952260 painted cells (21.4%)
    over a 120-POI sample are the wrong block, live-confirmed on the client
-   (`src/world/prefabs.zig:118`, stock does it at `Prefab::loadIdMapping`,
+   (`src/world/prefabs.zig:222`, stock does it at `Prefab::loadIdMapping`,
    asm.il:928850).
 
 4. **DONE 2026-08-06.** POIs: rotation direction and `YOffset`.
    zdtd rotates +90*r where stock rotates -90*r, so rotations 1 and 3 are swapped
-   for 709 of 1559 decorations (`src/world/tts.zig:272` vs
+   for 709 of 1559 decorations (`src/world/tts.zig:310` vs
    `Prefab::offsetToCoordRotated` asm.il:915424). Separately, `paintDecoration`
    never reads the prefab `YOffset`, so 679 of 1487 POIs sit too high and every
    cave, mine, quarry and bunker is stamped at the surface
-   (`src/world/prefabs.zig:122`, stock at asm.il:902414).
+   (`src/world/prefabs.zig:222`, stock at asm.il:902414).
 
 5. **Loot: make containers and bags roll the right table.**
    Three linked fixes. (a) Carry the `blocks.xml` `LootList` value through
@@ -203,7 +203,7 @@ area and the concrete work.
    client's interest box gets `NetPackageEntityRemove(entityId, Unloaded)` sent to
    that one client and its `known_entities` bit dropped, the way stock's
    `NetEntityDistributionEntry::updatePlayerEntity` does (asm.il:801228-801276)
-   (`src/server/game.zig:7876-7900`).
+   (`src/server/game.zig:8871-8891`).
 
 7. **Items: default `Stacknumber` to 500 and resolve `Extends`.**
    `items.zig:424` defaults an absent `Stacknumber` to 1; stock's `ItemClass`
@@ -221,7 +221,7 @@ area and the concrete work.
    health, food, water, XP, level, skill points, perks, and equipment, key it on
    platform identity rather than login name, and call `savePlayers` from
    `dropClientSlot` and `reapStalePeers` so a disconnect does not discard up to
-   5 s (`src/server/game.zig:1745-1748`, `:5893-5898`, `:3495-3527`).
+   5 s (`src/server/game.zig:1910-1913`, `:6586-6588`, `:4081-4085`).
 
 10. **World: make land claims real.** There is no `removeClaim`, so a destroyed
     keystone leaves a permanent 41x41 no-edit zone; claims are never persisted;
@@ -667,7 +667,7 @@ warning.
   sent. Even if the filter allowed it, `class_table[3]` has `hash = 0`, so
   `buildEntitySpawnStock` would fall back to `class_zombie_default` and the client
   would render a zombie. Everything else in this area is downstream.
-  *Anchors:* `src/server/game.zig:6477`, `:7830`, `src/ecs/world.zig:174`,
+  *Anchors:* `src/server/game.zig:7178`, `:8829`, `src/ecs/world.zig:174`,
   `:606`, `Data/Config/entityclasses.xml:6775`
 
 - **TraderData carried in EntityCreationData** `MISSING`
@@ -1165,13 +1165,13 @@ can walk into every POI but none of them is the building TFP authored.
   `woodShapes:signLetter_period`; y69 id 1342 authored `cubeBaseboard` renders
   `cubeHalfLocalNorthFaceInside`. zdtd also pushes its own blocks NameIdMapping,
   so the client cannot correct it.
-  *Anchors:* `src/world/prefabs.zig:118`, `:137`, `src/world/tts.zig:348`,
-  `src/server/game.zig:5560`, `asm.il:928850-928971`
+  *Anchors:* `src/world/prefabs.zig:222`, `src/world/tts.zig:373`,
+  `src/server/game.zig:6207`, `asm.il:928850-928971`
 
 - **POI footprint / AABB placement** `WORKS`
   `boundsXZ` keeps position as the min corner and swaps size_x/size_z for
   rotations 1 and 3, identical to stock for all four rotations.
-  *Anchors:* `src/world/prefabs.zig:41`, `asm.il:921616-921637`,
+  *Anchors:* `src/world/prefabs.zig:66`, `asm.il:921616-921637`,
   `asm.il:944180-944243`
 
 - **Prefab rotation: block coordinate mapping** `WORKS` (2026-08-06)
@@ -1184,7 +1184,7 @@ can walk into every POI but none of them is the building TFP authored.
   (rot1 24/24, rot3 23/23); zdtd's map only 94/130, and only 6/24 and 6/23 for rot
   1 and 3. 709 of 1559 decorations use rotation 1 or 3, so front doors, garages
   and driveways of ~46% of POIs face away from their road.
-  *Anchors:* `src/world/tts.zig:272`, `asm.il:915424-915618`,
+  *Anchors:* `src/world/tts.zig:310`, `asm.il:915424-915618`,
   `asm.il:915620-915698`, `asm.il:921639-921684`, `asm.il:931080-931180`
 
 - **Prefab rotation: per-block facing** `PARTIAL` (step count fixed 2026-08-06)
@@ -1209,7 +1209,7 @@ can walk into every POI but none of them is the building TFP authored.
   the pad. The extremes are structural: canyon_mine -55, house_old_ranch_13 -44,
   cave_07 -33, cave_03 -32, bunker_00 -30, quarry_02 -30, ten caves at -25. Every
   cave, mine, quarry and bunker is stamped as a surface box with no entrance.
-  *Anchors:* `src/world/tts.zig:335`, `src/world/prefabs.zig:122`,
+  *Anchors:* `src/world/tts.zig:373`, `src/world/prefabs.zig:222`,
   `asm.il:902414-902420`, `asm.il:917079-917081`, `asm.il:914052`
 
 - **Terrain flatten under a POI footprint** `PARTIAL`
@@ -1219,13 +1219,13 @@ can walk into every POI but none of them is the building TFP authored.
   runs after `ensureBlocksWithStack`, so the terrain blocks are fine; only the
   heights plane is 2 blocks high, which makes teleports, respawns and
   heightWorld-based placement inside a POI land 2 blocks above the floor.
-  *Anchors:* `src/world/prefabs.zig:54`, `:66`, `src/world/store.zig:589`
+  *Anchors:* `src/world/prefabs.zig:79`, `src/world/store.zig:589`
 
 - **Painting part_* decorations** `MISSING`
   `applyTtsPaintToChunk` returns early for any `part_` name and `sleepers.zig`
   skips them too. Navezgane has 72: driveways, town signs for
   Gravestowne/Diersville/Perishton, and the Perishton pedestrian bridge.
-  *Anchors:* `src/world/prefabs.zig:136`, `src/world/sleepers.zig:217`
+  *Anchors:* `src/world/prefabs.zig:232`, `src/world/sleepers.zig:217`
 
 - **Multi-block / child blocks** `MISSING`
   `parseBlocks` zeroes every cell with the child bit 0x40000000 and nothing
@@ -1257,7 +1257,7 @@ can walk into every POI but none of them is the building TFP authored.
   degrees off stock for rot 1/3. Only the local position and type byte are used;
   the payload (authored contents, lock state, sign text, light colour) is dropped,
   so POI safes and lockers arrive empty and unlocked and POI signs blank.
-  *Anchors:* `src/world/prefabs.zig:143`, `:159`, `src/world/tts.zig:22`, `:228`
+  *Anchors:* `src/world/prefabs.zig:243`, `:261`, `src/world/tts.zig:22`, `:228`
 
 - **TileEntityType constants** `PARTIAL`
   `src/wire/te_types.zig` does not match the stock enum. Stock: Collector=3,
@@ -1319,7 +1319,7 @@ can walk into every POI but none of them is the building TFP authored.
   Returns the prefab AABB (correct and rotation-independent) but iterates all 1559
   decorations linearly per query and does not exclude `part_*`, so a driveway or a
   city sign can be returned as the POI a quest is anchored to.
-  *Anchors:* `src/server/game.zig:1291`, `src/world/prefabs.zig:41`
+  *Anchors:* `src/server/game.zig:1455`, `src/world/prefabs.zig:66`
 
 - **Sleeper volume parse** `WORKS`
   Parses the '#'-separated volume list and both `SleeperVolumeGroup` forms with
@@ -1374,7 +1374,7 @@ can walk into every POI but none of them is the building TFP authored.
   its per-y ids are exactly the `.tts` cells of abandoned_house_07 at zdtd's
   rotated local column, so the paint reaches the client cell for cell. Applies to
   the heightmap terrain source only.
-  *Anchors:* `src/world/store.zig:589`, `src/world/prefabs.zig:122`, `:404`,
+  *Anchors:* `src/world/store.zig:589`, `src/world/prefabs.zig:222`, `:404`,
   `output_log_client_zdtd_connect.txt:20533`
 
 - **Trader areas / teleport volumes from prefabs.xml** `MISSING`
@@ -1731,7 +1731,7 @@ gamestage, no wandering hordes, and no screamers.
   `NetEntityDistributionEntry::updatePlayerEntity`. An observer whose own entity
   slot cannot be resolved is skipped rather than treated as sitting in cell (0,0),
   which would evict its whole known set.
-  *Anchors:* `src/server/game.zig:7876-7900`, `src/wire/packages.zig:861-880`,
+  *Anchors:* `src/server/game.zig:8871-8891`, `src/wire/packages.zig:861-880`,
   `asm.il:801228-801276`, `asm.il:1227761`
 
 - **Corpse dwell time (TimeStayAfterDeath)** `MISSING`
@@ -1840,7 +1840,7 @@ unvalidated, and durability, mods and repair do not exist.
   and meta; nothing ever decrements or persists UseTimes. Tools never wear out and
   durability is dropped on save/restore.
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:299-300`,
-  `src/server/game.zig:1745-1748`
+  `src/server/game.zig:1910-1913`
 
 - **Item quality tier** `PARTIAL`
   quality rides the wire, the TE and players.zsv, and stack merges refuse to blend
@@ -2060,7 +2060,7 @@ unvalidated, and durability, mods and repair do not exist.
   read buffer, while the ECS inventory is 47 slots against the stock wire layout of
   10 + 45 + 12. UseTimes, mods, cosmetics and seed are not stored at all. Slots
   beyond bag index 32 and equipment index 5 are dropped on the C2S apply.
-  *Anchors:* `src/server/game.zig:1745-1748`, `:1929-1938`,
+  *Anchors:* `src/server/game.zig:1910-1913`, `:2094-2103`,
   `src/ecs/components.zig:200-220`, `src/wire/stock_inv.zig:627-681`
 
 - **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `MISSING`
@@ -2359,7 +2359,7 @@ skills or vitals survives a relog let alone a restart.
   corrupt read, patches the header count from what was actually written, and
   re-resolves quest POI rects on load. Saved on the periodic tick when dirty, on
   `saveworld`, and on shutdown. Covered by the persist restart scenario.
-  *Anchors:* `src/server/game.zig:1745-1864`, `:1885-1999`, `:8143-8146`,
+  *Anchors:* `src/server/game.zig:1910-2033`, `:2050-2164`, `:9176-9179`,
   `src/server/scenarios.zig:293-336`
 
 - **Progression persistence across restart or relog** `MISSING`
@@ -2369,7 +2369,7 @@ skills or vitals survives a relog let alone a restart.
   level 0, and the C2S PlayerData parser stops at the Equipment block so the
   client's own progressionsData is never even read. A player who levels to 20 and
   reconnects is level 1 with 0 XP and no perks, every time.
-  *Anchors:* `src/server/game.zig:1745-1748`, `:1808-1861`,
+  *Anchors:* `src/server/game.zig:1910-1913`, `:1916-2033`,
   `src/wire/packages.zig:530-533`, `:538-542`, `src/wire/stock_inv.zig:369-428`,
   `src/server/game.zig:337-338`
 
@@ -2383,7 +2383,7 @@ skills or vitals survives a relog let alone a restart.
   so no PlayerEntityStats block is sent. The reader can skip an incoming block but
   never applies it. Every relog resets you to 100/100/100 via `spawnPlayer`.
   *Anchors:* `src/wire/packages.zig:420`, `src/wire/stock_inv.zig:278-295`,
-  `src/ecs/world.zig:553-556`, `src/server/game.zig:1808-1861`
+  `src/ecs/world.zig:553-556`, `src/server/game.zig:1916-2033`
 
 - **progression.zig curve-only loader** `PARTIAL`
   `loadFromPath` calls `loadTableFromPath`, discards the result with `_ = t`
@@ -2490,7 +2490,7 @@ counter and land claims are each broken in specific, noticeable ways.
   are enumerated for storage. Every prefab whose name starts `part_` is skipped
   outright, so roads, driveways and every part-based decoration are absent. (Full
   detail in [section 7](#7-pois-and-prefabs).)
-  *Anchors:* `src/world/prefabs.zig:54-84`, `:122-140`, `:136`,
+  *Anchors:* `src/world/prefabs.zig:79-114`, `:222-242`, `:232`,
   `src/world/tts.zig:1-200`
 
 - **Player-placed block rotation / meta in the chunk plane** `PARTIAL`
@@ -2932,7 +2932,7 @@ persists so little that a restart visibly damages a built base.
   completes ConnectRequest, never echoes the challenge, and keeps answering Pings
   holds a Client slot indefinitely. With max_players 8 that is an 8-packet
   slot-exhaustion DoS.
-  *Anchors:* `src/server/game.zig:3495-3527`, `src/litenet/peer.zig:412-414`,
+  *Anchors:* `src/server/game.zig:4081-4113`, `src/litenet/peer.zig:412-414`,
   `src/server/zdtd_config.zig:429`, `asm.il:853692-853711`
 
 - **Connect rate limiting** `PARTIAL`
@@ -3045,8 +3045,8 @@ persists so little that a restart visibly damages a built base.
   through a 64-slot window shared with uncompressed chunk and ConfigFile traffic.
   The client falls back to its own `Block::AssignIds` ordering, which happens to
   match today only because zdtd loads the same blocks.xml.
-  *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:5560-5632`,
-  `:5638-5661`
+  *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:6207-6283`,
+  `:6285-6308`
 
 - **LiteNet Merged packet handling** `WORKS`
   Merged (property 12) is unwrapped into an extra mailbox with nesting refused at
@@ -3082,7 +3082,7 @@ persists so little that a restart visibly damages a built base.
   datagram of any kind. That is three missed pings on stock's 1 s ping interval,
   which is aggressive for real internet; a 3 s hiccup reaps the client slot and
   forces a full reconnect.
-  *Anchors:* `src/server/game.zig:3495-3527`, `src/server/zdtd_config.zig:429`
+  *Anchors:* `src/server/game.zig:4081-4113`, `src/server/zdtd_config.zig:429`
 
 - **Admin TCP console** `PARTIAL` (2026-08-06)
   The stock telnet protocol now ships: TelnetEnabled / TelnetPort /
@@ -3239,7 +3239,7 @@ persists so little that a restart visibly damages a built base.
   package with no handler) is ignored, so a clean quit is not even noticed. Up to
   one autosave interval (5 s) of movement, loot and quest progress is discarded on
   every disconnect and on every admin kick.
-  *Anchors:* `src/server/game.zig:5893-5898`, `:3495-3527`,
+  *Anchors:* `src/server/game.zig:6586-6591`, `:4081-4113`,
   `src/server/phase_gate.zig:32`
 
 - **Per-peer memory footprint** `PARTIAL`

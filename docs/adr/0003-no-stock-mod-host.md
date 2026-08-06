@@ -15,8 +15,8 @@ DLL, not a zdtd plugin.
 - zdtd **never** loads stock game assemblies, Harmony, or `Mods/` XML modlets
   as a Unity mod host.
 - Stock **content** (XML, maps, TTS) is loaded as data from operator `game-dir`.
-- Extension of *this* process, if any, is a **native** plugin API (ADR 0005),
-  not IModApi compatibility.
+- Extension of *this* process, if any, is a **native** plugin API ([ADR 0005](0005-native-plugin-api.md),
+  superseded by [0020](0020-wasm-only-plugin-api.md)), not IModApi compatibility.
 
 ## Consequences
 

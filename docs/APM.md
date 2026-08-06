@@ -180,7 +180,7 @@ guarantees it.
 - Only zone begin/end and the per-tick frame mark are mapped. No Tracy plots for
   apm counters, no lock zones, no memory-allocation tracking, no message,
   callstack, or GPU zones. Deliberate YAGNI, not oversights.
-- Zones exist only where an `apm.profiler.scope` already exists (the six
+- Zones exist only where an `apm.profiler.scope` already exists (the named
   `Section` tags). Work with no apm section (worldgen, chunk-encode internals,
   job-pool worker threads) shows up as unmarked time inside its parent zone.
   Adding a `Section` is the documented way to get a zone. Worker threads spawned

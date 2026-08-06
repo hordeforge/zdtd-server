@@ -241,19 +241,12 @@ does. Until a runtime is wired up there is no plugin story at all: the in-tree
 static host is test scaffolding and loads nothing user-supplied.
 
 **Change**
-1. Pick the runtime and record why in the ADR follow-up. Zig-native options exist,
-   which avoids a C dependency and the FFI boundary entirely (surveyed 2026-08-06):
-
-   | Runtime | Notes |
-   |---|---|
-   | [zwasm](https://github.com/clojurewasm/zwasm) | Spec-compliant, actively developed through 2026. `InstantiateOpts.fuel` yields `error.OutOfFuel` and `.max_memory_pages` caps linear memory, which is exactly the budget this design needs. Typed embedder API. Closest fit |
-   | [zware](https://github.com/malcolmstill/zware) | Established Zig runtime engine, built to embed in a Zig program. Check its metering story before committing |
-   | [bytebox](https://github.com/rdunnington/bytebox) | Standalone VM, alpha, tracks Zig 0.15.x to avoid master churn, so it needs a 0.16 port first |
-
-   Non-Zig engines (wasmtime C API, wasmer, wasm3) stay the fallback if none of
-   the above holds up; they cost a C dependency and an FFI boundary.
-   Judge on: does it run under Zig 0.16, does it meter fuel and memory without a
-   patch, and how it behaves on a module that loops.
+1. ~~Pick the runtime.~~ **Done 2026-08-06: zwasm v2 (2.4.1).** Zig-native, so no
+   C dependency and no FFI boundary; `minimum_zig_version` 0.16.0. Verified under
+   Zig 0.16 that a typed export call returns, `fuelRemaining()` reports the
+   budget, and `(loop br 0)` stops with `error.OutOfFuel`. Anything linking it
+   needs `.use_llvm = true`: Zig 0.16's self-hosted x86 backend fails on
+   `R_X86_64_PC64`. WASI is not used; the import table stays bare.
 2. Load `.wasm` modules named in config, instantiate once, register whichever of
    `on_enable`, `on_tick`, `on_player_join`, `on_shutdown` the module exports.
 3. Implement the host import table behind capability gates. Start minimal: log,

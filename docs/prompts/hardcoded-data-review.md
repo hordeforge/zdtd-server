@@ -674,8 +674,7 @@ Always produce:
 ### Bucket A fixes
 
 1. Extend `src/assets/<domain>.zig`; reuse `xml_util`, `paths.tryLoadConfig`
-   (honors `--config-overrides`), `util/io_fs` (`std.Io` only, no raw linux),
-   `owned_arena`.
+   (honors `--config-overrides`), `util/io_fs` (`std.Io` only, no raw linux).
 2. Resolve names through AssignIds / `idByName` / item tables on Game.
 3. Game.create tryLoad; log `source=stock_xml|builtin` counts.
 4. Delete hardcoded production tables; keep minimal builtin for tests only.

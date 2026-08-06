@@ -43,7 +43,7 @@ Surveyed surfaces (Mach `main` / 0.4 line):
 | **Op queue / single consumer** (graph idea) | World or interest mutations from workers: enqueue op, main tick drains |
 | **`schedule` as ordered fn list** | Document `tickAll` + plugin phase hooks as data; optional comptime validate list |
 | **Field/object dirty (`updated`)** | Per-entity or per-field dirty for serialize-once interest (manual mark API) |
-| **`dynLibOpen` style** | Future plugin `.so` load with clear “tried these names” errors |
+| **`dynLibOpen` style** | Plugin load errors (`.so` path dropped by [ADR 0020](0020-wasm-only-plugin-api.md)) |
 | **Friendly module boundary** | `src/plugin` and `src/guard` as modules with explicit exported systems list |
 
 ### Medium
@@ -68,7 +68,8 @@ Surveyed surfaces (Mach `main` / 0.4 line):
 ## Consequences
 
 - Small in-tree `util/mpsc.zig` (or equivalent) unblocks multi-thread edges without Mach.
-- Plugin API (ADR 0005) can use MPSC for `async_ok` hooks.
+- Plugin API ([ADR 0005](0005-native-plugin-api.md), superseded by [0020](0020-wasm-only-plugin-api.md))
+  can use MPSC for `async_ok` hooks.
 - No engine lock-in; copy code we understand under our license/tree.
 - Must not paste huge Mach modules blindly; port minimal subsets with tests.
 

@@ -32,7 +32,7 @@ the client.
 
 ---
 
-## 2. What we have today (baseline)
+## 2. Baseline before the split
 
 ### 2.1 Pieces
 
@@ -46,7 +46,7 @@ the client.
 | Server admin TCP | zdtd `--admin-port` | `give`, `tele`, `kill`, `inv`, `spawnentity`, … |
 | Unit / loadgen | zdtd + `7dtd-loadgen` | Fast gates |
 
-### 2.2 Current 11 steps (pw38 PASS)
+### 2.2 Former 11 steps (pw38 PASS, removed with the split)
 
 ```text
 spawned → look → move → inventory → ground → dig → stats → place
@@ -176,7 +176,7 @@ admin for clearer process ownership and no extra client network surface.
 
 ```bash
 # Suite selection (examples)
-ZDTD_PLAYTEST=1                         # legacy: smoke suite
+ZDTD_PLAYTEST=1                         # legacy: demo suite
 ZDTD_PLAYTEST_SUITE=smoke               # explicit
 ZDTD_PLAYTEST_SUITE=core,combat,craft   # multi
 ZDTD_PLAYTEST_TAGS=dig,place            # filter by tag
@@ -305,7 +305,7 @@ kill after damage).
 
 **Canonical live list:** sibling
 [`../../7dtd-playtest/SCENARIOS.md`](../../7dtd-playtest/SCENARIOS.md)
-(demo / benchmark / full catalog, ~30 live + ~50 deferred). Code:
+(demo / benchmark / full catalog, ~100 live cases). Code:
 `7dtd-playtest/Source/PlayTestMod/Catalog.cs`.
 
 Prioritize by playability value and current STATUS/TODO gaps.
@@ -607,7 +607,7 @@ make -C 7dtd-playtest playtest SUITE=core,combat,economy
 
 # Legacy-compatible
 ZDTD_PLAYTEST=1 7dtd-connect/scripts/restart_pair.sh /path/to/world
-# (after split: still works if playtest maps ZDTD_PLAYTEST=1 → suite smoke|core)
+# (after split: still works; playtest maps ZDTD_PLAYTEST=1 → suite demo)
 ```
 
 ---

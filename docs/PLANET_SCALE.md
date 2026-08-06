@@ -6,6 +6,10 @@ options and records the SpacetimeDB rejection). This doc is the concrete plan:
 what to build, in what order, on top of the components that already exist in
 this repo.
 
+**Status: parked.** Execution is gated on the M11 in-process interest work (see
+[STATUS.md](STATUS.md) / [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)); M1
+(DEM streamer) is done, M2+ are not started.
+
 ## Two axes, equal weight
 
 "Planet scale" is **two** independent scaling problems, and this doc gives them
@@ -39,7 +43,7 @@ its chunk-GO stream ring (meshable core after neighbor halo; STATUS/WIRE_CHUNK:
   fixedSizeCC=false needs CGO ≥ viewDist²−10, stream r≥6);
 even a maxed client at
 `viewDist` ~12 sees a 25x25 chunk ring. At `chunk_size = 16`
-(`world/store.zig:11`) that is a **~400m x 400m** window into a 40,000km
+(`world/store.zig:31`) that is a **~400m x 400m** window into a 40,000km
 circumference planet. The client never knows how the world is partitioned
 behind the socket. That gap is the whole opportunity: the server can shard the
 world arbitrarily and remap ids at the seam, and a client cannot tell.
@@ -48,11 +52,11 @@ Two hard limits in today's code define the shard sizing:
 
 - `max_entities = 512` (`ecs/entity.zig:3`), fixed-size SoA columns
   (`ecs/world.zig`). Systems scan `0..max_entities` every tick
-  (`ecs/interest.zig:30`, `ecs/world.zig`), so cost is O(capacity), not
+  (`ecs/systems.zig:1451`, `ecs/world.zig`), so cost is O(capacity), not
   O(alive). Raising the cap to hold 10k entities on one node linearly slows
   every tick. **Conclusion: bound entities per shard (~512..2048), scale out by
   adding shards, do not grow one array to 10k.**
-- `max_resident_chunks = 4096` (`world/store.zig:234`) with LRU eviction. That
+- `max_resident_chunks = 4096` (`world/store.zig:524`) with LRU eviction. That
   is the per-shard hot chunk working set, not the world.
 
 So a shard is sized by *load*, not by *area*: it owns however much contiguous

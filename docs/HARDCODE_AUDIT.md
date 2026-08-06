@@ -8,7 +8,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
-| **A** (stock data) | ~12 | 2 | ~6 | P0 deco version pin + terrain module pins residual |
+| **A** (stock data) | ~12 | 1 | ~6 | P0 deco version skew (A22) residual |
 | **B** (zdtd policy) | ~12 | 0 | ~2 | Stream/authority/feature via `zdtd.toml` + InitOptions; residual open consts (locks, AI bands, caps) |
 | **OK** | 22+ | - | - | Wire / RE / physics / offline pins |
 
@@ -52,7 +52,7 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A02 | place path / `itemToBlock` | P1 | **Fixed** | Production resolved; offline pin gated |
 | A03 | inv stacks | P1 | **Fixed** | ItemTable via stack_fn |
 | A04 | armor id 11 | P1 | **Fixed** | name prefix |
-| A05 | `world/store.zig` `block_*` pins | P0 | **Open** | Module aliases still comptime pins; used by flat gen + tests. Safe while dump matches pin version; full resolve-at-init deferred |
+| A05 | `world/store.zig` `block_*` pins | P0 | **Fixed** | `World.terrain_ids` + `resolveTerrainIds` after AssignIds merge; module pins remain offline/test defaults; `isSolidWorld` uses live ids |
 | A06 | IdCtx terr* fallback | P1 | **Fixed** | Dump non-empty → no pin |
 | A07 | biome_layers defaults | P1 | Open P2 | Pre-XML defaults; XML path resolves |
 | A08 | stock_deco pins | P0 | **Fixed** | Live deco send resolves ids via biomes.xml + idByName (fail closed); module pins are offline/test labels |
@@ -68,10 +68,8 @@ Date: 2026-08-04 (re-audit + P0/P1 fixes). Method:
 | A18 | stock_chunk pins | P2 | Open | |
 | A19 | trader_wallet 5000 | P2 | Open → B | |
 | A20 | quest reward_coin | P2 | Open | |
-| A21 | director / gamestages | P2 | Open | |
-| A22 | deco version skew | P0 | **Partial** | Server now dictates block ids with a full `blocks` NameIdMapping before the config files, so a client cannot compute a different id for a name we ship. Still partial: names only the client has fall through to `assignLeftOverBlocks`, and the mapping has had no live V3.1.x run. Kill switches `[feature] block_id_mapping` and `deco_trees`; see archive/DECO_NRE.md gap 2 |
 | A21 | director / gamestages | P2 | **Partial** | gamestages.xml loaded; scout tier, blood-moon stage, sleeper groups and loot prob bands are data driven. Biome/quest/POI-tier stage inputs still zero (GAP_ANALYSIS P3 gamestage list) |
-| A22 | deco version skew | P0 | **Partial** | Fail closed on missing *name* + `[feature] deco_trees` kill switch. Cannot detect a client that computed a different id for the same name (no `blocks` NameIdMapping sent): see archive/DECO_NRE.md gap 2 |
+| A22 | deco version skew | P0 | **Partial** | Server now dictates block ids with a full `blocks` NameIdMapping before the config files, so a client cannot compute a different id for a name we ship. Still partial: names only the client has fall through to `assignLeftOverBlocks`, and the mapping has had no live V3.1.x run. Kill switches `[feature] block_id_mapping` and `deco_trees`; see archive/DECO_NRE.md gap 2 |
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
 | A24 | NONE loaders | P2 | Open | When feature lands |
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |
@@ -107,7 +105,7 @@ CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
 ```
 
 Parsed today: `[stream]`, `[authority]`, `[feature]`, `[perf]`. Keys under `[sim]`, `[net]`,
-`[ai]`, `[caps]`, `[apm]` in the draft below are residual (unknown-key warn if present).
+`[ai]`, `[caps]` in the draft below are residual (unknown-key warn if present).
 
 ```toml
 [stream]
@@ -155,9 +153,10 @@ max_peers = 64
 max_workers = 8
 min_parallel_items = 24
 
-[apm]
-dump_every_s = 0
-path = ""
+[perf]
+async_chunk_flush = false
+terrain_snapshot = false
+job_batches = false
 
 [feature]
 deco_trees = false

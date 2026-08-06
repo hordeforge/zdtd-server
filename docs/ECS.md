@@ -17,9 +17,12 @@ src/ecs/
   observers.zig    on_spawn / on_death listeners (cap 4)
   sim_view.zig     narrow inv/transform mut surface
   res.zig          Res/ResMut resource accessors
+  snapshot.zig     deterministic sim census/director bytes for tests
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
+  inv_ledger.zig   P4 inv cause ledger (fixed ring, no heap)
   path.zig         greedy path helper (no navmesh yet)
+  poi_lock.zig     quest POI lockout table (locked until unlock grace)
   quest.zig        Catalog resource types (defs from stock XML or builtin)
   buff.zig         buff stack/duration/expiry rules over the BuffSet component
   electric.zig     PowerGrid resource
@@ -68,13 +71,6 @@ trader_stock                     // traders (inventory on the entity)
 6. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
 7. `systemDespawnFar`: cull far zombies  
 8. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
-1. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
-2. `systemZombieAi`: multi-threaded over slots; deferred player damage  
-3. `systemVehicles`: seated-rider transform stick  
-4. Power: resolve stays in `Game.step` (daylight); not doubled here  
-5. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
-6. `systemDespawnFar`: cull far zombies  
-7. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 `vehicleAttach` / `vehicleControl` / `vehicleDetach`.

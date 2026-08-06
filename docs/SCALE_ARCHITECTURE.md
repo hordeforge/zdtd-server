@@ -9,6 +9,10 @@
 > **[PLANET_SCALE.md](PLANET_SCALE.md)**. SpacetimeDB below is one rejected
 > substrate option among that analysis, not the whole story.
 
+**Status: parked.** Research substrate only; the build plan waits on the M11
+in-process interest work (see [STATUS.md](STATUS.md) /
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)).
+
 ## Goals
 
 - 1:1 Earth voxel world (~510M km²) streamed from real DEM data

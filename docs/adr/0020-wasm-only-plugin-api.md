@@ -75,6 +75,11 @@ runtime, not the plugin, decides what memory and which host calls exist.
 
 ## Follow-up
 
-Runtime selection, the host function list, the capability set and the fuel
-policy are specified in [PLUGIN_API.md](../PLUGIN_API.md) and tracked as a task
-in [WORK_PLAN.md](../WORK_PLAN.md).
+Runtime selection is closed: **zwasm v2**, verified under Zig 0.16 on
+2026-08-06, including that a module which loops forever is stopped with
+`error.OutOfFuel`. WASI is not used. Both are recorded with their evidence in
+[PLUGIN_API.md](../PLUGIN_API.md).
+
+Still open, and tracked as [WORK_PLAN.md](../WORK_PLAN.md) T9: the host function
+list, the capability set, the zdtd fuel and memory defaults, and the loader
+itself. Plugin authors write against [PLUGIN_DEV.md](../PLUGIN_DEV.md).

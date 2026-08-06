@@ -1,7 +1,13 @@
 # ADR 0010: Stock data, config, Zig systems (no VM in core)
 
-- **Status:** accepted
+- **Status:** accepted (plugin / dynlib paragraphs superseded by [0020](0020-wasm-only-plugin-api.md), 2026-08-06)
 - **Date:** 2026-08-04
+
+> Partial supersede: the plugin rows in Layer 3 and the "Wasm modding API"
+> section below were written for native plugins first (ADR 0005). ADR 0020 makes
+> Wasm the only plugin format, so the native-static-first ordering and the
+> optional dynlib steps are obsolete. Layers 1-2 (stock data, server policy) and
+> the "no script VM in core" rule stand unchanged.
 
 ## Context
 

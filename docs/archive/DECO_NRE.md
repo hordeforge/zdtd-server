@@ -70,9 +70,11 @@ is `Block.list[rawData & 0xFFFF]` (asm.il 140325); the slot may be null, and:
    `ArgumentNullException`.
 
 Both abort the client's world-load coroutine and leave the player stuck loading,
-which is strictly worse than a bald world. Hence `Game.decoTreeIds` resolves
-`treeOakSml01` / `treeDeadTree02` through runtime `maxdamage.idByName` and returns
-null (→ empty firstPackage, log once) if either name is missing or resolves to 0.
+which is strictly worse than a bald world. Hence species are resolved before
+send: `assets/biome_layers.zig` keeps only `<decorations>` rows whose block name
+resolves through runtime `maxdamage.idByName` and carries `IsDistantDecoration`,
+and `Game.sendDecoAroundSpawn` falls back to the empty firstPackage (log once)
+when no species resolve.
 
 ## State is forced to 0
 

@@ -27,7 +27,8 @@ TE contents, damage, phase gates, and land claim remain server-authoritative.
 ## Consequences
 
 - Join/play bugs are fixed in zdtd, not client mods (workspace rule 10).
-- Plugin hooks (ADR 0005) observe or vote on requests; they do not bypass
+- Plugin hooks ([ADR 0005](0005-native-plugin-api.md), superseded by [0020](0020-wasm-only-plugin-api.md))
+  observe or vote on requests; they do not bypass
   validation or write raw wire without builders.
 - Aligns with native guard work (TODO P4).
 - Do not assume inventory C2S is fully hardened; read ADR 0007 before changing

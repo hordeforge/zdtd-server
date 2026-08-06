@@ -44,7 +44,7 @@ crosses.
 - **Data crosses as flat bytes** in the guest's linear memory. The host copies in
   and copies out. No host pointer is ever handed to a guest, so a guest cannot
   reach the sim except through the calls it was given.
-- **Authority is unchanged from ADR 0005:** a plugin may deny or adjust a request
+- **Authority is unchanged from ADR 0005, carried into [ADR 0020](adr/0020-wasm-only-plugin-api.md):** a plugin may deny or adjust a request
   the core already understands. It may not inject package bytes, invent wire
   types or skip the join state machine.
 
@@ -58,25 +58,48 @@ Exhausting either ends the call, disables that plugin, and logs which hook and
 which module. A plugin that loops forever costs one tick's budget, not the
 server. Budgets are per hook and configurable, with a documented default.
 
-## Open decisions
+## Runtime: zwasm v2 (decided 2026-08-06)
 
-These are decided when the work starts, and are the reason no runtime is wired
-up yet:
+zdtd embeds [zwasm](https://github.com/clojurewasm/zwasm) v2 (2.4.1), a
+WebAssembly runtime written in Zig, so the server takes no C dependency and no
+FFI boundary. Its `minimum_zig_version` is 0.16.0, matching this tree.
+
+The budgets this design requires come from the runtime rather than being bolted
+on:
+
+```zig
+pub const Budget = union(enum) { unmetered, limited: u64 };
+pub const InstantiateOpts = struct {
+    fuel:             Budget = .{ .limited = 1_000_000_000 },
+    max_memory_pages: Budget = .{ .limited = 4096 },
+};
+```
+
+Host imports are registered through its `Linker` (`defineFunc`, `defineFuncCtx`),
+and every host function receives a `*Caller` first, from which the importing
+instance's linear memory is reachable. That is exactly the bare, capability-gated
+import table this design wants.
+
+**Verified 2026-08-06** against zwasm 2.4.1 under Zig 0.16, not assumed from the
+documentation: a typed export call returns the right value, `fuelRemaining()`
+reports the budget, and a module compiled from `(loop br 0)` stops with
+`error.OutOfFuel` rather than hanging the caller.
+
+**WASI: not used.** The import table is deliberately small so it can be audited.
+A module importing `wasi_snapshot_preview1` will fail to instantiate.
+
+**Known constraint:** linking zwasm with Zig 0.16's self-hosted x86 backend fails
+with `unhandled relocation type R_X86_64_PC64`, so any artifact linking it needs
+`.use_llvm = true`. This is a backend limitation that applies to zwasm's own
+build too, not a defect in zwasm.
+
+### Still open
 
 | Decision | Notes |
 |---|---|
-| Runtime | An embeddable engine (wasm3, wasmtime C API, wasmer) versus a Zig interpreter. Trades startup, speed, dependency weight and sandbox maturity |
-| WASI or bare | A bare import table is smaller to audit; WASI brings a familiar toolchain story but a much larger surface |
-| Capability list | The security review surface; start minimal (log, read sim views, queue SimCommand) and add on evidence |
-| Memory and fuel defaults | Must be low enough to bound a bad plugin and high enough for a real one |
-
-Hot path: null hooks are a null check only; sample has no `on_tick`.
-
-Shipped v1 vtable hooks (`src/plugin/api.zig`): `on_enable(Host)`,
-`on_tick(Host)` (late in `step`, after sim/replicate),
-`on_player_join(Host, peer_slot: u16, entity_id: i32)` (first join only),
-`on_shutdown(Host)`. Everything else in this doc (SimView/PeerView, hook
-catalog, SimCommand, priorities) is **target design**, not implemented.
+| Capability list | The security review surface; start minimal (log, read-only sim views, queue a `SimCommand`) and add on evidence, since every addition is permanent |
+| Memory and fuel defaults | zwasm's defaults are already finite; pick zdtd's from a real plugin's measured cost per tick once one exists |
+| Interpreter or JIT | zwasm's interpreter is the hardened default; JIT is a later question and only with evidence that a plugin needs it |
 
 ## Goals
 
@@ -265,17 +288,11 @@ Plugins are compiled in and registered at runtime via `PluginHost.register`
 (`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
 InitOption, not a build option. Public facade: `src/plugin/root.zig`.
 
-### v2 Dynamic (optional)
+### v2 (optional): Wasm runtime
 
-```text
-extern fn zdtd_plugin_abi_version() u32;
-extern fn zdtd_plugin_init(host: *const HostVTable) callconv(.c) i32;
-extern fn zdtd_plugin_shutdown() void;
-```
-
-- HostVTable function pointers only; no Zig type layout across boundary  
-- Load from `plugins/*.so` path in config  
-- Disable on ABI mismatch  
+No native plugin ABI and no `.so` loading ([ADR 0020](adr/0020-wasm-only-plugin-api.md)).
+A plugin ships as a `.wasm` module; the runtime, host import table and fuel
+accounting are not implemented and tracked by WORK_PLAN T9.
 
 ## Safety and abuse
 
@@ -290,7 +307,7 @@ extern fn zdtd_plugin_shutdown() void;
 - Scenario: plugin denies setblock; expects no world change + optional chat  
 - Loadgen: plugins disabled or noop still 20 TPS budget (apm section `plugin`)
 
-## Implementation order (TODO P5)
+## Implementation order (TODO P4 guard seams; Wasm runtime: WORK_PLAN T9)
 
 1. `plugin/api.zig` types + null registry  
 2. Wire 3 hooks: login deny, setblock, admin command  
