@@ -9,7 +9,7 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
-| **A** (stock data) | ~12 | 1 | 2 | A22 residual (P0); A12 vehicle fallback + **A29 trader pricing** (P1); A20 dukes fixed |
+| **A** (stock data) | ~12 | 0 | 1 | A22 deco skew fixed; A12 vehicle fallback (P1) + **A29 trader pricing** fixed; A20 dukes fixed |
 | **B** (zdtd policy) | ~14 | 0 | 1 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, `% N` throttles (B13), caps, new quest heuristics (B25-B26) |
 | **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
@@ -51,7 +51,7 @@ Count drifts; see [STATUS.md](STATUS.md).
 | A03 | `maxStackFor` uses `World.stack_fn` → `ItemTable.stackFor`; builtin only when id missing. |
 | A04 | Armor via name prefix `armor*` (`isArmorOffline` + `is_armor_fn`); not bare `item_id == 11`. |
 | A06 | Biome IdCtx: comptime assignids pins only when `id_by_name.count() == 0`. |
-| A08/A22 | Deco species come from biomes.xml `<decorations>` resolved through `maxdamage.idByName` + `IsDistantDecoration`; an unresolvable row is dropped and an empty table falls back to the empty firstPackage. Ids are negotiated with a `blocks` NameIdMapping (`[feature] block_id_mapping`). Pins remain in `stock_deco` for offline labels only. |
+| A08/A22 | Deco species come from biomes.xml `<decorations>` resolved through `maxdamage.idByName` + `IsDistantDecoration`; an unresolvable row is dropped and an empty table falls back to the empty firstPackage. Ids are negotiated with a `blocks` NameIdMapping (`[feature] block_id_mapping`); coverage guard test asserts every placeable blocks.xml name (shape groups and the no-id rows excluded) resolves in the bundled dump, so client `assignLeftOverBlocks` never sees server data. Pins remain in `stock_deco` for offline labels only. |
 | A09 | `maxDamageForBlock`: drop deco pin HP table when maxdamage loaded; generic 100 / offline bands offline only. |
 | A15 | game-dir + still-builtin **warn** for loot, entitygroups, blocks, quests (plus existing items/recipes/entities). |
 | A17 | `ecsIdFromItemName` 6/7 aliases only when `items.source == .builtin`. |
@@ -102,7 +102,7 @@ A20 stay fixed, A22 stays partial. Litenet constants and the dual-stack
 | A19 | trader_wallet 5000 | P2 | **Fixed → B** | `default_trader_wallet_dukes` const → Game field from `[sim] trader_wallet_dukes`; ECD spawn / LockResponse / snapshot all read `self.trader_wallet_dukes` |
 | A20 | quest reward_coin | P2 | **Fixed** | `reward_coin` now sums `<reward type="Item" id="casinoCoin" value="N">` from the quest body (stock has no Coin reward type); fail closed to 0 when absent. Fixture starter quest carries a casinoCoin reward so the scenario asserts the sum path |
 | A21 | director / gamestages | P2 | **Partial** | gamestages.xml loaded; scout tier, blood-moon stage, sleeper groups and loot prob bands are data driven. Biome/quest/POI-tier stage inputs still zero (GAP_ANALYSIS P3 gamestage list) |
-| A22 | deco version skew | P0 | **Partial** | Server now dictates block ids with a full `blocks` NameIdMapping before the config files, so a client cannot compute a different id for a name we ship. Still partial: names only the client has fall through to `assignLeftOverBlocks`, and the mapping has had no live V3.1.x run. Kill switches `[feature] block_id_mapping` and `deco_trees`; see archive/DECO_NRE.md gap 2 |
+| A22 | deco version skew | P0 | **Fixed** | Server dictates block ids with a full `blocks` NameIdMapping (24808 rows) before the config files, so a client cannot compute a different id for a name we ship. Coverage guard test: every placeable blocks.xml name (excluding `shapes=` shape groups and the no-id rows `cntChickenCoop`/`terrFertileGrassExample`) resolves in the bundled dump, so server data never trips client `assignLeftOverBlocks`. Remaining: live V3.1.x client run (ops). Kill switches `[feature] block_id_mapping` and `deco_trees`; see archive/DECO_NRE.md gap 2 |
 | A23 | defaultGameDir Steam | P1 | **Fixed** | |
 | A24 | NONE loaders | P2 | Open | When feature lands |
 | A25–A28 | sleeper 5 / weather / power | OK | OK | |

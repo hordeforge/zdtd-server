@@ -754,6 +754,50 @@ test "stock blocks.xml deco facts when present" {
     try std.testing.expectEqual(Dim{ .x = 1, .y = 7, .z = 1 }, t.multiBlockDim("treeOakSml01"));
 }
 
+test "every placeable blocks.xml name resolves in the AssignIds dump" {
+    // A22 regression guard: the negotiated `blocks` NameIdMapping is only
+    // sound if every block name zdtd could send has an id, so a client never
+    // falls through to assignLeftOverBlocks for server data. Skip rows that
+    // stock itself never assigns an id: shape groups (shapes="All") and
+    // non-placeable blocks (CreativeMode None / player crafting collector).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    if (t.idNameCount() == 0) return error.SkipZigTest;
+
+    // CreativeMode=None (terrFertileGrassExample) and player-crafted collectors
+    // (cntChickenCoop) are placeable-looking rows with no client AssignIds entry.
+    const no_id = [_][]const u8{ "cntChickenCoop", "terrFertileGrassExample" };
+
+    const raw = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer std.testing.allocator.free(raw);
+    var missing: usize = 0;
+    var checked: usize = 0;
+    var lines = std.mem.splitScalar(u8, raw, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (std.mem.startsWith(u8, line, "<!--")) continue;
+        if (std.mem.startsWith(u8, line, "<block name=")) {
+            // Shape groups declare `shapes="…"` on the same line and are a
+            // metadata shape list, not a placeable block id.
+            if (std.mem.indexOf(u8, line, "shapes=") != null) continue;
+            const name = line["<block name=\"".len..];
+            const end = std.mem.indexOf(u8, name, "\"") orelse continue;
+            const bname = name[0..end];
+            var skip = false;
+            for (no_id) |n| {
+                if (std.mem.eql(u8, bname, n)) skip = true;
+            }
+            if (skip) continue;
+            checked += 1;
+            if (t.idByName(bname) == null) missing += 1;
+        }
+    }
+    try std.testing.expect(checked > 1000);
+    try std.testing.expectEqual(@as(usize, 0), missing);
+}
+
 test "AssignIds rows are walkable for id negotiation" {
     var t = Table.empty();
     defer t.deinit();
