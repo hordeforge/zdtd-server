@@ -27,7 +27,6 @@ wins**. Refresh inventory docs when closing work.
 | [PACKAGES.md](PACKAGES.md) | Full 190-package catalog |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff + C2S coverage tooling |
 | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
-| [PLAYTEST_V310_20260803.md](PLAYTEST_V310_20260803.md) | V3.1.0 playtest run log |
 | [WIRE_CHUNK.md](WIRE_CHUNK.md) | Chunk wire path |
 | [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) | Workstation TE wire |
 | [INVENTORY.md](INVENTORY.md) | Inventory wire |
@@ -64,13 +63,12 @@ wins**. Refresh inventory docs when closing work.
 
 | Doc | Role |
 |---|---|
-| [PROMPTS/audit-hardcoded-data.md](PROMPTS/audit-hardcoded-data.md) | Stock XML vs zdtd config hardcode audit |
-| [PROMPTS/review-zig-idiomatic.md](PROMPTS/review-zig-idiomatic.md) | Zig 0.16 idioms, comptime, hot-path no-alloc, std.Io, Zig Zen |
-| [PROMPTS/review-abstractions.md](PROMPTS/review-abstractions.md) | When to build/keep/delete abstractions; layer fit; YAGNI scorecard |
-| [PROMPTS/review-simd.md](PROMPTS/review-simd.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
-| [PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md) | ECS ownership vs world/session; SoA columns; systems vs stranded game.zig |
+| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | Stock XML vs zdtd config hardcode audit |
+| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | Zig 0.16 idioms, comptime, hot-path no-alloc, std.Io, Zig Zen |
+| [prompts/abstractions-review.md](prompts/abstractions-review.md) | When to build/keep/delete abstractions; layer fit; YAGNI scorecard |
+| [prompts/simd-review.md](prompts/simd-review.md) | SIMD/`@Vector` candidates on dense hot loops; golden vs scalar |
+| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | ECS ownership vs world/session; SoA columns; systems vs stranded game.zig |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http + thin posix residuals |
-| [DECO_NRE.md](DECO_NRE.md) | DecoManager.Read NRE block; RE plan before re-enabling trees |
 
 ## Scale (parked until M11)
 
@@ -97,3 +95,24 @@ M11 interest/scale     PARTIAL (open 1.0 scale gate)
 M12–M15 depth/ops      PARTIAL (honest gaps in MISSING)
 M16 / planet M2+       OPEN / parked
 ```
+
+## Archive
+
+Point-in-time reports. Kept for the evidence they carry, not maintained.
+
+| Doc | Role |
+|---|---|
+| [archive/DECO_NRE.md](archive/DECO_NRE.md) | DecoManager.Read NRE investigation, RESOLVED |
+| [archive/PLAYTEST_V310_20260803.md](archive/PLAYTEST_V310_20260803.md) | V3.1.0 stock-client playtest run log, 2026-08-03 |
+
+## Review prompts
+
+Discovered by the review-loop tool as project prompts (`*-review.md`).
+
+| Prompt | Focus |
+|---|---|
+| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | Zig 0.16 idiom, comptime, hot-path allocation |
+| [prompts/abstractions-review.md](prompts/abstractions-review.md) | Whether each abstraction earns its keep |
+| [prompts/simd-review.md](prompts/simd-review.md) | SIMD candidates on dense loops |
+| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | ECS ownership and SoA discipline |
+| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | Stock XML vs zdtd config vs hardcoded values |

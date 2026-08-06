@@ -3299,7 +3299,7 @@ client-visible blood-moon behaviour is IL-derived.
 - **Items, crafting and loot:** the client log for that session contains no chest
   open, no craft, no workstation and no TileEntity or exception lines at all, so
   nothing in that area has live stock-client evidence from it. The only live
-  datapoints are `docs/PLAYTEST_V310_20260803.md:53` (craft queue does not
+  datapoints are `docs/archive/PLAYTEST_V310_20260803.md:53` (craft queue does not
   consume) and `:71` (bag slot waste), which line up with the stack-default and
   instant-craft findings. `docs/WIRE_WORKSTATION.md:174` itself states there has
   been no live-client workstation playtest, so the workstation **WORKS** rows rest

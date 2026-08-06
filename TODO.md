@@ -50,7 +50,7 @@ independent; do W3 first if `make check` flakiness is costing time.
 
 Infrastructure and authority surface already in tree (do not re-open as gaps):
 
-- [x] **Review follow-ups**: STATUS/TODO hygiene; eat near-max soft so Food S2C rises; double PlayerSpawned on join; `evidence` ring + admin dump; flood counters; [DECO_NRE.md](docs/DECO_NRE.md)
+- [x] **Review follow-ups**: STATUS/TODO hygiene; eat near-max soft so Food S2C rises; double PlayerSpawned on join; `evidence` ring + admin dump; flood counters; [DECO_NRE.md](docs/archive/DECO_NRE.md)
 - [x] **WebUI HTTP** WU0–WU2 (`server/webui.zig`): dashboard, `/api/apm.json`, POST `/api/cmd`, CSRF, cookie login
 - [x] **`util/tcp_listen`**: std.Io.net listen for admin / GSI / webui (no raw linux accept loops in callers)
 - [x] **`phase_gate.zig`**: per-package connecting|joined|playing matrix + `phase_rejects`
@@ -78,7 +78,7 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ### Residual playtest fails (demo, 2026-08-04d) - product depth
 
-Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/PLAYTEST_V310_20260803.md](docs/PLAYTEST_V310_20260803.md).
+Latest: `server/logs/playtest_zdtd_demo_20260804h.log` · report [docs/archive/PLAYTEST_V310_20260803.md](docs/archive/PLAYTEST_V310_20260803.md).
 Score: **pass=83 fail=0** (20260804q). CGO PASS. Strict eat stackDrop + Food ≥+5 (04q 50.0→55.1; full +15 open). generator_fuel = Power TE present (not fuel SoC).
 
 | Case | Symptom | Likely owner |
@@ -98,7 +98,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Parity polish (client-visible)
 
-- [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
+- [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/archive/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
@@ -150,7 +150,7 @@ Design: [adr/0010-data-config-zig-plugins.md](docs/adr/0010-data-config-zig-plug
 - [x] Hardcode A05: `World.terrain_ids` resolved via idByName at init (pins remain offline defaults)
 - [x] `zdtd.toml` loader (`src/server/zdtd_config.zig`) stream/authority/feature + `zdtd.toml.example` + GAME_OPTIONS
 - [x] Hardcode A10–A12 / B13 (class AI floors, vehicle held drive, named tick periods)
-- [x] Hardcode A08: deco trees ship in the join `DecoUpdate` burst; ids via `Game.decoTreeIds` (`idByName`, fail closed to empty firstPackage), `[feature] deco_trees` kill switch, per-chunk deco path deleted (client nulls `loadedDecos` after `OnWorldLoaded`). A22 residual open: no `blocks` NameIdMapping, so id skew on a modded/other-version client is undetectable. Not stock density/biome species; server does not mirror the client deco writeback; needs a live-client playtest. See [DECO_NRE.md](docs/DECO_NRE.md)
+- [x] Hardcode A08: deco trees ship in the join `DecoUpdate` burst; ids via `Game.decoTreeIds` (`idByName`, fail closed to empty firstPackage), `[feature] deco_trees` kill switch, per-chunk deco path deleted (client nulls `loadedDecos` after `OnWorldLoaded`). A22 residual open: no `blocks` NameIdMapping, so id skew on a modded/other-version client is undetectable. Not stock density/biome species; server does not mirror the client deco writeback; needs a live-client playtest. See [DECO_NRE.md](docs/archive/DECO_NRE.md)
 - [x] Native static plugin host skeleton (ADR 0005) + `sample_hello` (`src/plugin/`; no dynlib/Wasm)
 - [x] Gamemode = config pack + static plugin flag (`modes/default.toml` + `mode.zig`; `--mode` / `[mode] name`; sample_plugin only)
 - Wasm / dynlib: see **Parked / rejected** above (not open near-term checkboxes).

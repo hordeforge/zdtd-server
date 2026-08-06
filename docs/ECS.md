@@ -32,7 +32,7 @@ src/util/parallel.zig   range-split thread helper
 ## Review
 
 Agent scorecard for "is this state ECS SoA, a resource, world/*, or session?":
-[PROMPTS/review-ecs-soa.md](PROMPTS/review-ecs-soa.md).
+[prompts/ecs-soa-review.md](prompts/ecs-soa-review.md).
 
 ## Model
 

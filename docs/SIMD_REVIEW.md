@@ -5,7 +5,7 @@
 | Date | 2026-08-04 |
 | Zig | 0.16 |
 | Mode | Review + **P1 kernels shipped** in `stock_chunk.zig` |
-| Prompt | [`PROMPTS/review-simd.md`](PROMPTS/review-simd.md) |
+| Prompt | [`prompts/simd-review.md`](prompts/simd-review.md) |
 
 ## Executive summary
 

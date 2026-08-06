@@ -21,7 +21,7 @@ ADR 0003 (not a stock mod host). Native plugins (ADR 0005) already define the
 extension direction.
 
 Related: [HARDCODE_AUDIT.md](../HARDCODE_AUDIT.md),
-[PROMPTS/audit-hardcoded-data.md](../PROMPTS/audit-hardcoded-data.md),
+[prompts/hardcoded-data-review.md](../prompts/hardcoded-data-review.md),
 [PLUGIN_API.md](../PLUGIN_API.md), [ASSETS.md](../ASSETS.md),
 [GAME_OPTIONS.md](../GAME_OPTIONS.md).
 
