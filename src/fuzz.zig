@@ -19,6 +19,7 @@ const serverinfo = @import("server/serverinfo_tcp.zig");
 const xml_util = @import("assets/xml_util.zig");
 const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
+const biome_layers = @import("assets/biome_layers.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 const water = @import("world/water.zig");
@@ -643,6 +644,61 @@ fn fuzzXmlPatch(_: void, smith: *std.testing.Smith) !void {
     if (std.mem.eql(u8, target, "blocks.xml") and patch.len == 0) {
         try std.testing.expectEqualStrings(base, out);
     }
+}
+
+const weather_xml_corpus = [_][]const u8{
+    "",
+    "<weather/>",
+    \\<weather name="default" prob="83" duration="6">
+    \\  <Temperature range="76,80"/>
+    \\  <CloudThickness range="0,0" prob="35"/>
+    \\  <CloudThickness range="10,70" prob="65"/>
+    \\</weather>
+    \\<weather name="storm" prob="0" duration="1.1" delay="26,36">
+    \\  <Wind range="40,40"/>
+    \\</weather>
+    ,
+    // unclosed group / prefix collision / junk numbers / oversize name
+    "<weather name=\"storm\"",
+    "<weathermap name=\"x\"></weathermap>",
+    "<weather prob=\"nan\" duration=\"-1\" delay=\"inf,nan\"><Fog min=\"nan\" max=\"1e40\"/></weather>",
+    "<weather name=\"" ++ ("s" ** 80) ++ "\"><Wind range=\",\"/></weather>",
+    "<weather/>" ** 40,
+};
+
+test "fuzz biomes.xml weather group parser" {
+    try std.testing.fuzz({}, fuzzWeatherGroups, .{ .corpus = &weather_xml_corpus });
+}
+
+fn fuzzWeatherGroups(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const set = biome_layers.parseWeatherGroups(storage[0..len]);
+    try std.testing.expect(set.n <= biome_layers.max_weather_groups);
+    var total: f32 = 0;
+    var i: usize = 0;
+    while (i < set.n) : (i += 1) {
+        const g = &set.groups[i];
+        // Every number the scheduler reads has to be finite and orderable: a NaN
+        // probability would make the cumulative group walk pick nothing forever.
+        try std.testing.expect(std.math.isFinite(g.prob) and g.prob >= 0);
+        try std.testing.expect(g.duration >= 0);
+        try std.testing.expect(g.delay_lo >= 0 and g.delay_hi >= 0);
+        try std.testing.expect(g.name().len <= biome_layers.max_weather_name);
+        total += g.prob;
+        var pt: usize = 0;
+        while (pt < biome_layers.prob_type_count) : (pt += 1) {
+            const ranges = g.rangeSlice(pt);
+            try std.testing.expect(ranges.len <= biome_layers.max_weather_ranges);
+            for (ranges) |r| {
+                try std.testing.expect(std.math.isFinite(r.lo) and std.math.isFinite(r.hi));
+                try std.testing.expect(std.math.isFinite(r.weight) and r.weight >= 0);
+            }
+        }
+    }
+    // Normalization can only shrink the mass below 1 (prob /= total + 1e-6).
+    try std.testing.expect(total <= 1.001);
 }
 
 const quest_xml_corpus = [_][]const u8{

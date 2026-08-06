@@ -725,7 +725,9 @@ Do not plan these as product features of zdtd:
 
 ### P1: Depth the client still notices
 1. Deco: trees ship in the join burst (idByName + kill switch). Remaining: `blocks` NameIdMapping so ids can be negotiated instead of trusted, biome-driven density, mirroring deco into the server world store, and a live-client playtest.  
-2. Weather storm/bloodMoon group SM (defaults from biomes.xml on join+WorldTime throttle shipped).  
+2. Weather storm/bloodMoon group SM: SHIPPED (`src/world/weather.zig`). Remaining:
+   persist storm state across restart (stock `WeatherManager::Save`/`Load`), and
+   `ForceWeather` / `SetStorm` admin commands.  
 3. Path A* (or better than greedy) + more EAI task types.  
 4. Quest objective-type coverage (Craft/StayWithin wired; Rally/UnlockPOI still auto).  
 5. Power: full trigger TE wire (first-cut shipped: gate pulse + player step; Switch/TE ClientTriggerData still open).  

@@ -35,6 +35,7 @@ const assets_progression = @import("../assets/progression.zig");
 const assets_vehicles = @import("../assets/vehicles.zig");
 const assets_storage_pairs = @import("../assets/storage_pairs.zig");
 const biomes_mod = @import("../world/biomes.zig");
+const world_weather = @import("../world/weather.zig");
 const terrain_snapshot = @import("../world/terrain_snapshot.zig");
 const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
@@ -914,6 +915,17 @@ pub const Game = struct {
             var id_ctx: IdCtx = .{ .t = &self.maxdamage };
             if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bl| {
                 self.world.biome_layers_table = bl;
+                // Weather groups must come from the same effective biomes.xml we
+                // serve, since groupIndex is a document ordinal in that file.
+                // Frequency and countdown divisor read the very GameStats values
+                // the client is told, so server sim and client display agree.
+                const gs_defaults: packages.GameStatsValues = .{};
+                self.world.weather.initFrom(&self.world.biome_layers_table, .{
+                    .seed = opts.worldgen_seed orelse util_sim.default_seed,
+                    .day_night_length = opts.day_night_length,
+                    .storm_frequency = @as(f32, @floatFromInt(gs_defaults.storm_freq)) / 100.0,
+                    .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
+                });
                 const burnt = bl.stackFor(9);
                 std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d}\n", .{
                     bl.default_stack.n,
@@ -7529,6 +7541,13 @@ pub const Game = struct {
             if (self.tick_n % 20 == 0) {
                 const tb = try packages.buildWorldTimeBody(self.body_buf[0..16], r.world_time);
                 try self.broadcast("NetPackageWorldTime", tb);
+                // Storm scheduling is driven by world time, so it advances even
+                // while shedding; only the broadcast below is deferrable.
+                self.world.weather.tick(
+                    &self.world.biome_layers_table,
+                    @intCast(@min(r.world_time, std.math.maxInt(i64))),
+                    self.sim.director.bloodmoon_active,
+                );
                 // Weather is cosmetic and safe to defer under load; WorldTime is not
                 // (clients drive day/night and blood-moon state off it).
                 if (!self.loadShedding()) try self.broadcastWeather();
@@ -7609,38 +7628,38 @@ pub const Game = struct {
         return false;
     }
 
-    /// Build NetPackageWeather from biomes.xml default groups (omit if none loaded).
-    fn buildWeatherBodyFromBiomes(self: *Game) ?[]const u8 {
+    /// Build NetPackageWeather from the live weather state machine (omit if none).
+    pub fn buildWeatherBodyFromBiomes(self: *Game) ?[]const u8 {
         const bl = &self.world.biome_layers_table;
+        const wm = &self.world.weather;
         // Stock client InitPackages sizes from biomeWeather.Count (Navezgane / stock
         // biomes with weather groups → 5). Wire has no count prefix, so body length
         // must be exactly Count * 23 (3 u8 + 5 f32).
         const stock_count: usize = 5;
         var wb: [assets_biome_layers.max_weather_biomes]packages.WeatherBiome = undefined;
         var n: usize = 0;
-        if (bl.weather_n > 0) {
-            var defs: [assets_biome_layers.max_weather_biomes]assets_biome_layers.WeatherDefaults = undefined;
-            n = bl.weatherPackages(&defs);
-            var i: usize = 0;
-            while (i < n) : (i += 1) {
-                wb[i] = .{
-                    .biome_id = defs[i].biome_id,
-                    .group_index = 0,
-                    .remaining_seconds = 0,
-                    .params = defs[i].params,
-                };
-            }
+        while (n < wm.n) : (n += 1) {
+            const st = &wm.states[n];
+            wb[n] = .{
+                .biome_id = st.biome_id,
+                .group_index = st.group_index,
+                .group_count = world_weather.Manager.groupsFor(bl, st).n,
+                .remaining_seconds = st.remaining_seconds,
+                .params = st.params,
+            };
         }
         // Pad or trim to stock_count so content_len matches client expected size.
         if (n == 0) {
-            // Fallback mild defaults (pine-ish) for biomap ids 1..5.
+            // No biomes.xml: mild pine-ish defaults on the raw 0..100 XML scale,
+            // group 0 so an unmodded client still resolves a real group.
             var i: usize = 0;
             while (i < stock_count) : (i += 1) {
                 wb[i] = .{
                     .biome_id = @intCast(i + 1),
                     .group_index = 0,
+                    .group_count = 1,
                     .remaining_seconds = 0,
-                    .params = .{ 70, 0, 0.2, 0.1, 0.05 },
+                    .params = .{ 70, 0, 20, 10, 5 },
                 };
             }
             n = stock_count;

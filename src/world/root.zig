@@ -17,6 +17,7 @@ pub const sleepers = @import("sleepers.zig");
 pub const tts = @import("tts.zig");
 pub const water = @import("water.zig");
 pub const biomes = @import("biomes.zig");
+pub const weather = @import("weather.zig");
 pub const worldgen = @import("worldgen.zig");
 pub const noise = @import("noise.zig");
 
@@ -33,6 +34,7 @@ test {
     _ = tts;
     _ = water;
     _ = biomes;
+    _ = weather;
     _ = worldgen;
     _ = noise;
 }

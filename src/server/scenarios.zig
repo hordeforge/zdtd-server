@@ -9,6 +9,7 @@ const world_store = @import("../world/store.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
 const io_fs = @import("../util/io_fs.zig");
+const biome_layers = @import("../assets/biome_layers.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPathSimple("worlds");
@@ -844,6 +845,101 @@ test "scenario aidirector night spawn" {
     std.debug.print(
         "PASS aidirector: night horde spawned={d} zombies_now={d} world_time={d}\n",
         .{ r.spawned, g.sim.countKind(.zombie), r.world_time },
+    );
+}
+
+test "scenario weather storm cycle and blood moon override" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_weather");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_weather", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    // Two biomes with different group counts, so a group index is only ever valid
+    // against its own biome (stock desert has no "fog" group either).
+    var table: biome_layers.Table = .{};
+    table.weather_ids[0] = 3;
+    table.weather_groups[0] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="83" duration="6"><CloudThickness range="0,20"/></weather>
+        \\<weather name="fog" prob="7"><Fog range="17,27"/></weather>
+        \\<weather name="stormbuild" prob="0" duration=".2"><Wind range="25,25"/></weather>
+        \\<weather name="storm" prob="0" duration="1.1" delay="26,36"><Wind range="40,40"/></weather>
+        \\<weather name="bloodMoon" prob="0"><Wind range="15,20"/></weather>
+    );
+    table.weather_ids[1] = 5;
+    table.weather_groups[1] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="90" duration="5"><CloudThickness range="0,10"/></weather>
+        \\<weather name="stormbuild" prob="0" duration=".59"><Wind range="9,9"/></weather>
+        \\<weather name="storm" prob="0" duration="1.3" delay="28,36"><Wind range="12,12"/></weather>
+        \\<weather name="bloodMoon" prob="0"><Wind range="4,4"/></weather>
+    );
+    table.weather_n = 2;
+    table.loaded = true;
+    g.world.biome_layers_table = table;
+    g.world.weather.initFrom(&g.world.biome_layers_table, .{ .seed = 20240101 });
+
+    const pine = &g.world.biome_layers_table.weather_groups[0];
+    const build_idx = pine.findIndex("stormbuild").?;
+    const storm_idx = pine.findIndex("storm").?;
+    var saw_build = false;
+    var saw_storm = false;
+    var saw_clear_after_storm = false;
+    var build_countdown_fell = false;
+    var prev_state: u8 = 0;
+    var prev_remaining: u8 = 0;
+    // Four in-game days of world ticks (day * 24000 + hour * 1000).
+    var world_time: i64 = 0;
+    while (world_time <= 96_000) : (world_time += 50) {
+        g.world.weather.tick(&g.world.biome_layers_table, world_time, false);
+        const st = g.world.weather.states[0];
+        // The wire body is always exactly 5 entries of 23 bytes, group index in
+        // range for its biome, whatever the machine is doing.
+        const body = g.buildWeatherBodyFromBiomes() orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(usize, 115), body.len);
+        try std.testing.expectEqual(st.biome_id, body[0]);
+        try std.testing.expect(body[1] < pine.n);
+        try std.testing.expectEqual(st.group_index, body[1]);
+        switch (st.storm_state) {
+            1 => {
+                saw_build = true;
+                try std.testing.expectEqual(build_idx, body[1]);
+                if (prev_state == 1 and st.remaining_seconds < prev_remaining) build_countdown_fell = true;
+            },
+            2 => {
+                saw_storm = true;
+                try std.testing.expectEqual(storm_idx, body[1]);
+            },
+            else => if (prev_state == 2) {
+                saw_clear_after_storm = true;
+            },
+        }
+        prev_state = st.storm_state;
+        prev_remaining = st.remaining_seconds;
+    }
+    try std.testing.expect(saw_build);
+    try std.testing.expect(saw_storm);
+    try std.testing.expect(saw_clear_after_storm);
+    try std.testing.expect(build_countdown_fell);
+
+    // Blood moon forces every weather biome onto its own bloodMoon group index.
+    g.sim.director.bloodmoon_active = true;
+    g.world.weather.tick(&g.world.biome_layers_table, 100_000, true);
+    const bm_body = g.buildWeatherBodyFromBiomes() orelse return error.TestUnexpectedResult;
+    var i: usize = 0;
+    while (i < g.world.weather.n) : (i += 1) {
+        const set = &g.world.biome_layers_table.weather_groups[i];
+        try std.testing.expectEqual(set.findIndex("bloodMoon").?, bm_body[i * 23 + 1]);
+    }
+    std.debug.print(
+        "PASS weather: stormbuild→storm→clear over 4 days, blood moon forced group={d}, body={d}B\n",
+        .{ bm_body[1], bm_body.len },
     );
 }
 

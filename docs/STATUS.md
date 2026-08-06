@@ -48,7 +48,7 @@ work; do not re-open a STATUS PASS from a stale MISSING row.
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | every client→server package handled (parity tool: 0 unhandled dir=1); 190-pkg catalog docs/PACKAGES.md |
-| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C from biomes.xml defaults; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
+| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
 product notes stay in this file + linked docs.
@@ -183,7 +183,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 |---|---|---|
 | P1 | Deco trees | Blocked on DecoManager.Read NRE RE; empty firstPackage only until object wire matches V3.1.0 |
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
-| P2 | Weather storm SM | Defaults from biomes.xml on join+WorldTime throttle; storm/bloodMoon group SM not simulated |
+| P2 | Weather storm SM | Shipped (`world/weather.zig`): stormbuild → storm → reschedule per biome, random group rolls, blood-moon override. Not persisted across restart |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
 | P2 | Quest / EAI / power depth | See MISSING honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
