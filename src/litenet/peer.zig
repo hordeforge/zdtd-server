@@ -112,6 +112,20 @@ pub const Capture = struct {
     }
 };
 
+/// One inbound fragment reassembly, keyed by the message's frag_id. Stock
+/// LiteNetLib keeps a dictionary of these; zdtd bounds it at a small fixed
+/// count (see Peer.asm_slots).
+const Assembly = struct {
+    active: bool = false,
+    frag_id: u16 = 0,
+    total: u16 = 0,
+    got: u16 = 0,
+    have: [max_frag_parts]bool = .{false} ** max_frag_parts,
+    part_len: [max_frag_parts]u16 = .{0} ** max_frag_parts,
+    /// Part payload storage (part i starts at i * max_fragment_user).
+    parts: [max_frag_parts][packet.max_fragment_user]u8 = undefined,
+};
+
 pub const Peer = struct {
     addr: udp.IpAddress = .{ .ip4 = .loopback(0) },
     /// Cached hashIp(addr); key for per-datagram peer lookup.
@@ -146,15 +160,17 @@ pub const Peer = struct {
     next_resend_check_ns: u64 = 0,
     last_recv_ns: u64 = 0,
     next_frag_id: u16 = 1,
-    /// Inbound fragment reassembly (one message at a time).
-    asm_active: bool = false,
-    asm_frag_id: u16 = 0,
-    asm_total: u16 = 0,
-    asm_got: u16 = 0,
-    asm_have: [max_frag_parts]bool = .{false} ** max_frag_parts,
-    asm_part_len: [max_frag_parts]u16 = .{0} ** max_frag_parts,
-    /// Part payload storage (part i starts at i * max_fragment_user).
-    asm_parts: [max_frag_parts][packet.max_fragment_user]u8 = undefined,
+    /// Inbound fragment reassembly. Stock LiteNetLib keys assemblies by
+    /// fragmentId (a dictionary); two large C2S messages (a Bag plus a
+    /// PlayerInventory during a loot transfer) can interleave. A single
+    /// assembly destroyed the first on the second's fragments, silently losing
+    /// a message that was already ACKed. Two slots cover that interleave;
+    /// `parts` is `undefined` so pages map lazily as parts arrive.
+    asm_slots: [2]Assembly = .{ .{}, .{} },
+    /// Drop counter for fragments arriving while every assembly slot is busy
+    /// with a different frag_id (a third concurrent large C2S message). Must
+    /// stay 0 in practice; the counter makes a loss observable.
+    asm_drops: u32 = 0,
     /// Delivered reassembled user payload (valid until next handlePacket).
     deliver_buf: [assemble_cap]u8 = undefined,
     deliver_len: usize = 0,
@@ -309,11 +325,8 @@ pub const Peer = struct {
         if (self.must_ack) try self.flushAcks(sock);
     }
 
-    fn clearAssembly(self: *Peer) void {
-        self.asm_active = false;
-        self.asm_got = 0;
-        self.asm_have = .{false} ** max_frag_parts;
-        self.asm_part_len = .{0} ** max_frag_parts;
+    fn clearAssembly(self: *Peer, slot: usize) void {
+        self.asm_slots[slot] = .{};
     }
 
     /// Collect fragment parts; return full user payload when complete.
@@ -321,39 +334,61 @@ pub const Peer = struct {
         if (info.frag_total == 0 or info.frag_total > max_frag_parts) return null;
         if (info.frag_part >= info.frag_total) return null;
         if (info.user.len > packet.max_fragment_user) return null;
-        if (!self.asm_active or self.asm_frag_id != info.frag_id) {
-            self.clearAssembly();
-            self.asm_active = true;
-            self.asm_frag_id = info.frag_id;
-            self.asm_total = info.frag_total;
-        } else if (self.asm_total != info.frag_total) {
-            return null;
+
+        // Find the assembly for this frag_id, or the first free slot.
+        var slot: usize = self.asm_slots.len;
+        var free: ?usize = null;
+        for (&self.asm_slots, 0..) |*a, i| {
+            if (a.active and a.frag_id == info.frag_id) {
+                slot = i;
+                break;
+            }
+            if (!a.active and free == null) free = i;
         }
+        if (slot == self.asm_slots.len) {
+            if (free) |f| {
+                slot = f;
+                self.asm_slots[f] = .{
+                    .active = true,
+                    .frag_id = info.frag_id,
+                    .total = info.frag_total,
+                };
+            } else {
+                // All slots hold a different message: drop this fragment (the
+                // message is lost for this connection; stock would keep a
+                // dictionary entry, but the third concurrent C2S fragment is
+                // outside the realistic Bag + inventory interleave).
+                self.asm_drops +%= 1;
+                return null;
+            }
+        }
+        const a = &self.asm_slots[slot];
+        if (a.total != info.frag_total) return null;
         const part: usize = info.frag_part;
-        if (self.asm_have[part]) return null; // duplicate part
-        @memcpy(self.asm_parts[part][0..info.user.len], info.user);
-        self.asm_have[part] = true;
-        self.asm_part_len[part] = @intCast(info.user.len);
-        self.asm_got += 1;
-        if (self.asm_got < self.asm_total) return null;
+        if (a.have[part]) return null; // duplicate part
+        @memcpy(a.parts[part][0..info.user.len], info.user);
+        a.have[part] = true;
+        a.part_len[part] = @intCast(info.user.len);
+        a.got += 1;
+        if (a.got < a.total) return null;
         // Reassemble in part order into deliver_buf.
         var out: usize = 0;
         var i: u16 = 0;
-        while (i < self.asm_total) : (i += 1) {
-            if (!self.asm_have[i]) {
-                self.clearAssembly();
+        while (i < a.total) : (i += 1) {
+            if (!a.have[i]) {
+                self.clearAssembly(slot);
                 return null;
             }
-            const pl = self.asm_part_len[i];
+            const pl = a.part_len[i];
             if (out + pl > assemble_cap) {
-                self.clearAssembly();
+                self.clearAssembly(slot);
                 return null;
             }
-            @memcpy(self.deliver_buf[out .. out + pl], self.asm_parts[i][0..pl]);
+            @memcpy(self.deliver_buf[out .. out + pl], a.parts[i][0..pl]);
             out += pl;
         }
         self.deliver_len = out;
-        self.clearAssembly();
+        self.clearAssembly(slot);
         return self.deliver_buf[0..self.deliver_len];
     }
 
@@ -678,9 +713,11 @@ fn fuzzPeerState(_: void, smith: *std.testing.Smith) !void {
         if (peer.takeFragment(info)) |full| {
             try std.testing.expect(full.len <= max_payload);
         }
-        if (peer.asm_active) {
-            try std.testing.expect(peer.asm_total <= max_frag_parts);
-            try std.testing.expect(peer.asm_got < peer.asm_total);
+        for (&peer.asm_slots) |a| {
+            if (a.active) {
+                try std.testing.expect(a.total <= max_frag_parts);
+                try std.testing.expect(a.got < a.total);
+            }
         }
     }
 
@@ -697,4 +734,37 @@ fn fuzzPeerState(_: void, smith: *std.testing.Smith) !void {
     const rlen = smith.slice(&raw);
     peer.processAck(raw[0..rlen]);
     try std.testing.expect(peer.local_window_start <= outstanding);
+}
+
+test "two interleaved fragmented messages reassemble independently" {
+    // Regression for the single-assembly bug: a second fragmented C2S message
+    // (Bag plus PlayerInventory during a loot transfer) used to clear the
+    // first assembly and lose both. Fragments of two messages now interleave
+    // into separate slots and each reassembles whole.
+    var peer: Peer = .{};
+    peer.alive = true;
+    const frag = struct {
+        fn mk(frag_id: u16, part: u16, total: u16, user: []const u8) packet.ChanneledInfo {
+            return .{ .seq = 0, .channel_id = 2, .fragmented = true, .frag_id = frag_id, .frag_part = part, .frag_total = total, .user = user };
+        }
+    }.mk;
+
+    // A (frag_id 7, 3 parts) and B (frag_id 9, 2 parts) interleaved.
+    try std.testing.expect(peer.takeFragment(frag(7, 0, 3, "AAAA")) == null);
+    try std.testing.expect(peer.takeFragment(frag(9, 0, 2, "XX")) == null);
+    // Both assemblies are live at once.
+    var live: usize = 0;
+    for (&peer.asm_slots) |a| {
+        if (a.active) live += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), live);
+    try std.testing.expect(peer.takeFragment(frag(7, 1, 3, "BBBB")) == null);
+    const full_b = peer.takeFragment(frag(9, 1, 2, "YY"));
+    try std.testing.expect(full_b != null);
+    if (full_b) |fb| try std.testing.expectEqualStrings("XXYY", fb);
+    // Completing A overwrites deliver_buf, so read it right after.
+    const full_a = peer.takeFragment(frag(7, 2, 3, "CCCC"));
+    try std.testing.expect(full_a != null);
+    if (full_a) |fa| try std.testing.expectEqualStrings("AAAABBBBCCCC", fa);
+    try std.testing.expectEqual(@as(u32, 0), peer.asm_drops);
 }

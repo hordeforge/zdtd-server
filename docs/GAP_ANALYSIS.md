@@ -440,12 +440,16 @@ because the per-objective Write shapes are wrong.
   0 of each. A modded file using them would silently lose its gating.
   *Anchors:* `asm.il:1390960-1391040`, `asm.il:1390474-1390510`
 
-- **Quest `<action>` elements** `MISSING`
-  `parseQuestDef` ignores `<action>` entirely. The stock file has 18: 10
-  UnlockPOI, 3 SpawnGSEnemy, 2 ShowMessageWindow, 2 SetCVar, 1 GameEvent. The
-  phase-4 UnlockPOI that releases the POI quest lock after turn-in never fires
-  server-side; the starter quest's `SetCVar StarterQuest=1` and its intro window
-  never fire.
+- **Quest `<action>` elements** `PARTIAL`
+  `parseQuestDef` now parses every `<action>` (types, phase, and the cvar /
+  value / message / event / gamestage_list properties). **UnlockPOI fires
+  server-side on phase entry**: the phase-gated action releases the quest's POI
+  lock (stock `QuestActionUnlockPOI`, asm.il 1390421-1390429), so the phase-4
+  action on turn-in quests no longer leaves the POI reserved forever. The
+  starter's `SetCVar StarterQuest=1` and `ShowMessageWindow` are parsed but run
+  on the owning player's client in stock, so zdtd records them and fires
+  nothing; `SpawnGSEnemy` (gamestage-scaled spawn) and `GameEvent` need the
+  spawn/event subsystems and stay recorded-unfired.
   *Anchors:* `src/assets/quests.zig:280`, `src/server/game.zig:6320`,
   `asm.il:1390421-1390429`
 
@@ -3076,12 +3080,12 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/litenet/peer.zig:217-263`, `src/server/game.zig:6285-6308`,
   `:3526-3550`
 
-- **Inbound fragment reassembly** `PARTIAL`
-  Peer holds exactly one in-flight assembly. A second fragmented C2S message with a
-  different frag_id calls `clearAssembly` and destroys the first. Stock LiteNetLib
-  keeps a dictionary keyed by fragmentId. Two large concurrent C2S messages (Bag
-  plus PlayerInventory during a loot transfer) can lose one silently after it was
-  already ACKed.
+- **Inbound fragment reassembly** `WORKS` `(2026-08-07)`
+  Peer now holds two assembly slots keyed by frag_id (stock keeps a dictionary;
+  the realistic interleave is exactly two: a Bag plus a PlayerInventory during a
+  loot transfer). A second fragmented message no longer clears the first; a
+  third concurrent message drops with an `asm_drops` counter. Regression test
+  interleaves two messages and reassembles both whole.
   *Anchors:* `src/litenet/peer.zig:149-157`, `:320-331`
 
 - **Reliable-window starvation on join (block IdMapping dropped)** `PARTIAL`
