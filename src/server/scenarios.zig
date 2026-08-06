@@ -760,9 +760,6 @@ test "scenario trader RemoveQuest accepts and drops the quest from offers" {
     fb[8] = 0; // fetch_list
     std.mem.writeInt(i32, fb[9..13], 1, .little); // tier 1 (fixture quests are tier 1)
     var fbuf: [256]u8 = undefined;
-    var rdbg: [128]u8 = undefined;
-    const rhe = std.fmt.bufPrint(&rdbg, "{x}", .{fb[0..13]}) catch "";
-    std.debug.print("zdtd: req body {s}\n", .{rhe});
     try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
     const before = cap.findPkgId(qid) orelse return error.TestUnexpectedResult;
     const before_count = std.mem.readInt(i32, before[13..17], .little);

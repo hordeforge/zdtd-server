@@ -214,10 +214,12 @@ fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8
 
 pub const AuthorityMode = server_config.AuthorityMode;
 
-/// Placeholder trader wallet (stock AvailableMoney is a per-day dukes pool that
-/// regenerates and is spent on player sells). zdtd has no trader economy: trade()
-/// credits the player wallet directly, so this is a fixed non-derived display value.
-const trader_wallet_dukes: i32 = 5000;
+/// Default trader AvailableMoney display value. Stock AvailableMoney is a
+/// per-day dukes pool that regenerates and is spent on player sells; zdtd has
+/// no trader economy, so trade() credits the player wallet directly. Bucket B:
+/// overridable via zdtd.toml [sim] trader_wallet_dukes (default matches the
+/// prior fixed value).
+pub const default_trader_wallet_dukes: i32 = 5000;
 
 pub const InitOptions = struct {
     map_dir: ?[]const u8 = null,
@@ -306,6 +308,8 @@ pub const InitOptions = struct {
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
+    /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
+    trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
 
@@ -617,6 +621,7 @@ pub const Game = struct {
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
+    trader_wallet_dukes: i32 = default_trader_wallet_dukes,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
     pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
@@ -688,6 +693,7 @@ pub const Game = struct {
             .max_edit_range = opts.max_edit_range,
             .interest_range = opts.interest_range,
             .peer_stale_ms = opts.peer_stale_ms,
+            .trader_wallet_dukes = opts.trader_wallet_dukes,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
@@ -6176,9 +6182,6 @@ pub const Game = struct {
                 return;
             }
             if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
-                var hdbg: [256]u8 = undefined;
-                const hhex = std.fmt.bufPrint(&hdbg, "{x}", .{body[0..@min(body.len, 20)]}) catch "";
-                std.debug.print("zdtd: fetch head tier={d} npc={d} body={s}\n", .{ head.tier_level, head.npc_entity_id, hhex });
                 var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
                 const on = self.buildTraderQuestOffers("trader_jen_quests", c.slot, tx, ty, tz, &offers);
                 const body_out = try packages.buildNpcQuestListFetch(
@@ -7382,21 +7385,14 @@ pub const Game = struct {
         trader_z: f32,
         out: []packages.stock_quest.QuestPacketEntry,
     ) usize {
-        const list = self.sim.catalog.listById(list_id) orelse {
-            std.debug.print("zdtd: offers list null\n", .{});
-            return 0;
-        };
-        const ps = self.sim.playerByPeer(peer_slot) orelse {
-            std.debug.print("zdtd: offers ps null\n", .{});
-            return 0;
-        };
+        const list = self.sim.catalog.listById(list_id) orelse return 0;
+        const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
         var n: usize = 0;
         for (list.entries) |qid| {
             if (n >= out.len) break;
             const d = self.sim.catalog.byId(qid) orelse continue;
             if (d.name.len == 0 or !isStockClientQuestName(d.name)) continue;
             if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
-            std.debug.print("zdtd: offer {d} '{s}'\n", .{ qid, d.name });
             out[n] = .{
                 .quest_id = d.name,
                 .loc_x = d.tx,
