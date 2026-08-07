@@ -34,6 +34,7 @@ const biomes = @import("world/biomes.zig");
 const prefabs = @import("world/prefabs.zig");
 const tts = @import("world/tts.zig");
 const store = @import("world/store.zig");
+const vending = @import("world/vending.zig");
 const path_mod = @import("ecs/path.zig");
 const weather = @import("world/weather.zig");
 
@@ -1038,6 +1039,82 @@ fn fuzzContainersZct(_: void, smith: *std.testing.Smith) !void {
     defer std.testing.allocator.destroy(s);
     s.* = .{};
     s.loadFromSlice(storage[0..len]) catch return;
+}
+
+const zvn_corpus = [_][]const u8{
+    "",
+    "ZVNM",
+    // empty store: magic + count 0
+    &([_]u8{ 'Z', 'V', 'N', 'M', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'X', 'X', 'X', 'X', 1, 0 }),
+    // claimed huge count, truncated
+    &([_]u8{ 'Z', 'V', 'N', 'M', 0xff, 0xff }),
+    // one machine: pos(0,70,0) block 42 trader 4 money 100, empty
+    // stock/owner/password/allowed, rentable
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
+        [_]u8{0} ** 82 ++ // owner: platform_len 0 + 16 + id_len 0 + 64
+        [_]u8{0} ** 65 ++ // password_len 0 + 64 hash
+        [_]u8{0} ++ // allowed_n 0
+        [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }), // rental 0, rentable, auto_buy
+    // owner platform_len 200 (> 16): must fail closed, not pass a bad slice
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
+        [_]u8{ 200 } ++ [_]u8{0} ** 81 ++
+        [_]u8{0} ** 65 ++
+        [_]u8{0} ++
+        [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
+    // owner id_len 100 (> 64): must fail closed too
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
+        [_]u8{ 0 } ++ [_]u8{0} ** 16 ++ [_]u8{ 100 } ++ [_]u8{0} ** 64 ++
+        [_]u8{0} ** 65 ++
+        [_]u8{0} ++
+        [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
+    // password_len 200 (> 64): must fail closed before the hash slice
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
+        [_]u8{0} ** 82 ++
+        [_]u8{ 200 } ++ [_]u8{0} ** 64 ++
+        [_]u8{0} ++
+        [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
+    // stock_n 255 claimed, stream truncated
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 255 }),
+    // allowed_n 9 (> 8) with one oversized entry, then record cut mid-password
+    &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
+        [_]u8{0} ** 82 ++
+        [_]u8{0} ** 65 ++
+        [_]u8{ 9 } ++
+        [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 }),
+};
+
+test "fuzz vending store ZVNM loader" {
+    try std.testing.fuzz({}, fuzzVendingStore, .{ .corpus = &zvn_corpus });
+}
+
+fn fuzzVendingStore(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // Store is large (128 machines); keep off the fuzz stack.
+    const s = try std.testing.allocator.create(vending.VendingStore);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.loadFromSlice(storage[0..len]) catch return;
+    // The wire send path slices these fixed buffers by the declared lengths
+    // (game.zig vendingOwnerId / password_hash), so any accepted record must
+    // keep every count inside its buffer, or a later send reads past it.
+    try std.testing.expect(s.count() <= vending.max_vending);
+    for (&s.items) |v| {
+        try std.testing.expect(v.stock_n <= vending.max_vending_stock);
+        try std.testing.expect(v.allowed_n <= vending.max_allowed_users);
+        try std.testing.expect(v.password_len <= vending.max_password_hash);
+        try std.testing.expect(v.owner.platform_len <= vending.max_platform_len);
+        try std.testing.expect(v.owner.id_len <= vending.max_id_len);
+    }
 }
 
 const png_sig = [_]u8{ 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
