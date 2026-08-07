@@ -4372,10 +4372,12 @@ Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
 
 `admin addgroup` / `removegroup` and `whitelist addgroup` / `removegroup` (zdtd has
 no Steam group concept), `commandpermission`/`cp`, `loglevel`, `listthreads`/`lt`,
-`getoptions`, `exportcurrentconfigs`, `help <command>` detail pages,
-`setgamepref` as a real write (zdtd applies serverconfig at startup only, so it
-replies that the pref is read-only rather than reporting a change that did not
-happen).
+`getoptions`, `exportcurrentconfigs`, `help <command>` detail pages. `setgamepref`
+writes the GameStats-backed prefs at runtime (GameDifficulty, BloodMoonEnemyCount,
+EnemyDifficulty, BloodMoonFrequency, DayNightLength, BlockDamagePlayer,
+XPMultiplier, PlayerKillingMode, DropOnDeath, LootRespawnDays, AirDropFrequency),
+clamping to the config loader's ranges and broadcasting the fresh stats blob;
+startup-only prefs (ServerPort, world paths) keep the read-only reply.
 
 **Deliberate divergences**
 

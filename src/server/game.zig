@@ -3259,6 +3259,41 @@ pub const Game = struct {
         self.adminWrite(admin_cmds.writeGamePref, .{ name, v });
     }
 
+    /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
+    /// clamp to the same range the config loader uses, and write the sim/Game
+    /// field the stats blob reads, so the client HUD follows. Unknown or
+    /// startup-only prefs (ServerPort, world paths) return false and the caller
+    /// keeps the honest read-only reply.
+    fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
+        const v = std.fmt.parseInt(i32, std.mem.trim(u8, value, " \t"), 10) catch return false;
+        if (std.mem.eql(u8, name, "GameDifficulty")) {
+            self.sim.director.difficulty = @intCast(@min(@max(v, 0), 5));
+        } else if (std.mem.eql(u8, name, "BloodMoonEnemyCount")) {
+            self.sim.director.bloodmoon_enemy_count = @intCast(@min(@max(v, 0), 60));
+        } else if (std.mem.eql(u8, name, "EnemyDifficulty")) {
+            self.sim.director.enemy_difficulty = @intCast(@min(@max(v, 0), 1));
+        } else if (std.mem.eql(u8, name, "BloodMoonFrequency")) {
+            self.sim.director.clock.bloodmoon_frequency = @intCast(@min(@max(v, 0), 255));
+        } else if (std.mem.eql(u8, name, "DayNightLength")) {
+            self.sim.director.clock.setDayNightLength(@intCast(@min(@max(v, 10), 1200)));
+        } else if (std.mem.eql(u8, name, "BlockDamagePlayer")) {
+            self.block_damage_player = @intCast(@min(@max(v, 0), 1000));
+        } else if (std.mem.eql(u8, name, "XPMultiplier")) {
+            self.xp_multiplier = @intCast(@min(@max(v, 0), 1000));
+        } else if (std.mem.eql(u8, name, "PlayerKillingMode")) {
+            self.pvp_mode = @intCast(@min(@max(v, 0), 3));
+        } else if (std.mem.eql(u8, name, "DropOnDeath")) {
+            self.drop_on_death = @intCast(@min(@max(v, 0), 3));
+        } else if (std.mem.eql(u8, name, "LootRespawnDays")) {
+            self.loot_respawn_days = @intCast(@min(@max(v, 0), 365));
+        } else if (std.mem.eql(u8, name, "AirDropFrequency")) {
+            self.air_drop_interval_hours = @intCast(@min(@max(v, 0), 168));
+        } else {
+            return false;
+        }
+        return true;
+    }
+
     /// Stock `mem` (asm.il 235864). zdtd has no Unity heap, so the Unity-only
     /// fields report 0 rather than a made-up number; the separators are stock's
     /// so a scraper still finds the counts it can use.
@@ -3652,15 +3687,27 @@ pub const Game = struct {
             },
             .getgamepref => |filter| self.replyGamePrefs(filter),
             .setgamepref => |sp| {
-                // zdtd applies serverconfig at startup only; a runtime write would
-                // report success while the sim kept the old value.
-                var b: [160]u8 = undefined;
-                const s = std.fmt.bufPrint(
-                    &b,
-                    "GamePref.{s} is read-only on zdtd (set {s} in serverconfig.xml and restart).\n",
-                    .{ sp.name, sp.name },
-                ) catch return;
-                self.adminReply(s);
+                // Runtime write for the GameStats-backed prefs: apply to the sim
+                // and broadcast the new stats blob so client HUD values match.
+                if (self.applyGamePrefSet(sp.name, sp.value)) {
+                    self.broadcastGameStats() catch {};
+                    var b: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(
+                        &b,
+                        "GamePref.{s} set to {s} (applied at runtime).\n",
+                        .{ sp.name, sp.value },
+                    ) catch return;
+                    self.adminReply(s);
+                } else {
+                    // Unknown or startup-only pref: honest read-only reply.
+                    var b: [160]u8 = undefined;
+                    const s = std.fmt.bufPrint(
+                        &b,
+                        "GamePref.{s} is not runtime-writable on zdtd (set {s} in serverconfig.xml and restart).\n",
+                        .{ sp.name, sp.name },
+                    ) catch return;
+                    self.adminReply(s);
+                }
             },
             .chunkcache => self.adminWrite(admin_cmds.writeChunkCache, .{
                 self.world.chunks.count(),
@@ -7185,10 +7232,11 @@ pub const Game = struct {
                     .count = if (ent.count > 0) ent.count else 1,
                     .quality = 1,
                 },
-                // Stock Entry.Markup is a runtime int8 demand delta (Increase +100 /
-                // Decrease -4, asm.il 856828-856866). We have no per-item markup source,
-                // so 0 is the honest neutral: the client shows the base econ price we model.
-                .markup = 0,
+                // Entry.Markup demand delta: +100 after a buy, -4 after a sell
+                // (asm.il 856828-856866), reset on restock. The client shows the
+                // demand arrows and, for player-owned/rentable machines, prices
+                // from 1 + Markup*0.2 (loot-economy.md section 5).
+                .markup = ent.markup,
             };
             n += 1;
         }
@@ -11762,6 +11810,42 @@ test "world clock persists across a restart (BM calendar survives)" {
         try std.testing.expectEqual(@as(u32, 5), g.sim.director.clock.day);
         try std.testing.expectApproxEqAbs(@as(f32, 12.5), g.sim.director.clock.hours, 0.001);
     }
+}
+
+test "setgamepref applies runtime GameStats prefs and broadcasts" {
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const dir = ".zdtd_cfg_cache/pref_set_test";
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const gs_id = packages.idOf("NetPackageGameStats").?;
+    try std.testing.expectEqual(@as(u8, 2), g.sim.director.difficulty);
+
+    // A writable pref applies to the sim and reaches the client as a fresh
+    // GameStats blob (HUD difficulty / blood-moon day follow the server).
+    cap.clear();
+    g.runAdminLine("setgamepref GameDifficulty 3", "test");
+    try std.testing.expectEqual(@as(u8, 3), g.sim.director.difficulty);
+    try std.testing.expect(cap.findPkgId(gs_id) != null);
+
+    // Values clamp to the config loader's range.
+    g.runAdminLine("setgamepref GameDifficulty 99", "test");
+    try std.testing.expectEqual(@as(u8, 5), g.sim.director.difficulty);
+
+    // Another writable key.
+    g.runAdminLine("setgamepref BloodMoonFrequency 14", "test");
+    try std.testing.expectEqual(@as(u32, 14), g.sim.director.clock.bloodmoon_frequency);
+
+    // Unknown / startup-only prefs keep the read-only reply and touch nothing.
+    const info_port_before = g.info_port;
+    g.runAdminLine("setgamepref ServerPort 9999", "test");
+    try std.testing.expectEqual(info_port_before, g.info_port);
 }
 
 test "sleeper scan job batch matches the serial pass" {
