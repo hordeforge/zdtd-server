@@ -42,6 +42,25 @@ Count drifts; see [STATUS.md](../STATUS.md).
 
 ---
 
+## Re-audit 2026-08-07 (survival / AI wave)
+
+Two Bucket A findings against code that landed the same day, both where stock
+ships the data and zdtd invented a constant instead.
+
+| ID | Finding | State |
+|---|---|---|
+| A30 | `Rules.ai.sense_dist_sq` was a single global documented as having "no per-entity stock equivalent". `entityclasses.xml` ships `SightRange` per class (27, 30, 40 m on different zombies), so every zdtd zombie sensed at the same 48 m. | **Fixed**: parsed into `EntityDef.sight_range`, carried on the class table, resolved by `systems.senseDistSq`; the `Rules` value is now the documented floor. |
+| A31 | `Rules.progression` invents food / water / health / stamina rates. Stock drives survival from `buffs.xml`: `buffStatusHungry01/02/03` + `buffStatusThirsty01/02/03` with `damage_type Starvation` / `Dehydration`, `StatComparePercCurrentToMax` threshold requirements (`value="0.52"`), and `FoodChangeOT` / `WaterChangeOT` / `HealthChangeOT` passive effects; stamina from `StaminaChangeOT` and the `items.xml` `StaminaLoss` stats. `assets/buffs.zig` already parses passive_effect rows and `Game.buffs` already holds the table. | **Open**, [WORK_PLAN T16](../WORK_PLAN.md). Model differs too: `well_fed_threshold` is absolute where stock compares a fraction of max. |
+
+Spot-checks that came back clean in this pass: the numeric block ids left in
+`game.zig` (24629, 20001, 20002) and `stock_chunk.zig` (240) are all inside
+`test` blocks; `inventory.place_wood_block_id` / `place_cobble_block_id` remain
+documented offline pins with `itemToBlockResolved` on the production path; the
+trader currency now reads `traders.xml` `currency_item` rather than assuming
+`casinoCoin`.
+
+---
+
 ## Fixes landed this pass
 
 | ID | Change |

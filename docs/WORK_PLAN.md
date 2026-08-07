@@ -156,14 +156,17 @@ values, including one item that inherits through two levels.
 
 ## T4. World: put water in the world
 
-**Status: landed 2026-08-06** (764 tests). Lake/river water writes from the
-`water_info.xml` sources at chunk generation (`Chunk.applyWaterSources`: water
-blocks from the lake bed up to the source surface) and the chunk water channel
-carries the full static mass (19500) per water cell. Tested: the lake-column
-fill and the water-channel encode against the stock layout. A Navezgane loadgen
-smoke passes with the water channel live. Still open for full "done when": the
-prefab `.tts` water plane (POI pools) and the flowing-water sim; the stock
-client visual check (water renders, swimming) is queued in the visual round.
+**Status: landed 2026-08-06 (prefab planes 2026-08-07)** (950 tests). Lake/river
+water writes from the `water_info.xml` sources at chunk generation
+(`Chunk.applyWaterSources`: water blocks from the lake bed up to the source
+surface) and the chunk water channel carries the full static mass (19500) per
+water cell. Tested: the lake-column fill and the water-channel encode against
+the stock layout. A Navezgane loadgen smoke passes with the water channel live.
+Prefab `.tts` water planes landed 2026-08-07: the v>=17 sparse water channel is
+decoded into `TtsBlocks.water` and `paintDecoration` paints the resolved water
+block at mass>0 cells, so POI pools and flooded basements render wet. Still
+open for full "done when": the flowing-water sim and the stock client visual
+check (water renders, swimming) queued in the visual round.
 
 **Why:** no water block is ever written, so lakes and rivers are dry holes.
 
@@ -651,6 +654,80 @@ auditable.
 
 ---
 
+## T16. Survival: read the rates from buffs.xml instead of inventing them
+
+**Why:** `Rules.progression` invents food, water, health and stamina rates. Stock
+ships them as data, so this is a Bucket A hardcode in a system that just landed.
+The loader already exists, so this is wiring rather than research.
+
+**Grounding** (stock `Data/Config`, V3.1.0 b14):
+
+- `buffs.xml` `buffStatusHungry01/02/03` and `buffStatusThirsty01/02/03` carry
+  `<damage_type value="Starvation"/>` / `Dehydration` and gate on
+  `<requirement name="StatComparePercCurrentToMax" stat="Food" operation="GT"
+  value="0.52"/>`. The thresholds are per stage, and they compare a **fraction of
+  max**, not an absolute 0..100 value as `well_fed_threshold` does.
+- `FoodChangeOT`, `WaterChangeOT` and `HealthChangeOT` passive effects carry the
+  rates (for example `operation="base_subtract" value="10"`).
+- Stamina: `StaminaChangeOT` passive effects, plus the `items.xml` `StaminaLoss`
+  stat rows, plus the progression perks that modify it
+  (`progression.xml` `StaminaLoss` `perc_add` by level).
+
+**Change:** resolve each rate from the loaded buffs table at load, keeping the
+`Rules` value as the floor for a missing effect (ADR 0021 decision 5). Replace
+`well_fed_threshold` with stock's fraction-of-max comparison; an absolute
+threshold is a different model and will not match at any max other than 100.
+
+**Files:** `src/ecs/rules.zig`, `src/server/game.zig` (`tickSurvival`),
+`src/assets/buffs.zig` (extend only if a needed row is not parsed).
+
+**Done when:** no survival rate is a literal in `rules.zig` when
+`entityclasses.xml` and `buffs.xml` are loaded, and the stage thresholds come
+from the buff requirements.
+
+**Proof:** a test over the shipped `buffs.xml` asserting the parsed rate and
+threshold for each stage, and a test that an absent effect falls back to the
+`Rules` floor rather than to zero.
+
+**Out of scope:** the triggered_effect VM. Only the passive rows and the
+threshold requirements are needed here.
+
+---
+
+## T17. Systems: make the tick pipeline a table a mode can edit
+
+**Why:** [ADR 0021](adr/0021-config-driven-game-modes.md) made the sim's
+*numbers* configurable, but not its *behaviour*. `ecs/schedule.zig` `run()` is a
+fixed call sequence, so a mode cannot drop the blood-moon director, skip the
+despawn pass, or insert a phase. Today that means forking `run()`, which is the
+thing mode packs exist to avoid.
+
+**Change:** turn the fixed sequence into a table of
+`{ phase: Phase, name: []const u8, run: *const fn (*World, f32) void, enabled: bool }`,
+iterated in order. The default table is exactly today's sequence, so behaviour is
+unchanged. A mode pack may disable an entry by name; the binder from T11 already
+gives it a config surface.
+
+Keep it a static table, not a dynamic registry: the set of systems is known at
+compile time, ordering stays explicit and reviewable, and there is no allocation
+or indirection added to the 20 TPS path beyond one predictable call per entry.
+
+**Files:** `src/ecs/schedule.zig`, `src/ecs/rules.zig` (the enable flags),
+`src/server/mode.zig`.
+
+**Done when:** a mode pack disables one system and the scenario for that system
+observes it not running, with every other system unaffected.
+
+**Proof:** a test asserting the default table reproduces the current phase order
+exactly (name and order pinned, like the `Rules` default pin), plus a scenario
+running with one system disabled.
+
+**Out of scope:** plugin-provided systems. A Wasm guest gets the T15 hooks, not
+a slot in the sim pipeline: a guest system would run inside the tick budget and
+break the determinism rule in ADR 0020.
+
+---
+
 ## W1. Harness: rebuild suite fixtures on a fresh world
 
 **Why:** the playtest harness now starts every run from a fresh world, which is
@@ -699,7 +776,8 @@ unique per-run directory.
 - **Custom game modes ([ADR 0021](adr/0021-config-driven-game-modes.md)):**
   strictly ordered. T11 (binder), then T12 (`Rules`), then T13 (mode overlay),
   then T14 (precedence audit). T15 (plugin hooks) is independent of all four and
-  can run in parallel from the start.
+  can run in parallel from the start. T16 (survival rates from buffs.xml) needs
+  T12 landed; T17 (system table) needs T11 for its config surface.
 - **Harness, any time and cheap:** W1, W2, W3. Do W3 first if `make check`
   flakiness is costing you time.
 
