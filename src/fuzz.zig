@@ -7,11 +7,12 @@ const packet = @import("litenet/packet.zig");
 const frame = @import("wire/frame.zig");
 const binary = @import("wire/binary.zig");
 const packages = @import("wire/packages.zig");
-const platform_user = @import("wire/platform_user.zig");
-const stock_te = @import("wire/stock_te.zig");
-const stock_inv = @import("wire/stock_inv.zig");
-const stock_quest = @import("wire/stock_quest.zig");
-const stock_buff = @import("wire/stock_buff.zig");
+// Stock body modules via packages facade (same path as game/scenarios).
+const platform_user = packages.platform_user;
+const stock_te = packages.stock_te;
+const stock_inv = packages.stock_inv;
+const stock_quest = packages.stock_quest;
+const stock_buff = packages.stock_buff;
 const admin = @import("server/admin.zig");
 const components = @import("ecs/components.zig");
 const mode_pack = @import("server/mode.zig");
@@ -34,6 +35,7 @@ const prefabs = @import("world/prefabs.zig");
 const tts = @import("world/tts.zig");
 const store = @import("world/store.zig");
 const path_mod = @import("ecs/path.zig");
+const weather = @import("world/weather.zig");
 
 const packet_corpus = [_][]const u8{
     "",
@@ -302,6 +304,25 @@ const inv_corpus = [_][]const u8{
     &.{ 0, 1, 1, 0, 0, 0, 1, 0, 0 },
     // bag with huge claimed stack count, truncated
     &.{ 0, 1, 0, 0xff, 0xff },
+    // PlayerDataFile.WriteNetwork-ish: ECD v35, entityClass 0, empty stats/bag,
+    // then toolbelt list 0 + selected + bag empty + drag 0 + crafted 0 + spawn
+    // meta + Equipment v4 with 12 empty ItemValues + 12 cosmetic 0 + unlocked 0.
+    // Truncated and overlong crafted/unlocked counts are the crash targets.
+    &.{
+        35, 0, 0, 0, 0, 106, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x42, 0, 0, 0, 0,
+        0,  0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0,
+        0,  0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0,
+        0,  0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0,
+        0,  0, 0, 0, 0, 0,
+    },
+    // ECD v36 + huge entityData blob length
+    &.{ 36, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff },
+    // Bag package: entity | u16 blob_len | bag_ver=1, count=0, no lock, touched, no prefs
+    &.{ 106, 0, 0, 0, 5, 0, 1, 0, 0, 0, 1, 0 },
+    // Bag package with claimed blob longer than remainder
+    &.{ 1, 0, 0, 0, 0xff, 0xff, 0, 0 },
+    // Bag package: huge bag_n after a short blob
+    &.{ 1, 0, 0, 0, 4, 0, 1, 0xff, 0xff, 0 },
 };
 
 test "fuzz inventory item stack decoders" {
@@ -331,6 +352,26 @@ fn fuzzInventoryDecoders(_: void, smith: *std.testing.Smith) !void {
     // parsed from an untrusted body must never write outside the fixed slots.
     var inv: components.Inventory = .{};
     stock_inv.applyPlayerInventoryBody(input, &inv, null, null) catch {};
+
+    // PlayerDataFile.WriteNetwork (join / live PDF) and NetPackageEntityAliveFlags
+    // bag mirror: deeper ECD + equipment + crafted-list loops than PI alone.
+    inv = .{};
+    if (stock_inv.applyPlayerDataNetwork(input, &inv, null, null)) |h| {
+        try std.testing.expect(h.inv_slots <= components.max_inv_slots);
+        var filled: u16 = 0;
+        for (inv.slots) |s| {
+            if (s.count > 0 and s.item_id != 0) filled += 1;
+        }
+        try std.testing.expect(filled <= components.max_inv_slots);
+        try std.testing.expectEqual(filled, h.inv_slots);
+    } else |_| {}
+
+    // Loot-container bag and player bag share the same blob layout; both modes
+    // must refuse oversized blob_len / bag_n without writing past max_inv_slots.
+    inv = .{};
+    _ = stock_inv.applyBagPackage(input, &inv, null, null, true) catch {};
+    inv = .{};
+    _ = stock_inv.applyBagPackage(input, &inv, null, null, false) catch {};
 }
 
 const binary_corpus = [_][]const u8{
@@ -1394,5 +1435,90 @@ fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
             try std.testing.expect(st.count >= 1);
             try std.testing.expect(st.count <= 65535);
         }
+    }
+}
+
+/// Minimal weather table so decode can accept a well-formed ZWTH1 payload.
+fn fuzzWeatherTable() biome_layers.Table {
+    var t: biome_layers.Table = .{};
+    t.weather_ids[0] = 3;
+    t.weather_groups[0] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="80" duration="6"><Wind range="3,22"/></weather>
+        \\<weather name="stormbuild" prob="0" duration="0.2"><Wind range="25,25"/></weather>
+        \\<weather name="storm" prob="0" duration="1.1" delay="26,36"><Wind range="40,40"/></weather>
+        \\<weather name="bloodMoon" prob="0"><Wind range="15,20"/></weather>
+    );
+    t.weather_ids[1] = 5;
+    t.weather_groups[1] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="100" duration="5"><Wind range="1,2"/></weather>
+        \\<weather name="stormbuild" prob="0" duration="0.59"><Wind range="9,9"/></weather>
+        \\<weather name="storm" prob="0" duration="1.3" delay="28,36"><Wind range="12,12"/></weather>
+        \\<weather name="bloodMoon" prob="0"><Wind range="4,4"/></weather>
+    );
+    t.weather_n = 2;
+    t.loaded = true;
+    return t;
+}
+
+// ZWTH1 | n=2 | states with matching biome ids 3 and 5 | rng | last_update | blood_moon
+fn weatherState(biome_id: u8) [weather.save_state_bytes]u8 {
+    var s = [_]u8{0} ** weather.save_state_bytes;
+    s[0] = biome_id;
+    return s;
+}
+
+const weather_zwt_valid = "ZWTH1" ++ [_]u8{2} ++ weatherState(3) ++ weatherState(5) ++
+    [_]u8{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+const weather_corpus = [_][]const u8{
+    "",
+    "ZWTH1",
+    "XXXX1" ++ [_]u8{0},
+    weather_zwt_valid,
+    // n larger than max_biomes / table.weather_n
+    "ZWTH1" ++ [_]u8{255},
+    // n=1 but truncated mid-state
+    "ZWTH1" ++ [_]u8{1} ++ ([_]u8{0} ** 20),
+    // n=1 matching table slot 0 (biome_id=3, group 0, storm_state 0) with tail
+    "ZWTH1" ++ [_]u8{1} ++ weatherState(3) ++
+        [_]u8{ 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // storm_state out of range (byte 3 of first state)
+    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 9 } ++ ([_]u8{0} ** (weather.save_state_bytes - 4)) ++
+        ([_]u8{0} ** 13),
+    // NaN in first weather param (offset 29 of the state)
+    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 0, 0 } ++ ([_]u8{0} ** 24) ++
+        [_]u8{ 0, 0, 0xc0, 0x7f } ++ ([_]u8{0} ** 16) ++ ([_]u8{0} ** 13),
+    // wrong biome_id for slot 0
+    "ZWTH1" ++ [_]u8{1} ++ weatherState(99) ++ ([_]u8{0} ** 13),
+};
+
+test "fuzz weather.zwt save decoder" {
+    try std.testing.fuzz({}, fuzzWeatherDecode, .{ .corpus = &weather_corpus });
+}
+
+fn fuzzWeatherDecode(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [2048]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+
+    const table = fuzzWeatherTable();
+    var m: weather.Manager = .{};
+    // Seed a non-empty manager so a failed decode can prove fail-closed.
+    m.initFrom(&table, .{ .seed = 1 });
+    const n_before = m.n;
+    const ok = m.decode(input, &table);
+    if (ok) {
+        try std.testing.expect(m.n <= weather.max_biomes);
+        try std.testing.expect(m.n <= table.weather_n);
+        var i: usize = 0;
+        while (i < m.n) : (i += 1) {
+            try std.testing.expect(m.states[i].group_index < table.weather_groups[i].n);
+            try std.testing.expect(m.states[i].storm_state <= 2);
+            for (m.states[i].params) |p| try std.testing.expect(std.math.isFinite(p));
+        }
+    } else {
+        // Corrupt input must not half-apply (manager.n stays from initFrom).
+        try std.testing.expectEqual(n_before, m.n);
     }
 }
