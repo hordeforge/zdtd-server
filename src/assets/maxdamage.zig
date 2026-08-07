@@ -67,6 +67,10 @@ pub const Table = struct {
     material_max: std.StringHashMapUnmanaged(u16) = .{},
     /// block name → material id (from blocks.xml Material property).
     block_material: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// block name → resolved `UpgradeBlock.ToBlock` after the Extends chain.
+    /// Stock Block.UpgradeBlock (property class) names the block a hammer
+    /// upgrade turns this one into; absent means no upgrade path.
+    upgrade_to: std.StringHashMapUnmanaged([]const u8) = .{},
     /// block name → resolved `IsDistantDecoration` (blocks.xml property, after
     /// the Extends chain). Only `true` entries are stored; absent means false,
     /// so an unparsed or unknown name fails closed out of the deco tables.
@@ -185,6 +189,12 @@ pub const Table = struct {
     /// default). A non-support block caps its stability byte at 1.
     pub fn stabilitySupport(self: *const Table, name: []const u8) bool {
         return !self.non_support.contains(name);
+    }
+
+    /// blocks.xml `UpgradeBlock.ToBlock` after Extends resolution: the block a
+    /// hammer upgrade turns `name` into, or null when it has no upgrade path.
+    pub fn upgradeTarget(self: *const Table, name: []const u8) ?[]const u8 {
+        return self.upgrade_to.get(name);
     }
 
     /// blocks.xml `StabilityIgnore` after Extends resolution (default false):
@@ -414,6 +424,9 @@ const DecoFacts = struct {
     dim: ?Dim = null,
     /// Direct blocks.xml LootList (resolved through Extends in a second pass).
     loot_list: ?[]const u8 = null,
+    /// UpgradeBlock.ToBlock (resolved through Extends; stock upgrade chains
+    /// inherit through the parent).
+    upgrade_to: ?[]const u8 = null,
     /// StabilitySupport / StabilityIgnore (resolved through Extends; null =
     /// "ask the parent", both default true/false when the chain is exhausted).
     stability_support: ?bool = null,
@@ -451,6 +464,20 @@ fn resolveLootList(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.loot_list) |ll| return ll;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
+/// Resolve `UpgradeBlock.ToBlock` by walking `Extends` (same inheritance rule
+/// as the other per-block facts).
+fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?[]const u8 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.upgrade_to) |tb| return tb;
         cur = f.extends orelse return null;
     }
     return null;
@@ -563,6 +590,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "StabilityIgnore")) |si| {
             facts.stability_ignore = parseBool(si);
         }
+        // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
+        // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
+        // upgrade path). ToBlock appears only inside that class.
+        if (xml.propertyValue(body, "ToBlock")) |tb| {
+            facts.upgrade_to = try arena.dupe(u8, tb);
+        }
         try own_facts.put(arena, kn, facts);
         i = body_end;
     }
@@ -571,6 +604,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
     var non_support: std.StringHashMapUnmanaged(void) = .{};
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
+    var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
         const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
@@ -582,6 +616,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
+        }
+        if (resolveUpgrade(&own_facts, e.key_ptr.*)) |tb| {
+            try upgrade_to_names.put(arena, e.key_ptr.*, tb);
         }
     }
     own_facts.deinit(arena);
@@ -603,6 +640,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .multi_block_dim = multi_block_dim,
         .non_support = non_support,
         .stability_ignore_names = stability_ignore_names,
+        .upgrade_to = upgrade_to_names,
         .arena_ptr = arena_holder,
     };
 }
@@ -701,6 +739,15 @@ test "deco facts follow Extends chains and fail closed" {
         \\</block>
         \\<block name="loopA"><property name="Extends" value="loopB" /></block>
         \\<block name="loopB"><property name="Extends" value="loopA" /></block>
+        \\<block name="woodFrameBlock">
+        \\  <property class="UpgradeBlock">
+        \\    <property name="ToBlock" value="cobbleUpgrade" />
+        \\    <property name="Item" value="resourceCobblestones" />
+        \\  </property>
+        \\</block>
+        \\<block name="woodFrameDerived">
+        \\  <property name="Extends" value="woodFrameBlock" />
+        \\</block>
         \\</blocks>
     ;
     const path = ".zdtd_test_blocks_deco.xml";
@@ -726,6 +773,13 @@ test "deco facts follow Extends chains and fail closed" {
     try std.testing.expectEqual(Dim{ .x = 3, .y = 2, .z = 3 }, t.multiBlockDim("resourceRock01"));
     try std.testing.expectEqual(Dim{}, t.multiBlockDim("treeMaster"));
     try std.testing.expectEqual(Dim{}, t.multiBlockDim("noSuchBlock"));
+
+    // UpgradeBlock.ToBlock resolves directly and through Extends; unknown
+    // names have no upgrade path (fail closed).
+    try std.testing.expectEqualStrings("cobbleUpgrade", t.upgradeTarget("woodFrameBlock").?);
+    try std.testing.expectEqualStrings("cobbleUpgrade", t.upgradeTarget("woodFrameDerived").?);
+    try std.testing.expect(t.upgradeTarget("treeMaster") == null);
+    try std.testing.expect(t.upgradeTarget("noSuchBlock") == null);
 }
 
 test "MultiBlockDim parse rejects malformed dims" {
@@ -752,6 +806,10 @@ test "stock blocks.xml deco facts when present" {
     try std.testing.expect(!t.isDistantDeco("treeTallGrassDiagonal"));
     try std.testing.expect(!t.isDistantDeco("plantShrub"));
     try std.testing.expectEqual(Dim{ .x = 1, .y = 7, .z = 1 }, t.multiBlockDim("treeOakSml01"));
+    // Real upgrade path: the wood tier upgrades to cobblestone.
+    try std.testing.expectEqualStrings("cobblestoneMaster", t.upgradeTarget("woodMaster").?);
+    // A terminal block has no upgrade target.
+    try std.testing.expect(t.upgradeTarget("bedroll") == null);
 }
 
 test "every placeable blocks.xml name resolves in the AssignIds dump" {

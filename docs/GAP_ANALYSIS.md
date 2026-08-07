@@ -2074,10 +2074,13 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`,
   `src/server/game.zig:4679-4683`, `asm.il:1413451-1413530`
 
-- **Block upgrade path (hammer upgrade)** `MISSING`
-  `blocks.xml` UpgradeBlock is never read; `maxdamage.zig` reads only MaxDamage,
-  LootList presence and CompositeTileEntity. Hitting a wood frame with a hammer
-  changes nothing server-side.
+- **Block upgrade path (hammer upgrade)** `PARTIAL`
+  `blocks.xml` `UpgradeBlock.ToBlock` is parsed (property class, through the
+  Extends chain) and exposed as `maxdamage.upgradeTarget(name)`, so the wood →
+  cobblestone → concrete → steel ladder is data-driven (verified against stock:
+  `woodMaster` → `cobblestoneMaster`). Residual: the hammer SetBlock upgrade
+  handling in Game does not consume it yet, so hitting a block still changes
+  nothing server-side.
   *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig:6670-6680`
 
 - **recipes.xml load** `PARTIAL`
