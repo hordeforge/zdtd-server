@@ -103,6 +103,26 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Custom game modes (config-driven behaviour)
+
+Sim rules are file-scope constants, so a mode pack can only set 28 stock
+serverconfig scalars and a custom game mode still means a fork. Decision:
+[ADR 0021](docs/adr/0021-config-driven-game-modes.md). Plan:
+[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T11-T15, strictly ordered T11 to T14.
+
+- [ ] T11: bind TOML by comptime reflection; delete the two hand-written key
+      chains (`zdtd_config.zig` 985 lines, `mode.zig` 432). Net deletion, no
+      behaviour change.
+- [ ] T12: move the sim rule constants into `Rules` on `World`, defaults pinned
+      to today's values. No behaviour change.
+- [ ] T13: mode pack becomes a full `Rules` overlay; precedence stays
+      operator-wins; GAME_OPTIONS.md reference generated from the struct.
+- [ ] T14: classify each moved value floor vs policy; prove stock per-entity
+      data still outranks the configured floor (HARDCODE_AUDIT Bucket A rows).
+- [ ] T15: plugin hooks a mode can be written against (`on_player_death`,
+      `on_entity_killed`, `on_block_damage`, `on_quest_complete`) with a
+      deny/adjust return. Independent of T11-T14.
+
 ### Playtest suite (real client)
 
 - [x] Phase A: `7dtd-playtest` mod + orchestrator; connect join-only; dig/place wait-confirm ([docs/CLIENT_PLAYTEST.md](docs/CLIENT_PLAYTEST.md))

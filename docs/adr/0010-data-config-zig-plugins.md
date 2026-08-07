@@ -9,6 +9,13 @@
 > optional dynlib steps are obsolete. Layers 1-2 (stock data, server policy) and
 > the "no script VM in core" rule stand unchanged.
 
+> Extended by [0021](0021-config-driven-game-modes.md) (2026-08-07): layer 3's
+> "data-driven parameters" half was never built out, so sim rules stayed
+> file-scope constants and a game mode still meant a fork. ADR 0021 adds the
+> reflected config binder, the `Rules` struct, and the mode-pack overlay, and
+> routes non-parameter behaviour to Wasm hooks. The three-layer split and the
+> no-script-VM rule are unchanged; 0021 implements them.
+
 ## Context
 
 Operators and implementers hit three different kinds of "hardcoding" and often

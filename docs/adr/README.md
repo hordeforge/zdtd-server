@@ -25,6 +25,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0018](0018-webui-ops-dashboard.md) | Operator WebUI WU0–WU2 shape | accepted |
 | [0019](0019-validation-triad.md) | Validation triad: loadgen + stock client + zdtd apm | accepted |
 | [0020](0020-wasm-only-plugin-api.md) | Wasm-only plugin API | accepted |
+| [0021](0021-config-driven-game-modes.md) | Config-driven game modes: reflected binder, `Rules` struct, hooks for logic | accepted (extends 0010) |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),

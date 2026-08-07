@@ -391,6 +391,231 @@ removes the player immediately rather than at the next peer-death poll.
 sender's own id and asserts the player slot is freed before the transport
 timeout.
 
+## T11. Config: bind TOML by comptime reflection, not by hand
+
+**Why:** `src/server/zdtd_config.zig` (985 lines) and `src/server/mode.zig` (432)
+are mostly `else if (std.mem.eql(u8, key, "..."))` chains. Every new tunable
+costs a parse arm, a validation arm, a docs row and a test, and every key name
+is a string no compiler checks. That per-key cost, not any design objection, is
+why the mode pack stopped at 28 keys and why sim rules were never exposed at
+all. This task is the enabler for T12 and T13 ([ADR
+0021](adr/0021-config-driven-game-modes.md) decision 1).
+
+**Change**
+
+- Add `src/util/toml_bind.zig` with one entry point:
+  `pub fn bind(comptime T: type, dst: *T, src: []const u8, a: std.mem.Allocator) !void`.
+- Walk `std.meta.fields(T)`: a field whose type is a struct is a `[section]`;
+  that struct's fields are the keys. Field name is the key name verbatim.
+- Drive parsing from the field type: `bool`, integer types (range-checked
+  against the destination type), floats, `[]const u8` (duped through the
+  allocator), and enums by name. An `?T` field means "unset", which is what the
+  precedence merge already keys on.
+- Keep the existing line splitter and `stripComment`; replace only `applyKV`.
+- Preserve the behaviour the current chains have: unknown section or key prints
+  the existing message and returns `error.UnknownTomlKey`, and a key outside any
+  section is rejected.
+- Carry the two per-key behaviours the chains encode today as optional
+  declarations on the destination struct, so they stay declarative:
+  `pub const aliases` for accepted spellings (`mode.zig` accepts both
+  `blood_moon_frequency` and `bloodmoon_frequency`) and `pub const ranges` for
+  the clamp bounds now written inline as `clampU8Named("ViewRadius", v, 1, 16, …)`.
+- Point both `zdtd_config.parse` and `mode.zig` at the binder and delete the
+  chains.
+
+**Files:** `src/util/toml_bind.zig` (new), `src/server/zdtd_config.zig`,
+`src/server/mode.zig`, `src/fuzz.zig`.
+
+**Grounding:** none needed. This is zdtd policy plumbing with no stock
+behaviour, so no IL anchor applies. The contract to preserve is the existing
+zdtd.toml tests and the precedence order printed at the top of
+`zdtd.toml.example`.
+
+**Done when:** both config surfaces parse through the binder, the existing
+zdtd.toml and mode tests pass **unchanged**, and adding a new tunable requires
+editing only the destination struct.
+
+**Proof:** a table-driven test over a scratch struct covering every supported
+field type, plus the empty file, an unknown section, an unknown key, a key with
+no section, a malformed assignment, an out-of-range integer, and a value that
+overflows the destination type. Add a fuzz target over `bind` for a
+representative struct: this is a parser of operator-supplied input, so the
+house rule applies.
+
+**Out of scope:** widening the TOML subset (still no arrays and no
+tables-in-tables), and any change to precedence. Behaviour-preserving refactor
+only, so a reviewer can diff the deleted chains against the field lists.
+
+---
+
+## T12. Sim: move rule constants into a `Rules` struct
+
+**Why:** the sim's rule parameters are file-scope constants
+(`src/ecs/systems.zig:17-27` and `:1855`, and the blood-moon party constants in
+`src/ecs/aidirector.zig`), so no config surface can reach them. A game mode is
+mostly these numbers ([ADR 0021](adr/0021-config-driven-game-modes.md)
+decision 2).
+
+**Change**
+
+- Add `src/ecs/rules.zig` with a nested struct grouped by the system that reads
+  each value:
+  - `combat`: `attack_damage`, `attack_range_sq`, `attack_cooldown_s`
+  - `ai`: `full_dist_sq`, `mid_dist_sq`, `sense_dist_sq`, `despawn_dist_sq`,
+    `chase_speed`, `wander_speed`
+  - `bloodmoon`: `party_join_dist`, `party_teleport_dist`, `party_spawn_dist`,
+    `party_enemy_max`, `max_parties`
+  - `progression`, `world`: added as constants move; leave empty rather than
+    inventing fields.
+- **Every default equals the current constant value.** This task changes no
+  behaviour.
+- Carry `rules: Rules = .{}` on `World`. The precedent and the access path
+  already exist: `World` holds `trader_restock_cap`, `trader_restock_refill` and
+  `zombie_speed_scale` today.
+- Update the read sites to `w.rules.<group>.<field>` and delete the file-scope
+  constants. The widest of them has 9 references, so this is small.
+- Preserve the resolve order at each site exactly. `systems.zig:1344` reads
+  `if (ct.attack_damage > 0) ct.attack_damage else attack_damage`: the `Rules`
+  value stays the **else** branch. See T14.
+
+**Files:** `src/ecs/rules.zig` (new), `src/ecs/systems.zig`,
+`src/ecs/aidirector.zig`, `src/ecs/world.zig`, `src/server/game.zig`.
+
+**Grounding:** the blood-moon party constants are `AIDirectorBloodMoonParty`,
+asm.il 413090-413140 (already cited in `aidirector.zig`). The AI speed and
+damage constants are documented in place as offline floors preferring
+`entityclasses.xml`; that comment is the contract this task must not break.
+
+**Done when:** no rule constant remains at file scope in `systems.zig` or
+`aidirector.zig`, every read goes through `w.rules`, and `make check` is green
+with no behavioural diff.
+
+**Proof:** a test that pins each `Rules` default to its pre-move literal value,
+so a later accidental default change fails loudly rather than silently
+retuning the game. Run the existing combat and blood-moon scenarios unchanged:
+they are the behavioural regression check.
+
+**Out of scope:** adding any new rule, changing any default, and wiring `Rules`
+to config. T13 does the wiring.
+
+---
+
+## T13. Modes: make a mode pack a full `Rules` overlay
+
+**Why:** `modes/<name>.toml` and `--mode` ship, but a pack understands only 28
+stock serverconfig scalars and cannot touch a sim rule, so a custom game mode is
+still a fork ([ADR 0021](adr/0021-config-driven-game-modes.md) decision 3).
+
+**Change**
+
+- Bind the mode pack into `Rules` through T11's binder, alongside the stock keys
+  it already accepts.
+- Keep precedence exactly as documented at the top of `zdtd.toml.example`:
+  `CLI > env > world/zdtd.toml > CWD zdtd.toml > mode pack > serverconfig >
+  defaults`. A pack ships coherent defaults; the operator still wins.
+- Ship two example packs that exercise the new surface, not just the old keys.
+  They double as the test fixtures.
+- Document the format in [GAME_OPTIONS.md](GAME_OPTIONS.md), generated from the
+  `Rules` field list rather than written by hand.
+
+**Files:** `src/server/mode.zig`, `modes/*.toml`, `src/main.zig`,
+`docs/GAME_OPTIONS.md`, `zdtd.toml.example`.
+
+**Grounding:** none needed; zdtd policy.
+
+**Done when:** `--mode <name>` measurably changes sim behaviour in a scenario,
+and a value set in both the pack and `zdtd.toml` resolves to the `zdtd.toml`
+one.
+
+**Proof:** three tests. A scenario that loads a pack and asserts the rule took
+effect. A precedence test asserting `zdtd.toml` beats the pack and CLI beats
+both. A documentation-coverage test asserting every `Rules` field appears in
+GAME_OPTIONS.md, so the reference cannot drift from the struct.
+
+**Out of scope:** hot reload of packs, and per-world mode switching at runtime.
+
+---
+
+## T14. Rules: audit the stock-data precedence of every moved value
+
+**Why:** [ADR 0021](adr/0021-config-driven-game-modes.md) decision 5: a `Rules`
+field must stay a floor, never a replacement for stock per-entity data. The
+speed and damage constants already resolve `entityclasses.xml` first, and
+making them configurable is exactly the moment that ordering gets inverted by
+accident. This is the failure mode
+[HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) exists to catch.
+
+**Change**
+
+- Classify every value moved in T12 as **floor** (stock data wins when present)
+  or **policy** (no stock equivalent; the config value is authoritative).
+- For floors, add a Bucket A row to HARDCODE_AUDIT.md naming the stock file and
+  field that outranks it.
+- Where a mode genuinely wants to scale a stock-derived value, add an explicit
+  multiplier applied **after** the per-entity resolve, rather than a global that
+  discards the XML. `zombie_speed_scale` on `World` is the existing shape to
+  follow.
+
+**Files:** `src/ecs/rules.zig`, `src/ecs/systems.zig`, `docs/HARDCODE_AUDIT.md`.
+
+**Grounding:** `entityclasses.xml` `MoveSpeed` / `MoveSpeedAggro` and the
+`HandItem` to `items.xml` `DamageEntity` path, as already resolved in
+`src/assets/entities.zig`.
+
+**Done when:** every moved value is classified, and each floor has a test
+proving the loaded `entityclasses.xml` value wins over the configured floor.
+
+**Proof:** a test per floor that sets a `Rules` value and a conflicting
+`entityclasses` value and asserts the XML one is used.
+
+**Out of scope:** writing new stock loaders. If a value has no loader yet, file
+it as a Bucket A row and leave it a floor.
+
+---
+
+## T15. Plugins: hooks a game mode can actually be written against
+
+**Why:** the Wasm host exposes four observe-only hooks (`on_enable`, `on_tick`,
+`on_player_join`, `on_shutdown`). Behaviour that is not a number belongs in a
+plugin ([ADR 0021](adr/0021-config-driven-game-modes.md) decision 4), but a
+plugin that can only watch cannot implement a win condition, a scoring system or
+a custom event chain.
+
+**Change**
+
+- Add the event hooks a mode needs: `on_player_death`, `on_entity_killed`,
+  `on_block_damage`, `on_quest_complete`.
+- Define a return convention that lets a hook **deny or adjust** rather than
+  only observe: an ignored return keeps today's behaviour, so a plugin that does
+  not export the hook costs nothing and existing modules keep working.
+- Each new hook runs under the existing per-call fuel and memory budget, and a
+  trap or `OutOfFuel` disables the plugin and logs the hook and module, as the
+  current hooks already do.
+- Hooks stay on the tick thread in documented order, per
+  [ADR 0020](adr/0020-wasm-only-plugin-api.md) rule 5.
+
+**Files:** `src/plugin/wasm.zig`, `src/plugin/api.zig`, `docs/PLUGIN_DEV.md`,
+`docs/PLUGIN_API.md`, `docs/STATE_MACHINES.md` (plugin lifecycle diagram).
+
+**Grounding:** none needed; this is the zdtd plugin boundary, not stock
+behaviour. The authority rule in [AUTHORITY.md](AUTHORITY.md) constrains it: a
+plugin may deny or adjust a high-level operation, never emit package bytes or
+skip the join state machine.
+
+**Done when:** a sample `.wasm` implements a visible mode rule end to end (for
+example, denying a death or doubling a quest reward) and the server behaves
+accordingly.
+
+**Proof:** a scenario driving a test module through each new hook, including a
+deny path, a hook that traps, and a hook that exhausts its fuel. Update the hook
+table in PLUGIN_DEV.md in the same change.
+
+**Out of scope:** read-only sim views for guests, hot reload, and any new host
+import beyond what a listed hook needs. Keep the import table small and
+auditable.
+
+---
+
 ## W1. Harness: rebuild suite fixtures on a fresh world
 
 **Why:** the playtest harness now starts every run from a fresh world, which is
@@ -436,9 +661,21 @@ unique per-run directory.
 - **Wave 3 (world integrity):** T4, T8.
 - **Independent, whenever a modding story is wanted:** T9 (Wasm runtime).
 - **Tiny, any time:** T10 (C2S disconnect), alongside the harness work.
+- **Custom game modes ([ADR 0021](adr/0021-config-driven-game-modes.md)):**
+  strictly ordered. T11 (binder), then T12 (`Rules`), then T13 (mode overlay),
+  then T14 (precedence audit). T15 (plugin hooks) is independent of all four and
+  can run in parallel from the start.
 - **Harness, any time and cheap:** W1, W2, W3. Do W3 first if `make check`
   flakiness is costing you time.
 
 Each task is independent enough for one agent per task, except T6 which needs T1
-landed first. If several agents run in parallel, keep each on its own branch and
+landed first and the T11 to T14 chain, which must land in order: each one edits
+the surface the next one binds to, so running them in parallel guarantees a
+conflict. If several agents run in parallel, keep each on its own branch and
 follow the rebase rule under Known traps.
+
+**Why T11 and T12 come first:** both are behaviour-preserving refactors with a
+mechanical review (T11 is a net deletion diffed against a field list; T12 pins
+every default to its old literal). Landing them separately means the risky part
+of the feature, the new config surface in T13, arrives on top of a base that is
+already proven not to have changed the game.
