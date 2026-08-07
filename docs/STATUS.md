@@ -160,6 +160,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | serverconfig gameplay options | **PASS** | difficulty/bloodmoon/PvP/day-length/max-zombies parsed + applied (docs/GAME_OPTIONS.md) |
 | Parity batch 2026-07-23 | **PASS (partial cores)** | POI sleeper volumes from prefab .tts/.nim, blood-moon BloodmoonMusic builder (HordeEvent builder unwired: stock has no sender), electrical block placement + WireActions, vehicle terrain gravity/ground-clamp, trader stock TraderData wire, quest multi-phase objective graphs, EAI prioritized task graphs, in-game console commands. All PARTIAL with documented gaps (GAP_ANALYSIS.md) |
 | Quest PDF load | **PASS** | no `Failed loading` after RewardItem ItemStack wire |
+| POI reset | **PASS** | quest dedication (rally activation / POI lock) re-paints the POI's baked .tts blocks over player edits (ResetBlocksAndRebuild); quest-tag filter + lockout-expiry reset residual |
 | Unit tests | **PASS** | 2026-08-05 wave: inventory place wood + craft scenarios green; snapshot/EAI/evidence/webui http added (run `zig build test` for exact count). |
 | C2S hardening | **PASS** | join-phase gate; Bag ownership; damage cap+fatal-vs-NPC only; SetBlock/Explosion/TE reach 96; respawn heal only when dead |
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |

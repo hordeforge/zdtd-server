@@ -7376,6 +7376,40 @@ pub const Game = struct {
         try self.sendGame(peer, "NetPackageWorldAreas", body);
     }
 
+    /// PrefabInstance.ResetBlocksAndRebuild (asm.il 945360-945387): re-paint a
+    /// POI's baked .tts blocks over the area, overwriting player edits, so a
+    /// repeatable quest POI can be restored (a cleared or destroyed POI resets
+    /// when the next quest dedicates it). The block id is the low 16 bits of
+    /// the BlockValue raw (tts.zig:13); each changed block is broadcast as the
+    /// authoritative SetBlock. Tag-filter residual: stock resets only
+    /// quest-tagged blocks; zdtd re-paints the full prefab footprint.
+    fn resetPoiBlocks(self: *Game, wx: i32, wz: i32) void {
+        const pf = if (self.world.prefabs) |*p| p else return;
+        var di: ?usize = null;
+        for (pf.items, 0..) |d, i| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            if (wx < d.x or wx >= d.x + d.size_x or wz < d.z or wz >= d.z + d.size_z) continue;
+            di = i;
+            break;
+        }
+        const idx = di orelse return;
+        const d = pf.items[idx];
+        const tb = pf.getTtsBlocks(d.name) orelse return;
+        const Ctx = struct {
+            g: *Game,
+            fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8) void {
+                const g: *Game = @ptrCast(@alignCast(ctx.?));
+                g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
+                g.clearBlockHp(bx, by, bz);
+                if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
+                    g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), g.interest_range) catch {};
+                } else |_| {}
+            }
+        };
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, Ctx.put, self);
+        std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
+    }
+
     /// Send the full "blocks" NameIdMapping so the client assigns exactly the ids
     /// our AssignIds dump names, instead of us trusting its local blocks.xml to
     /// land on the same numbers.
@@ -8242,6 +8276,9 @@ pub const Game = struct {
                     // marker must not report activated for a quest we cannot track.
                     if (!systems.questOnRallyActivated(&self.sim, c.slot, head.quest_code)) return;
                     systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
+                    // The quest now dedicates this POI: restore its baked blocks
+                    // (PrefabInstance.ResetBlocksAndRebuild on quest dedication).
+                    self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
                 }
                 const out = try packages.stock_quest.buildQuestEvent(self.body_buf[0..64], reply);
                 if (lockout.reason == .none) {
@@ -8252,7 +8289,11 @@ pub const Game = struct {
                     try self.sendGame(peer, "NetPackageQuestEvent", out);
                 }
             },
-            .lock_poi => systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz),
+            .lock_poi => {
+                systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
+                // Lock acquisition = quest dedication: restore the POI blocks.
+                self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
+            },
             .unlock_poi => systems.questPoiUnlock(&self.sim, c.entity_id, head.px, head.pz),
             else => return,
         }
@@ -9009,8 +9050,57 @@ pub const Game = struct {
         try std.testing.expect(saw_bob);
     }
 
-    test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
+    test "POI reset restores baked blocks over player edits" {
         const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+        const map = game_dir ++ "/Data/Worlds/Navezgane";
+        if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
+        io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+        var g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_reset", 0, .{
+            .map_dir = map,
+            .game_dir = game_dir,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        const pf = if (g.world.prefabs) |*p| p else return error.TestUnexpectedResult;
+        // First trader POI with a baked block table.
+        var di: ?usize = null;
+        for (pf.items, 0..) |d, i| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            const qd = pf.questData(d.name) orelse continue;
+            if (!qd.is_trader_area) continue;
+            if (pf.getTtsBlocks(d.name) == null) continue;
+            di = i;
+            break;
+        }
+        const idx = di orelse return error.TestUnexpectedResult;
+        const d = pf.items[idx];
+        // A non-air block near the stamp surface to edit and restore.
+        var target: ?[3]i32 = null;
+        outer: for (0..@as(usize, @intCast(d.size_x))) |lx| {
+            for (0..@as(usize, @intCast(d.size_z))) |lz| {
+                const by = d.stampY() + 1;
+                const y_hi = @min(by + 10, 255);
+                var y: i32 = by;
+                while (y <= y_hi) : (y += 1) {
+                    const bid = g.world.blockWorld(d.x + @as(i32, @intCast(lx)), y, d.z + @as(i32, @intCast(lz))) catch 0;
+                    if (bid == 0) continue;
+                    target = .{ d.x + @as(i32, @intCast(lx)), y, d.z + @as(i32, @intCast(lz)) };
+                    break :outer;
+                }
+            }
+        }
+        const t = target orelse return error.TestUnexpectedResult;
+        const orig = (try g.world.blockWorld(t[0], t[1], t[2]));
+        // Player edit wipes the block; the quest dedication resets it.
+        try g.setBlock(t[0], t[1], t[2], 0);
+        try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(t[0], t[1], t[2]));
+        g.resetPoiBlocks(t[0], t[2]);
+        try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
+    }
+
+    test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {        const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
         const map = game_dir ++ "/Data/Worlds/Navezgane";
         if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
         io_fs.mkdirPathSimple(".zdtd_cfg_cache");

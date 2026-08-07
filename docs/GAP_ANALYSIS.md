@@ -894,13 +894,23 @@ parsed, and quest offering is unwired.
   (perkDaringAdventurer, +10..+50); none are loaded or applied.
   *Anchors:* `src/` (no match), `Data/Config/progression.xml:3064-3065`, `:3084`
 
-- **Trader tiers / TierItemGroups / traderstage_templates** `MISSING`
-  `buildTraderDataStock` always writes a 0 tier-group count.
-  `TraderInfo.TierItemGroups`, `TraderMaxTier`, `TraderItemAbundance` and the
-  `traderstage_templates` gating are unimplemented, so stock never deepens or
-  improves as the player progresses.
-  *Anchors:* `src/wire/packages.zig:665`, `Data/Config/traders.xml:24-60`,
-  `asm.il:863725-863767`
+- **Trader tiers / TierItemGroups / traderstage_templates** `N/A (parity)`
+  The engine tier machinery exists but stock V3.1.0 data never exercises it:
+  `TradersFromXml` dispatches `<tier_items>` elements (only `trader_items` and
+  `tier_items` are recognized; anything else throws), and the shipped
+  `Data/Config/traders.xml` contains zero `<tier_items>`, so every
+  `TraderInfo.TierItemGroups` is empty and `TraderData::WriteInventoryData`
+  emits a 0 tier-group count. zdtd's `writeTraderDataBody` writes exactly that
+  (u8 0), so the wire is byte-correct for stock. The tier engine itself
+  (ParseTierItems: `count`/`level="min,max"`/items; `SpawnTierGroup` shuffling
+  the tier's entries into `min..max` stacks on HandleFullReset; the wire
+  `u8 count + GameUtils::WriteItemStack` per group) is documented RE but
+  unverifiable without a modded traders.xml sample; `TraderMaxTier` /
+  `TraderItemAbundance` are GameStats knobs, not XML.
+  *Anchors:* `TradersFromXml.il.txt:470-500` (element dispatch),
+  `:566-642` (ParseTierItems), `TraderInfo.il.txt:719-750` (SpawnTierGroup),
+  `TraderData.il.txt:477-520` (WriteInventoryData tier section),
+  `src/wire/stock_entity.zig:121-137` (writeTraderDataBody), `asm.il:863725-863767`
 
 - **Per-entry Markup (demand model)** `WORKS`
   `TraderStock.StockEntry.markup` (sbyte) tracks the demand delta: a buy spikes
@@ -1483,12 +1493,18 @@ can walk into every POI but none of them is the building TFP authored.
   player-placed storage never respawns (stock `bPlayerStorage`).
   *Anchors:* `src/world/containers.zig:31`, `src/server/game.zig:7445`
 
-- **POI reset / rebuild** `MISSING`
-  Nothing resets a POI's blocks; a repo-wide search for ResetBlocks / poi_reset
-  finds no implementation. Stock resets on fetch/clear quest accept or lockout
-  expiry. A POI destroyed or cleared once stays that way permanently, so
-  repeatable quests on the same POI can never restore it.
-  *Anchors:* `src/ecs/poi_lock.zig:1`, `asm.il:945360-945387`
+- **POI reset / rebuild** `WORKS` (quest-tag filter residual)
+  `resetPoiBlocks` re-paints a POI's baked .tts blocks over the area
+  (PrefabInstance.ResetBlocksAndRebuild shape, asm.il 945360-945387), restoring
+  destroyed or cleared POIs when a quest dedicates them: the rally-marker
+  activation and lock-acquisition quest events reset the locked POI. Each
+  changed block broadcasts the authoritative SetBlock; textures/densities ride
+  the world raw+tex path. Residual: stock resets only quest-tagged blocks (a
+  base built inside a POI survives stock's reset); zdtd re-paints the full
+  prefab footprint, and lockout-expiry reset is not wired (only dedication).
+  *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
+  `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`
+  (`paintDecoration`), `asm.il:945360-945387`
 
 - **Quest POI lockout table** `WORKS`
   Lock/unlock/expire with the 2000-tick grace, quester list, rect containment and

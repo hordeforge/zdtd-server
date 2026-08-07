@@ -707,6 +707,14 @@ pub const World = struct {
         try c.setBlock(self.allocator, t.lx, y, t.lz, id);
     }
 
+    /// World-space raw+texture set (POI reset re-paint path): keeps the baked
+    /// texture and density like the chunk-load paint.
+    pub fn setBlockTexDensWorld(self: *World, x: i32, y: i32, z: i32, raw: u32, tex: u64, dens: ?u8) !void {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        try c.setBlockTexDens(self.allocator, t.lx, y, t.lz, raw, tex, dens);
+    }
+
     /// World-space `Chunk.setBlockDecoRaw` (surface height preserved).
     pub fn setBlockDecoWorld(self: *World, x: i32, y: i32, z: i32, raw: u32) !void {
         const t = worldToChunk(x, z);
