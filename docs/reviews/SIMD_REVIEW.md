@@ -6,7 +6,7 @@
 | Updated | 2026-08-06 (review-only refresh; anchors moved, new loops classified) |
 | Zig | 0.16 |
 | Mode | Review + **P1 kernels shipped** in `stock_chunk.zig` |
-| Prompt | [`prompts/simd-review.md`](prompts/simd-review.md) |
+| Prompt | [`prompts/simd-review.md`](../prompts/simd-review.md) |
 
 ## Executive summary
 

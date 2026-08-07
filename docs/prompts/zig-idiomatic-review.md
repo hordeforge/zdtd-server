@@ -88,7 +88,7 @@ way beats N OS-specific paths.
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings + `docs/ZIG_REVIEW.md` (or PR comment style tables). No code. |
+| **Review only** | Findings + `../reviews/ZIG_REVIEW.md` (or PR comment style tables). No code. |
 | **Fix P0/P1** | Review + apply high-severity idiomatic fixes; re-run tests. |
 | **Full pass on path** | Deep review of given dirs/files + fix all safe issues. |
 | **Comptime focus** | Only comptime/inline/generics/`anytype` quality. |
@@ -443,7 +443,7 @@ Review any change that runs per tick or per packet:
 
 ### Always
 
-1. **`docs/ZIG_REVIEW.md`** (create or update) with:
+1. **`../reviews/ZIG_REVIEW.md`** (create or update) with:
    - Scope (paths, mode, date)
    - Summary counts by severity
    - Tables: location (`path:line`), issue, idiomatic fix, severity

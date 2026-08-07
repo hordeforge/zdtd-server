@@ -5,7 +5,7 @@
 # Do not put secrets, MaxFuel, biome colors, item ids, or EconomicValue here.
 # Web UI secret: env ZDTD_WEBUI_SECRET (see .env.example), never this file.
 # Unknown keys and malformed assignments abort startup.
-# See docs/HARDCODE_AUDIT.md and docs/GAME_OPTIONS.md.
+# See docs/reviews/HARDCODE_AUDIT.md and docs/GAME_OPTIONS.md.
 
 [stream]
 max_streamed_chunks = 169

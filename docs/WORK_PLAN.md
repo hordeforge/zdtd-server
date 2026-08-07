@@ -570,20 +570,20 @@ field must stay a floor, never a replacement for stock per-entity data. The
 speed and damage constants already resolve `entityclasses.xml` first, and
 making them configurable is exactly the moment that ordering gets inverted by
 accident. This is the failure mode
-[HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) exists to catch.
+[HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md) exists to catch.
 
 **Change**
 
 - Classify every value moved in T12 as **floor** (stock data wins when present)
   or **policy** (no stock equivalent; the config value is authoritative).
-- For floors, add a Bucket A row to HARDCODE_AUDIT.md naming the stock file and
+- For floors, add a Bucket A row to reviews/HARDCODE_AUDIT.md naming the stock file and
   field that outranks it.
 - Where a mode genuinely wants to scale a stock-derived value, add an explicit
   multiplier applied **after** the per-entity resolve, rather than a global that
   discards the XML. `zombie_speed_scale` on `World` is the existing shape to
   follow.
 
-**Files:** `src/ecs/rules.zig`, `src/ecs/systems.zig`, `docs/HARDCODE_AUDIT.md`.
+**Files:** `src/ecs/rules.zig`, `src/ecs/systems.zig`, `reviews/HARDCODE_AUDIT.md`.
 
 **Grounding:** `entityclasses.xml` `MoveSpeed` / `MoveSpeedAggro` and the
 `HandItem` to `items.xml` `DamageEntity` path, as already resolved in

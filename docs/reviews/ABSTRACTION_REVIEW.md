@@ -118,7 +118,7 @@ pulled into assets test root). `linux_fs` module: already absent (no file).
 | `game.zig` size (~5.5k) | orchestration god | **document** | P2 | Wrong-layer open-code wire is already mostly in packages; further split is product work, not this pass |
 | `parallel` | 3 sites, no alloc on hot path | **keep** | - | - |
 | Plugin / System vtable | none | **do not build** | - | - |
-| LiteNet + admin/GSI TCP | migrated to `std.Io.net` / `tcp_listen` | **keep** | - | See [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md); residual thin posix only |
+| LiteNet + admin/GSI TCP | migrated to `std.Io.net` / `tcp_listen` | **keep** | - | See [STD_ABSTRACTIONS.md](../STD_ABSTRACTIONS.md); residual thin posix only |
 | clock hot path | `posix.system.clock_gettime` | **keep** | - | Io.Threaded per call too heavy on packet path |
 
 ## Dual paths

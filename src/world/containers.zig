@@ -284,31 +284,38 @@ test "container store save load roundtrip" {
     var s: ContainerStore = .{};
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 8, 42).?;
     c.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 2, .meta = 3 });
-    try s.save(".", std.testing.allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
     var s2: ContainerStore = .{};
-    try s2.load(".");
+    try s2.load(dir);
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u16, 7), c2.slots[0].item_id);
     try std.testing.expectEqual(@as(u16, 12), c2.slots[0].count);
     try std.testing.expectEqual(@as(u8, 2), c2.slots[0].quality);
     try std.testing.expect(c2.touched);
-    io_fs.deleteFileSimple("./containers.zct");
 }
 
 test "container save order is pos-sorted not slot-order" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
     // Reverse-insert so sparse slot indices disagree with world-pos order.
     var s: ContainerStore = .{};
     _ = s.getOrCreate(.{ .x = 9, .y = 70, .z = 0 }, 8, 1).?;
     _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
-    try s.save(".zdtd_cfg_cache", std.testing.allocator);
-    const data = try io_fs.readFileAll(std.testing.allocator, ".zdtd_cfg_cache/containers.zct");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+    var zct_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zct = try std.fmt.bufPrint(&zct_buf, "{s}/containers.zct", .{dir});
+    const data = try io_fs.readFileAll(std.testing.allocator, zct);
     defer std.testing.allocator.free(data);
     try std.testing.expect(data.len >= 6 + 40);
     // First record pos.x must be 1 (sorted), not 9 (slot-0 insert).
     const first_x = std.mem.readInt(i32, data[6..10], .little);
     try std.testing.expectEqual(@as(i32, 1), first_x);
-    io_fs.deleteFileSimple(".zdtd_cfg_cache/containers.zct");
 }
 
 test "container get or create" {
@@ -328,9 +335,13 @@ test "container persistence retains every full-capacity container" {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = 0 }, max_container_slots, 42).?;
         c.setSlot(max_container_slots - 1, .{ .item_id = 7, .count = @intCast(i + 1) });
     }
-    try s.save(".", std.testing.allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
     var s2: ContainerStore = .{};
-    try s2.load(".");
+    try s2.load(dir);
     try std.testing.expectEqual(max_containers, s2.n);
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
     try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);

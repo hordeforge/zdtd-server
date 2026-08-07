@@ -364,12 +364,14 @@ test "vending store round-trips through the ZVNM1 save format" {
     a.next_auto_buy = 9876543210;
     _ = st.getOrCreate(.{ .x = 9, .y = 0, .z = 0 }, 200, 10);
 
-    io_fs.mkdirPathSimple(".zdtd_test_vending");
-    defer io_fs.deleteFileSimple(".zdtd_test_vending/vending.zvn");
-    try st.save(".zdtd_test_vending");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try st.save(dir);
 
     var st2: VendingStore = .{};
-    try st2.load(".zdtd_test_vending");
+    try st2.load(dir);
     try std.testing.expectEqual(@as(usize, 2), st2.count());
     const a2 = st2.get(.{ .x = 1, .y = 2, .z = 3 }).?;
     try std.testing.expectEqual(@as(i32, 1234), a2.available_money);

@@ -760,9 +760,13 @@ test "deco facts follow Extends chains and fail closed" {
         \\</block>
         \\</blocks>
     ;
-    const path = ".zdtd_test_blocks_deco.xml";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_deco.xml", .{dir});
     try io_fs.writeFile(std.testing.allocator, path, xml_src);
-    defer io_fs.deleteFile(std.testing.allocator, path);
 
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();

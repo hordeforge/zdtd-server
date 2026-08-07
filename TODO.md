@@ -178,7 +178,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan)
 - [x] Power: full trigger TE wire (pressure plate / tripwire gate + `activateTriggerAt` on player step; pulse opens BFS)
 - [x] Workstation RecipeQueue C2S: TileEntity type 12 parse applies queue + burn; tick crafts + dirty rebroadcast
-- [x] Hardcode audit: run `docs/prompts/hardcoded-data-review.md` → [`docs/HARDCODE_AUDIT.md`](docs/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
+- [x] Hardcode audit: run `docs/prompts/hardcoded-data-review.md` → [`docs/reviews/HARDCODE_AUDIT.md`](docs/reviews/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
 
 ### M11 multiplayer CPU (1.0 scale gate)
 
@@ -466,9 +466,18 @@ All items below shipped. Kept as historical checklist.
   drives a real `AllyStore` table (`src/server/ally.zig`, ComputeTransition
   per asm.il 885142), and relationships persist to `{world_dir}/allies.zal`
   (magic ZAL1, zdtd-owned like claims.zlc) on the periodic + shutdown saves and
-  restore at init. Open: party membership (`NetPackagePartyActions`/`PartyData`
-  are entity-id keyed with no PUID, so it needs real `Party` state, not
-  identity — see docs/GAP_ANALYSIS.md §AUTHGATE).
+  restore at init.
+- [x] **Party state machine (P3)** SHIPPED 2026-08-07: `NetPackagePartyActions`
+  (entity-id keyed, no PUID — RE parties-factions.md §2) dispatches to a real
+  `Party`/`PartyManager` (`src/ecs/party.zig`): AcceptInvite (creates/joins,
+  8-member cap), ChangeLead, LeaveParty, KickFromParty, Disconnected,
+  JoinAutoParty (party id 1), SetVoiceLobby; every mutation fans a stock-layout
+  `NetPackagePartyData` snapshot out (party id, leader, voice lobby, member ids,
+  changed entity, action, disband); party-of-one auto-disbands and disconnect
+  removes. **Shared kill XP SHIPPED 2026-08-07** (`Party.GetPartyXP` split by
+  in-range members + `NetPackageSharedPartyKill`). Open: the rest of the shared
+  scope — shared quests, party gamestage/loot max (see
+  docs/GAP_ANALYSIS.md §AUTHGATE).
 - [x] Kick/ban/list on admin TCP (first cut); ServerPassword = LiteNet connect key
 - [x] Admin TCP: kick/ban/unban/list/give/tele/say/save (not full telnet parity)
 - [x] LiteNet: reliable+frag HAVE; unreliable sendUnreliable; sequenced still MISSING

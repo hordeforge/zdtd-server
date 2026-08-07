@@ -4,7 +4,7 @@
 //! Minimal TOML subset: [section] + key = int|float|bool|string. No arrays/tables-in-tables.
 //! Parsing is the comptime binder (src/util/toml_bind.zig, ADR 0021 decision 1);
 //! this file declares the shape and the merge/sanitize behaviour.
-//! Design: docs/HARDCODE_AUDIT.md, docs/adr/0010-data-config-zig-plugins.md
+//! Design: docs/reviews/HARDCODE_AUDIT.md, docs/adr/0010-data-config-zig-plugins.md
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");

@@ -89,18 +89,20 @@ Where the world and its data come from.
 ## Review prompts and their findings
 
 The prompts under `prompts/` are named `*-review.md` so the review-loop tool
-discovers them as project prompts. Each findings document is the output of one
-run and is a snapshot, not a live inventory.
+discovers them as project prompts. Findings live under `reviews/`: each is the
+output of one run and is a **snapshot, not a live inventory**. That separation
+is the point of the directory. When a review contradicts
+[STATUS.md](STATUS.md), STATUS wins.
 
 | Prompt | Findings |
 |---|---|
-| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | [ZIG_REVIEW.md](ZIG_REVIEW.md) |
-| [prompts/abstractions-review.md](prompts/abstractions-review.md) | [ABSTRACTION_REVIEW.md](ABSTRACTION_REVIEW.md) |
-| [prompts/simd-review.md](prompts/simd-review.md) | [SIMD_REVIEW.md](SIMD_REVIEW.md) |
-| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | [ECS_REVIEW.md](ECS_REVIEW.md) |
-| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) |
-| [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](ZIG_0_16_REVIEW.md) |
-| [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | [ZIG_PRACTICES_REVIEW.md](ZIG_PRACTICES_REVIEW.md) |
+| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | [ZIG_REVIEW.md](reviews/ZIG_REVIEW.md) |
+| [prompts/abstractions-review.md](prompts/abstractions-review.md) | [ABSTRACTION_REVIEW.md](reviews/ABSTRACTION_REVIEW.md) |
+| [prompts/simd-review.md](prompts/simd-review.md) | [SIMD_REVIEW.md](reviews/SIMD_REVIEW.md) |
+| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | [ECS_REVIEW.md](reviews/ECS_REVIEW.md) |
+| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md) |
+| [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](reviews/ZIG_0_16_REVIEW.md) |
+| [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
 
 ## Scale (parked until M11 numbers exist)
 

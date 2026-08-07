@@ -219,8 +219,12 @@ pub fn readLinkAbsoluteSimple(absolute_path: []const u8, buf: []u8) ![]u8 {
 
 test "write read roundtrip under cache dir" {
     const a = std.testing.allocator;
-    mkdirPath(a, ".zdtd_cfg_cache");
-    const p = ".zdtd_cfg_cache/io_fs_test.txt";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_test.txt", .{dir});
     try writeFile(a, p, "hello");
     const got = try readFileAll(a, p);
     defer a.free(got);
@@ -236,22 +240,30 @@ test "write read roundtrip under cache dir" {
 
 test "injectWriteFailures fails then recovers" {
     defer injectWriteFailures(0);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_fault.txt", .{dir});
     injectWriteFailures(2);
     try std.testing.expectEqual(@as(u32, 2), pendingWriteFailures());
-    try std.testing.expectError(error.DiskQuota, writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "x"));
+    try std.testing.expectError(error.DiskQuota, writeFileSimple(p, "x"));
     try std.testing.expectEqual(@as(u32, 1), pendingWriteFailures());
-    try std.testing.expectError(error.DiskQuota, writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "x"));
+    try std.testing.expectError(error.DiskQuota, writeFileSimple(p, "x"));
     try std.testing.expectEqual(@as(u32, 0), pendingWriteFailures());
-    try writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "ok");
-    deleteFileSimple(".zdtd_cfg_cache/io_fs_fault.txt");
+    try writeFileSimple(p, "ok");
 }
 
 test "injectReadFailures fails then recovers" {
     defer injectReadFailures(0);
-    mkdirPathSimple(".zdtd_cfg_cache");
-    const p = ".zdtd_cfg_cache/io_fs_read_fault.txt";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_read_fault.txt", .{dir});
     try writeFileSimple(p, "payload");
-    defer deleteFileSimple(p);
     injectReadFailures(1);
     try std.testing.expectEqual(@as(u32, 1), pendingReadFailures());
     try std.testing.expectError(error.InputOutput, readFileAll(std.testing.allocator, p));

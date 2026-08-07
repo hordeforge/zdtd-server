@@ -39,7 +39,7 @@ This is complementary to (do not conflate):
 
 | Mode | Do |
 |---|---|
-| **Audit only** | Findings + `docs/HARDCODE_AUDIT.md`. No code. |
+| **Audit only** | Findings + `../reviews/HARDCODE_AUDIT.md`. No code. |
 | **Fix Bucket A** | Audit + implement P0/P1 loader / name-resolve fixes. |
 | **Extract Bucket B** | Audit + move listed caps into serverconfig / zdtd.toml. |
 
@@ -667,7 +667,7 @@ For **every** hit:
 
 Always produce:
 
-1. **`docs/HARDCODE_AUDIT.md`** (create or update) with:
+1. **`../reviews/HARDCODE_AUDIT.md`** (create or update) with:
    - Executive summary (counts by bucket × severity)
    - Full finding tables (A and B separate)
    - OK false-positive list
@@ -777,7 +777,7 @@ $HOME/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Co
 - Concise, tables over prose
 - Every finding: `path:line`, bucket, severity, fix shape, default-preserving
 - No em dashes, no AI attribution
-- Audit-only: stop after `docs/HARDCODE_AUDIT.md` + doc cross-links
+- Audit-only: stop after `../reviews/HARDCODE_AUDIT.md` + doc cross-links
 - Implement: short audit → A P0/P1 → B schema + extraction → `make check`
 
 ---

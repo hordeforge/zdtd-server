@@ -241,14 +241,19 @@ test "child raw refuses offsets the bit fields cannot hold" {
     try std.testing.expectEqual(@as(?u32, null), childRaw(1, .{ .x = 0, .y = 33, .z = 0 }));
 }
 
-fn testWorld() !store.World {
-    var w = try store.World.init(std.testing.allocator, ".zdtd_test_deco_mirror");
+/// `dir` is a caller-owned scratch dir (tmpDir), so tests never write into the
+/// repo root.
+fn testWorld(dir: []const u8) !store.World {
+    var w = try store.World.init(std.testing.allocator, dir);
     w.terrain_ids = .{};
     return w;
 }
 
 test "single block deco only fills air and leaves terrain height alone" {
-    var w = try testWorld();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(4, 4);
     const before = try w.blockWorld(4, h, 4);
@@ -270,7 +275,10 @@ test "single block deco only fills air and leaves terrain height alone" {
 }
 
 test "multiblock tree writes parent plus children" {
-    var w = try testWorld();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(9, 11);
     const n = try apply(&w, .{ .x = 9, .y = h + 1, .z = 11, .raw = 24629, .offsets = offsetsFor(1, 7, 1) });
@@ -298,7 +306,10 @@ test "multiblock tree writes parent plus children" {
 }
 
 test "multiblock spanning a chunk edge writes into both chunks" {
-    var w = try testWorld();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(15, 15);
     const n = try apply(&w, .{ .x = 15, .y = h + 1, .z = 15, .raw = 24629, .offsets = offsetsFor(3, 2, 3) });

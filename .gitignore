@@ -33,6 +33,11 @@ assets/fixtures/assignids_v314.txt
 /server/
 *.pid
 
+# Scenario / unit-test scratch left in the repo root. Tests should use
+# std.testing.tmpDir instead; these patterns keep a stray run from showing up
+# as untracked noise or, worse, getting committed.
+.zdtd_test_*
+
 # Local scratch / agent caches (not product inputs)
 .cache_fixed_block_ids.txt
 .ruff_cache/

@@ -142,7 +142,7 @@ test, so a retune cannot land silently).
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
-`entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md)).
+`entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md)).
 
 ### Gamemode packs (`modes/`)
 

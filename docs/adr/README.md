@@ -29,7 +29,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),
-[HARDCODE_AUDIT.md](../HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
+[HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
 [WIRE_CHUNK.md](../WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
 [WEBUI.md](../WEBUI.md), [STD_ABSTRACTIONS.md](../STD_ABSTRACTIONS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0020),

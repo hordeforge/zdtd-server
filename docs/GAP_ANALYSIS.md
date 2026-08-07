@@ -3852,7 +3852,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
 | Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
 | Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
-| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` table + transition; party membership still echoed, see §AUTHGATE) |
+| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; shared party scope — kill XP split, shared quests — still open, see §AUTHGATE) |
 
 #### Quests / traders / dialog (stock)
 | Package | Priority |
@@ -4025,8 +4025,8 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
-| Party (membership) | MISSING (PartyActions/PartyData echoed to sender; no Party state) |
-| Allies | PARTIAL (identity-keyed AllyStore + AllyResponse; not persisted) |
+| Party (membership) | PARTIAL (real `Party` state machine + `PartyData` snapshots; shared scope — kill-XP split, shared quests — open, §AUTHGATE) |
+| Allies | PARTIAL (identity-keyed AllyStore + AllyResponse, allies.zal persisted; no faction tiers) |
 | Spatial hash for queries | MISSING (broadcastNear radius only) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
 | Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate walks `World.alive_bits`/`dirty_bits` and the dirty clear is O(changed); the interest *query* is still a per-entity observer mask, no cell hash) |
@@ -4810,13 +4810,24 @@ LANDED (real, IL-grounded):
   its direction is ToClient (asm.il 886358).
 
 HONEST GAPS:
-- **Party membership.** `NetPackagePartyActions` (asm.il 829049) and
-  `NetPackagePartyData` (asm.il 829470) carry **no** PlatformUserId; both are
-  purely entity-id keyed. zdtd holds no `Party` state, so both are echoed to the
-  sender and no S2C `PartyData` is ever constructed. What is missing is a
-  Party/PartyManager equivalent (AcceptInvite / ChangeLead / LeaveParty /
-  KickFromParty / JoinAutoParty), not identity. This is also why party members
-  are not exempt from the POI `PlayerInside` lockout (`src/ecs/systems.zig`).
+- **Party shared scope (partial).** `NetPackagePartyActions` (asm.il 829049)
+  is decoded and dispatched to a real `Party`/`PartyManager` state machine
+  (`src/ecs/party.zig`; RE parties-factions.md §2.2): AcceptInvite creates /
+  joins (8-member cap), ChangeLead / LeaveParty / KickFromParty /
+  Disconnected / JoinAutoParty (party id 1) / SetVoiceLobby all mutate the
+  authoritative group and fan a stock-layout `NetPackagePartyData` snapshot
+  (party id, leader index, voice lobby, member ids, changed entity, action,
+  disband) out to party-relevant peers; a party of one auto-disbands, and
+  disconnect removes the member. **Shared kill XP SHIPPED 2026-08-07**:
+  `Party.GetPartyXP` (`base * (1 - 0.1 * MemberCountInRange)`, range from
+  GameStats[54] party_shared_kill_range = 100) splits the killer's award and
+  every other in-range member receives the same split via
+  `NetPackageSharedPartyKill` (stock §2.3). What stock has and zdtd still
+  lacks is the rest of the shared scope: shared quests
+  (`NetPackagePartyQuestChange`), the party gamestage/loot max
+  (`Party.get_HighestGameStage` / `GetHighestLootStage`), and party members
+  are still not exempt from the POI `PlayerInside` lockout
+  (`src/ecs/systems.zig`).
 - **Ally persistence.** Relationships now persist to `{world_dir}/allies.zal`
   (magic ZAL1) on the periodic and shutdown saves and are restored at init;
   stock keeps them in `PersistentPlayerList`. The saved file is zdtd-owned like

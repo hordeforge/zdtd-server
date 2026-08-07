@@ -78,7 +78,7 @@ ergonomics (`query`, `command`) only when they preserve that shape
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings tables + `docs/ECS_REVIEW.md`. No code. |
+| **Review only** | Findings tables + `../reviews/ECS_REVIEW.md`. No code. |
 | **Review + fix P0** | Fix mis-owned state and AoS regressions that break tick or authority. |
 | **Deep pass** | Full inventory of `src/server/game.zig` C2S paths vs ecs systems; propose moves. |
 
@@ -260,7 +260,7 @@ hook except full Game.
 
 ## Output format
 
-Always write the findings to **`docs/ECS_REVIEW.md`** (create or update;
+Always write the findings to **`../reviews/ECS_REVIEW.md`** (create or update;
 `docs/INDEX.md` maps this prompt to that doc) and post a short chat note with
 the top findings. Sections below are the doc's structure.
 
@@ -340,7 +340,7 @@ zig build test
 - [ ] Ownership table filled for scope
 - [ ] P0/P1 findings listed with correct home
 - [ ] No recommendation to import a foreign ECS
-- [ ] `docs/ECS_REVIEW.md` created or updated
+- [ ] `../reviews/ECS_REVIEW.md` created or updated
 - [ ] If code changed: tests green; ECS.md updated if public shape changed
 - [ ] No em dashes / AI attribution
 

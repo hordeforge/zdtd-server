@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-07  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **917** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **930** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -93,7 +93,7 @@ observable, on the live stock client:
   entity only, immediate save + slot teardown). Parity coverage is now **0
   unhandled dir=1** (70 handled in game.zig). 775 total.
 - **Review passes (prompts dir):** the abstraction and ecs-soa reviews ran and
-  landed findings (`docs/ABSTRACTION_REVIEW.md`, `docs/ECS_REVIEW.md`); the
+  landed findings (`reviews/ABSTRACTION_REVIEW.md`, `reviews/ECS_REVIEW.md`); the
   ecs-soa follow-up fixes are in: RelPosAndRot raises the dirty bit so movers
   relay at the motion period instead of the heartbeat, the loot-bag Collect arm
   restores on partial deposit and records ledger causes, QuestEntitySpawn and
@@ -145,7 +145,7 @@ and player persistence depth.
 ## Wave 2026-08-07 (config-driven game modes, ADR 0021)
 
 The full WORK_PLAN T11-T15 chain landed (ADR 0021 "config-driven game modes"),
-plus three priority gaps from GAP_ANALYSIS / TODO. 917 unit tests.
+plus three priority gaps from GAP_ANALYSIS / TODO. 930 unit tests.
 
 - **T11 TOML binder** (`src/util/toml_bind.zig`): `zdtd.toml` and the mode
   packs now parse through one comptime-reflected binder — struct fields are
@@ -264,8 +264,24 @@ plus three priority gaps from GAP_ANALYSIS / TODO. 917 unit tests.
   (magic ZAL1, zdtd-owned like claims.zlc) on the periodic + shutdown saves and
   restore at init; a missing file is a fresh server, a corrupt one fails the
   load loudly instead of silently clobbering. Unit test round-trips the file
-  and the corrupt path. Party membership stays open (entity-id keyed, needs
-  real `Party` state, not identity).
+  and the corrupt path.
+- **Party state machine (P3)**: `NetPackagePartyActions` (entity-id keyed, no
+  PUID — RE parties-factions.md §2) dispatches to a real `Party`/`PartyManager`
+  (`src/ecs/party.zig`): AcceptInvite creates or joins (8-member cap, leader
+  index 0), ChangeLead / LeaveParty / KickFromParty / Disconnected /
+  JoinAutoParty (party id 1) / SetVoiceLobby mutate the authoritative group,
+  and every mutation fans a stock-layout `NetPackagePartyData` snapshot
+  (party id, leader index, voice lobby, member ids, changed entity, action,
+  disband — parties-factions.md §3) out to party-relevant peers. A party of
+  one auto-disbands (stock keeps no singleton party); disconnect removes the
+  member. The old echo-to-sender is gone; a client-sent PartyData is rejected
+  (ToClient, ownership). **Shared kill XP SHIPPED**: `Party.GetPartyXP`
+  (`base * (1 - 0.1 * MemberCountInRange)`, range GameStats[54] = 100) splits
+  the killer's award and every in-range mate gets the same split via
+  `NetPackageSharedPartyKill` (scenario covers the 90/90 split and the solo
+  full award). Wire layout + parse tests, a 7-case state-machine test, and
+  two-peer scenarios cover accept → leave → disconnect → shared kill. Open:
+  the rest of the shared scope (shared quests, party gamestage/loot max).
 - **GAP 12 fixed-size caps**: land claims 256→1024, containers 256→512
   (heap encode buffer — the old stack buffer truncated saves), workstations
   64→256, damaged blocks 64→256, bans 32→128, join-rate IPs 16→64. The join
@@ -285,7 +301,7 @@ plus three priority gaps from GAP_ANALYSIS / TODO. 917 unit tests.
   Ken Perlin table used); banding is stock-shaped, boundaries may drift
   (HARDCODE_AUDIT A33, extraction owned by 7dtd-research).
 
-**Gates at this pin:** `make check` exit 0 · 917 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 930 unit tests · live stock-client
 gate 23/23 · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md) (all T1-T15 tasks landed) and
@@ -487,7 +503,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
-| P3 | Party membership + ally persistence | Ally persistence SHIPPED (allies.zal round-trip); PUID flows login → PersistentPlayerState → AllyStore; party packages carry no PUID (entity-id keyed) so party still needs Party state, not identity |
+| P3 | Party membership + ally persistence | Both SHIPPED: allies.zal round-trip; real `Party` state machine + `PartyData` snapshots (entity-id keyed, no PUID). Open: shared party scope (kill-XP split, shared quests, gamestage/loot max) |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |

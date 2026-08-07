@@ -64,7 +64,7 @@ abstractions that match stock boundaries and stdlib.
 
 | Mode | Do |
 |---|---|
-| **Review only** | Verdict tables + `docs/ABSTRACTION_REVIEW.md`. No code. |
+| **Review only** | Verdict tables + `../reviews/ABSTRACTION_REVIEW.md`. No code. |
 | **Review + fix P0/P1** | Also delete/merge dual paths and mis-layered helpers; `make check` green. |
 | **Deep pass** | Full inventory of a named dir; score every public helper/facade. |
 
@@ -327,7 +327,7 @@ nothing → delete wrapper.
 
 ### 6. Deliverable (always)
 
-Write or update **`docs/ABSTRACTION_REVIEW.md`**:
+Write or update **`../reviews/ABSTRACTION_REVIEW.md`**:
 
 - Scope and date
 - Table of findings (name, verdict, severity, action)

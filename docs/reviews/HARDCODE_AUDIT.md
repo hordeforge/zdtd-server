@@ -38,7 +38,7 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 
 **Validation (this audit pass):** unit suite ~**800** (`zig build test`; STATUS.md
 and changelog report 796-807 while a parallel wave is landing; prior pass 771).
-Count drifts; see [STATUS.md](STATUS.md).
+Count drifts; see [STATUS.md](../STATUS.md).
 
 ---
 
@@ -144,7 +144,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 ### `zdtd.toml` (shipped surface)
 
 Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../zdtd.toml.example).
-Operator docs: [GAME_OPTIONS.md](GAME_OPTIONS.md). Precedence:
+Operator docs: [GAME_OPTIONS.md](../GAME_OPTIONS.md). Precedence:
 
 ```text
 CLI  >  env (webui secret)  >  <world>/zdtd.toml  >  CWD zdtd.toml
@@ -273,10 +273,10 @@ markup ratios (A29) here (Bucket A).
 
 | Doc | Role |
 |---|---|
-| [ASSETS.md](ASSETS.md) | Loader contracts |
-| [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig + zdtd.toml |
-| [STATUS.md](STATUS.md) | Play surface |
-| [../TODO.md](../TODO.md) | Backlog |
-| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | Audit prompt |
+| [ASSETS.md](../ASSETS.md) | Loader contracts |
+| [GAME_OPTIONS.md](../GAME_OPTIONS.md) | serverconfig + zdtd.toml |
+| [STATUS.md](../STATUS.md) | Play surface |
+| [../../TODO.md](../../TODO.md) | Backlog |
+| [prompts/hardcoded-data-review.md](../prompts/hardcoded-data-review.md) | Audit prompt |
 
 End of audit.

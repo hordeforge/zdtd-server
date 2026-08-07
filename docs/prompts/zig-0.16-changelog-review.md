@@ -80,7 +80,7 @@ cannot exist in the tree. The review hunts:
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings + `docs/ZIG_0_16_REVIEW.md`. No code changes. |
+| **Review only** | Findings + `../reviews/ZIG_0_16_REVIEW.md`. No code changes. |
 | **Fix** | Review + apply the rename/migration fixes; `make check` green. |
 
 Default if unspecified: **review only**, all of `src/`.
@@ -251,7 +251,7 @@ if found, the pin or the build is wrong).
 
 ### Always
 
-1. **`docs/ZIG_0_16_REVIEW.md`** (create or update) with:
+1. **`../reviews/ZIG_0_16_REVIEW.md`** (create or update) with:
    - Scope (paths, mode, date) and the release-notes URL
    - Per-section tables: location (`path:line`), changelog subsection, 0.15
      form, 0.16 form, severity
