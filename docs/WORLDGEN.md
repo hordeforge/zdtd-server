@@ -258,7 +258,7 @@ neighborhoods. Do not run WFC per-block for continents; that is the wrong tool.
 1. **Tiles** = stock RWG-style tiles and/or zdtd tile defs: edge tags
    (road_N/E/S/W, wall, open, water), footprint in chunks, prefab name list.
    Prefer reading stock `rwgmixer.xml` / tile prefab metadata when present;
-   never invent block ids (AGENTS rule 13).
+   never invent block ids (AGENTS rule 15).
 2. **Grid** = coarse cells (e.g. 1 cell = 1 RWG tile or N chunks). Seeded
    Shannon entropy collapse: pick lowest-entropy cell, pick weighted tile via
    `hash(seed, cell)`, propagate adjacency constraints.

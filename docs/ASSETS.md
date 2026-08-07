@@ -13,7 +13,7 @@ Policy hub for loading game data from the operator's install (`--game-dir`).
 Optional root: `<configs file="blocks.xml">…</configs>`. If `file=` omitted, target is inferred from the first xpath tag (`/blocks/…` → blocks.xml).
 
 Patched bytes are written under `.zdtd_cfg_cache/` (cwd, gitignored) then parsed by existing loaders. Not a Harmony/ModAPI host.
-Implements AGENTS.md rule 13: **no hand-copied catalogs** when a loader exists
+Implements AGENTS.md rule 15: **no hand-copied catalogs** when a loader exists
 or should.
 
 ## Paths

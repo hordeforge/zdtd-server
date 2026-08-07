@@ -14,7 +14,7 @@
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
 
-Target: game **V3.x Mono** client wire, Zig **0.16+**, **20 TPS** (50 ms) main
+Target: game **V3.1.0 b14** (Mono) client wire, Zig **0.16+**, **20 TPS** (50 ms) main
 tick. Validate with loadgen + stock client (EAC off) + **zdtd** apm dumps.
 
 ## Principles
@@ -88,10 +88,19 @@ The operating principles behind every rule below. When in doubt, these decide.
    tooling stays join/automation only. Workspace rule 10.
 10. **Proper stock fidelity.** Prefer **missing** over fake content (no invented
     terrain shells, fake FX, or incomplete journal blobs that fail stock `Read`).
-11. **Name for what it does.** A flag that only throttles streaming is not
+11. **A new tunable is a struct field, not a parse arm.** `util/toml_bind.zig`
+    binds `zdtd.toml` and mode packs by walking the destination struct, so
+    adding a field makes it configurable, validated and documented. Never
+    hand-write a `std.mem.eql(u8, key, ...)` chain again (ADR 0021). Sim rule
+    parameters belong in `ecs/rules.zig`, and a `Rules` value is a **floor**:
+    where stock ships per-entity data, that data still wins.
+12. **Markup is not a string literal.** HTML, CSS and JS live in their own files
+    and reach the binary through `@embedFile` (`src/server/webui/`). Nothing is
+    read from disk at runtime.
+13. **Name for what it does.** A flag that only throttles streaming is not
     `world_enabled`. Confusing names are defects.
-12. **One stock package shape → one builder.** No second "almost stock" encoder.
-13. **Do not hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md).
+14. **One stock package shape → one builder.** No second "almost stock" encoder.
+15. **Do not hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md).
     Anything stock ships in `Data/Config`, prefabs, DTM, TTS, XML catalogs, or
     other install files must be **read from those assets** (runtime via
     `game-dir` / `assets/*`, or **comptime** embed/parse that generates tables).
@@ -106,47 +115,47 @@ The operating principles behind every rule below. When in doubt, these decide.
     - **Fixtures** under `assets/fixtures/` are offline tests only.
     - **OK hardcodes:** wire layout RE constants, Unity hashes computed from
       stock **names**, ConfigFile LoadLocal name list (protocol).
-14. **RE before inventing wire.** Package field order, types, lengths, and join
+16. **RE before inventing wire.** Package field order, types, lengths, and join
     sequence come from `../7dtd-research/docs`, loadgen goldens, or verified stock
     `Read`/`Write`. Do not guess layouts from "what seems right." If RE and
     code disagree, fix the code (or update RE with evidence), not the client.
-15. **Server is authoritative.** World blocks, inventory, TE contents, entity
+17. **Server is authoritative.** World blocks, inventory, TE contents, entity
     HP/alive, quests, locks, and time are owned by sim. C2S is a request:
     validate (bounds, ownership, join phase, rates), apply or reject, then
     broadcast the **resulting** state. Never apply client-supplied world/inv
     blobs blindly; never let C2S overwrite another player's slots or distant
     chunks without a stock-legal path.
-16. **Join and channel phase gates.** Only accept packages legal for the peer's
+18. **Join and channel phase gates.** Only accept packages legal for the peer's
     current SM state (challenge → ids → login → enter → spawn → playing).
     Drop or disconnect illegal early/late C2S. Do not send play-world packages
     before the client is ready for them per stock order.
-17. **Interest and no self-echo.** Entity/chunk/TE/stream updates go to peers
+19. **Interest and no self-echo.** Entity/chunk/TE/stream updates go to peers
     that should observe them. Do not echo a player's own movement or redundant
     full state to themselves unless stock does. Serialize-once per tick where
     the interest path already does.
-18. **Bounds and caps everywhere untrusted or hot.** C2S coords, slot indices,
+20. **Bounds and caps everywhere untrusted or hot.** C2S coords, slot indices,
     counts, string lengths, and fragment sizes are range-checked. Streaming
     queues (chunks, deco, entity spawn) stay under named caps so one peer
     cannot stall the 50 ms tick or OOM the process.
-19. **Persist through the store.** Block/TE/player mutations that must survive
+21. **Persist through the store.** Block/TE/player mutations that must survive
     restart go through `world/*` / save paths (e.g. ZCH3 `.zch`, player data), not
     only in-memory interest caches. A green join test is not proof of persist.
-20. **Deterministic sim inputs.** Tick order for systems that touch the same
+22. **Deterministic sim inputs.** Tick order for systems that touch the same
     data is stable. RNG for loot/AI/director uses explicit seeded state, not
     ad-hoc `std.crypto` or time-based noise on the sim path. Same seed + inputs
     → same outcomes in tests where we claim that.
-21. **Stock hashes and type ids.** Unity/string hashes, AssignIds class ids, and
+23. **Stock hashes and type ids.** Unity/string hashes, AssignIds class ids, and
     item/block type ids follow stock formulas or loaded tables. Do not invent
     parallel id spaces that diverge from what the client resolves.
-22. **Fail closed on encode.** If a body cannot be built correctly (missing
+24. **Fail closed on encode.** If a body cannot be built correctly (missing
     catalog entry, buffer too small, unknown TE type), omit or send the stock
     empty/error form. Never truncate mid-field, pad with zeros to a guessed
     size, or send a partial blob that desyncs `BinaryReader`.
-23. **Keep `make check` green.** No "fix later," no skipped assertions to land a
+25. **Keep `make check` green.** No "fix later," no skipped assertions to land a
     feature. New wire/sim behavior gets a unit or `scenarios.zig` test when
     the path is non-trivial; join/spawn/chunk/inv changes need loadgen smoke
     when practical.
-24. **Stdlib abstractions, not OS-specific guts. No raw syscalls in new or
+26. **Stdlib abstractions, not OS-specific guts. No raw syscalls in new or
     touched code.** Prefer the highest stable Zig 0.16 API that fits:
     `std.Io` / `Dir` / `File` / `Threaded`, `std.mem`, `std.fmt`, `std.Thread`
     (via `util/parallel`), etc. Zig does not use OOP abstract classes; **stdlib
@@ -209,10 +218,16 @@ src/wire/*             package bodies (stock_*), binary LE, frames
 src/litenet/*          LiteNet framing, peers, std.Io.net UDP
 src/assets/*           blocks/items/recipes/loot/quests/entities XML tables
 src/apm/*              counters, section timers, dumps (not 7dtd-apm)
+src/plugin/*           Wasm plugin host, hook table, budgets (ADR 0020)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
-assets/fixtures/       offline XML for tests
-tests/                 extra fixtures / harnesses when present
+src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
+src/ecs/rules.zig      sim rule parameters, overlaid by mode packs (ADR 0021)
+src/server/webui/      webui markup, @embedFile'd (never a Zig string literal)
+assets/fixtures/       offline XML and .wasm fixtures for tests
+modes/                 gamemode packs (`--mode <name>`)
+scripts/               release, lint and smoke gates called by the Makefile
 docs/                  STATUS, gaps, plan, APM, wire/map/system notes
+docs/reviews/          review findings: point-in-time snapshots, not inventories
 worlds/                local save overlays (ZCH3 `.zch`, player data)
 ```
 
@@ -229,6 +244,10 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
   for stock body modules. Leaf files stay importable. Avoid cycles; world must
   not import wire (TE domain types live in world, wire re-exports as needed).
 - `pub` only for intended API. Helpers stay file-private by default.
+- Package dependency edges are **enforced**, not conventional:
+  `scripts/lint-architecture.sh` (part of `make check`) fails the build on a
+  forbidden `@import`. Adding one means changing the lint, which means arguing
+  for the edge.
 
 ## Docs map
 
@@ -239,6 +258,9 @@ Full index: [`docs/INDEX.md`](docs/INDEX.md). **STATUS wins** if inventory docs 
 | [`docs/STATUS.md`](docs/STATUS.md) | What works now (gates + shipped surface) |
 | [`TODO.md`](TODO.md) | Open backlog (shipped log below the fold) |
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Full gap inventory vs stock |
+| [`docs/WORK_PLAN.md`](docs/WORK_PLAN.md) | Handoff-ready tasks: files, grounding, done-when, proof |
+| [`docs/adr/README.md`](docs/adr/README.md) | Decision records. Read the ADR before relitigating a decision |
+| [`docs/reviews/`](docs/reviews/) | Review findings. Snapshots: STATUS wins on conflict |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased plan (M7+; post-playable stack) |
 | [`docs/AUTHORITY.md`](docs/AUTHORITY.md) | Server-authoritative C2S gates + mode |
 | [`docs/APM.md`](docs/APM.md) | Native metrics harness |
@@ -393,6 +415,14 @@ heap), dealloc always succeeds (`defer`). Full review rubric:
   the stock client will `Read` need tests or an explicit join-path scenario.
 - `zig build test` must stay green. Touching listen/join: loadgen smoke when
   practical.
+- **A test never writes into the repo.** Use `std.testing.tmpDir`, which cleans
+  itself up, and pass the path in. Writing to the working directory means the
+  working directory is the repo root: that has already produced a scratch file
+  committed by accident, and `git status` flipping between clean and dirty
+  depending on whether a scenario had run. `.zdtd_test_*` is gitignored as a
+  backstop, not a licence.
+- A test that leaves state behind is a test that fails on the second
+  `make check`. If a scenario needs a world, give it one it removes.
 
 ### Anti-patterns
 

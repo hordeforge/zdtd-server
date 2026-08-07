@@ -10,7 +10,7 @@ Sim owns world blocks, TE contents, entity HP/alive, quests, locks, and time.
 **Target** ownership of player inventory is the same; **today** the stock UI
 path still trusts C2S hold/bag pushes (see below). C2S is a **request**:
 validate → apply or reject → broadcast the **result**. Never apply client
-**world** blobs blindly (AGENTS rule 15). Inventory: [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
+**world** blobs blindly (AGENTS rule 17). Inventory: [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
 
 ## Mode config
 
