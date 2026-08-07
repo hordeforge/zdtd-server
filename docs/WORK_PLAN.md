@@ -656,6 +656,21 @@ auditable.
 
 ## T16. Survival: read the rates from buffs.xml instead of inventing them
 
+**Status: loader half landed 2026-08-07.** `assets/buffs.zig` now parses
+`triggered_effect action="ModifyStats"` rows and
+`StatComparePercCurrentToMax` requirements, and `buffs.survival()` resolves the
+stage thresholds (.5 / .25 / .02 of max), the starvation and dehydration HP loss
+per real second, and the starving stamina penalty. A test asserts those values
+against the **shipped** buffs.xml, so the parse is proven against stock data
+rather than a fixture. **Remaining:** call `buffs.survival()` from the survival
+tick and use it in place of `Rules.progression`, keeping the Rules value as the
+floor when the table has no rows (`Survival.ok()` reports that).
+
+**Note on the base depletion:** the food and water drain rates are **not** in
+buffs.xml. Stock decays those engine-side through `Stat.Tick`, scaled by
+activity, and no XML row states the rate. That one stays a documented policy
+tunable in `Rules.progression`; it is not a hardcode to close.
+
 **Why:** `Rules.progression` invents food, water, health and stamina rates. Stock
 ships them as data, so this is a Bucket A hardcode in a system that just landed.
 The loader already exists, so this is wiring rather than research.

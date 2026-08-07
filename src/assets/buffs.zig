@@ -9,11 +9,30 @@ const components = @import("../ecs/components.zig");
 pub const max_buffs: usize = 2048;
 pub const max_passives_per_buff: usize = 16;
 pub const max_passives_total: usize = 8192;
+pub const max_stat_mods_per_buff: usize = 8;
+pub const max_stat_mods_total: usize = 2048;
+pub const max_thresholds_per_buff: usize = 16;
+pub const max_thresholds_total: usize = 512;
 /// BuffClass::.ctor UpdateRateTicks default (asm.il 732691); update_rate is in
 /// seconds and the client multiplies by 20 (asm.il 1371556).
 pub const default_update_rate_ticks: i32 = 20;
 
-pub const Op = enum(u8) { base_set = 0, base_add = 1, perc_set = 2, perc_add = 3, unknown = 255 };
+/// passive_effect / triggered_effect `operation=`. The base_* and perc_* forms
+/// come from passive_effect rows; the bare set/add/subtract/multiply forms come
+/// from `action="ModifyStats"` and `ModifyCVar` triggered effects.
+pub const Op = enum(u8) {
+    base_set = 0,
+    base_add = 1,
+    perc_set = 2,
+    perc_add = 3,
+    base_subtract = 4,
+    perc_subtract = 5,
+    set = 6,
+    add = 7,
+    subtract = 8,
+    multiply = 9,
+    unknown = 255,
+};
 
 /// BuffEffectStackTypes (asm.il 738358), consumed by the stack switch in
 /// EntityBuffs::AddBuff (asm.il 736259 IL_00e7). Lives with the component so
@@ -27,6 +46,27 @@ pub const Passive = struct {
     tags: []const u8 = "",
 };
 
+/// One `<triggered_effect action="ModifyStats" .../>` row. Stock drives
+/// starvation and dehydration damage this way rather than through a passive
+/// effect, so the survival loop has to read these to get the real rate.
+pub const StatMod = struct {
+    /// `stat=` verbatim from the file, which is inconsistently cased in stock
+    /// ("Food", "water"), so compare case-insensitively.
+    stat: []const u8 = "",
+    op: Op = .unknown,
+    value: f32 = 0,
+};
+
+/// One `<requirement name="StatComparePercCurrentToMax" .../>` gate. Stock
+/// compares a **fraction of max**, not an absolute 0..100 value.
+pub const StatThreshold = struct {
+    /// The buff this requirement gates (the AddBuff target).
+    buff: []const u8 = "",
+    stat: []const u8 = "",
+    /// Fraction of max, 0..1.
+    value: f32 = 0,
+};
+
 pub const BuffDef = struct {
     name: []const u8 = "",
     /// BuffClass::InitialDurationMax in seconds; <= 0 never expires (asm.il 732754).
@@ -36,6 +76,8 @@ pub const BuffDef = struct {
     /// BuffClass::RemoveOnDeath (asm.il 1371585), default true per .ctor.
     remove_on_death: bool = true,
     passives: []const Passive = &.{},
+    stat_mods: []const StatMod = &.{},
+    thresholds: []const StatThreshold = &.{},
 };
 
 /// Fallback catalog when buffs.xml is absent (headless tests, no game dir).
@@ -101,8 +143,10 @@ pub const Table = struct {
         for (b.passives) |p| {
             if (!std.mem.eql(u8, p.name, effect)) continue;
             switch (p.op) {
-                .base_set, .perc_set => acc = p.value,
-                .base_add, .perc_add => acc = (acc orelse 0) + p.value,
+                .base_set, .perc_set, .set => acc = p.value,
+                .base_add, .perc_add, .add => acc = (acc orelse 0) + p.value,
+                .base_subtract, .perc_subtract, .subtract => acc = (acc orelse 0) - p.value,
+                .multiply => acc = (acc orelse 1) * p.value,
                 .unknown => {},
             }
         }
@@ -115,6 +159,12 @@ fn parseOp(s: []const u8) Op {
     if (std.mem.eql(u8, s, "base_add")) return .base_add;
     if (std.mem.eql(u8, s, "perc_set")) return .perc_set;
     if (std.mem.eql(u8, s, "perc_add")) return .perc_add;
+    if (std.mem.eql(u8, s, "base_subtract")) return .base_subtract;
+    if (std.mem.eql(u8, s, "perc_subtract")) return .perc_subtract;
+    if (std.mem.eql(u8, s, "set")) return .set;
+    if (std.mem.eql(u8, s, "add")) return .add;
+    if (std.mem.eql(u8, s, "subtract")) return .subtract;
+    if (std.mem.eql(u8, s, "multiply")) return .multiply;
     return .unknown;
 }
 
@@ -168,6 +218,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     defer passives_list.deinit(allocator);
     var metas: std.ArrayList(BuffDef) = .empty; // every field but passives
     defer metas.deinit(allocator);
+    var mods_list: std.ArrayList(StatMod) = .empty;
+    defer mods_list.deinit(allocator);
+    var mod_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer mod_ranges.deinit(allocator);
+    var thresholds_list: std.ArrayList(StatThreshold) = .empty;
+    defer thresholds_list.deinit(allocator);
+    var thr_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer thr_ranges.deinit(allocator);
 
     var i: usize = 0;
     while (i < clean.len and metas.items.len < max_buffs) {
@@ -196,6 +254,46 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             if (xml.attr(body, ui, "value")) |v| meta.update_rate_ticks = parseUpdateRateTicks(v);
         }
         if (xml.attr(clean, bi, "remove_on_death")) |v| meta.remove_on_death = parseBoolAttr(v, true);
+        const m0 = mods_list.items.len;
+        var mj: usize = 0;
+        var mn: usize = 0;
+        while (mj < body.len and mn < max_stat_mods_per_buff and mods_list.items.len < max_stat_mods_total) {
+            const ti = std.mem.indexOfPos(u8, body, mj, "action=\"ModifyStats\"") orelse break;
+            mj = ti + 20;
+            // Attributes sit on the same tag, so scan from the tag open.
+            const tag = std.mem.lastIndexOfScalar(u8, body[0..ti], '<') orelse continue;
+            const st = xml.attr(body, tag, "stat") orelse continue;
+            const op_s = xml.attr(body, tag, "operation") orelse "add";
+            const val_s = xml.attr(body, tag, "value") orelse "0";
+            try mods_list.append(allocator, .{
+                .stat = try arena.dupe(u8, st),
+                .op = parseOp(op_s),
+                .value = firstF32(val_s),
+            });
+            mn += 1;
+        }
+
+        const t0 = thresholds_list.items.len;
+        var tj: usize = 0;
+        var tn: usize = 0;
+        while (tj < body.len and tn < max_thresholds_per_buff and thresholds_list.items.len < max_thresholds_total) {
+            const ri = std.mem.indexOfPos(u8, body, tj, "StatComparePercCurrentToMax") orelse break;
+            tj = ri + 27;
+            const tag = std.mem.lastIndexOfScalar(u8, body[0..ri], '<') orelse continue;
+            const st = xml.attr(body, tag, "stat") orelse continue;
+            const val_s = xml.attr(body, tag, "value") orelse continue;
+            // The gated buff is the AddBuff on the enclosing triggered_effect,
+            // which opens before this requirement.
+            const te = std.mem.lastIndexOf(u8, body[0..ri], "<triggered_effect") orelse continue;
+            const gated = xml.attr(body, te, "buff") orelse "";
+            try thresholds_list.append(allocator, .{
+                .buff = try arena.dupe(u8, gated),
+                .stat = try arena.dupe(u8, st),
+                .value = firstF32(val_s),
+            });
+            tn += 1;
+        }
+
         const p0 = passives_list.items.len;
         var j: usize = 0;
         var pn: usize = 0;
@@ -219,17 +317,113 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         }
         try metas.append(allocator, meta);
         try ranges.append(allocator, .{ p0, passives_list.items.len - p0 });
+        try mod_ranges.append(allocator, .{ m0, mods_list.items.len - m0 });
+        try thr_ranges.append(allocator, .{ t0, thresholds_list.items.len - t0 });
         i = body_end + 1;
     }
 
     const pool = try arena.alloc(Passive, passives_list.items.len);
     @memcpy(pool, passives_list.items);
+    const mod_pool = try arena.alloc(StatMod, mods_list.items.len);
+    @memcpy(mod_pool, mods_list.items);
+    const thr_pool = try arena.alloc(StatThreshold, thresholds_list.items.len);
+    @memcpy(thr_pool, thresholds_list.items);
     const defs = try arena.alloc(BuffDef, metas.items.len);
     for (metas.items, ranges.items, 0..) |meta, rg, di| {
         defs[di] = meta;
         defs[di].passives = pool[rg[0] .. rg[0] + rg[1]];
+        const mr = mod_ranges.items[di];
+        defs[di].stat_mods = mod_pool[mr[0] .. mr[0] + mr[1]];
+        const tr = thr_ranges.items[di];
+        defs[di].thresholds = thr_pool[tr[0] .. tr[0] + tr[1]];
     }
     return .{ .defs = defs, .passive_pool = pool, .arena_ptr = arena_holder };
+}
+
+/// Survival numbers stock ships as data, resolved out of the loaded table so
+/// the sim does not have to know buff names or walk effect rows every tick.
+///
+/// What is here is what buffs.xml actually carries. The **base** food and water
+/// depletion is deliberately absent: stock decays those engine-side through
+/// `Stat.Tick` (activity scaled), and no XML row states the rate, so that one
+/// stays a documented policy tunable in `Rules.progression` rather than being
+/// invented here and presented as stock (AGENTS: prefer missing over fake).
+pub const Survival = struct {
+    /// Fraction of max Food at or below which each hunger stage applies
+    /// (stock buffStatusCheck01: .5, .25, .02). 0 = not found.
+    hungry_frac: [3]f32 = .{ 0, 0, 0 },
+    /// Same for Water (buffStatusThirsty01/02/03).
+    thirsty_frac: [3]f32 = .{ 0, 0, 0 },
+    /// HP lost per **real** second at the final hunger stage. Stock applies
+    /// `ModifyStats Health subtract .25` once per buff update, so this is that
+    /// value divided by the buff's update rate.
+    starve_hp_per_s: f32 = 0,
+    /// Same for the final thirst stage (Dehydration).
+    dehydrate_hp_per_s: f32 = 0,
+    /// Fraction of max stamina subtracted while starving
+    /// (buffStatusHungry03 `StaminaChangeOT perc_subtract`).
+    starve_stamina_perc: f32 = 0,
+
+    /// True when the table carried enough to drive the sim. False keeps the
+    /// caller on its Rules floor rather than on a half-resolved mix.
+    pub fn ok(self: Survival) bool {
+        return self.hungry_frac[0] > 0 and self.thirsty_frac[0] > 0 and self.starve_hp_per_s > 0;
+    }
+};
+
+fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| if (std.ascii.toLower(x) != std.ascii.toLower(y)) return false;
+    return true;
+}
+
+/// Health lost per real second by `buff_name`'s ModifyStats Health row.
+fn healthLossPerSecond(t: *const Table, buff_name: []const u8) f32 {
+    const d = t.byName(buff_name) orelse return 0;
+    const rate_ticks: f32 = @floatFromInt(@max(1, d.update_rate_ticks));
+    const secs = rate_ticks / 20.0; // update_rate is stored in 20 TPS ticks
+    for (d.stat_mods) |m| {
+        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (m.op != .base_subtract and m.op != .subtract) continue;
+        if (m.value <= 0 or secs <= 0) continue;
+        return m.value / secs;
+    }
+    return 0;
+}
+
+/// Resolve the survival numbers stock ships. Missing rows stay 0 so the caller
+/// can tell "not in this file" from "stock says zero".
+pub fn survival(t: *const Table) Survival {
+    var out: Survival = .{};
+    const check = t.byName("buffStatusCheck01");
+    if (check) |c| {
+        for (c.thresholds) |th| {
+            const stage: usize = if (std.mem.endsWith(u8, th.buff, "01"))
+                0
+            else if (std.mem.endsWith(u8, th.buff, "02"))
+                1
+            else if (std.mem.endsWith(u8, th.buff, "03"))
+                2
+            else
+                continue;
+            if (eqIgnoreCase(th.stat, "Food") and std.mem.indexOf(u8, th.buff, "Hungry") != null) {
+                out.hungry_frac[stage] = th.value;
+            } else if (eqIgnoreCase(th.stat, "Water") and std.mem.indexOf(u8, th.buff, "Thirsty") != null) {
+                out.thirsty_frac[stage] = th.value;
+            }
+        }
+    }
+    out.starve_hp_per_s = healthLossPerSecond(t, "buffStatusHungry03");
+    out.dehydrate_hp_per_s = healthLossPerSecond(t, "buffStatusThirsty03");
+    if (t.byName("buffStatusHungry03")) |h3| {
+        for (h3.passives) |ps| {
+            if (std.mem.eql(u8, ps.name, "StaminaChangeOT") and ps.op == .perc_subtract) {
+                out.starve_stamina_perc = ps.value;
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
@@ -322,3 +516,27 @@ test "load buffs.xml when present" {
     try std.testing.expect(t.defs.len > 10);
     try std.testing.expect(t.passive_pool.len > 0);
 }
+
+test "survival numbers resolve from the shipped buffs.xml" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoad(std.testing.allocator, gd, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    const sv = survival(&t);
+    try std.testing.expect(sv.ok());
+    // buffStatusCheck01 gates: Food <= .5 / .25 / .02 of max.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), sv.hungry_frac[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), sv.hungry_frac[1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.02), sv.hungry_frac[2], 0.001);
+    try std.testing.expect(sv.thirsty_frac[0] > 0);
+    // buffStatusHungry03: ModifyStats Health subtract .25 per update.
+    try std.testing.expect(sv.starve_hp_per_s > 0);
+    try std.testing.expect(sv.dehydrate_hp_per_s > 0);
+}
+
+test "an empty table resolves to not-ok rather than to zeros that look real" {
+    var t = builtin();
+    defer t.deinit();
+    const sv = survival(&t);
+    try std.testing.expect(!sv.ok());
+}
+
