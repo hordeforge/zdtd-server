@@ -167,6 +167,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
+| Trader open/close | **PASS** | per-trader edge-latched close cycle (EntityTrader::OnUpdateLive shape): close force-unlocks the held trade channel and toggles `TraderOnOff` gate blocks (light meta; door lock via TE features residual); open latch reopens |
 | Vending machines | **PASS** | TileEntityVendingMachine (type 7) emitted: blocks.xml Class/TraderID + Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream and LockRequest open (VendingMachineLockContext); rent/edit SM + C2S buy and disk persistence residual |
 | Director class variety | **PASS** | zombie slots 1+8..11 from entitygroups weighted picks; rotation per spawn |
 | Biome spawn groups | **PASS** | night/day/animal group per spawn-point biome via spawning.xml rules (biome map id → biomes.xml name → rule); wasteland at midnight gets `ZombiesWastelandNight`, not pine_forest's `ZombiesNight`; fallback on unknown biome |

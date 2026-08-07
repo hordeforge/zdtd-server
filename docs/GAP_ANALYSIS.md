@@ -923,28 +923,38 @@ parsed, and quest offering is unwired.
   `src/server/game.zig:8452-8457`, `src/ecs/aidirector.zig:213-251`,
   `asm.il:863657-863767`, `asm.il:863770-863910`, `Data/Config/traders.xml:1240`
 
-- **Open hours and the closed-door behaviour** `PARTIAL`
+- **Open hours and the closed-door behaviour** `WORKS` (door TE features residual)
   `open_time`/`close_time` are parsed per `<trader_info>` and the lock-open path
   refuses to open the trade window outside them (`traderIsOpen` compares
   `worldTime % 24000` against the hours like stock's `TraderInfo::get_IsOpen`;
-  vending machines and traders without hours stay open). Missing the stock
-  visuals: `TraderArea.SetClosed` (raising bars, force-unlocking anyone in the
-  window) and the "next time" tooltip, which depend on the TraderArea /
-  `NetPackageWorldAreas` row below.
-  *Anchors:* `src/server/game.zig` (`traderIsOpen`), `src/assets/traders.zig`
-  (`TraderInfo.open_time`), `asm.il:862122-862230`,
-  `asm.il:531811-531898`, `asm.il:531397-531420`, `asm.il:861688-861690`
+  vending machines and traders without hours stay open). The close/open cycle is
+  edge-latched per trader (`tickTraderAreas`, `EntityTrader::OnUpdateLive`
+  equivalent): on closing it force-unlocks the held trade channel
+  (`ForceUnlockLockTarget`, channel 0) so an open window shuts, and walks the
+  POI's `IndexName="TraderOnOff"` blocks to toggle them (BlockLight meta bit
+  0x2 via SetBlockRPC; door close/lock via composite TEFeatureDoor/TEFeature
+  Lockable and speaker sounds are residuals — zdtd has no door TE yet).
+  *Anchors:* `src/server/game.zig` (`traderIsOpen` `:8765`, `tickTraderAreas`
+  `:8793`, `toggleTraderGates` `:8811`), `src/assets/blocks.zig`
+  (`IndexName=TraderOnOff`), `asm.il:862122-862230`,
+  `asm.il:531757-531898`, `asm.il:531397-531420`, `asm.il:861688-861690`,
+  `TraderArea.il.txt:244` (`SetClosed`)
 
-- **TraderArea replication (NetPackageWorldAreas)** `PARTIAL`
+- **TraderArea replication (NetPackageWorldAreas)** `WORKS`
   The body is built and sent in the join bundle right after SpawnPoints (stock
   order): `byte cVersion=1`, `i16 count`, per area Position i32x3, PrefabSize
   i16x3, GetProtectPadding s8x3, teleport volumes (u8 count + startPos s8x3 /
   size u8x3) — layout extracted from the IL dump
   (`NetPackageWorldAreas::write` IL=31, `TraderArea::Write` IL=111). Data comes
   from the trader POIs' XML (`TraderAreaProtect`, `TeleportVolumeStart/Size`).
-  The client now has the safe-zone bounds and teleport volumes. Missing:
-  `IsClosed` state sync and the closing-time `SetClosed` force-unlock /
-  auto-teleport, which ride the TraderAreaStates updates, not this package.
+  Note: `TraderArea::Write` does **not** serialize `IsClosed` — the IL tail is
+  `ret` right after the teleport loop (`TraderArea.il.txt:721-788`), so the
+  client learns the open/close state from the `SetClosed` gate block toggles and
+  its local TraderInfo hours, not from this package. `TraderAreaStates`
+  (`Default=0, Claimable=1, NotClaimable=2`, 1207071-1207078) is a
+  claimability enum, not an open/closed wire signal. The earlier "IsClosed
+  state sync ... ride the TraderAreaStates updates" claim was wrong; corrected
+  against the IL.
   *Anchors:* `src/wire/packages.zig` (`buildWorldAreasBody`),
   `src/server/game.zig` (`sendWorldAreas`), `src/world/prefabs.zig`
   (`QuestData.is_trader_area`), `../7dtd-research il dump` `TraderArea.il.txt:721`

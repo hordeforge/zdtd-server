@@ -8702,6 +8702,99 @@ pub const Game = struct {
         return now >= open or now < close; // overnight window
     }
 
+    /// EntityTrader::OnUpdateLive open/close cycle (asm.il 531757-531898):
+    /// when `!TraderInfo.IsOpen` differs from the area's closed latch, apply
+    /// `TraderArea::SetClosed` — on closing, force-unlock the trade channel
+    /// (LockManager::ForceUnlockLockTarget, channel 0) so an open window closes,
+    /// then toggle the area's TraderOnOff gate blocks.
+    fn tickTraderAreas(self: *Game) void {
+        var s: ecs.Slot = 0;
+        while (s < ecs.max_entities) : (s += 1) {
+            if (!self.sim.alive[s] or !self.sim.mask[s].trader or !self.sim.mask[s].trader_stock) continue;
+            const st = &self.sim.trader_stock[s];
+            const closed = !self.traderIsOpen(s);
+            if (closed == st.is_closed) continue;
+            st.is_closed = closed;
+            if (closed) {
+                // ForceUnlockLockTarget: only the trade channel (0) is a trader
+                // lock; kick its holder with a forced unlock so the window shuts.
+                const ch: usize = 0;
+                if (self.lock_channel[ch] >= 0) {
+                    const holder: usize = @intCast(self.lock_channel[ch]);
+                    self.clearLockSlot(ch);
+                    if (holder < self.clients.len and self.clients[holder].joined) {
+                        if (self.clients[holder].peer) |p| {
+                            const resp = packages.buildLockResponseUnlock(&self.body_buf, true) catch continue;
+                            self.sendGame(p, "NetPackageLockResponse", resp) catch continue;
+                        }
+                    }
+                }
+            }
+            self.toggleTraderGates(s, closed);
+        }
+    }
+
+    /// TraderArea::SetClosed gate walk: toggle IndexName="TraderOnOff" blocks in
+    /// the trader's POI area. Stock closes doors/locks via their composite door
+    /// TE features (zdtd has no door TE yet: residual) and flips BlockLight meta
+    /// bit 0x2 (close clears, open sets); loudspeakers only play a sound. Each
+    /// raw change is broadcast as the authoritative NetPackageSetBlock.
+    fn toggleTraderGates(self: *Game, s: ecs.Slot, closed: bool) void {
+        const tr = self.sim.transform[s];
+        const pf = if (self.world.prefabs) |*p| p else return;
+        for (pf.items) |*d| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            const qd = pf.questData(d.name) orelse continue;
+            if (!qd.is_trader_area) continue;
+            // The trader entity sits inside its area footprint.
+            if (tr.x < @as(f32, @floatFromInt(d.x - 8)) or tr.x > @as(f32, @floatFromInt(d.x + d.size_x + 8))) continue;
+            if (tr.z < @as(f32, @floatFromInt(d.z - 8)) or tr.z > @as(f32, @floatFromInt(d.z + d.size_z + 8))) continue;
+            self.toggleGatesInArea(d, closed);
+            return;
+        }
+    }
+
+    fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, closed: bool) void {
+        const x0 = d.x;
+        const x1 = d.x + d.size_x;
+        const z0 = d.z;
+        const z1 = d.z + d.size_z;
+        var bx: i32 = x0;
+        while (bx < x1) : (bx += 1) {
+            var bz: i32 = z0;
+            while (bz < z1) : (bz += 1) {
+                const surf = self.world.heightWorld(bx, bz) catch continue;
+                const y_lo: i32 = @max(@as(i32, 0), @as(i32, surf) - 4);
+                const y_hi: i32 = @min(@as(i32, 255), @as(i32, surf) + 14);
+                var y: i32 = y_lo;
+                while (y <= y_hi) : (y += 1) {
+                    const id = self.world.blockWorld(bx, y, bz) catch 0;
+                    if (id == 0) continue;
+                    if (!self.blocks.isTraderOnOff(id)) continue;
+                    // Doors and loudspeakers are handled via TE features or are
+                    // sound-only; only light gates carry the meta on/off bit.
+                    const raw = self.blockRawAt(bx, y, bz);
+                    const meta = packages.blockMeta(raw);
+                    const new_meta: u8 = if (closed) meta & ~@as(u8, 0x2) else meta | 0x2;
+                    if (new_meta == meta) continue;
+                    self.setBlockRaw(bx, y, bz, packages.withBlockMeta(raw, new_meta));
+                    if (packages.buildSetBlockBodyRaw(
+                        self.body_buf[0..96],
+                        bx,
+                        y,
+                        bz,
+                        packages.withBlockMeta(raw, new_meta),
+                        0,
+                        -1,
+                        -1,
+                    )) |sb| {
+                        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
+                    } else |_| {}
+                }
+            }
+        }
+    }
+
     /// Replace builtin trader stock with the trader's own traders.xml list when
     /// resolvable to ECS items: per-trader `<trader_items>` from the trader_info
     /// matching the entity's class (npc.xml trader_id), else traderAlways.
@@ -10712,6 +10805,8 @@ pub const Game = struct {
             _ = self.sim.power.tick(dt, daylight);
             self.broadcastPowerVisuals();
             self.reapStaleLocks();
+            // Trader open/close cycle (edge-latched per trader).
+            self.tickTraderAreas();
             if (r.turret_kills > 0) {
                 for (&self.clients) |*cl| {
                     if (!cl.joined) continue;

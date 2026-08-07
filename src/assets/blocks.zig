@@ -17,6 +17,9 @@ pub const BlockDef = struct {
     class: []const u8 = "",
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
+    /// IndexName="TraderOnOff": trader-area gate/loudspeaker blocks that
+    /// TraderArea::SetClosed toggles (doors lock, lights flip meta bit 0x2).
+    trader_onoff: bool = false,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -70,6 +73,13 @@ pub const BlockTable = struct {
     pub fn traderId(self: *const BlockTable, id: u16) i32 {
         if (self.byId(id)) |d| return d.trader_id;
         return 0;
+    }
+
+    /// TraderArea::SetClosed gate set (IndexName="TraderOnOff"): these blocks
+    /// toggle when the owning trader opens/closes.
+    pub fn isTraderOnOff(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.trader_onoff;
+        return false;
     }
 };
 
@@ -129,6 +139,7 @@ pub fn loadFromPath(
         class: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
+        trader_onoff: bool = false,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -152,10 +163,11 @@ pub fn loadFromPath(
         };
         const kn = try arena.dupe(u8, name);
         try seen.put(allocator, kn, {});
-        // Scan this block's body for Class / TraderID / Extends.
+        // Scan this block's body for Class / TraderID / Extends / IndexName.
         var class: ?[]const u8 = null;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
+        var trader_onoff = false;
         const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -171,6 +183,10 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| trader_id = std.fmt.parseInt(i32, v, 10) catch -1;
             } else if (std.mem.eql(u8, pname, "Extends")) {
                 extends = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "IndexName")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    if (std.mem.eql(u8, v, "TraderOnOff")) trader_onoff = true;
+                }
             }
             p = pi + 10;
         }
@@ -182,6 +198,7 @@ pub fn loadFromPath(
             .class = class,
             .trader_id = trader_id,
             .extends = extends,
+            .trader_onoff = trader_onoff,
         });
         i = bi + 7;
     }
@@ -232,6 +249,7 @@ pub fn loadFromPath(
             .solid = isSolidName(pb.name),
             .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
             .trader_id = pb.trader_id,
+            .trader_onoff = pb.trader_onoff,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -307,6 +325,9 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\<block name="cntWoodCrateWood01">
         \\  <property name="Class" value="Storage"/>
         \\</block>
+        \\<block name="doorWoodLargeGate">
+        \\  <property name="IndexName" value="TraderOnOff"/>
+        \\</block>
         \\</blocks>
     ;
     const path = ".zdtd_test_blocks_vending.xml";
@@ -332,6 +353,10 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const crate = t.byName("cntWoodCrateWood01").?;
     try std.testing.expect(!t.isVending(crate.id));
     try std.testing.expectEqual(@as(i32, 0), t.traderId(crate.id));
+    // TraderOnOff gate block (IndexName property).
+    const gate = t.byName("doorWoodLargeGate").?;
+    try std.testing.expect(t.isTraderOnOff(gate.id));
+    try std.testing.expect(!t.isTraderOnOff(crate.id));
 }
 
 fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -342,6 +367,7 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "cntVendingMachine2Broken", 102 },
         .{ "cntVendingMachine2", 103 },
         .{ "cntWoodCrateWood01", 104 },
+        .{ "doorWoodLargeGate", 105 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

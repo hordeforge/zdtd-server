@@ -555,6 +555,9 @@ pub const TraderStock = struct {
     /// Game day of the last restock; traderRestock skips a trader until
     /// day >= last_restock_day + reset_interval (0 interval always restocks).
     last_restock_day: u32 = 0,
+    /// Edge latch for the open/close cycle (EntityTrader::OnUpdateLive):
+    /// true = the area currently shows closed (gates locked, window denied).
+    is_closed: bool = false,
     entries: [max_stock]StockEntry = defaultStock(),
     n: usize = 5,
 };

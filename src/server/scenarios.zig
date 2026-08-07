@@ -17,6 +17,7 @@ const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
+const assets_traders = @import("../assets/traders.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPathSimple("worlds");
@@ -924,6 +925,84 @@ test "scenario vending machine opens via LockRequest with TraderData" {
     try std.testing.expectEqual(@as(usize, 0), pr.remaining());
 
     std.debug.print("PASS scenario: vending open LockResponse trader_id=3 te_pay={d}\n", .{te_pay_len});
+}
+
+test "scenario trader close cycle force-unlocks the trade channel" {
+    // Fixture traders.xml with one hour-gated trader_info (stock Joel shape:
+    // 4:05-21:50) so the cycle runs offline.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="groupCasino">
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1" open_time="4:05" close_time="21:50"/>
+        \\  <traderAlways>
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </traderAlways>
+        \\</traders>
+    ;
+    const tpath = ".zdtd_test_traders_close.xml";
+    try io_fs.writeFile(std.testing.allocator, tpath, tsrc);
+    defer io_fs.deleteFile(std.testing.allocator, tpath);
+    const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_traders_close");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traders_close", 0, .{});
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.traders.deinit();
+    g.traders = tt;
+
+    const trader_id = g.sim.spawnTrader("traderJen", 0, 70, 0, 1, 500).?;
+    const ts = g.sim.slotOfNetId(trader_id).?;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Open the trade window the way the stock client does: LockRequest on
+    // channel 0 with an Entity target (EntityTraderLockContext).
+    cap.clear();
+    var lr_body: [128]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_body };
+    try lw.writeBool(true); // locking
+    try lw.writeU16(0); // trade channel
+    try lw.writeI32(1);
+    try lw.writeByte(1); // present
+    try lw.writeByte(2); // Entity target
+    try lw.writeI32(trader_id);
+    try lw.writeString("EntityTraderLockContext");
+    try lw.writeString("trade");
+    var lfb: [256]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+    try std.testing.expect(g.lock_channel[0] == @as(i32, @intCast(c.slot)));
+    try std.testing.expect(!g.sim.trader_stock[ts].is_closed);
+
+    // Close time: the clock passes 21:50, the next tick latches closed and
+    // force-unlocks the held trade channel.
+    g.sim.director.clock.hours = 22.0;
+    cap.clear();
+    try g.step();
+    try std.testing.expect(g.sim.trader_stock[ts].is_closed);
+    try std.testing.expect(g.lock_channel[0] < 0);
+    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    const resp = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+    // Forced unlock: locking=false, success=true (buildLockResponseUnlock).
+    var rr: binary.Reader = .{ .data = resp };
+    try std.testing.expectEqual(false, try rr.readBool()); // locking
+    try std.testing.expectEqual(true, try rr.readBool()); // success
+
+    // Opening hours latch back open on the next cycle.
+    g.sim.director.clock.hours = 8.0;
+    try g.step();
+    try std.testing.expect(!g.sim.trader_stock[ts].is_closed);
+
+    std.debug.print("PASS scenario: trader close cycle force-unlock + reopen latch\n", .{});
 }
 
 test "scenario trader RemoveQuest accepts and drops the quest from offers" {
