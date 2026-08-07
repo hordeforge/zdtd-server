@@ -18,11 +18,17 @@ pub const ServerInfo = struct {
     info_port: u16 = 27015,
     max_players: i32 = 8,
     current_players: i32 = 0,
-    server_version: []const u8 = version.stock_wire_announce,
+    server_version: []const u8 = version.stock_wire_gsi_version,
     world_size: i32 = 6144,
     eac_enabled: bool = false,
     /// Stock IsPasswordProtected (ServerPassword set).
     password_protected: bool = false,
+    /// GameInfoString 18/19 (RE network.md: SandboxPreset = 0x12, SandboxCode =
+    /// 0x13): the browser shows the server's sandbox preset/code. Empty (the
+    /// zdtd default, matching GameStats "empty = client default") omits the
+    /// keys rather than advertising a blank preset.
+    sandbox_preset: []const u8 = "",
+    sandbox_code: []const u8 = "",
 };
 
 /// Strip CR/LF/`;` so operator-supplied names cannot inject extra GSI key lines.
@@ -49,9 +55,11 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
     var ln: [64]u8 = undefined;
     var ipb: [64]u8 = undefined;
     var ver: [32]u8 = undefined;
-    return std.fmt.bufPrint(
+    var sp: [64]u8 = undefined;
+    var sc: [128]u8 = undefined;
+    const head = try std.fmt.bufPrint(
         buf,
-        "GameType:7DTD;\r\nGameName:{s};\r\nGameMode:Survival;\r\nGameHost:{s};\r\nLevelName:{s};\r\nIP:{s};\r\nServerVersion:{s};\r\nPort:{d};\r\nCurrentPlayers:{d};\r\nMaxPlayers:{d};\r\nFreePlayerSlots:{d};\r\nWorldSize:{d};\r\nIsDedicated:True;\r\nIsPasswordProtected:{s};\r\nEACEnabled:{s};\r\nAllowCrossplay:False;\r\nArchitecture64:True;\r\nIsPublic:True;\r\n\r\n",
+        "GameType:7DTD;\r\nGameName:{s};\r\nGameMode:Survival;\r\nGameHost:{s};\r\nLevelName:{s};\r\nIP:{s};\r\nServerVersion:{s};\r\nPort:{d};\r\nCurrentPlayers:{d};\r\nMaxPlayers:{d};\r\nFreePlayerSlots:{d};\r\nWorldSize:{d};\r\nIsDedicated:True;\r\nIsPasswordProtected:{s};\r\nEACEnabled:{s};\r\nAllowCrossplay:False;\r\nArchitecture64:True;\r\nIsPublic:True;\r\n",
         .{
             gsiSafe(info.game_name, &gn),
             gsiSafe(info.game_host, &gh),
@@ -67,6 +75,21 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
             if (info.eac_enabled) "True" else "False",
         },
     );
+    var w: usize = head.len;
+    // GameInfoString 18/19 (RE network.md: SandboxPreset = 0x12, SandboxCode =
+    // 0x13). Stock emits both keys always; zdtd omits an unset one rather than
+    // advertising a blank preset ("empty = client default", same as GameStats).
+    if (info.sandbox_preset.len > 0) {
+        const s = try std.fmt.bufPrint(buf[w..], "SandboxPreset:{s};\r\n", .{gsiSafe(info.sandbox_preset, &sp)});
+        w += s.len;
+    }
+    if (info.sandbox_code.len > 0) {
+        const s = try std.fmt.bufPrint(buf[w..], "SandboxCode:{s};\r\n", .{gsiSafe(info.sandbox_code, &sc)});
+        w += s.len;
+    }
+    if (w + 2 > buf.len) return error.NoSpaceLeft;
+    buf[w..][0..2].* = .{ '\r', '\n' };
+    return buf[0 .. w + 2];
 }
 
 /// 5 ASCII digits + CRLF length prefix (stock AcceptTcpClient framing).
@@ -172,6 +195,45 @@ test "info text clamps player counts" {
     const empty = try buildInfoText(&buf, .{ .max_players = 8, .current_players = -1 });
     try std.testing.expect(std.mem.indexOf(u8, empty, "CurrentPlayers:0;") != null);
     try std.testing.expect(std.mem.indexOf(u8, empty, "FreePlayerSlots:8;") != null);
+}
+
+test "info text advertises sandbox preset and code (GameInfoString 18/19)" {
+    var buf: [1024]u8 = undefined;
+    const t = try buildInfoText(&buf, .{
+        .game_name = "zdtd",
+        .level_name = "Navezgane",
+        .ip = "127.0.0.1",
+        .info_port = 27015,
+        .sandbox_preset = "Adventurer",
+        .sandbox_code = "AAAJABJACJADJARFBNC",
+    });
+    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:Adventurer;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxCode:AAAJABJACJADJARFBNC;") != null);
+    // The string block keeps its stock trailing blank line.
+    try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
+}
+
+test "info text omits sandbox keys when unset (empty = client default)" {
+    var buf: [1024]u8 = undefined;
+    const t = try buildInfoText(&buf, .{
+        .game_name = "zdtd",
+        .level_name = "Navezgane",
+        .ip = "127.0.0.1",
+        .info_port = 27015,
+    });
+    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxCode:") == null);
+    try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
+}
+
+test "info text sanitizes sandbox values like the other GSI fields" {
+    var buf: [1024]u8 = undefined;
+    const t = try buildInfoText(&buf, .{
+        .info_port = 27015,
+        .sandbox_preset = "evil;\r\nInjected:1",
+    });
+    try std.testing.expect(std.mem.indexOf(u8, t, "\r\nInjected:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:evil") != null);
 }
 
 test "response header is 5 digit length" {

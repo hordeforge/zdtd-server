@@ -1,8 +1,12 @@
 //! Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`).
 //!
-//! Pure state + transition table over identities. No Game import, no allocator,
-//! no clock: the caller decodes `NetPackageAllyRequest`, hands both identities
-//! here, and broadcasts the returned transition as `NetPackageAllyResponse`.
+//! Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`).
+//!
+//! Pure state + transition table over identities. No Game import: the caller
+//! decodes `NetPackageAllyRequest`, hands both identities here, and broadcasts
+//! the returned transition as `NetPackageAllyResponse`. Only the persist
+//! helpers (`save`/`load`) touch I/O and take an allocator; the tick path is
+//! allocation-free.
 //!
 //! Grounded in asm.il:
 //!   - `AllyStore/AllyStatus` and `AllyStore/AllyEvent` values: 884540, 884550.
@@ -13,11 +17,13 @@
 //!   - `AllyStore::ProcessAllyRequest`: 885024 (server-only; a null identity on
 //!     either side is dropped before anything is written).
 //!
-//! Not persisted. Stock keeps allies in PersistentPlayerList; zdtd's list lives
-//! for the server process only, so relationships reset on restart.
+//! Persisted to `{world_dir}/allies.zal` (magic ZAL1, zdtd-owned like
+//! claims.zlc). Stock keeps allies in PersistentPlayerList; zdtd persists the
+//! same relationship set so it survives a server restart.
 
 const std = @import("std");
 const platform_user = @import("../wire/platform_user.zig");
+const io_fs = @import("../util/io_fs.zig");
 
 pub const Id = platform_user.Id;
 
@@ -174,6 +180,84 @@ pub const Store = struct {
         }
         return n;
     }
+    /// Persist allies to `{dir}/allies.zal` (magic ZAL1, zdtd-owned like
+    /// claims.zlc). Only used pairs are written; identities are len-prefixed.
+    /// The encode buffer is heap-owned (max_pairs x ~170 bytes is stack-heavy).
+    pub fn save(self: *const Store, dir: []const u8, allocator: std.mem.Allocator) !void {
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+        const buf = try allocator.alloc(u8, 6 + max_pairs * (1 + 16 + 1 + 64 + 1 + 16 + 1 + 64 + 1));
+        defer allocator.free(buf);
+        @memcpy(buf[0..4], "ZAL1");
+        var o: usize = 6; // 4 magic + 2 count reserved; records start at 6
+        var save_count: u16 = 0;
+        for (&self.entries) |*e| {
+            if (!e.used) continue;
+            if (o + 170 > buf.len) break;
+            buf[o] = e.a.platform_len;
+            @memcpy(buf[o + 1 ..][0..e.a.platform_len], e.a.platform_buf[0..e.a.platform_len]);
+            o += 1 + e.a.platform_len;
+            buf[o] = e.a.id_len;
+            @memcpy(buf[o + 1 ..][0..e.a.id_len], e.a.id_buf[0..e.a.id_len]);
+            o += 1 + e.a.id_len;
+            buf[o] = e.b.platform_len;
+            @memcpy(buf[o + 1 ..][0..e.b.platform_len], e.b.platform_buf[0..e.b.platform_len]);
+            o += 1 + e.b.platform_len;
+            buf[o] = e.b.id_len;
+            @memcpy(buf[o + 1 ..][0..e.b.id_len], e.b.id_buf[0..e.b.id_len]);
+            o += 1 + e.b.id_len;
+            buf[o] = @intFromEnum(e.status);
+            o += 1;
+            save_count += 1;
+        }
+        std.mem.writeInt(u16, buf[4..6], save_count, .little);
+        try io_fs.writeFile(allocator, path, buf[0..o]);
+    }
+
+    /// Restore allies from `{dir}/allies.zal`. A missing file is a fresh
+    /// server (OpenFailed, like containers.load); any other read failure
+    /// surfaces so the caller can log before the next save clobbers data.
+    /// Fail closed on corrupt records: overlong identities or a bad status
+    /// stop the load at that record.
+    pub fn load(self: *Store, dir: []const u8, allocator: std.mem.Allocator) !void {
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+        const data = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return error.ReadFailed,
+        };
+        defer allocator.free(data);
+        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZAL1")) return error.ReadFailed;
+        const load_count = std.mem.readInt(u16, data[4..6], .little);
+        var pos: usize = 6;
+        var i: u16 = 0;
+        while (i < load_count) : (i += 1) {
+            const a_plat = readLenStr(data, &pos, 16) orelse return error.ReadFailed;
+            const a_id = readLenStr(data, &pos, 64) orelse return error.ReadFailed;
+            const b_plat = readLenStr(data, &pos, 16) orelse return error.ReadFailed;
+            const b_id = readLenStr(data, &pos, 64) orelse return error.ReadFailed;
+            if (pos >= data.len) return error.ReadFailed;
+            const st: Status = @enumFromInt(data[pos]);
+            pos += 1;
+            if (@intFromEnum(st) >= @typeInfo(Status).@"enum".fields.len) return error.ReadFailed;
+            self.setStatus(
+                .{ .platform = a_plat, .id = a_id },
+                .{ .platform = b_plat, .id = b_id },
+                st,
+            ) catch return error.ReadFailed;
+        }
+    }
+
+    fn readLenStr(data: []const u8, pos: *usize, max_len: u8) ?[]const u8 {
+        if (pos.* >= data.len) return null;
+        const len = data[pos.*];
+        if (len > max_len) return null;
+        pos.* += 1;
+        if (pos.* + len > data.len) return null;
+        const s = data[pos.* .. pos.* + len];
+        pos.* += len;
+        return s;
+    }
 
     /// `AllyStore::ProcessAllyRequest` (asm.il 885024): compute the transition
     /// from the current status, apply it, and hand it back so the caller can
@@ -233,6 +317,36 @@ test "a no-op transition never changes the stored status" {
     try std.testing.expect(t.isNoop());
     try std.testing.expectEqual(Status.not_allied, store.status(a, b));
     try std.testing.expectEqual(@as(usize, 0), store.count());
+}
+
+test "ally store persists across restart (allies.zal)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    {
+        var store: Store = .{};
+        try store.setStatus(.{ .platform = "Steam", .id = "1001" }, .{ .platform = "Steam", .id = "1002" }, .allies);
+        try store.setStatus(.{ .platform = "EOS", .id = "abc" }, .{ .platform = "Steam", .id = "1001" }, .outgoing_invite);
+        try store.save(dir, std.testing.allocator);
+    }
+    var restored: Store = .{};
+    try restored.load(dir, std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), restored.count());
+    try std.testing.expectEqual(Status.allies, restored.status(
+        .{ .platform = "Steam", .id = "1002" },
+        .{ .platform = "Steam", .id = "1001" },
+    ));
+    try std.testing.expectEqual(Status.outgoing_invite, restored.status(
+        .{ .platform = "EOS", .id = "abc" },
+        .{ .platform = "Steam", .id = "1001" },
+    ));
+    // Corrupt file fails closed, not silently empty.
+    var bad_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const bad_path = try std.fmt.bufPrint(&bad_path_buf, "{s}/allies.zal", .{dir});
+    try io_fs.writeFileSimple(bad_path, "ZAL1\x00\x01\xff");
+    var bad: Store = .{};
+    try std.testing.expectError(error.ReadFailed, bad.load(dir, std.testing.allocator));
 }
 
 test "invite, accept, remove round-trip from both sides" {
