@@ -34,6 +34,9 @@ pub const EntityDef = struct {
     hand_item: []const u8 = "",
     /// Resolved Action0 DamageEntity for hand_item (0 = unresolved).
     attack_damage: f32 = 0,
+    /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
+    /// 0 = unset, which leaves the sim on the Rules floor.
+    sight_range: f32 = 0,
 };
 
 pub const EntityTable = struct {
@@ -294,6 +297,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         if (resolveProp(&classes, name, "MoveSpeed", 0)) |ms| {
             if (xml.parseF32(ms)) |f| wander = f;
         }
+        // SightRange is per class in stock (zombies 27-40 m). Bounded: a
+        // crafted value must not make one zombie sense the whole world.
+        var sight: f32 = 0;
+        if (resolveProp(&classes, name, "SightRange", 0)) |sr| {
+            if (xml.parseF32(sr)) |f| {
+                if (f > 0 and f <= 256) sight = f;
+            }
+        }
         var time_stay: f32 = 0;
         if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
             if (xml.parseF32(ts)) |f| {
@@ -315,6 +326,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .chase_speed = chase,
             .wander_speed = wander,
             .time_stay = time_stay,
+            .sight_range = sight,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
     }

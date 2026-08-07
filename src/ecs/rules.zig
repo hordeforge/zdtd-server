@@ -30,7 +30,9 @@ pub const Ai = struct {
     full_dist_sq: f32 = 64.0 * 64.0,
     /// Mid-sim range, squared blocks (lodScale step 2).
     mid_dist_sq: f32 = 225.0,
-    /// Sense range, squared blocks. Policy: no per-entity stock equivalent.
+    /// Sense range, squared blocks. **Floor**: entityclasses.xml `SightRange`
+    /// wins per class when present (stock ships 27, 30, 40 m on different
+    /// zombie classes); see systems.senseDistSq.
     sense_dist_sq: f32 = 48.0 * 48.0,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
@@ -58,11 +60,22 @@ pub const Bloodmoon = struct {
     max_parties: u32 = 8,
 };
 
-/// Survival simulation tuning (GAP 22). The stock loop applies the
-/// FoodChangeOT/WaterOT/HealthChangeOT passive effects through Stat.Tick,
-/// whose per-effect defaults are not in the V3.1.0 IL corpus; these rates are
-/// policy tunables (ADR 0021) that reproduce the stock feel (full Food drains
-/// in ~2 in-game days at 60-min days). Eat/Drink restores on top.
+/// Survival simulation tuning (GAP 22).
+///
+/// **These are invented numbers and stock ships the real ones as data.** The
+/// values below reproduce the stock feel (a full Food bar drains in roughly two
+/// in-game days at 60-minute days), but stock drives survival from buffs.xml:
+/// `buffStatusHungry01/02/03` and `buffStatusThirsty01/02/03` carry
+/// `damage_type Starvation` / `Dehydration`, threshold requirements of the form
+/// `StatComparePercCurrentToMax stat="Food" operation="GT" value="0.52"`, and
+/// `FoodChangeOT` / `WaterChangeOT` / `HealthChangeOT` passive effects; stamina
+/// comes from `StaminaChangeOT` plus the items.xml `StaminaLoss` stats. The
+/// loader already exists (`assets/buffs.zig` parses passive_effect rows and
+/// `Game.buffs` holds the table), so this is wiring, not research.
+///
+/// Note the model differs too: `well_fed_threshold` is an absolute 0..100 value
+/// where stock compares a fraction of max. Tracked as WORK_PLAN T16; until then
+/// treat every field here as a placeholder, not as stock behaviour.
 pub const Progression = struct {
     /// Food units lost per in-game hour (100 = full).
     food_depletion_per_hour: f32 = 2.0,

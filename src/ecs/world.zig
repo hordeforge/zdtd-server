@@ -47,6 +47,8 @@ pub const EntityClass = struct {
     attack_damage: f32 = 0,
     /// TimeStayAfterDeath seconds a corpse lingers (entityclasses.xml).
     time_stay: f32 = 0,
+    /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
+    sight_range: f32 = 0,
 };
 
 pub const World = struct {

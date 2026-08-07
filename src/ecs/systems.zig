@@ -906,8 +906,8 @@ fn isBestTask(self: Task, executing: c.TaskId) bool {
 /// while the seeded target entity still exists (its removal releases the mutex
 /// so Wander resumes). The chaseTimeMax aggro-timeout countdown is not modeled
 /// (coarse `alert` flag only). Continue() defaults to CanExecute (asm.il:424569).
-fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    if (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) return true;
+fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
+    if (np_id >= 0 and np_d2 < sense_d2) return true;
     return ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null;
 }
 
@@ -922,14 +922,14 @@ fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
 /// entity has no attack target. Stock also bails at close range on non-eat
 /// items and clears the pending slot there; zdtd clears in the Update instead
 /// (CanExecute stays read-only, matching the other gates).
-fn approachDistractionCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn approachDistractionCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     const live = ai.pending_distraction >= 0 or ai.distraction >= 0;
     if (!live) return false;
     const latch = if (ai.distraction >= 0) ai.distraction else ai.pending_distraction;
     if (w.slotOfNetId(latch) == null) return false;
     // GetAttackTarget()!=null → false (asm.il CanExecute IL_001E-002E), and the
     // persistent aggro branch (alert + live target) counts as one too.
-    const has_target = (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) or
+    const has_target = (np_id >= 0 and np_d2 < sense_d2) or
         (ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null);
     if (has_target) return false;
     return true;
@@ -952,18 +952,18 @@ fn approachDistractionContinue(w: *const World, s: Slot, ai: *const c.ZombieAi) 
 /// the pure fallback: wander whenever no player is sensed. It yields to chase
 /// only through priority + MutexBits, never through this gate. Spot also wins
 /// over wander via table order when has_spot (same priority/mutex).
-fn wanderCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn wanderCanExecute(_: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     // EAIWander::CanExecute returns false while lookTime > 0 (asm.il:438181):
     // Look and Wander are mutually exclusive by data, not only by MutexBits.
     if (ai.look_time > 0) return false;
-    return !(np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq);
+    return !(np_id >= 0 and np_d2 < sense_d2);
 }
 
 /// EAIWander::Continue (asm.il:438318) is a real override distinct from
 /// CanExecute: stop on the 30 s cap and when the path is finished. The stun and
 /// moveHelper.BlockedTime bails have no zdtd equivalent.
-fn wanderContinue(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    if (!wanderCanExecute(w, ai, np_id, np_d2)) return false;
+fn wanderContinue(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
+    if (!wanderCanExecute(w, ai, np_id, np_d2, sense_d2)) return false;
     if (ai.wander_time > wander_time_max_s) return false;
     const dx = ai.wander_tx - w.transform[s].x;
     const dz = ai.wander_tz - w.transform[s].z;
@@ -1147,18 +1147,34 @@ const AiCtx = struct {
     }
 };
 
+/// Sense range for one entity, squared blocks. **Per-class first**:
+/// entityclasses.xml ships `SightRange` per class (stock zombies 27-40 m), so a
+/// feral does not sense at the same distance as a crawler. The `Rules` value is
+/// the floor for a class with no SightRange, or when no entityclasses.xml
+/// loaded (ADR 0021 decision 5).
+///
+/// Note the search bound in `nearestPlayerSnap` stays on the Rules value: it is
+/// an outer bound over every entity, not a per-entity gate, and every stock
+/// SightRange sits under it.
+fn senseDistSq(w: *const World, s: Slot) f32 {
+    const sr = w.class_table[w.class_id[s].id].sight_range;
+    if (sr > 0) return sr * sr;
+    return w.rules.ai.sense_dist_sq;
+}
+
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
+    const sense_d2 = senseDistSq(w, s);
     return switch (id) {
-        .break_block => breakBlockCanExecute(w, ai, np.id, np.d2),
-        .destroy_area => destroyAreaCanExecute(w, ai, np.id, np.d2),
+        .break_block => breakBlockCanExecute(w, ai, np.id, np.d2, sense_d2),
+        .destroy_area => destroyAreaCanExecute(w, ai, np.id, np.d2, sense_d2),
         .runaway => runawayCanExecute(w, s, ai),
-        .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
-        .territorial => territorialCanExecute(w, s, ai, np.id, np.d2),
-        .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2),
+        .approach_attack => approachCanExecute(w, ai, np.id, np.d2, sense_d2),
+        .territorial => territorialCanExecute(w, s, ai, np.id, np.d2, sense_d2),
+        .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2, sense_d2),
         .approach_spot => approachSpotCanExecute(ai),
         .look => lookCanExecute(ai),
-        .wander => wanderCanExecute(w, ai, np.id, np.d2),
+        .wander => wanderCanExecute(w, ai, np.id, np.d2, sense_d2),
         .none => false,
     };
 }
@@ -1169,7 +1185,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
 /// allowed to run down instead of being re-tested against the start condition.
 fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     return switch (id) {
-        .wander => wanderContinue(w, s, ai, np.id, np.d2),
+        .wander => wanderContinue(w, s, ai, np.id, np.d2, senseDistSq(w, s)),
         .look => lookContinue(ai),
         // EAIApproachDistraction overrides Continue to read `distraction`
         // (Start moved pending there), not the pending slot.
@@ -1219,9 +1235,9 @@ fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
 
 /// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
 /// and a solid cell directly toward the goal (set by chaseAlongPath).
-fn breakBlockCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn breakBlockCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     if (!ai.path_blocked) return false;
-    if (!(np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq)) return false;
+    if (!(np_id >= 0 and np_d2 < sense_d2)) return false;
     // Melee range: approach owns the bite; do not stick on break.
     if (np_d2 <= w.rules.combat.attack_range_sq) return false;
     return true;
@@ -1256,8 +1272,8 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
 
 /// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
 /// random while chasing (same block-damage feed as BreakBlock).
-fn destroyAreaCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    const chasing = (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) or (ai.alert and ai.target_id >= 0);
+fn destroyAreaCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
+    const chasing = (np_id >= 0 and np_d2 < sense_d2) or (ai.alert and ai.target_id >= 0);
     if (!chasing) return false;
     if (np_id >= 0 and np_d2 <= w.rules.combat.attack_range_sq) return false;
     if (ai.path_blocked) return true;
@@ -1369,10 +1385,10 @@ fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
 }
 
 /// EAITerritorial::CanExecute: has home and outside leash; yields to sensed player.
-fn territorialCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn territorialCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     if (!ai.has_home) return false;
     // Sensed player: approach owns movement; do not leash mid-fight.
-    if (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) return false;
+    if (np_id >= 0 and np_d2 < sense_d2) return false;
     if (!w.mask[s].transform) return false;
     const dx = w.transform[s].x - ai.home_x;
     const dz = w.transform[s].z - ai.home_z;
@@ -3797,4 +3813,15 @@ test "completed starter quest is not granted again on the next login" {
     // A fresh player on a different peer still gets the starter.
     _ = w.spawnPlayer(0, 70, 5, 1);
     try std.testing.expect(questAcceptStarter(&w, 1));
+}
+
+test "sense range comes from entityclasses SightRange, not the global rule" {
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48.0 * 48.0 } } };
+    // A class with no SightRange keeps the Rules floor.
+    try std.testing.expectEqual(@as(f32, 48.0 * 48.0), senseDistSq(&w, 0));
+    // A class that ships one uses it: stock zombies sit at 27-40 m, all well
+    // under the floor, so this is a real behaviour change per class.
+    w.class_table[1].sight_range = 30.0;
+    w.class_id[0] = .{ .id = 1 };
+    try std.testing.expectEqual(@as(f32, 900.0), senseDistSq(&w, 0));
 }

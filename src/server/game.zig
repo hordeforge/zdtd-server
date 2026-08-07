@@ -1311,6 +1311,7 @@ pub const Game = struct {
                 .wander_speed = zdef.wander_speed,
                 .attack_damage = self.handItemDamage(zdef.hand_item),
                 .time_stay = zdef.time_stay,
+                .sight_range = zdef.sight_range,
             });
             const adef = self.entities.defaultAnimal();
             self.sim.setClassDef(7, .{
@@ -1324,6 +1325,7 @@ pub const Game = struct {
                 .wander_speed = adef.wander_speed,
                 .attack_damage = self.handItemDamage(adef.hand_item),
                 .time_stay = adef.time_stay,
+                .sight_range = adef.sight_range,
             });
             std.debug.print("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
                 self.entities.defs.len, zdef.name, zdef.hash,
