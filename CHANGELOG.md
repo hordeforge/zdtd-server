@@ -179,6 +179,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - The last bare tick throttles became `[stream]` keys in zdtd.toml
   (`sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`), and the
   workstation burn dt follows the configured cadence.
+- DecoUpdate objects carry stock `GetRandomRotation` rolls (rawData bits
+  16..20, keyed to the placement cell) instead of a flat 0, so trees and rocks
+  no longer all face north; the world mirror reads the same rotation bits.
+- `setgamepref` writes the GameStats-backed prefs at runtime (difficulty,
+  blood-moon cadence, day length, block damage, xp, pvp, drop, loot respawn,
+  air drops), clamping to the config ranges and broadcasting the fresh stats
+  blob; startup-only prefs keep the read-only reply.
+- Vending machines persist their full store (stock rows, owner, password,
+  rental) to `vending.zvn`, so a placed machine keeps opening after a restart;
+  the trader-markup dead code in its stock seeding is gone (vending is
+  owner-priced).
+- `ItemValue.UseTimes` rides the ECS slot and both wire conversions, and
+  `inventory.degradeUse` wears a tool toward 0 (clamped, stack stays present).
+- Hammer upgrades work: `blocks.xml` `UpgradeBlock.ToBlock` resolves through
+  the Extends chain into a data-driven ladder, and SetBlock only accepts a
+  block swap onto an occupied cell when the new id is the current block's
+  upgrade target, so a forged SetBlock cannot swap in arbitrary block ids.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
