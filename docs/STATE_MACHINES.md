@@ -214,7 +214,9 @@ Owners: `src/server/ally.zig:25` (`Status` + `mirror`).
 
 ## 10. Plugin lifecycle
 
-Two hosts share the hook order (enable, tick, playerJoin, shutdown). The static
+Two hosts share the hook order (enable, tick, playerJoin, shutdown) plus the
+T15 event hooks (playerDeath, entityKilled, blockDamage, questComplete), which
+run at their game events on the tick thread in that fixed order. The static
 host is test scaffolding; the Wasm host loads `[plugin] modules` and disables a
 module when a hook traps or exhausts its fuel budget.
 
@@ -223,6 +225,7 @@ stateDiagram-v2
     [*] --> Registered: static register / wasm loadAll
     Registered --> Enabled: enable (on_enable)
     Enabled --> Enabled: per tick on_tick, on_player_join
+    Enabled --> Enabled: event hooks (death, kill, block damage, quest)
     Enabled --> Disabled: trap or OutOfFuel (wasm only)
     Enabled --> [*]: shutdown (on_shutdown)
     Disabled --> [*]: shutdown (hook skipped)

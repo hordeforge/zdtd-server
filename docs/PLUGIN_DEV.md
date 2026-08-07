@@ -1,9 +1,9 @@
 # Writing a zdtd plugin
 
-**Status:** shipped first cut (2026-08-06, WORK_PLAN T9). The contract below is
-live: the runtime loads `.wasm` modules named in zdtd.toml and calls the four
-hooks under fuel and memory budgets. The host import table is deliberately
-small and documented below; deny hooks and read-only sim views are still open.
+**Status:** shipped (T9 runtime 2026-08-06; T15 event hooks + deny/adjust
+2026-08-07). The runtime loads `.wasm` modules named in zdtd.toml and calls the
+lifecycle/event hooks under fuel and memory budgets. The host import table is
+deliberately small and documented below; read-only sim views are still open.
 
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
 Rust, TinyGo, Zig, C, AssemblyScript. You do not link against zdtd, you do not
@@ -23,6 +23,10 @@ your .wasm                        zdtd
             on_tick        <────  called late in each server tick
             on_player_join <────  called on a player's first join
             on_shutdown    <────  called once at shutdown
+            on_player_death <───  verdict hook: deny/adjust (T15)
+            on_entity_killed <──  verdict hook: deny/adjust (T15)
+            on_block_damage <───  verdict hook: deny/adjust (T15)
+            on_quest_complete <─  verdict hook: deny/adjust (T15)
   imports:  log            ────>  provided by the host, capability-gated
             ...
 ```
@@ -43,7 +47,8 @@ modules = "mods/my_plugin.wasm, mods/stats.wasm"
 Modules load once at startup; a missing or unloadable module is logged and
 skipped, it does not stop the server. `on_enable` runs right after load,
 `on_tick` runs late in every tick, `on_player_join` runs on a player's first
-join, and `on_shutdown` runs at shutdown.
+join, `on_shutdown` runs at shutdown, and the four event hooks run at their
+game events (death, kill, block damage, quest completion).
 
 ## Host imports
 
@@ -108,6 +113,8 @@ the offset past the call.
 
 ## Hooks
 
+Observe / lifecycle hooks (all `void`):
+
 | Export | When | Notes |
 |---|---|---|
 | `on_enable` | once, at enable | Register interest, read config, allocate |
@@ -115,9 +122,28 @@ the offset past the call.
 | `on_player_join` | a player's first join | Receives the peer slot and entity id |
 | `on_shutdown` | once, at shutdown | Flush anything you own |
 
+Event hooks (T15, return a verdict):
+
+| Export | Signature | Verdict return |
+|---|---|---|
+| `on_player_death` | `(victim_entity_id: i32) -> i32` | `<0` deny: the victim survives at 1 hp and the hit is consumed |
+| `on_entity_killed` | `(killed_entity_id: i32, killer_entity_id: i32) -> i32` | `<0` deny the kill; `killer` is `-1` when the attacker is unknown (AI melee accumulator) |
+| `on_block_damage` | `(x: i32, y: i32, z: i32, dmg: i32) -> i32` | `<0` deny (no damage); `>0` apply that percent (`200` doubles) |
+| `on_quest_complete` | `(player_entity_id: i32, quest_def_id: i32) -> i32` | `<0` withhold the payout; `>0` pay that percent of items/exp |
+
+The return convention is: **below 0 denies the proposed outcome, 0 keeps
+today's behaviour, above 0 adjusts as a percent** (where a percent is
+meaningful). A module that does not export the hook costs nothing and the
+default holds. Verdicts are taken in plugin load order, first non-zero wins;
+a plugin that traps or exhausts its fuel is disabled and reports keep, so one
+broken module cannot veto the game.
+
 `on_tick` running at 20 Hz is the one to respect. A hook that burns its budget
 every tick will be disabled, which is the system working, but your plugin still
 stops.
+
+Fixtures exercising the full surface: `assets/fixtures/plugin_rules.c`
+(deny/double verdicts) and `assets/fixtures/plugin_trap.c` (trapping hook).
 
 ## Building one
 

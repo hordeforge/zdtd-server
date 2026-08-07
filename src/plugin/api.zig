@@ -35,12 +35,18 @@ fn defaultLog(level: LogLevel, msg: []const u8) void {
 }
 
 /// Static plugin vtable. Null hooks are skipped (zero cost beyond a null check).
+/// Event hooks follow the Wasm verdict convention (see wasm.zig): a return
+/// below 0 denies the outcome, 0 keeps behaviour, above 0 adjusts as a percent.
 pub const PluginVTable = struct {
     name: []const u8,
     on_enable: ?*const fn (*const Host) void = null,
     on_tick: ?*const fn (*const Host) void = null,
     on_player_join: ?*const fn (*const Host, peer_slot: u16, entity_id: i32) void = null,
     on_shutdown: ?*const fn (*const Host) void = null,
+    on_player_death: ?*const fn (*const Host, victim: i32) i32 = null,
+    on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,
+    on_block_damage: ?*const fn (*const Host, x: i32, y: i32, z: i32, dmg: i32) i32 = null,
+    on_quest_complete: ?*const fn (*const Host, player: i32, quest_def: i32) i32 = null,
 };
 
 test "host log dispatches level and message to log_fn" {

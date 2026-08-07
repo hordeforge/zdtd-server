@@ -25,8 +25,9 @@ A native ABI could promise neither.
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (8), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
-| Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin`; `deinit` shutdown |
-| C2S deny hooks / SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick); deny hooks still open |
+| Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks |
+| Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
+| SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
 
 The static host stays because scenarios need to drive hooks without standing up
 a Wasm runtime in the test path. It is not a way to ship a plugin and is not
@@ -38,8 +39,10 @@ The contract is the module's exports plus the host's imports. Nothing else
 crosses.
 
 - **Guest exports** the hooks it wants: `on_enable`, `on_tick`,
-  `on_player_join`, `on_shutdown`. A missing export means that hook is not
-  registered, which costs nothing at runtime.
+  `on_player_join`, `on_shutdown`, plus the four event hooks
+  (`on_player_death`, `on_entity_killed`, `on_block_damage`,
+  `on_quest_complete`). A missing export means that hook is not registered,
+  which costs nothing at runtime.
 - **Host imports** are capability-gated. A module declares what it needs; the
   host supplies only those functions. There is no filesystem, no socket, and no
   clock beyond the tick time passed in, unless a capability grants it.
@@ -99,7 +102,7 @@ build too, not a defect in zwasm.
 
 | Decision | Notes |
 |---|---|
-| Capability list | Shipped minimal: `log`, `tick`, `queue`. Read-only sim views and deny hooks are the next candidates; every addition is permanent, so they land on evidence |
+| Capability list | Shipped minimal: `log`, `tick`, `queue`. Event hooks (T15) deny/adjust deaths, kills, block damage and quest rewards; read-only sim views are the next candidate. Every addition is permanent, so it lands on evidence |
 | Memory and fuel defaults | zdtd ships `Budget` defaults (100M fuel, 1024 pages). Re-tune from a real plugin's measured cost per tick once one exists |
 | Interpreter or JIT | zwasm's interpreter is the hardened default; JIT is a later question and only with evidence that a plugin needs it |
 

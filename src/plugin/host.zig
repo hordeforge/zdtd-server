@@ -67,6 +67,56 @@ pub const PluginHost = struct {
         }
     }
 
+    /// Event-hook verdicts (T15): first non-zero return across enabled
+    /// plugins. 0 keeps today's behaviour; a null hook is skipped.
+    pub fn playerDeath(self: *PluginHost, victim: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_player_death) |f| {
+                const v = f(&self.view, victim);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
+    pub fn entityKilled(self: *PluginHost, killed: i32, killer: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_entity_killed) |f| {
+                const v = f(&self.view, killed, killer);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
+    pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_block_damage) |f| {
+                const v = f(&self.view, x, y, z, dmg);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
+    pub fn questComplete(self: *PluginHost, player: i32, quest_def: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_quest_complete) |f| {
+                const v = f(&self.view, player, quest_def);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn shutdown(self: *PluginHost) void {
         var i: usize = self.n;
         while (i > 0) {

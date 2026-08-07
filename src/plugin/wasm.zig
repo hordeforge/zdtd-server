@@ -15,9 +15,24 @@ pub const Hook = enum(u8) {
     on_tick = 1,
     on_player_join = 2,
     on_shutdown = 3,
+    on_player_death = 4,
+    on_entity_killed = 5,
+    on_block_damage = 6,
+    on_quest_complete = 7,
 
-    pub const names = [_][]const u8{ "on_enable", "on_tick", "on_player_join", "on_shutdown" };
+    pub const names = [_][]const u8{
+        "on_enable",       "on_tick",          "on_player_join",  "on_shutdown",
+        "on_player_death", "on_entity_killed", "on_block_damage", "on_quest_complete",
+    };
 };
+
+/// Verdict convention for the event hooks (T15 / PLUGIN_DEV.md): a return
+/// below 0 denies the proposed outcome (death cancelled, damage not applied,
+/// quest rewards withheld); 0 keeps today's behaviour; above 0 adjusts as a
+/// percent (block damage applied and quest rewards paid at that percentage).
+/// A module that does not export the hook costs nothing (missing export -> 0).
+pub const verdict_deny: i32 = -1;
+pub const verdict_keep: i32 = 0;
 
 /// Per-call budget (PLUGIN_API.md). zwasm enforces both itself.
 pub const Budget = struct {
@@ -60,7 +75,7 @@ pub const Plugin = struct {
     name: []const u8,
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
-    hook_present: [4]bool = .{false} ** 4,
+    hook_present: [8]bool = .{false} ** 8,
 
     pub fn load(
         allocator: std.mem.Allocator,
@@ -140,6 +155,51 @@ pub const Plugin = struct {
         return true;
     }
 
+    /// on_player_death(victim: i32) -> i32 (verdict convention: <0 deny,
+    /// 0 keep, >0 adjust-percent where meaningful).
+    pub fn callPlayerDeath(self: *Plugin, victim: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_player_death)]) return verdict_keep;
+        return self.instance.call(fn (i32) i32, "on_player_death", .{victim}) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_player_death disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_entity_killed(killed: i32, killer: i32) -> i32.
+    pub fn callEntityKilled(self: *Plugin, killed: i32, killer: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_entity_killed)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32) i32, "on_entity_killed", .{ killed, killer }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_entity_killed disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_block_damage(x, y, z, dmg) -> i32: percent applied, or deny (< 0).
+    pub fn callBlockDamage(self: *Plugin, x: i32, y: i32, z: i32, dmg: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_block_damage)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32, i32, i32) i32, "on_block_damage", .{ x, y, z, dmg }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_block_damage disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_quest_complete(player: i32, quest_def: i32) -> i32: reward percent.
+    pub fn callQuestComplete(self: *Plugin, player: i32, quest_def: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_quest_complete)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32) i32, "on_quest_complete", .{ player, quest_def }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_quest_complete disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
     /// Export the remaining fuel (diagnostics; the runtime enforces the budget).
     pub fn fuelRemaining(self: *Plugin) ?u64 {
         return self.instance.fuelRemaining();
@@ -201,6 +261,41 @@ pub const WasmHost = struct {
 
     pub fn playerJoin(self: *WasmHost, slot: u16, entity_id: i32) void {
         for (0..self.n) |i| _ = self.slots[i].callPlayerJoin(@intCast(slot), entity_id);
+    }
+
+    /// Event-hook verdicts: first non-zero return across plugins in load order.
+    /// 0 (no plugin exports the hook, or all keep) preserves today's behaviour;
+    /// a trap/fuel-exhaustion disables that plugin and it reports keep.
+    pub fn playerDeath(self: *WasmHost, victim: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callPlayerDeath(victim);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn entityKilled(self: *WasmHost, killed: i32, killer: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callEntityKilled(killed, killer);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn blockDamage(self: *WasmHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callBlockDamage(x, y, z, dmg);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callQuestComplete(player, quest_def);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
     }
 
     /// Reverse order, like the static host: shutdown then deinit each plugin.
@@ -386,4 +481,51 @@ test "wasm host loads the C fixture modules: hooks fire, looper disabled" {
     Cap.tick = 10;
     host.onTick();
     try std.testing.expectEqual(@as(usize, 1), host.disabledCount());
+}
+
+test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
+    // plugin_rules.wasm exports the four event hooks (T15): on_player_death
+    // denies, on_block_damage and on_quest_complete double, on_entity_killed
+    // keeps. plugin_trap.wasm traps in on_entity_killed: the host disables only
+    // that module and the kill still proceeds (trap -> keep).
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+    };
+    var host: WasmHost = .{};
+    const paths = [_][]const u8{
+        "assets/fixtures/plugin_rules.wasm",
+        "assets/fixtures/plugin_trap.wasm",
+    };
+    host.loadAll(std.testing.allocator, &paths, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 2), host.count());
+
+    // plugin_rules: deny death, double block damage, double quest reward,
+    // observe kills.
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_death)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_entity_killed)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_block_damage)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_complete)]);
+    try std.testing.expectEqual(verdict_deny, host.playerDeath(7));
+    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(8, 1));
+    try std.testing.expectEqual(@as(i32, 200), host.blockDamage(0, 0, 0, 50));
+    try std.testing.expectEqual(@as(i32, 200), host.questComplete(9, 2));
+
+    // plugin_trap: on_entity_killed traps -> that module only is disabled; the
+    // verdict keeps (0) so the sim's kill is not blocked by a broken plugin.
+    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(10, 1));
+    try std.testing.expectEqual(@as(usize, 1), host.disabledCount());
+    try std.testing.expect(host.slots[1].disabled);
+    try std.testing.expect(!host.slots[0].disabled);
+    // A disabled module keeps reporting keep for every hook.
+    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(11, 1));
 }
