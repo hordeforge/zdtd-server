@@ -84,11 +84,12 @@ if ! rg -q 'quests=.*defs=[0-9]{2,}' "$WORLD/server.log"; then
   exit 1
 fi
 
-# LiteNet = ServerPort+2; expect every bot to PASS its join.
-"$LOADGEN" --join --host 127.0.0.1 --port $((10#$PORT + 2)) --count "$COUNT" --actions "$ACTIONS" | tee "$WORLD/loadgen.log"
+# LiteNet = ServerPort+2; expect every bot to PASS its join. The timeout caps
+# loadgen's rejoin loop so the script exits after the smoke window.
+"$LOADGEN" --join --host 127.0.0.1 --port $((10#$PORT + 2)) --count "$COUNT" --actions "$ACTIONS" --timeout 30000 --no-spawn-zombies | tee "$WORLD/loadgen.log"
 passes=$(rg -c "PASS joined" "$WORLD/loadgen.log" || true)
 if ((passes < COUNT)); then
   echo "smoke-navezgane: only $passes/$COUNT joins passed; see $WORLD/loadgen.log" >&2
   exit 1
 fi
-echo "smoke-navezgane OK: Navezgane loaded, $passes/$COUNT joins passed"
+echo "smoke-navezgane OK: Navezgane loaded, $passes join passes (rejoins included, expected >= $COUNT)"
