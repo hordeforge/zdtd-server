@@ -696,6 +696,9 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             // Stock credits the trader's AvailableMoney with the sale (the
             // wire TraderData shows the live balance). Clamp at i32 max.
             stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
+            // Demand spike: a buy raises the entry's markup to +100
+            // (TraderData/Entry::IncreaseMarkup, asm.il 856828-856866).
+            stock.entries[e].markup = 100;
         } else {
             const gain: u32 = @as(u32, stock.entries[e].sell) * qty;
             if (gain > std.math.maxInt(u16)) return false;
@@ -719,6 +722,9 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             stock.entries[e].count += qty;
             w.wallet[ps].coins += gain;
             stock.wallet -= @intCast(gain);
+            // A sell eases demand: step the entry's markup down by 4
+            // (DecreaseMarkup, asm.il 856828-856866), saturating at i8 min.
+            stock.entries[e].markup -|= 4;
         }
         return true;
     }
@@ -748,6 +754,9 @@ pub fn traderRestock(w: *World) void {
             if (stock.entries[e].count < 50) {
                 stock.entries[e].count +%= @min(10, 50 - stock.entries[e].count);
             }
+            // Fresh entries: demand resets (stock HandleFullReset rebuilds the
+            // inventory, which drops the old markups).
+            stock.entries[e].markup = 0;
         }
         // The money pool regenerates toward its spawn default each restock.
         if (stock.wallet < stock.wallet_default) stock.wallet = stock.wallet_default;
@@ -2889,6 +2898,29 @@ test "trader wallet debits on sell, credits on buy and refuses overdraft" {
     w.trader_stock[ts].wallet = 0;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
+}
+
+test "trade demand markup: buy spikes +100, sell eases -4, restock resets" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    // Default first entry: item 2, price 5. Fund the wallet; the player's
+    // inventory starts empty so deposits find a free slot.
+    const item = w.trader_stock[ts].entries[0].item;
+    w.wallet[ps].coins = 1000;
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+    // A buy spikes demand to +100 (Entry.IncreaseMarkup).
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(@as(i8, 100), w.trader_stock[ts].entries[0].markup);
+    // A sell eases demand by 4 (Entry.DecreaseMarkup), saturating at i8 min.
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
+    try std.testing.expectEqual(@as(i8, 96), w.trader_stock[ts].entries[0].markup);
+    // A restock rebuilds fresh entries: markup back to neutral.
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
 }
 
 test "traderRestock honors per-trader reset_interval (never vs every N days)" {

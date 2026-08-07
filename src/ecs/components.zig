@@ -530,6 +530,12 @@ pub const StockEntry = struct {
     count: u16 = 0,
     price: u16 = 0,
     sell: u16 = 0,
+    /// TraderData.Entry.Markup (sbyte demand delta). Stock raises it to +100 on
+    /// a buy and steps it down by 4 on a sell (asm.il 856828-856866); the wire
+    /// TraderData carries it so the client shows the demand arrows and (for
+    /// player-owned/rentable machines) prices from 1 + Markup*0.2. Fresh stock
+    /// and restocks reset it to 0.
+    markup: i8 = 0,
 };
 
 fn defaultStock() [max_stock]StockEntry {

@@ -902,11 +902,20 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/wire/packages.zig:665`, `Data/Config/traders.xml:24-60`,
   `asm.il:863725-863767`
 
-- **Per-entry Markup (demand model)** `MISSING`
-  Written as a constant 0 with an honest comment. Stock mutates `Entry.Markup` via
-  IncreaseMarkup/DecreaseMarkup and the price factor is `(1 + Markup*0.2)`.
-  *Anchors:* `src/server/game.zig:5507-5513`, `asm.il:860548-860586`,
-  `asm.il:1830586-1830600`
+- **Per-entry Markup (demand model)** `WORKS`
+  `TraderStock.StockEntry.markup` (sbyte) tracks the demand delta: a buy spikes
+  it to +100 (`Entry.IncreaseMarkup`), a sell eases it by 4 saturating at i8 min
+  (`Entry.DecreaseMarkup`, asm.il 856828-856866), and a restock resets it to 0
+  (fresh entries). The wire TraderData (`stockEntries`, vending) now carries the
+  live markup, so the client shows the demand arrows and prices
+  player-owned/rentable machines from `1 + Markup*0.2` (loot-economy.md section
+  5). Price deltas are the RE-cited constants; the absolute-set-on-buy and the
+  i8 saturation are documented approximations (the nested `Entry` method IL is
+  not dumped).
+  *Anchors:* `src/ecs/components.zig` (`StockEntry.markup`),
+  `src/ecs/systems.zig` (`trade` buy/sell branches, `traderRestock`),
+  `src/server/game.zig` (`stockEntries`), `asm.il:856828-856866`,
+  `asm.il:860548-860586`, `asm.il:1830586-1830600`
 
 - **Restock timer** `PARTIAL`
   `traderRestock` respects each trader's `<trader_info>` `reset_interval`
