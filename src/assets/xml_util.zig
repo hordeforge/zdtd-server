@@ -78,6 +78,25 @@ pub fn propertyValue(body: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
+/// First `<passive_effect name="X" ... value="Y"/>` value in an effect_group
+/// body (items.xml Distraction* / buffs.xml passives, e.g. decoy's
+/// `DistractionRadius` with `operation="base_set"`).
+pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.indexOfPos(u8, body, i, "<passive_effect") orelse break;
+        const name_v = attr(body, pi, "name") orelse {
+            i = pi + 15;
+            continue;
+        };
+        if (std.mem.eql(u8, name_v, name)) {
+            return attr(body, pi, "value");
+        }
+        i = pi + 15;
+    }
+    return null;
+}
+
 pub fn parseU16(s: []const u8) ?u16 {
     return std.fmt.parseInt(u16, s, 10) catch null;
 }

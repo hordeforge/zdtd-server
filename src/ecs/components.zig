@@ -79,6 +79,11 @@ pub const TaskId = enum(u8) {
     destroy_area,
     approach_attack,
     territorial,
+    /// EAIApproachDistraction (asm.il:423700, MutexBits 3): walk to the dropped
+    /// EntityItem that tickDistraction registered as pendingDistraction. Sits
+    /// between Territorial and ApproachSpot in the stock zombie AITask list
+    /// (entityclasses.xml:562-571), behind ApproachAndAttackTarget.
+    approach_distraction,
     approach_spot,
     /// EAIRunawayWhenHurt (asm.il:435616). Passive animals flee the entity that
     /// hurt them; not in the zombie AITask list, so it is gated on kind.animal.
@@ -124,6 +129,11 @@ pub const ZombieAi = struct {
     /// Blood-moon horde zombie (stock EntityAlive.IsHordeZombie): teleported
     /// back to the party focus when it drifts past cTeleportDist, cleared at dawn.
     is_horde: bool = false,
+    /// EAIRunawayFromEntity fear source (AITask-2): the nearest feared entity
+    /// (player / zombie / other animal) within fleeDistance, refreshed on a
+    /// 0.5 s cadence for passive animals. -1 = no fear.
+    fear_target: i32 = -1,
+    fear_cd: f32 = 0,
     active_scale: f32 = 1,
     path_goal_x: f32 = 0,
     path_goal_z: f32 = 0,
@@ -164,6 +174,20 @@ pub const ZombieAi = struct {
     /// Seconds the revenge target stays valid. Stock's SetAttackTarget window
     /// is 400 ticks (asm.il:436155 ldc.i4 0x190) = 20 s at 20 Hz.
     revenge_time: f32 = 0,
+    /// EntityAlive.pendingDistraction: the nearest dropped EntityItem that
+    /// broadcast itself into this entity's 25 m (distractionRadius) window
+    /// (EntityItem.tickDistraction). Net id of the loot-bag entity, -1 = none.
+    pending_distraction: i32 = -1,
+    /// EntityAlive.pendingDistractionDistanceSq (tickDistraction only replaces
+    /// a closer item).
+    pending_distraction_dsq: f32 = 0,
+    /// EntityAlive.distraction: the item the winning EAIApproachDistraction
+    /// task is walking to / eating (EAIApproachDistraction.Start, asm.il:423700).
+    /// Net id of the loot-bag entity, -1 = none.
+    distraction: i32 = -1,
+    /// EntityAlive.IsEating (EAIApproachDistraction.Update sets it while within
+    /// cCloseDist and the item is an eat distraction).
+    is_eating: bool = false,
 
     /// Drop any buffered path (arrive, preempt, mover stop).
     pub fn clearPath(self: *ZombieAi) void {
@@ -584,6 +608,20 @@ pub const TraderStock = struct {
 pub const LootBag = struct {
     /// Simple loot: first inv slots.
     open: bool = false,
+    /// EntityItem distraction state (RE EntityItem::SetupDistraction). Tags bit
+    /// 1 = eat, 2 = requires_contact, 4 = zombie; 0 = plain loot bag, no
+    /// attraction. `radius_sq` is DistractionRadius squared (stock compares
+    /// against the squared value, asm.il EntityItem:1381-1385).
+    distraction_tags: u8 = 0,
+    distraction_radius_sq: f32 = 0,
+    distraction_lifetime: i32 = 0,
+    distraction_strength: f32 = 0,
+    /// Stock EntityItem.distractionEatTicks: ticks an eating zombie chews the
+    /// item before it dies (PassiveEffects 69; stock decoy = 0, no eating).
+    distraction_eat_ticks: i32 = 0,
+    /// Stock EntityItem.nextDistractionTick: 20-tick broadcast cadence
+    /// (tickDistraction, asm.il EntityItem:1341-1349).
+    next_distraction_tick: i32 = 0,
 };
 
 pub const Sleeper = struct {

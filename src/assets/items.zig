@@ -42,6 +42,39 @@ pub const ItemDef = struct {
     food_health: f32 = 0,
     /// $waterAmountAdd from effect_group (PlayerEntityStats.Water gain).
     water_amount: f32 = 0,
+    /// items.xml `DistractionTags` (EntityItem distraction; RE EntityItem::SetupDistraction
+    /// + ItemClass::get_IsEatDistraction). Bits: 1 = eat, 2 = requires_contact, 4 = zombie.
+    /// Stock ships only decoy (`zombie,requires_contact`).
+    distraction_tags: u8 = 0,
+    /// items.xml effect_group `DistractionRadius` (PassiveEffects.DistractionRadius,
+    /// EntityItem::SetupDistraction). 0 = not a distraction.
+    distraction_radius: f32 = 0,
+    /// effect_group `DistractionLifetime` (tick broadcasts before the item stops
+    /// attracting; stock decoy = 1).
+    distraction_lifetime: i32 = 0,
+    /// effect_group `DistractionStrength` (overcomes EntityAlive.distractionResistance).
+    distraction_strength: f32 = 0,
+    /// effect_group `DistractionEatTicks` (PassiveEffects 69): ticks an eating
+    /// zombie chews the item before it dies. Stock decoy leaves it unset (0 =
+    /// no eating; approach clears at close range).
+    distraction_eat_ticks: i32 = 0,
+};
+
+/// EntityItem distraction parameters (RE EntityItem::SetupDistraction):
+/// DistractionRadius(66), DistractionLifetime(67), DistractionStrength(68)
+/// passive effects, plus the item's `DistractionTags`.
+pub const Distraction = struct {
+    /// Bit 1 = eat, 2 = requires_contact, 4 = zombie (stock decoy: 2|4).
+    tags: u8 = 0,
+    /// DistractionRadius in meters (squared on the sim side, like stock).
+    radius: f32 = 0,
+    /// DistractionLifetime in broadcast ticks (stock decoy = 1).
+    lifetime: i32 = 0,
+    /// DistractionStrength (vs EntityAlive.distractionResistance).
+    strength: f32 = 0,
+    /// DistractionEatTicks (PassiveEffects 69): ticks an eating zombie chews
+    /// the item (0 = not eaten, approach clears at close range).
+    eat_ticks: i32 = 0,
 };
 
 pub const ItemTable = struct {
@@ -196,6 +229,20 @@ pub const ItemTable = struct {
             if (d.name.len >= 5 and std.mem.startsWith(u8, d.name, "drink")) return 20;
         }
         return 0;
+    }
+
+    /// EntityItem distraction parameters for a dropped item, or null when the
+    /// item carries no DistractionTags (most items; only decoy in stock V3.1.0).
+    pub fn distractionFor(self: *const ItemTable, item_id: u16) ?Distraction {
+        const d = self.byId(item_id) orelse return null;
+        if (d.distraction_tags == 0) return null;
+        return .{
+            .tags = d.distraction_tags,
+            .radius = d.distraction_radius,
+            .lifetime = d.distraction_lifetime,
+            .strength = d.distraction_strength,
+            .eat_ticks = d.distraction_eat_ticks,
+        };
     }
 
     /// Resolve ECS item_id → absolute stock type for wire encode.
@@ -424,6 +471,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_food_hp.deinit(allocator);
     var stock_water_amt: std.ArrayList(f32) = .empty;
     defer stock_water_amt.deinit(allocator);
+    var stock_dtags: std.ArrayList(u8) = .empty;
+    defer stock_dtags.deinit(allocator);
+    var stock_dradius: std.ArrayList(f32) = .empty;
+    defer stock_dradius.deinit(allocator);
+    var stock_dlifetime: std.ArrayList(i32) = .empty;
+    defer stock_dlifetime.deinit(allocator);
+    var stock_dstrength: std.ArrayList(f32) = .empty;
+    defer stock_dstrength.deinit(allocator);
+    var stock_deat: std.ArrayList(i32) = .empty;
+    defer stock_deat.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -480,6 +537,40 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
+            // EntityItem distraction (stock decoy: `zombie,requires_contact`).
+            var dtags: u8 = 0;
+            if (xml.propertyValue(body, "DistractionTags")) |v| {
+                var t = v;
+                while (t.len > 0) {
+                    const comma = std.mem.indexOfScalar(u8, t, ',') orelse t.len;
+                    const tag = t[0..comma];
+                    if (std.mem.eql(u8, tag, "eat")) dtags |= 1;
+                    if (std.mem.eql(u8, tag, "requires_contact")) dtags |= 2;
+                    if (std.mem.eql(u8, tag, "zombie")) dtags |= 4;
+                    t = if (comma < t.len) t[comma + 1 ..] else "";
+                }
+            }
+            var dradius: f32 = 0;
+            if (xml.passiveEffectValue(body, "DistractionRadius")) |v| {
+                dradius = xml.parseF32(v) orelse 0;
+            }
+            var dlifetime: i32 = 0;
+            if (xml.passiveEffectValue(body, "DistractionLifetime")) |v| {
+                dlifetime = std.fmt.parseInt(i32, v, 10) catch 0;
+            }
+            var dstrength: f32 = 0;
+            if (xml.passiveEffectValue(body, "DistractionStrength")) |v| {
+                dstrength = xml.parseF32(v) orelse 0;
+            }
+            var deat: i32 = 0;
+            if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
+                deat = std.fmt.parseInt(i32, v, 10) catch 0;
+            }
+            try stock_dtags.append(allocator, dtags);
+            try stock_dradius.append(allocator, dradius);
+            try stock_dlifetime.append(allocator, dlifetime);
+            try stock_dstrength.append(allocator, dstrength);
+            try stock_deat.append(allocator, deat);
             try stock_stacks.append(allocator, stack);
             try stock_names.append(allocator, try arena.dupe(u8, name));
             try stock_types.append(allocator, next_stock);
@@ -565,6 +656,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .food_amount = stock_food_amt.items[idx],
             .food_health = stock_food_hp.items[idx],
             .water_amount = stock_water_amt.items[idx],
+            .distraction_tags = stock_dtags.items[idx],
+            .distraction_radius = stock_dradius.items[idx],
+            .distraction_lifetime = stock_dlifetime.items[idx],
+            .distraction_strength = stock_dstrength.items[idx],
+            .distraction_eat_ticks = stock_deat.items[idx],
         });
         next_sim +%= 1;
         if (list.items.len >= max_items) break;
@@ -622,6 +718,56 @@ test "ecs offline inventory catalog mirrors builtins" {
 
 test "stock type first item is ItemsStartHere+1" {
     try std.testing.expectEqual(@as(i32, 65537), stock_first_item_type);
+}
+
+test "DistractionTags + Distraction* effects parse (stock decoy shape)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFileSimple(path, "<items>\n" ++
+        "  <item name=\"resourceRockDecoy\">\n" ++
+        "    <property name=\"ThrowableDecoy\" value=\"true\"/>\n" ++
+        "    <property name=\"DistractionTags\" value=\"zombie,requires_contact\"/>\n" ++
+        "    <effect_group name=\"decoy\" tiered=\"false\">\n" ++
+        "      <passive_effect name=\"DistractionRadius\" operation=\"base_set\" value=\"25\"/>\n" ++
+        "      <passive_effect name=\"DistractionLifetime\" operation=\"base_set\" value=\"1\"/>\n" ++
+        "      <passive_effect name=\"DistractionStrength\" operation=\"base_set\" value=\"100\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"foodBait\">\n" ++
+        "    <property name=\"DistractionTags\" value=\"zombie,eat\"/>\n" ++
+        "    <effect_group name=\"decoy\">\n" ++
+        "      <passive_effect name=\"DistractionRadius\" operation=\"base_set\" value=\"10\"/>\n" ++
+        "      <passive_effect name=\"DistractionLifetime\" operation=\"base_set\" value=\"5\"/>\n" ++
+        "      <passive_effect name=\"DistractionStrength\" operation=\"base_set\" value=\"50\"/>\n" ++
+        "      <passive_effect name=\"DistractionEatTicks\" operation=\"base_set\" value=\"12\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"resourceWood\">\n" ++
+        "    <property name=\"Stacknumber\" value=\"100\"/>\n" ++
+        "  </item>\n" ++
+        "</items>\n");
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const decoy = t.byName("resourceRockDecoy").?;
+    const d = t.distractionFor(decoy.id).?;
+    try std.testing.expectEqual(@as(u8, 2 | 4), d.tags); // requires_contact + zombie
+    try std.testing.expectEqual(@as(f32, 25), d.radius);
+    try std.testing.expectEqual(@as(i32, 1), d.lifetime);
+    try std.testing.expectEqual(@as(f32, 100), d.strength);
+    try std.testing.expectEqual(@as(i32, 0), d.eat_ticks); // decoy is not eaten
+    // Eat distraction parses the DistractionEatTicks passive effect.
+    const bait = t.byName("foodBait").?;
+    const b = t.distractionFor(bait.id).?;
+    try std.testing.expectEqual(@as(u8, 1 | 4), b.tags);
+    try std.testing.expectEqual(@as(f32, 10), b.radius);
+    try std.testing.expectEqual(@as(i32, 12), b.eat_ticks);
+    // Plain items are not distractions.
+    const wood = t.byName("resourceWood").?;
+    try std.testing.expect(t.distractionFor(wood.id) == null);
 }
 
 test "load stock items.xml when present" {

@@ -110,6 +110,54 @@ pub const TraderStockEntry = struct {
 /// TraderData::Write block: EntityCreationData.hasTraderData (spawn) and the
 /// channel-1 LockResponse EntityTraderLockContext. NetPackageTraderData itself
 /// is ToServer-only, so a server-sent one is not a delivery path.
+/// One read TraderData stock entry: the ItemStack (count rides it) plus the
+/// Markup sbyte. AddedByPlayer is read and dropped (the client's post-trade
+/// copy always mirrors server-authored entries).
+pub const TraderDataReadEntry = struct {
+    item: stock_inv.StockSlot = .{},
+    markup: i8 = 0,
+};
+
+/// TraderData::Read (the mirror of writeTraderDataBody, stock IL 472732):
+/// trader id, last restock world time, FileVersion, primary inventory entries,
+/// tier groups (read + skipped), available money. `entries` is the caller's
+/// storage; the returned count is capped at `entries.len`.
+pub fn readTraderDataBody(
+    r: *binary.Reader,
+    entries: []TraderDataReadEntry,
+) binary.ReadError!struct { trader_id: i32, money: i32, n: usize } {
+    const trader_id = try r.readI32();
+    _ = try r.readU64(); // lastInventoryUpdate
+    _ = try r.readByte(); // FileVersion
+    const count = try r.readI32();
+    if (count < 0 or count > 4096) return error.EndOfStream;
+    var n: usize = 0;
+    var i: i32 = 0;
+    while (i < count) : (i += 1) {
+        if (n < entries.len) {
+            entries[n] = .{
+                .item = try stock_inv.readItemStack(r),
+                .markup = @bitCast(try r.readByte()),
+            };
+            n += 1;
+        } else {
+            _ = try stock_inv.readItemStack(r);
+            _ = try r.readByte();
+        }
+        _ = try r.readBool(); // AddedByPlayer
+    }
+    const tier_groups = try r.readByte();
+    var tg: u8 = 0;
+    while (tg < tier_groups) : (tg += 1) {
+        // TierItemGroup: name string + item count + item ids.
+        try r.skipString();
+        const item_count = try r.readByte();
+        var k: u8 = 0;
+        while (k < item_count) : (k += 1) _ = try r.readU16();
+    }
+    const money = try r.readI32();
+    return .{ .trader_id = trader_id, .money = money, .n = n };
+}
 pub const TraderDataInfo = struct {
     trader_id: i32,
     available_money: i32,

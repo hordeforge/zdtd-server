@@ -14,17 +14,9 @@ const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 
-pub const full_ai_dist_sq: f32 = 64.0 * 64.0;
-pub const mid_ai_dist_sq: f32 = 225.0;
-pub const sense_dist_sq: f32 = 48.0 * 48.0;
-pub const attack_range_sq: f32 = 2.0 * 2.0;
-/// Offline / class_table field==0 floors only. Prefer EntityClass from entityclasses
-/// (MoveSpeedAggro, MoveSpeed, HandItem→items DamageEntity) when non-zero.
-pub const attack_damage: f32 = 8.0;
-pub const chase_speed: f32 = 2.2;
-pub const wander_speed: f32 = 0.8;
-/// No entityclasses field; always this cadence (stock melee interval approx).
-pub const attack_cooldown_s: f32 = 1.2;
+/// Sim rule parameters (ADR 0021): read as w.rules.<group>.<field>; defaults
+/// live in rules.zig (pinned by its test) and are overlaid from mode packs /
+/// zdtd.toml. The pre-move file-scope constants are gone by design.
 /// Replan grid A* at most this often while chasing (keeps 20 TPS budget).
 const path_replan_interval_s: f32 = 0.35;
 /// Max A* node expansions per replan (coarse local grid).
@@ -40,9 +32,9 @@ const path_goal_slack: u32 = 2;
 /// Fixed-point damage unit (1.0 hp = 100).
 const dmg_scale: u32 = 100;
 
-fn lodScale(d2: f32) f32 {
-    if (d2 < mid_ai_dist_sq) return 1.0;
-    if (d2 < full_ai_dist_sq) return 0.3;
+fn lodScale(w: *const World, d2: f32) f32 {
+    if (d2 < w.rules.ai.mid_dist_sq) return 1.0;
+    if (d2 < w.rules.ai.full_dist_sq) return 0.3;
     return 0.1;
 }
 
@@ -82,10 +74,10 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
 /// player" for this tick (nearest sensed, or the attacker via revenge).
 const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
 
-fn nearestPlayerSnap(snaps: []const PlayerSnap, zx: f32, zz: f32) TargetSnap {
+fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zz: f32) TargetSnap {
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
-    var best_d: f32 = sense_dist_sq;
+    var best_d: f32 = w.rules.ai.sense_dist_sq;
     var px: f32 = zx;
     var pz: f32 = zz;
     for (snaps) |p| {
@@ -182,6 +174,15 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         // that flag here: without it the victim's client never sees the hit.
         if (w.mask[i].dirty) w.dirty[i].hp = true;
         if (w.health[i].hp <= 0) {
+            // Kill verdict (T15): a plugin may deny the death; the victim
+            // survives at 1 hp and the hit is consumed. The attacker is not
+            // tracked by the deferred accumulator, so it reads -1 (unknown).
+            if (w.kill_verdict_fn) |vf| {
+                if (vf(w.kill_verdict_ctx, w.kind[i], w.network_id[i].id, -1) < 0) {
+                    w.health[i].hp = 1;
+                    continue;
+                }
+            }
             // Dead players keep their entity (stock death → respawn flow).
             if (w.kind[i] == .player) {
                 w.health[i].hp = 0;
@@ -798,7 +799,15 @@ const zombie_tasks = [_]Task{
     // class; its kind gate keeps it out of the zombie list.
     .{ .id = .runaway, .priority = 1, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
-    // continuous so approach_attack can preempt via isBestTask continuous yield.
+    // EAIApproachDistraction (asm.il:423700): MutexBits=3, no Init override so
+    // executeDelay/continuous are the EAIBase defaults (0.5 / true). Priority 1
+    // mirrors stock order (AITask-4, ahead of ApproachAndAttack-5 and far ahead
+    // of Wander-8); the CanExecute gate (no attack target) keeps it below chase,
+    // and the 0b11 mutex keeps it exclusive with approach_attack. continuous is
+    // forced false like approach_attack: a continuous priority-1 task would let
+    // the wander fallback (always CanExecute when no player is sensed) steal the
+    // walk every decision window via isBestTask's continuous yield.
+    .{ .id = .approach_distraction, .priority = 1, .mutex = 0b11, .execute_delay = 0.5, .continuous = false },
     .{ .id = .territorial, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     .{ .id = .approach_spot, .priority = 2, .mutex = 0b01, .execute_delay = 0.2, .continuous = true },
     // EAILook: MutexBits=1 (.ctor, asm.il:429876); no Init override so
@@ -839,6 +848,19 @@ const wander_look_max_s: f32 = 5.0;
 /// EAIApproachSpot::Reset lookTime = 5 + RandomFloat*3 (asm.il:424395/424401).
 const spot_look_base_s: f32 = 5.0;
 const spot_look_rand_s: f32 = 3.0;
+/// EAIApproachDistraction::Reset sets EAIManager.lookTime = 2 (asm.il:423700
+/// Reset, IL_003E ldc.r4 2).
+const distraction_look_s: f32 = 2.0;
+/// EAIApproachDistraction cCloseDist is hardcoded 1.5 m; squared comparisons
+/// against it appear inline (2.25) in CanExecute/Continue/Update (asm.il).
+const distraction_close_sq: f32 = 2.25;
+/// EntityItem.tickDistraction broadcast cadence: nextDistractionTick resets
+/// after 20 ticks (asm.il EntityItem:1341-1349, IL_004B ldc.i4.s 20).
+const distraction_broadcast_ticks: i32 = 20;
+/// EAIApproachDistraction::updatePath pathRecalculateTicks = 20 + rand(20)
+/// (asm.il updatePath, IL_0019/IL_001C ldc.i4.s 20).
+const distraction_replan_min: i32 = 20;
+const distraction_replan_rand: i32 = 20;
 /// EAIWander::Continue bails once time > 30 s (asm.il:438343).
 const wander_time_max_s: f32 = 30.0;
 /// Stock's Continue also bails on navigator.noPathAndNotPlanningOne() (path
@@ -872,7 +894,7 @@ fn isBestTask(self: Task, executing: c.TaskId) bool {
 /// so Wander resumes). The chaseTimeMax aggro-timeout countdown is not modeled
 /// (coarse `alert` flag only). Continue() defaults to CanExecute (asm.il:424569).
 fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    if (np_id >= 0 and np_d2 < sense_dist_sq) return true;
+    if (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) return true;
     return ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null;
 }
 
@@ -881,22 +903,54 @@ fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
     return ai.has_spot;
 }
 
+/// EAIApproachDistraction::CanExecute (asm.il:423700): a dropped EntityItem
+/// registered itself as pendingDistraction (EntityItem.tickDistraction), or the
+/// task is already walking one (Start moved pending → distraction), and the
+/// entity has no attack target. Stock also bails at close range on non-eat
+/// items and clears the pending slot there; zdtd clears in the Update instead
+/// (CanExecute stays read-only, matching the other gates).
+fn approachDistractionCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    const live = ai.pending_distraction >= 0 or ai.distraction >= 0;
+    if (!live) return false;
+    const latch = if (ai.distraction >= 0) ai.distraction else ai.pending_distraction;
+    if (w.slotOfNetId(latch) == null) return false;
+    // GetAttackTarget()!=null → false (asm.il CanExecute IL_001E-002E), and the
+    // persistent aggro branch (alert + live target) counts as one too.
+    const has_target = (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) or
+        (ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null);
+    if (has_target) return false;
+    return true;
+}
+
+/// EAIApproachDistraction::Continue (asm.il:423700): the latched `distraction`
+/// is still a live dropped item, and either the zombie is still walking to it
+/// or it is an active eat item it is allowed to keep chewing.
+fn approachDistractionContinue(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
+    if (ai.distraction < 0) return false;
+    const ds = w.slotOfNetId(ai.distraction) orelse return false;
+    if (!w.alive[ds] or !w.mask[ds].loot_bag) return false;
+    const dx = w.transform[ds].x - w.transform[s].x;
+    const dz = w.transform[ds].z - w.transform[s].z;
+    if (dx * dx + dz * dz > distraction_close_sq) return true;
+    return (w.loot_bag[ds].distraction_tags & 1) != 0;
+}
+
 /// EAIWander::CanExecute (asm.il:438161) does NOT test for a target; here it is
 /// the pure fallback: wander whenever no player is sensed. It yields to chase
 /// only through priority + MutexBits, never through this gate. Spot also wins
 /// over wander via table order when has_spot (same priority/mutex).
-fn wanderCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn wanderCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
     // EAIWander::CanExecute returns false while lookTime > 0 (asm.il:438181):
     // Look and Wander are mutually exclusive by data, not only by MutexBits.
     if (ai.look_time > 0) return false;
-    return !(np_id >= 0 and np_d2 < sense_dist_sq);
+    return !(np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq);
 }
 
 /// EAIWander::Continue (asm.il:438318) is a real override distinct from
 /// CanExecute: stop on the 30 s cap and when the path is finished. The stun and
 /// moveHelper.BlockedTime bails have no zdtd equivalent.
 fn wanderContinue(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    if (!wanderCanExecute(ai, np_id, np_d2)) return false;
+    if (!wanderCanExecute(w, ai, np_id, np_d2)) return false;
     if (ai.wander_time > wander_time_max_s) return false;
     const dx = ai.wander_tx - w.transform[s].x;
     const dz = ai.wander_tz - w.transform[s].z;
@@ -980,15 +1034,20 @@ const AiCtx = struct {
             }
             if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
 
+            // EAIRunawayFromEntity (AITask-2): passive animals scan for feared
+            // classes (players, zombies, other animals) within fleeDistance on
+            // a 0.5 s cadence; the runaway task then flees the nearest one.
+            if (ctx.w.kind[s] == .animal) refreshFearSource(ctx.w, s, ai, ctx.dt);
+
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            const np = applyRevengeTarget(ctx.w, s, ai, nearestPlayerSnap(ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
-            ai.active_scale = if (np.id >= 0) lodScale(np.d2) else 0.1;
+            const np = applyRevengeTarget(ctx.w, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
+            ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else 0.1;
 
             // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
             // only (no A*/task scan) unless chewing a blocked path. No-player still
             // runs the normal table (wander / territorial / spot).
-            if (np.id >= 0 and np.d2 > full_ai_dist_sq * 4.0 and !ai.path_blocked and
+            if (np.id >= 0 and np.d2 > ctx.w.rules.ai.full_dist_sq * 4.0 and !ai.path_blocked and
                 ai.active_task != .break_block and ai.active_task != .destroy_area)
             {
                 if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
@@ -996,7 +1055,7 @@ const AiCtx = struct {
                 if (ai.decision_cd > 0) continue;
                 const sscale = ctx.zombie_speed_scale;
                 const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
-                const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else wander_speed) * sscale;
+                const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
                 ai.active_task = .wander;
                 ai.decision_cd = 1.0;
                 wanderUpdate(ctx.w, s, ai, wspd * 0.5, ctx.dt);
@@ -1009,8 +1068,8 @@ const AiCtx = struct {
             // fields are read here (per alive zombie, every tick).
             const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
             const sscale = ctx.zombie_speed_scale;
-            const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else wander_speed) * sscale;
-            const cspd: f32 = (if (ct.chase_speed > 0) ct.chase_speed * 1.6 else chase_speed) * sscale;
+            const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
+            const cspd: f32 = (if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed) * sscale;
 
             // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
             // executing task when it is no longer best or its Continue() fails.
@@ -1055,6 +1114,7 @@ const AiCtx = struct {
                 .runaway => runawayUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .look => lookUpdate(ctx.w, s, ai, ctx.dt),
                 .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
@@ -1077,14 +1137,15 @@ const AiCtx = struct {
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     return switch (id) {
-        .break_block => breakBlockCanExecute(ai, np.id, np.d2),
-        .destroy_area => destroyAreaCanExecute(ai, np.id, np.d2),
+        .break_block => breakBlockCanExecute(w, ai, np.id, np.d2),
+        .destroy_area => destroyAreaCanExecute(w, ai, np.id, np.d2),
         .runaway => runawayCanExecute(w, s, ai),
         .approach_attack => approachCanExecute(w, ai, np.id, np.d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2),
+        .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2),
         .approach_spot => approachSpotCanExecute(ai),
         .look => lookCanExecute(ai),
-        .wander => wanderCanExecute(ai, np.id, np.d2),
+        .wander => wanderCanExecute(w, ai, np.id, np.d2),
         .none => false,
     };
 }
@@ -1097,6 +1158,9 @@ fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np
     return switch (id) {
         .wander => wanderContinue(w, s, ai, np.id, np.d2),
         .look => lookContinue(ai),
+        // EAIApproachDistraction overrides Continue to read `distraction`
+        // (Start moved pending there), not the pending slot.
+        .approach_distraction => approachDistractionContinue(w, s, ai),
         else => canExecute(w, s, id, ai, np),
     };
 }
@@ -1115,6 +1179,18 @@ fn resetTask(id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void {
         },
         // EAIApproachSpot::Reset (asm.il:424395): lookTime = 5 + rand*3.
         .approach_spot => ai.look_time = spot_look_base_s + rngFrac(ai, rng_seed) * spot_look_rand_s,
+        // EAIApproachDistraction::Reset (asm.il:423700): moveHelper.Stop,
+        // IsEating=false, distraction=null, manager.lookTime = 2.
+        .approach_distraction => {
+            ai.distraction = -1;
+            ai.pending_distraction = -1;
+            ai.pending_distraction_dsq = 0;
+            ai.is_eating = false;
+            ai.look_time = distraction_look_s;
+            ai.clearPath();
+            ai.has_path = false;
+            ai.path_blocked = false;
+        },
         else => {},
     }
 }
@@ -1130,11 +1206,11 @@ fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
 
 /// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
 /// and a solid cell directly toward the goal (set by chaseAlongPath).
-fn breakBlockCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+fn breakBlockCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
     if (!ai.path_blocked) return false;
-    if (!(np_id >= 0 and np_d2 < sense_dist_sq)) return false;
+    if (!(np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq)) return false;
     // Melee range: approach owns the bite; do not stick on break.
-    if (np_d2 <= attack_range_sq) return false;
+    if (np_d2 <= w.rules.combat.attack_range_sq) return false;
     return true;
 }
 
@@ -1167,10 +1243,10 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
 
 /// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
 /// random while chasing (same block-damage feed as BreakBlock).
-fn destroyAreaCanExecute(ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
-    const chasing = (np_id >= 0 and np_d2 < sense_dist_sq) or (ai.alert and ai.target_id >= 0);
+fn destroyAreaCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
+    const chasing = (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) or (ai.alert and ai.target_id >= 0);
     if (!chasing) return false;
-    if (np_id >= 0 and np_d2 <= attack_range_sq) return false;
+    if (np_id >= 0 and np_d2 <= w.rules.combat.attack_range_sq) return false;
     if (ai.path_blocked) return true;
     // Random chew while chase: only when rng already seeded and hits the gate.
     if (ai.wander_rng != 0 and (ai.wander_rng % destroy_area_rng_mod) == 1) return true;
@@ -1196,18 +1272,61 @@ const flee_distance: f32 = 20.0;
 /// fleeDistance directly away from the attacker, so the gate reduces to "was
 /// hurt recently". Only passive animals carry this task in stock XML
 /// (entityclasses AITask-1 on the animal templates), so kind gates it.
+/// EAIRunawayFromEntity fear scan: the nearest entity whose kind is in the
+/// stock AITask-2 filter (`class=EntityPlayer,EntityZombie,EntityEnemyAnimal`,
+/// entityclasses.xml, e.g. the animal templates at :4755) within fleeDistance.
+/// Bounded to a 0.5 s cadence so the O(live) scan is not per-tick.
+fn refreshFearSource(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
+    if (ai.fear_cd > 0) {
+        ai.fear_cd -= dt;
+        return;
+    }
+    ai.fear_cd = 0.5;
+    const x = w.transform[s].x;
+    const z = w.transform[s].z;
+    var best: i32 = -1;
+    var best_d2: f32 = flee_distance * flee_distance;
+    const kinds = [_]c.Kind{ .player, .zombie, .animal };
+    for (kinds) |kind| {
+        for (query.groupSlice(w, kind)) |t| {
+            if (t == s) continue;
+            if (!w.alive[t] or !w.mask[t].transform) continue;
+            const dx = w.transform[t].x - x;
+            const dz = w.transform[t].z - z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = w.network_id[t].id;
+            }
+        }
+    }
+    ai.fear_target = best;
+}
+
+/// Combined gate: AITask-1 RunawayWhenHurt (fresh revenge target) or AITask-2
+/// RunawayFromEntity (fresh fear source). Only passive animals carry either in
+/// stock XML (the animal templates' AITask-1/2), so kind gates the task.
 fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
     if (!w.mask[s].kind or w.kind[s] != .animal) return false;
-    if (ai.revenge_target < 0 or ai.revenge_time <= 0) return false;
-    return w.slotOfNetId(ai.revenge_target) != null;
+    if (ai.revenge_target >= 0 and ai.revenge_time > 0 and w.slotOfNetId(ai.revenge_target) != null) return true;
+    return ai.fear_target >= 0 and w.slotOfNetId(ai.fear_target) != null;
 }
 
 /// EAIRunAway::Update: path to the flee position, dropping the task once the
-/// attacker is further than fleeDistance. The stock stuck/retry bookkeeping
+/// source is further than fleeDistance. The stock stuck/retry bookkeeping
 /// (pathTicks, checkedPath, FindRandomPos) has no zdtd equivalent.
 fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
-    const ts = w.slotOfNetId(ai.revenge_target) orelse {
+    const ts = blk: {
+        if (ai.revenge_target >= 0 and ai.revenge_time > 0) {
+            if (w.slotOfNetId(ai.revenge_target)) |t| break :blk t;
+        }
+        if (ai.fear_target >= 0) {
+            if (w.slotOfNetId(ai.fear_target)) |t| break :blk t;
+        }
+        break :blk null;
+    } orelse {
         ai.revenge_time = 0;
+        ai.fear_target = -1;
         ai.state = .idle;
         return;
     };
@@ -1220,6 +1339,7 @@ fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
     if (d2 >= flee_distance * flee_distance) {
         // Out of range: the fright is over, release the mutex.
         ai.revenge_time = 0;
+        ai.fear_target = -1;
         ai.clearPath();
         ai.has_path = false;
         return;
@@ -1239,7 +1359,7 @@ fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
 fn territorialCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32) bool {
     if (!ai.has_home) return false;
     // Sensed player: approach owns movement; do not leash mid-fight.
-    if (np_id >= 0 and np_d2 < sense_dist_sq) return false;
+    if (np_id >= 0 and np_d2 < w.rules.ai.sense_dist_sq) return false;
     if (!w.mask[s].transform) return false;
     const dx = w.transform[s].x - ai.home_x;
     const dz = w.transform[s].z - ai.home_z;
@@ -1299,6 +1419,21 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
             ai.clearPath();
             ai.path_blocked = false;
         },
+        // EAIApproachDistraction::Start (asm.il:423700): SetAttackTarget(null),
+        // IsEating=false, distraction = pendingDistraction, pendingDistraction
+        // = null, then updatePath(). zdtd re-runs Start on every decision
+        // re-eval, so the pending→distraction migration is guarded: a re-win
+        // keeps the latch already in flight.
+        .approach_distraction => {
+            ai.target_id = -1;
+            ai.alert = false;
+            ai.is_eating = false;
+            if (ai.pending_distraction >= 0) {
+                ai.distraction = ai.pending_distraction;
+                ai.pending_distraction = -1;
+                ai.pending_distraction_dsq = 0;
+            }
+        },
         else => {},
     }
 }
@@ -1336,16 +1471,17 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     ai.path_goal_x = np.px;
     ai.path_goal_z = np.pz;
     ai.has_path = true;
-    if (np.d2 <= attack_range_sq) {
+    if (np.d2 <= ctx.w.rules.combat.attack_range_sq) {
         ai.state = .attack;
         ai.clearPath();
         if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
-            // A11: HandItem DamageEntity on class_table; module const if 0.
-            const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else attack_damage;
+            // A11: HandItem DamageEntity on class_table; Rules floor if 0
+            // (ADR 0021 decision 5: entityclasses/items XML still wins).
+            const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
             const add: u32 = @intFromFloat(adm * @as(f32, @floatFromInt(dmg_scale)));
             _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
             _ = ctx.hits.fetchAdd(1, .monotonic);
-            ai.attack_cd = attack_cooldown_s;
+            ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
             ctx.w.flags[s].bits |= 1;
         }
     } else {
@@ -1471,6 +1607,55 @@ fn approachSpotUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) v
     chaseAlongPath(w, s, ai, ai.spot_x, ai.spot_z, cspd * ai.active_scale, dt);
 }
 
+/// EAIApproachDistraction::Update (asm.il:423700): walk to the dropped item the
+/// Start step latched as `distraction`, chew it within cCloseDist (1.5 m) when
+/// it is an eat distraction (IsEating + distractionEatTicks--), and clear the
+/// latch when a non-eat item is reached or the item disappears.
+fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
+    // `distraction` is a net id (same namespace as pending_distraction);
+    // resolve it to a slot for the SoA reads.
+    const bag_slot = if (ai.distraction >= 0) w.slotOfNetId(ai.distraction) else null;
+    if (bag_slot == null or !w.alive[bag_slot.?] or !w.mask[bag_slot.?].loot_bag) {
+        ai.distraction = -1;
+        ai.is_eating = false;
+        ai.state = .idle;
+        return;
+    }
+    const bs = bag_slot.?;
+    const dx = w.transform[bs].x - w.transform[s].x;
+    const dz = w.transform[bs].z - w.transform[s].z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 <= distraction_close_sq) {
+        if ((w.loot_bag[bs].distraction_tags & 1) == 0) {
+            // Non-eat item reached (stock decoy): the approach is done; the
+            // zombie loses interest (CanExecute/Continue clear path, asm.il).
+            ai.distraction = -1;
+            ai.is_eating = false;
+            ai.clearPath();
+            ai.has_path = false;
+            ai.path_blocked = false;
+            ai.state = .idle;
+            return;
+        }
+        // Eat distraction: chew one tick (EntityItem.distractionEatTicks--,
+        // asm.il Update IL_00C4-00DE). The sim side consumes the item when the
+        // counter hits zero (tickItemDistractions); Game removes the entity.
+        ai.is_eating = true;
+        if (w.loot_bag[bs].distraction_eat_ticks > 0) {
+            w.loot_bag[bs].distraction_eat_ticks -= 1;
+        }
+        ai.state = .idle;
+        return;
+    }
+    ai.is_eating = false;
+    ai.state = .chase;
+    ai.target_id = -1;
+    ai.path_goal_x = w.transform[bs].x;
+    ai.path_goal_z = w.transform[bs].z;
+    ai.has_path = true;
+    chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd * ai.active_scale, dt);
+}
+
 /// EAIWander::Update: drift toward the Start-picked destination.
 fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.state = .wander;
@@ -1484,9 +1669,70 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     stepToward(w, s, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
 }
 
+/// EntityItem.tickDistraction (asm.il EntityItem:1341): dropped items carrying
+/// DistractionTags broadcast themselves to nearby EntityAlive every 20 ticks
+/// while distractionLifetime lasts, and eat items die once chewed up. zdtd
+/// drops settle instantly, so the stock `!isCollided && requires_contact`
+/// gate is a no-op here (documented simplification: no per-drop physics).
+fn tickItemDistractions(w: *World) void {
+    var i: Slot = 0;
+    while (i < max_entities) : (i += 1) {
+        if (!w.alive[i] or !w.mask[i].loot_bag or !w.mask[i].transform) continue;
+        const tags = w.loot_bag[i].distraction_tags;
+        if (tags == 0) continue;
+        var bag = &w.loot_bag[i];
+        if (bag.distraction_lifetime <= 0) continue;
+        // Eat items die once chewed up (EntityItem.OnUpdateEntity SetDead,
+        // asm.il EntityItem:0100-0113); Game broadcasts EntityRemove on its
+        // own sweep when distraction_eat_ticks hits 0, so the sim only drops
+        // the slot there and keeps the latch consistent.
+        bag.next_distraction_tick += 1;
+        if (bag.next_distraction_tick <= distraction_broadcast_ticks) continue;
+        bag.next_distraction_tick = 0;
+        const bx = w.transform[i].x;
+        const bz = w.transform[i].z;
+        const r2 = bag.distraction_radius_sq;
+        var j: Slot = 0;
+        while (j < max_entities) : (j += 1) {
+            if (!w.alive[j] or !w.mask[j].zombie_ai or !w.mask[j].transform) continue;
+            if (w.mask[j].sleeper and !w.sleeper[j].awake) continue;
+            // EntityAlive.distraction != null → already eating one (IL_00C0).
+            if (w.zombie_ai[j].distraction >= 0) continue;
+            // DistractionTags filter: tag 4 ("zombie") requires the target's
+            // EntityClass tags to overlap (IL_00E5-010E).
+            if ((tags & 4) != 0 and w.kind[j] != .zombie) continue;
+            const dx = w.transform[j].x - bx;
+            const dz = w.transform[j].z - bz;
+            const d2 = dx * dx + dz * dz;
+            if (d2 > r2) continue;
+            // A closer pending item wins (IL_0124-013D).
+            const ai = &w.zombie_ai[j];
+            if (ai.pending_distraction >= 0) {
+                if (w.slotOfNetId(ai.pending_distraction)) |_| {
+                    if (d2 >= ai.pending_distraction_dsq) continue;
+                } else {
+                    // Stale latch (item collected/destroyed): drop it.
+                    ai.pending_distraction = -1;
+                    ai.pending_distraction_dsq = 0;
+                }
+            }
+            // distractionResistance - strength gate (IL_013E-016B): zdtd has
+            // no per-entity resistance state, so a non-positive strength (no
+            // DistractionStrength effect) never registers. Decoy ships 100.
+            if (bag.distraction_strength <= 0) continue;
+            ai.pending_distraction = w.network_id[i].id;
+            ai.pending_distraction_dsq = d2;
+        }
+        bag.distraction_lifetime -= 1;
+    }
+}
+
 pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // Zombie AI also drives animal wander (kind.animal reuses zombie_ai mask).
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
+    // Dropped-item distraction broadcast runs before task selection so a
+    // zombie can react to a fresh decoy on the same tick it lands.
+    tickItemDistractions(w);
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
@@ -1851,12 +2097,10 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     return out;
 }
 
-/// Despawn range for director-spawned zombies (stock unloads far spawned zeds).
-pub const despawn_dist_sq: f32 = 200.0 * 200.0;
-
 /// Remove idle/wandering zombies far from every player. Returns removed ids
 /// (caller broadcasts EntityRemove with Despawned reason).
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
+    const despawn_dist_sq = w.rules.ai.despawn_dist_sq;
     if (w.countKind(.zombie) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, false);
@@ -2364,6 +2608,149 @@ test "hurt animal runs away from its attacker" {
     try std.testing.expect(!w.zombie_ai[as].alert);
 }
 
+test "passive animal flees a feared entity within fleeDistance (RunawayFromEntity)" {
+    // AITask-2 RunawayFromEntity: an animal within fleeDistance (20) of a
+    // player / zombie / other animal picks the runaway task and moves away.
+    var w: World = .{};
+    defer w.deinit();
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    const z = w.spawnZombie(10, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Fear scan found the zombie; the runaway task is active and the animal
+    // is walking away from it (-x).
+    try std.testing.expectEqual(w.network_id[zs].id, w.zombie_ai[as].fear_target);
+    try std.testing.expectEqual(c.TaskId.runaway, w.zombie_ai[as].active_task);
+    const x0 = w.transform[as].x;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // No player is sensed, so the LOD active_scale throttles movement to 0.1x;
+    // the flee still walks away from the zombie (-x).
+    try std.testing.expect(w.transform[as].x < x0 - 0.1);
+}
+
+test "passive animal does not flee an entity beyond fleeDistance" {
+    var w: World = .{};
+    defer w.deinit();
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    _ = w.spawnZombie(30, 70, 0, 40).?; // beyond 20 -> no fear
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[as].fear_target);
+    try std.testing.expect(w.zombie_ai[as].active_task != c.TaskId.runaway);
+}
+
+/// Stock decoy distraction state (items.xml resourceRockDecoy): tags
+/// zombie+requires_contact, radius 25, lifetime broadcast count, strength 100.
+fn seedDecoy(w: *World, x: f32, z: f32, lifetime: i32) i32 {
+    const bag = w.spawnLootBag(x, 70, z, 1, 1).?;
+    const bs = w.slotOfNetId(bag).?;
+    w.loot_bag[bs] = .{
+        .distraction_tags = 2 | 4,
+        .distraction_radius_sq = 25 * 25,
+        .distraction_lifetime = lifetime,
+        .distraction_strength = 100,
+    };
+    return bag;
+}
+
+test "dropped decoy registers as pending within 25 m (tickDistraction)" {
+    var w: World = .{};
+    defer w.deinit();
+    const bag = seedDecoy(&w, 10, 0, 10);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    // 20-tick broadcast cadence: the first broadcast fires on AI tick 21.
+    var t: f32 = 0;
+    while (t < 1.05) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(bag, w.zombie_ai[zs].pending_distraction);
+}
+
+test "approach_distraction walks a decoy across decision re-evals" {
+    var w: World = .{};
+    defer w.deinit();
+    const bag = seedDecoy(&w, 4, 0, 10);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    // Pre-latch the broadcast result so the task selection is deterministic
+    // (the 20-tick cadence itself is covered by the test above).
+    w.zombie_ai[zs].pending_distraction = bag;
+    w.zombie_ai[zs].pending_distraction_dsq = 16;
+    w.zombie_ai[zs].active_task = .none;
+    w.zombie_ai[zs].decision_cd = 0;
+    var t: f32 = 0;
+    while (t < 0.1) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        std.debug.print("DBG2 t={d} task={s} dc={d} pend={d} dist={d}\n", .{
+            @as(u32, @intFromFloat(t * 20 + 1)), @tagName(w.zombie_ai[zs].active_task),
+            w.zombie_ai[zs].decision_cd,         w.zombie_ai[zs].pending_distraction,
+            w.zombie_ai[zs].distraction,
+        });
+    }
+    try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
+    const x0 = w.transform[zs].x;
+    // Outlast one decision window (0.425 s / 0.005 s/tick at the 0.1 LOD
+    // active_scale with no player sensed = 85 ticks); the task must re-win on
+    // `distraction` and keep walking toward the decoy (+x).
+    while (t < 6.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.transform[zs].x > x0);
+}
+
+test "zombie reaches a non-eat decoy and loses interest (clears the latch)" {
+    var w: World = .{};
+    defer w.deinit();
+    const bag = w.spawnLootBag(1, 70, 0, 1, 1).?;
+    const bs = w.slotOfNetId(bag).?;
+    w.loot_bag[bs] = .{
+        .distraction_tags = 2 | 4,
+        .distraction_radius_sq = 25 * 25,
+        .distraction_lifetime = 10,
+        .distraction_strength = 100,
+    };
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].pending_distraction = bag;
+    w.zombie_ai[zs].pending_distraction_dsq = 1;
+    w.zombie_ai[zs].active_task = .none;
+    w.zombie_ai[zs].decision_cd = 0;
+    var t: f32 = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Within cCloseDist (1.5 m) of a non-eat item the task clears itself and
+    // the zombie falls back to the movement fallback (wander).
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].distraction);
+    try std.testing.expect(w.zombie_ai[zs].active_task != c.TaskId.approach_distraction);
+}
+
+test "zombie chews an eat distraction until the item is eaten up" {
+    var w: World = .{};
+    defer w.deinit();
+    const bag = w.spawnLootBag(1, 70, 0, 1, 1).?;
+    const bs = w.slotOfNetId(bag).?;
+    w.loot_bag[bs] = .{
+        .distraction_tags = 1 | 4, // eat + zombie
+        .distraction_radius_sq = 25 * 25,
+        .distraction_lifetime = 100,
+        .distraction_strength = 100,
+        .distraction_eat_ticks = 5,
+    };
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].pending_distraction = bag;
+    w.zombie_ai[zs].pending_distraction_dsq = 1;
+    w.zombie_ai[zs].active_task = .none;
+    w.zombie_ai[zs].decision_cd = 0;
+    var t: f32 = 0;
+    while (t < 0.6) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Close enough to chew: IsEating latched, eat ticks drained to 0. The sim
+    // keeps the bag alive (Game removes + broadcasts EntityRemove).
+    try std.testing.expect(w.zombie_ai[zs].is_eating);
+    try std.testing.expectEqual(@as(i32, 0), w.loot_bag[bs].distraction_eat_ticks);
+    try std.testing.expect(w.alive[bs]);
+}
+
 test "system zombie wanders when no player sensed" {
     var w: World = .{};
     defer w.deinit();
@@ -2421,6 +2808,60 @@ test "class_table attack/chase floors only when field is zero" {
     try std.testing.expect(w.health[ps].hp <= hp0 - 15);
     // Class chase applied (non-zero table field).
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+// T14 (WORK_PLAN): a configured Rules floor is a floor, never a replacement
+// for per-entity stock data (ADR 0021 decision 5). These three tests set a
+// Rules value and a conflicting entityclasses value and assert the loaded
+// class table wins, exactly as the production resolve order does.
+test "configured attack floor never beats the entityclasses value" {
+    var w: World = .{ .rules = .{ .combat = .{ .attack_damage = 100.0 } } };
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20; // items.xml DamageEntity (via HandItem)
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const lost = hp0 - w.health[ps].hp;
+    // Class 20 x 2 bites ~= 40. The 100 floor must NOT apply (that would be 200).
+    try std.testing.expect(lost >= 20);
+    try std.testing.expect(lost < 80);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+test "configured chase floor never beats the entityclasses MoveSpeedAggro" {
+    var w: World = .{ .rules = .{ .ai = .{ .chase_speed = 100.0 } } };
+    defer w.deinit();
+    w.class_table[1].chase_speed = 1.0; // XML-scale; sim uses *1.6
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(30, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Class 1.0 -> 1.6 blocks/s; 4 s closes only a few blocks. A 100 floor would
+    // have crossed 30 in under a second (160 blocks/s), so this bounds it.
+    try std.testing.expect(w.transform[zs].x < 25);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+test "configured wander floor never beats the entityclasses MoveSpeed" {
+    var w: World = .{ .rules = .{ .ai = .{ .wander_speed = 50.0 } } };
+    defer w.deinit();
+    w.class_table[1].wander_speed = 0.2; // XML-scale; sim uses *10.0
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const x0 = w.transform[zs].x;
+    const z0 = w.transform[zs].z;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    const moved = @abs(w.transform[zs].x - x0) + @abs(w.transform[zs].z - z0);
+    // Class 0.2 -> 2.0 blocks/s with look pauses; a 50 floor would be 500/s.
+    try std.testing.expect(moved > 0.1);
+    try std.testing.expect(moved < 25);
 }
 
 test "spawn zombie loot_list comes from class_table not scrap" {
