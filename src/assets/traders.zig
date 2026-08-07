@@ -66,6 +66,9 @@ pub const TraderTable = struct {
     /// GetBuyPrice/GetSellPrice; per-trader Override* wins when set).
     buy_markup: f32 = 0,
     sell_markdown: f32 = 0,
+    /// Root `currency_item` name (stock traders.xml: "casinoCoin"). Game pays
+    /// trade/rent in this item; empty = the stock-name fallback.
+    currency_item: []const u8 = "",
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *TraderTable) void {
@@ -245,9 +248,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     // per-item price math unless a trader_info Override* is set.
     var root_buy_markup: f32 = 0;
     var root_sell_markdown: f32 = 0;
+    var root_currency: []const u8 = "";
     if (std.mem.indexOfPos(u8, clean, 0, "<traders")) |tr| {
         root_buy_markup = std.fmt.parseFloat(f32, xml.attr(clean, tr, "buy_markup") orelse "0") catch 0;
         root_sell_markdown = std.fmt.parseFloat(f32, xml.attr(clean, tr, "sell_markdown") orelse "0") catch 0;
+        if (xml.attr(clean, tr, "currency_item")) |ci| root_currency = try arena.dupe(u8, ci);
     }
 
     // Per-trader `<trader_info>` blocks: id + hours/vending/player-owned attrs
@@ -290,7 +295,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     const gsl = try arena.alloc(Group, groups.items.len);
     @memcpy(gsl, groups.items);
 
-    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl, .buy_markup = root_buy_markup, .sell_markdown = root_sell_markdown };
+    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl, .buy_markup = root_buy_markup, .sell_markdown = root_sell_markdown, .currency_item = root_currency };
 
     // Expand traderAlways into entries (primary stock list).
     var expand_buf: [max_expand]Entry = undefined;
@@ -436,4 +441,42 @@ test "trader_info scan survives adjacent blocks with no whitespace" {
     try std.testing.expectEqual(@as(u16, 1), infos.items[0].id);
     try std.testing.expectEqual(@as(u16, 2), infos.items[1].id);
     try std.testing.expectEqual(@as(usize, 1), infos.items[0].refs.len);
+}
+
+test "traders root economy attributes parse (currency_item, markup)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/traders.xml", .{dir});
+    try io_fs.writeFileSimple(path, "<traders buy_markup=\"3\" sell_markdown=\"0.2\" currency_item=\"dukeCoin\" >\n" ++
+        "  <trader_item_group name=\"groupTest\">\n" ++
+        "    <item name=\"resourceWood\" count=\"10\"/>\n" ++
+        "  </trader_item_group>\n" ++
+        "  <trader_info id=\"1\" name=\"Joel\">\n" ++
+        "    <trader_items>\n" ++
+        "      <item name=\"resourceWood\" count=\"10\"/>\n" ++
+        "    </trader_items>\n" ++
+        "  </trader_info>\n" ++
+        "</traders>\n");
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(f32, 3), t.buy_markup);
+    try std.testing.expectEqual(@as(f32, 0.2), t.sell_markdown);
+    try std.testing.expectEqualStrings("dukeCoin", t.currency_item);
+    // Unset currency_item stays empty (Game falls back to the stock name).
+    var p2: [std.fs.max_path_bytes]u8 = undefined;
+    const path2 = try std.fmt.bufPrint(&p2, "{s}/traders2.xml", .{dir});
+    try io_fs.writeFileSimple(path2, "<traders buy_markup=\"2\" >\n" ++
+        "  <trader_item_group name=\"groupTest\">\n" ++
+        "    <item name=\"resourceWood\" count=\"1\"/>\n" ++
+        "  </trader_item_group>\n" ++
+        "  <trader_info id=\"1\" name=\"Joel\">\n" ++
+        "    <trader_items><item name=\"resourceWood\" count=\"1\"/></trader_items>\n" ++
+        "  </trader_info>\n" ++
+        "</traders>\n");
+    var t2 = try loadFromPath(std.testing.allocator, path2);
+    defer t2.deinit();
+    try std.testing.expectEqualStrings("", t2.currency_item);
 }
