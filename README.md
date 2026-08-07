@@ -50,6 +50,7 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 
 # loadgen joins LiteNet (ServerPort+2), not the TCP info port:
 #   7dtd-loadgen --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
+# Navezgane boot + join smoke: scripts/smoke-navezgane.sh (map load assertions)
 ```
 
 
@@ -128,7 +129,7 @@ src/world/water.zig    water_info sources
 src/apm/               metrics + section profiler + report
 src/version.zig        product/wire version pins (read by scripts/check-release.sh)
 src/fuzz.zig           fuzz entry (`zig build fuzz`, part of `make check`)
-scripts/               release check, wire lint, auto-join helpers
+scripts/               release check, wire lint, auto-join + Navezgane smoke
 docs/STATUS.md         living hub
 docs/INDEX.md          doc map
 docs/                 gaps, plan, wire, scale, APM
