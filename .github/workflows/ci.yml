@@ -47,11 +47,7 @@ jobs:
         id: pin
         run: |
           set -euo pipefail
-          zig="$(tr -d '[:space:]' < .zigversion)"
-          if [[ -z "$zig" ]]; then
-            echo "ci: .zigversion is empty" >&2
-            exit 1
-          fi
+          zig="$(bash scripts/zig-pin.sh)"
           echo "zig=$zig" >> "$GITHUB_OUTPUT"
 
       - name: Install Zig
@@ -61,7 +57,7 @@ jobs:
           version: ${{ steps.pin.outputs.zig }}
 
       - name: Verify workflow toolchain pin
-        run: test "$(zig version)" = "$(tr -d '[:space:]' < .zigversion)"
+        run: test "$(zig version)" = "$(bash scripts/zig-pin.sh)"
 
       # Zig's cache is content-addressed, so restoring a stale entry is safe;
       # keying on github.sha keeps a rolling cache (always save, restore latest
@@ -95,6 +91,7 @@ jobs:
           path: |
             zig-out/bin/zdtd
             zig-out/bin/zdtd.sha256
+            zig-out/bin/buildinfo.txt
           if-no-files-found: error
           # Keep tag artifacts longer for operators fetching a release build.
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 14 }}
@@ -119,11 +116,7 @@ jobs:
         id: pin
         run: |
           set -euo pipefail
-          zig="$(tr -d '[:space:]' < .zigversion)"
-          if [[ -z "$zig" ]]; then
-            echo "repro: .zigversion is empty" >&2
-            exit 1
-          fi
+          zig="$(bash scripts/zig-pin.sh)"
           echo "zig=$zig" >> "$GITHUB_OUTPUT"
 
       - name: Install Zig
@@ -132,7 +125,7 @@ jobs:
           version: ${{ steps.pin.outputs.zig }}
 
       - name: Verify workflow toolchain pin
-        run: test "$(zig version)" = "$(tr -d '[:space:]' < .zigversion)"
+        run: test "$(zig version)" = "$(bash scripts/zig-pin.sh)"
 
       - name: Build twice and compare
         run: make repro

@@ -26,7 +26,7 @@ source_versions=$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.
 manifest_version=$(printf '%s\n' "$manifest_versions" | head -n1)
 source_version=$(printf '%s\n' "$source_versions" | head -n1)
 min_zig=$(sed -n 's/^[[:space:]]*\.minimum_zig_version = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)
-toolchain_zig=$(tr -d '[:space:]' < .zigversion)
+toolchain_zig="$("$ROOT/scripts/zig-pin.sh")"
 stock_wire=$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
 stock_wire_announce=$(sed -n 's/^pub const stock_wire_announce = "\([^"]*\)";/\1/p' src/version.zig | head -n1)
 

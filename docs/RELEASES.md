@@ -66,7 +66,9 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
 6. Verify reproducibility: run `make repro` (or
    `bash scripts/repro-release.sh`), which builds the source twice in separate
    clean cache trees with `zig build -Doptimize=ReleaseSafe -Dstrip=true
-   -Dcpu=baseline` and requires both `sha256sum zig-out/bin/zdtd` to match.
+   -Dcpu=baseline` and requires both scratch-build binaries
+   (`zig-out/repro-a/out/zdtd` and `zig-out/repro-b/out/zdtd`, deleted on exit)
+   to have matching sha256.
    The pinned `.zigversion` compiler, `-Dcpu=baseline`, and `strip` make the
    binary independent of build path, host CPU, and wall-clock time; a mismatch
    means a nondeterminism slipped in and must be fixed before tagging. CI runs
