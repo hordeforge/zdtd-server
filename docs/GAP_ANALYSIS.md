@@ -1871,12 +1871,16 @@ gamestage, no wandering hordes, and no screamers.
   structure or lull. The only real limit is MaxSpawnedZombies.
   *Anchors:* `src/ecs/aidirector.zig:163-167`, `:96-97`, `asm.il:416385-416960`
 
-- **Wandering hordes** `MISSING`
-  No equivalent of `AIDirectorWanderingHordeComponent` / `AIWanderingHordeSpawner`:
-  no scheduled group of 6 spawning at 92 m and walking a path across the map, no
-  HordeNextTime scheduling, no horde path.
-  *Anchors:* `asm.il:419473-419490`, `asm.il:416218`,
-  `src/ecs/aidirector.zig:159-162`
+- **Wandering hordes** `WORKS` (pack path-walk residual)
+  `AIDirectorWanderingHordeComponent` schedule: `HordeNextTime` arms after day 1
+  (worldTime > 28000) at now + RandomRange(12000, 24000) ticks (ChooseNextTime,
+  deterministic day+spawn-counter roll), player-gated (no players re-arms), and
+  on expiry spawns a pack of 6 horde-marked zombies (`IsHordeZombie`) at ~92 m
+  that chase the party. Residual: stock walks the pack as a startPos->endPos
+  Astar location line with pit-stop commands; zdtd spawns and chases directly.
+  *Anchors:* `src/ecs/aidirector.zig` (`wandering_next`, `nextWanderingTime`,
+  `spawnWanderingHorde`), `asm.il:419473-419490` (TickNextTime/ChooseNextTime),
+  `asm.il:416218`, `Data/Config/gamestages.xml:1582`, `:3458`
 
 - **Screamers and the activity heat map** `MISSING`
   No `AIDirectorChunkData` heat accumulation, no noise-to-heat feed, no scout spawn
@@ -1886,11 +1890,12 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/aidirector.zig:168-171`, `asm.il:414504-415200`,
   `asm.il:416218`
 
-- **NetPackageHordeEvent** `MISSING`
-  `buildHordeEventBody` with the None/Warn1/Warn2/Spawn enum exists and is unit
-  tested, but there are zero send sites, so `HandleHordeEvent` never fires on the
-  client and there is no approaching-horde warning.
-  *Anchors:* `src/wire/packages.zig:912-942`, `src/server/game.zig` (no call site)
+- **NetPackageHordeEvent** `N/A (parity)`
+  Duplicate of the §6 row above (same verdict): `buildHordeEventBody` exists and
+  is byte-tested, but stock has no `GetPackage<NetPackageHordeEvent>()` anywhere
+  in the assembly, so there is no stock server sender for it to match; the
+  approaching-horde warning stock does emit rides other packages.
+  *Anchors:* see §6 `NetPackageHordeEvent` row (`src/wire/packages.zig:896`)
 
 - **AIDirector / sleeper state persistence across restart** `MISSING`
   `saveAll` persists chunks, containers, block meta and players. No entity,

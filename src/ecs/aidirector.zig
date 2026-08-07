@@ -141,6 +141,17 @@ pub const party_spawn_dist: f32 = 40.0;
 pub const party_enemy_max: u32 = 30;
 pub const max_bm_parties: usize = 8;
 
+/// AIDirectorWanderingHordeComponent (asm.il 419473-419490): a scheduled group
+/// of ~6 zombies spawns ~92 m out and walks in as a pack. ChooseNextTime picks
+/// worldTime + RandomRange(12000, 24000) ticks (12-24 in-game hours); the
+/// schedule is player-gated (no players -> re-choose) and only starts after
+/// day 1 (worldTime > 28000).
+pub const wandering_horde_size: u32 = 6;
+pub const wandering_spawn_dist: f32 = 92.0;
+pub const wander_min_gap: u64 = 12_000;
+pub const wander_max_gap: u64 = 24_000;
+pub const wander_start_after: u64 = 28_000;
+
 pub const BmParty = struct {
     focus_x: f32 = 0,
     focus_z: f32 = 0,
@@ -192,6 +203,9 @@ pub const Director = struct {
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
+    /// World time (ticks) of the next wandering horde (0 = not scheduled yet).
+    /// ChooseNextTime: now + RandomRange(12000, 24000); player-gated.
+    wandering_next: u64 = 0,
     /// Alive-zombie ceiling (MaxSpawnedZombies). Defaults to the dev cap; the
     /// operator's serverconfig raises it. See default_max_alive_zombies.
     max_alive: u32 = default_max_alive_zombies,
@@ -297,6 +311,15 @@ pub const Director = struct {
         if (self.bloodmoon_active) {
             self.buildBloodMoonParties(w);
             self.recountAndTeleportHorde(w);
+        }
+        // Wandering horde schedule (AIDirectorWanderingHordeComponent): a group
+        // of 6 at ~92 m every 12-24 in-game hours, player-gated.
+        const wt = self.clock.worldTimeBits();
+        if (self.wandering_next == 0) {
+            if (wt > wander_start_after) self.wandering_next = self.nextWanderingTime();
+        } else if (wt >= self.wandering_next) {
+            if (self.anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
+            self.wandering_next = self.nextWanderingTime();
         }
         if (!self.clock.isNight() and self.scouts_cd <= 0) {
             spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0, self.scoutGroup());
@@ -556,6 +579,54 @@ pub const Director = struct {
         return w.transform[s].y;
     }
 
+    /// True when at least one online player exists (wandering horde gate).
+    fn anyPlayer(self: *const Director, w: *ecs_world.World) bool {
+        _ = self;
+        var p: ecs_world.Slot = 0;
+        while (p < ecs_world.max_entities) : (p += 1) {
+            if (w.alive[p] and w.mask[p].player) return true;
+        }
+        return false;
+    }
+
+    /// ChooseNextTime: now + RandomRange(12000, 24000). The roll is a
+    /// deterministic mix of the day and the spawn counter (seeded sim, stable
+    /// replays), standing in for the director GameRandom.
+    fn nextWanderingTime(self: *const Director) u64 {
+        const wt = self.clock.worldTimeBits();
+        const span = wander_max_gap - wander_min_gap + 1;
+        const day = wt / 24_000;
+        const off = ((day *% 2654435761) +% (self.total_spawned *% 97)) % span;
+        return wt + wander_min_gap + off;
+    }
+
+    /// Spawn one wandering-horde group of 6 at ~92 m around the first online
+    /// player, marked IsHordeZombie and set to chase the party. Stock walks the
+    /// pack as a startPos->endPos path (AstarManager location line) with
+    /// pit-stop commands; the direct-chase simplification keeps the client
+    /// visible behaviour (a scheduled pack arriving from outside) without the
+    /// path-command AI, which stays a residual (GAP wandering hordes row).
+    fn spawnWanderingHorde(self: *Director, w: *ecs_world.World) u32 {
+        var p: ecs_world.Slot = 0;
+        while (p < ecs_world.max_entities) : (p += 1) {
+            if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            var n: u32 = 0;
+            while (n < wandering_horde_size) : (n += 1) {
+                const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(n)) * 1.0472;
+                const x = w.transform[p].x + @cos(ang) * wandering_spawn_dist;
+                const z = w.transform[p].z + @sin(ang) * wandering_spawn_dist;
+                const y = w.transform[p].y;
+                const slot = self.spawnOneZombie(w, x, y, z, "", self.total_spawned +% n, true) orelse continue;
+                w.zombie_ai[slot].state = .chase;
+                w.zombie_ai[slot].target_id = w.network_id[p].id;
+                w.zombie_ai[slot].alert = true;
+                n += 1;
+            }
+            return n;
+        }
+        return 0;
+    }
+
     fn nearestPlayerSlot(w: *ecs_world.World, x: f32, z: f32) ?ecs_world.Slot {
         var best: ?ecs_world.Slot = null;
         var best_d2: f32 = std.math.floatMax(f32);
@@ -797,4 +868,53 @@ test "blood moon party clustering pools nearby players and splits stragglers" {
     try std.testing.expectEqual(@as(u8, 0), d2.bm_party_n);
     _ = a;
     _ = b;
+}
+
+test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const pid = w.spawnPlayer(0, 70, 0, 0).?;
+    _ = pid;
+    var d: Director = .{};
+    // Day 1 (worldTime < 28000): not scheduled yet.
+    _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(@as(u64, 0), d.wandering_next);
+    // Day 2 10:00 (34000 ticks): the schedule arms into the future.
+    d.clock.day = 2;
+    d.clock.hours = 10.0;
+    _ = d.tick(&w, 0.05);
+    try std.testing.expect(d.wandering_next > d.clock.worldTimeBits());
+    try std.testing.expect(d.wandering_next - d.clock.worldTimeBits() >= wander_min_gap);
+    try std.testing.expect(d.wandering_next - d.clock.worldTimeBits() <= wander_max_gap);
+    // Force it due: a pack of up to 6 horde-marked zombies at ~92 m, then the
+    // schedule rolls forward.
+    d.wandering_next = d.clock.worldTimeBits() + 1;
+    _ = d.tick(&w, 0.05);
+    var horde: u32 = 0;
+    var horde_slot: ?ecs_world.Slot = null;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
+        horde += 1;
+        horde_slot = s;
+    }
+    try std.testing.expect(horde >= 1 and horde <= wandering_horde_size);
+    try std.testing.expect(d.wandering_next > d.clock.worldTimeBits());
+    const hs = horde_slot orelse return error.TestUnexpectedResult;
+    const dx = w.transform[hs].x - 0.0;
+    const dz = w.transform[hs].z - 0.0;
+    const dist = @sqrt(dx * dx + dz * dz);
+    try std.testing.expect(dist > 70.0 and dist < 115.0);
+    try std.testing.expect(w.zombie_ai[hs].state == .chase);
+}
+
+test "wandering horde skips with no players and re-arms" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .day = 3, .hours = 12.0 } };
+    d.wandering_next = d.clock.worldTimeBits() + 1; // due
+    const zombies_before = w.countKind(.zombie);
+    _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(zombies_before, w.countKind(.zombie)); // no spawn
+    try std.testing.expect(d.wandering_next > d.clock.worldTimeBits()); // re-armed
 }
