@@ -54,10 +54,33 @@ pub fn monoNs() u64 {
 
 /// Unix seconds. Only for values that must survive a restart (ban expiry); the
 /// monotonic clock is the right one for anything measuring elapsed time.
+///
+/// Under the virtual clock this is derived from virtual mono ns (not
+/// CLOCK_REALTIME) so ban add/expire/list and load-time expiry stay
+/// seed-stable and advance with sleepNs/advanceNs. Production (virtual off)
+/// still reads REALTIME.
 pub fn wallSeconds() i64 {
+    if (virtual_active.load(.acquire)) {
+        return @intCast(virtual_ns.load(.acquire) / 1_000_000_000);
+    }
     var ts: posix.timespec = undefined;
     if (posix.system.clock_gettime(posix.CLOCK.REALTIME, &ts) != 0) return 0;
     return @intCast(ts.sec);
+}
+
+/// Wall-clock "YYYY-MM-DD HH:MM:SS" stamp for log/audit lines. Virtual-clock
+/// aware (derives from virtual mono ns when enabled) so deterministic runs and
+/// tests stay seed-stable. Not on the hot path (bufPrint + epoch math).
+/// Writes into `buf` (19 bytes); returns the formatted slice.
+pub fn wallStamp(buf: *[19]u8) []const u8 {
+    const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(wallSeconds(), 0)) };
+    const ymd = epoch.getEpochDay().calculateYearDay();
+    const md = ymd.calculateMonthDay();
+    const s = epoch.getDaySeconds();
+    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
+        ymd.year,            md.month.numeric(),     md.day_index + 1,
+        s.getHoursIntoDay(), s.getMinutesIntoHour(), s.getSecondsIntoMinute(),
+    }) catch "1970-01-01 00:00:00";
 }
 
 /// Best-effort sleep for `ns` nanoseconds. Under virtual clock, advances time
@@ -78,6 +101,19 @@ pub fn sleepNs(ns: u64) void {
         if (posix.errno(rc) != .INTR) return;
         req = rem;
     }
+}
+
+test "wallStamp formats and tracks the virtual clock" {
+    defer disableVirtual();
+    enableVirtual(0);
+    var buf: [19]u8 = undefined;
+    try std.testing.expectEqualStrings("1970-01-01 00:00:00", wallStamp(&buf));
+    advanceNs(123 * std.time.ns_per_s); // 00:02:03
+    try std.testing.expectEqualStrings("1970-01-01 00:02:03", wallStamp(&buf));
+    setVirtualNs(86_400_000_000_000 + 3600_000_000_000); // 1970-01-02 01:00:00
+    try std.testing.expectEqualStrings("1970-01-02 01:00:00", wallStamp(&buf));
+    // Fits the 19-byte buffer exactly; timestamp length is stable.
+    try std.testing.expectEqual(@as(usize, 19), wallStamp(&buf).len);
 }
 
 test "monoNs advances" {
@@ -109,4 +145,19 @@ test "virtual then disable restores real clock" {
     disableVirtual();
     try std.testing.expect(!isVirtual());
     _ = monoNs();
+}
+
+test "virtual wallSeconds tracks mono and ignores host REALTIME" {
+    defer disableVirtual();
+    enableVirtual(5_000_000_000); // 5 s epoch
+    try std.testing.expectEqual(@as(i64, 5), wallSeconds());
+    advanceNs(2_000_000_000);
+    try std.testing.expectEqual(@as(i64, 7), wallSeconds());
+    sleepNs(1_000_000_000);
+    try std.testing.expectEqual(@as(i64, 8), wallSeconds());
+    setVirtualNs(42_000_000_000);
+    try std.testing.expectEqual(@as(i64, 42), wallSeconds());
+    // Sub-second mono does not advance wall seconds.
+    setVirtualNs(42_999_999_999);
+    try std.testing.expectEqual(@as(i64, 42), wallSeconds());
 }

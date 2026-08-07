@@ -139,7 +139,10 @@ fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     self.harness.counters.inc(.persistence_errors);
     const n = self.harness.counters.get(.persistence_errors);
     if (n == 1 or n % 100 == 0) {
-        std.debug.print("zdtd: {s} failed: {s} n={d}\n", .{ what, @errorName(err), n });
+        // Audit trail: without a wall-clock stamp "when did the disk fill?"
+        // is unanswerable at 3 AM, so every logged failure carries one.
+        var ts: [19]u8 = undefined;
+        std.debug.print("zdtd: {s} {s} failed: {s} n={d}\n", .{ clock.wallStamp(&ts), what, @errorName(err), n });
     }
 }
 
@@ -1766,7 +1769,15 @@ pub const Game = struct {
         const t = world_store.World.worldToChunk(wx, wz);
         g.terrain_mu.lock();
         defer g.terrain_mu.unlock();
-        const ch = g.world.getOrCreate(t.pos) catch return 61;
+        // OOM / chunk-cap failure must not silently float vehicles at y=61 forever
+        // without a log line; the fallback height is only so physics keeps stepping.
+        const ch = g.world.getOrCreate(t.pos) catch |err| {
+            std.debug.print(
+                "zdtd: heightAtWorld chunk ({d},{d}) failed: {s}; fallback y=61\n",
+                .{ t.pos.x, t.pos.z, @errorName(err) },
+            );
+            return 61;
+        };
         return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
     }
 
@@ -2708,6 +2719,7 @@ pub const Game = struct {
         // Zero in place (avoid stack temp Snapshot which overflows step's frame).
         @memset(std.mem.asBytes(s), 0);
         s.tick_n = self.tick_n;
+        s.last_tick_ns = clock.monoNs(); // readiness: wedged-loop detection
         const clk = self.sim.director.clock;
         s.day = clk.day;
         s.hours = clk.hours;
@@ -3166,7 +3178,10 @@ pub const Game = struct {
 
     fn saveAdminListFile(self: *Game, name: []const u8, comptime ser: anytype, list: anytype) void {
         var path_buf: [512]u8 = undefined;
-        const path = self.adminListsPath(&path_buf, name) catch return;
+        const path = self.adminListsPath(&path_buf, name) catch |e| {
+            logPersistErr(self, "admin list path", e);
+            return;
+        };
         var buf: [16 * 1024]u8 = undefined;
         var w: std.Io.Writer = .fixed(&buf);
         ser(&w, list) catch |e| return logPersistErr(self, "serialize admin list", e);
@@ -3204,7 +3219,10 @@ pub const Game = struct {
         now: i64,
     ) void {
         var path_buf: [512]u8 = undefined;
-        const path = self.adminListsPath(&path_buf, name) catch return;
+        const path = self.adminListsPath(&path_buf, name) catch |e| {
+            logPersistErr(self, "admin list path", e);
+            return;
+        };
         const text = io_fs.readFileAll(self.allocator, path) catch |e| {
             if (e != error.FileNotFound) logPersistErr(self, "load admin list", e);
             return;
@@ -3357,11 +3375,23 @@ pub const Game = struct {
         std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
         const cmd = admin_mod.parseCommand(line);
         switch (cmd) {
-            .help => {
-                var buf: [4096]u8 = undefined;
-                var w: std.Io.Writer = .fixed(&buf);
-                admin_cmds.writeHelp(&w, &admin_help_index) catch return;
-                self.adminReply(w.buffered());
+            .help => |topic| {
+                if (topic) |t| {
+                    // `help <command>`: the one-line usage when known, else the
+                    // same unknown-command reply a bare miss gets.
+                    var hb: [320]u8 = undefined;
+                    if (admin_mod.usageFor(t)) |u| {
+                        const s = std.fmt.bufPrint(&hb, "usage: {s}\n", .{u}) catch return;
+                        self.adminReply(s);
+                    } else {
+                        self.adminWrite(admin_cmds.writeUnknownCommand, .{t});
+                    }
+                } else {
+                    var buf: [4096]u8 = undefined;
+                    var w: std.Io.Writer = .fixed(&buf);
+                    admin_cmds.writeHelp(&w, &admin_help_index) catch return;
+                    self.adminReply(w.buffered());
+                }
             },
             .unknown => {
                 // Surface the first token so typos are obvious (matches player console).
@@ -4084,8 +4114,17 @@ pub const Game = struct {
         while (attempts < max_attempts) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
                 error.WindowFull => {
-                    peer.resendPending(&self.net.sock) catch {
+                    // Counter alone hid the resend error name; rate-limit a log
+                    // so a peer that cannot drain is visible in the server log.
+                    peer.resendPending(&self.net.sock) catch |re| {
                         self.harness.counters.inc(.net_send_errors);
+                        const n = self.harness.counters.get(.net_send_errors);
+                        if (n == 1 or n % 100 == 0) {
+                            std.debug.print(
+                                "zdtd: resendPending failed pkg={s} local_id={d} n={d}: {s}\n",
+                                .{ pkg_name, peer.local_id, n, @errorName(re) },
+                            );
+                        }
                     };
                     self.pollNetOnce();
                     if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
@@ -4647,13 +4686,22 @@ pub const Game = struct {
     }
 
     /// Restore `clock.zcl` over the freshly seeded clock. A missing file is a
-    /// fresh world (keep day 1); a corrupt file is dropped with a log line.
+    /// fresh world (keep day 1); a corrupt or unreadable file is dropped with a
+    /// log line (never silent: the next save would otherwise clobber day 1).
     fn restoreClock(self: *Game) void {
         var path: [512]u8 = undefined;
-        const p = std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir}) catch return;
+        const p = std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir}) catch {
+            std.debug.print("zdtd: clock.zcl path too long; keeping fresh clock\n", .{});
+            return;
+        };
         if (!io_fs.fileExistsSimple(p)) return;
         var buf: [16]u8 = undefined;
-        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch return;
+        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
+            // File exists but could not be read: operator must know the calendar
+            // reset is involuntary, not a fresh world.
+            logPersistErr(self, "restore clock", err);
+            return;
+        };
         if (bytes.len < 12 or !std.mem.eql(u8, bytes[0..4], "ZCL1")) {
             std.debug.print("zdtd: clock.zcl unreadable or mismatched; keeping fresh clock\n", .{});
             return;
@@ -4677,14 +4725,21 @@ pub const Game = struct {
     }
 
     /// Restore `weather.zwt` over the freshly seeded manager. A missing file is
-    /// a fresh world (keep the roll); a corrupt or table-mismatched file is
-    /// dropped with a log line (fail closed, weather.zig decode never half-applies).
+    /// a fresh world (keep the roll); a corrupt, unreadable, or table-mismatched
+    /// file is dropped with a log line (fail closed: weather.zig decode never
+    /// half-applies; I/O errors must not look like "no weather file yet").
     fn restoreWeather(self: *Game) void {
         var path: [512]u8 = undefined;
-        const p = std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir}) catch return;
+        const p = std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir}) catch {
+            std.debug.print("zdtd: weather.zwt path too long; keeping fresh roll\n", .{});
+            return;
+        };
         if (!io_fs.fileExistsSimple(p)) return;
         var buf: [1024]u8 = undefined;
-        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch return;
+        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
+            logPersistErr(self, "restore weather", err);
+            return;
+        };
         if (self.world.weather.decode(bytes, &self.world.biome_layers_table)) {
             std.debug.print("zdtd: weather state restored ({d} biomes)\n", .{self.world.weather.n});
         } else {
@@ -7650,8 +7705,16 @@ pub const Game = struct {
         );
         if (self.clients[slot].peer) |p| p.alive = false;
         // Free the seat a dropping rider held, or the vehicle stays occupied
-        // (and, for seat 0, undriveable) for the rest of the session.
-        self.unseatRider(self.clients[slot].entity_id) catch {};
+        // (and, for seat 0, undriveable) for the rest of the session. Sim
+        // detach still runs inside unseatRider even when the S2C attach encode
+        // or broadcast fails; log the network side so other clients stuck
+        // drawing a seated ghost are explainable.
+        self.unseatRider(self.clients[slot].entity_id) catch |err| {
+            std.debug.print(
+                "zdtd: unseat on drop failed entity={d}: {s}\n",
+                .{ self.clients[slot].entity_id, @errorName(err) },
+            );
+        };
         self.clearLocksForPeer(slot);
         // Offline claims start their expiry clock and lose the online HP bonus.
         self.markClaimsForEntity(self.clients[slot].entity_id, false);
@@ -9344,14 +9407,29 @@ pub const Game = struct {
         var path_buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/seed_chest_block_id", .{self.world.world_dir}) catch return captured;
         var buf: [32]u8 = undefined;
-        const slice = io_fs.readFileInto(self.allocator, path, &buf) catch return captured;
+        // Optional override file: missing is fine; other I/O must not look like
+        // "no override" when the operator left a broken/unreadable file.
+        const slice = io_fs.readFileInto(self.allocator, path, &buf) catch |err| {
+            if (err != error.FileNotFound) {
+                std.debug.print(
+                    "zdtd: seed_chest_block_id read failed: {s}; using AssignIds/default\n",
+                    .{@errorName(err)},
+                );
+            }
+            return captured;
+        };
         const trimmed = std.mem.trim(u8, slice, " \t\r\n");
-        const v = std.fmt.parseInt(u16, trimmed, 10) catch return captured;
+        const v = std.fmt.parseInt(u16, trimmed, 10) catch {
+            std.debug.print("zdtd: seed_chest_block_id not a u16; using AssignIds/default\n", .{});
+            return captured;
+        };
         return if (v >= 20) v else captured;
     }
 
     fn broadcastStorageTe(self: *Game, cont: *const containers_mod.Container) !void {
-        const body = stock_te.buildStorageTeBody(
+        // Encode failure must surface: callers use try after mutating container
+        // state, and a silent return would leave remotes on a stale TE.
+        const body = try stock_te.buildStorageTeBody(
             &self.body_buf,
             255,
             cont.pos.x,
@@ -9361,7 +9439,7 @@ pub const Game = struct {
             cont,
             resolveItemType,
             self,
-        ) catch return;
+        );
         try self.broadcast("NetPackageTileEntity", body);
     }
 
@@ -9419,14 +9497,16 @@ pub const Game = struct {
             wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
             wire_n += 1;
         }
-        const body = stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{
+        // Propagate encode failure: a silent return left power switches/traps
+        // looking unpowered on remotes after the sim already flipped the node.
+        const body = try stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{
             .power_item_type = ecs.powerblocks.powerItemTypeOf(tt),
             .wires = wires[0..wire_n],
             .is_powered = node.powered,
             .trigger_type = @intFromEnum(tt),
             .property1 = node.delay_idx,
             .property2 = node.duration_idx,
-        }) catch return;
+        });
         try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
     }
 
@@ -10705,7 +10785,15 @@ pub const Game = struct {
                 // Per-peer connect/payload failures must not take down the dedi.
                 const ev = self.net.poll(&self.recv_buf) catch |err| {
                     self.harness.counters.inc(.net_poll_errors);
-                    std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
+                    if (util_sim.isEnabled()) {
+                        var seed_buf: [32]u8 = undefined;
+                        std.debug.print("zdtd: net poll error: {s} ({s})\n", .{
+                            @errorName(err),
+                            util_sim.formatSeed(&seed_buf),
+                        });
+                    } else {
+                        std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
+                    }
                     return err;
                 };
                 switch (ev) {
@@ -10928,6 +11016,9 @@ pub const Game = struct {
 
         // One parseable line per minute gives unbounded production runs a
         // bounded-cost health signal without per-packet label cardinality.
+        // Machine metrics go to stdout, human diagnostics to stderr: keeping
+        // the JSONL on its own stream lets log scrapers (jq/fluentd) parse
+        // every line instead of choking on interleaved `zdtd:` free text.
         if (self.tick_n % apm_report_period_ticks == 0) {
             var snap = self.harness.snapshot();
             // Instantaneous gauges ride the same JSON line as counters so log
@@ -10955,7 +11046,15 @@ pub const Game = struct {
                 report_ok = false;
                 std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
             };
-            if (report_ok) std.debug.print("{s}", .{report_writer.buffered()});
+            if (report_ok) {
+                // Per-minute cadence; not the tick hot path, so a transient
+                // Io.Threaded init is fine (same pattern as main.printStdout).
+                var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+                defer threaded.deinit();
+                std.Io.File.stdout().writeStreamingAll(threaded.io(), report_writer.buffered()) catch |e| {
+                    std.debug.print("zdtd: apm report write failed: {s}\n", .{@errorName(e)});
+                };
+            }
         }
         completed = true;
     }
@@ -11050,6 +11149,8 @@ pub const Game = struct {
 
     /// Unseat a rider and broadcast AttachType 3 with vehicleId and slot both
     /// -1, matching the server branch of Entity::SendDetach (asm.il:406816).
+    /// Sim seat is freed even if the wire body cannot be built; encode failure
+    /// is logged so a silent ghost seat on remotes is not invisible.
     fn unseatRider(self: *Game, rider_id: i32) !void {
         _ = systems.vehicleDetach(&self.sim, rider_id) orelse return;
         const body = packages.buildEntityAttach(
@@ -11058,7 +11159,13 @@ pub const Game = struct {
             rider_id,
             -1,
             packages.slot_any,
-        ) catch return;
+        ) catch |err| {
+            std.debug.print(
+                "zdtd: unseat encode failed entity={d}: {s}\n",
+                .{ rider_id, @errorName(err) },
+            );
+            return;
+        };
         try self.broadcast("NetPackageEntityAttach", body);
     }
 
@@ -11608,6 +11715,27 @@ test "offline steps replay same world_time for same seed" {
     try std.testing.expectEqual(t_a, t_b);
 }
 
+test "ban expiry under virtual wall is seed-stable" {
+    // Offline Game enables the virtual clock: wallSeconds must not sample host
+    // REALTIME or ban add/expire cannot replay from a seed.
+    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_ban_wall", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(util_sim.isEnabled());
+    // default_start_ns = 1s → wall epoch second 1.
+    try std.testing.expectEqual(@as(i64, 1), clock.wallSeconds());
+    try std.testing.expect(g.ban_list.add("Eve", clock.wallSeconds() + 2, "tmp"));
+    try std.testing.expect(g.ban_list.banned("Eve", clock.wallSeconds()));
+    clock.advanceNs(3_000_000_000);
+    try std.testing.expectEqual(@as(i64, 4), clock.wallSeconds());
+    try std.testing.expect(!g.ban_list.banned("Eve", clock.wallSeconds()));
+}
+
 test "world clock persists across a restart (BM calendar survives)" {
     io_fs.mkdirPathSimple(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/clock_persist";
@@ -12010,6 +12138,12 @@ test "console replies use the stock error and listing shapes" {
     try std.testing.expect(std.mem.startsWith(u8, help, "*** Generic Console Help ***\n"));
     try std.testing.expect(std.mem.indexOf(u8, help, "*** List of Commands ***\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, " => lists all players\n") != null);
+
+    // `help <topic>` resolves the usage line; an unknown topic gets the same
+    // unknown-command reply a bare miss gets.
+    try std.testing.expectEqualStrings("usage: kick <name/entity id/user id> [reason]\n", adminRun(g, &sink, "help kick"));
+    try std.testing.expectEqualStrings("usage: gettime\n", adminRun(g, &sink, "help gt"));
+    try std.testing.expectEqualStrings("*** ERROR: unknown command 'frobnicate'\n", adminRun(g, &sink, "help frobnicate"));
 
     // settime takes stock world time and reports it back verbatim.
     try std.testing.expectEqualStrings("Set time to 12000\n", adminRun(g, &sink, "settime day"));

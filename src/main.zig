@@ -497,6 +497,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         usageError("--webui-bind must be loopback (127.0.0.1 or localhost); use a TLS reverse proxy for remote access", .{});
     }
 
+    // Fail fast on TCP listen collisions (UDP LiteNet is port+2; it can share a
+    // number with a TCP listener, so only TCP↔TCP overlaps are fatal here).
+    if (admin_port != 0 and admin_port == port) {
+        fatal("AdminPort/TelnetPort {d} collides with ServerPort (TCP GameServerInfo)", .{admin_port});
+    }
+    if (webui_port != 0 and webui_port == port) {
+        fatal("webui port {d} collides with ServerPort (TCP GameServerInfo)", .{webui_port});
+    }
+    if (webui_port != 0 and admin_port != 0 and webui_port == admin_port) {
+        fatal("webui port {d} collides with AdminPort/TelnetPort", .{webui_port});
+    }
+
     // InitOptions: serverconfig → optional mode pack → zdtd.toml stream/authority.
     // CLI-resolved fields (paths, ports, seed) are already set on the struct.
     var init_opts: game_mod.InitOptions = .{
@@ -540,6 +552,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .land_claim_size = cfg.land_claim_size,
         .land_claim_online_durability_modifier = cfg.land_claim_online_durability_modifier,
         .land_claim_offline_durability_modifier = cfg.land_claim_offline_durability_modifier,
+        .land_claim_expiry_days = cfg.land_claim_expiry_days,
+        .loot_respawn_days = cfg.loot_respawn_days,
         .worldgen_seed = worldgen_seed,
         .authority_mode = cfg.authority_mode,
     };

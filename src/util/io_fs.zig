@@ -2,13 +2,16 @@
 //! Ordinary file/dir work goes through here or `std.Io` directly, never
 //! `std.os.linux` / raw posix in application code.
 //!
-//! DST: `injectWriteFailures` forces the next N `writeFile` calls to fail so
-//! crash/full-disk paths can be replayed from a seed without real I/O faults.
+//! DST: `injectWriteFailures` / `injectReadFailures` force the next N write or
+//! read calls to fail so crash/full-disk/torn-read paths can be replayed from
+//! a seed without real I/O faults. `util.sim.disable` clears both counters.
 
 const std = @import("std");
 
 /// Remaining synthetic write failures for DST fault injection (0 = off).
 var write_fail_remaining: std.atomic.Value(u32) = .init(0);
+/// Remaining synthetic read failures for DST fault injection (0 = off).
+var read_fail_remaining: std.atomic.Value(u32) = .init(0);
 
 /// Force the next `n` `writeFile` / `writeFileSimple` calls to return
 /// `error.DiskQuota` without touching the OS. Pair with a fixed sim seed so
@@ -22,17 +25,37 @@ pub fn pendingWriteFailures() u32 {
     return write_fail_remaining.load(.acquire);
 }
 
-fn consumeWriteFault() bool {
+/// Force the next `n` `readFileAll` / `readFileInto` calls to return
+/// `error.InputOutput` without touching the OS. Pair with a fixed sim seed so
+/// the failure lands on the same load step every replay.
+pub fn injectReadFailures(n: u32) void {
+    read_fail_remaining.store(n, .release);
+}
+
+/// Outstanding synthetic read failures (for tests / harness asserts).
+pub fn pendingReadFailures() u32 {
+    return read_fail_remaining.load(.acquire);
+}
+
+fn consumeFault(counter: *std.atomic.Value(u32)) bool {
     // CAS loop: only one caller consumes each injected fault.
     while (true) {
-        const cur = write_fail_remaining.load(.acquire);
+        const cur = counter.load(.acquire);
         if (cur == 0) return false;
-        if (write_fail_remaining.cmpxchgWeak(cur, cur - 1, .acq_rel, .acquire)) |_| {
+        if (counter.cmpxchgWeak(cur, cur - 1, .acq_rel, .acquire)) |_| {
             continue;
         } else {
             return true;
         }
     }
+}
+
+fn consumeWriteFault() bool {
+    return consumeFault(&write_fail_remaining);
+}
+
+fn consumeReadFault() bool {
+    return consumeFault(&read_fail_remaining);
 }
 
 /// `std.Io.Threaded` bookkeeping only. Always page_allocator so concurrent
@@ -116,6 +139,7 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
 
 /// Read entire file. Caller frees.
 pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (consumeReadFault()) return error.InputOutput;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -125,6 +149,7 @@ pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 /// Read up to `buf.len` bytes into `buf`. Returns slice of bytes read.
 pub fn readFileInto(allocator: std.mem.Allocator, path: []const u8, buf: []u8) ![]u8 {
     _ = allocator;
+    if (consumeReadFault()) return error.InputOutput;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -219,4 +244,19 @@ test "injectWriteFailures fails then recovers" {
     try std.testing.expectEqual(@as(u32, 0), pendingWriteFailures());
     try writeFileSimple(".zdtd_cfg_cache/io_fs_fault.txt", "ok");
     deleteFileSimple(".zdtd_cfg_cache/io_fs_fault.txt");
+}
+
+test "injectReadFailures fails then recovers" {
+    defer injectReadFailures(0);
+    mkdirPathSimple(".zdtd_cfg_cache");
+    const p = ".zdtd_cfg_cache/io_fs_read_fault.txt";
+    try writeFileSimple(p, "payload");
+    defer deleteFileSimple(p);
+    injectReadFailures(1);
+    try std.testing.expectEqual(@as(u32, 1), pendingReadFailures());
+    try std.testing.expectError(error.InputOutput, readFileAll(std.testing.allocator, p));
+    try std.testing.expectEqual(@as(u32, 0), pendingReadFailures());
+    const got = try readFileAll(std.testing.allocator, p);
+    defer std.testing.allocator.free(got);
+    try std.testing.expectEqualStrings("payload", got);
 }

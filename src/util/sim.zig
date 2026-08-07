@@ -12,6 +12,7 @@
 //! the single value that should reproduce a run (pair with virtual clock).
 
 const clock = @import("clock.zig");
+const io_fs = @import("io_fs.zig");
 const parallel = @import("parallel.zig");
 const std = @import("std");
 
@@ -45,11 +46,14 @@ pub fn enableSeeded(start_ns: u64, seed: u64) void {
 }
 
 /// Leave sim mode (real clock, parallel ranges allowed again). Clears the run
-/// seed so a later production path does not inherit a harness seed.
+/// seed and any leftover I/O fault injection so a later production path or
+/// test does not inherit harness state.
 pub fn disable() void {
     parallel.setForceSerial(false);
     clock.disableVirtual();
     run_seed.store(0, .release);
+    io_fs.injectWriteFailures(0);
+    io_fs.injectReadFailures(0);
 }
 
 /// Record the seed that should fully determine a simulated run.
@@ -60,6 +64,14 @@ pub fn setSeed(seed: u64) void {
 /// Current run seed (0 when unset / after disable).
 pub fn getSeed() u64 {
     return run_seed.load(.acquire);
+}
+
+/// Format the process-wide run seed into `buf` for failure logs / assert
+/// messages. Empty when unset so callers can print only under sim.
+pub fn formatSeed(buf: []u8) []const u8 {
+    const s = getSeed();
+    if (s == 0) return "";
+    return std.fmt.bufPrint(buf, "dst_seed={d}", .{s}) catch "dst_seed=?";
 }
 
 /// True when both virtual clock and force-serial are active.
@@ -105,6 +117,21 @@ test "sim seed is stored and cleared on disable" {
     try std.testing.expectEqual(@as(u64, 0xC0FFEE), getSeed());
     setSeed(42);
     try std.testing.expectEqual(@as(u64, 42), getSeed());
+    var seed_buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("dst_seed=42", formatSeed(&seed_buf));
     disable();
     try std.testing.expectEqual(@as(u64, 0), getSeed());
+    try std.testing.expectEqualStrings("", formatSeed(&seed_buf));
+}
+
+test "sim disable clears leftover I/O fault injection" {
+    defer disable();
+    enable(default_start_ns);
+    io_fs.injectWriteFailures(3);
+    io_fs.injectReadFailures(2);
+    try std.testing.expectEqual(@as(u32, 3), io_fs.pendingWriteFailures());
+    try std.testing.expectEqual(@as(u32, 2), io_fs.pendingReadFailures());
+    disable();
+    try std.testing.expectEqual(@as(u32, 0), io_fs.pendingWriteFailures());
+    try std.testing.expectEqual(@as(u32, 0), io_fs.pendingReadFailures());
 }

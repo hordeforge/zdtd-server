@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const tcp = @import("../util/tcp_listen.zig");
+const clock = @import("../util/clock.zig");
 
 pub const max_cmd: usize = 256;
 
@@ -154,15 +155,17 @@ pub const Server = struct {
         }
         self.fails[i] +|= 1;
         if (self.fails[i] >= self.auth.fail_limit) {
+            var ts: [19]u8 = undefined;
             std.debug.print(
-                "zdtd: admin login failed session={d} attempts={d} closed\n",
-                .{ i, self.fails[i] },
+                "zdtd: {s} admin login failed session={d} attempts={d} closed\n",
+                .{ clock.wallStamp(&ts), i, self.fails[i] },
             );
             self.reply("Too many failed login attempts!\n");
             self.closeActive();
             return false;
         }
-        std.debug.print("zdtd: admin login failed session={d} attempts={d}\n", .{ i, self.fails[i] });
+        var ts: [19]u8 = undefined;
+        std.debug.print("zdtd: {s} admin login failed session={d} attempts={d}\n", .{ clock.wallStamp(&ts), i, self.fails[i] });
         self.reply("Password incorrect, please enter password:\n");
         return true;
     }
@@ -307,7 +310,9 @@ pub const WhitelistSub = union(enum) {
 };
 
 pub const Command = union(enum) {
-    help,
+    /// `help` with no topic prints the index; `help <topic>` prints that command's
+    /// usage/description. The topic is a slice of the input line.
+    help: ?[]const u8,
     status,
     /// Dump C2S authority reject counters (phase/ownership/bounds/movement/decode).
     guardstats,
@@ -413,7 +418,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
     return .{ .err_text = .{ .prefix = "Invalid sub command \"", .token = s, .suffix = "\"." } };
 }
 
-/// One-line usage for a known verb (admin `bad_args` replies). Null if unknown.
+/// One-line usage for a known verb (admin `bad_args` replies and `help <verb>`
+/// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
     if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemId> [count]";
@@ -434,14 +440,39 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "gamestage")) return "gamestage [slot]";
     if (std.mem.eql(u8, verb, "guardclear") or std.mem.eql(u8, verb, "gc"))
         return "guardclear <slot>";
+    if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?") or std.mem.eql(u8, verb, "commands"))
+        return "help [topic]";
+    if (std.mem.eql(u8, verb, "status")) return "status";
+    if (std.mem.eql(u8, verb, "guardstats") or std.mem.eql(u8, verb, "gs")) return "guardstats";
+    if (std.mem.eql(u8, verb, "evidence") or std.mem.eql(u8, verb, "ev")) return "evidence";
+    if (std.mem.eql(u8, verb, "apm") or std.mem.eql(u8, verb, "metrics")) return "apm";
+    if (std.mem.eql(u8, verb, "save")) return "save";
+    if (std.mem.eql(u8, verb, "list") or std.mem.eql(u8, verb, "players")) return "list";
+    if (std.mem.eql(u8, verb, "gettime") or std.mem.eql(u8, verb, "gt")) return "gettime";
+    if (std.mem.eql(u8, verb, "listents") or std.mem.eql(u8, verb, "le")) return "listents";
+    if (std.mem.eql(u8, verb, "listplayers") or std.mem.eql(u8, verb, "lp")) return "listplayers";
+    if (std.mem.eql(u8, verb, "killall") or std.mem.eql(u8, verb, "ka")) return "killall";
+    if (std.mem.eql(u8, verb, "saveworld") or std.mem.eql(u8, verb, "sa")) return "saveworld";
+    if (std.mem.eql(u8, verb, "shutdown")) return "shutdown";
+    if (std.mem.eql(u8, verb, "version")) return "version";
+    if (std.mem.eql(u8, verb, "kick")) return "kick <name/entity id/user id> [reason]";
+    if (std.mem.eql(u8, verb, "kickall")) return "kickall [reason]";
+    if (std.mem.eql(u8, verb, "ban")) return "ban <add|remove|list> <target> [duration] [unit] [reason]";
+    if (std.mem.eql(u8, verb, "admin")) return "admin <add|remove|list> <target> [level]";
+    if (std.mem.eql(u8, verb, "whitelist")) return "whitelist <add|remove|list> <target>";
+    if (std.mem.eql(u8, verb, "getgamepref") or std.mem.eql(u8, verb, "gg")) return "getgamepref [filter]";
+    if (std.mem.eql(u8, verb, "setgamepref") or std.mem.eql(u8, verb, "sg")) return "setgamepref <name> <value>";
     return null;
 }
 
 pub fn parseCommand(line: []const u8) Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const cmd = it.next() orelse return .unknown;
-    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "?") or std.mem.eql(u8, cmd, "commands"))
-        return if (it.next() == null) .help else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "?") or std.mem.eql(u8, cmd, "commands")) {
+        const topic = it.next();
+        if (topic != null and it.next() != null) return .{ .bad_args = cmd };
+        return .{ .help = topic };
+    }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "guardstats") or std.mem.eql(u8, cmd, "gs")) return if (it.next() == null) .guardstats else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "guardclear") or std.mem.eql(u8, cmd, "gc")) {
@@ -792,7 +823,19 @@ test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expect(parseCommand("commands") == .help);
     try std.testing.expectEqualStrings("give <slot> <itemId> [count]", usageFor("give").?);
     try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
+    try std.testing.expectEqualStrings("status", usageFor("status").?);
+    try std.testing.expectEqualStrings("getgamepref [filter]", usageFor("gg").?);
+    try std.testing.expectEqualStrings("ban <add|remove|list> <target> [duration] [unit] [reason]", usageFor("ban").?);
     try std.testing.expect(usageFor("frobnicate") == null);
+}
+
+test "help with a topic carries the topic; extra args are bad_args" {
+    try std.testing.expect(parseCommand("help").help == null);
+    try std.testing.expectEqualStrings("kick", parseCommand("help kick").help.?);
+    try std.testing.expectEqualStrings("tp", parseCommand("help tp").help.?);
+    try std.testing.expectEqualStrings("le", parseCommand("? le").help.?);
+    try std.testing.expect(parseCommand("help kick ban") == .bad_args);
+    try std.testing.expect(parseCommand("commands status") == .help);
 }
 
 test "parse wipeplayer" {
@@ -1013,6 +1056,7 @@ fn fuzzParseCommand(_: void, smith: *std.testing.Smith) !void {
             .list => {},
         },
         .spawnentity => |se| try std.testing.expect(se.name_off + se.name_len <= line.len),
+        .help => |t| if (t) |tt| try expectWithin(line, tt),
         else => {},
     }
 }

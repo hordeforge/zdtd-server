@@ -53,6 +53,9 @@ pub const PlayerRow = struct {
 
 pub const Snapshot = struct {
     tick_n: u64 = 0,
+    /// Monotonic time (clock.monoNs) of the last main-loop tick that refreshed
+    /// this snapshot. Read from the webui poll thread; written from Game.step.
+    last_tick_ns: u64 = 0,
     day: u32 = 1,
     hours: f32 = 8,
     bloodmoon_active: bool = false,
@@ -217,10 +220,6 @@ pub const Server = struct {
         if (self.secret_len > 0) @memset(self.secret_buf[0..self.secret_len], 0);
         self.secret_len = 0;
         @memset(&self.session_token, 0);
-    }
-
-    pub fn publishSnap(self: *Server, s: Snapshot) void {
-        self.snap = s;
     }
 
     fn secret(self: *const Server) []const u8 {
@@ -450,7 +449,8 @@ pub const Server = struct {
                     return;
                 }
                 self.noteLoginFailure();
-                std.debug.print("zdtd: webui login rejected (bad token)\n", .{});
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} webui login rejected (bad token)\n", .{clock.wallStamp(&ts)});
                 try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", loginHintHtml(true), &.{});
                 return;
             }
@@ -869,8 +869,16 @@ fn isGetOnlyPath(path: []const u8) bool {
         std.mem.eql(u8, path, "/api/apm.json");
 }
 
+/// 30 s without a main-loop tick means the sim loop is wedged (blocked poll,
+/// deadlocked flush, debugger attach): the webui thread keeps serving, so a
+/// stale tick is the only signal the game is not actually advancing. Generous:
+/// a periodic save-all on a large overlay can take seconds, never this long.
+const readiness_stale_ns: u64 = 30 * std.time.ns_per_s;
+
 fn readinessStatus(s: *const Snapshot) u16 {
-    return if (s.tick_n == 0) 503 else 200;
+    if (s.tick_n == 0) return 503; // pre-first-tick startup: not ready yet
+    if (clock.monoNs() -% s.last_tick_ns > readiness_stale_ns) return 503;
+    return 200;
 }
 
 fn parseIpv4(host: []const u8) !u32 {
@@ -1062,11 +1070,15 @@ fn adminReplyLooksFailed(reply: []const u8) bool {
 fn renderCmdReply(buf: []u8, line: []const u8, reply: []const u8) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
     // tabindex so keyboard users can scroll overflow (max-height); WCAG 2.1.1.
+    // No aria-label here: the pre is injected into the #cmd-out polite live
+    // region, and an explicit label would replace the actual command output in
+    // the region's text alternative (screen readers would hear "Command result"
+    // instead of the reply). The pre's text content is its accessible name.
     // class=err when the admin reply is a known failure string (still HTTP 200).
     if (adminReplyLooksFailed(reply)) {
-        try w.writeAll("<pre class=\"cmd-out err\" tabindex=\"0\" aria-label=\"Command result\" role=\"alert\"><span class=\"in\">&gt; ");
+        try w.writeAll("<pre class=\"cmd-out err\" tabindex=\"0\" role=\"alert\"><span class=\"in\">&gt; ");
     } else {
-        try w.writeAll("<pre class=\"cmd-out\" tabindex=\"0\" aria-label=\"Command result\"><span class=\"in\">&gt; ");
+        try w.writeAll("<pre class=\"cmd-out\" tabindex=\"0\"><span class=\"in\">&gt; ");
     }
     try htmlEscape(&w, line);
     try w.writeAll("</span>\n");
@@ -1354,7 +1366,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\const autoEl=document.getElementById('auto-refresh');const refreshState=document.getElementById('refresh-state');
         \\function applyRefresh(){{const on=autoEl.checked;polls.forEach(el=>{{if(on)el._hxStart();else{{el._hxStop();if(!el.children.length)el._hxOnce();}}}});if(refreshState)refreshState.textContent=on?'Auto-refresh on':'Auto-refresh paused';}}
         \\autoEl.addEventListener('change',applyRefresh);applyRefresh();
-        \\document.getElementById('refresh-now').addEventListener('click',async(e)=>{{const button=e.currentTarget;button.disabled=true;if(refreshState)refreshState.textContent='Refreshing…';await Promise.all(polls.map(el=>el._hxOnce?el._hxOnce():Promise.resolve()));button.disabled=false;if(refreshState)refreshState.textContent=autoEl.checked?'Refreshed (auto-refresh on)':'Refreshed (auto-refresh paused)';}});
+        \\document.getElementById('refresh-now').addEventListener('click',async(e)=>{{const button=e.currentTarget;button.disabled=true;if(refreshState)refreshState.textContent='Refreshing…';await Promise.all(polls.map(el=>el._hxOnce?el._hxOnce():Promise.resolve()));button.disabled=false;button.focus();if(refreshState)refreshState.textContent=autoEl.checked?'Refreshed (auto-refresh on)':'Refreshed (auto-refresh paused)';}});
         \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const input=document.getElementById('cmd-line');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();if(!line){{input.setCustomValidity('Enter a command.');input.reportValidity();return;}}input.setCustomValidity('');const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick','ban','wipeplayer']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players or erase saved data.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.setAttribute('aria-busy','true');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});if(r.status===401){{window.location.assign('/login');return;}}const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;if(r.ok){{input.value='';input.focus();}}const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{out.removeAttribute('aria-busy');button.disabled=false;button.textContent='Run';input.focus();}}}});
         \\</script>
         \\</body></html>
@@ -1738,6 +1750,17 @@ test "readiness waits for first live snapshot" {
     var s: Snapshot = .{};
     try std.testing.expectEqual(@as(u16, 503), readinessStatus(&s));
     s.tick_n = 1;
+    s.last_tick_ns = clock.monoNs(); // fresh snapshot: ready
+    try std.testing.expectEqual(@as(u16, 200), readinessStatus(&s));
+}
+
+test "readiness goes stale when the sim loop wedges" {
+    var s: Snapshot = .{ .tick_n = 100, .last_tick_ns = clock.monoNs() };
+    // One threshold later, the webui thread still serves but the game has not
+    // advanced a tick: orchestrators must drain/restart instead of trusting 200.
+    s.last_tick_ns = clock.monoNs() -% (readiness_stale_ns + 1);
+    try std.testing.expectEqual(@as(u16, 503), readinessStatus(&s));
+    s.last_tick_ns = clock.monoNs();
     try std.testing.expectEqual(@as(u16, 200), readinessStatus(&s));
 }
 
@@ -2076,7 +2099,9 @@ test "command result marks known failures and is keyboard-scrollable" {
     var buf: [2048]u8 = undefined;
     const reply = try renderCmdReply(&buf, "status", "ok");
     try std.testing.expect(std.mem.indexOf(u8, reply, "tabindex=\"0\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, reply, "aria-label=\"Command result\"") != null);
+    // No aria-label: the pre is read by the #cmd-out live region, and a label
+    // would mask the actual command output from screen reader announcements.
+    try std.testing.expect(std.mem.indexOf(u8, reply, "aria-label=") == null);
     try std.testing.expect(std.mem.indexOf(u8, reply, "class=\"cmd-out err\"") == null);
     const fail = try renderCmdReply(&buf, "frob", "unknown command 'frob'. 'help' for list.\n");
     try std.testing.expect(std.mem.indexOf(u8, fail, "class=\"cmd-out err\"") != null);

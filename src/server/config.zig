@@ -254,41 +254,45 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     // Never trimmed and never logged: the value is the console credential.
     if (prop(raw, "TelnetPassword")) |v| cfg.telnet_password = try arena.dupe(u8, v);
     if (prop(raw, "TelnetFailedLoginLimit")) |v|
-        cfg.telnet_failed_login_limit = clampU8(xml.parseU16(v), 1, 255, cfg.telnet_failed_login_limit);
+        cfg.telnet_failed_login_limit = clampU8Named("TelnetFailedLoginLimit", v, 1, 255, cfg.telnet_failed_login_limit);
     if (prop(raw, "TelnetFailedLoginsBlocktime")) |v|
-        cfg.telnet_failed_logins_blocktime = clampRange(xml.parseU16(v), 0, 1440, cfg.telnet_failed_logins_blocktime);
-    if (prop(raw, "ViewRadius")) |v| cfg.view_radius = clampRange(xml.parseU16(v), 1, 16, @intCast(cfg.view_radius));
-    if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8(xml.parseU16(v), 0, 5, cfg.game_difficulty);
-    if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8(xml.parseU16(v), 0, 255, cfg.blood_moon_frequency);
-    if (prop(raw, "BloodMoonEnemyCount")) |v| cfg.blood_moon_enemy_count = clampU8(xml.parseU16(v), 0, 60, cfg.blood_moon_enemy_count);
-    if (prop(raw, "PlayerKillingMode")) |v| cfg.player_killing_mode = clampU8(xml.parseU16(v), 0, 3, cfg.player_killing_mode);
-    if (prop(raw, "DayNightLength")) |v| cfg.day_night_length = clampRange(xml.parseU16(v), 10, 1200, cfg.day_night_length);
-    if (prop(raw, "DayLightLength")) |v| cfg.day_light_length = clampU8(xml.parseU16(v), 1, 23, cfg.day_light_length);
-    if (prop(raw, "MaxSpawnedZombies")) |v| cfg.max_spawned_zombies = clampRange(xml.parseU16(v), 1, 2048, cfg.max_spawned_zombies);
-    if (prop(raw, "BloodMoonRange")) |v| cfg.blood_moon_range = clampU8(xml.parseU16(v), 0, 15, cfg.blood_moon_range);
-    if (prop(raw, "ZombieMove")) |v| cfg.zombie_move = clampU8(xml.parseU16(v), 0, 4, cfg.zombie_move);
-    if (prop(raw, "ZombieMoveNight")) |v| cfg.zombie_move_night = clampU8(xml.parseU16(v), 0, 4, cfg.zombie_move_night);
-    if (prop(raw, "ZombieFeralMove")) |v| cfg.zombie_feral_move = clampU8(xml.parseU16(v), 0, 4, cfg.zombie_feral_move);
-    if (prop(raw, "ZombieBMMove")) |v| cfg.zombie_bm_move = clampU8(xml.parseU16(v), 0, 4, cfg.zombie_bm_move);
-    if (prop(raw, "EnemyDifficulty")) |v| cfg.enemy_difficulty = clampU8(xml.parseU16(v), 0, 1, cfg.enemy_difficulty);
-    if (prop(raw, "LootAbundance")) |v| cfg.loot_abundance = clampRange(xml.parseU16(v), 1, 1000, cfg.loot_abundance);
-    if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRange(xml.parseU16(v), 1, 1000, cfg.xp_multiplier);
-    if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRange(xml.parseU16(v), 1, 1000, cfg.block_damage_player);
-    if (prop(raw, "BlockDamageAI")) |v| cfg.block_damage_ai = clampRange(xml.parseU16(v), 0, 1000, cfg.block_damage_ai);
-    if (prop(raw, "BlockDamageAIBM")) |v| cfg.block_damage_ai_bm = clampRange(xml.parseU16(v), 0, 1000, cfg.block_damage_ai_bm);
-    if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRange(xml.parseU16(v), 0, 2048, cfg.max_spawned_animals);
-    if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRange(xml.parseU16(v), 0, 8760, cfg.air_drop_frequency);
-    if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8(xml.parseU16(v), 0, 4, cfg.drop_on_death);
+        cfg.telnet_failed_logins_blocktime = clampRangeNamed("TelnetFailedLoginsBlocktime", v, 0, 1440, cfg.telnet_failed_logins_blocktime);
+    if (prop(raw, "ViewRadius")) |v| cfg.view_radius = @intCast(clampRangeNamed("ViewRadius", v, 1, 16, @intCast(cfg.view_radius)));
+    if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8Named("GameDifficulty", v, 0, 5, cfg.game_difficulty);
+    if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8Named("BloodMoonFrequency", v, 0, 255, cfg.blood_moon_frequency);
+    if (prop(raw, "BloodMoonEnemyCount")) |v| cfg.blood_moon_enemy_count = clampU8Named("BloodMoonEnemyCount", v, 0, 60, cfg.blood_moon_enemy_count);
+    if (prop(raw, "PlayerKillingMode")) |v| cfg.player_killing_mode = clampU8Named("PlayerKillingMode", v, 0, 3, cfg.player_killing_mode);
+    if (prop(raw, "DayNightLength")) |v| cfg.day_night_length = clampRangeNamed("DayNightLength", v, 10, 1200, cfg.day_night_length);
+    if (prop(raw, "DayLightLength")) |v| cfg.day_light_length = clampU8Named("DayLightLength", v, 1, 23, cfg.day_light_length);
+    if (prop(raw, "MaxSpawnedZombies")) |v| cfg.max_spawned_zombies = clampRangeNamed("MaxSpawnedZombies", v, 1, 2048, cfg.max_spawned_zombies);
+    if (prop(raw, "BloodMoonRange")) |v| cfg.blood_moon_range = clampU8Named("BloodMoonRange", v, 0, 15, cfg.blood_moon_range);
+    if (prop(raw, "ZombieMove")) |v| cfg.zombie_move = clampU8Named("ZombieMove", v, 0, 4, cfg.zombie_move);
+    if (prop(raw, "ZombieMoveNight")) |v| cfg.zombie_move_night = clampU8Named("ZombieMoveNight", v, 0, 4, cfg.zombie_move_night);
+    if (prop(raw, "ZombieFeralMove")) |v| cfg.zombie_feral_move = clampU8Named("ZombieFeralMove", v, 0, 4, cfg.zombie_feral_move);
+    if (prop(raw, "ZombieBMMove")) |v| cfg.zombie_bm_move = clampU8Named("ZombieBMMove", v, 0, 4, cfg.zombie_bm_move);
+    if (prop(raw, "EnemyDifficulty")) |v| cfg.enemy_difficulty = clampU8Named("EnemyDifficulty", v, 0, 1, cfg.enemy_difficulty);
+    if (prop(raw, "LootAbundance")) |v| cfg.loot_abundance = clampRangeNamed("LootAbundance", v, 1, 1000, cfg.loot_abundance);
+    if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
+    if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
+    if (prop(raw, "BlockDamageAI")) |v| cfg.block_damage_ai = clampRangeNamed("BlockDamageAI", v, 0, 1000, cfg.block_damage_ai);
+    if (prop(raw, "BlockDamageAIBM")) |v| cfg.block_damage_ai_bm = clampRangeNamed("BlockDamageAIBM", v, 0, 1000, cfg.block_damage_ai_bm);
+    if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRangeNamed("MaxSpawnedAnimals", v, 0, 2048, cfg.max_spawned_animals);
+    if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRangeNamed("AirDropFrequency", v, 0, 8760, cfg.air_drop_frequency);
+    if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8Named("DropOnDeath", v, 0, 4, cfg.drop_on_death);
     if (prop(raw, "LandClaimSize")) |v| {
         // Stock keystone area is odd (centered on block); force odd after clamp.
-        var sz = clampRange(xml.parseU16(v), 1, 255, cfg.land_claim_size);
+        var sz = clampRangeNamed("LandClaimSize", v, 1, 255, cfg.land_claim_size);
         if (sz % 2 == 0) sz -= 1;
         cfg.land_claim_size = if (sz == 0) 1 else sz;
     }
-    if (prop(raw, "LandClaimOnlineDurabilityModifier")) |v| cfg.land_claim_online_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_online_durability_modifier);
-    if (prop(raw, "LandClaimOfflineDurabilityModifier")) |v| cfg.land_claim_offline_durability_modifier = clampRange(xml.parseU16(v), 0, 64, cfg.land_claim_offline_durability_modifier);
-    if (prop(raw, "LandClaimExpiryDays")) |v| cfg.land_claim_expiry_days = clampRange(xml.parseU16(v), 0, 365, cfg.land_claim_expiry_days);
-    if (prop(raw, "LootRespawnDays")) |v| cfg.loot_respawn_days = clampRange(xml.parseU16(v), 0, 365, cfg.loot_respawn_days);
+    if (prop(raw, "LandClaimOnlineDurabilityModifier")) |v|
+        cfg.land_claim_online_durability_modifier = clampRangeNamed("LandClaimOnlineDurabilityModifier", v, 0, 64, cfg.land_claim_online_durability_modifier);
+    if (prop(raw, "LandClaimOfflineDurabilityModifier")) |v|
+        cfg.land_claim_offline_durability_modifier = clampRangeNamed("LandClaimOfflineDurabilityModifier", v, 0, 64, cfg.land_claim_offline_durability_modifier);
+    if (prop(raw, "LandClaimExpiryDays")) |v|
+        cfg.land_claim_expiry_days = clampRangeNamed("LandClaimExpiryDays", v, 0, 365, cfg.land_claim_expiry_days);
+    if (prop(raw, "LootRespawnDays")) |v|
+        cfg.loot_respawn_days = clampRangeNamed("LootRespawnDays", v, 0, 365, cfg.loot_respawn_days);
     if (prop(raw, "ZdtdAuthorityMode")) |v| {
         if (AuthorityMode.parse(v)) |m| {
             cfg.authority_mode = m;
@@ -317,15 +321,20 @@ fn parseXmlBool(s: []const u8) ?bool {
     return null;
 }
 
-fn clampU8(v: ?u16, lo: u16, hi: u16, dflt: u8) u8 {
-    return @intCast(clampRange(v, lo, hi, dflt));
+/// Parse a serverconfig integer property: warn on non-numeric input (keep default)
+/// and on out-of-range values (clamp). Silent keep on typos is a misconfig footgun.
+fn clampU8Named(name: []const u8, raw: []const u8, lo: u16, hi: u16, dflt: u8) u8 {
+    return @intCast(clampRangeNamed(name, raw, lo, hi, dflt));
 }
 
-fn clampRange(v: ?u16, lo: u16, hi: u16, dflt: u16) u16 {
-    const x = v orelse return dflt;
+fn clampRangeNamed(name: []const u8, raw: []const u8, lo: u16, hi: u16, dflt: u16) u16 {
+    const x = xml.parseU16(raw) orelse {
+        std.debug.print("zdtd: serverconfig {s} '{s}' invalid; keeping {d}\n", .{ name, raw, dflt });
+        return dflt;
+    };
     if (x < lo or x > hi) {
         const c = std.math.clamp(x, lo, hi);
-        std.debug.print("zdtd: serverconfig value {d} out of range [{d}..{d}]; using {d}\n", .{ x, lo, hi, c });
+        std.debug.print("zdtd: serverconfig {s}={d} out of range [{d}..{d}]; using {d}\n", .{ name, x, lo, hi, c });
         return c;
     }
     return x;
@@ -411,6 +420,31 @@ test "parse gameplay options with clamping" {
     try std.testing.expectEqual(@as(u16, 31), cfg.land_claim_size);
     try std.testing.expectEqual(@as(u16, 8), cfg.land_claim_online_durability_modifier);
     try std.testing.expectEqual(AuthorityMode.correct, cfg.authority_mode);
+}
+
+test "parse land claim expiry and loot respawn days" {
+    // These keys must parse into Config so main can wire them onto InitOptions
+    // (a silent parse+drop left operators stuck on code defaults).
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="LandClaimExpiryDays" value="14"/>
+        \\  <property name="LootRespawnDays" value="21"/>
+        \\  <property name="ViewRadius" value="not-a-number"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFileSimple(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 14), cfg.land_claim_expiry_days);
+    try std.testing.expectEqual(@as(u16, 21), cfg.loot_respawn_days);
+    // Non-numeric ViewRadius keeps the default (and prints a stderr warning).
+    try std.testing.expectEqual(@as(i32, 7), cfg.view_radius);
 }
 
 test "parse authority mode observe" {

@@ -57,7 +57,14 @@ pub const Server = struct {
                     req.connection_number,
                     &packet.reject_invalid_password,
                 );
-                self.sock.sendTo(rej, &src) catch {};
+                self.sock.sendTo(rej, &src) catch |err| {
+                    // Reject still stands (no peer allocated); log so a silent
+                    // UDP send failure is not mistaken for "client never tried".
+                    std.debug.print(
+                        "zdtd: connect reject send failed remote_peer_id={d}: {s}\n",
+                        .{ req.peer_id, @errorName(err) },
+                    );
+                };
                 std.debug.print("zdtd: connect rejected (bad password) remote_peer_id={d}\n", .{req.peer_id});
                 return .none;
             }
