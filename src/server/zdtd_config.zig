@@ -2,11 +2,15 @@
 //! Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml >
 //! CWD zdtd.toml > --serverconfig keys > code defaults.
 //! Minimal TOML subset: [section] + key = int|float|bool|string. No arrays/tables-in-tables.
+//! Parsing is the comptime binder (src/util/toml_bind.zig, ADR 0021 decision 1);
+//! this file declares the shape and the merge/sanitize behaviour.
 //! Design: docs/HARDCODE_AUDIT.md, docs/adr/0010-data-config-zig-plugins.md
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const guard_policy = @import("guard_policy.zig");
+const toml_bind = @import("../util/toml_bind.zig");
+const rules_mod = @import("../ecs/rules.zig");
 
 pub const Stream = struct {
     max_streamed_chunks: ?usize = null,
@@ -88,6 +92,10 @@ pub const Sim = struct {
     /// at most the refill each restock.
     trader_restock_cap: ?u16 = null,
     trader_restock_refill: ?u16 = null,
+    /// Storm frequency percent (World::StormFrequency, stock GamePrefs default
+    /// 100 = 1.0x; 0 disables storms). No V3.1.0 serverconfig key (world state,
+    /// GameStats blob); this is the zdtd.toml surface.
+    storm_frequency: ?i32 = null,
 };
 
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
@@ -101,7 +109,29 @@ pub const Plugin = struct {
     modules: ?[]const u8 = null,
 };
 
+/// Authority.mode is a constrained string: observe | permissive | correct.
+/// The binder validates it by name and canonicalises the spelling.
+pub const AuthorityModeName = enum {
+    observe,
+    permissive,
+    correct,
+};
+
 pub const File = struct {
+    pub const toml_label = "zdtd.toml";
+    /// Accepted alternate spellings (kept from the pre-binder chains).
+    pub const aliases = .{
+        .stream = [_][2][]const u8{
+            .{ "chunk_stream_radius_min", "stream_radius_min" },
+            .{ "chunk_stream_radius_max", "stream_radius_max" },
+        },
+        .authority = [_][2][]const u8{
+            .{ "interest_range", "interest_range_blocks" },
+            .{ "max_edit_range", "max_edit_range_blocks" },
+        },
+    };
+    pub const enum_by_name = .{ .mode = AuthorityModeName };
+
     stream: Stream = .{},
     authority: Authority = .{},
     feature: Feature = .{},
@@ -109,6 +139,9 @@ pub const File = struct {
     sim: Sim = .{},
     mode: Mode = .{},
     plugin: Plugin = .{},
+    /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
+    /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
+    rules: rules_mod.RulesOverlay = .{},
     /// Arena owning any string slices from parse.
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
@@ -141,216 +174,18 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
     const a = arena.allocator();
 
     var f: File = .{ .arena_ptr = arena };
-    var section: []const u8 = "";
-
-    var lines = std.mem.splitScalar(u8, src, '\n');
-    while (lines.next()) |raw| {
-        var line = std.mem.trim(u8, try stripComment(raw), " \t\r");
-        if (line.len == 0) continue;
-        if (line[0] == '[') {
-            const end = std.mem.indexOfScalar(u8, line, ']') orelse return error.BadToml;
-            if (std.mem.trim(u8, line[end + 1 ..], " \t").len != 0) return error.BadToml;
-            section = try a.dupe(u8, std.mem.trim(u8, line[1..end], " \t"));
-            if (section.len == 0) return error.BadToml;
-            continue;
-        }
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.BadToml;
-        const key = std.mem.trim(u8, line[0..eq], " \t");
-        if (key.len == 0) return error.BadToml;
-        const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
-        if (val.len == 0) return error.BadToml;
-        try applyKV(&f, a, section, key, val);
-    }
+    toml_bind.bind(File, &f, src, a) catch |err| switch (err) {
+        // The binder's enum-name error surfaces as the pre-binder contract for
+        // an invalid [authority] mode.
+        error.InvalidTomlEnum => return error.InvalidAuthorityMode,
+        else => return err,
+    };
     return f;
 }
 
-fn stripComment(line: []const u8) ![]const u8 {
-    var quote: ?u8 = null;
-    for (line, 0..) |c, i| {
-        if (quote) |q| {
-            if (c == q) quote = null;
-        } else if (c == '"' or c == '\'') {
-            quote = c;
-        } else if (c == '#') {
-            return line[0..i];
-        }
-    }
-    if (quote != null) return error.BadToml;
-    return line;
-}
-
-fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8, val: []const u8) !void {
-    if (std.mem.eql(u8, section, "stream")) {
-        if (std.mem.eql(u8, key, "max_streamed_chunks")) {
-            f.stream.max_streamed_chunks = try parseUsize(val);
-        } else if (std.mem.eql(u8, key, "chunk_adds_per_stream_tick")) {
-            f.stream.chunk_adds_per_stream_tick = try parseU32(val);
-        } else if (std.mem.eql(u8, key, "stream_radius_min") or std.mem.eql(u8, key, "chunk_stream_radius_min")) {
-            f.stream.stream_radius_min = try parseI32(val);
-        } else if (std.mem.eql(u8, key, "stream_radius_max") or std.mem.eql(u8, key, "chunk_stream_radius_max")) {
-            f.stream.stream_radius_max = try parseI32(val);
-        } else if (std.mem.eql(u8, key, "chunk_stream_period_ticks")) {
-            f.stream.chunk_stream_period_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "motion_replicate_period_ticks")) {
-            f.stream.motion_replicate_period_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "world_time_send_ticks")) {
-            f.stream.world_time_send_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "vehicle_pos_send_ticks")) {
-            f.stream.vehicle_pos_send_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "spawn_area_radius_max")) {
-            f.stream.spawn_area_radius_max = try parseI32(val);
-        } else if (std.mem.eql(u8, key, "sleeper_tick_ticks")) {
-            f.stream.sleeper_tick_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "turret_sync_ticks")) {
-            f.stream.turret_sync_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "save_interval_ticks")) {
-            f.stream.save_interval_ticks = try parseU64(val);
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "authority")) {
-        if (std.mem.eql(u8, key, "interest_range_blocks") or std.mem.eql(u8, key, "interest_range")) {
-            f.authority.interest_range_blocks = try parseF32(val);
-        } else if (std.mem.eql(u8, key, "max_edit_range_blocks") or std.mem.eql(u8, key, "max_edit_range")) {
-            f.authority.max_edit_range_blocks = try parseF32(val);
-        } else if (std.mem.eql(u8, key, "max_claimed_damage")) {
-            f.authority.max_claimed_damage = try parseI32(val);
-        } else if (std.mem.eql(u8, key, "peer_stale_ms")) {
-            f.authority.peer_stale_ms = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "guard_enforce")) {
-            f.authority.guard_enforce = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "guard_dry_run")) {
-            f.authority.guard_dry_run = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "guard_quarantine")) {
-            f.authority.guard_quarantine = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "guard_load_shed")) {
-            f.authority.guard_load_shed = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "guard_window_ticks")) {
-            f.authority.guard_window_ticks = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "guard_strong_distinct")) {
-            f.authority.guard_strong_distinct = try parseU32(val);
-        } else if (std.mem.eql(u8, key, "guard_hard_repeat")) {
-            f.authority.guard_hard_repeat = try parseU32(val);
-        } else if (std.mem.eql(u8, key, "mode")) {
-            const mode = stripQuotes(val);
-            if (!std.ascii.eqlIgnoreCase(mode, "observe") and
-                !std.ascii.eqlIgnoreCase(mode, "permissive") and
-                !std.ascii.eqlIgnoreCase(mode, "correct"))
-            {
-                return error.InvalidAuthorityMode;
-            }
-            f.authority.mode = try a.dupe(u8, mode);
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "feature")) {
-        if (std.mem.eql(u8, key, "wire_chunks")) {
-            f.feature.wire_chunks = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "deco_trees")) {
-            f.feature.deco_trees = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "deco_mirror")) {
-            f.feature.deco_mirror = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "block_id_mapping")) {
-            f.feature.block_id_mapping = try parseBool(val);
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "perf")) {
-        if (std.mem.eql(u8, key, "async_chunk_flush")) {
-            f.perf.async_chunk_flush = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "terrain_snapshot")) {
-            f.perf.terrain_snapshot = try parseBool(val);
-        } else if (std.mem.eql(u8, key, "job_batches")) {
-            f.perf.job_batches = try parseBool(val);
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "sim")) {
-        if (std.mem.eql(u8, key, "trader_wallet_dukes")) {
-            f.sim.trader_wallet_dukes = try parseI32(val);
-        } else if (std.mem.eql(u8, key, "min_chat_gap_ns")) {
-            f.sim.min_chat_gap_ns = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "inv_bucket_cap")) {
-            f.sim.inv_bucket_cap = try parseU8(val);
-        } else if (std.mem.eql(u8, key, "inv_refill_ns")) {
-            f.sim.inv_refill_ns = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "block_bucket_cap")) {
-            f.sim.block_bucket_cap = try parseU8(val);
-        } else if (std.mem.eql(u8, key, "block_refill_ns")) {
-            f.sim.block_refill_ns = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "min_damage_gap_ns")) {
-            f.sim.min_damage_gap_ns = try parseU64(val);
-        } else if (std.mem.eql(u8, key, "damage_burst_max")) {
-            f.sim.damage_burst_max = try parseU8(val);
-        } else if (std.mem.eql(u8, key, "trader_restock_cap")) {
-            f.sim.trader_restock_cap = try parseU16(val);
-        } else if (std.mem.eql(u8, key, "trader_restock_refill")) {
-            f.sim.trader_restock_refill = try parseU16(val);
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "mode")) {
-        if (std.mem.eql(u8, key, "name")) {
-            f.mode.name = try a.dupe(u8, stripQuotes(val));
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (std.mem.eql(u8, section, "plugin")) {
-        if (std.mem.eql(u8, key, "modules")) {
-            f.plugin.modules = try a.dupe(u8, stripQuotes(val));
-        } else {
-            return unknownKey(section, key);
-        }
-    } else if (section.len == 0) {
-        std.debug.print("zdtd: zdtd.toml key '{s}' must be inside a known section\n", .{key});
-        return error.UnknownTomlKey;
-    } else {
-        return unknownKey(section, key);
-    }
-}
-
-fn unknownKey(section: []const u8, key: []const u8) error{UnknownTomlKey} {
-    std.debug.print("zdtd: zdtd.toml unknown key [{s}].{s}\n", .{ section, key });
-    return error.UnknownTomlKey;
-}
-
-fn stripQuotes(v: []const u8) []const u8 {
-    if (v.len >= 2 and ((v[0] == '"' and v[v.len - 1] == '"') or (v[0] == '\'' and v[v.len - 1] == '\''))) {
-        return v[1 .. v.len - 1];
-    }
-    return v;
-}
-
-fn parseUsize(v: []const u8) !usize {
-    return std.fmt.parseInt(usize, stripQuotes(v), 10);
-}
-fn parseU32(v: []const u8) !u32 {
-    return std.fmt.parseInt(u32, stripQuotes(v), 10);
-}
-fn parseU64(v: []const u8) !u64 {
-    return std.fmt.parseInt(u64, stripQuotes(v), 10);
-}
-fn parseU8(v: []const u8) !u8 {
-    return std.fmt.parseInt(u8, stripQuotes(v), 10);
-}
-fn parseU16(v: []const u8) !u16 {
-    return std.fmt.parseInt(u16, stripQuotes(v), 10);
-}
-fn parseI32(v: []const u8) !i32 {
-    return std.fmt.parseInt(i32, stripQuotes(v), 10);
-}
-fn parseF32(v: []const u8) !f32 {
-    return std.fmt.parseFloat(f32, stripQuotes(v));
-}
-fn parseBool(v: []const u8) !bool {
-    const s = stripQuotes(v);
-    if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "1") or std.mem.eql(u8, s, "yes")) return true;
-    if (std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "0") or std.mem.eql(u8, s, "no")) return false;
-    return error.BadTomlBool;
-}
-
 /// Merge File into InitOptions-like fields. Only non-null keys override.
-/// Does not apply authority.mode (caller parses with AuthorityMode).
+/// Does not apply authority.mode (caller parses with AuthorityMode); does not
+/// apply `rules` (main.zig merges it over the mode pack in precedence order).
 pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.max_streamed_chunks) |v| opts.max_streamed_chunks = v;
     if (f.stream.chunk_adds_per_stream_tick) |v| opts.chunk_adds_per_stream_tick = v;
@@ -395,6 +230,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.damage_burst_max) |v| opts.damage_burst_max = v;
     if (f.sim.trader_restock_cap) |v| opts.trader_restock_cap = v;
     if (f.sim.trader_restock_refill) |v| opts.trader_restock_refill = v;
+    if (f.sim.storm_frequency) |v| opts.storm_frequency = v;
 }
 
 /// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
@@ -568,6 +404,22 @@ test "parse stream and authority" {
     );
 }
 
+test "parse rules overlay sections" {
+    var f = try parse(std.testing.allocator,
+        \\[rules.combat]
+        \\attack_damage = 12.0
+        \\[rules.ai]
+        \\sense_dist_sq = 2500.0
+        \\[rules.bloodmoon]
+        \\max_parties = 4
+    );
+    defer f.deinit();
+    try std.testing.expectEqual(@as(?f32, 12.0), f.rules.combat.attack_damage);
+    try std.testing.expectEqual(@as(?f32, null), f.rules.combat.attack_range_sq);
+    try std.testing.expectEqual(@as(?f32, 2500.0), f.rules.ai.sense_dist_sq);
+    try std.testing.expectEqual(@as(?u32, 4), f.rules.bloodmoon.max_parties);
+}
+
 test "applyToInitOptions deco_trees only when set" {
     const Opts = struct {
         max_streamed_chunks: usize = 169,
@@ -596,6 +448,7 @@ test "applyToInitOptions deco_trees only when set" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -706,6 +559,7 @@ test "sanitizeInitOptions repairs bad radii" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{
@@ -749,6 +603,7 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{};
@@ -785,6 +640,7 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{ .max_streamed_chunks = 999 };
@@ -820,6 +676,7 @@ test "guard policy merges from [authority] and clamps" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -895,6 +752,7 @@ test "[perf] switches default off and merge only when set" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -957,6 +815,7 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
         damage_burst_max: u8 = 4,
         trader_restock_cap: u16 = 50,
         trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -982,4 +841,55 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
     try std.testing.expectEqual(@as(i32, 0), o.trader_wallet_dukes);
 
     try std.testing.expectError(error.UnknownTomlKey, parse(std.testing.allocator, "[sim]\nnope = 1\n"));
+}
+
+test "[sim] storm_frequency parses and merges" {
+    const Opts = struct {
+        max_streamed_chunks: usize = 169,
+        chunk_stream_radius_min: i32 = 7,
+        chunk_stream_radius_max: i32 = 9,
+        chunk_adds_per_stream_tick: u32 = 8,
+        chunk_stream_period_ticks: u64 = 5,
+        motion_replicate_period_ticks: u64 = 2,
+        world_time_send_ticks: u64 = 20,
+        vehicle_pos_send_ticks: u64 = 5,
+        sleeper_tick_ticks: u64 = 10,
+        turret_sync_ticks: u64 = 10,
+        save_interval_ticks: u64 = 100,
+        spawn_area_radius_max: i32 = 8,
+        interest_range: f32 = 160,
+        max_edit_range: f32 = 96,
+        max_claimed_damage: i32 = 200,
+        peer_stale_ms: u64 = 3000,
+        trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
+        storm_frequency: i32 = 100,
+        wire_chunks: bool = true,
+        deco_trees: bool = true,
+        deco_mirror: bool = true,
+        block_id_mapping: bool = true,
+        async_chunk_flush: bool = false,
+        terrain_snapshot: bool = false,
+        job_batches: bool = false,
+        guard: guard_policy.Policy = .{},
+    };
+    var o: Opts = .{};
+    var f = try parse(std.testing.allocator, "[sim]\nstorm_frequency = 250\n");
+    defer f.deinit();
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(@as(i32, 250), o.storm_frequency);
+    // Default untouched when the key is absent.
+    var empty = try parse(std.testing.allocator, "[sim]\ntrader_wallet_dukes = 5\n");
+    defer empty.deinit();
+    var o2: Opts = .{};
+    applyToInitOptions(&empty, &o2);
+    try std.testing.expectEqual(@as(i32, 100), o2.storm_frequency);
 }
