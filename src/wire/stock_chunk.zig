@@ -19,7 +19,6 @@ pub const stock_air: u16 = assignids.air;
 pub const stock_terr_stone: u16 = assignids.terr_stone;
 pub const stock_terr_bedrock: u16 = assignids.terr_bedrock;
 pub const stock_terr_dirt: u16 = assignids.terr_dirt;
-pub const stock_terr_forest_ground: u16 = assignids.terr_forest_ground;
 pub const stock_terr_topsoil: u16 = assignids.terr_topsoil;
 
 /// Stock BlockValue.isTerrain: unsigned (type - 1) < 239 → type 1..239.
@@ -262,6 +261,80 @@ pub fn packTexturePlane(vals: []const u64, plane: u3, out: []u8) void {
     }
 }
 
+/// Density bytes from dense rawData: densityForBlock per low-16 type.
+/// Scalar equivalent: dens[i] = densityForBlock(@truncate(raws[i])).
+/// Hot stream path when dens_at is null and a raw plane is memoized.
+pub fn packDensityFromRaws(raws: []const u32, dens: []u8) void {
+    std.debug.assert(dens.len >= raws.len);
+    const mask: @Vector(simd_u32_w, u32) = @splat(0xffff);
+    const zero: @Vector(simd_u32_w, u32) = @splat(0);
+    const one: @Vector(simd_u32_w, u32) = @splat(1);
+    const terr_hi: @Vector(simd_u32_w, u32) = @splat(239);
+    const air_d: @Vector(simd_u32_w, u8) = @splat(density_air);
+    const terr_d: @Vector(simd_u32_w, u8) = @splat(density_terrain);
+    const non_d: @Vector(simd_u32_w, u8) = @splat(density_nonterrain);
+    var i: usize = 0;
+    while (i + simd_u32_w <= raws.len) : (i += simd_u32_w) {
+        const chunk: @Vector(simd_u32_w, u32) = raws[i..][0..simd_u32_w].*;
+        const ty = chunk & mask;
+        const is_air = ty == zero;
+        // isTerrainType: type in 1..239 (air 0 is excluded by the lower bound).
+        const is_terrain = (ty >= one) & (ty <= terr_hi);
+        const mid = @select(u8, is_terrain, terr_d, non_d);
+        dens[i..][0..simd_u32_w].* = @select(u8, is_air, air_d, mid);
+    }
+    while (i < raws.len) : (i += 1) {
+        dens[i] = densityForBlock(@truncate(raws[i]));
+    }
+}
+
+const simd_u16_w: usize = 8;
+
+/// Write byte plane of each u16 into out (plane 0 = lo, plane 1 = hi).
+/// Scalar equivalent: out[i] = @truncate(vals[i] >> (plane * 8)).
+pub fn packU16Plane(vals: []const u16, plane: u1, out: []u8) void {
+    std.debug.assert(out.len >= vals.len);
+    const shift_amt: u4 = @as(u4, plane) * 8;
+    var i: usize = 0;
+    while (i + simd_u16_w <= vals.len) : (i += simd_u16_w) {
+        const chunk: @Vector(simd_u16_w, u16) = vals[i..][0..simd_u16_w].*;
+        const shifted = chunk >> @as(@Vector(simd_u16_w, u4), @splat(shift_amt));
+        const bytes: @Vector(simd_u16_w, u8) = @truncate(shifted);
+        out[i..][0..simd_u16_w].* = bytes;
+    }
+    while (i < vals.len) : (i += 1) {
+        out[i] = @truncate(vals[i] >> shift_amt);
+    }
+}
+
+/// Fill water mass plane from dense raws. Writes mass_full where type == water_id,
+/// else 0. Returns true if any cell is water.
+/// Scalar equivalent: per-cell type compare + assign water_mass_full.
+pub fn fillWaterMassFromRaws(raws: []const u32, water_id: u16, vals: []u16) bool {
+    std.debug.assert(vals.len >= raws.len);
+    const mask: @Vector(simd_u32_w, u32) = @splat(0xffff);
+    const wid: @Vector(simd_u32_w, u32) = @splat(water_id);
+    const mass: @Vector(simd_u32_w, u16) = @splat(water_mass_full);
+    const zero: @Vector(simd_u32_w, u16) = @splat(0);
+    var has_water = false;
+    var i: usize = 0;
+    while (i + simd_u32_w <= raws.len) : (i += simd_u32_w) {
+        const chunk: @Vector(simd_u32_w, u32) = raws[i..][0..simd_u32_w].*;
+        const hit = (chunk & mask) == wid;
+        if (@reduce(.Or, hit)) has_water = true;
+        vals[i..][0..simd_u32_w].* = @select(u16, hit, mass, zero);
+    }
+    while (i < raws.len) : (i += 1) {
+        if (@as(u16, @truncate(raws[i])) == water_id) {
+            vals[i] = water_mass_full;
+            has_water = true;
+        } else {
+            vals[i] = 0;
+        }
+    }
+    return has_water;
+}
+
 /// Write one same-value ChunkBlockChannel (all 64 layers null, sameValue filled).
 fn writeChannelSame(w: *binary.Writer, bytes_per_val: usize, fill: []const u8) !void {
     // fill length must be bytes_per_val (one value repeated into sameValue slots by read path).
@@ -421,7 +494,10 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // density: solid below surface, air above (per-cell via full layers is heavy;
     // use same-value air for empty sky layers is handled by block presence).
     // Emit density channel as full per-layer data for bands that have solids, else same air.
-    try writeDensityChannel(&w, opts);
+    // Density/texture/water share the memoized raw plane when raws_scratch filled
+    // opts_memo.raws (stream path). Passing plain opts would drop the plane and
+    // re-invoke blockAt per cell (and skip SIMD density/water packs).
+    try writeDensityChannel(&w, opts_memo);
 
     // light bpv=1: full sun+block (0xFF). Zero light makes the whole mesh black/grey
     // until client LightChunk runs; seed bright so first mesh is readable.
@@ -429,10 +505,10 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // damage bpv=2 same 0
     try writeChannelSame(&w, 2, &[_]u8{ 0, 0 });
     // textures[0] bpv=6: TTS paint, else blocks.xml default Texture packing.
-    try writeTextureChannel(&w, opts);
+    try writeTextureChannel(&w, opts_memo);
     // water bpv=2: per-cell WaterValue mass. Static lake cells carry the full
     // mass; air/other cells 0. Same-value 0 layers stay tiny.
-    try writeWaterChannel(&w, opts);
+    try writeWaterChannel(&w, opts_memo);
 
     // true → client runs light rebuild; false + bright seed still meshes immediately.
     try w.writeBool(true); // NeedsLightCalculation
@@ -483,17 +559,25 @@ fn densityAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u8 {
 
 fn writeDensityChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     // ChunkBlockChannel bpv=1: per layer presence(1=null/sameValue, 0=full 1024).
+    // Fast path: dense raw plane + no TTS dens_at → SIMD packDensityFromRaws.
+    // dens_at or missing raws falls back to per-cell densityAt (scalar).
     var layer_i: usize = 0;
     while (layer_i < layers_n) : (layer_i += 1) {
         const y0: i32 = @intCast(layer_i * 4);
         var dens: [cells_per_layer]u8 = undefined;
-        var ly: i32 = 0;
-        while (ly < 4) : (ly += 1) {
-            var lz: i32 = 0;
-            while (lz < 16) : (lz += 1) {
-                var lx: i32 = 0;
-                while (lx < 16) : (lx += 1) {
-                    dens[layerCell(lx, ly, lz)] = densityAt(opts, lx, y0 + ly, lz);
+        if (opts.dens_at == null and opts.raws != null) {
+            const plane = opts.raws.?;
+            const base: usize = @intCast(y0 * 256);
+            packDensityFromRaws(plane[base..][0..cells_per_layer], &dens);
+        } else {
+            var ly: i32 = 0;
+            while (ly < 4) : (ly += 1) {
+                var lz: i32 = 0;
+                while (lz < 16) : (lz += 1) {
+                    var lx: i32 = 0;
+                    while (lx < 16) : (lx += 1) {
+                        dens[layerCell(lx, ly, lz)] = densityAt(opts, lx, y0 + ly, lz);
+                    }
                 }
             }
         }
@@ -554,16 +638,21 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
         var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
         var has_water = false;
         if (opts.water_block_id != 0) {
-            var ly: i32 = 0;
-            while (ly < 4) : (ly += 1) {
-                var lz: i32 = 0;
-                while (lz < 16) : (lz += 1) {
-                    var lx: i32 = 0;
-                    while (lx < 16) : (lx += 1) {
-                        const raw = rawAt(opts, lx, y0 + ly, lz);
-                        if (@as(u16, @truncate(raw)) == opts.water_block_id) {
-                            vals[layerCell(lx, ly, lz)] = water_mass_full;
-                            has_water = true;
+            if (opts.raws) |plane| {
+                const base: usize = @intCast(y0 * 256);
+                has_water = fillWaterMassFromRaws(plane[base..][0..cells_per_layer], opts.water_block_id, &vals);
+            } else {
+                var ly: i32 = 0;
+                while (ly < 4) : (ly += 1) {
+                    var lz: i32 = 0;
+                    while (lz < 16) : (lz += 1) {
+                        var lx: i32 = 0;
+                        while (lx < 16) : (lx += 1) {
+                            const raw = rawAt(opts, lx, y0 + ly, lz);
+                            if (@as(u16, @truncate(raw)) == opts.water_block_id) {
+                                vals[layerCell(lx, ly, lz)] = water_mass_full;
+                                has_water = true;
+                            }
                         }
                     }
                 }
@@ -576,13 +665,12 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
         }
         try w.writeByte(0); // presence: full byte-planes
         var plane_buf: [cells_per_layer]u8 = undefined;
-        var j: usize = 0;
-        while (j < 2) : (j += 1) {
-            var c: usize = 0;
-            while (c < cells_per_layer) : (c += 1) {
-                plane_buf[c] = @truncate(vals[c] >> @intCast(j * 8));
-            }
+        var j: u1 = 0;
+        while (true) {
+            packU16Plane(&vals, j, &plane_buf);
             try w.writeBytes(&plane_buf);
+            if (j == 1) break;
+            j = 1;
         }
     }
 }
@@ -831,6 +919,141 @@ test "simd packLower and packTexturePlane match scalar" {
     while (i < 32) : (i += 1) {
         try std.testing.expectEqual(@as(u8, @truncate(vals[i] >> 16)), plane[i]);
     }
+}
+
+test "simd packDensityFromRaws matches densityForBlock" {
+    // Mix: air, terrain band (1..239), construction id, high raw with rot bits.
+    var raws: [1024]u32 = undefined;
+    var i: usize = 0;
+    while (i < 1024) : (i += 1) {
+        raws[i] = switch (i % 7) {
+            0 => @as(u32, stock_air),
+            1 => @as(u32, stock_terr_dirt),
+            2 => @as(u32, stock_terr_stone),
+            3 => 259, // non-terrain shape
+            4 => 1000, // construction
+            5 => @as(u32, stock_terr_bedrock) | (@as(u32, 3) << 16), // terrain + meta
+            else => @as(u32, 500) | (@as(u32, 1) << 24),
+        };
+    }
+    var dens: [1024]u8 = undefined;
+    packDensityFromRaws(&raws, &dens);
+    i = 0;
+    while (i < 1024) : (i += 1) {
+        try std.testing.expectEqual(densityForBlock(@truncate(raws[i])), dens[i]);
+    }
+    // Tail length not a multiple of vector width.
+    var short_raws: [11]u32 = .{ 0, 1, 100, 239, 240, 259, 1000, 0, 5, 300, 42 };
+    var short_dens: [11]u8 = undefined;
+    packDensityFromRaws(&short_raws, &short_dens);
+    i = 0;
+    while (i < 11) : (i += 1) {
+        try std.testing.expectEqual(densityForBlock(@truncate(short_raws[i])), short_dens[i]);
+    }
+}
+
+test "simd packU16Plane and fillWaterMassFromRaws match scalar" {
+    var vals: [1024]u16 = undefined;
+    var i: usize = 0;
+    while (i < 1024) : (i += 1) vals[i] = @as(u16, @intCast((i * 37 + 0x4C2C) & 0xffff));
+    var lo: [1024]u8 = undefined;
+    var hi: [1024]u8 = undefined;
+    packU16Plane(&vals, 0, &lo);
+    packU16Plane(&vals, 1, &hi);
+    i = 0;
+    while (i < 1024) : (i += 1) {
+        try std.testing.expectEqual(@as(u8, @truncate(vals[i])), lo[i]);
+        try std.testing.expectEqual(@as(u8, @truncate(vals[i] >> 8)), hi[i]);
+    }
+
+    const water_id: u16 = 240;
+    var raws: [1024]u32 = .{0} ** 1024;
+    raws[0] = water_id;
+    raws[17] = @as(u32, water_id) | (@as(u32, 2) << 16);
+    raws[1000] = 1; // stone
+    var mass: [1024]u16 = undefined;
+    const has = fillWaterMassFromRaws(&raws, water_id, &mass);
+    try std.testing.expect(has);
+    try std.testing.expectEqual(water_mass_full, mass[0]);
+    try std.testing.expectEqual(water_mass_full, mass[17]);
+    try std.testing.expectEqual(@as(u16, 0), mass[1000]);
+    try std.testing.expectEqual(@as(u16, 0), mass[1]);
+    // No water cells.
+    @memset(&raws, 1);
+    try std.testing.expect(!fillWaterMassFromRaws(&raws, water_id, &mass));
+    try std.testing.expectEqual(@as(u16, 0), mass[0]);
+}
+
+test "simd density channel with raws plane matches dens_at-less scalar encode" {
+    // Full memoized raw plane: SIMD density path must match callback-only encode.
+    var heights: [256]u8 = .{60} ** 256;
+    var plane: [65536]u32 = undefined;
+    var i: usize = 0;
+    while (i < plane.len) : (i += 1) {
+        const lx: i32 = @intCast(i % 16);
+        const lz: i32 = @intCast((i / 16) % 16);
+        const y: i32 = @intCast(i / 256);
+        plane[i] = defaultBlockAt(&heights, lx, y, lz);
+        // One non-terrain solid so density mix is not only terrain/air.
+        if (y == 30 and lx == 2 and lz == 3) plane[i] = 259;
+    }
+    var buf_a: [131072]u8 = undefined;
+    var buf_b: [131072]u8 = undefined;
+    const with_plane = try encodeNetworkChunk(&buf_a, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .raws = &plane,
+    });
+    const Ctx = struct {
+        plane: *const [65536]u32,
+        fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32 {
+            const self: *const @This() = @ptrCast(@alignCast(ctx.?));
+            return self.plane[@intCast(lx + lz * 16 + y * 256)];
+        }
+    };
+    var ctx: Ctx = .{ .plane = &plane };
+    const via_cb = try encodeNetworkChunk(&buf_b, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .block_at = Ctx.at,
+        .block_ctx = &ctx,
+    });
+    try std.testing.expectEqualSlices(u8, via_cb, with_plane);
+}
+
+test "raws_scratch memo reaches density channel (SIMD path)" {
+    // raws_scratch alone must fill opts_memo.raws so density/water see the plane.
+    var heights: [256]u8 = .{55} ** 256;
+    var scratch: [65536]u32 = undefined;
+    var buf_scratch: [131072]u8 = undefined;
+    var buf_raws: [131072]u8 = undefined;
+    const via_scratch = try encodeNetworkChunk(&buf_scratch, .{
+        .cx = 1,
+        .cz = -2,
+        .heights = &heights,
+        .raws_scratch = &scratch,
+    });
+    // Same content as an explicit plane fill with defaultBlockAt.
+    var plane: [65536]u32 = undefined;
+    var i: usize = 0;
+    while (i < plane.len) : (i += 1) {
+        const lx: i32 = @intCast(i % 16);
+        const lz: i32 = @intCast((i / 16) % 16);
+        const y: i32 = @intCast(i / 256);
+        plane[i] = defaultBlockAt(&heights, lx, y, lz);
+    }
+    const via_raws = try encodeNetworkChunk(&buf_raws, .{
+        .cx = 1,
+        .cz = -2,
+        .heights = &heights,
+        .raws = &plane,
+    });
+    try std.testing.expectEqualSlices(u8, via_raws, via_scratch);
+    // Scratch must have been filled (not left untouched).
+    try std.testing.expect(scratch[0] == stock_terr_bedrock);
+    try std.testing.expect(scratch[55 * 256] != stock_air);
 }
 
 test "simd encode matches mixed height chunk length class" {
