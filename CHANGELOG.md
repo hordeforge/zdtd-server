@@ -162,6 +162,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   block-activated objective update (parsed but previously discarded) instead
   of auto-scaffolding past the phase; unrelated objective events such as
   zombie kills no longer advance it.
+- Trader restock follows each traders.xml `<trader_info>` `reset_interval`
+  (-1 never, 0 daily, N every N days) instead of a flat daily refill, and
+  buy/sell pricing uses the root `buy_markup` / `sell_markdown` (per-trader
+  overrides win) so the server charge matches the price the client displays.
+- Goto-point quests without a static position (stock RandomPOIGoto /
+  ClosestPOIGoto) bind the nearest real POI at accept; the NavObject marker,
+  PositionData location and the goto check all use the bound POI center, so
+  markers point at reachable prefabs instead of an invented FNV spot.
+- Container loot fails closed: storage blocks with no resolvable `LootList`
+  stay empty on both initial fill and the LootRespawnDays re-roll instead of
+  falling back to a woodenChest roll.
+- The block-id coverage guard test asserts every placeable blocks.xml name
+  resolves in the bundled AssignIds dump, so the negotiated `blocks` mapping
+  never leaves server data to the client's `assignLeftOverBlocks`.
+- The last bare tick throttles became `[stream]` keys in zdtd.toml
+  (`sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`), and the
+  workstation burn dt follows the configured cadence.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
