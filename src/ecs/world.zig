@@ -6,6 +6,7 @@ const c = @import("components.zig");
 const electric = @import("electric.zig");
 const quest = @import("quest.zig");
 const director = @import("aidirector.zig");
+const rules_mod = @import("rules.zig");
 const command = @import("command.zig");
 const inv_ledger = @import("inv_ledger.zig");
 const locals_mod = @import("locals.zig");
@@ -68,6 +69,9 @@ pub const World = struct {
     /// `trader_restock_refill`. Bucket B (zdtd sim strategy, not stock data).
     trader_restock_cap: u16 = 50,
     trader_restock_refill: u16 = 10,
+    /// Sim rule parameters (ADR 0021): combat/ai/bloodmoon tuning, overlaid
+    /// from the mode pack and zdtd.toml by main.zig (Game sets this at init).
+    rules: rules_mod.Rules = .{},
     journal: [max_entities]c.Journal = [_]c.Journal{.{}} ** max_entities,
     wallet: [max_entities]c.Wallet = [_]c.Wallet{.{}} ** max_entities,
     inventory: [max_entities]c.Inventory = [_]c.Inventory{.{}} ** max_entities,
@@ -186,6 +190,13 @@ pub const World = struct {
     /// Optional item_id → armor? (name prefix armor*). Null → offline pin.
     is_armor_ctx: ?*anyopaque = null,
     is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// Optional kill verdict hook (T15 / ADR 0021 decision 4): (ctx, kind,
+    /// victim_id, attacker_id) -> i32. Below 0 denies the death: the victim
+    /// survives at 1 hp and the fatal hit's side effects (loot, corpse,
+    /// respawn flow) are skipped. Game wires this to the Wasm host; unset =
+    /// no plugins, today's behaviour exactly.
+    kill_verdict_ctx: ?*anyopaque = null,
+    kill_verdict_fn: ?*const fn (?*anyopaque, Kind, i32, i32) i32 = null,
     /// Optional POI footprint at a world XZ (Game wires the prefabs index).
     /// Unset → no POI data (tests / headless), so quests get no POI rect and
     /// their rally objectives stay scaffolding instead of stalling.
@@ -745,6 +756,14 @@ pub const World = struct {
         self.health[s].hp -= amount;
         self.markDirty(s, .{ .hp = true });
         if (self.health[s].hp <= 0) {
+            // Kill verdict (T15): a plugin may deny the death; the victim
+            // survives at 1 hp and the hit is consumed (no loot/corpse/flow).
+            if (self.kill_verdict_fn) |vf| {
+                if (vf(self.kill_verdict_ctx, self.kind[s], self.network_id[s].id, attacker_net_id) < 0) {
+                    self.health[s].hp = 1;
+                    return .{};
+                }
+            }
             // Drop loot bag for zombies/animals (caller must S2C stock ECD + Bag).
             if ((self.kind[s] == .zombie or self.kind[s] == .animal) and self.mask[s].transform) {
                 const x = self.transform[s].x;

@@ -132,14 +132,12 @@ pub fn scoutSpawnerName(party_stage: i32) []const u8 {
     return "ScoutsRadiated";
 }
 
-/// AIDirectorBloodMoonParty constants (asm.il 413090-413140): players within
-/// 80 m join one party; horde zombies beyond 150 m teleport back; waves spawn
-/// ~40 m from the focus; the per-party alive ceiling is cPartyEnemyMax 30.
-pub const party_join_dist: f32 = 80.0;
-pub const party_teleport_dist: f32 = 150.0;
-pub const party_spawn_dist: f32 = 40.0;
-pub const party_enemy_max: u32 = 30;
-pub const max_bm_parties: usize = 8;
+/// Blood-moon party storage bound. The tuning constants (join/teleport/spawn
+/// distances, party enemy cap, party count) live in rules.zig
+/// `w.rules.bloodmoon` (ADR 0021): the per-tick reads go through the rule, and
+/// `max_parties` is clamped to this array bound at use. The stock values are
+/// AIDirectorBloodMoonParty constants (asm.il 413090-413140).
+pub const bm_parties_cap: usize = 8;
 
 /// AIDirectorWanderingHordeComponent (asm.il 419473-419490): a scheduled group
 /// of ~6 zombies spawns ~92 m out and walks in as a pack. ChooseNextTime picks
@@ -224,7 +222,7 @@ pub const Director = struct {
     /// players within cPartyJoinDistance 80 m share one focus and one
     /// per-party wave; the party gamestage is frozen for the night; horde
     /// zombies beyond cTeleportDist 150 m are teleported back.
-    bm_parties: [max_bm_parties]BmParty = [_]BmParty{.{}} ** max_bm_parties,
+    bm_parties: [bm_parties_cap]BmParty = [_]BmParty{.{}} ** bm_parties_cap,
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
@@ -466,9 +464,13 @@ pub const Director = struct {
 
     /// Cluster online players into blood-moon parties: anyone within
     /// cPartyJoinDistance (80 m) of an existing party focus joins it (focus =
-    /// running average); stragglers open new parties (cap max_bm_parties).
+    /// running average); stragglers open new parties (cap rules.bloodmoon
+    /// max_parties, clamped to the storage array bm_parties_cap).
     fn buildBloodMoonParties(self: *Director, w: *ecs_world.World) void {
-        self.bm_parties = [_]BmParty{.{}} ** max_bm_parties;
+        const rules = w.rules.bloodmoon;
+        const max_parties: usize = @min(rules.max_parties, bm_parties_cap);
+        const join2 = rules.party_join_dist * rules.party_join_dist;
+        self.bm_parties = [_]BmParty{.{}} ** bm_parties_cap;
         self.bm_party_n = 0;
         var p: ecs_world.Slot = 0;
         while (p < ecs_world.max_entities) : (p += 1) {
@@ -479,7 +481,7 @@ pub const Director = struct {
             for (self.bm_parties[0..self.bm_party_n]) |*party| {
                 const dx = party.focus_x - x;
                 const dz = party.focus_z - z;
-                if (dx * dx + dz * dz > party_join_dist * party_join_dist) continue;
+                if (dx * dx + dz * dz > join2) continue;
                 const m: f32 = @floatFromInt(party.members);
                 party.focus_x = (party.focus_x * m + x) / (m + 1.0);
                 party.focus_z = (party.focus_z * m + z) / (m + 1.0);
@@ -487,7 +489,7 @@ pub const Director = struct {
                 joined = true;
                 break;
             }
-            if (joined or self.bm_party_n >= max_bm_parties) continue;
+            if (joined or self.bm_party_n >= max_parties) continue;
             const np = &self.bm_parties[self.bm_party_n];
             np.* = .{ .focus_x = x, .focus_z = z, .members = 1 };
             self.bm_party_n += 1;
@@ -498,9 +500,10 @@ pub const Director = struct {
     /// alive set (stock OnEntityUnloaded accounting) and teleport a drifter
     /// back to its party focus once it passes cTeleportDist (150 m).
     fn recountAndTeleportHorde(self: *Director, w: *ecs_world.World) void {
+        const rules = w.rules.bloodmoon;
         for (self.bm_parties[0..self.bm_party_n]) |*party| party.alive = 0;
         if (self.bm_party_n == 0) return;
-        const tel2 = party_teleport_dist * party_teleport_dist;
+        const tel2 = rules.party_teleport_dist * rules.party_teleport_dist;
         var s: ecs_world.Slot = 0;
         while (s < ecs_world.max_entities) : (s += 1) {
             if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
@@ -521,8 +524,8 @@ pub const Director = struct {
             if (best_d2 <= tel2) continue;
             const focus = &self.bm_parties[best_i];
             const ang = @as(f32, @floatFromInt(s)) * 2.399963; // ~120 degree steps
-            const nx = focus.focus_x + @cos(ang) * party_spawn_dist;
-            const nz = focus.focus_z + @sin(ang) * party_spawn_dist;
+            const nx = focus.focus_x + @cos(ang) * rules.party_spawn_dist;
+            const nz = focus.focus_z + @sin(ang) * rules.party_spawn_dist;
             w.setPos(w.network_id[s].id, nx, w.transform[s].y, nz, 0);
         }
     }
@@ -540,13 +543,14 @@ pub const Director = struct {
     /// min(cPartyEnemyMax 30, BloodMoonEnemyCount x members). One shared wave
     /// per party instead of one per player: 2 players in range get one horde.
     fn spawnBloodMoonParties(self: *Director, w: *ecs_world.World, wave: u32, group: []const u8) u32 {
+        const rules = w.rules.bloodmoon;
         var n: u32 = 0;
         for (self.bm_parties[0..self.bm_party_n]) |*party| {
-            const cap = @min(party_enemy_max, @as(u32, self.bloodmoon_enemy_count) * party.members);
+            const cap = @min(rules.party_enemy_max, @as(u32, self.bloodmoon_enemy_count) * party.members);
             var k: u32 = 0;
             while (k < wave and party.alive < cap and n < wave * self.bm_party_n) : (k += 1) {
                 const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
-                const r = party_spawn_dist + @mod(ang, 1.0) * 10.0;
+                const r = rules.party_spawn_dist + @mod(ang, 1.0) * 10.0;
                 const x = party.focus_x + @cos(ang) * r;
                 const z = party.focus_z + @sin(ang) * r;
                 const y = nearestPlayerY(w, x, z) orelse continue;

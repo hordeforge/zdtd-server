@@ -17,6 +17,8 @@ pub const buff = @import("buff.zig");
 pub const electric = @import("electric.zig");
 pub const powerblocks = @import("powerblocks.zig");
 pub const aidirector = @import("aidirector.zig");
+pub const party = @import("party.zig");
+pub const rules = @import("rules.zig");
 pub const path = @import("path.zig");
 pub const interest = @import("interest.zig");
 pub const inventory = @import("inventory.zig");
@@ -68,6 +70,7 @@ test {
     _ = electric;
     _ = powerblocks;
     _ = aidirector;
+    _ = rules;
     _ = path;
     _ = interest;
     _ = inventory;
