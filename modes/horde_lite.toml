@@ -1,0 +1,23 @@
+# horde_lite: softer blood moons for casual sessions (ADR 0021 mode overlay).
+# Exercises the [rules.*] surface: sim rule numbers, not just serverconfig keys.
+# Load: --mode horde_lite  or  zdtd.toml [mode] name = "horde_lite"
+
+name = "horde_lite"
+
+# Stock serverconfig keys (optional overrides)
+max_spawned_zombies = 32
+blood_moon_frequency = 10
+enable_sample_plugin = true
+
+# Sim rules (docs/GAME_OPTIONS.md "[rules] sim rules"): zombies hit softer and
+# slower, horde parties cap lower. An operator's zdtd.toml [rules.*] wins.
+[rules.combat]
+attack_damage = 5.0
+attack_cooldown_s = 1.5
+
+[rules.ai]
+chase_speed = 1.6
+wander_speed = 0.6
+
+[rules.bloodmoon]
+party_enemy_max = 20

@@ -15,7 +15,7 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 | CLI (`--port`, `--mode`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
 | `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature/sim/plugin + optional `[mode] name`; first existing file wins; **fatal** if present but unreadable |
-| Mode pack `modes/<name>.toml` | When `--mode` or `[mode] name` is set: data-only InitOptions overrides (after serverconfig, before stream keys) |
+| Mode pack `modes/<name>.toml` | When `--mode` or `[mode] name` is set: data-only InitOptions + `[rules.*]` sim-rule overrides (after serverconfig, before stream keys; `zdtd.toml` wins on a rules key) |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
 
@@ -100,9 +100,49 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE_ARCHITECTURE.md` |
-| `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). Defaults match the previous code constants |
+| `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `storm_frequency` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. Defaults match the previous code constants |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
+| `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the mode pack so `zdtd.toml` wins; see the `[rules]` section below |
 | `[plugin]` | `modules` | Comma-separated `.wasm` paths for the Wasm plugin runtime (ADR 0020, [PLUGIN_DEV.md](PLUGIN_DEV.md)); empty default = no Wasm plugins |
+
+### `[rules]` sim rules (mode packs and zdtd.toml)
+
+ADR 0021: the sim's rule parameters live in one `Rules` struct
+(`src/ecs/rules.zig`) read as `w.rules.<group>.<field>`. Both a mode pack and
+`zdtd.toml` can set them under `[rules.<group>]` sections (dotted keys); the
+binder reflects the struct, so this table is the struct and the struct is the
+parser (adding a tunable is one field + one row). Precedence for a key set in
+both: **zdtd.toml wins over the mode pack** (operator wins), matching the
+top-level order.
+
+Defaults equal the pre-move code constants (pinned by the `Rules` defaults
+test, so a retune cannot land silently).
+
+| Section / key | Default | Floor / policy |
+|---|---|---|
+| `[rules.combat]` | | |
+| `attack_damage` | 8.0 | **Floor**: `entityclasses.xml` `HandItem` → `items.xml` `DamageEntity` wins when non-zero |
+| `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
+| `attack_cooldown_s` | 1.2 | Policy (no entityclasses field) |
+| `[rules.ai]` | | |
+| `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
+| `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
+| `sense_dist_sq` | 2304.0 | Policy (sense range) |
+| `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
+| `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
+| `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |
+| `[rules.bloodmoon]` | | |
+| `party_join_dist` | 80.0 | Policy (AIDirectorBloodMoonParty constant) |
+| `party_teleport_dist` | 150.0 | Policy (AIDirectorBloodMoonParty constant) |
+| `party_spawn_dist` | 40.0 | Policy (AIDirectorBloodMoonParty constant) |
+| `party_enemy_max` | 30 | Policy (cPartyEnemyMax) |
+| `max_parties` | 8 | Policy; clamped to the storage array bound at use |
+| `[rules.progression]` | (empty) | Added as constants move; no fields invented |
+| `[rules.world]` | (empty) | Added as constants move; no fields invented |
+
+A mode that wants every zombie to hit harder gets a multiplier on the resolved
+per-entity value (the `zombie_speed_scale` shape), never a global that discards
+`entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md)).
 
 ### Gamemode packs (`modes/`)
 
@@ -129,11 +169,16 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 | `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
 | `loot_respawn_days` | container re-roll interval (0..365) |
 | `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
+| `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]` (see above) |
 
 Only the keys you set override; everything else falls through to
 `serverconfig.xml`, `zdtd.toml` and code defaults. A mode is a complete
 behavior pack — `hardcore.toml` = `player_killing_mode = 0`,
-`drop_on_death = 1`, `game_difficulty = 4`, and so on — no code involved.
+`drop_on_death = 1`, `game_difficulty = 4`, plus `[rules.combat]`
+`attack_damage = 14`, and so on — no code involved.
+
+Shipped examples that exercise the rules surface: [`modes/horde_lite.toml`](../modes/horde_lite.toml)
+(softer) and [`modes/survival_crunch.toml`](../modes/survival_crunch.toml) (harsher).
 
 Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
 be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.

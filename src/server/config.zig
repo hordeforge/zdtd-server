@@ -29,6 +29,15 @@ pub const Config = struct {
     max_players: u16 = 8,
     world_name: []const u8 = "zdtd",
     game_world: []const u8 = "",
+    /// Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding
+    /// all 152 sandbox options, echoed verbatim into GameStats(71) so a joining
+    /// client decodes the server's gates (TemperatureSurvival, StormFreq,
+    /// blood-moon settings) instead of its own defaults (RE sandbox-options
+    /// §8). Malformed codes leave client defaults, exactly like stock.
+    sandbox_code: []const u8 = "",
+    /// SandboxPreset (295): the preset NAME for server-browser display and the
+    /// stock-settings check; not used to load values.
+    sandbox_preset: []const u8 = "",
     password: []const u8 = "",
     admin_port: u16 = 0,
     /// Stock telnet console (EnumGamePrefs TelnetEnabled 0x44 / TelnetPort 0x45 /
@@ -234,6 +243,8 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     }
     if (prop(raw, "GameName")) |v| cfg.world_name = try arena.dupe(u8, v);
     if (prop(raw, "GameWorld")) |v| cfg.game_world = try arena.dupe(u8, v);
+    if (prop(raw, "SandboxCode")) |v| cfg.sandbox_code = try arena.dupe(u8, v);
+    if (prop(raw, "SandboxPreset")) |v| cfg.sandbox_preset = try arena.dupe(u8, v);
     if (prop(raw, "ServerPassword")) |v| cfg.password = try arena.dupe(u8, v);
     if (prop(raw, "AdminPort")) |v| {
         cfg.admin_port = xml.parseU16(v) orelse blk: {
@@ -346,6 +357,8 @@ test "parse config fixture" {
         \\  <property name="ServerPort" value="27002"/>
         \\  <property name="GameName" value="TestWorld"/>
         \\  <property name="ServerMaxPlayerCount" value="16"/>
+        \\  <property name="SandboxPreset" value="Adventurer"/>
+        \\  <property name="SandboxCode" value="AAAJABJACJADJARFBNC"/>
         \\</ServerSettings>
     ;
     var tmp = std.testing.tmpDir(.{});
@@ -359,6 +372,11 @@ test "parse config fixture" {
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u16, 27002), cfg.port);
     try std.testing.expectEqualStrings("TestWorld", cfg.world_name);
+    // Sandbox code + preset ride through verbatim (the client decodes the
+    // server's weather-survival / blood-moon gates from the code; RE
+    // sandbox-options §8).
+    try std.testing.expectEqualStrings("AAAJABJACJADJARFBNC", cfg.sandbox_code);
+    try std.testing.expectEqualStrings("Adventurer", cfg.sandbox_preset);
     // Unset gameplay options keep stock defaults.
     try std.testing.expectEqual(@as(u8, 2), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);

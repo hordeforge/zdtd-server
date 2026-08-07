@@ -1,0 +1,25 @@
+# survival_crunch: harsher zombies and scarcer loot (ADR 0021 mode overlay).
+# Exercises the [rules.*] surface opposite to horde_lite. Load: --mode survival_crunch
+# or zdtd.toml [mode] name = "survival_crunch"
+
+name = "survival_crunch"
+
+# Stock serverconfig keys (optional overrides)
+max_spawned_zombies = 64
+blood_moon_frequency = 7
+loot_abundance = 60
+drop_on_death = 1
+
+# Sim rules (docs/GAME_OPTIONS.md "[rules] sim rules"). Note the attack_damage
+# floor: per-entity items.xml DamageEntity still wins when non-zero; this value
+# applies when the class table has no entry (ADR 0021 decision 5).
+[rules.combat]
+attack_damage = 12.0
+
+[rules.ai]
+chase_speed = 2.8
+sense_dist_sq = 3600.0
+
+[rules.bloodmoon]
+party_join_dist = 120.0
+party_enemy_max = 40

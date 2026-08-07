@@ -8,6 +8,7 @@ const frame = @import("wire/frame.zig");
 const protocol = @import("protocol.zig");
 const apm = @import("apm/root.zig");
 const world_store = @import("world/store.zig");
+const ecs_mod = @import("ecs/root.zig");
 const server_config = @import("server/config.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const mode_mod = @import("server/mode.zig");
@@ -576,6 +577,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .loot_respawn_days = cfg.loot_respawn_days,
         .worldgen_seed = worldgen_seed,
         .authority_mode = cfg.authority_mode,
+        .sandbox_code = cfg.sandbox_code,
+        .sandbox_preset = cfg.sandbox_preset,
     };
 
     var toml_path_buf: [1024]u8 = undefined;
@@ -634,18 +637,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         // allocate, so split it here and free the list after the Game is created
         // (paths point into the toml arena; Game dupes the names it keeps).
         if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
+        // authority.mode is validated + canonicalised at parse (binder
+        // enum_by_name), so this is a straight apply.
         if (tf.authority.mode) |mode_s| {
-            if (server_config.AuthorityMode.parse(mode_s)) |am| {
-                init_opts.authority_mode = am;
-            } else {
-                // Keep as warning so misconfigured authority is still visible under --quiet.
-                std.debug.print(
-                    "zdtd: zdtd.toml authority.mode '{s}' unknown (use observe|permissive|correct); keeping {s}\n",
-                    .{ mode_s, @tagName(init_opts.authority_mode) },
-                );
-            }
+            if (server_config.AuthorityMode.parse(mode_s)) |am| init_opts.authority_mode = am;
         }
     }
+    // Effective sim rules: defaults < mode pack < zdtd.toml (ADR 0021). The
+    // pack is the lower-precedence overlay; the operator's zdtd.toml wins.
+    var rules_eff: ecs_mod.rules.Rules = .{};
+    if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
+    if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
+    init_opts.rules = rules_eff;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
     zdtd_config.sanitizeInitOptions(&init_opts);
 
