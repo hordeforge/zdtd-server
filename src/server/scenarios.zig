@@ -118,13 +118,15 @@ test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
 }
 
 test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_sc_dmg");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dmg", 0);
+    const g = try game_mod.Game.create(gpa, dir, 0);
     defer {
         g.deinit();
         gpa.destroy(g);

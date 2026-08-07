@@ -83,11 +83,12 @@ the surface. Still open: `part_*` decorations are not painted, sleeper triggers
 are partial, and per-block facing uses one remap table where stock resolves it
 virtually per BlockShape.
 
-**Water is in lakes but not POIs.** Lake and river water now writes from the
+**Water is in lakes and POIs.** Lake and river water now writes from the
 `water_info.xml` sources at chunk generation (water blocks below the surface),
 and the chunk water channel carries the full static mass, so Navezgane's 39
-sources render wet. Still dry: prefab `.tts` water planes (POI pools, flooded
-basements, water tanks) and the flowing-water sim.
+sources render wet. Prefab `.tts` water planes (POI pools, flooded basements,
+water tanks) paint the resolved water block from the v>=17 sparse water
+channel, so they render too. Still open: the flowing-water sim.
 
 **Loot is mostly meaningful now.** Containers roll their own `blocks.xml`
 LootList (a gun safe rolls `smallSafes`, a chest rolls `woodenChest`), and
@@ -126,25 +127,30 @@ replication CPU work.
 The per-area tables and the scorecard **have** been rescored against the code at
 head `2768e30` (2026-08-06): rows verified as landed carry a `(2026-08-06)` tag
 next to their state. Totals moved from 74/160/111 to 100/150/95 (current
-scorecard; the per-area headers match the row counts).
+scorecard; the per-area headers match the row counts). On 2026-08-07 the
+scorecard was recounted from the per-feature markers (338 features; the
+per-area headers and the scorecard rows both match the markers), and two more
+gaps closed: power grid nodes rebuild from the chunk block grid
+(`scanChunkPower`) and prefab `.tts` water planes paint.
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-345 features catalogued across nine areas. Rescored 2026-08-06 at head `2768e30`.
+338 features catalogued across nine areas. Counts recounted 2026-08-07 (the
+per-feature markers are the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 15 | 17 | 4 | 36 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
-| [Traders](#5-traders) | 8 | 11 | 7 | 26 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
-| [Blood moon](#6-blood-moon) | 7 | 14 | 6 | 27 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
-| [POIs and prefabs](#7-pois-and-prefabs) | 14 | 15 | 3 | 32 | Ids, rotation and height now correct; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 15 | 21 | 13 | 49 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 9 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
-| [Player progression](#10-player-progression) | 8 | 11 | 18 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 20 | 19 | 12 | 51 | Walk, dig, build, persist; lakes wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 13 | 29 | 10 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **104** | **150** | **91** | **345** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Quests](#4-quests) | 17 | 17 | 1 | 35 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
+| [Traders](#5-traders) | 12 | 10 | 3 | 25 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
+| [Blood moon](#6-blood-moon) | 9 | 14 | 3 | 26 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
+| [POIs and prefabs](#7-pois-and-prefabs) | 16 | 15 | 0 | 31 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
+| [Entities and AI](#8-entities-and-ai) | 20 | 21 | 7 | 48 | Real fights with real stakes and real A*; population is still thin |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 16 | 8 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
+| [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
+| [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [Net and ops](#12-net-and-ops) | 16 | 28 | 9 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **134** | **150** | **54** | **338** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -229,14 +235,19 @@ area and the concrete work.
    case against the stock file. The "bag slot waste" playtest residual is
    closed. DamageEntity/FuelValue/eat cvars still read direct-only.
 
-8. **DONE 2026-08-06.** World: put water in the world. Lake/river water now
-   writes from the `water_info.xml` sources at chunk generation
-   (`Chunk.applyWaterSources`: water blocks from the lake bed up to the source
-   surface), and the chunk water channel carries the full static mass (19500)
-   per water cell instead of uniform zero
+8. **DONE 2026-08-06 (prefab planes 2026-08-07).** World: put water in the
+   world. Lake/river water now writes from the `water_info.xml` sources at chunk
+   generation (`Chunk.applyWaterSources`: water blocks from the lake bed up to
+   the source surface), and the chunk water channel carries the full static mass
+   (19500) per water cell instead of uniform zero
    (`src/wire/stock_chunk.zig` `writeWaterChannel`, `water_block_id`).
-   Navezgane's 39 sources render wet; a Navezgane loadgen smoke passes. Still
-   open: prefab `.tts` water planes (POI pools) and the flowing-water sim.
+   Navezgane's 39 sources render wet; a Navezgane loadgen smoke passes. Prefab
+   `.tts` water planes landed 2026-08-07: the v>=17 sparse water channel is
+   decoded into a dense per-cell mass plane (`TtsBlocks.water`) and
+   `tts.paintDecoration` paints the resolved water block at mass>0 cells, so POI
+   pools, flooded basements and water tanks render wet (the chunk wire derives
+   full static mass from the water block plane). Still open: the flowing-water
+   sim.
 
 9. **DONE (server side) 2026-08-06.** Progression / net: save what a player
    is. `players.zsv` v3 extends each record with a progression tail: level,
@@ -437,7 +448,7 @@ implemented, no trader-accepted quest is ever recorded server-side, and any
 journal write for a `tier1_*` quest will make the stock client mark it Failed
 because the per-objective Write shapes are wrong.
 
-**15 WORKS · 17 PARTIAL · 4 MISSING**
+**17 WORKS · 17 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -786,7 +797,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**6 WORKS · 9 PARTIAL · 11 MISSING**
+**12 WORKS · 10 PARTIAL · 3 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -1121,7 +1132,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**4 WORKS · 15 PARTIAL · 8 MISSING**
+**9 WORKS · 14 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `PARTIAL`
   `isBloodMoonNight` tests `day % bloodmoon_frequency == 0`; 0 disables. Stock
@@ -1392,7 +1403,7 @@ files and reach a stock client, but they are built from the wrong block ids
 rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
 can walk into every POI but none of them is the building TFP authored.
 
-**12 WORKS · 14 PARTIAL · 6 MISSING**
+**16 WORKS · 15 PARTIAL · 0 MISSING**
 
 - **prefabs.xml decoration parse** `WORKS`
   Reads all 1559 `<decoration>` elements with rotation mod 4 and
@@ -1505,10 +1516,18 @@ can walk into every POI but none of them is the building TFP authored.
   arrive pristine, losing both the ruined look and the intended weak spots.
   *Anchors:* `src/world/tts.zig:136`, `:358`, `src/wire/stock_chunk.zig:383`
 
-- **Prefab water plane** `MISSING`
-  The v>=17 sparse water channel is only skipped over to find the TE list. POI
-  pools, flooded basements and water tanks are dry.
-  *Anchors:* `src/world/tts.zig:172`
+- **Prefab water plane** `WORKS` (2026-08-07)
+  The v>=17 sparse water channel is decoded into a dense per-cell `u16` mass
+  plane (`TtsBlocks.water`, same sparse-bitstream layout as the texture
+  channel) and `tts.paintDecoration` paints the resolved runtime water block at
+  every mass>0 cell — POI pools, flooded basements and water tanks render wet.
+  The chunk wire's water-mass channel derives full static mass from the water
+  block plane, so no separate channel encode is needed. Fail closed: `water_id`
+  0 (unresolved AssignIds) skips water paint. Test builds a synthetic v19 file
+  with one water cell and asserts the decode and the painted block.
+  *Anchors:* `src/world/tts.zig` `parseBlocks` / `paintDecoration`,
+  `src/world/prefabs.zig` `applyTtsPaintToChunk`, `src/world/store.zig`,
+  `src/server/game.zig` `resetPoiBlocks`
 
 - **Prefab texture/paint plane** `WORKS`
   The sparse texture bitstream is decoded into a dense per-cell u64 and carried
@@ -1697,7 +1716,7 @@ behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
 gamestage, no wandering hordes, and no screamers.
 
-**15 WORKS · 21 PARTIAL · 13 MISSING**
+**20 WORKS · 21 PARTIAL · 7 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -2109,7 +2128,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**11 WORKS · 15 PARTIAL · 9 MISSING**
+**11 WORKS · 16 PARTIAL · 8 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -2406,7 +2425,7 @@ runtime (client-owned spending, no server model), the client's
 `NetPackagePlayerStats` blob is dropped so other players never see your level,
 and server-to-client XP/level pushes do not exist.
 
-**8 WORKS · 11 PARTIAL · 18 MISSING**
+**10 WORKS · 12 PARTIAL · 15 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -2731,7 +2750,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**20 WORKS · 19 PARTIAL · 12 MISSING**
+**23 WORKS · 17 PARTIAL · 8 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -3144,7 +3163,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**13 WORKS · 29 PARTIAL · 10 MISSING**
+**16 WORKS · 28 PARTIAL · 9 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of

@@ -144,6 +144,12 @@ pub const Peer = struct {
     /// can never drain the 64-slot window and the send fails, holing the chunk disk.
     pump_fn: ?*const fn (?*anyopaque) void = null,
     pump_ctx: ?*anyopaque = null,
+    /// Join-critical sends share one reliable-window budget across the enter
+    /// bundle (set by the first critical send, re-armed on success, expired by
+    /// the deadline). A transiently busy peer ACKs within the budget and the
+    /// bundle goes through; a dead peer stalls the tick at most once per join
+    /// instead of once per package (reap clears it at peer_stale_ms anyway).
+    critical_budget_deadline_ns: u64 = 0,
 
     local_seq: u16 = 0,
     local_window_start: u16 = 0,

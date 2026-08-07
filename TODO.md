@@ -262,6 +262,23 @@ Do not adopt third-party ECS cores.
 
 Core loop and parity landings. Do not re-open without new evidence.
 
+### Recent (2026-08-07)
+- [x] **Prefab water plane (GAP)**: the `.tts` v>=17 sparse water channel is
+      decoded into a dense per-cell mass plane (`TtsBlocks.water`) and
+      `tts.paintDecoration` paints the resolved runtime water block at every
+      mass>0 cell, so POI pools, flooded basements and water towers render wet
+      through the existing chunk water-mass channel (full static mass derived
+      from the water block plane). `applyTtsPaintToChunk` / `resetPoiBlocks`
+      take the resolved `terrain_ids.water`; `water_id` 0 fails closed. Test:
+      synthetic v19 prefab with one water cell → decode + paint (+1 test, 950
+      total). Open: flowing-water sim.
+- [x] **Power graph rebuild (GAP "Vehicle, turret, power ... persistence")**:
+      power grid **nodes** rebuild from the chunk block grid on first chunk
+      load (`scanChunkPower`, per-chunk `power_scanned`), so a
+      generator/consumer/battery layout survives restart without saving the
+      graph; `entities.zen` already saved vehicles/turrets. Open: wire edges
+      (runtime only) and trader quest-offer state.
+
 ### Recent (2026-08-04)
 - [x] **EAI Look + Reset/Continue split**: ported `EAILook` (asm.il:429858) as the seventh `zombie_tasks` cell, in the stock zombie AITask position between ApproachSpot and Wander (`entityclasses.xml` zombieTemplateMale, `EAITaskList::AddTask` priority == 1-based index, asm.il:430495). Look is not cosmetic: it is Wander's partner. Implementing it forced two missing stock mechanisms - a per-task `Reset()` hook (`EAITaskList::OnUpdateTasks` IL_006F, asm.il:437713) and a `Continue()` distinct from `CanExecute()` (`EAIBase::Continue` defaults to CanExecute, asm.il:424569). `EAIWander::Reset` seeds `lookTime = RandomRange(0.5, 5)` (asm.il:438383) and `EAIApproachSpot::Reset` seeds `5 + rand*3` (asm.il:424395); those are the only two Reset sites in the assembly that write `lookTime`. `EAIWander::Continue` (asm.il:438318) stops on the 30 s cap and on path-finished, which zdtd previously never did (wander ran forever). `EAIWander::CanExecute` is data-blocked while `lookTime > 0` (asm.il:438181). Look's Start latches the owed seconds and stops the mover (asm.il:429903); its Update slews body yaw via a port of `Entity::SeekYaw`'s speed law (asm.il:399475: quadratic slowdown inside 35 deg, 20 deg/s floor, MaxTurnSpeed 250 from entityclasses.xml) toward a fresh +/-60 deg pick every 0.7 s (asm.il:429984-430001). New: `c.TaskId.look`, five `ZombieAi` fields (`look_time`/`look_wait`/`look_turn_cd`/`look_yaw`/`wander_time`), `seekYawStep`, `canContinue`, `resetTask`, `rngFrac` (reuses the existing per-entity xorshift, as stock reuses one GameRandom per entity). +4 tests (453 total). Gaps documented (MISSING §5.2.1): head/eye `SetLookPosition` aim, alert double-drain, stun bail, per-class MaxTurnSpeed, per-tick vs two-phase slew, ultra-far LOD bypass, and the five residual tasks (Dodge/Leap/RangedAttack/RunAway*/ApproachDistraction) with the hard dependency each is blocked on. Also corrected §5.2.1's false claim that `entityclasses.xml` is "not on hand" - it ships with the dedicated server; per-class parsing is a scope gap, not a data gap.
 - [x] **ECS/SoA review prompt** `docs/prompts/ecs-soa-review.md`; phase_gate + movement envelope; plugin host + query/command

@@ -52,6 +52,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Weather and storm state now survives a server restart: the per-biome storm
   machine (`weather.zwt`) resumes the storm cycle instead of re-rolling the
   opening weather groups.
+- Spawned vehicles and turrets survive a restart via `entities.zen`, and the
+  power grid graph is rebuilt from the chunk block grid on first chunk load
+  (`scanChunkPower`), so a generator/consumer/battery layout keeps working
+  after a restart without saving the graph. Wire links between power nodes and
+  trader quest-offer state remain runtime-only.
+- Prefab `.tts` water planes now paint: POI pools, flooded basements and water
+  tanks render wet through the chunk water-mass channel (the v>=17 sparse water
+  channel in the prefab is decoded per-cell and the resolved water block is
+  stamped at mass>0 cells). The flowing-water sim remains open.
 - The scheduled blood-moon day is re-sent to connected clients when it rolls,
   so a client that joined mid-cycle no longer keeps a stale red-moon HUD day
   after its first horde.

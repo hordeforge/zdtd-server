@@ -24,7 +24,7 @@ roughly 3500 lines in the NetPackage region.
 New to the project, or picking up work:
 
 1. [STATUS.md](STATUS.md) what works now, with the current gates.
-2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 345 features scored
+2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 338 features scored
    WORKS / PARTIAL / MISSING with anchors.
 3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
@@ -32,7 +32,7 @@ New to the project, or picking up work:
 | Doc | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | What works now (gates + shipped surface). Wins on conflict |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap document: 345 features scored WORKS/PARTIAL/MISSING with anchors, plus the area narratives and deep dives |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap document: 338 features scored WORKS/PARTIAL/MISSING with anchors, plus the area narratives and deep dives |
 | [WORK_PLAN.md](WORK_PLAN.md) | Handoff-ready tasks: files, grounding, done-when, proof |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) | Open items turned into research specs |

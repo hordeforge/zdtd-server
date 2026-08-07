@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-07  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **949** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **950** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -56,8 +56,10 @@ observable, on the live stock client:
   through `Extends` (two-pass resolve); the "bag slot waste" residual is closed.
   New stock-file test; 762 total.
 - **Water (T4):** lakes and rivers now fill from `water_info.xml` sources at
-  chunk generation, and the chunk water channel carries the full static mass
-  (POI water planes and the fluid sim remain open). Two new tests; 764 total.
+  chunk generation, and the chunk water channel carries the full static mass.
+  Prefab `.tts` water planes paint the resolved water block from the v>=17
+  sparse water channel, so POI pools, flooded basements and water tanks render
+  wet (the fluid sim remains open). Two new tests; 764 total.
 - **Progression (T5):** `players.zsv` v3 persists level, XP, food/water and
   active buffs across restarts (server-side `awardXp` ledger; ZPV2 files still
   read; admin wipeplayer handles v3). Round-trip test x2; 765 total.
@@ -99,7 +101,7 @@ observable, on the live stock client:
   restores on partial deposit and records ledger causes, QuestEntitySpawn and
   TurretSpawn gained rate/quest gates, PosAndRot preserves the stored yaw, and
   turret kills roll `LootDropProb` like player kills. 788 total.
-- **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 345 features with anchors;
+- **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 338 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 - **Visual round (stock client, 2026-08-06):** the automated playtest
   (`7dtd-playtest`, Steam + Proton, EAC off) ran the demo suite against zdtd on
@@ -145,7 +147,7 @@ and player persistence depth.
 ## Wave 2026-08-07 (config-driven game modes, ADR 0021)
 
 The full WORK_PLAN T11-T15 chain landed (ADR 0021 "config-driven game modes"),
-plus four priority gaps from GAP_ANALYSIS / TODO. 949 unit tests.
+plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
 
 - **T11 TOML binder** (`src/util/toml_bind.zig`): `zdtd.toml` and the mode
   packs now parse through one comptime-reflected binder — struct fields are
@@ -311,6 +313,14 @@ plus four priority gaps from GAP_ANALYSIS / TODO. 949 unit tests.
   chunk) so a generator/consumer/battery layout survives restart. Restart keeps
   a parked minibike, a turret, and its power network. Open: wire edges (links
   between nodes stay runtime) and trader quest-offer state.
+- **Prefab water plane (GAP)**: the v>=17 sparse water channel in `.tts`
+  prefabs is decoded into a dense per-cell mass plane (`TtsBlocks.water`) and
+  `tts.paintDecoration` paints the resolved runtime water block at every
+  mass>0 cell, so POI pools, flooded basements and water towers render wet
+  through the existing chunk water-mass channel (full static mass derived from
+  the water block plane). Fail closed: `water_id` 0 skips water paint. Test
+  builds a synthetic v19 prefab with one water cell and asserts decode + paint.
+  Open: the flowing-water sim.
 - **Procedural biome surface (W3 step 1)**: the proc generator samples a
   continuous low-frequency biome field (`WorldGen.biomeAt`, deterministic,
   region-contiguous — a biome is a landmass, not per-column static) and fills
@@ -368,7 +378,7 @@ plus four priority gaps from GAP_ANALYSIS / TODO. 949 unit tests.
   Ken Perlin table used); banding is stock-shaped, boundaries may drift
   (HARDCODE_AUDIT A33, extraction owned by 7dtd-research).
 
-**Gates at this pin:** `make check` exit 0 · 949 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 950 unit tests · live stock-client
 gate 23/23 · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md) (all T1-T15 tasks landed) and

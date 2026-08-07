@@ -21,6 +21,9 @@ const parallel_util = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 const protocol = @import("../protocol.zig");
 const replicate_te = @import("replicate_te.zig");
+const admin_console = @import("admin_console.zig");
+const ConsoleOut = admin_console.ConsoleOut;
+const TargetResult = admin_console.TargetResult;
 const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
@@ -73,7 +76,7 @@ const stock_te = packages.stock_te;
 const te_types = packages.te_types;
 const platform_user = packages.platform_user;
 
-const max_clients = ln_server.max_peers;
+pub const max_clients = ln_server.max_peers;
 /// Per-entity observer set: one bit per client slot, so replication interest is
 /// a single word instead of a sweep over the whole client table.
 const ObsMask = interest.ObserverMask(max_clients);
@@ -99,7 +102,7 @@ const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 /// `help` index. Stock names and descriptions where the verb exists in stock
 /// (ConsoleCmdHelp, asm.il 226623); zdtd-only verbs are marked so an operator can
 /// tell parity from extension at a glance.
-const admin_help_index = [_]admin_cmds.HelpEntry{
+pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "admin", .description = "Manage user permission levels" },
     .{ .names = "apm, metrics", .description = "zdtd: server APM counters and section latency" },
     .{ .names = "ban", .description = "Manage ban entries" },
@@ -139,7 +142,7 @@ const admin_help_index = [_]admin_cmds.HelpEntry{
 /// state must show up in the server log. Counter always increments; log is
 /// rate-limited (first + every 100th) so a full disk does not flood stderr
 /// every save period while still leaving an audit trail.
-fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
+pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     self.harness.counters.inc(.persistence_errors);
     const n = self.harness.counters.get(.persistence_errors);
     if (n == 1 or n % 100 == 0) {
@@ -441,6 +444,11 @@ const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms every 4th attempt after th
 /// paced the full attempt budget (~1 s for a chunk's 4000 attempts) and the
 /// per-pass chunk stream multiplied it: observed 9.86 s single-tick overrun.
 const window_retry_budget_ns: u64 = 16_000_000; // 16 ms
+/// Join-critical send budget (sendGameCritical / sendFramedReliable critical):
+/// one shared window of retry across the enter bundle so a transiently busy
+/// peer still gets WorldInfo/IdMapping. 3 s matches the peer_stale_ms reap, so
+/// a dead peer stalls the tick at most once per join, not per package.
+const critical_retry_budget_ns: u64 = 3_000_000_000;
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
@@ -476,7 +484,7 @@ const LandClaim = struct {
     owner_name_len: u8 = 0,
 };
 
-const Client = struct {
+pub const Client = struct {
     peer: ?*ln_peer.Peer = null,
     entity_id: i32 = -1,
     /// Server-side XP ledger (XPMultiplier applied on award).
@@ -1873,7 +1881,7 @@ pub const Game = struct {
         _ = self.sim.power.activateTriggerAt(bx, by, bz);
     }
 
-    fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
+    pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
         if (peer_slot >= max_clients) return;
         const c = &self.clients[peer_slot];
         c.move_valid = false;
@@ -2532,7 +2540,7 @@ pub const Game = struct {
     /// ZPV2 files (no progression tail) are still read. Merge-write: offline
     /// players' existing records are carried over, not erased.
     /// ADR 0011 sibling stores; item_id = ECS handle (ADR 0015).
-    fn savePlayers(self: *Game) !void {
+    pub fn savePlayers(self: *Game) !void {
         var path_buf: [512]u8 = undefined;
         const path = try self.playersPath(&path_buf);
 
@@ -2688,7 +2696,7 @@ pub const Game = struct {
     /// Remove all players.zsv records whose login name equals `name`.
     /// Returns how many records were dropped. FileNotFound → 0 (no-op).
     /// Does not log the name (operator reply only).
-    fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
+    pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
         if (name.len == 0 or name.len > 32) return 0;
         var path_buf: [512]u8 = undefined;
         const path = try self.playersPath(&path_buf);
@@ -2881,1377 +2889,120 @@ pub const Game = struct {
     }
 
     fn pollAdmin(self: *Game) void {
-        const chunk = self.admin.pollLine(&self.admin_line) orelse return;
-        // One read may carry several newline-separated commands (piped input).
-        var it = std.mem.tokenizeAny(u8, chunk, "\r\n");
-        while (it.next()) |line| {
-            // TCP-session-only: closing a session makes no sense on the webui path.
-            if (std.mem.eql(u8, line, "quit") or std.mem.eql(u8, line, "exit")) {
-                self.admin.reply("bye\n");
-                self.admin.closeActive();
-                return;
-            }
-            self.runAdminLine(line, "admin_tcp");
-        }
+        admin_console.pollAdmin(self);
     }
 
-    /// Admin TCP + optional webui sink (same text both paths).
-    fn adminReply(self: *Game, text: []const u8) void {
-        self.admin.reply(text);
-        if (self.admin_reply_sink) |sink| {
-            const room = sink.len -% self.admin_reply_len;
-            if (room == 0) return;
-            const n = @min(text.len, room);
-            @memcpy(sink[self.admin_reply_len..][0..n], text[0..n]);
-            self.admin_reply_len += n;
-        }
+    pub fn adminReply(self: *Game, text: []const u8) void {
+        admin_console.adminReply(self, text);
     }
 
     fn pollWebui(self: *Game) void {
-        // Drain up to 4 queued console lines (same path as admin TCP).
-        var drain_i: u32 = 0;
-        while (drain_i < 4) : (drain_i += 1) {
-            var line_buf: [webui_mod.max_cmd_line]u8 = undefined;
-            const line = self.webui.takeCmd(&line_buf) orelse break;
-            self.admin_reply_len = 0;
-            self.admin_reply_sink = self.webui.cmd_out_buf[0..];
-            self.runAdminLine(line, "webui");
-            self.admin_reply_sink = null;
-            self.webui.finishCmd(self.webui.cmd_out_buf[0..self.admin_reply_len]);
-        }
-        // Non-blocking HTTP; at most one request per poll call.
-        self.webui.poll();
+        admin_console.pollWebui(self);
     }
 
-    /// Copy live ops gauges into webui snapshot (call after step returns).
-    /// Writes in-place into webui.snap (no large stack frame).
-    pub fn fillWebuiSnap(self: *Game) void {
-        if (!self.webui.enabled()) return;
-        // Browser partials poll at >= 2s; rebuilding the snapshot (7 entity
-        // scans + histogram percentiles) every tick is 10x wasted work.
-        if (self.tick_n % 10 != 0) return;
-        const s = &self.webui.snap;
-        // Zero in place (avoid stack temp Snapshot which overflows step's frame).
-        @memset(std.mem.asBytes(s), 0);
-        s.tick_n = self.tick_n;
-        s.last_tick_ns = clock.monoNs(); // readiness: wedged-loop detection
-        const clk = self.sim.director.clock;
-        s.day = clk.day;
-        s.hours = clk.hours;
-        s.bloodmoon_active = self.sim.director.bloodmoon_active;
-        s.joined = self.countJoined();
-        s.max_players = self.max_players;
-        var entered_n: u16 = 0;
-        var peers_alive: u16 = 0;
-        for (&self.clients) |cl| {
-            if (cl.entered) entered_n += 1;
-        }
-        for (&self.net.peers) |p| {
-            if (p.alive) peers_alive += 1;
-        }
-        s.entered = entered_n;
-        s.peers_alive = peers_alive;
-        s.zombies = @intCast(@min(self.sim.countKind(.zombie), 65535));
-        s.animals = @intCast(@min(self.sim.countKind(.animal), 65535));
-        s.traders = @intCast(@min(self.sim.countKind(.trader), 65535));
-        s.vehicles = @intCast(@min(self.sim.countKind(.vehicle), 65535));
-        s.turrets = @intCast(@min(self.sim.countKind(.turret), 65535));
-        s.loot_bags = @intCast(@min(self.sim.countKind(.loot_bag), 65535));
-        s.players_ent = @intCast(@min(self.sim.countKind(.player), 65535));
-        s.chunks = @intCast(@min(self.world.chunks.count(), 0xffff_ffff));
-        s.bloodmoon_frequency = self.sim.director.clock.bloodmoon_frequency;
-        s.net_packets_in = self.harness.counters.get(.net_packets_in);
-        s.net_packets_out = self.harness.counters.get(.net_packets_out);
-        s.net_bytes_in = self.harness.counters.get(.net_bytes_in);
-        s.net_bytes_out = self.harness.counters.get(.net_bytes_out);
-        s.entities_ticked = self.harness.counters.get(.entities_ticked);
-        s.tick_overruns = self.harness.counters.get(.tick_overruns);
-        s.encode_errors = self.harness.counters.get(.encode_errors);
-        s.stream_errors = self.harness.counters.get(.stream_errors);
-        s.join_ok = self.harness.counters.get(.join_ok);
-        s.join_fail = self.harness.counters.get(.join_fail);
-        s.packages_encoded = self.harness.counters.get(.packages_encoded);
-        s.packages_broadcast = self.harness.counters.get(.packages_broadcast);
-        s.net_poll_errors = self.harness.counters.get(.net_poll_errors);
-        s.net_payload_errors = self.harness.counters.get(.net_payload_errors);
-        s.net_send_errors = self.harness.counters.get(.net_send_errors);
-        s.reliable_window_drops = self.harness.counters.get(.reliable_window_drops);
-        s.persistence_errors = self.harness.counters.get(.persistence_errors);
-        s.stale_peers_reaped = self.harness.counters.get(.stale_peers_reaped);
-        s.phase_rejects = self.harness.counters.get(.phase_rejects);
-        s.ownership_rejects = self.harness.counters.get(.ownership_rejects);
-        s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
-        s.movement_rejects = self.harness.counters.get(.movement_rejects);
-        s.decode_rejects = self.harness.counters.get(.decode_rejects);
-        const th = self.harness.prof.histOf(.tick_total);
-        s.tick_mean_ns = th.meanNs();
-        s.tick_p50_ns = th.percentileNs(50);
-        s.tick_p99_ns = th.percentileNs(99);
-        s.tick_max_ns = th.max_ns;
-        const nh = self.harness.prof.histOf(.net_poll);
-        s.net_mean_ns = nh.meanNs();
-        s.net_p99_ns = nh.percentileNs(99);
-        const sh = self.harness.prof.histOf(.sim_entities);
-        s.sim_mean_ns = sh.meanNs();
-        s.sim_p99_ns = sh.percentileNs(99);
-        const rh = self.harness.prof.histOf(.replicate);
-        s.repl_mean_ns = rh.meanNs();
-        s.repl_p99_ns = rh.percentileNs(99);
-        const ch = self.harness.prof.histOf(.chunk_stream);
-        s.stream_mean_ns = ch.meanNs();
-        s.stream_p99_ns = ch.percentileNs(99);
-        s.save_mean_ns = self.harness.prof.histOf(.save_io).meanNs();
-        s.view_radius = self.view_radius;
-        s.max_streamed_chunks = @intCast(@min(self.max_streamed_chunks, 65535));
-        s.interest_range = self.interest_range;
-        s.max_edit_range = self.max_edit_range;
-        s.max_spawned_zombies = @intCast(@min(self.sim.director.max_alive, 65535));
-        s.info_port = self.info_port;
-        s.webui_port = self.webui.port;
-        s.authority_correct = self.authority_mode == .correct;
-        s.password_set = self.password.len > 0;
-        s.wire_chunks = self.wire_chunks;
-        const wn = self.world_name;
-        const ncopy = @min(wn.len, s.world_name.len);
-        @memcpy(s.world_name[0..ncopy], wn[0..ncopy]);
-        s.world_name_len = @intCast(ncopy);
-        var pi: usize = 0;
-        for (&self.clients, 0..) |cl, slot| {
-            if (!cl.joined and cl.peer == null) continue;
-            if (pi >= webui_mod.max_players_snap) break;
-            var row: webui_mod.PlayerRow = .{
-                .used = true,
-                .slot = @intCast(slot),
-                .entity_id = cl.entity_id,
-                .joined = cl.joined,
-                .entered = cl.entered,
-            };
-            const nl = @min(cl.name_len, webui_mod.max_name);
-            @memcpy(row.name[0..nl], cl.name[0..nl]);
-            row.name_len = @intCast(nl);
-            if (cl.entity_id > 0) {
-                if (self.sim.slotOfNetId(cl.entity_id)) |es| {
-                    if (self.sim.mask[es].transform) {
-                        const t = self.sim.transform[es];
-                        row.x = t.x;
-                        row.y = t.y;
-                        row.z = t.z;
-                    }
-                }
-            }
-            s.players[pi] = row;
-            pi += 1;
-        }
+    fn fillWebuiSnap(self: *Game) void {
+        admin_console.fillWebuiSnap(self);
     }
 
-    /// Collects console output lines into a scratch buffer for one reply.
-    const ConsoleOut = struct {
-        buf: [4096]u8 = undefined,
-        used: usize = 0,
-        lines: [64][]const u8 = undefined,
-        n: usize = 0,
-        fn line(self: *ConsoleOut, s: []const u8) void {
-            if (self.n >= self.lines.len) return;
-            const w = @min(s.len, self.buf.len - self.used);
-            @memcpy(self.buf[self.used..][0..w], s[0..w]);
-            self.lines[self.n] = self.buf[self.used..][0..w];
-            self.used += w;
-            self.n += 1;
-        }
-        fn linef(self: *ConsoleOut, comptime fmt: []const u8, args: anytype) void {
-            var tmp: [256]u8 = undefined;
-            self.line(std.fmt.bufPrint(&tmp, fmt, args) catch return);
-        }
-    };
-
-    /// In-game console (F1) command set, executed for the sending player.
-    /// Reply is NetPackageConsoleCmdClient (output lines, bExecute=false).
     fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
-        var cmdbuf: [512]u8 = undefined;
-        const cmd = packages.parseConsoleCmd(body, &cmdbuf);
-        if (cmd.len == 0) return;
-        // Log verb only: args may include player names, chat text, or coords.
-        const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
-        self.harness.counters.inc(.player_console_commands);
-        std.debug.print("zdtd: audit source=player_console slot={d} command={s}\n", .{ c.slot, cmd[0..verb_end] });
-
-        var out: ConsoleOut = .{};
-        var it = std.mem.tokenizeAny(u8, cmd, " ");
-        const verb = it.next() orelse return;
-
-        if (!isPlayerConsoleCommand(verb)) {
-            var denied: ConsoleOut = .{};
-            denied.line("permission denied");
-            const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], denied.lines[0..denied.n], false);
-            try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
-            return;
-        }
-
-        const player = self.sim.playerByPeer(c.slot);
-
-        if (eqAny(verb, &.{ "help", "commands", "?" })) {
-            // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist.
-            out.line("zdtd console commands:");
-            out.line(" gettime|gt  listplayers|lp  listents|le  version");
-            out.line(" say|s <msg>");
-            out.line(" dm|cm|settempunit|debugmenu (client-side)");
-        } else if (eqAny(verb, &.{ "gettime", "gt" })) {
-            const clk = &self.sim.director.clock;
-            const hh: u32 = @intFromFloat(clk.hours);
-            const mm: u32 = @intFromFloat((clk.hours - @floor(clk.hours)) * 60.0);
-            out.linef("Day {d}, {d:0>2}:{d:0>2}  (bloodmoon in {d} days)", .{
-                clk.day, hh, mm, self.daysToBloodMoon(),
-            });
-        } else if (eqAny(verb, &.{ "settime", "st" })) {
-            self.consoleSetTime(&it, &out);
-        } else if (eqAny(verb, &.{ "teleportplayer", "tp", "goto" })) {
-            self.consoleTeleport(player, &it, &out);
-        } else if (eqAny(verb, &.{ "spawnentity", "se" })) {
-            self.consoleSpawnEntity(player, &it, &out);
-        } else if (eqAny(verb, &.{"spawnairdrop"})) {
-            if (self.forceAirDrop()) out.line("air drop spawned") else out.line("no player to drop near");
-        } else if (eqAny(verb, &.{ "killall", "ka" })) {
-            out.linef("killed {d} zombies", .{self.consoleKillAll()});
-        } else if (eqAny(verb, &.{ "giveself", "give", "gi" })) {
-            self.consoleGiveSelf(player, &it, &out);
-        } else if (eqAny(verb, &.{ "listplayers", "lp" })) {
-            var i: usize = 0;
-            for (&self.clients) |*cl| {
-                if (!cl.joined) continue;
-                out.linef("{d}. {s} (entity {d})", .{ i, cl.name[0..cl.name_len], cl.entity_id });
-                i += 1;
-            }
-            if (i == 0) out.line("no players");
-        } else if (eqAny(verb, &.{ "listents", "le" })) {
-            out.linef("zombies={d} animals={d} players={d}", .{
-                self.sim.countKind(.zombie), self.sim.countKind(.animal), self.countJoined(),
-            });
-        } else if (eqAny(verb, &.{ "say", "s" })) {
-            const msg = it.rest();
-            if (!chatMsgOk(msg)) {
-                out.line("message too long or has control characters");
-            } else if (!self.acceptChatRate(c)) {
-                out.line("slow down");
-            } else {
-                const chat = try packages.buildStockChat(&self.body_buf, 0, c.entity_id, msg, &.{});
-                try self.broadcast("NetPackageChat", chat);
-                out.line("sent");
-            }
-        } else if (eqAny(verb, &.{"kick"})) {
-            self.consoleKickBan(it.next(), &out, false);
-        } else if (eqAny(verb, &.{"ban"})) {
-            self.consoleKickBan(it.next(), &out, true);
-        } else if (eqAny(verb, &.{"version"})) {
-            out.line("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)");
-        } else if (eqAny(verb, &.{ "dm", "cm", "settempunit", "debugmenu" })) {
-            out.line("ok (client-side toggle)");
-        } else {
-            out.linef("unknown command '{s}'; try 'help'", .{verb});
-        }
-
-        const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], out.lines[0..out.n], false);
-        try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
+        return admin_console.handleConsoleCmd(self, peer, c, body);
     }
 
-    fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-        const clk = &self.sim.director.clock;
-        const a = it.next() orelse {
-            out.line("usage: settime <day|night|D H M>");
-            return;
-        };
-        if (std.mem.eql(u8, a, "day")) {
-            clk.hours = 12.0;
-        } else if (std.mem.eql(u8, a, "night")) {
-            clk.hours = 22.0;
-        } else {
-            const d = std.fmt.parseInt(u32, a, 10) catch {
-                out.line("bad day");
-                return;
-            };
-            if (d > 0) clk.day = d;
-            if (it.next()) |hs| clk.hours = @floatFromInt(std.fmt.parseInt(u32, hs, 10) catch 0);
-            if (it.next()) |ms| clk.hours += @as(f32, @floatFromInt(std.fmt.parseInt(u32, ms, 10) catch 0)) / 60.0;
-        }
-        const wt = packages.buildWorldTimeBody(self.body_buf[0..16], clk.worldTimeBits()) catch return;
-        self.broadcast("NetPackageWorldTime", wt) catch {};
-        out.linef("time set: day {d} {d:0>2}:00", .{ clk.day, @as(u32, @intFromFloat(clk.hours)) });
+    pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
+        admin_console.consoleSetTime(self, it, out);
     }
 
-    fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-        const ps = player orelse {
-            out.line("no player entity");
-            return;
-        };
-        const xs = it.next();
-        const ys = it.next();
-        const zs = it.next();
-        if (xs == null or ys == null or zs == null) {
-            out.line("usage: tp <x> <y> <z>");
-            return;
-        }
-        const x = std.fmt.parseFloat(f32, xs.?) catch return;
-        const y = std.fmt.parseFloat(f32, ys.?) catch return;
-        const z = std.fmt.parseFloat(f32, zs.?) catch return;
-        if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(z)) {
-            out.line("coordinates must be finite");
-            return;
-        }
-        self.sim.transform[ps] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
-        if (self.sim.mask[ps].player) {
-            self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), x, y, z);
-        }
-        const entity_id = self.sim.netId(ps);
-        const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, y, z, 0, 0, 0, true) catch return;
-        self.broadcast("NetPackageEntityTeleport", body) catch {};
-        out.linef("teleported to {d:.0} {d:.0} {d:.0}", .{ x, y, z });
+    pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
+        admin_console.consoleTeleport(self, player, it, out);
     }
 
-    fn consoleSpawnEntity(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-        const ps = player orelse {
-            out.line("no player entity");
-            return;
-        };
-        const nm = it.next() orelse {
-            out.line("usage: spawnentity <class>");
-            return;
-        };
-        const def = self.entities.byName(nm) orelse {
-            out.linef("unknown class '{s}'", .{nm});
-            return;
-        };
-        const t = self.sim.transform[ps];
-        const sy = self.spawnYNearPlayer(t.x, t.y, t.z);
-        const nid = if (def.kind == .animal)
-            self.sim.spawnAnimal(t.x + 3, sy, t.z + 3, def.max_hp, def.hash, def.loot_list)
-        else
-            self.sim.spawnZombieClass(t.x + 3, sy, t.z + 3, def.max_hp, def.hash, def.loot_list);
-        if (nid) |eid| {
-            if (self.sim.slotOfNetId(eid)) |es| {
-                for (&self.clients) |*cl| {
-                    if (!cl.joined) continue;
-                    cl.known_entities.unset(es);
-                }
-            }
-            out.linef("spawned {s}", .{nm});
-        } else out.line("spawn failed (capacity)");
+    pub fn consoleSpawnEntity(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
+        admin_console.consoleSpawnEntity(self, player, it, out);
     }
 
-    fn consoleGiveSelf(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-        const ps = player orelse {
-            out.line("no player entity");
-            return;
-        };
-        const nm = it.next() orelse {
-            out.line("usage: giveself <item> [count]");
-            return;
-        };
-        const def = self.items.byName(nm) orelse {
-            out.linef("unknown item '{s}'", .{nm});
-            return;
-        };
-        const count: u16 = if (it.next()) |cs| (std.fmt.parseInt(u16, cs, 10) catch 1) else 1;
-        const t = self.sim.transform[ps];
-        if (self.sim.spawnLootBag(t.x + 1, t.y, t.z + 1, def.id, count)) |nid| {
-            self.broadcastLootSpawn(nid) catch {};
-            out.linef("dropped {d}x {s} at your feet", .{ count, nm });
-        } else out.line("give failed");
+    pub fn consoleGiveSelf(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
+        admin_console.consoleGiveSelf(self, player, it, out);
     }
 
-    fn consoleKickBan(self: *Game, name: ?[]const u8, out: *ConsoleOut, do_ban: bool) void {
-        const nm = name orelse {
-            out.line("usage: kick|ban <name>");
-            return;
-        };
-        for (&self.clients, 0..) |*cl, i| {
-            if (!cl.joined or !std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
-            if (cl.peer) |p| {
-                if (do_ban) self.banIp(peerIpKey(p));
-                p.alive = false;
-            }
-            self.clearLocksForPeer(i);
-            self.clients[i] = .{};
-            out.linef("{s} {s}", .{ if (do_ban) "banned" else "kicked", nm });
-            return;
-        }
-        out.linef("no player named '{s}'", .{nm});
+    pub fn consoleKickBan(self: *Game, name: ?[]const u8, out: *ConsoleOut, do_ban: bool) void {
+        admin_console.consoleKickBan(self, name, out, do_ban);
     }
 
-    fn consoleKillAll(self: *Game) u32 {
-        var n: u32 = 0;
-        var s: ecs.Slot = 0;
-        while (s < ecs.max_entities) : (s += 1) {
-            if (!self.sim.alive[s] or self.sim.kind[s] != .zombie) continue;
-            const eid = self.sim.network_id[s].id;
-            const dmg = self.sim.damage(eid, 99999);
-            if (dmg.killed) {
-                if (packages.buildRemoveBody(&self.body_buf, eid)) |rm| {
-                    self.broadcast("NetPackageEntityRemove", rm) catch {};
-                } else |_| {}
-                // Drop loot bags silently (caller may sweep). Avoid flooding bag.
-                if (dmg.loot_bag_id > 0) {
-                    if (self.sim.slotOfNetId(dmg.loot_bag_id)) |ls| {
-                        if (self.sim.alive[ls]) self.sim.destroy(ls);
-                    }
-                }
-                n += 1;
-            }
-        }
-        return n;
+    pub fn consoleKillAll(self: *Game) u32 {
+        return admin_console.consoleKillAll(self);
     }
 
-    /// Trigger an air drop immediately (console spawnairdrop). Returns false if
-    /// no joined player to drop near.
-    fn forceAirDrop(self: *Game) bool {
-        for (&self.clients) |*cl| {
-            if (!cl.joined) continue;
-            const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-            const t = self.sim.transform[ps];
-            if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag| {
-                self.fillLootBagFromTable(bag, "supplyCrate", @intCast(bag), self.lootStageForPlayer(cl.slot));
-                self.broadcastLootSpawn(bag) catch {};
-                return true;
-            }
-        }
-        return false;
+    pub fn forceAirDrop(self: *Game) bool {
+        return admin_console.forceAirDrop(self);
     }
 
-    fn daysToBloodMoon(self: *const Game) u32 {
-        const clk = self.sim.director.clock;
-        if (clk.bloodmoon_frequency == 0) return 999;
-        if (clk.day % clk.bloodmoon_frequency == 0) return 0;
-        const next = ((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency;
-        return next - clk.day;
+    pub fn daysToBloodMoon(self: *const Game) u32 {
+        return admin_console.daysToBloodMoon(self);
     }
 
     fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
-        const self: *Game = @ptrCast(@alignCast(ctx));
-        self.admin_reply_len = 0;
-        self.admin_reply_sink = out;
-        self.runAdminLine(line, "webui");
-        self.admin_reply_sink = null;
-        return self.admin_reply_len;
+        return admin_console.webuiAdminThunk(ctx, line, out);
     }
 
-    /// Stock `ban add|remove|list` (ConsoleCmdBan, asm.il 209578-210270). The list
-    /// is by identity and survives restart; the IP ban table still does the
-    /// immediate enforcement for the connection that is being dropped.
-    fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
-        switch (sub) {
-            .list => {
-                self.ban_list.expire(clock.wallSeconds());
-                self.adminWrite(admin_cmds.writeBanList, .{&self.ban_list});
-            },
-            .remove => |t| {
-                var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(t, &idb);
-                _ = self.ban_list.remove(id);
-                self.saveAdminLists();
-                var b: [160]u8 = undefined;
-                const s = std.fmt.bufPrint(&b, "{s} removed from ban list.\n", .{id}) catch return;
-                self.adminReply(s);
-            },
-            .add => |a| {
-                var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(a.target, &idb);
-                const now = clock.wallSeconds();
-                const until = std.math.add(i64, now, a.seconds) catch std.math.maxInt(i64);
-                if (!self.ban_list.add(id, until, a.reason)) {
-                    self.adminReply("ban list full\n");
-                    return;
-                }
-                self.saveAdminLists();
-                // Online target: drop the session and hold its address too, so a
-                // reconnect before the next join check cannot slip through.
-                switch (self.resolveAdminTarget(a.target)) {
-                    .slot => |slot| {
-                        if (self.clients[slot].peer) |p| self.banIp(peerIpKey(p));
-                        self.dropClientSlot(slot, "ban");
-                    },
-                    else => {},
-                }
-                var tb: [24]u8 = undefined;
-                var b: [256]u8 = undefined;
-                const s = std.fmt.bufPrint(&b, "{s} banned until {s}, reason: {s}.\n", .{
-                    id, admin_cmds.formatUnix(&tb, until), a.reason,
-                }) catch return;
-                self.adminReply(s);
-            },
-        }
+    pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
+        admin_console.runBanCommand(self, sub);
     }
 
-    fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 {
-        return try std.fmt.bufPrint(buf, "{s}/{s}", .{ self.world.world_dir, name });
+    pub fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 {
+        return admin_console.adminListsPath(self, buf, name);
     }
 
-    /// All three lists are rewritten together: they are small, and a single call
-    /// site means no command can mutate one and forget to persist it.
-    fn saveAdminLists(self: *Game) void {
-        self.saveAdminListFile("admins.zsv", admin_cmds.serializePermissions, &self.admin_list);
-        self.saveAdminListFile("whitelist.zsv", admin_cmds.serializePermissions, &self.whitelist);
-        self.saveAdminListFile("bans.zsv", admin_cmds.serializeBans, &self.ban_list);
+    pub fn saveAdminLists(self: *Game) void {
+        admin_console.saveAdminLists(self);
     }
 
-    fn saveAdminListFile(self: *Game, name: []const u8, comptime ser: anytype, list: anytype) void {
-        var path_buf: [512]u8 = undefined;
-        const path = self.adminListsPath(&path_buf, name) catch |e| {
-            logPersistErr(self, "admin list path", e);
-            return;
-        };
-        var buf: [16 * 1024]u8 = undefined;
-        var w: std.Io.Writer = .fixed(&buf);
-        ser(&w, list) catch |e| return logPersistErr(self, "serialize admin list", e);
-        io_fs.writeFile(self.allocator, path, w.buffered()) catch |e|
-            logPersistErr(self, "save admin list", e);
+    pub fn saveAdminListFile(self: *Game, name: []const u8, comptime ser: anytype, list: anytype) void {
+        admin_console.saveAdminListFile(self, name, ser, list);
     }
 
-    /// Reads the three lists at startup. A missing file is normal; a corrupt line
-    /// is skipped and reported, never applied, so a damaged file cannot grant
-    /// permissions or silently drop a live ban without a warning.
     fn loadAdminLists(self: *Game) void {
-        const now = clock.wallSeconds();
-        self.readAdminList("admins.zsv", "admin", struct {
-            fn f(g: *Game, text: []const u8, _: i64) admin_cmds.LoadResult {
-                return admin_cmds.deserializePermissions(&g.admin_list, text);
-            }
-        }.f, now);
-        self.readAdminList("whitelist.zsv", "whitelist", struct {
-            fn f(g: *Game, text: []const u8, _: i64) admin_cmds.LoadResult {
-                return admin_cmds.deserializePermissions(&g.whitelist, text);
-            }
-        }.f, now);
-        self.readAdminList("bans.zsv", "ban", struct {
-            fn f(g: *Game, text: []const u8, t: i64) admin_cmds.LoadResult {
-                return admin_cmds.deserializeBans(&g.ban_list, text, t);
-            }
-        }.f, now);
+        admin_console.loadAdminLists(self);
     }
 
-    fn readAdminList(
-        self: *Game,
-        name: []const u8,
-        label: []const u8,
-        load: *const fn (*Game, []const u8, i64) admin_cmds.LoadResult,
-        now: i64,
-    ) void {
-        var path_buf: [512]u8 = undefined;
-        const path = self.adminListsPath(&path_buf, name) catch |e| {
-            logPersistErr(self, "admin list path", e);
-            return;
-        };
-        const text = io_fs.readFileAll(self.allocator, path) catch |e| {
-            if (e != error.FileNotFound) logPersistErr(self, "load admin list", e);
-            return;
-        };
-        defer self.allocator.free(text);
-        const res = load(self, text, now);
-        if (res.skipped != 0) {
-            std.debug.print(
-                "zdtd: warning: {d} corrupt {s} list entries skipped (not applied)\n",
-                .{ res.skipped, label },
-            );
-        }
+    pub fn readAdminList(self: *Game, name: []const u8, label: []const u8, load: *const fn (*Game, []const u8, i64) admin_cmds.LoadResult, now: i64) void {
+        admin_console.readAdminList(self, name, label, load, now);
     }
 
-    /// Stock `getgamepref` (asm.il 220877): "GamePref.{0} = {1}" per pref, filtered
-    /// by substring. Only prefs zdtd actually applies are listed; printing a stock
-    /// name zdtd ignores would tell an operator a lie.
-    fn replyGamePrefs(self: *Game, filter: []const u8) void {
-        self.gamePref(filter, "ServerPort", "{d}", .{self.info_port});
-        self.gamePref(filter, "ServerMaxPlayerCount", "{d}", .{self.max_players});
-        self.gamePref(filter, "GameName", "{s}", .{self.world_name});
-        self.gamePref(filter, "ViewRadius", "{d}", .{self.view_radius});
-        self.gamePref(filter, "GameDifficulty", "{d}", .{self.sim.director.difficulty});
-        self.gamePref(filter, "DayNightLength", "{d}", .{
-            @as(u32, @intFromFloat(@round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0))),
-        });
-        self.gamePref(filter, "TelnetPort", "{d}", .{self.admin.port});
+    pub fn replyGamePrefs(self: *Game, filter: []const u8) void {
+        admin_console.replyGamePrefs(self, filter);
     }
 
-    fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
-        if (filter.len != 0 and std.ascii.indexOfIgnoreCase(name, filter) == null) return;
-        var vb: [96]u8 = undefined;
-        const v = std.fmt.bufPrint(&vb, fmt, args) catch return;
-        self.adminWrite(admin_cmds.writeGamePref, .{ name, v });
+    pub fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
+        admin_console.gamePref(self, filter, name, fmt, args);
     }
 
-    /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
-    /// clamp to the same range the config loader uses, and write the sim/Game
-    /// field the stats blob reads, so the client HUD follows. Unknown or
-    /// startup-only prefs (ServerPort, world paths) return false and the caller
-    /// keeps the honest read-only reply.
-    fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
-        const v = std.fmt.parseInt(i32, std.mem.trim(u8, value, " \t"), 10) catch return false;
-        if (std.mem.eql(u8, name, "GameDifficulty")) {
-            self.sim.director.difficulty = @intCast(@min(@max(v, 0), 5));
-        } else if (std.mem.eql(u8, name, "BloodMoonEnemyCount")) {
-            self.sim.director.bloodmoon_enemy_count = @intCast(@min(@max(v, 0), 60));
-        } else if (std.mem.eql(u8, name, "EnemyDifficulty")) {
-            self.sim.director.enemy_difficulty = @intCast(@min(@max(v, 0), 1));
-        } else if (std.mem.eql(u8, name, "BloodMoonFrequency")) {
-            self.sim.director.clock.bloodmoon_frequency = @intCast(@min(@max(v, 0), 255));
-        } else if (std.mem.eql(u8, name, "DayNightLength")) {
-            self.sim.director.clock.setDayNightLength(@intCast(@min(@max(v, 10), 1200)));
-        } else if (std.mem.eql(u8, name, "BlockDamagePlayer")) {
-            self.block_damage_player = @intCast(@min(@max(v, 0), 1000));
-        } else if (std.mem.eql(u8, name, "XPMultiplier")) {
-            self.xp_multiplier = @intCast(@min(@max(v, 0), 1000));
-        } else if (std.mem.eql(u8, name, "PlayerKillingMode")) {
-            self.pvp_mode = @intCast(@min(@max(v, 0), 3));
-        } else if (std.mem.eql(u8, name, "DropOnDeath")) {
-            self.drop_on_death = @intCast(@min(@max(v, 0), 3));
-        } else if (std.mem.eql(u8, name, "LootRespawnDays")) {
-            self.loot_respawn_days = @intCast(@min(@max(v, 0), 365));
-        } else if (std.mem.eql(u8, name, "AirDropFrequency")) {
-            self.air_drop_interval_hours = @intCast(@min(@max(v, 0), 168));
-        } else {
-            return false;
-        }
-        return true;
+    pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
+        return admin_console.applyGamePrefSet(self, name, value);
     }
 
-    /// Stock `mem` (asm.il 235864). zdtd has no Unity heap, so the Unity-only
-    /// fields report 0 rather than a made-up number; the separators are stock's
-    /// so a scraper still finds the counts it can use.
-    fn replyMem(self: *Game) void {
-        var players: usize = 0;
-        var zombies: usize = 0;
-        var entities: usize = 0;
-        var s: ecs.Slot = 0;
-        while (s < ecs.max_entities) : (s += 1) {
-            if (!self.sim.alive[s]) continue;
-            entities += 1;
-            switch (self.sim.kind[s]) {
-                .player => players += 1,
-                .zombie => zombies += 1,
-                else => {},
-            }
-        }
-        self.adminWrite(admin_cmds.writeMem, .{admin_cmds.MemStats{
-            .minutes = clock.monoNs() / std.time.ns_per_min,
-            .fps = protocol.ticks_per_second,
-            .heap_mb = 0,
-            .max_mb = 0,
-            .chunks = self.world.chunks.count(),
-            .chunk_game_objects = 0,
-            .players = players,
-            .zombies = zombies,
-            .entities = entities,
-            .entities_of_type = entities,
-            .items = 0,
-            .collision_objects = 0,
-            .rss_mb = 0,
-        }});
+    pub fn replyMem(self: *Game) void {
+        admin_console.replyMem(self);
     }
 
-    /// Render one `admin_cmds` formatter straight into the admin reply stream.
-    /// Sized for the largest single formatter output, a full `ban list`
-    /// (admin_cmds.max_entries rows of id + reason + timestamp).
-    fn adminWrite(self: *Game, comptime f: anytype, args: anytype) void {
-        var buf: [16 * 1024]u8 = undefined;
-        var w: std.Io.Writer = .fixed(&buf);
-        @call(.auto, f, .{&w} ++ args) catch return;
-        self.adminReply(w.buffered());
+    pub fn adminWrite(self: *Game, comptime f: anytype, args: anytype) void {
+        admin_console.adminWrite(self, f, args);
     }
 
-    /// Stock console target resolution (ConsoleHelper::ParseParamPartialNameOrId,
-    /// asm.il:268297): entity id, peer slot or (partial) player name.
-    const TargetResult = union(enum) { slot: usize, none, ambiguous };
-
-    fn resolveAdminTarget(self: *const Game, t: admin_mod.Target) TargetResult {
-        switch (t) {
-            .id => |n| {
-                if (n < 0) return .none;
-                const u: usize = @intCast(n);
-                if (u < max_clients and self.clients[u].joined) return .{ .slot = u };
-                for (&self.clients, 0..) |*cl, i| {
-                    if (cl.joined and cl.entity_id == n) return .{ .slot = i };
-                }
-                return .none;
-            },
-            .name => |nm| {
-                if (nm.len == 0) return .none;
-                for (&self.clients, 0..) |*cl, i| {
-                    if (cl.joined and std.ascii.eqlIgnoreCase(cl.name[0..cl.name_len], nm)) return .{ .slot = i };
-                }
-                var hit: ?usize = null;
-                for (&self.clients, 0..) |*cl, i| {
-                    if (!cl.joined) continue;
-                    if (std.ascii.indexOfIgnoreCase(cl.name[0..cl.name_len], nm) == null) continue;
-                    if (hit != null) return .ambiguous;
-                    hit = i;
-                }
-                return if (hit) |h| .{ .slot = h } else .none;
-            },
-        }
+    pub fn resolveAdminTarget(self: *const Game, t: admin_mod.Target) TargetResult {
+        return admin_console.resolveAdminTarget(self, t);
     }
 
-    /// The stock error lines a miss produces, so tooling can branch on them.
-    fn adminTargetError(self: *Game, t: admin_mod.Target, res: TargetResult) void {
-        var tb: [96]u8 = undefined;
-        const tok = switch (t) {
-            .id => |n| std.fmt.bufPrint(&tb, "{d}", .{n}) catch "?",
-            .name => |nm| nm,
-        };
-        var b: [256]u8 = undefined;
-        const s = switch (res) {
-            .ambiguous => std.fmt.bufPrint(&b, "\"{s}\" matches multiple player names.\n", .{tok}),
-            else => std.fmt.bufPrint(&b, "\"{s}\" is not a valid entity id, player name or user id.\n", .{tok}),
-        } catch return;
-        self.adminReply(s);
+    pub fn adminTargetError(self: *Game, t: admin_mod.Target, res: TargetResult) void {
+        admin_console.adminTargetError(self, t, res);
     }
 
-    /// Identity a ban/permission entry is stored under: the login name when the
-    /// target is online, otherwise the operator's own token. zdtd has no stock
-    /// platform user id to key on, and inventing one would be a lie on the wire.
-    /// Always copied into `buf`: callers kick the client afterwards, which clears
-    /// the name the slice would otherwise point at.
-    fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const u8 {
-        const src: []const u8 = switch (self.resolveAdminTarget(t)) {
-            .slot => |i| self.clients[i].name[0..self.clients[i].name_len],
-            else => switch (t) {
-                .id => |n| return std.fmt.bufPrint(buf, "{d}", .{n}) catch "?",
-                .name => |nm| nm,
-            },
-        };
-        const n = @min(src.len, buf.len);
-        @memcpy(buf[0..n], src[0..n]);
-        return buf[0..n];
+    pub fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const u8 {
+        return admin_console.adminTargetId(self, t, buf);
     }
 
-    fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
-        const trimmed = std.mem.trim(u8, line, " \t");
-        const verb_end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
-        self.harness.counters.inc(.admin_commands);
-        std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
-        const cmd = admin_mod.parseCommand(line);
-        switch (cmd) {
-            .help => |topic| {
-                if (topic) |t| {
-                    // `help <command>`: the one-line usage when known, else the
-                    // same unknown-command reply a bare miss gets.
-                    var hb: [320]u8 = undefined;
-                    if (admin_mod.usageFor(t)) |u| {
-                        const s = std.fmt.bufPrint(&hb, "usage: {s}\n", .{u}) catch return;
-                        self.adminReply(s);
-                    } else {
-                        self.adminWrite(admin_cmds.writeUnknownCommand, .{t});
-                    }
-                } else {
-                    var buf: [4096]u8 = undefined;
-                    var w: std.Io.Writer = .fixed(&buf);
-                    admin_cmds.writeHelp(&w, &admin_help_index) catch return;
-                    self.adminReply(w.buffered());
-                }
-            },
-            .unknown => {
-                // Surface the first token so typos are obvious (matches player console).
-                const bad_verb = if (verb_end > 0) trimmed[0..verb_end] else trimmed;
-                self.adminWrite(admin_cmds.writeUnknownCommand, .{bad_verb});
-            },
-            .err_text => |e| {
-                var eb: [320]u8 = undefined;
-                const s = std.fmt.bufPrint(&eb, "{s}{s}{s}\n", .{ e.prefix, e.token, e.suffix }) catch return;
-                self.adminReply(s);
-            },
-            .wrong_args => |a| {
-                var eb: [96]u8 = undefined;
-                const s = std.fmt.bufPrint(
-                    &eb,
-                    "Wrong number of arguments, expected {s}, found {d}.\n",
-                    .{ a.expected, a.found },
-                ) catch return;
-                self.adminReply(s);
-            },
-            .bad_args => |verb| {
-                var eb: [128]u8 = undefined;
-                const s = if (admin_mod.usageFor(verb)) |u|
-                    std.fmt.bufPrint(&eb, "bad arguments to '{s}'. usage: {s}\n", .{ verb, u }) catch
-                        "bad arguments. 'help' for usage.\n"
-                else
-                    std.fmt.bufPrint(&eb, "bad arguments to '{s}'. 'help' for usage.\n", .{verb}) catch
-                        "bad arguments. 'help' for usage.\n";
-                self.adminReply(s);
-            },
-            .status => {
-                // One-line ops glance: load + key error counters for incident triage.
-                var sb: [320]u8 = undefined;
-                const s = std.fmt.bufPrint(
-                    &sb,
-                    "tick={d} players={d} zombies={d} chunks={d} overruns={d} encode_err={d} send_err={d} window_drop={d} persist_err={d}\n",
-                    .{
-                        self.tick_n,
-                        self.countJoined(),
-                        self.sim.countKind(.zombie),
-                        self.world.chunks.count(),
-                        self.harness.counters.get(.tick_overruns),
-                        self.harness.counters.get(.encode_errors),
-                        self.harness.counters.get(.net_send_errors),
-                        self.harness.counters.get(.reliable_window_drops),
-                        self.harness.counters.get(.persistence_errors),
-                    },
-                ) catch return;
-                self.adminReply(s);
-            },
-            .guardstats => {
-                var sb: [384]u8 = undefined;
-                const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d} malformed={d} reconnects={d} evidence={d}\n", .{
-                    self.harness.counters.get(.phase_rejects),
-                    self.harness.counters.get(.ownership_rejects),
-                    self.harness.counters.get(.bounds_rejects),
-                    self.harness.counters.get(.movement_rejects),
-                    self.harness.counters.get(.decode_rejects),
-                    self.harness.counters.get(.c2s_throttle),
-                    self.harness.counters.get(.c2s_malformed),
-                    self.harness.counters.get(.reconnects),
-                    self.evidence.total,
-                }) catch return;
-                self.adminReply(s);
-                self.adminReplyGuardPolicy();
-            },
-            .guardclear => |peer| {
-                if (peer >= max_clients or self.clients[peer].peer == null) {
-                    self.adminReply("no player in slot\n");
-                    return;
-                }
-                self.clients[peer].guard.quarantine = .{};
-                self.clients[peer].guard.kick_at_tick = 0;
-                self.adminReply("guard cleared\n");
-            },
-            .evidence => |path_opt| {
-                if (path_opt) |p| {
-                    // JSONL flush (P4 evidence file): the ring only holds the
-                    // last 64 events, so the operator can persist them.
-                    var path_buf: [1024]u8 = undefined;
-                    const path = if (p.len == 0) blk: {
-                        break :blk std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{self.world.world_dir}) catch "evidence.jsonl";
-                    } else p;
-                    const n = self.dumpEvidenceFile(path) catch |err| {
-                        var eb: [256]u8 = undefined;
-                        self.adminReply(std.fmt.bufPrint(&eb, "evidence dump failed: {s}\n", .{@errorName(err)}) catch "evidence dump failed\n");
-                        return;
-                    };
-                    var mb: [256]u8 = undefined;
-                    self.adminReply(std.fmt.bufPrint(&mb, "evidence dump: {d} events -> {s}\n", .{ n, path }) catch "evidence dumped\n");
-                } else {
-                    var dump: [16384]u8 = undefined;
-                    const n = self.evidence.dumpText(&dump);
-                    if (n == 0) self.adminReply("evidence empty\n") else self.adminReply(dump[0..n]);
-                }
-            },
-            .gamestage => |maybe_slot| self.adminReplyGameStage(maybe_slot),
-            .apm => {
-                // Full harness dump without waiting for the minute JSON line or --ticks exit.
-                const snap = self.harness.snapshot();
-                var ab: [apm.report.max_text_bytes]u8 = undefined;
-                var w: std.Io.Writer = .fixed(&ab);
-                apm.report.writeText(&snap, &w) catch |err| {
-                    std.debug.print("zdtd: admin apm dump failed: {s}\n", .{@errorName(err)});
-                };
-                if (w.buffered().len > 0) self.adminReply(w.buffered()) else self.adminReply("apm dump empty\n");
-            },
-            .save => {
-                // Same honesty as saveworld: never claim success when disk I/O failed.
-                var save_failed = false;
-                self.savePlayers() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save players", e);
-                };
-                self.world.saveAll() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save world", e);
-                };
-                self.containers.save(self.world.world_dir, self.allocator) catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save containers", e);
-                };
-                self.vending.save(self.world.world_dir) catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save vending", e);
-                };
-                self.saveClaims() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save claims", e);
-                };
-                self.saveBlockMeta() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save block meta", e);
-                };
-                self.saveWeather() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save weather", e);
-                };
-                self.saveClock() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save clock", e);
-                };
-                self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
-            },
-            .kick => |k| {
-                const res = self.resolveAdminTarget(k.target);
-                const slot = switch (res) {
-                    .slot => |i| i,
-                    else => return self.adminTargetError(k.target, res),
-                };
-                var kb: [192]u8 = undefined;
-                const s = std.fmt.bufPrint(&kb, "Kicking Player {s}: {s}\n", .{
-                    self.clients[slot].name[0..self.clients[slot].name_len], k.reason,
-                }) catch "Kicking Player\n";
-                self.adminReply(s);
-                self.dropClientSlot(slot, "kick");
-            },
-            .kickall => |reason| {
-                for (&self.clients, 0..) |*cl, i| {
-                    if (!cl.joined) continue;
-                    var kb: [192]u8 = undefined;
-                    const s = std.fmt.bufPrint(&kb, "Kicking Player {s}: {s}\n", .{
-                        cl.name[0..cl.name_len], reason,
-                    }) catch "Kicking Player\n";
-                    self.adminReply(s);
-                    self.dropClientSlot(i, "kickall");
-                }
-            },
-            .ban => |sub| self.runBanCommand(sub),
-            .unban => |ip| {
-                self.unbanIp(ip);
-                self.adminReply("unbanned\n");
-            },
-            .admin => |sub| switch (sub) {
-                .list => self.adminWrite(admin_cmds.writeAdminList, .{&self.admin_list}),
-                .add => |a| {
-                    var idb: [96]u8 = undefined;
-                    const id = self.adminTargetId(a.target, &idb);
-                    if (!self.admin_list.add(id, a.level)) {
-                        self.adminReply("permissions list full\n");
-                        return;
-                    }
-                    self.saveAdminLists();
-                    var b: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(&b, "{s} added with permission level of {d}.\n", .{ id, a.level }) catch return;
-                    self.adminReply(s);
-                },
-                .remove => |t| {
-                    var idb: [96]u8 = undefined;
-                    const id = self.adminTargetId(t, &idb);
-                    const removed = self.admin_list.remove(id);
-                    if (removed) self.saveAdminLists();
-                    var b: [160]u8 = undefined;
-                    const s = if (removed)
-                        std.fmt.bufPrint(&b, "{s} removed from permissions list.\n", .{id}) catch return
-                    else
-                        std.fmt.bufPrint(&b, "{s} was not on permissions list.\n", .{id}) catch return;
-                    self.adminReply(s);
-                },
-            },
-            .whitelist => |sub| switch (sub) {
-                .list => self.adminWrite(admin_cmds.writeWhitelist, .{&self.whitelist}),
-                .add => |t| {
-                    var idb: [96]u8 = undefined;
-                    const id = self.adminTargetId(t, &idb);
-                    if (!self.whitelist.add(id, 0)) {
-                        self.adminReply("whitelist full\n");
-                        return;
-                    }
-                    self.saveAdminLists();
-                    var b: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(&b, "{s} added to whitelist.\n", .{id}) catch return;
-                    self.adminReply(s);
-                },
-                .remove => |t| {
-                    var idb: [96]u8 = undefined;
-                    const id = self.adminTargetId(t, &idb);
-                    const removed = self.whitelist.remove(id);
-                    if (removed) self.saveAdminLists();
-                    var b: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(&b, "{s} {s} the whitelist.\n", .{
-                        id, if (removed) "removed from" else "was not on",
-                    }) catch return;
-                    self.adminReply(s);
-                },
-            },
-            .wipeplayer => |nm| {
-                // Drop any online session with this login name first so the next
-                // autosave cannot re-write the wiped players.zsv record.
-                var kicked: u32 = 0;
-                for (&self.clients, 0..) |*cl, i| {
-                    if (!cl.joined or cl.name_len != nm.len) continue;
-                    if (!std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
-                    self.dropClientSlot(i, "wipeplayer");
-                    kicked += 1;
-                }
-                const removed = self.wipePlayerRecordsByName(nm) catch |e| {
-                    logPersistErr(self, "wipe player", e);
-                    self.adminReply("wipe failed; see server log\n");
-                    return;
-                };
-                var lb: [72]u8 = undefined;
-                const s = std.fmt.bufPrint(&lb, "wiped records={d} kicked={d}\n", .{ removed, kicked }) catch "wiped\n";
-                self.adminReply(s);
-                // Count only; never print the login name to process logs.
-                std.debug.print("zdtd: wipeplayer records={d} kicked={d}\n", .{ removed, kicked });
-            },
-            .list, .listplayers => {
-                // ConsoleCmdListPlayers::Execute (asm.il 231241) field order.
-                // Names stay on admin/webui replies only (never process stdout; PlayerLogin logs name_len).
-                var n: usize = 0;
-                for (&self.clients, 0..) |*cl, i| {
-                    if (!cl.joined) continue;
-                    const ps = self.sim.playerByPeer(i);
-                    const t = if (ps) |p| self.sim.transform[p] else ecs.components.Transform{};
-                    const hp: i32 = if (ps) |p| @intFromFloat(self.sim.health[p].hp) else 0;
-                    self.adminWrite(admin_cmds.writePlayerRow, .{ n, admin_cmds.PlayerRow{
-                        .entity_id = cl.entity_id,
-                        .name = cl.name[0..cl.name_len],
-                        .x = t.x,
-                        .y = t.y,
-                        .z = t.z,
-                        .rot_y = t.yaw,
-                        .health = hp,
-                    } });
-                    n += 1;
-                }
-                self.adminWrite(admin_cmds.writeTotal, .{n});
-            },
-            .listplayerids => {
-                var n: usize = 0;
-                for (&self.clients) |*cl| {
-                    if (!cl.joined) continue;
-                    self.adminWrite(admin_cmds.writePlayerIdRow, .{ n, cl.entity_id, cl.name[0..cl.name_len] });
-                    n += 1;
-                }
-                self.adminWrite(admin_cmds.writeTotal, .{n});
-            },
-            .getgamepref => |filter| self.replyGamePrefs(filter),
-            .setgamepref => |sp| {
-                // Runtime write for the GameStats-backed prefs: apply to the sim
-                // and broadcast the new stats blob so client HUD values match.
-                if (self.applyGamePrefSet(sp.name, sp.value)) {
-                    self.broadcastGameStats() catch {};
-                    var b: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(
-                        &b,
-                        "GamePref.{s} set to {s} (applied at runtime).\n",
-                        .{ sp.name, sp.value },
-                    ) catch return;
-                    self.adminReply(s);
-                } else {
-                    // Unknown or startup-only pref: honest read-only reply.
-                    var b: [160]u8 = undefined;
-                    const s = std.fmt.bufPrint(
-                        &b,
-                        "GamePref.{s} is not runtime-writable on zdtd (set {s} in serverconfig.xml and restart).\n",
-                        .{ sp.name, sp.name },
-                    ) catch return;
-                    self.adminReply(s);
-                }
-            },
-            .chunkcache => self.adminWrite(admin_cmds.writeChunkCache, .{
-                self.world.chunks.count(),
-                @as(u64, self.world.chunks.count()) * @sizeOf(world_store.Chunk),
-            }),
-            .mem => self.replyMem(),
-            .killall => {
-                const n = self.consoleKillAll();
-                // Also animals (consoleKillAll is zombies-only). No loot bags:
-                // playtest clear_ai between combat and economy; loot floods the
-                // client bag and fails bag_add_item / trader free-slot paths.
-                var extra: u32 = 0;
-                var s: ecs.Slot = 0;
-                while (s < ecs.max_entities) : (s += 1) {
-                    if (!self.sim.alive[s] or self.sim.kind[s] != .animal) continue;
-                    const eid = self.sim.network_id[s].id;
-                    const dmg = self.sim.damage(eid, 99999);
-                    if (dmg.killed) {
-                        if (packages.buildRemoveBody(&self.body_buf, eid)) |rm| {
-                            self.broadcast("NetPackageEntityRemove", rm) catch {};
-                        } else |_| {}
-                        // Destroy any loot bag created by damage() without S2C spawn.
-                        if (dmg.loot_bag_id > 0) {
-                            if (self.sim.slotOfNetId(dmg.loot_bag_id)) |ls| {
-                                if (self.sim.alive[ls]) self.sim.destroy(ls);
-                            }
-                        }
-                        extra += 1;
-                    }
-                }
-                // Sweep existing ground loot so clear_ai leaves a clean field.
-                var swept: u32 = 0;
-                s = 0;
-                while (s < ecs.max_entities) : (s += 1) {
-                    if (!self.sim.alive[s]) continue;
-                    if (self.sim.kind[s] != .loot_bag and !self.sim.mask[s].loot_bag) continue;
-                    const lid = self.sim.network_id[s].id;
-                    if (packages.buildRemoveBodyReason(&self.body_buf, lid, .despawned)) |rm| {
-                        self.broadcast("NetPackageEntityRemove", rm) catch {};
-                    } else |_| {}
-                    self.sim.destroy(s);
-                    swept += 1;
-                }
-                var lb: [64]u8 = undefined;
-                const msg = std.fmt.bufPrint(&lb, "killed {d}\n", .{n + extra + swept}) catch "killed\n";
-                self.adminReply(msg);
-            },
-            .give => |g| {
-                // Server-side inv writes get clobbered by the client's next C2S
-                // PlayerInventory push. Stock-legal: drop a loot bag at the
-                // player's feet; pickup runs the client-authoritative flow.
-                const ps = self.sim.playerByPeer(g.peer) orelse {
-                    self.adminReply("no player in slot\n");
-                    return;
-                };
-                const t = self.sim.transform[ps];
-                if (self.sim.spawnLootBag(t.x + 1, t.y, t.z + 1, g.item, g.count)) |nid| {
-                    self.broadcastLootSpawn(nid) catch {};
-                    self.adminReply("dropped at player\n");
-                } else self.adminReply("give failed\n");
-            },
-            .tele => |t| {
-                if (self.sim.playerByPeer(t.peer)) |ps| {
-                    self.sim.transform[ps] = .{ .x = t.x, .y = t.y, .z = t.z, .yaw = 0 };
-                    self.resetMoveEnvelopePeer(t.peer, t.x, t.y, t.z);
-                    const entity_id = self.sim.netId(ps);
-                    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, t.x, t.y, t.z, 0, 0, 0, true) catch {
-                        self.adminReply("teleport encode failed\n");
-                        return;
-                    };
-                    self.broadcast("NetPackageEntityTeleport", body) catch {
-                        self.adminReply("teleport send failed\n");
-                        return;
-                    };
-                    self.adminReply("teleported\n");
-                } else self.adminReply("no player in slot\n");
-            },
-            .say => |msg| {
-                const body = packages.buildStockChat(&self.body_buf, 0, 0, msg, &.{}) catch return;
-                self.broadcast("NetPackageChat", body) catch {};
-                self.adminReply("sent\n");
-            },
-            .gettime => {
-                const clk = &self.sim.director.clock;
-                var tb2: [64]u8 = undefined;
-                const hh: u32 = @intFromFloat(clk.hours);
-                const mm: u32 = @intFromFloat((clk.hours - @floor(clk.hours)) * 60.0);
-                const s = std.fmt.bufPrint(&tb2, "Day {d}, {d:0>2}:{d:0>2}\n", .{ clk.day, hh, mm }) catch return;
-                self.adminReply(s);
-            },
-            .settime => |world_time| {
-                // Stock world time: 24000 ticks/day, 1000/hour (asm.il 1926175).
-                const clk = &self.sim.director.clock;
-                clk.day = @intCast(world_time / 24000 + 1);
-                const in_day = world_time % 24000;
-                clk.hours = @as(f32, @floatFromInt(in_day)) / 1000.0;
-                const wt = packages.buildWorldTimeBody(self.body_buf[0..16], clk.worldTimeBits()) catch return;
-                self.broadcast("NetPackageWorldTime", wt) catch {};
-                var b: [64]u8 = undefined;
-                const s = std.fmt.bufPrint(&b, "Set time to {d}\n", .{world_time}) catch return;
-                self.adminReply(s);
-            },
-            .spawnentity => |sp2| {
-                const nm = line[sp2.name_off..][0..sp2.name_len];
-                const def = self.entities.byName(nm) orelse {
-                    self.adminReply("unknown entity class\n");
-                    return;
-                };
-                // Accept peer slot (small) or stock player entity id (>= ~100).
-                const ps: ?ecs.Slot = blk: {
-                    if (sp2.peer < max_clients) {
-                        if (self.sim.playerByPeer(sp2.peer)) |s| break :blk s;
-                    }
-                    if (self.sim.slotOfNetId(@intCast(sp2.peer))) |s| {
-                        if (self.sim.mask[s].player) break :blk s;
-                    }
-                    // First joined player fallback (playtest often only has one).
-                    for (&self.clients, 0..) |*cl, i| {
-                        if (!cl.joined) continue;
-                        if (self.sim.playerByPeer(i)) |s| break :blk s;
-                    }
-                    break :blk null;
-                };
-                const pslot = ps orelse {
-                    self.adminReply("no player in slot\n");
-                    return;
-                };
-                const tr = self.sim.transform[pslot];
-                const sy = self.spawnYNearPlayer(tr.x, tr.y, tr.z);
-                const sx = tr.x + 3;
-                const sz = tr.z + 3;
-                // Name-based vehicle/trader shortcuts (entityclasses often tags them as zombie).
-                const low_vehicle = std.mem.indexOf(u8, nm, "vehicle") != null or std.mem.indexOf(u8, nm, "Bicycle") != null or std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "Motorcycle") != null or std.mem.indexOf(u8, nm, "4x4") != null or std.mem.indexOf(u8, nm, "Truck") != null or std.mem.indexOf(u8, nm, "Gyrocopter") != null;
-                const nid = blk: {
-                    if (low_vehicle or def.kind == .vehicle) {
-                        const vk: ecs.components.VehicleKind = if (std.mem.indexOf(u8, nm, "Bicycle") != null or std.mem.indexOf(u8, nm, "bicycle") != null)
-                            .bicycle
-                        else if (std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "minibike") != null)
-                            .minibike
-                        else if (std.mem.indexOf(u8, nm, "Motorcycle") != null or std.mem.indexOf(u8, nm, "motorcycle") != null)
-                            .motorcycle
-                        else if (std.mem.indexOf(u8, nm, "Gyro") != null or std.mem.indexOf(u8, nm, "gyro") != null)
-                            .gyrocopter
-                        else
-                            .four_by_four;
-                        // Seats come from vehicles.xml when that kind is known,
-                        // so a Truck4x4 gets four seats and not one.
-                        const vd = self.vehicles.byKind(vk);
-                        break :blk self.sim.spawnVehicleEx(
-                            vk,
-                            sx,
-                            sy,
-                            sz,
-                            if (vd) |d| d.max_hp else 200,
-                            if (vd) |d| d.velocity_max else 0,
-                            if (vd) |d| d.seat_count else 1,
-                        );
-                    }
-                    if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
-                        break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm), self.trader_wallet_dukes);
-                    }
-                    if (def.kind == .animal) {
-                        break :blk self.sim.spawnAnimal(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
-                    }
-                    break :blk self.sim.spawnZombieClass(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
-                };
-                if (nid) |eid| {
-                    // Force clients to treat entity as unknown so next interest pass
-                    // sends ECD (playtest combat flake: spawn without client EntityAlive).
-                    if (self.sim.slotOfNetId(eid)) |es| {
-                        for (&self.clients) |*cl| {
-                            if (!cl.joined) continue;
-                            cl.known_entities.unset(es);
-                        }
-                    }
-                    self.adminReply("spawned\n");
-                    std.debug.print("zdtd: admin spawnentity {s} eid={d} y={d:.1} near peerArg={d}\n", .{ nm, eid, sy, sp2.peer });
-                } else self.adminReply("spawn failed (capacity)\n");
-            },
-            .listents => {
-                // ConsoleCmdListEntities (asm.il 230715) field order + total line.
-                var n: usize = 0;
-                var ei: ecs.Slot = 0;
-                while (ei < ecs.max_entities) : (ei += 1) {
-                    if (!self.sim.alive[ei] or !self.sim.mask[ei].network_id) continue;
-                    const t = self.sim.transform[ei];
-                    self.adminWrite(admin_cmds.writeEntityRow, .{ n, admin_cmds.EntityRow{
-                        .entity_id = self.sim.network_id[ei].id,
-                        .name = @tagName(self.sim.kind[ei]),
-                        .x = t.x,
-                        .y = t.y,
-                        .z = t.z,
-                        .rot_y = t.yaw,
-                        .dead = self.sim.mask[ei].health and self.sim.health[ei].hp <= 0,
-                        .health = if (self.sim.mask[ei].health)
-                            @intFromFloat(self.sim.health[ei].hp)
-                        else
-                            null,
-                    } });
-                    n += 1;
-                }
-                self.adminWrite(admin_cmds.writeTotal, .{n});
-            },
-            .saveworld => {
-                var save_failed = false;
-                self.world.saveAll() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save world", e);
-                };
-                self.containers.save(self.world.world_dir, self.allocator) catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save containers", e);
-                };
-                self.vending.save(self.world.world_dir) catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save vending", e);
-                };
-                self.saveClaims() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save claims", e);
-                };
-                self.saveBlockMeta() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save block meta", e);
-                };
-                self.saveWeather() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save weather", e);
-                };
-                self.saveClock() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save clock", e);
-                };
-                self.savePlayers() catch |e| {
-                    save_failed = true;
-                    logPersistErr(self, "save players", e);
-                };
-                self.adminReply(if (save_failed) "world save failed; see server log\n" else "world saved\n");
-            },
-            .shutdown => {
-                self.adminReply("shutting down\n");
-                self.running = false;
-            },
-            .version => self.adminReply("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)\n"),
-            .inv => |peer_slot| {
-                const ps = self.sim.playerByPeer(peer_slot) orelse {
-                    self.adminReply("no player in slot\n");
-                    return;
-                };
-                if (!self.sim.mask[ps].inventory) {
-                    self.adminReply("no inventory\n");
-                    return;
-                }
-                for (self.sim.inventory[ps].slots, 0..) |s, si| {
-                    if (s.count == 0) continue;
-                    var lb: [96]u8 = undefined;
-                    const out = std.fmt.bufPrint(&lb, "slot={d} item={d} count={d} q={d} meta={d}\n", .{
-                        si, s.item_id, s.count, s.quality, s.meta,
-                    }) catch continue;
-                    self.adminReply(out);
-                }
-                self.adminReply("end\n");
-            },
-            .kill => |eid| {
-                const was_zombie = blk: {
-                    if (self.sim.slotOfNetId(eid)) |ei|
-                        break :blk self.sim.kind[ei] == .zombie or self.sim.kind[ei] == .animal;
-                    break :blk false;
-                };
-                const dmg = self.sim.damage(eid, 99999);
-                if (!dmg.killed) {
-                    std.debug.print("zdtd: admin kill {d} missed (alive or unknown)\n", .{eid});
-                    self.adminReply("kill missed\n");
-                    return;
-                }
-                const is_player = blk: {
-                    if (self.sim.slotOfNetId(eid)) |ti| break :blk self.sim.mask[ti].player;
-                    break :blk false;
-                };
-                if (is_player) {
-                    // Push hp=0 stat so the client death flow triggers.
-                    if (packages.buildEntityStatBody(self.body_buf[512..640], eid, 0, 100)) |hb| {
-                        self.broadcast("NetPackageEntityStatChanged", hb) catch {};
-                    } else |_| {}
-                    std.debug.print("zdtd: admin kill player entity={d} hp=0 sent\n", .{eid});
-                    self.adminReply("player killed\n");
-                    return;
-                }
-                const rm = packages.buildRemoveBody(&self.body_buf, eid) catch return;
-                self.broadcast("NetPackageEntityRemove", rm) catch {};
-                self.adminReply("killed\n");
-                std.debug.print("zdtd: admin kill entity={d} remove sent\n", .{eid});
-                if (was_zombie) {
-                    // quest credit to first joined peer if any
-                    for (&self.clients, 0..) |*cl, i| {
-                        if (!cl.joined) continue;
-                        systems.questOnZombieKilled(&self.sim, i);
-                        systems.questOnFetchItem(&self.sim, i, 1);
-                        break;
-                    }
-                }
-                if (dmg.loot_bag_id > 0) {
-                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(eid), self.partyLootStage());
-                    self.broadcastLootSpawn(dmg.loot_bag_id) catch {};
-                }
-            },
-        }
+    pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
+        admin_console.runAdminLine(self, line, source);
     }
-
     pub fn bindPort(self: *const Game) u16 {
         return self.net.port;
     }
@@ -4354,6 +3105,20 @@ pub const Game = struct {
     }
 
     pub fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
+        return self.sendGameBudget(peer, pkg_name, body, window_retry_budget_ns, false);
+    }
+
+    /// Join-critical variant of sendGame: the enter bundle has no client retry,
+    /// so a transiently busy peer (another client's stream burst holding the
+    /// reliable window) must not lose WorldInfo / IdMapping — a silent drop
+    /// wedges the client on the loading screen forever. Uses the peer's shared
+    /// critical budget (default 3 s, matching the peer_stale_ms reap); a truly
+    /// dead peer still fails fast and is reaped.
+    pub fn sendGameCritical(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
+        return self.sendGameBudget(peer, pkg_name, body, critical_retry_budget_ns, true);
+    }
+
+    fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
         // Stock compresses NetPackageChunk and NetPackageSignDataResponse
         // (asm.il:808641 set); deflate them into send_buf before the plain
         // framing path so the join/stream cost drops. Bodies stay in body_buf
@@ -4406,8 +3171,16 @@ pub const Game = struct {
         else
             960;
         // One client ACK batch cycle for the paced phase; the fast phase (no
-        // sleep) is untouched, so healthy peers drain exactly as before.
-        const retry_deadline = clock.monoNs() + window_retry_budget_ns;
+        // sleep) is untouched, so healthy peers drain exactly as before. Critical
+        // sends share the peer budget so the whole enter bundle gets one window
+        // of retry time, not one per package.
+        var retry_budget = budget_ns;
+        if (critical) {
+            const now = clock.monoNs();
+            if (peer.critical_budget_deadline_ns < now) peer.critical_budget_deadline_ns = now + budget_ns;
+            retry_budget = @min(budget_ns, peer.critical_budget_deadline_ns -% now);
+        }
+        const retry_deadline = clock.monoNs() + retry_budget;
         var attempts: u32 = 0;
         while (attempts < max_attempts) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
@@ -4463,6 +3236,9 @@ pub const Game = struct {
                 .{ pkg_name, droppable, drops },
             );
         }
+        // Critical (join) sends surface the failure so the enter bundle stops
+        // instead of silently continuing a bundle the client can never complete.
+        if (critical) return error.WindowFull;
     }
 
     /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
@@ -4544,7 +3320,7 @@ pub const Game = struct {
     /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
     /// quest modifiers are zero: biomes.xml GameStageMod/Bonus and quests.xml
     /// GameStageMod/Bonus are not parsed yet (docs/GAP_ANALYSIS.md).
-    fn gameStageOf(self: *const Game, slot: usize) i32 {
+    pub fn gameStageOf(self: *const Game, slot: usize) i32 {
         if (slot >= self.clients.len) return 1;
         const c = &self.clients[slot];
         const now = self.sim.director.clock.worldTimeBits();
@@ -4556,7 +3332,7 @@ pub const Game = struct {
 
     /// EntityPlayer::GetLootStage for one client (asm.il ~504215): level driven,
     /// with no POI tier or biome terms until those tables are parsed.
-    fn lootStageOf(self: *const Game, slot: usize) i32 {
+    pub fn lootStageOf(self: *const Game, slot: usize) i32 {
         if (slot >= self.clients.len) return 1;
         return assets_gamestages.lootStage(.{ .level = self.clients[slot].level });
     }
@@ -4565,7 +3341,7 @@ pub const Game = struct {
     /// over joined players within `radius` of (wx,wz). Stock also requires the
     /// same PrefabInstance; zdtd has no per-player POI tracking, so distance
     /// alone decides. Pass a negative radius for "every joined player".
-    fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
+    pub fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
         var stages: [max_clients]i32 = undefined;
         var n: usize = 0;
         for (&self.clients, 0..) |*c, i| {
@@ -4587,7 +3363,7 @@ pub const Game = struct {
     /// clients. Container contents are shared world state, so a per-viewer
     /// stage would make the same chest differ between clients; the party high
     /// water mark is both stock-shaped and viewer independent.
-    fn partyLootStage(self: *const Game) i32 {
+    pub fn partyLootStage(self: *const Game) i32 {
         var best: i32 = 1;
         for (&self.clients, 0..) |*c, i| {
             if (!c.joined) continue;
@@ -4599,7 +3375,7 @@ pub const Game = struct {
     /// Party.GetHighestLootStage for one player: the max loot stage across the
     /// player's party members, or the player alone when ungrouped. World-gen
     /// fills with no player context keep the global partyLootStage.
-    fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
+    pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
         if (peer_slot >= self.clients.len or !self.clients[peer_slot].joined) return self.partyLootStage();
         const me = self.clients[peer_slot].entity_id;
         var best: i32 = 1;
@@ -4961,7 +3737,7 @@ pub const Game = struct {
         }
     }
 
-    fn saveClaims(self: *Game) !void {
+    pub fn saveClaims(self: *Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
         var buf: [max_land_claims * (4 + 4 + 4 + 1 + 32 + 4) + 8]u8 = undefined;
@@ -5238,7 +4014,7 @@ pub const Game = struct {
     /// encoding stock persists (GamePrefs worldTime / WorldClock Read+Write).
     /// Saved on the periodic save path and at deinit; restored right after the
     /// fresh clock in initWithOptions.
-    fn saveClock(self: *const Game) !void {
+    pub fn saveClock(self: *const Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir});
         var buf: [16]u8 = undefined;
@@ -5278,7 +4054,7 @@ pub const Game = struct {
     /// instead of re-rolling the opening groups. File: `weather.zwt` (ZWTH1).
     /// Saved on the periodic save path and at deinit; restored right after
     /// initFrom in initWithOptions.
-    fn saveWeather(self: *const Game) !void {
+    pub fn saveWeather(self: *const Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir});
         var buf: [1024]u8 = undefined;
@@ -5313,7 +4089,7 @@ pub const Game = struct {
     /// shapes and partial block damage survive restart. File: "ZBM1" | u16 raw_n |
     /// (key u64 + raw u32)* | u16 hp_n | (key u64 + hp u16)*.
     /// Keys are sorted so bytes do not depend on insert/remove history (DST).
-    fn saveBlockMeta(self: *const Game) !void {
+    pub fn saveBlockMeta(self: *const Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
         var buf: [4096]u8 = undefined;
@@ -5436,7 +4212,7 @@ pub const Game = struct {
         self.lock_pos_key[ch] = 0;
     }
 
-    fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
+    pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
         const ps: i32 = @intCast(peer_slot);
         for (&self.lock_channel, 0..) |*h, i| {
             if (h.* == ps) self.clearLockSlot(i);
@@ -5488,7 +4264,7 @@ pub const Game = struct {
         }
     }
 
-    fn peerIpKey(peer: *const ln_peer.Peer) u32 {
+    pub fn peerIpKey(peer: *const ln_peer.Peer) u32 {
         // Host-order key for ban/rate tables (IPv4 loopback = 0x7f000001). Port is
         // excluded so ban/rate apply per host. IPv4-mapped IPv6 shares the IPv4 key.
         return switch (peer.addr) {
@@ -5541,14 +4317,14 @@ pub const Game = struct {
         return false;
     }
 
-    fn banIp(self: *Game, ip: u32) void {
+    pub fn banIp(self: *Game, ip: u32) void {
         if (ip == 0 or self.isBanned(ip)) return;
         if (self.ban_n >= self.ban_ip.len) return;
         self.ban_ip[self.ban_n] = ip;
         self.ban_n += 1;
     }
 
-    fn unbanIp(self: *Game, ip: u32) void {
+    pub fn unbanIp(self: *Game, ip: u32) void {
         var i: usize = 0;
         while (i < self.ban_n) : (i += 1) {
             if (self.ban_ip[i] != ip) continue;
@@ -5850,7 +4626,7 @@ pub const Game = struct {
             self.sendBlockIdMapping(peer);
             try self.sendLocalConfigFiles(peer);
             const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
-            try self.sendGame(peer, "NetPackageWorldInfo", wi);
+            try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
             try self.sendWorldSpawnPoints(peer);
             // Stock sends World.TraderAreas right after SpawnPoints and before
             // GameStats (GameManager/<RequestToEnterGame>d__195 MoveNext,
@@ -8101,14 +6877,8 @@ pub const Game = struct {
     /// Returns the number of events written; fails loudly on I/O error so the
     /// operator never mistakes a failed flush for a successful one.
     pub fn dumpEvidenceFile(self: *Game, path: []const u8) !usize {
-        var dump: [16384]u8 = undefined;
-        const n = self.evidence.dumpText(&dump);
-        try io_fs.writeFile(self.allocator, path, dump[0..n]);
-        return self.evidence.n;
+        return admin_console.dumpEvidenceFile(self, path);
     }
-
-    /// Stock multiplayer waits for NetPackageConfigFile for each SendToClients XML
-    /// (WorldStaticData.xmlsToLoad where sendToClients=true). Length -1 => load local.
     fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
         var pts: [32]packages.SpawnPointXYZ = undefined;
         var n: usize = 0;
@@ -8126,7 +6896,7 @@ pub const Game = struct {
             n = 1;
         }
         const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);
-        try self.sendGame(peer, "NetPackageWorldSpawnPoints", body);
+        try self.sendGameCritical(peer, "NetPackageWorldSpawnPoints", body);
     }
 
     /// Build and send NetPackageWorldAreas from the trader POIs on the loaded
@@ -8171,7 +6941,7 @@ pub const Game = struct {
         }
         if (n == 0) return;
         const body = try packages.buildWorldAreasBody(self.body_buf[0..2048], areas[0..n]);
-        try self.sendGame(peer, "NetPackageWorldAreas", body);
+        try self.sendGameCritical(peer, "NetPackageWorldAreas", body);
     }
 
     /// PrefabInstance.ResetBlocksAndRebuild (asm.il 945360-945387): re-paint a
@@ -8272,7 +7042,7 @@ pub const Game = struct {
             std.debug.print("zdtd: blocks IdMapping deflate failed: {s}\n", .{@errorName(err)});
             return;
         };
-        self.sendFramedReliable(peer, "NetPackageIdMapping", framed) catch |err| {
+        self.sendFramedReliable(peer, "NetPackageIdMapping", framed, critical_retry_budget_ns, true) catch |err| {
             std.debug.print("zdtd: blocks IdMapping send failed: {s}\n", .{@errorName(err)});
             return;
         };
@@ -8294,20 +7064,27 @@ pub const Game = struct {
         const w = fr.writer();
         w.writeAll(body) catch return false;
         const framed = fr.finish() catch return false;
-        self.sendFramedReliable(peer, pkg_name, framed) catch return false;
+        self.sendFramedReliable(peer, pkg_name, framed, window_retry_budget_ns, false) catch return false;
         return true;
     }
 
     /// Send an already-framed envelope on the reliable channel, pumping the window
     /// the same way `sendGame` does. Separate from `sendGame` because the compressed
     /// mapping frame is built by the streaming framer, not from a body buffer.
-    fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8) anyerror!void {
+    fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8, budget_ns: u64, critical: bool) anyerror!void {
         // A live peer drains a small mapping inside a few outer attempts once
         // the 1 ms pacing lets its ACK cycle run; a large one (Navezgane,
         // ~200 fragments) drains inside one sendReliable via the inner per-part
         // pump. The outer budget also escapes a stuck window: it stays bounded
-        // (~230 ms of paced attempts) so the stale-peer sweep reclaims a dead
-        // peer instead of the tick holding for minutes.
+        // (paced attempts up to the deadline) so the stale-peer sweep reclaims
+        // a dead peer instead of the tick holding for minutes.
+        var retry_budget = budget_ns;
+        if (critical) {
+            const now = clock.monoNs();
+            if (peer.critical_budget_deadline_ns < now) peer.critical_budget_deadline_ns = now + budget_ns;
+            retry_budget = @min(budget_ns, peer.critical_budget_deadline_ns -% now);
+        }
+        const retry_deadline = clock.monoNs() + retry_budget;
         var attempts: u32 = 0;
         while (attempts < 960) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
@@ -8316,6 +7093,7 @@ pub const Game = struct {
                         self.harness.counters.inc(.net_send_errors);
                     };
                     self.pollNetOnce();
+                    if (clock.monoNs() >= retry_deadline) break;
                     if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                     continue;
                 },
@@ -8327,6 +7105,9 @@ pub const Game = struct {
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.pollNetAfterSend();
+            // A successful critical send means the window is draining; re-arm
+            // the shared budget so the rest of the bundle gets a fair window.
+            if (critical) peer.critical_budget_deadline_ns = clock.monoNs() + budget_ns;
             return;
         }
         self.harness.counters.inc(.reliable_window_drops);
@@ -8457,92 +7238,14 @@ pub const Game = struct {
     /// ConsoleCmdGameStage::Execute (asm.il ~220775) prints the whole formula so
     /// a live client's own `gamestage` output can be diffed against the server.
     /// Biome/quest terms are printed as the zeros zdtd actually feeds in.
-    fn adminReplyGameStage(self: *Game, maybe_slot: ?usize) void {
-        if (maybe_slot) |slot| {
-            if (slot >= max_clients or !self.clients[slot].joined) {
-                self.adminReply("no player in slot\n");
-                return;
-            }
-        }
-        var sb: [512]u8 = undefined;
-        const now = self.sim.director.clock.worldTimeBits();
-        var any = false;
-        for (&self.clients, 0..) |*c, i| {
-            if (!c.joined) continue;
-            if (maybe_slot) |slot| if (i != slot) continue;
-            any = true;
-            const days = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level);
-            const s = std.fmt.bufPrint(
-                &sb,
-                "slot={d} gamestage={d} lootstage={d} level={d} biome_mod=0 quest_mod=0 days_alive={d} " ++
-                    "biome_bonus=0 quest_bonus=0 difficulty_bonus={d:.3} global_modifier=1.000 born_at={d}\n",
-                .{
-                    i,
-                    self.gameStageOf(i),
-                    self.lootStageOf(i),
-                    c.level,
-                    days,
-                    self.gamestages.config.difficulty_bonus,
-                    c.game_stage_born_world_time,
-                },
-            ) catch return;
-            self.adminReply(s);
-        }
-        if (!any) {
-            self.adminReply("no players joined\n");
-            return;
-        }
-        const p = std.fmt.bufPrint(&sb, "party_stage={d} party_lootstage={d} world_time={d}\n", .{
-            self.partyStageAround(0, 0, -1),
-            self.partyLootStage(),
-            now,
-        }) catch return;
-        self.adminReply(p);
+    pub fn adminReplyGameStage(self: *Game, maybe_slot: ?usize) void {
+        admin_console.adminReplyGameStage(self, maybe_slot);
     }
 
-    fn adminReplyGuardPolicy(self: *Game) void {
-        var sb: [512]u8 = undefined;
-        const s = std.fmt.bufPrint(
-            &sb,
-            "policy enforce={d} dry_run={d} quarantine={d} load_shed={d} mode={s} window={d} strong_distinct={d} hard_repeat={d} quarantines={d} kicks={d} would_kicks={d} q_rejects={d} shed_drops={d} shed={d}\n",
-            .{
-                @intFromBool(self.guard.enforce),
-                @intFromBool(self.guard.dry_run),
-                @intFromBool(self.guard.quarantine),
-                @intFromBool(self.guard.load_shed),
-                @tagName(self.authority_mode),
-                self.guard.window_ticks,
-                self.guard.strong_distinct,
-                self.guard.hard_repeat,
-                self.harness.counters.get(.guard_quarantines),
-                self.harness.counters.get(.guard_kicks),
-                self.harness.counters.get(.guard_would_kicks),
-                self.harness.counters.get(.quarantine_rejects),
-                self.harness.counters.get(.load_shed_drops),
-                @intFromBool(self.loadShedding()),
-            },
-        ) catch return;
-        self.adminReply(s);
-
-        var qb: [512]u8 = undefined;
-        var pos: usize = 0;
-        for (&self.clients, 0..) |*cl, i| {
-            const q = cl.guard.quarantine;
-            if (!q.any() and cl.guard.kick_at_tick == 0) continue;
-            const line = std.fmt.bufPrint(qb[pos..], "  slot={d} no_damage={d} no_container={d} no_setblock={d} kick_at={d}\n", .{
-                i,
-                @intFromBool(q.no_damage),
-                @intFromBool(q.no_container),
-                @intFromBool(q.no_setblock),
-                cl.guard.kick_at_tick,
-            }) catch break;
-            pos += line.len;
-        }
-        if (pos > 0) self.adminReply(qb[0..pos]);
+    pub fn adminReplyGuardPolicy(self: *Game) void {
+        admin_console.adminReplyGuardPolicy(self);
     }
-
-    /// True while the tick-budget valve is open (set by the run() overrun branch).
-    fn loadShedding(self: *const Game) bool {
+    pub fn loadShedding(self: *const Game) bool {
         return self.tick_n < self.shed_until_tick;
     }
 
@@ -8756,7 +7459,7 @@ pub const Game = struct {
     }
 
     /// Per-peer chat flood gate. Returns true and stamps `last_chat_ns` when allowed.
-    fn acceptChatRate(self: *const Game, c: *Client) bool {
+    pub fn acceptChatRate(self: *const Game, c: *Client) bool {
         const now = clock.monoNs();
         if (c.last_chat_ns != 0 and now -% c.last_chat_ns < self.min_chat_gap_ns) return false;
         c.last_chat_ns = now;
@@ -8776,7 +7479,7 @@ pub const Game = struct {
     }
 
     /// World Y for spawning mobs next to a player (surface band, not void/float).
-    fn spawnYNearPlayer(self: *Game, tr_x: f32, tr_y: f32, tr_z: f32) f32 {
+    pub fn spawnYNearPlayer(self: *Game, tr_x: f32, tr_y: f32, tr_z: f32) f32 {
         const gx: i32 = std.math.lossyCast(i32, @floor(tr_x));
         const gz: i32 = std.math.lossyCast(i32, @floor(tr_z));
         const h_u16: u16 = self.world.heightWorld(gx, gz) catch {
@@ -9015,7 +7718,7 @@ pub const Game = struct {
     fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void {
         const vals = self.gameStatsValues();
         const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], vals);
-        try self.sendGame(peer, "NetPackageGameStats", gs);
+        try self.sendGameCritical(peer, "NetPackageGameStats", gs);
     }
 
     /// The bPersistent GameStats values (stock defaults otherwise).
@@ -9050,7 +7753,7 @@ pub const Game = struct {
     /// Re-send the GameStats blob to every entered peer when the scheduled
     /// blood-moon day rolls (a client that joined mid-cycle and sat past its
     /// first horde would otherwise keep the stale red-moon HUD day forever).
-    fn broadcastGameStats(self: *Game) !void {
+    pub fn broadcastGameStats(self: *Game) !void {
         const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], self.gameStatsValues());
         try self.broadcast("NetPackageGameStats", gs);
     }
@@ -9456,7 +8159,7 @@ pub const Game = struct {
         }
     }
 
-    fn countJoined(self: *const Game) u16 {
+    pub fn countJoined(self: *const Game) u16 {
         var n: u16 = 0;
         for (self.clients) |cl| {
             if (cl.joined) n += 1;
@@ -10127,7 +8830,7 @@ pub const Game = struct {
         return 0;
     }
 
-    fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {
+    pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {
         const list_name = if (loot_list.len > 0) loot_list else "EntityLootContainerRegular";
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
         const n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
@@ -10343,7 +9046,7 @@ pub const Game = struct {
     /// GameStageDefinition::CalcGameStageAround radius (asm.il ~1093363).
     const sleeper_party_radius: f32 = 100.0;
 
-    fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
+    pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         const bi = self.sim.slotOfNetId(net_id) orelse return;
         // Death / multi-stack bags: DroppedLootContainer + ECD bag field.
         var bag_slots: [ecs.components.max_inv_slots]packages.stock_inv.StockSlot = undefined;

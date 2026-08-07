@@ -298,6 +298,7 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
         .density = density,
         .damage = damage,
         .textures = textures,
+        .water = water,
         .tile_entities = tile_entities,
         .allocator = allocator,
     };
