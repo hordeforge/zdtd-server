@@ -2327,18 +2327,35 @@ pub fn buildConsoleCmdClient(buf: []u8, lines: []const []const u8, b_execute: bo
     return w.written();
 }
 
-pub fn buildStockChat(buf: []u8, sender_entity_id: i32, msg: []const u8) ![]u8 {
+/// NetPackageChat body (RE chat.md §1): chatType u8 (EChatType: 0 Global,
+/// 1 Friends, 2 Party, 3 Whisper, 4 Discord), senderEntityId i32, msg string,
+/// msgSender u8, bbMode u8, recipientEntityIds (i32 count + ids). The
+/// recipient list is the routing key: ChatMessageServer sends only to those
+/// clients when non-empty, else broadcasts (chat.md §2).
+pub const StockChat = struct {
+    chat_type: u8,
+    sender: i32,
+    msg: []const u8,
+    msg_sender: u8 = 0,
+    bb_mode: u8 = 0,
+    /// Party/friends/whisper recipients (≤ 8, the party cap).
+    recipients: [8]i32 = .{-1} ** 8,
+    recipient_count: u8 = 0,
+};
+
+pub fn buildStockChat(buf: []u8, chat_type: u8, sender_entity_id: i32, msg: []const u8, recipients: []const i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(0); // EChatType.Global
+    try w.writeByte(chat_type);
     try w.writeI32(sender_entity_id);
     try w.writeString(msg);
     try w.writeByte(0); // EMessageSender
     try w.writeByte(0); // BbCodeSupportMode
-    try w.writeI32(0); // no recipient filter (broadcast)
+    try w.writeI32(@intCast(recipients.len));
+    for (recipients) |rid| try w.writeI32(rid);
     return w.written();
 }
 
-pub fn parseStockChat(body: []const u8) !struct { chat_type: u8, sender: i32, msg: []const u8 } {
+pub fn parseStockChat(body: []const u8) !StockChat {
     if (body.len < 6) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const chat_type = try r.readByte();
@@ -2352,7 +2369,52 @@ pub fn parseStockChat(body: []const u8) !struct { chat_type: u8, sender: i32, ms
     const len: usize = len_u;
     if (r.pos + len > body.len) return error.EndOfStream;
     const msg = body[r.pos .. r.pos + len];
-    return .{ .chat_type = chat_type, .sender = sender, .msg = msg };
+    r.pos += len;
+    var out = StockChat{ .chat_type = chat_type, .sender = sender, .msg = msg };
+    out.msg_sender = try r.readByte();
+    out.bb_mode = try r.readByte();
+    const count = try r.readI32();
+    if (count > 0) {
+        if (count > out.recipients.len) return error.Overflow; // forged list
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(count))) : (i += 1) {
+            out.recipients[i] = try r.readI32();
+        }
+        out.recipient_count = @intCast(count);
+    }
+    return out;
+}
+
+test "stock chat round-trips channel, sender, message and recipients" {
+    var buf: [128]u8 = undefined;
+    const recips = [_]i32{ 20, 30 };
+    const body = try buildStockChat(&buf, 2, 10, "hello party", &recips); // EChatType.Party
+    const ch = try parseStockChat(body);
+    try std.testing.expectEqual(@as(u8, 2), ch.chat_type);
+    try std.testing.expectEqual(@as(i32, 10), ch.sender);
+    try std.testing.expectEqualStrings("hello party", ch.msg);
+    try std.testing.expectEqual(@as(u8, 2), ch.recipient_count);
+    try std.testing.expectEqual(@as(i32, 20), ch.recipients[0]);
+    try std.testing.expectEqual(@as(i32, 30), ch.recipients[1]);
+}
+
+test "stock chat global has no recipients and rejects a forged oversized list" {
+    var buf: [128]u8 = undefined;
+    const body = try buildStockChat(&buf, 0, 10, "global", &.{});
+    const ch = try parseStockChat(body);
+    try std.testing.expectEqual(@as(u8, 0), ch.chat_type);
+    try std.testing.expectEqual(@as(u8, 0), ch.recipient_count);
+    // 9 recipients > the 8 cap is rejected, not truncated.
+    var w = binary.Writer{ .buf = &buf };
+    try w.writeByte(0);
+    try w.writeI32(10);
+    try w.writeString("x");
+    try w.writeByte(0);
+    try w.writeByte(0);
+    try w.writeI32(9);
+    var i: usize = 0;
+    while (i < 9) : (i += 1) try w.writeI32(@intCast(100 + i));
+    try std.testing.expectError(error.Overflow, parseStockChat(w.written()));
 }
 
 /// NetPackageEntityAttach: attachType u8 | riderId i32 | vehicleId i32 | slot i16
@@ -3236,6 +3298,27 @@ pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
     try out.target.set(try platform_user.read(&r, &plat_buf, &id_buf));
     out.add_ally = try r.readBool();
     return out;
+}
+
+/// Stock `NetPackagePartyQuestChange::read` (asm.il): senderEntityID i32 |
+/// objectiveIndex u8 | isComplete bool | questCode i32. Server fans it to the
+/// other party members; the client's HandlePlayer applies the shared-quest
+/// objective delta (parties-factions.md §2.3).
+pub const PartyQuestChange = struct {
+    sender_entity: i32,
+    objective_index: u8,
+    is_complete: bool,
+    quest_code: i32,
+};
+
+pub fn parsePartyQuestChange(body: []const u8) binary.ReadError!PartyQuestChange {
+    var r: binary.Reader = .{ .data = body };
+    return .{
+        .sender_entity = try r.readI32(),
+        .objective_index = try r.readByte(),
+        .is_complete = try r.readBool(),
+        .quest_code = try r.readI32(),
+    };
 }
 
 /// Stock `NetPackageAllyResponse::read` (asm.il 886390): source | target |

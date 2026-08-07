@@ -27,6 +27,9 @@ pub const Health = struct {
     food_max: f32 = 100,
     water: f32 = 0,
     water_max: f32 = 100,
+    /// PlayerEntityStats Stamina (0..max); drained by sprinting, regens idle.
+    stamina: f32 = 100,
+    stamina_max: f32 = 100,
     /// Corpse dwell seconds left (TimeStayAfterDeath: 30 zombies, 300 animals).
     /// > 0 means dead-but-in-world: the corpse stays replicated until the sweep
     /// destroys it, so the client's ragdoll is not yanked mid-animation.
@@ -327,6 +330,10 @@ pub const QuestProgress = struct {
     /// POI this quest instance runs in; unset (zero size) for quests the server
     /// could not place, which keeps their rally objectives as scaffolding.
     poi: PoiRect = .{},
+    /// Stock shared quest: the server shared this quest with the owner's party
+    /// (ShareAllQuestsWithParty). Cleared/removed when the owner leaves the
+    /// party or disconnects.
+    is_shared: bool = false,
 };
 
 pub const Journal = struct {

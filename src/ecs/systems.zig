@@ -358,7 +358,17 @@ pub fn questFindByCode(w: *World, peer_slot: usize, quest_code: i32) ?*c.QuestPr
 }
 
 pub fn questAcceptStarter(w: *World, peer_slot: usize) bool {
-    return questAccept(w, peer_slot, w.catalog.starter_id);
+    const ps = w.playerByPeer(peer_slot) orelse return false;
+    if (!w.mask[ps].journal) return false;
+    // A starter completed (or still active) in an earlier session must not be
+    // granted again on the next login: hasActive only matches active slots,
+    // and findFree reuses non-active ones, so the guard has to scan every
+    // slot (GAP starter-quest row).
+    const starter = w.catalog.starter_id;
+    for (w.journal[ps].slots) |s| {
+        if (s.def_id == starter and (s.active or s.completed)) return false;
+    }
+    return questAccept(w, peer_slot, starter);
 }
 
 pub fn questOnZombieKilled(w: *World, peer_slot: usize) void {
@@ -474,13 +484,16 @@ pub fn questCheckPoiLockout(w: *World, entity_id: i32, x: f32, z: f32) PoiLockou
         return .{ .reason = .quest_lock, .extra_data = until };
     }
     const rect = w.poiAt(x, z) orelse return .{};
-    // Stock exempts party members; zdtd tracks no parties, so every other
-    // player inside the POI blocks the reset.
+    // Stock exempts party members (CheckForPOILockouts, asm.il 998957): a
+    // party member inside the POI does not block the rally.
     var i: Slot = 0;
     while (i < max_entities) : (i += 1) {
         if (!w.alive[i] or !w.mask[i].player or !w.mask[i].transform) continue;
         if (w.mask[i].network_id and w.network_id[i].id == entity_id) continue;
         if (rect.containsXZ(w.transform[i].x, w.transform[i].z)) {
+            if (w.party_same_fn) |f| {
+                if (w.mask[i].network_id and f(w.party_same_ctx, entity_id, w.network_id[i].id)) continue;
+            }
             return .{ .reason = .player_inside };
         }
     }
@@ -2681,14 +2694,7 @@ test "approach_distraction walks a decoy across decision re-evals" {
     w.zombie_ai[zs].active_task = .none;
     w.zombie_ai[zs].decision_cd = 0;
     var t: f32 = 0;
-    while (t < 0.1) : (t += 0.05) {
-        _ = systemZombieAi(&w, 0.05);
-        std.debug.print("DBG2 t={d} task={s} dc={d} pend={d} dist={d}\n", .{
-            @as(u32, @intFromFloat(t * 20 + 1)), @tagName(w.zombie_ai[zs].active_task),
-            w.zombie_ai[zs].decision_cd,         w.zombie_ai[zs].pending_distraction,
-            w.zombie_ai[zs].distraction,
-        });
-    }
+    while (t < 0.1) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
     const x0 = w.transform[zs].x;
     // Outlast one decision window (0.425 s / 0.005 s/tick at the 0.1 LOD
@@ -3251,6 +3257,33 @@ test "poi lockout reports quest lock and other players inside" {
     try std.testing.expectEqual(poi_lock.LockReason.quest_lock, questCheckPoiLockout(&w, a_id, 10, 10).reason);
 }
 
+test "poi lockout exempts a party member inside the POI" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    // Hook: entity ids 100 and 101 are in one party; everyone else is not.
+    const Ctx = struct {
+        fn same(ctx: ?*anyopaque, a: i32, b: i32) bool {
+            _ = ctx;
+            const in_party = (a == 100 or a == 101) and (b == 100 or b == 101);
+            return a != b and in_party;
+        }
+    };
+    w.party_same_ctx = null;
+    w.party_same_fn = &Ctx.same;
+    const a_id = w.spawnPlayer(5, 70, 5, 0).?;
+    w.network_id[w.slotOfNetId(a_id).?].id = 100;
+    // Party mate inside the POI does not block A's rally.
+    const b_id = w.spawnPlayer(20, 70, 20, 1).?;
+    w.network_id[w.slotOfNetId(b_id).?].id = 101;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+    // A non-party player (fresh id 102) still blocks.
+    const c_id = w.spawnPlayer(20, 70, 20, 2).?;
+    w.network_id[w.slotOfNetId(c_id).?].id = 102;
+    try std.testing.expectEqual(poi_lock.LockReason.player_inside, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+}
+
 test "quest turn_in needs trader open" {
     var w: World = .{};
     defer w.deinit();
@@ -3733,4 +3766,35 @@ test "blood-moon-dead players are skipped as AI targets but kept for despawn" {
     try std.testing.expectEqual(@as(usize, 1), ai_n);
     const des_n = snapshotPlayers(&w, &snaps, false);
     try std.testing.expectEqual(@as(usize, 2), des_n);
+}
+
+test "completed starter quest is not granted again on the next login" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 22,
+        .kind = .fetch_item,
+        .title = "Starter",
+        .target_count = 1,
+        .reward_coin = 10,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    // First login grants the starter.
+    try std.testing.expect(questAcceptStarter(&w, 0));
+    try std.testing.expect(questHasActive(&w, 0, 22));
+    // The player completes it; a second login must not re-grant it (hasActive
+    // only matches active slots, so the guard scans completed slots too).
+    const ps = w.playerByPeer(0).?;
+    for (&w.journal[ps].slots) |*s| {
+        if (s.def_id == 22 and s.active) {
+            s.completed = true;
+            s.active = false;
+            break;
+        }
+    }
+    try std.testing.expect(!questAcceptStarter(&w, 0));
+    // A fresh player on a different peer still gets the starter.
+    _ = w.spawnPlayer(0, 70, 5, 1);
+    try std.testing.expect(questAcceptStarter(&w, 1));
 }

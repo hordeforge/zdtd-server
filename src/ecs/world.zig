@@ -208,6 +208,12 @@ pub const World = struct {
     /// POI data, so those quests fall back to their def marker position.
     nearest_poi_ctx: ?*anyopaque = null,
     nearest_poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
+    /// "Are two entity ids in the same party?" (Game wires the Party manager).
+    /// Quest POI lockout exempts party members (stock CheckForPOILockouts:
+    /// a party member inside the POI does not block the rally). Unset → no
+    /// party data, every other player blocks (pre-party behaviour).
+    party_same_ctx: ?*anyopaque = null,
+    party_same_fn: ?*const fn (?*anyopaque, i32, i32) bool = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

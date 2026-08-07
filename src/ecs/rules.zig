@@ -58,8 +58,34 @@ pub const Bloodmoon = struct {
     max_parties: u32 = 8,
 };
 
-/// Placeholder group: added as constants move; no fields invented.
-pub const Progression = struct {};
+/// Survival simulation tuning (GAP 22). The stock loop applies the
+/// FoodChangeOT/WaterOT/HealthChangeOT passive effects through Stat.Tick,
+/// whose per-effect defaults are not in the V3.1.0 IL corpus; these rates are
+/// policy tunables (ADR 0021) that reproduce the stock feel (full Food drains
+/// in ~2 in-game days at 60-min days). Eat/Drink restores on top.
+pub const Progression = struct {
+    /// Food units lost per in-game hour (100 = full).
+    food_depletion_per_hour: f32 = 2.0,
+    /// Water units lost per in-game hour (100 = full).
+    water_depletion_per_hour: f32 = 2.5,
+    /// HP lost per in-game hour while Food or Water is exhausted
+    /// (UpdatePlayerHealthOT starvation branch).
+    starvation_damage_per_hour: f32 = 12.0,
+    /// HP regenerated per in-game hour while Food and Water are both above
+    /// the well-fed threshold (UpdatePlayerHealthOT regen branch).
+    well_fed_regen_per_hour: f32 = 10.0,
+    /// Food/Water above this count as well-fed for regen.
+    well_fed_threshold: f32 = 80.0,
+    /// Stamina drained per real second while sprinting (MovementState 3).
+    stamina_drain_per_second: f32 = 12.0,
+    /// Stamina regenerated per real second while not sprinting.
+    stamina_regen_per_second: f32 = 8.0,
+    /// Seconds without an EntitySpeeds update before the sprint state lapses.
+    sprint_stale_seconds: f32 = 0.5,
+    /// Seconds between survival S2C refreshes per player (EntityStats
+    /// netSyncWaitTicks is 10 ticks; 2 s keeps a visible but not chatty feed).
+    survival_sync_seconds: f32 = 2.0,
+};
 
 /// Placeholder group: added as constants move; no fields invented.
 pub const WorldGroup = struct {};
@@ -97,7 +123,17 @@ pub const BloodmoonOverlay = struct {
     max_parties: ?u32 = null,
 };
 
-pub const ProgressionOverlay = struct {};
+pub const ProgressionOverlay = struct {
+    food_depletion_per_hour: ?f32 = null,
+    water_depletion_per_hour: ?f32 = null,
+    starvation_damage_per_hour: ?f32 = null,
+    well_fed_regen_per_hour: ?f32 = null,
+    well_fed_threshold: ?f32 = null,
+    stamina_drain_per_second: ?f32 = null,
+    stamina_regen_per_second: ?f32 = null,
+    sprint_stale_seconds: ?f32 = null,
+    survival_sync_seconds: ?f32 = null,
+};
 
 pub const WorldGroupOverlay = struct {};
 

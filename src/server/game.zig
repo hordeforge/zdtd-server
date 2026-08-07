@@ -522,6 +522,14 @@ const Client = struct {
     stream_cap_warned: bool = false,
     /// Last accepted chat broadcast (mono ns); flood throttle for Global chat.
     last_chat_ns: u64 = 0,
+    /// Survival S2C throttle (tickSurvival): seconds until the next
+    /// sendSurvivalStats for this client.
+    survival_sync_cd: f32 = 0,
+    /// Last reported sprint speed (NetPackageEntitySpeeds MovementState 3);
+    /// lapses after sprint_stale_seconds without an update. Drives stamina
+    /// drain (UpdatePlayerStaminaOT).
+    sprint_speed: f32 = 0,
+    sprint_stale_cd: f32 = 0,
     /// Cost-class token buckets (refill on accept path).
     inv_tokens: u8 = 0,
     inv_refill_ns: u64 = 0,
@@ -1146,6 +1154,13 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Spawned vehicles / turrets survive restart (entities.zen).
+        self.loadEntities() catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load entities", e);
+                return e;
+            }
+        };
         // Ally relationships survive restart (allies.zal).
         self.allies.load(self.world.world_dir, self.allocator) catch |e| {
             if (e != error.OpenFailed) {
@@ -1541,6 +1556,8 @@ pub const Game = struct {
             var id_ctx: IdCtx = .{ .t = &self.maxdamage };
             if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, IdCtx.distantDeco, &id_ctx) catch null) |bl| {
                 self.world.biome_layers_table = bl;
+                // The procedural generator picks up the loaded biome stacks (W3).
+                self.world.syncWorldgenBiomes();
                 // Weather groups must come from the same effective biomes.xml we
                 // serve, since groupIndex is a document ordinal in that file.
                 // Frequency and countdown divisor read the very GameStats values
@@ -2168,6 +2185,22 @@ pub const Game = struct {
         }
     }
 
+    /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
+    /// survival/stamina loop calls it on a throttle like the vitals.
+    fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
+        if (packages.buildEntityStatChangedBody(
+            self.body_buf[0..32],
+            entity_id,
+            -1,
+            .stamina,
+            stamina,
+            stamina_max,
+            0,
+        )) |body| {
+            try self.sendGame(peer, "NetPackageEntityStatChanged", body);
+        } else |_| {}
+    }
+
     /// `stock_deco` height callback over the live chunk store. Unreadable columns
     /// return 0, which the sampler skips (fail closed, no fabricated deco).
     fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
@@ -2438,6 +2471,7 @@ pub const Game = struct {
         self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
         self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
+        self.saveEntities() catch |e| logPersistErr(self, "save entities", e);
         self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
@@ -3097,7 +3131,7 @@ pub const Game = struct {
             } else if (!self.acceptChatRate(c)) {
                 out.line("slow down");
             } else {
-                const chat = try packages.buildStockChat(&self.body_buf, c.entity_id, msg);
+                const chat = try packages.buildStockChat(&self.body_buf, 0, c.entity_id, msg, &.{});
                 try self.broadcast("NetPackageChat", chat);
                 out.line("sent");
             }
@@ -3271,7 +3305,7 @@ pub const Game = struct {
             const ps = self.sim.playerByPeer(cl.slot) orelse continue;
             const t = self.sim.transform[ps];
             if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag| {
-                self.fillLootBagFromTable(bag, "supplyCrate", @intCast(bag));
+                self.fillLootBagFromTable(bag, "supplyCrate", @intCast(bag), self.lootStageForPlayer(cl.slot));
                 self.broadcastLootSpawn(bag) catch {};
                 return true;
             }
@@ -3985,7 +4019,7 @@ pub const Game = struct {
                 } else self.adminReply("no player in slot\n");
             },
             .say => |msg| {
-                const body = packages.buildStockChat(&self.body_buf, 0, msg) catch return;
+                const body = packages.buildStockChat(&self.body_buf, 0, 0, msg, &.{}) catch return;
                 self.broadcast("NetPackageChat", body) catch {};
                 self.adminReply("sent\n");
             },
@@ -4209,7 +4243,7 @@ pub const Game = struct {
                     }
                 }
                 if (dmg.loot_bag_id > 0) {
-                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(eid));
+                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(eid), self.partyLootStage());
                     self.broadcastLootSpawn(dmg.loot_bag_id) catch {};
                 }
             },
@@ -4318,6 +4352,15 @@ pub const Game = struct {
     }
 
     pub fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
+        // Stock compresses NetPackageChunk and NetPackageSignDataResponse
+        // (asm.il:808641 set); deflate them into send_buf before the plain
+        // framing path so the join/stream cost drops. Bodies stay in body_buf
+        // (chunks and sign batches are built there), so the compressed frame
+        // never aliases them. On any overflow/encode failure the call falls
+        // through uncompressed.
+        if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse")) {
+            if (self.trySendCompressed(peer, pkg_name, body)) return;
+        }
         // Count encode failures here: many callers swallow the error (`catch {}`),
         // so this is the only place they stay visible in apm. Rate-limit the log
         // so a bad package does not flood stdout while still showing first/100th.
@@ -4551,6 +4594,96 @@ pub const Game = struct {
         return best;
     }
 
+    /// Party.GetHighestLootStage for one player: the max loot stage across the
+    /// player's party members, or the player alone when ungrouped. World-gen
+    /// fills with no player context keep the global partyLootStage.
+    fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
+        if (peer_slot >= self.clients.len or !self.clients[peer_slot].joined) return self.partyLootStage();
+        const me = self.clients[peer_slot].entity_id;
+        var best: i32 = 1;
+        if (self.parties.partyByMember(me)) |p| {
+            for (p.members[0..p.n]) |m| {
+                if (self.clientByEntityId(m)) |mc| {
+                    best = @max(best, self.lootStageOf(mc.slot));
+                }
+            }
+            return best;
+        }
+        return @max(1, self.lootStageOf(peer_slot));
+    }
+
+    /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
+    /// Food/Water deplete with in-game time (rates from `[sim] rules.progression`,
+    /// ADR 0021), starving/dehydrated players take over-time damage and
+    /// well-fed ones regen (UpdatePlayerHealthOT branches), and the changed
+    /// totals sync to the owner on a throttle. Runs after tickAll so the
+    /// world clock already advanced.
+    fn tickSurvival(self: *Game, dt: f32) void {
+        const prog = self.sim.rules.progression;
+        if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
+        if (self.sim.director.clock.seconds_per_hour <= 0) return;
+        const game_hours = dt / self.sim.director.clock.seconds_per_hour;
+        for (&self.clients) |*c| {
+            if (!c.joined) continue;
+            const ps = self.sim.playerByPeer(c.slot) orelse continue;
+            if (!self.sim.mask[ps].health or !self.sim.mask[ps].transform) continue;
+            var h = &self.sim.health[ps];
+            if (h.max_hp <= 0) continue;
+            const food_was = h.food;
+            const water_was = h.water;
+            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
+            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+            var hp_delta: f32 = 0;
+            if (h.food <= 0 or h.water <= 0) {
+                hp_delta -= prog.starvation_damage_per_hour * game_hours;
+            } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
+                hp_delta += prog.well_fed_regen_per_hour * game_hours;
+            }
+            if (hp_delta != 0 and h.hp > 0) {
+                h.hp = @min(h.max_hp, @max(0, h.hp + hp_delta));
+                self.sim.markDirty(ps, .{ .hp = true });
+            }
+            if (h.food != food_was or h.water != water_was or hp_delta != 0) {
+                if (c.survival_sync_cd <= 0) {
+                    c.survival_sync_cd = prog.survival_sync_seconds;
+                    if (c.peer) |peer| {
+                        self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send survival stats failed: {s}\n", .{@errorName(err)});
+                        };
+                    }
+                } else {
+                    c.survival_sync_cd -= dt;
+                }
+            }
+            // UpdatePlayerStaminaOT: sprinting drains, idle regens; the stale
+            // timer clears the sprint latch when the client stops reporting.
+            if (c.sprint_stale_cd > 0) {
+                c.sprint_stale_cd -= dt;
+                if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
+            }
+            const stamina_was = h.stamina;
+            if (c.sprint_speed > 0) {
+                h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
+            } else {
+                h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
+            }
+            if (h.stamina != stamina_was) {
+                if (c.survival_sync_cd <= 0) {
+                    c.survival_sync_cd = prog.survival_sync_seconds;
+                    if (c.peer) |peer| {
+                        self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send stamina stats failed: {s}\n", .{@errorName(err)});
+                        };
+                    }
+                } else {
+                    c.survival_sync_cd -= dt;
+                }
+            }
+        }
+    }
+
     /// Current whole world-hour (day*24 + hour), for time-based scheduling.
     fn worldHour(self: *const Game) u64 {
         const clk = self.sim.director.clock;
@@ -4573,7 +4706,7 @@ pub const Game = struct {
             const ps = self.sim.playerByPeer(cl.slot) orelse continue;
             const t = self.sim.transform[ps];
             if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag_nid| {
-                self.fillLootBagFromTable(bag_nid, "supplyCrate", @intCast(bag_nid));
+                self.fillLootBagFromTable(bag_nid, "supplyCrate", @intCast(bag_nid), self.lootStageForPlayer(cl.slot));
                 self.broadcastLootSpawn(bag_nid) catch {};
                 std.debug.print("zdtd: air drop supply crate at ({d:.0},{d:.0}) hour={d}\n", .{ t.x, t.z, now });
             }
@@ -4727,6 +4860,105 @@ pub const Game = struct {
     /// records: x i32, y i32, z i32, name_len u8, name[32], seen_day u32).
     /// Best-effort like the other save paths; owner_entity is not stored (it is
     /// reassigned across restarts and re-mapped on login by name).
+    /// Vehicle / turret persistence (GAP "Vehicle, turret, power ... persistence"):
+    /// spawned vehicles and turrets survive restart via `entities.zen` (ZENT1,
+    /// zdtd-owned like claims.zlc). Power is re-derived from the block grid on
+    /// load (spawnTurret re-adds its node); riders are session state and not
+    /// persisted (a parked-but-mounted vehicle saves empty).
+    fn saveEntities(self: *Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
+        var buf: [ecs.max_entities * 32 + 8]u8 = undefined;
+        var w = wire_binary.Writer{ .buf = &buf };
+        w.writeBytes("ZENT") catch return;
+        w.writeU16(0) catch return; // count patched below
+        var count: u16 = 0;
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!self.sim.alive[i] or !self.sim.mask[i].transform) continue;
+            if (self.sim.kind[i] == .vehicle) {
+                const v = self.sim.vehicle[i];
+                w.writeByte(1) catch return;
+                w.writeByte(@intFromEnum(v.kind)) catch return;
+                w.writeF32(self.sim.transform[i].x) catch return;
+                w.writeF32(self.sim.transform[i].y) catch return;
+                w.writeF32(self.sim.transform[i].z) catch return;
+                w.writeF32(self.sim.transform[i].yaw) catch return;
+                w.writeF32(v.fuel) catch return;
+                w.writeByte(v.seat_count) catch return;
+                w.writeF32(v.max_speed) catch return;
+                count += 1;
+            } else if (self.sim.kind[i] == .turret) {
+                const t = self.sim.turret[i];
+                w.writeByte(2) catch return;
+                w.writeF32(self.sim.transform[i].x) catch return;
+                w.writeF32(self.sim.transform[i].y) catch return;
+                w.writeF32(self.sim.transform[i].z) catch return;
+                w.writeF32(t.range) catch return;
+                w.writeF32(t.damage) catch return;
+                w.writeU16(t.ammo) catch return;
+                count += 1;
+            }
+        }
+        const written = w.written();
+        std.mem.writeInt(u16, written[4..6], count, .little);
+        try io_fs.writeFileSimple(p, written);
+    }
+
+    /// Restore vehicles/turrets from entities.zen. A missing file is a fresh
+    /// world (OpenFailed); a corrupt record fails the load loudly. Turrets
+    /// whose block was removed no longer resolve a power node and are skipped.
+    fn loadEntities(self: *Game) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
+        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return error.ReadFailed,
+        };
+        defer self.allocator.free(data);
+        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZENT")) return error.BadMagic;
+        const count = std.mem.readInt(u16, data[4..6], .little);
+        var r = wire_binary.Reader{ .data = data, .pos = 6 };
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            const rec_type = r.readByte() catch return error.Truncated;
+            switch (rec_type) {
+                1 => {
+                    const kind: ecs.components.VehicleKind = @enumFromInt(r.readByte() catch return error.Truncated);
+                    const x = r.readF32() catch return error.Truncated;
+                    const y = r.readF32() catch return error.Truncated;
+                    const z = r.readF32() catch return error.Truncated;
+                    const yaw = r.readF32() catch return error.Truncated;
+                    const fuel = r.readF32() catch return error.Truncated;
+                    const seats = r.readByte() catch return error.Truncated;
+                    const max_speed = r.readF32() catch return error.Truncated;
+                    if (self.sim.spawnVehicleEx(kind, x, y, z, 200, max_speed, seats)) |nid| {
+                        if (self.sim.slotOfNetId(nid)) |vs| {
+                            self.sim.vehicle[vs].fuel = fuel;
+                            self.sim.transform[vs].yaw = yaw;
+                        }
+                    }
+                },
+                2 => {
+                    const x = r.readF32() catch return error.Truncated;
+                    const y = r.readF32() catch return error.Truncated;
+                    const z = r.readF32() catch return error.Truncated;
+                    const range = r.readF32() catch return error.Truncated;
+                    const damage = r.readF32() catch return error.Truncated;
+                    const ammo = r.readU16() catch return error.Truncated;
+                    if (self.sim.spawnTurret(x, y, z)) |nid| {
+                        if (self.sim.slotOfNetId(nid)) |ts| {
+                            self.sim.turret[ts].range = range;
+                            self.sim.turret[ts].damage = damage;
+                            self.sim.turret[ts].ammo = ammo;
+                        }
+                    }
+                },
+                else => return error.BadRecord,
+            }
+        }
+    }
+
     fn saveClaims(self: *Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
@@ -5881,8 +6113,31 @@ pub const Game = struct {
                 // the name from the sender entity id).
                 const ch = packages.parseStockChat(body) catch return;
                 if (!chatMsgOk(ch.msg)) return;
-                const stock = packages.buildStockChat(self.body_buf[0..512], c.entity_id, ch.msg) catch return;
-                try self.broadcastExcept("NetPackageChat", stock, c.slot);
+                const stock = packages.buildStockChat(
+                    self.body_buf[0..512],
+                    ch.chat_type, // carry the channel (Party/Friends/Whisper) for the client UI
+                    c.entity_id,
+                    ch.msg,
+                    ch.recipients[0..ch.recipient_count],
+                ) catch return;
+                // Stock ChatMessageServer (chat.md §2): routing is recipient-list
+                // based, not channel based — a non-empty recipientEntityIds sends
+                // only to those clients, else broadcast to everyone.
+                if (ch.recipient_count > 0) {
+                    for (ch.recipients[0..ch.recipient_count]) |rid| {
+                        if (rid == c.entity_id) continue; // no self-echo
+                        if (self.clientByEntityId(rid)) |rc| {
+                            if (rc.peer) |rpeer| {
+                                self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
+                                    self.harness.counters.inc(.net_send_errors);
+                                    std.debug.print("zdtd: send chat failed: {s}\n", .{@errorName(err)});
+                                };
+                            }
+                        }
+                    }
+                } else {
+                    try self.broadcastExcept("NetPackageChat", stock, c.slot);
+                }
             } else {
                 // Upgrade simple chat to stock Chat when possible
                 var r: wire_binary.Reader = .{ .data = body };
@@ -5892,7 +6147,7 @@ pub const Game = struct {
                 const msg = r.readString(&msg_buf) catch return;
                 _ = from;
                 if (!chatMsgOk(msg)) return;
-                const stock = try packages.buildStockChat(self.body_buf[0..512], c.entity_id, msg);
+                const stock = try packages.buildStockChat(self.body_buf[0..512], 0, c.entity_id, msg, &.{});
                 try self.broadcast("NetPackageChat", stock);
             }
             return;
@@ -6523,6 +6778,10 @@ pub const Game = struct {
                 self.harness.counters.inc(.ownership_rejects);
                 return;
             }
+            // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
+            // entity-ai.md SetMovementState); lapses on a stale timer.
+            c.sprint_speed = if (s.movement_state == 3) s.speed_forward else 0;
+            c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
             try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
             return;
         }
@@ -6605,6 +6864,32 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackageSharedQuest", body);
             } else {
                 try self.broadcast("NetPackageSharedQuest", body);
+            }
+            return;
+        }
+        // Party quest delta: the sender (a shared-quest member) reports an
+        // objective change; the server fans it to the other party members so
+        // their mirrors advance (parties-factions.md §2.3).
+        if (std.mem.eql(u8, name, "NetPackagePartyQuestChange")) {
+            const q = packages.parsePartyQuestChange(body) catch {
+                self.harness.counters.inc(.c2s_malformed);
+                return;
+            };
+            if (q.sender_entity != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return;
+            }
+            const p = self.parties.partyByMember(c.entity_id) orelse return;
+            for (p.members[0..p.n]) |m| {
+                if (m == c.entity_id) continue;
+                if (self.clientByEntityId(m)) |member| {
+                    if (member.peer) |mp| {
+                        self.sendGame(mp, "NetPackagePartyQuestChange", body) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send PartyQuestChange failed: {s}\n", .{@errorName(err)});
+                        };
+                    }
+                }
             }
             return;
         }
@@ -6895,7 +7180,7 @@ pub const Game = struct {
                 }
                 // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
                 if (dmg.loot_bag_id > 0) {
-                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(d.entity_id));
+                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(d.entity_id), self.lootStageForPlayer(c.slot));
                     try self.broadcastLootSpawn(dmg.loot_bag_id);
                 }
             }
@@ -7380,7 +7665,7 @@ pub const Game = struct {
                 }
             } else |_| {
                 if (packages.parseQuestOp(body)) |op| {
-                    if (op.op == 1) _ = systems.questAccept(&self.sim, c.slot, op.def_id);
+                    if (op.op == 1) _ = self.acceptQuestFor(c, op.def_id);
                 } else |_| {}
             }
             return;
@@ -7416,7 +7701,7 @@ pub const Game = struct {
                         const ps = self.sim.playerByPeer(c.slot) orelse break;
                         if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
                         if (idx == head.remove_index) {
-                            _ = systems.questAccept(&self.sim, c.slot, qid);
+                            _ = self.acceptQuestFor(c, qid);
                             break;
                         }
                         idx += 1;
@@ -7471,7 +7756,7 @@ pub const Game = struct {
             // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
             if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
                 for (list.entries) |qid| {
-                    if (systems.questAccept(&self.sim, c.slot, qid)) break;
+                    if (self.acceptQuestFor(c, qid)) break;
                 }
             }
             try self.sendTraderSnapshot(peer, null);
@@ -7524,7 +7809,7 @@ pub const Game = struct {
             const info = self.traders.traderInfo(@intCast(vm.trader_id)) orelse return;
             if (!info.rentable) return;
             if (vm.rental_end_day > 0 and !vm.owner.matches(acc.user)) return; // other owner (CanRent 1)
-            const coins = self.items.ecsIdByName("casinoCoin");
+            const coins = self.coinItemId();
             if (coins == 0) return;
             const ps = self.sim.playerByPeer(c.slot) orelse return;
             if (!self.sim.mask[ps].wallet) return;
@@ -7747,7 +8032,7 @@ pub const Game = struct {
                 }
             }
         }
-        const coin = self.items.ecsIdByName("casinoCoin");
+        const coin = self.coinItemId();
         _ = systems.trade(&self.sim, c.slot, t.trader_entity, t.item, t.qty, t.side, coin);
         if (c.peer) |p| {
             const ts = self.sim.slotOfNetId(t.trader_entity);
@@ -7917,7 +8202,7 @@ pub const Game = struct {
                 } else |_| {}
             }
         };
-        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, Ctx.put, self);
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
 
@@ -7993,6 +8278,22 @@ pub const Game = struct {
             "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
             .{ summary.count, summary.bytes, framed.len },
         );
+    }
+
+    /// Deflate a compressible package body (stock `get_Compress()` set:
+    /// NetPackageChunk / NetPackageSignDataResponse) into send_buf and send it
+    /// on the reliable channel. The body must live outside send_buf (chunks
+    /// and sign batches are built in body_buf); false on any overflow/encode
+    /// failure so the caller falls through to the uncompressed path.
+    fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
+        const pkg_id = packages.idOf(pkg_name) orelse return false;
+        var fr: wire_frame.DeflateFramer = undefined;
+        fr.begin(&self.send_buf, &self.deflate_window, 0, pkg_id, body.len) catch return false;
+        const w = fr.writer();
+        w.writeAll(body) catch return false;
+        const framed = fr.finish() catch return false;
+        self.sendFramedReliable(peer, pkg_name, framed) catch return false;
+        return true;
     }
 
     /// Send an already-framed envelope on the reliable channel, pumping the window
@@ -8335,6 +8636,28 @@ pub const Game = struct {
                 std.debug.print("zdtd: party disconnect broadcast failed: {s}\n", .{@errorName(err)});
             };
         }
+        // Stock PartyQuests.RemovePlayerFromSharedWiths (parties-factions.md
+        // §2.3): a disconnect drops the owner's shared quests; the party gets
+        // remove_quest events so their mirrors clear.
+        if (self.sim.playerByPeer(slot)) |ps| {
+            if (self.sim.mask[ps].journal) {
+                var rb: [16]u8 = undefined;
+                for (self.sim.journal[ps].slots) |s| {
+                    if (!s.active or !s.is_shared) continue;
+                    var w = wire_binary.Writer{ .buf = &rb };
+                    w.writeI32(self.clients[slot].entity_id) catch continue;
+                    w.writeByte(@intFromEnum(packages.stock_quest.SharedQuestEvent.remove_quest)) catch continue;
+                    w.writeI32(s.quest_code) catch continue;
+                    const rbody = w.written();
+                    for (&self.clients) |*cl| {
+                        if (!cl.joined or cl.entity_id == self.clients[slot].entity_id) continue;
+                        if (cl.peer) |mp| {
+                            self.sendGame(mp, "NetPackageSharedQuest", rbody) catch {};
+                        }
+                    }
+                }
+            }
+        }
         self.clients[slot] = .{};
         self.refreshInfoPlayers();
     }
@@ -8528,7 +8851,11 @@ pub const Game = struct {
         }
         const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).
-        _ = systems.questAcceptStarter(&self.sim, c.slot);
+        // questAcceptStarter refuses a starter already active or completed in an
+        // earlier session; a fresh grant is shared with the (post-join) party.
+        if (systems.questAcceptStarter(&self.sim, c.slot)) {
+            self.shareQuestWithParty(c, self.sim.catalog.starter_id);
+        }
         // GAP 12: the join PDF journal was capped at 2 quests while the sim
         // journal holds max_journal (8); a third active quest silently vanished
         // from the client. All stores now size to the sim journal.
@@ -8772,10 +9099,12 @@ pub const Game = struct {
         if (std.mem.startsWith(u8, name, "quest_")) return true;
         if (std.mem.startsWith(u8, name, "tier")) return true;
         // Other stock quest-name families the client's quests.xml knows
-        // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*).
+        // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*,
+        // treasure_* — stock ships 7 treasure maps).
         if (std.mem.startsWith(u8, name, "intro_")) return true;
         if (std.mem.startsWith(u8, name, "test_")) return true;
         if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
+        if (std.mem.startsWith(u8, name, "treasure_")) return true;
         return false;
     }
 
@@ -9091,6 +9420,8 @@ pub const Game = struct {
         var food_max: f32 = 100;
         var water: f32 = 100;
         var water_max: f32 = 100;
+        var stamina: f32 = 100;
+        var stamina_max: f32 = 100;
         if (self.sim.slotOfNetId(eid)) |si| {
             if (self.sim.mask[si].health) {
                 hp = self.sim.health[si].hp;
@@ -9099,11 +9430,13 @@ pub const Game = struct {
                 food_max = self.sim.health[si].food_max;
                 water = self.sim.health[si].water;
                 water_max = self.sim.health[si].water_max;
+                stamina = self.sim.health[si].stamina;
+                stamina_max = self.sim.health[si].stamina_max;
             }
         }
         const stats = [_]struct { packages.EntityStatKind, f32, f32 }{
             .{ .health, hp, max_hp },
-            .{ .stamina, 100, 100 },
+            .{ .stamina, stamina, stamina_max },
             .{ .food, food, food_max },
             .{ .water, water, water_max },
         };
@@ -9366,6 +9699,14 @@ pub const Game = struct {
         // Quest craft progress when objective matches recipe name.
         systems.questOnCraft(&self.sim, peer_slot, recipe.name);
         return true;
+    }
+
+    /// The item traders pay/charge in: traders.xml root `currency_item`
+    /// (stock: casinoCoin), falling back to the stock name when unset or
+    /// unresolvable.
+    fn coinItemId(self: *const Game) u16 {
+        const name = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
+        return self.items.ecsIdByName(name);
     }
 
     /// Live trader AvailableMoney for the wire: stock debits it when buying
@@ -9751,8 +10092,6 @@ pub const Game = struct {
         return 0;
     }
 
-
-
     /// One workstation step: burn/craft, then re-broadcast the stations it changed.
     pub fn tickWorkstations(self: *Game, dt: f32) !void {
         self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self);
@@ -9768,9 +10107,6 @@ pub const Game = struct {
         }
         try replicate_te.broadcastDirtyWorkstations(self);
     }
-
-
-
 
     pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         const id = self.items.ecsIdByName(name);
@@ -9789,10 +10125,10 @@ pub const Game = struct {
         return 0;
     }
 
-    fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32) void {
+    fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {
         const list_name = if (loot_list.len > 0) loot_list else "EntityLootContainerRegular";
         var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-        const n = self.loot.rollContainer(list_name, self.partyLootStage(), seed, &stacks);
+        const n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
         if (n == 0) return;
         const slot = self.sim.slotOfNetId(bag_net_id) orelse return;
         if (!self.sim.mask[slot].inventory) return;
@@ -10005,15 +10341,6 @@ pub const Game = struct {
     /// GameStageDefinition::CalcGameStageAround radius (asm.il ~1093363).
     const sleeper_party_radius: f32 = 100.0;
 
-
-
-
-
-
-
-
-
-
     fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         const bi = self.sim.slotOfNetId(net_id) orelse return;
         // Death / multi-stack bags: DroppedLootContainer + ECD bag field.
@@ -10124,10 +10451,16 @@ pub const Game = struct {
         };
         // After TTS paint, create storage TEs for known chest block ids (loot fill once).
         self.ensurePrefabStorageInChunk(ch, cx, cz);
+        // Rebuild power nodes from this chunk's blocks (grid is runtime state).
+        self.scanChunkPower(ch, cx, cz);
         // Prefer biomes.png color→id mode; fallback height band. Cached on the
         // chunk so re-sends to other clients skip the 256-lookup dominant scan.
+        // Procedural worlds use the same biome field that drove the surface
+        // fill, so the client's displayed biome matches the blocks (W3).
         const biome_id: u8 = ch.biome_id orelse blk: {
-            const b: u8 = if (self.world.biomes) |*bm|
+            const b: u8 = if (self.world.terrain_source == .proc)
+                self.world.procBiomeAt(cx, cz)
+            else if (self.world.biomes) |*bm|
                 bm.chunkDominant(cx, cz)
             else hb: {
                 var hsum: u32 = 0;
@@ -10197,6 +10530,42 @@ pub const Game = struct {
     }
 
     /// Also honor prefab TTS TE list (Loot/SecureLoot/Composite types).
+    /// Rebuild power nodes from a chunk's blocks (GAP power persistence): the
+    /// grid is runtime state (addNodeAt on place/remove), so after a restart
+    /// each chunk re-derives its generators/consumers/wires from the block
+    /// plane on first touch. `applyToNode` carries the per-block fuel/capacity
+    /// properties; wires are re-added from the block plane the same way.
+    fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
+        if (ch.power_scanned) return;
+        const blocks = ch.blocks orelse return;
+        ch.power_scanned = true;
+        const base_x = cx * 16;
+        const base_z = cz * 16;
+        var last_id: u16 = 0;
+        var last_power: ?ecs.powerblocks.Resolved = null;
+        var y: i32 = 0;
+        while (y < world_store.y_dim) : (y += 1) {
+            var lz: i32 = 0;
+            while (lz < 16) : (lz += 1) {
+                var lx: i32 = 0;
+                while (lx < 16) : (lx += 1) {
+                    const id: u16 = @truncate(blocks[@intCast(lx + lz * 16 + y * 256)]);
+                    if (id != last_id) {
+                        last_id = id;
+                        last_power = self.power_registry.lookup(id);
+                    }
+                    const pn = last_power orelse continue;
+                    const wx = base_x + lx;
+                    const wz = base_z + lz;
+                    if (self.sim.power.addNodeAt(pn.kind, wx, y, wz, pn.watts)) |nid| {
+                        if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
+                    }
+                }
+            }
+        }
+        self.sim.power.resolve();
+    }
+
     fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
         if (ch.te_scanned) return;
         const blocks = ch.blocks orelse return;
@@ -11244,6 +11613,8 @@ pub const Game = struct {
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
             self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
+            // PlayerEntityStats survival loop after the world clock advanced.
+            self.tickSurvival(dt);
             // A chewed-up eat distraction (EntityItem.OnUpdateEntity SetDead,
             // asm.il EntityItem:0100-0113) is removed like a collected drop:
             // EntityRemove(Despawned) so every observer drops the local item.
@@ -11352,7 +11723,7 @@ pub const Game = struct {
                 const lid = r.loot_bag_ids[li];
                 if (lid > 0) {
                     // Refill from loot.xml (turret/AI kills otherwise keep the seed scrap).
-                    self.fillLootBagFromTable(lid, "", @bitCast(lid));
+                    self.fillLootBagFromTable(lid, "", @bitCast(lid), self.partyLootStage());
                     try self.broadcastLootSpawn(lid);
                 }
             }
@@ -11442,6 +11813,7 @@ pub const Game = struct {
             self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
             self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
             self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
+            self.saveEntities() catch |e| logPersistErr(self, "save entities", e);
             self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
@@ -11927,6 +12299,51 @@ pub const Game = struct {
             if (cl.joined and cl.entity_id == entity_id) return cl;
         }
         return null;
+    }
+
+    /// QuestEventManager.ShareAllQuestsWithParty (parties-factions.md §2.3): a
+    /// newly accepted quest is shared with the owner's party. Accepts, then
+    /// fans a NetPackageSharedQuest share_quest body to the other members.
+    fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
+        if (!systems.questAccept(&self.sim, c.slot, def_id)) return false;
+        self.shareQuestWithParty(c, def_id);
+        return true;
+    }
+
+    /// Fan a share_quest body to the other party members (stock
+    /// ShareAllQuestsWithParty; the client mirrors it into its journal).
+    fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
+        const p = self.parties.partyByMember(c.entity_id) orelse return;
+        const d = self.sim.catalog.byId(def_id) orelse return;
+        var qp: ?*ecs.components.QuestProgress = null;
+        if (self.sim.playerByPeer(c.slot)) |ps| {
+            if (self.sim.mask[ps].journal) {
+                for (&self.sim.journal[ps].slots) |*s| {
+                    if (s.active and s.def_id == def_id) qp = s;
+                }
+            }
+        }
+        const q = qp orelse return;
+        if (q.is_shared) return;
+        q.is_shared = true;
+        for (p.members[0..p.n]) |m| {
+            if (m == c.entity_id) continue;
+            if (self.clientByEntityId(m)) |member| {
+                if (member.peer) |mp| {
+                    var qb: [256]u8 = undefined;
+                    const body = packages.stock_quest.buildSharedQuestShare(&qb, .{
+                        .shared_by_entity_id = c.entity_id,
+                        .quest_code = q.quest_code,
+                        .quest_id = d.name,
+                        .shared_with_entity_id = m,
+                    }) catch continue;
+                    self.sendGame(mp, "NetPackageSharedQuest", body) catch |err| {
+                        self.harness.counters.inc(.net_send_errors);
+                        std.debug.print("zdtd: send SharedQuest failed: {s}\n", .{@errorName(err)});
+                    };
+                }
+            }
+        }
     }
 
     /// Stock `AllyStore::ProcessAllyRequest` (asm.il 885024): take the pair's
@@ -12765,6 +13182,14 @@ test "party stage weights the second player by diminishing returns" {
     try std.testing.expectEqual(@as(i32, 50), g.partyStageAround(0, 0, -1));
     // Highest party loot stage, not the sum.
     try std.testing.expectEqual(@as(i32, 40), g.partyLootStage());
+    // Per-player party loot stage: ungrouped players use their own stage;
+    // grouped, the party high water mark (Party.GetHighestLootStage).
+    g.clients[0].entity_id = 100;
+    g.clients[1].entity_id = 101;
+    try std.testing.expectEqual(@as(i32, 40), g.lootStageForPlayer(0));
+    try std.testing.expectEqual(@as(i32, 20), g.lootStageForPlayer(1));
+    try std.testing.expect(g.parties.acceptInvite(100, 101) != null);
+    try std.testing.expectEqual(@as(i32, 40), g.lootStageForPlayer(1));
     // No joined players is stage 0, and the loot floor stays at 1.
     g.clients[0].joined = false;
     g.clients[1].joined = false;
@@ -12944,4 +13369,213 @@ fn adminRun(g: *Game, sink: []u8, line: []const u8) []const u8 {
     g.runAdminLine(line, "test");
     g.admin_reply_sink = null;
     return sink[0..g.admin_reply_len];
+}
+
+test "survival: food/water deplete, starvation damages, well-fed regens, S2C syncs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Pin the game-hour length so one tickSurvival(30.0) call is exactly one
+    // in-game hour regardless of the default day-length config.
+    g.sim.director.clock.seconds_per_hour = 30;
+    g.sim.health[ps].food = 100;
+    g.sim.health[ps].water = 100;
+    g.sim.health[ps].hp = 100;
+    const st_id = packages.idOf("NetPackageEntityStatChanged").?;
+
+    // One in-game hour (default seconds_per_hour = 30): food -2, water -2.5.
+    cap.clear();
+    g.tickSurvival(30.0);
+    try std.testing.expect(g.sim.health[ps].food < 100);
+    try std.testing.expect(g.sim.health[ps].water < 100);
+    try std.testing.expect(cap.findPkgId(st_id) != null); // S2C sync fired
+
+    // Starvation: exhausted food drains hp (12/game-hour).
+    g.sim.health[ps].food = 0;
+    g.sim.health[ps].water = 100;
+    const hp_before = g.sim.health[ps].hp;
+    g.tickSurvival(30.0);
+    try std.testing.expect(g.sim.health[ps].hp < hp_before);
+
+    // Well-fed regen: fed + hydrated restores hp (10/game-hour), capped.
+    g.sim.health[ps].hp = 50;
+    g.sim.health[ps].food = 90;
+    g.sim.health[ps].water = 90;
+    g.tickSurvival(30.0);
+    try std.testing.expect(g.sim.health[ps].hp > 50);
+    try std.testing.expect(g.sim.health[ps].hp <= g.sim.health[ps].max_hp);
+
+    // Clamp at zero: depletion never goes negative.
+    g.sim.health[ps].food = 0.5;
+    g.sim.health[ps].water = 0.5;
+    g.tickSurvival(30.0);
+    try std.testing.expect(g.sim.health[ps].food == 0);
+    try std.testing.expect(g.sim.health[ps].water == 0);
+
+    // Stamina: sprinting drains (MovementState 3), idle regenerates, and the
+    // stale timer lapses the sprint latch without further speed updates.
+    g.sim.health[ps].stamina = 50;
+    cl.sprint_speed = 5;
+    cl.sprint_stale_cd = 5.0; // outlives the 0.2 s tick below
+    g.tickSurvival(0.2);
+    try std.testing.expect(g.sim.health[ps].stamina < 50);
+    // Stale expiry clears the latch even if no EntitySpeeds arrives.
+    cl.sprint_stale_cd = 0.1;
+    g.tickSurvival(0.2);
+    try std.testing.expectEqual(@as(f32, 0), cl.sprint_speed);
+    const st_before = g.sim.health[ps].stamina;
+    g.tickSurvival(0.2);
+    try std.testing.expect(g.sim.health[ps].stamina > st_before);
+    try std.testing.expect(g.sim.health[ps].stamina <= g.sim.health[ps].stamina_max);
+}
+
+test "compressible packages send deflated frames the parser can read back" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    // A byte-diverse payload (stock chunk data is far from compressible
+    // trivially; 251-period bytes still exercise the deflate window).
+    var payload: [4096]u8 = undefined;
+    for (&payload, 0..) |*b, i| b.* = @intCast(i % 251);
+    const pkgs_under_test = [_][]const u8{ "NetPackageChunk", "NetPackageSignDataResponse" };
+    for (pkgs_under_test) |pkg_name| {
+        cap.clear();
+        try std.testing.expect(g.trySendCompressed(cl.peer.?, pkg_name, &payload));
+        const pkg_id = packages.idOf(pkg_name).?;
+        var pkgs: [8]wire_frame.Package = undefined;
+        var found = false;
+        for (cap.slots[0..cap.n]) |s| {
+            const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+            for (pkgs[0..pn]) |p| {
+                if (p.id == pkg_id and std.mem.eql(u8, p.body, &payload)) found = true;
+            }
+        }
+        try std.testing.expect(found);
+    }
+}
+
+test "stock client quest name gate accepts every stock family" {
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/questname", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // The builtin catalog (no stock_xml) exercises the prefix gate directly.
+    try std.testing.expect(g.isStockClientQuestName("quest_whiteRiverCitizen1"));
+    try std.testing.expect(g.isStockClientQuestName("tier1_clear"));
+    try std.testing.expect(g.isStockClientQuestName("intro_buried_supplies"));
+    try std.testing.expect(g.isStockClientQuestName("test_fixture"));
+    try std.testing.expect(g.isStockClientQuestName("challengegroup_reward_homesteading"));
+    try std.testing.expect(g.isStockClientQuestName("treasure_01"));
+    try std.testing.expect(!g.isStockClientQuestName("invented_quest"));
+    try std.testing.expect(!g.isStockClientQuestName(""));
+}
+
+test "vehicles and turrets persist across restart (entities.zen)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        const v = g.sim.spawnVehicleEx(.minibike, 10, 70, 20, 200, 12, 1).?;
+        const vs = g.sim.slotOfNetId(v).?;
+        g.sim.vehicle[vs].fuel = 55;
+        g.sim.transform[vs].yaw = 90;
+        const t = g.sim.spawnTurret(30, 70, 40).?;
+        const ts = g.sim.slotOfNetId(t).?;
+        g.sim.turret[ts].ammo = 42;
+        try g.saveEntities();
+    }
+    {
+        // Game.create restores entities.zen automatically.
+        const g2 = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g2.deinit();
+            std.testing.allocator.destroy(g2);
+        }
+        // Game.create also spawns its demo world vehicle/turret, so match the
+        // persisted ones by their saved values rather than first-match.
+        var found_v = false;
+        var found_t = false;
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!g2.sim.alive[i] or !g2.sim.mask[i].transform) continue;
+            if (g2.sim.kind[i] == .vehicle and g2.sim.vehicle[i].fuel == 55) {
+                found_v = true;
+                try std.testing.expectEqual(@as(f32, 90), g2.sim.transform[i].yaw);
+                try std.testing.expectEqual(ecs.components.VehicleKind.minibike, g2.sim.vehicle[i].kind);
+            }
+            if (g2.sim.kind[i] == .turret and g2.sim.turret[i].ammo == 42) {
+                found_t = true;
+            }
+        }
+        try std.testing.expect(found_v and found_t);
+    }
+}
+
+test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // The registry is built from game data (blocks.xml) at load; a test world
+    // has none, so seed two synthetic power block ids through the same build
+    // path a stock install would use.
+    const PowerStub = struct {
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 20001;
+            if (std.mem.eql(u8, name, "batterybank")) return 20002;
+            return null;
+        }
+        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
+            if (std.mem.eql(u8, name, "batterybank")) return 50;
+            return null;
+        }
+    };
+    var stub: PowerStub = .{};
+    try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+    try stub.power_class_by_name.put(std.testing.allocator, "batterybank", "BatteryBank");
+    defer stub.power_class_by_name.deinit(std.testing.allocator);
+    g.power_registry = ecs.powerblocks.Registry.build(&stub);
+    const gen_id: u16 = 20001;
+    const cons_id: u16 = 20002;
+    _ = g.sim.power.removeAt(8, 70, 8);
+    _ = g.sim.power.removeAt(10, 70, 8);
+    // Rebuild the plane with the power blocks at fixed cells.
+    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+    const blocks = ch.blocks.?;
+    blocks[8 + 8 * 16 + 70 * 256] = gen_id;
+    blocks[10 + 8 * 16 + 70 * 256] = cons_id;
+    g.scanChunkPower(ch, 0, 0);
+    try std.testing.expect(g.sim.power.indexOfPosition(8, 70, 8) != null);
+    try std.testing.expect(g.sim.power.indexOfPosition(10, 70, 8) != null);
 }

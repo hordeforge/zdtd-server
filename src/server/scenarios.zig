@@ -733,13 +733,18 @@ test "scenario stock fixture quests.xml load" {
 }
 
 test "scenario quest accept kill complete and trader buy" {
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_sc_quest");
+    // tmp dir: the fixed worlds/zdtd_sc_quest directory is shared with the
+    // quests-xml scenario; a completed starter persists in ZPV3 and the join
+    // would refuse to re-grant it (GAP starter-quest row).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_quest", 0);
+    const g = try game_mod.Game.create(gpa, dir, 0);
     defer {
         g.deinit();
         gpa.destroy(g);
@@ -1013,9 +1018,13 @@ test "scenario trader close cycle force-unlocks the trade channel" {
         \\  </traderAlways>
         \\</traders>
     ;
-    const tpath = ".zdtd_test_traders_close.xml";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tdir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var tpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tpath_buf, "{s}/traders_close.xml", .{tdir});
     try io_fs.writeFile(std.testing.allocator, tpath, tsrc);
-    defer io_fs.deleteFile(std.testing.allocator, tpath);
     const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
 
     io_fs.mkdirPathSimple("worlds");
@@ -1203,13 +1212,15 @@ test "scenario trader RemoveQuest accepts and drops the quest from offers" {
 }
 
 test "scenario vehicle enter drive and turret kills with power" {
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_sc_veh");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_veh", 0);
+    const g = try game_mod.Game.create(gpa, dir, 0);
     defer {
         g.deinit();
         gpa.destroy(g);
@@ -2201,6 +2212,28 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     );
 }
 
+/// First NetPackageEntityStatChanged body for `entity_id` with EnumStat `kind`
+/// (0 Health, 7 Food, 8 Water — PlayerEntityStats::Tick). The survival loop
+/// also emits Food/Water stats, so tests must pick the stat they mean.
+fn findStatBody(cap: *const ln_peer.Capture, stat_id: u16, entity_id: i32, kind: u8) ?[]const u8 {
+    var i: usize = 0;
+    while (i < cap.n) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id != stat_id) continue;
+            const b = pkgs[j].body;
+            if (b.len < 9) continue;
+            if (std.mem.readInt(i32, b[0..4], .little) != entity_id) continue;
+            if (b[8] != kind) continue;
+            return b;
+        }
+    }
+    return null;
+}
+
 test "scenario zombie melee reaches the client as EntityStatChanged, then death and respawn" {
     // Regression for the "zombies cannot hurt you" gap: server-side melee moved
     // health[].hp and nothing was ever sent, so the victim's client saw no damage,
@@ -2220,6 +2253,10 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     const stat_id = packages.idOf("NetPackageEntityStatChanged").?;
     const ps = g.sim.playerByPeer(c.slot).?;
     const p = g.sim.transform[ps];
+    // This test exercises damage/death replication, not survival: turn the
+    // depletion loop off so well-fed regen cannot interfere with the kill.
+    g.sim.rules.progression.food_depletion_per_hour = 0;
+    g.sim.rules.progression.water_depletion_per_hour = 0;
     _ = g.sim.spawnZombie(p.x + 1, p.y, p.z, 40).?;
 
     cap.clear();
@@ -2230,7 +2267,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     // Stock NetPackageEntityStatChanged::write (asm.il:201967, GetLength 21 at
     // :202120): entityId i32 (NetPackageEntityTargeted) | instigatorId i32 |
     // EnumStat u8 | value f32 | max f32 | maxModifier f32.
-    const hit = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoDamageStatPackage;
+    const hit = findStatBody(&cap, stat_id, c.entity_id, 0) orelse return error.NoDamageStatPackage;
     try std.testing.expectEqual(@as(usize, 21), hit.len);
     // A dedicated server has no local player, so the instigator is -1 (asm.il:199661).
     try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, hit[4..8], .little));
@@ -2248,7 +2285,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     while (t < 60 and g.sim.health[ps].hp > 0) : (t += 1) try g.step();
     try std.testing.expectEqual(@as(f32, 0), g.sim.health[ps].hp);
     try std.testing.expect(g.sim.alive[ps]); // corpse keeps its entity for respawn
-    const dead = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoDeathStatPackage;
+    const dead = findStatBody(&cap, stat_id, c.entity_id, 0) orelse return error.NoDeathStatPackage;
     try std.testing.expectEqual(@as(f32, 0), @as(f32, @bitCast(std.mem.readInt(u32, dead[9..13], .little))));
 
     // Respawn still heals and still tells the client.
@@ -2258,7 +2295,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     var fb: [64]u8 = undefined;
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", &spawn_body));
     try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].hp);
-    const alive_again = cap.findPkgIdEntity(stat_id, c.entity_id) orelse return error.NoRespawnStatPackage;
+    const alive_again = findStatBody(&cap, stat_id, c.entity_id, 0) orelse return error.NoRespawnStatPackage;
     try std.testing.expectEqual(@as(f32, 100), @as(f32, @bitCast(std.mem.readInt(u32, alive_again[9..13], .little))));
 
     std.debug.print(
@@ -3476,14 +3513,17 @@ test "scenario quest completion pays out item and exp rewards" {
     // <reward type="Exp" value="500"/> + <reward type="Item" id="casinoCoin"
     // value="100"/>. Completing it must credit the wallet coins (sim), drop
     // the casinoCoin stack into the inventory and award the exp, via the
-    // tick-end payout drain.
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_sc_rewards");
+    // tick-end payout drain. tmp dir: a completed starter persists in ZPV3
+    // and the join would refuse to re-grant it (GAP starter-quest row).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_rewards", 0, .{
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
     defer {
@@ -3811,7 +3851,9 @@ test "scenario party: accept invite fans a snapshot, leave disbands, disconnect 
     try std.testing.expect(try r2.readByte() != 0); // disband true
     try std.testing.expect(g.parties.partyByMember(ca.entity_id) == null);
 
-    // Re-join A+B then disconnect B: party shrinks, A stays.
+    // Re-join A+B then disconnect B: the party of two shrinks to one, and the
+    // last member auto-leaves (stock: a party of one is not kept), so A gets a
+    // disband snapshot with no members.
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&body, 1, ca.entity_id, cb.entity_id)));
     try std.testing.expect(g.parties.partyByMember(cb.entity_id) != null);
     cap_a.clear();
@@ -3821,9 +3863,230 @@ test "scenario party: accept invite fans a snapshot, leave disbands, disconnect 
     _ = try r3.readI32();
     _ = try r3.readByte();
     _ = try r3.readString(&vbuf);
-    try std.testing.expectEqual(@as(i32, 1), try r3.readI32()); // only A left
-    try std.testing.expectEqual(@as(i32, ca.entity_id), try r3.readI32());
-    // Party of one auto-disbands (stock: last member auto-leaves).
+    try std.testing.expectEqual(@as(i32, 0), try r3.readI32()); // no members left
+    _ = try r3.readI32(); // changed
+    _ = try r3.readByte();
     try std.testing.expect(try r3.readByte() != 0); // disband
     try std.testing.expect(g.parties.partyByMember(ca.entity_id) == null);
+}
+
+test "scenario party shared kill XP splits and sends SharedPartyKill to the mate" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // A accepts B into a party (both spawn near the (256,70,256) sim origin).
+    var pbody: [32]u8 = undefined;
+    var fbuf: [128]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+    try std.testing.expect(g.parties.partyByMember(cb.entity_id) != null);
+
+    // A kills a zombie: Party.GetPartyXP = 100 * (1 - 0.1 * 1 in-range mate).
+    const zid = g.sim.spawnZombie(258, 70, 258, 10).?;
+    var dmg: [256]u8 = undefined;
+    const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+    try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
+    try std.testing.expectEqual(@as(u64, 90), ca.xp);
+    try std.testing.expectEqual(@as(u64, 90), cb.xp);
+    const sk_id = packages.idOf("NetPackageSharedPartyKill").?;
+    const skb = cap_b.findPkgId(sk_id) orelse return error.TestUnexpectedResult;
+    var r = binary.Reader{ .data = skb };
+    _ = try r.readI32(); // entityTypeID
+    try std.testing.expectEqual(@as(i32, 90), try r.readI32()); // xp
+    try std.testing.expectEqual(ca.entity_id, try r.readI32()); // entityID (killer for the tooltip)
+    try std.testing.expectEqual(ca.entity_id, try r.readI32()); // killerID
+
+    // A solo kill (party broken by B leaving) awards the full 100.
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 3, 0, 0)));
+    const zid2 = g.sim.spawnZombie(258, 70, 258, 10).?;
+    const dbody2 = try packages.buildDamageBody(&dmg, zid2, 0, 3, 100, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody2));
+    try std.testing.expectEqual(@as(u64, 190), ca.xp);
+    try std.testing.expectEqual(@as(u64, 90), cb.xp);
+}
+
+test "scenario chat routes by recipient list and preserves the channel" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    var cap_c: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const cc = try g.attachJoinedClient(&cap_c); // third peer must not see party chat
+
+    const chat_id = packages.idOf("NetPackageChat").?;
+    var body: [256]u8 = undefined;
+    var fbuf: [128]u8 = undefined;
+
+    // A sends a Party-channel message with B as the only recipient: only B
+    // receives it, C does not, and the channel survives the re-encode.
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    const recips = [_]i32{cb.entity_id};
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageChat", try packages.buildStockChat(&body, 2, ca.entity_id, "party hi", &recips)));
+    const b_body = cap_b.findPkgId(chat_id) orelse return error.TestUnexpectedResult;
+    const ch = try packages.parseStockChat(b_body);
+    try std.testing.expectEqual(@as(u8, 2), ch.chat_type);
+    try std.testing.expectEqualStrings("party hi", ch.msg);
+    try std.testing.expect(cap_a.findPkgId(chat_id) == null);
+    try std.testing.expect(cap_c.findPkgId(chat_id) == null);
+
+    // A global message (no recipients) broadcasts to everyone except the
+    // sender; sent by the third peer so the per-client chat rate limiter does
+    // not trip (the same client cannot chat twice within min_chat_gap_ns).
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    try g.injectFramed(cc, try packages.framed(&fbuf, "NetPackageChat", try packages.buildStockChat(&body, 0, cc.entity_id, "global hi", &.{})));
+    try std.testing.expect(cap_a.findPkgId(chat_id) != null);
+    try std.testing.expect(cap_b.findPkgId(chat_id) != null);
+    try std.testing.expect(cap_c.findPkgId(chat_id) == null); // no self-echo
+}
+
+test "scenario party shared quest: accept shares to the party, disconnect removes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const sq_id = packages.idOf("NetPackageSharedQuest").?;
+    var fbuf: [128]u8 = undefined;
+
+    // A accepts B into a party.
+    var pbody: [32]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+
+    // A accepts a quest (legacy {def_id u16, op u8=1} fixture body); use a
+    // non-starter def because the join already accepted the starter (and a
+    // re-accept is refused). The accept shares it to B (share_quest with the
+    // def name + quest code).
+    cap_b.clear();
+    var def_id: u16 = 0;
+    for (g.sim.catalog.defs) |d| {
+        if (d.id != g.sim.catalog.starter_id) {
+            def_id = d.id;
+            break;
+        }
+    }
+    try std.testing.expect(def_id != 0);
+    var opbody: [3]u8 = undefined;
+    std.mem.writeInt(u16, opbody[0..2], def_id, .little);
+    opbody[2] = 1;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageQuestObjectiveUpdate", &opbody));
+    const sqb = cap_b.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const head = try packages.stock_quest.parseSharedQuestHead(sqb);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.share_quest, head.event);
+    try std.testing.expectEqual(ca.entity_id, head.shared_by_entity_id);
+    // The shared quest is marked server-side.
+    var found_shared = false;
+    if (g.sim.playerByPeer(ca.slot)) |ps| {
+        for (g.sim.journal[ps].slots) |s| {
+            if (s.active and s.is_shared) found_shared = true;
+        }
+    }
+    try std.testing.expect(found_shared);
+
+    // A disconnects: the party gets a remove_quest for the shared quest.
+    // (Capture the entity id first: dropClientSlot resets the Client.)
+    const a_entity = ca.entity_id;
+    cap_b.clear();
+    g.dropClientSlot(ca.slot, "test-quit");
+    const rqb = cap_b.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const rh = try packages.stock_quest.parseSharedQuestHead(rqb);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.remove_quest, rh.event);
+    try std.testing.expectEqual(a_entity, rh.shared_by_entity_id);
+}
+
+test "scenario party quest change fans objective deltas to the other members" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const pq_id = packages.idOf("NetPackagePartyQuestChange").?;
+    var fbuf: [128]u8 = undefined;
+
+    // A accepts B into a party.
+    var pbody: [32]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+
+    // A reports a shared-quest objective delta: B receives it verbatim.
+    cap_b.clear();
+    var qb: [16]u8 = undefined;
+    var w = binary.Writer{ .buf = &qb };
+    try w.writeI32(ca.entity_id);
+    try w.writeByte(2); // objectiveIndex
+    try w.writeBool(true);
+    try w.writeI32(7); // questCode
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyQuestChange", w.written()));
+    const got = cap_b.findPkgId(pq_id) orelse return error.TestUnexpectedResult;
+    const q = try packages.parsePartyQuestChange(got);
+    try std.testing.expectEqual(ca.entity_id, q.sender_entity);
+    try std.testing.expectEqual(@as(u8, 2), q.objective_index);
+    try std.testing.expect(q.is_complete);
+    try std.testing.expectEqual(@as(i32, 7), q.quest_code);
+
+    // A spoofed sender id is rejected (ownership), even from a party member.
+    cap_b.clear();
+    var spoof: [16]u8 = undefined;
+    var w2 = binary.Writer{ .buf = &spoof };
+    try w2.writeI32(999); // not A's entity
+    try w2.writeByte(0);
+    try w2.writeBool(false);
+    try w2.writeI32(1);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyQuestChange", w2.written()));
+    try std.testing.expect(cap_b.findPkgId(pq_id) == null);
 }
