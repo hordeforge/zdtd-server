@@ -300,15 +300,6 @@ pub fn buildSharedQuestShare(buf: []u8, q: SharedQuestShare) ![]u8 {
     return w.written();
 }
 
-/// RemoveQuest (event 1): sharedBy | event | questCode
-pub fn buildSharedQuestRemove(buf: []u8, shared_by_entity_id: i32, quest_code: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI32(shared_by_entity_id);
-    try w.writeByte(@intFromEnum(SharedQuestEvent.remove_quest));
-    try w.writeI32(quest_code);
-    return w.written();
-}
-
 pub const SharedQuestHead = struct {
     shared_by_entity_id: i32,
     event: SharedQuestEvent,

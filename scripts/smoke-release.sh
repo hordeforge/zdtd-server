@@ -74,6 +74,18 @@ if ! grep -q "binary_sha256=$sidecar_hash" zig-out/bin/buildinfo.txt; then
   exit 1
 fi
 
+# Dependency bill of materials: buildinfo.txt must name the pinned zwasm
+# dependency hash from build.zig.zon so the artifact traces to its source.
+dep_zwasm="$(sed -n 's/^[[:space:]]*\.hash = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)"
+if [[ -z "$dep_zwasm" ]]; then
+  echo "smoke-release: could not read zwasm dep hash from build.zig.zon" >&2
+  exit 1
+fi
+if ! grep -q "dep_zwasm=$dep_zwasm" zig-out/bin/buildinfo.txt; then
+  echo "smoke-release: buildinfo.txt does not record dep_zwasm=$dep_zwasm" >&2
+  exit 1
+fi
+
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).
 smoke_world=zig-out/smoke-world

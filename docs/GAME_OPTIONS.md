@@ -24,8 +24,12 @@ The console binds **127.0.0.1 only** unless `TelnetPassword` is set, matching
 stock `TelnetConsole::.ctor`; a password is the only way it leaves loopback.
 `ServerMaxPlayerCount` is applied to GSI ads and soft join capacity (capped at 64).
 Out-of-range serverconfig values are clamped with a stderr warning (not silent).
-Unknown stock properties are ignored (stock configs have many keys zdtd does not
-apply). Near-miss typos of applied keys (edit distance ≤2) print a stderr hint.
+Non-numeric values for applied integer keys keep the previous default and print
+a named stderr warning (same shape as invalid `ServerPort`). Unknown stock
+properties are ignored (stock configs have many keys zdtd does not apply).
+Near-miss typos of applied keys (edit distance ≤2) print a stderr hint.
+TCP listen collisions among ServerPort, AdminPort/TelnetPort, and webui port
+abort startup (LiteNet uses UDP port+2 and is not checked against TCP).
 `zdtd.toml` / mode-pack stream knobs are sanitized after merge even when no
 toml file is present. Invalid authority modes and mode-file name mismatches
 abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
@@ -57,7 +61,9 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `LandClaimSize` | 41 | 1..255 (odd) | keystone protection area; even values forced odd |
 | `LandClaimOnlineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner online |
 | `LandClaimOfflineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner offline |
-| `ServerPort` | 26902 | u16 | TCP GameServerInfo; LiteNet = port+2 (CLI `--port` wins) |
+| `LandClaimExpiryDays` | 3 | 0..365 | offline days without owner online before claim is released (0 = never; `Game.land_claim_expiry_days`) |
+| `ServerPort` | 26902 | 0..65533 | TCP GameServerInfo; LiteNet = port+2 (CLI `--port` wins); values above 65533 abort startup |
+
 | `ServerMaxPlayerCount` | 8 | 1..64 | GSI max + soft join cap |
 | `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
 | `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
@@ -131,7 +137,7 @@ operator host under the world directory and on the wire between client and serve
 
 | Store / surface | Contents | Retention / control |
 |---|---|---|
-| `<world>/players.zsv` | Login name, last position, coins, inventory stacks, quest journal | Kept until `wipeplayer <name>` or the operator deletes the file/world |
+| `<world>/players.zsv` | Login name, last position, coins, inventory stacks, quest journal, progression (level/XP/food/water/buffs); magic ZPV3 (ZPV2 still read) | Kept until `wipeplayer <name>` or the operator deletes the file/world |
 | In-memory ban table | IPv4 keys from admin `ban` | Process lifetime only (not written to disk) |
 | Admin TCP / WebUI | Player names, slots, inventory dump (`inv`) for ops | Loopback admin (no auth); WebUI requires secret, default off |
 | Process logs | Join/slot/entity ids, name **lengths**, reject reasons | Never full login names or WebUI/server passwords |

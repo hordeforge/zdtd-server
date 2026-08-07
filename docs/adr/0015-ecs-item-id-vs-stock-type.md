@@ -28,9 +28,9 @@ wrong stock types cause dupe/ghost stacks and join PDF desync.
      exist only so tests and no-asset runs still encode parseable v9 stacks
      (`ItemsStartHere + id` fallback). Production paths must not prefer
      builtins when the dump/table is present (warn on leakage).
-3. **Persist stores ECS ids** in ZPV2 / ZCT1 slots. After restart, rejoin PDF
-   remaps through the current table; wrong dump version can orphan stacks
-   (accept fail-closed over inventing type ids).
+3. **Persist stores ECS ids** in ZPV3 (and legacy ZPV2) / ZCT1 slots. After
+   restart, rejoin PDF remaps through the current table; wrong dump version can
+   orphan stacks (accept fail-closed over inventing type ids).
 4. **Wire encode/decode** always goes through stock absolute types on the wire
    (`stock_inv`); ECS never sends bare builtin ids as absolute types without
    the ItemsStartHere / catalog path.

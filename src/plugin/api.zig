@@ -1,4 +1,6 @@
-//! Plugin hook types for the in-tree static host, test scaffolding (ADR 0020: Wasm-only; no native ABI). Static link only; no dynlib/Wasm.
+//! Static plugin hook types for in-tree test scaffolding only (ADR 0020).
+//! Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping
+//! native ABI. No dynlib, no stock IModApi.
 
 const std = @import("std");
 

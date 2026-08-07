@@ -737,17 +737,10 @@ pub fn buildRelPosBody(buf: []u8, entity_id: i32, dx: i16, dy: i16, dz: i16, rx:
     return w.written();
 }
 
-/// Stock NetPackageEntityAliveFlags bit constants (V3).
-pub const cF_approaching_enemy: u16 = 0x0001;
+/// Stock NetPackageEntityAliveFlags bits actually set on the S2C path (V3).
 pub const cF_approaching_player: u16 = 0x0002;
-pub const cF_aiming_gun: u16 = 0x0004;
 pub const cF_spawned: u16 = 0x0008;
-pub const cF_jumping: u16 = 0x0010;
-pub const cF_is_breaking_blocks: u16 = 0x0020;
 pub const cF_is_alert: u16 = 0x0040;
-pub const cF_is_flashlight_on: u16 = 0x0080;
-pub const cF_is_god_mode: u16 = 0x0100;
-pub const cF_crouching: u16 = 0x0200;
 
 pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
@@ -1063,25 +1056,20 @@ pub fn buildChunkPayload(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) !
     return w.written();
 }
 
-/// Test/loadgen helper: stock NetPackageChunk envelope around a height-plane
-/// payload. Production client stream uses `stock_chunk.buildNetPackageChunkNew`.
+/// Test/loadgen helper: stock NetPackageChunk envelope (overwrite=true) around
+/// a height-plane payload. Production client stream uses
+/// `stock_chunk.buildNetPackageChunkNew`.
 pub fn buildChunkBody(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) ![]u8 {
-    return buildChunkBodyStockEnvelope(buf, cx, cz, heights, true);
-}
-
-pub fn buildChunkBodyStockEnvelope(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8, overwrite: bool) ![]u8 {
     if (buf.len < chunk_stock_envelope_overhead + chunk_body_size) return error.Overflow;
     var payload_buf: [chunk_body_size]u8 = undefined;
     const payload = try buildChunkPayload(&payload_buf, cx, cz, heights);
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(overwrite);
-    if (overwrite) {
-        try w.writeI16(@intCast(cx));
-        try w.writeI16(0); // cy
-        try w.writeI16(@intCast(cz));
-        try w.writeI32(@intCast(payload.len));
-        try w.writeBytes(payload);
-    }
+    try w.writeBool(true);
+    try w.writeI16(@intCast(cx));
+    try w.writeI16(0); // cy
+    try w.writeI16(@intCast(cz));
+    try w.writeI32(@intCast(payload.len));
+    try w.writeBytes(payload);
     return w.written();
 }
 
@@ -2515,9 +2503,15 @@ test "world areas stock wire" {
     var buf: [256]u8 = undefined;
     const body = try buildWorldAreasBody(&buf, &[_]TraderAreaEntry{
         .{
-            .pos_x = 10, .pos_y = 61, .pos_z = 20,
-            .size_x = 60, .size_y = 28, .size_z = 60,
-            .pad_x = -2, .pad_y = 0, .pad_z = -2,
+            .pos_x = 10,
+            .pos_y = 61,
+            .pos_z = 20,
+            .size_x = 60,
+            .size_y = 28,
+            .size_z = 60,
+            .pad_x = -2,
+            .pad_y = 0,
+            .pad_z = -2,
             .teleports = &.{
                 .{ .start_x = 7, .start_y = 1, .start_z = 2, .size_x = 52, .size_y = 12, .size_z = 5 },
                 .{ .start_x = 2, .start_y = 1, .start_z = 7, .size_x = 57, .size_y = 28, .size_z = 41 },
@@ -2724,13 +2718,6 @@ pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
     };
 }
 
-pub fn buildQuestOpBody(buf: []u8, def_id: u16, op: u8) ![]u8 {
-    if (buf.len < 3) return error.Overflow;
-    std.mem.writeInt(u16, buf[0..2], def_id, .little);
-    buf[2] = op;
-    return buf[0..3];
-}
-
 // --- Stock NetPackageNPCQuestList (V3.x) ---
 // eventType: 0 FetchList, 1 RemoveQuest, 2 ResetQuests, 3 AddUsedPOI, 4 ClearUsedPOI
 
@@ -2776,12 +2763,8 @@ pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     return head;
 }
 
-/// S2C empty FetchList: npc | player | eventType=0 | tier | entryCount=0
-pub fn buildNpcQuestListEmptyFetch(buf: []u8, npc_entity_id: i32, player_entity_id: i32, tier_level: i32) ![]u8 {
-    return stock_quest.buildNpcQuestListFetch(buf, npc_entity_id, player_entity_id, tier_level, &.{});
-}
-
 /// S2C FetchList with QuestPacketEntry offers (stock trader UI).
+/// Empty offers: pass `entries` as `&.{}` (npc | player | eventType=0 | tier | count=0).
 pub fn buildNpcQuestListFetch(
     buf: []u8,
     npc_entity_id: i32,
@@ -2790,15 +2773,6 @@ pub fn buildNpcQuestListFetch(
     entries: []const stock_quest.QuestPacketEntry,
 ) ![]u8 {
     return stock_quest.buildNpcQuestListFetch(buf, npc_entity_id, player_entity_id, tier_level, entries);
-}
-
-/// S2C ResetQuests: npc | player | eventType=2 (no extra fields)
-pub fn buildNpcQuestListReset(buf: []u8, npc_entity_id: i32, player_entity_id: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI32(npc_entity_id);
-    try w.writeI32(player_entity_id);
-    try w.writeByte(@intFromEnum(NpcQuestEventType.reset_quests));
-    return w.written();
 }
 
 // --- Stock NetPackageQuestObjectiveUpdate (V3.x) ---
@@ -2946,7 +2920,7 @@ test "stock trader data snapshot layout" {
 
 test "stock npc quest list empty fetch layout" {
     var buf: [32]u8 = undefined;
-    const body = try buildNpcQuestListEmptyFetch(&buf, 50, 106, 0);
+    const body = try buildNpcQuestListFetch(&buf, 50, 106, 0, &.{});
     try std.testing.expectEqual(@as(usize, 17), body.len);
     const head = try parseNpcQuestList(body);
     try std.testing.expectEqual(@as(i32, 50), head.npc_entity_id);

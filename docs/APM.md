@@ -110,7 +110,9 @@ Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
   unbounded runs and is also available through the report API. When emitted from
   the live loop it includes an `"ops"` object with instantaneous gauges
   (`tick`, `joined`, `entered`, `peers_alive`, `zombies`, `chunks`) so scrapers
-  get load and counters in one event.
+  get load and counters in one event. It is written to **stdout** (human
+  diagnostics stay on stderr), so `1>metrics.jsonl 2>server.log` yields a
+  parseable line stream without interleaved `zdtd:` free text.
 - **Admin `status`:** one-line load + key error counters (overruns, encode/send
   errors, window drops, persist errors). `guardstats` remains authority rejects.
 

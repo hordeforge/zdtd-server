@@ -1,9 +1,11 @@
-//! Static plugin host, in-tree test scaffolding (ADR 0020; no native ABI).
-//! No dynlib, no Wasm, no stock IModApi.
+//! Plugin package: Wasm guest runtime (ADR 0020) plus in-tree static host as
+//! test scaffolding only (`api` / `host` / `sample_hello`). Shipping plugins
+//! are `.wasm` modules via `wasm.zig`. No native plugin ABI, no dynlib, no
+//! stock IModApi.
 //!
 //! Dependency direction: leaf layer below server (server imports plugin, never
-//! the reverse). Currently std-only; must not import server, ecs, wire, world,
-//! assets, litenet, or apm.
+//! the reverse). Must not import server, ecs, wire, world, assets, litenet, or
+//! apm. Wasm runtime may use util (io_fs) only.
 
 pub const api = @import("api.zig");
 pub const host = @import("host.zig");

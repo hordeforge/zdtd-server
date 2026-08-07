@@ -5,7 +5,6 @@
 const std = @import("std");
 
 pub const protocol_id: i32 = 13;
-pub const header_size: usize = 1;
 pub const channeled_header_size: usize = 4;
 /// FragmentId:u16 + FragmentPart:u16 + FragmentsTotal:u16 (after channeled header).
 pub const fragment_header_size: usize = 6;
@@ -72,7 +71,6 @@ pub const disconnect_header_size: usize = 9;
 /// Stock NetworkServerLiteNetLib reject payloads (EAdditionalDisconnectCause in byte0).
 pub const reject_invalid_password = [_]u8{ 0, 0 };
 pub const reject_rate_limit = [_]u8{ 1, 0 };
-pub const reject_pending_connection = [_]u8{ 2, 0 };
 
 pub fn parseConnectRequest(raw: []const u8) ?ConnectRequest {
     if (raw.len < connect_request_header) return null;

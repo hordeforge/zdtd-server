@@ -16,8 +16,6 @@ pub const Entry = struct {
 pub const Table = struct {
     /// paint_id → texture_id (0xFFFF = unset)
     paint_to_tex: [max_paints]u16 = .{0xFFFF} ** max_paints,
-    /// first paint_id for a texture_id (sparse via hashmap)
-    tex_to_paint: std.AutoHashMapUnmanaged(u16, u8) = .{},
     entries: []const Entry = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     n: usize = 0,
@@ -29,7 +27,6 @@ pub const Table = struct {
     pub fn deinit(self: *Table) void {
         if (self.arena_ptr) |ap| {
             const child = ap.child_allocator;
-            self.tex_to_paint = .{};
             self.entries = &.{};
             ap.deinit();
             child.destroy(ap);
@@ -42,10 +39,6 @@ pub const Table = struct {
         const t = self.paint_to_tex[paint_id];
         if (t == 0xFFFF) return null;
         return t;
-    }
-
-    pub fn paintOf(self: *const Table, texture_id: u16) ?u8 {
-        return self.tex_to_paint.get(texture_id);
     }
 };
 
@@ -92,8 +85,6 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         else
             0;
         t.paint_to_tex[pid] = tid;
-        const gop = try t.tex_to_paint.getOrPut(arena, tid);
-        if (!gop.found_existing) gop.value_ptr.* = pid;
         const kn = try arena.dupe(u8, name);
         try list.append(allocator, .{ .paint_id = pid, .texture_id = tid, .name = kn });
         i = body_end + 1;

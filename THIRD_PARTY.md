@@ -26,6 +26,9 @@ zdtd itself:
 |---|---|---|---|
 | zlinter | 0.0.1 | MIT | Lint tool used by zwasm's own `zig build lint` step. |
 | zls | 0.16.0 | MIT | Zig language server; build dependency of zlinter. |
+| known_folders | 0.0.0 | MIT | Known-folders helper; build dependency of zls. |
+| diffz | 0.0.1 | MIT | Diff library; build dependency of zls. |
+| lsp_kit | 0.1.0 | MIT | LSP helper library; build dependency of zls. |
 
 ---
 

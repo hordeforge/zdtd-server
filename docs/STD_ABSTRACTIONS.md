@@ -39,9 +39,18 @@ app (server/ecs/world/assets)
 
 ## Why clock stays on `posix.system`
 
-`monoNs` is on the per-packet hot path. Constructing `Io.Threaded` per call is
-too heavy. `posix.system.clock_gettime(CLOCK.MONOTONIC)` hits the vDSO and is the
-idiomatic portable thin layer (not `std.os.linux`).
+`monoNs` is on the per-packet hot path. 0.16 moved timing into `std.Io`
+(`Io.Clock.now(clock, io)`, `Io.sleep`); `std.time.Instant` and `Thread.sleep`
+are gone. Every std time call requires an `Io`, and owning one means
+`Io.Threaded.init`, which calls `getCpuCount()` and installs SIGIO/SIGPIPE
+handlers (`Io/Threaded.zig:1652`) - too heavy and globally racy per packet.
+`clock.zig` stays an Io-free leaf: Threaded's posix `.now` is exactly
+`posix.system.clock_gettime` plus a timespec conversion (`Io/Threaded.zig:11428`),
+so the direct vDSO read is the same call with no context to construct. Sleep is
+analogous: `Io.sleep` lowers to `clock_nanosleep` (`Io/Threaded.zig:11598`); the
+leaf `nanosleep` is the Io-free equivalent. (`Io.Threaded.init_single_threaded`
+is a comptime-const `Io` whose `now` would work since userdata is unused, but it
+is the single-thread fallback global, not the right anchor for a threaded server.)
 
 ## Why accept uses poll + accept4
 
@@ -53,8 +62,10 @@ is non-blocking. Listen stays blocking; `poll(0)` gates `accept4(..., NONBLOCK|C
 | Call | Where |
 |---|---|
 | `posix.setsockopt` REUSEADDR | UDP bind (BindOptions has no reuse) |
+| `system.setsockopt` V6ONLY | UDP dual-stack bind (post-bind EINVAL probe; std variant traps on EINVAL) |
 | `posix.poll` + `system.accept4` | tcp_listen accept |
 | `posix.read` / `system.write` / `system.close` | tcp_listen client I/O |
+| `posix.poll` POLLOUT | tcp_listen `writeAll` EAGAIN gate (no std write-with-cap exists) |
 | `system.clock_gettime` / `nanosleep` | clock hot path |
 
 ## Checklist for new code

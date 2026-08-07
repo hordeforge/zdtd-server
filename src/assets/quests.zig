@@ -753,12 +753,6 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !quest.Catal
     return cat;
 }
 
-pub fn loadFromConfigDir(allocator: std.mem.Allocator, config_dir: []const u8) !quest.Catalog {
-    var buf: [2048]u8 = undefined;
-    const path = try questsXmlPath(config_dir, &buf);
-    return loadFromPath(allocator, path);
-}
-
 /// Try explicit path, config dir, game dir, then map-derived Data/Config.
 /// Applies --config-overrides patches when set (via paths.override_dirs).
 pub fn tryLoad(

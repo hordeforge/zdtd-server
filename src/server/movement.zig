@@ -5,8 +5,6 @@ const std = @import("std");
 
 /// Soft cap: sprint (~6 m/s) + vehicle-on-foot margin. Excess is clamped.
 pub const max_horizontal_speed_mps: f32 = 20.0;
-/// Hard horizontal cap used only as documentation/reference; clamp always uses soft.
-pub const hard_horizontal_speed_mps: f32 = 40.0;
 /// Floor dt so a double-packet same tick does not divide by zero.
 pub const min_dt_s: f32 = 1.0 / 40.0;
 /// Cap dt after long stall so one packet cannot jump the whole map.

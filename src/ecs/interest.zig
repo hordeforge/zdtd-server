@@ -6,7 +6,6 @@ const std = @import("std");
 const Dirty = @import("components.zig").Dirty;
 
 pub const cell_size: f32 = 32.0;
-pub const default_radius_cells: i32 = 3;
 
 /// Main-tick period for PosAndRot heartbeat when no dirty bits (paired with
 /// motion_replicate_period in game.zig; effective interval is LCM).

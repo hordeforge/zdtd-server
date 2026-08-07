@@ -1319,9 +1319,9 @@ test "scenario inventory move drop place equip" {
 
     // Stock TE storage roundtrip via NetPackageTileEntity.
     {
-        const stock_te = @import("../wire/stock_te.zig");
-        const containers = @import("../world/containers.zig");
-        var cont: containers.Container = .{
+        // Stock body via packages facade (AGENTS: one stock shape → one builder path).
+        const stock_te = packages.stock_te;
+        var cont: containers_mod.Container = .{
             .pos = .{ .x = 253, .y = 70, .z = 254 },
             .block_id = 42,
             .slot_count = 8,

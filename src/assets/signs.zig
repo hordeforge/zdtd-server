@@ -141,7 +141,15 @@ fn walkSigns(
     var threaded = std.Io.Threaded.init(gpa, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+    // Missing Prefabs tree is normal without a full game install; other open
+    // failures must not look like "no sign libraries".
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => {
+            std.debug.print("zdtd: open signs dir '{s}' failed: {s}\n", .{ dir_path, @errorName(err) });
+            return;
+        },
+    };
     defer dir.close(io);
 
     var it = dir.iterate();
@@ -168,7 +176,15 @@ fn parseSignsFile(
     library: []const u8,
     list: *std.ArrayList(SignEntry),
 ) !void {
-    const raw = io_fs.readFileAll(gpa, path) catch return;
+    // Skip one unreadable library file rather than aborting the whole catalog,
+    // but log non-missing failures so a permission/I/O issue is not invisible.
+    const raw = io_fs.readFileAll(gpa, path) catch |err| {
+        switch (err) {
+            error.FileNotFound => {},
+            else => std.debug.print("zdtd: read signs '{s}' failed: {s}\n", .{ path, @errorName(err) }),
+        }
+        return;
+    };
     defer gpa.free(raw);
 
     const lib_owned = try arena.dupe(u8, library);

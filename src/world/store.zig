@@ -172,11 +172,6 @@ pub const Chunk = struct {
         s[blockIndex(lx, y, lz)] = v;
     }
 
-    /// Set a block (full rawData) plus paint texture and optional TTS density.
-    pub fn setBlockTex(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32, tex: u64) !void {
-        try self.setBlockTexDens(allocator, lx, y, lz, raw, tex, null);
-    }
-
     /// Fill lake water from the water_info.xml sources: every column whose
     /// terrain surface sits below a source surface gets water blocks from the
     /// bed up to that surface (the water channel mass is derived from the
@@ -472,10 +467,6 @@ pub const World = struct {
                 },
             );
         }
-    }
-
-    pub fn isAirId(self: *const World, id: u16) bool {
-        return id == self.terrain_ids.air;
     }
 
     pub fn isWaterId(self: *const World, id: u16) bool {

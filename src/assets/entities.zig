@@ -60,13 +60,6 @@ pub const EntityTable = struct {
         return null;
     }
 
-    pub fn byHash(self: *const EntityTable, hash: i32) ?EntityDef {
-        for (self.defs) |d| {
-            if (d.hash == hash) return d;
-        }
-        return null;
-    }
-
     /// Default spawnable walker (zombieBoe or first zombie).
     pub fn defaultZombie(self: *const EntityTable) EntityDef {
         if (self.byName("zombieBoe")) |d| return d;

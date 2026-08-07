@@ -47,6 +47,7 @@ test {
     _ = gamestages;
     _ = maxdamage;
     _ = traders;
+    _ = npc;
     _ = assignids_comptime;
     _ = biome_layers;
     _ = block_textures;

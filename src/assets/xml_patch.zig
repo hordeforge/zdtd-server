@@ -13,9 +13,6 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 
-pub const max_override_files: usize = 256;
-pub const max_path: usize = 2048;
-
 const XSeg = struct {
     tag: []const u8 = "",
     filter_attr: ?[]const u8 = null,
@@ -413,8 +410,16 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
 }
 
 /// List *.xml under dir (non-recursive) into out paths (caller frees each full path).
+/// Missing dir is a no-op (override path optional). Any other list failure is
+/// logged and returned so a bad override path does not look like "no patches".
 pub fn listXmlFilesSorted(allocator: std.mem.Allocator, dir_path: []const u8, out: *std.ArrayList([]const u8)) !void {
-    const names = io_fs.listFileNames(allocator, dir_path) catch return;
+    const names = io_fs.listFileNames(allocator, dir_path) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => {
+            std.debug.print("zdtd: list override dir '{s}' failed: {s}\n", .{ dir_path, @errorName(err) });
+            return err;
+        },
+    };
     defer {
         for (names) |n| allocator.free(n);
         allocator.free(names);

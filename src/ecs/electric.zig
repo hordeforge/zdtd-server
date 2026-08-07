@@ -160,21 +160,6 @@ pub const PowerGrid = struct {
         return id;
     }
 
-    /// Place or update node at position, then apply stock fuel/SoC props.
-    pub fn addNodeAtResolved(
-        self: *PowerGrid,
-        kind: NodeKind,
-        x: i32,
-        y: i32,
-        z: i32,
-        watts: f32,
-        apply: *const fn (*PowerNode) void,
-    ) ?u16 {
-        const id = self.addNodeAt(kind, x, y, z, watts) orelse return null;
-        if (self.indexOfId(id)) |i| apply(&self.nodes[i]);
-        return id;
-    }
-
     /// Arm a trigger/timer node: period seconds between on/off toggles of `target_id` consumer.
     pub fn armTimer(self: *PowerGrid, id: u16, period_s: f32) bool {
         const i = self.indexOfId(id) orelse return false;

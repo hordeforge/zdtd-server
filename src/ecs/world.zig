@@ -633,16 +633,6 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
-    pub fn spawnSleeper(self: *World, x: f32, y: f32, z: f32, hp: f32) ?NetId {
-        const id = self.spawnZombie(x, y, z, hp) orelse return null;
-        if (self.slotOfNetId(id)) |s| {
-            self.mask[s].sleeper = true;
-            self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
-            self.zombie_ai[s].state = .sleep;
-        }
-        return id;
-    }
-
     /// Deterministic per-entity loot drop roll, shared by player damage and
     /// turret kills. Stock uses the world GameRandom; the net id is stable
     /// within a run, so the same inputs give the same outcomes. drop_prob is
@@ -785,20 +775,6 @@ pub const World = struct {
             return .{ .killed = true };
         }
         return .{};
-    }
-
-    /// Multi-stack loot bag (death / chest fill).
-    pub fn spawnLootBagStacks(self: *World, x: f32, y: f32, z: f32, stacks: []const struct { item_id: u16, count: u16 }) ?NetId {
-        if (stacks.len == 0) return self.spawnLootBag(x, y, z, 1, 5);
-        const first = stacks[0];
-        const id = self.spawnLootBag(x, y, z, first.item_id, first.count) orelse return null;
-        if (self.slotOfNetId(id)) |s| {
-            var i: usize = 1;
-            while (i < stacks.len) : (i += 1) {
-                _ = self.depositItem(s, stacks[i].item_id, stacks[i].count);
-            }
-        }
-        return id;
     }
 
     pub fn setPos(self: *World, net_id: NetId, x: f32, y: f32, z: f32, yaw: f32) void {

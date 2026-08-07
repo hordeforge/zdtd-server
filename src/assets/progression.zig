@@ -64,28 +64,11 @@ pub const Table = struct {
         }
         self.* = .{};
     }
-
-    pub fn perkByName(self: *const Table, name: []const u8) ?PerkDef {
-        for (self.perks) |p| {
-            if (std.mem.eql(u8, p.name, name)) return p;
-        }
-        return null;
-    }
-
-    pub fn attrByName(self: *const Table, name: []const u8) ?AttrDef {
-        for (self.attributes) |a| {
-            if (std.mem.eql(u8, a.name, name)) return a;
-        }
-        return null;
-    }
 };
 
-/// Backward-compatible curve-only load (used by older tryLoad callers).
+/// Curve-only load (fallback when the full table parse fails). Parses the file
+/// once, lightly, and does not build or leak the attribute/perk arena.
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
-    const t = try loadTableFromPath(allocator, path);
-    // leak table arena into curve-only path is wrong: load curve without full table
-    _ = t;
-    // Actually loadTable owns arena; for LevelCurve-only we parse lightly:
     return loadCurveOnly(allocator, path);
 }
 

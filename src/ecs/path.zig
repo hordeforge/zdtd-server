@@ -36,11 +36,6 @@ pub const Path = struct {
         self.cursor += 1;
         return p;
     }
-
-    pub fn peek(self: *const Path) ?Point {
-        if (self.cursor >= self.len) return null;
-        return self.points[self.cursor];
-    }
 };
 
 /// Open-addressed coord→node-index map for BFS/A* dedup. Fixed 512 slots

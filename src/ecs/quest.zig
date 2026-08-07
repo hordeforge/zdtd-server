@@ -4,7 +4,6 @@
 const std = @import("std");
 const c = @import("components.zig");
 
-pub const max_quests: usize = 512;
 pub const max_journal = c.max_journal;
 
 pub const QuestKind = enum(u8) {

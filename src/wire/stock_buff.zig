@@ -16,12 +16,8 @@ pub const max_buff_name: usize = 64;
 
 /// BuffValue/BuffFlags bit values (asm.il 733040). Same bit order as
 /// ecs/components.BuffFlags, which is what callers @bitCast into `flags`.
+/// Only `flag_started` is written here; other bits live on `BuffFlags` in ecs.
 pub const flag_started: u8 = 0x01;
-pub const flag_finished: u8 = 0x02;
-pub const flag_remove: u8 = 0x04;
-pub const flag_update: u8 = 0x08;
-pub const flag_invalid: u8 = 0x10;
-pub const flag_paused: u8 = 0x20;
 
 /// One BuffValue as it appears inside the EntityBuffs blob (asm.il 733588).
 pub const BuffValueWire = struct {

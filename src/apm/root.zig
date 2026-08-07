@@ -31,11 +31,6 @@ pub const Harness = struct {
         s.captureWall();
         return s;
     }
-
-    pub fn resetWindow(self: *Harness) void {
-        self.counters.reset();
-        self.prof.reset();
-    }
 };
 
 test {

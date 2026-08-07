@@ -21,8 +21,4 @@ pub const EntityHandle = struct {
     pub fn invalid() EntityHandle {
         return .{};
     }
-
-    pub fn isValid(self: EntityHandle) bool {
-        return self.slot != invalid_slot;
-    }
 };
