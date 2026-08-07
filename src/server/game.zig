@@ -9169,6 +9169,16 @@ pub const Game = struct {
     /// One workstation step: burn/craft, then re-broadcast the stations it changed.
     pub fn tickWorkstations(self: *Game, dt: f32) !void {
         self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self);
+        // Heat map feed (AIDirectorChunkData): burning workstations with a
+        // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
+        // raise the region's activity like stock TileEntity.heatMapLastTime.
+        for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
+            if (!u or !w.is_burning) continue;
+            const strength = self.blocks.heatStrength(@intCast(w.block_id));
+            if (strength > 0) {
+                self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, 720.0);
+            }
+        }
         try self.broadcastDirtyWorkstations();
     }
 

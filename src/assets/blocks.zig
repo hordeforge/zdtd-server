@@ -20,6 +20,9 @@ pub const BlockDef = struct {
     /// IndexName="TraderOnOff": trader-area gate/loudspeaker blocks that
     /// TraderArea::SetClosed toggles (doors lock, lights flip meta bit 0x2).
     trader_onoff: bool = false,
+    /// HeatMapStrength: heat the block feeds the AI heat map while active
+    /// (forge 6, campfire 5, workbench 5, torches 1...). 0 = none.
+    heat_strength: f32 = 0,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -81,6 +84,12 @@ pub const BlockTable = struct {
         if (self.byId(id)) |d| return d.trader_onoff;
         return false;
     }
+
+    /// HeatMapStrength of a block (0 = no heat; feeds the AI heat map).
+    pub fn heatStrength(self: *const BlockTable, id: u16) f32 {
+        if (self.byId(id)) |d| return d.heat_strength;
+        return 0;
+    }
 };
 
 // Offline / no-dump slice: dump-validated pins only (assignids_comptime).
@@ -140,6 +149,7 @@ pub fn loadFromPath(
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         trader_onoff: bool = false,
+        heat_strength: f32 = 0,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -163,11 +173,13 @@ pub fn loadFromPath(
         };
         const kn = try arena.dupe(u8, name);
         try seen.put(allocator, kn, {});
-        // Scan this block's body for Class / TraderID / Extends / IndexName.
+        // Scan this block's body for Class / TraderID / Extends / IndexName /
+        // HeatMapStrength.
         var class: ?[]const u8 = null;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
         var trader_onoff = false;
+        var heat_strength: f32 = 0;
         const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -187,6 +199,8 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.eql(u8, v, "TraderOnOff")) trader_onoff = true;
                 }
+            } else if (std.mem.eql(u8, pname, "HeatMapStrength")) {
+                if (xml.attr(clean, pi, "value")) |v| heat_strength = std.fmt.parseFloat(f32, v) catch 0;
             }
             p = pi + 10;
         }
@@ -199,6 +213,7 @@ pub fn loadFromPath(
             .trader_id = trader_id,
             .extends = extends,
             .trader_onoff = trader_onoff,
+            .heat_strength = heat_strength,
         });
         i = bi + 7;
     }
@@ -250,6 +265,7 @@ pub fn loadFromPath(
             .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,
+            .heat_strength = pb.heat_strength,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -328,6 +344,9 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\<block name="doorWoodLargeGate">
         \\  <property name="IndexName" value="TraderOnOff"/>
         \\</block>
+        \\<block name="campfire">
+        \\  <property name="HeatMapStrength" value="5"/>
+        \\</block>
         \\</blocks>
     ;
     const path = ".zdtd_test_blocks_vending.xml";
@@ -357,6 +376,10 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const gate = t.byName("doorWoodLargeGate").?;
     try std.testing.expect(t.isTraderOnOff(gate.id));
     try std.testing.expect(!t.isTraderOnOff(crate.id));
+    // HeatMapStrength feeds the AI heat map while the block runs.
+    const fire = t.byName("campfire").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5), t.heatStrength(fire.id), 1e-4);
+    try std.testing.expectEqual(@as(f32, 0), t.heatStrength(crate.id));
 }
 
 fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -368,6 +391,7 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "cntVendingMachine2", 103 },
         .{ "cntWoodCrateWood01", 104 },
         .{ "doorWoodLargeGate", 105 },
+        .{ "campfire", 106 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

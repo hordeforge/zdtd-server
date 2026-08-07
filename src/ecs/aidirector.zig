@@ -152,6 +152,31 @@ pub const wander_min_gap: u64 = 12_000;
 pub const wander_max_gap: u64 = 24_000;
 pub const wander_start_after: u64 = 28_000;
 
+/// AIDirectorChunkData heat map (asm.il 414504-415200): 5x5-chunk regions
+/// accumulate activity from heat blocks (forges/campfires, blocks.xml
+/// HeatMapStrength) and expire over the event duration; a region crossing 25
+/// spawns a scout party (Scouts1/2/Feral/Radiated by gamestage) on the 5 s
+/// check, then cooldowns the region and its neighbors. Blood moons suppress
+/// new heat (NotifyActivity gate).
+pub const heat_region_world: i32 = 16 * 5; // 5 chunks x 16 blocks
+pub const heat_spawn_threshold: f32 = 25.0;
+pub const heat_event_ticks: f32 = 720.0; // TileEntity heat event duration
+pub const heat_check_seconds: f32 = 5.0;
+pub const heat_cooldown_seconds: f32 = 120.0;
+pub const heat_neighbor_cooldown_seconds: f32 = 60.0;
+pub const heat_feral_chance: f32 = 0.2;
+pub const max_heat_regions: usize = 32;
+pub const heat_scout_count: u32 = 2;
+pub const heat_scout_dist: f32 = 10.0; // chunk-heat spawner 0/8/10 constants
+
+pub const HeatRegion = struct {
+    key: i64 = 0,
+    activity: f32 = 0,
+    /// Per-second decay (sum of value/duration over the active events).
+    decay: f32 = 0,
+    cooldown: f32 = 0,
+};
+
 pub const BmParty = struct {
     focus_x: f32 = 0,
     focus_z: f32 = 0,
@@ -206,6 +231,10 @@ pub const Director = struct {
     /// World time (ticks) of the next wandering horde (0 = not scheduled yet).
     /// ChooseNextTime: now + RandomRange(12000, 24000); player-gated.
     wandering_next: u64 = 0,
+    /// Heat map regions (AIDirectorChunkData), dense array capped.
+    heat: [max_heat_regions]HeatRegion = [_]HeatRegion{.{}} ** max_heat_regions,
+    heat_n: u8 = 0,
+    heat_check_cd: f32 = 0,
     /// Alive-zombie ceiling (MaxSpawnedZombies). Defaults to the dev cap; the
     /// operator's serverconfig raises it. See default_max_alive_zombies.
     max_alive: u32 = default_max_alive_zombies,
@@ -321,6 +350,8 @@ pub const Director = struct {
             if (self.anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
             self.wandering_next = self.nextWanderingTime();
         }
+        // Heat map: decay + the 5 s scout check (AIDirectorChunkEventComponent).
+        self.tickHeat(w, dt);
         if (!self.clock.isNight() and self.scouts_cd <= 0) {
             spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0, self.scoutGroup());
             self.scouts_cd = 120.0;
@@ -627,6 +658,117 @@ pub const Director = struct {
         return 0;
     }
 
+    /// 5x5-chunk region key for a world position (AIDirectorChunkData map).
+    fn heatRegionKey(wx: f32, wz: f32) i64 {
+        const rx: i64 = @divFloor(@as(i64, @intFromFloat(@floor(wx))), heat_region_world);
+        const rz: i64 = @divFloor(@as(i64, @intFromFloat(@floor(wz))), heat_region_world);
+        return (rx << 32) | (rz & 0xFFFFFFFF);
+    }
+
+    fn heatRegionCenter(key: i64) struct { x: f32, z: f32 } {
+        const rx: i64 = key >> 32;
+        const rz: i64 = @as(i32, @bitCast(@as(u32, @truncate(@as(u64, @bitCast(key))))));
+        return .{
+            .x = @floatFromInt(rx * heat_region_world + heat_region_world / 2),
+            .z = @floatFromInt(rz * heat_region_world + heat_region_world / 2),
+        };
+    }
+
+    /// AIDirector::NotifyActivity (asm.il 414504-415200): a heat event adds
+    /// `value` to the region for `duration` ticks (linear decay). Gated off
+    /// during blood moons; fail-closed at the region cap.
+    pub fn notifyActivity(self: *Director, wx: f32, wz: f32, value: f32, duration_ticks: f32) void {
+        if (value <= 0 or self.bloodmoon_active) return;
+        const key = heatRegionKey(wx, wz);
+        const per_sec = value / (duration_ticks / 20.0);
+        for (self.heat[0..self.heat_n]) |*r| {
+            if (r.key == key) {
+                r.activity += value;
+                r.decay += per_sec;
+                return;
+            }
+        }
+        if (self.heat_n >= max_heat_regions) return;
+        const r = &self.heat[self.heat_n];
+        r.* = .{ .key = key, .activity = value, .decay = per_sec };
+        self.heat_n += 1;
+    }
+
+    /// AIDirectorChunkEventComponent::Tick: decay region activity (events
+    /// expire), then every 5 s run CheckToSpawn: a region at/above 25 spawns a
+    /// scout party toward its center and cooldowns itself and its neighbors.
+    fn tickHeat(self: *Director, w: *ecs_world.World, dt: f32) void {
+        var i: usize = 0;
+        while (i < self.heat_n) {
+            const r = &self.heat[i];
+            if (r.cooldown > 0) r.cooldown -= dt;
+            r.activity -= r.decay * dt;
+            if (r.activity < 0) r.activity = 0;
+            // A spent region stays while on cooldown (it must keep blocking new
+            // heat in the same area); once cooled and empty it is dropped.
+            if (r.activity <= 0.01 and r.cooldown <= 0) {
+                self.heat[i] = self.heat[self.heat_n - 1];
+                self.heat_n -= 1;
+                continue;
+            }
+            i += 1;
+        }
+        self.heat_check_cd -= dt;
+        if (self.heat_check_cd > 0) return;
+        self.heat_check_cd = heat_check_seconds;
+        if (self.bloodmoon_active) return;
+        var ci: usize = 0;
+        while (ci < self.heat_n) : (ci += 1) {
+            const r = &self.heat[ci];
+            if (r.activity < heat_spawn_threshold or r.cooldown > 0) continue;
+            // FindBestEventAndReset + StartCooldownOnNeighbors; the 20 % feral
+            // roll doubles the cooldown (deterministic, seeded stream).
+            const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % 5 == 0;
+            r.activity = 0;
+            r.cooldown = if (feral) heat_cooldown_seconds * 2.0 else heat_cooldown_seconds;
+            self.cooldownNeighbors(r.key);
+            self.spawnHeatScouts(w, r.key);
+        }
+    }
+
+    /// StartCooldownOnNeighbors: the eight surrounding regions get the shorter
+    /// neighbor cooldown (or keep a longer existing one).
+    fn cooldownNeighbors(self: *Director, key: i64) void {
+        const rx: i64 = key >> 32;
+        const rz: i64 = @as(i32, @bitCast(@as(u32, @truncate(@as(u64, @bitCast(key))))));
+        for (self.heat[0..self.heat_n]) |*r| {
+            const nrx: i64 = r.key >> 32;
+            const nrz: i64 = @as(i32, @bitCast(@as(u32, @truncate(@as(u64, @bitCast(r.key))))));
+            const dx = nrx - rx;
+            const dz = nrz - rz;
+            if (dx == 0 and dz == 0) continue;
+            if (@abs(dx) > 1 or @abs(dz) > 1) continue;
+            if (r.cooldown < heat_neighbor_cooldown_seconds) r.cooldown = heat_neighbor_cooldown_seconds;
+        }
+    }
+
+    /// SpawnScouts: a small party toward the hot region center (chunk-heat
+    /// spawner 0/8/10 constants), marked horde and set to investigate the
+    /// nearest player (SetInvestigatePosition, 2400 ticks).
+    fn spawnHeatScouts(self: *Director, w: *ecs_world.World, key: i64) void {
+        const center = heatRegionCenter(key);
+        const group = self.scoutGroup();
+        var n: u32 = 0;
+        while (n < heat_scout_count) : (n += 1) {
+            const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
+            const x = center.x + @cos(ang) * heat_scout_dist;
+            const z = center.z + @sin(ang) * heat_scout_dist;
+            const y = nearestPlayerY(w, x, z) orelse break;
+            const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
+            if (nearestPlayerSlot(w, x, z)) |ps| {
+                w.zombie_ai[slot].state = .chase;
+                w.zombie_ai[slot].target_id = w.network_id[ps].id;
+                w.zombie_ai[slot].alert = true;
+            }
+            n += 1;
+        }
+    }
+
     fn nearestPlayerSlot(w: *ecs_world.World, x: f32, z: f32) ?ecs_world.Slot {
         var best: ?ecs_world.Slot = null;
         var best_d2: f32 = std.math.floatMax(f32);
@@ -917,4 +1059,60 @@ test "wandering horde skips with no players and re-arms" {
     _ = d.tick(&w, 0.05);
     try std.testing.expectEqual(zombies_before, w.countKind(.zombie)); // no spawn
     try std.testing.expect(d.wandering_next > d.clock.worldTimeBits()); // re-armed
+}
+
+test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{};
+    // A forge (6 per event, 720-tick duration) feeds every tick: 30 ticks give
+    // activity ~180, well past the 25 threshold.
+    var t: u32 = 0;
+    while (t < 30) : (t += 1) {
+        d.notifyActivity(0, 0, 6, 720);
+        _ = d.tick(&w, 0.05);
+    }
+    try std.testing.expect(d.heat_n >= 1);
+    try std.testing.expect(d.heat[0].activity >= 25);
+    // The 5 s CheckToSpawn fires: scouts spawn, the region resets and cools.
+    var warm: u32 = 0;
+    while (warm < 110) : (warm += 1) _ = d.tick(&w, 0.05);
+    var scouts: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
+        scouts += 1;
+    }
+    try std.testing.expect(scouts >= 1 and scouts <= heat_scout_count);
+    // Region was reset (activity 0) and is on cooldown. Region key of (0,0):
+    // floor(0/80)=0 on both axes, packed = 0.
+    var found = false;
+    for (d.heat[0..d.heat_n]) |*r| {
+        if (r.key == 0) {
+            found = true;
+            try std.testing.expect(r.activity == 0);
+            try std.testing.expect(r.cooldown > 0);
+        }
+    }
+    try std.testing.expect(found);
+}
+
+test "heat map: low activity never spawns and decays away" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{};
+    // A torch (1) fed once stays well under 25 and decays over the 720-tick
+    // (36 s) event duration.
+    d.notifyActivity(0, 0, 1, 720);
+    var t: u32 = 0;
+    while (t < 800) : (t += 1) _ = d.tick(&w, 0.05); // 40 s > 36 s
+    var zombies: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) zombies += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 0), zombies);
+    try std.testing.expectEqual(@as(u8, 0), d.heat_n); // expired
 }

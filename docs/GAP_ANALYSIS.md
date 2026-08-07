@@ -1270,12 +1270,12 @@ encoding is one day high.
   `asm.il:2501788`, `serverconfig.xml:103`,
   `output_log_client_zdtd_connect.txt:3672-3675`
 
-- **Wandering horde / screamer heat** `MISSING`
-  Stock creates `AIDirectorWanderingHordeComponent` and
-  `AIDirectorChunkEventComponent` alongside the blood-moon component. zdtd's
-  director has only a fixed daytime "scout" of 1 zombie every 120 s and a
-  2-per-45s night trickle, with no heat map, no screamer and no wandering horde
-  schedule.
+- **Wandering horde / screamer heat** `WORKS`
+  Both components now exist alongside the blood-moon component:
+  `AIDirectorWanderingHordeComponent` (scheduled 6-pack at ~92 m) and
+  `AIDirectorChunkEventComponent` (region heat map, forge/campfire feed,
+  threshold-25 scout spawns with cooldowns). Residual: the fixed daytime scout
+  drip stays as the fallback when no heat source runs; see the two rows below.
   *Anchors:* `src/ecs/aidirector.zig:159`, `:168`, `asm.il:409351`,
   `Data/Config/gamestages.xml:1582`, `:3458`
 
@@ -1882,13 +1882,23 @@ gamestage, no wandering hordes, and no screamers.
   `spawnWanderingHorde`), `asm.il:419473-419490` (TickNextTime/ChooseNextTime),
   `asm.il:416218`, `Data/Config/gamestages.xml:1582`, `:3458`
 
-- **Screamers and the activity heat map** `MISSING`
-  No `AIDirectorChunkData` heat accumulation, no noise-to-heat feed, no scout spawn
-  on threshold, no scream-summons-more loop. The daytime "scout" is a single
-  ordinary zombie every 120 s. Forges, generators and gunfire have zero
-  consequence.
-  *Anchors:* `src/ecs/aidirector.zig:168-171`, `asm.il:414504-415200`,
-  `asm.il:416218`
+- **Screamers and the activity heat map** `WORKS` (heat feed residual)
+  `AIDirectorChunkData` heat accumulation per 5x5-chunk region
+  (`Director.heat`): burning workstations whose block carries a blocks.xml
+  `HeatMapStrength` (forge 6, campfire 5, workbench 5, ...) feed
+  `notifyActivity(value, 720 ticks)`; events decay linearly and expire. Every
+  5 s `CheckToSpawn`: a region at/above 25 resets and spawns a scout party
+  (Scouts1/2/Feral/Radiated by gamestage, chunk-heat spawner 0/8/10 constants)
+  that investigates the nearest player; the region and its neighbors go on
+  cooldown (120 s / 60 s; the 20% feral roll doubles it). Blood moons suppress
+  new heat (NotifyActivity gate). Residual: noise-to-heat (stock items.xml
+  carries no `heat_map_strength`, so stock's own noise table is empty too),
+  static torch/campfire heat (only burning workstations feed now), and the
+  screamer's scream-summons-more loop.
+  *Anchors:* `src/ecs/aidirector.zig` (`heat`, `notifyActivity`, `tickHeat`,
+  `spawnHeatScouts`), `src/server/game.zig` (workstation heat feed),
+  `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
+  `asm.il:416218`, `Data/Config/blocks.xml:28086` (forge 6)
 
 - **NetPackageHordeEvent** `N/A (parity)`
   Duplicate of the §6 row above (same verdict): `buildHordeEventBody` exists and
