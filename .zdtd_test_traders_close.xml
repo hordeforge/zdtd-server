@@ -1,0 +1,9 @@
+<traders>
+  <trader_item_group name="groupCasino">
+    <item name="casinoCoin" count="1"/>
+  </trader_item_group>
+  <trader_info id="1" open_time="4:05" close_time="21:50"/>
+  <traderAlways>
+    <item name="casinoCoin" count="1"/>
+  </traderAlways>
+</traders>

@@ -15,6 +15,7 @@ const stock_quest = packages.stock_quest;
 const stock_buff = packages.stock_buff;
 const admin = @import("server/admin.zig");
 const components = @import("ecs/components.zig");
+const toml_bind = @import("util/toml_bind.zig");
 const mode_pack = @import("server/mode.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const serverconfig = @import("server/config.zig");
@@ -621,6 +622,63 @@ fn fuzzTomlConfig(_: void, smith: *std.testing.Smith) !void {
     var f = zdtd_config.parse(std.testing.allocator, input) catch return;
     defer f.deinit();
     if (f.authority.mode) |m| try std.testing.expect(m.len <= input.len);
+}
+
+/// Representative binder surface: nested sections (dotted paths), optional
+/// scalars, aliases, ranges, and a constrained enum-by-name string. This
+/// isolates the comptime reflection in src/util/toml_bind.zig from the two
+/// real config surfaces (also fuzzed above, through the same binder).
+const bind_fuzz_cfg = struct {
+    pub const toml_label = "fuzz";
+    pub const allow_root = true;
+    pub const aliases = .{
+        .root = [_][2][]const u8{.{ "short_label", "name" }},
+        .group = [_][2][]const u8{.{ "n", "count" }},
+    };
+    pub const ranges = .{ .count = .{ 0, 10 } };
+    pub const enum_by_name = .{ .mode_name = FuzzMode };
+
+    const FuzzMode = enum { a, b, c };
+    name: []const u8 = "",
+    mode_name: []const u8 = "",
+    count: u32 = 0,
+    group: struct {
+        count: u32 = 0,
+        ratio: f32 = 0,
+        on: bool = false,
+    } = .{},
+    nested: struct { depth: ?u8 = null } = .{},
+};
+
+const bind_corpus = [_][]const u8{
+    "",
+    "name = \"x\"\ncount = 5\n",
+    "short_label = \"alias\"\n",
+    "mode_name = \"b\"\n",
+    "[group]\nn = 3\nratio = 0.5\non = yes\n",
+    "[nested]\ndepth = 7\n",
+    "count = 99\n",
+    "count = 4294967296\n",
+    "mode_name = \"d\"\n",
+    "[unknown]\ncount = 1\n",
+    "[nested.more]\ndepth = 1\n",
+    "count = 1 # trailing\n[group\n",
+};
+
+test "fuzz toml_bind over a representative struct" {
+    try std.testing.fuzz({}, fuzzTomlBind, .{ .corpus = &bind_corpus });
+}
+
+fn fuzzTomlBind(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [2048]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    var cfg: bind_fuzz_cfg = .{};
+    toml_bind.bind(bind_fuzz_cfg, &cfg, input, std.testing.allocator) catch return;
+    // Parsed strings are arena dupes (or ""); a successful parse may only hold
+    // slices of its own input (via dupes), so no cross-input aliasing.
+    try std.testing.expect(cfg.name.len <= len + 1);
 }
 
 const asset_xml_corpus = [_][]const u8{

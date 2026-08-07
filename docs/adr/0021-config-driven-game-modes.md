@@ -1,6 +1,9 @@
 # 0021. Config-driven game modes
 
-- **Status:** accepted (extends [0010](0010-data-config-zig-plugins.md))
+- **Status:** accepted (extends [0010](0010-data-config-zig-plugins.md)).
+  Implemented 2026-08-07 (WORK_PLAN T11-T15): the reflected binder, the
+  `Rules` struct, the mode-pack overlay, the floor audit, and the four event
+  hooks all ship.
 - **Date:** 2026-08-07
 
 ## Context

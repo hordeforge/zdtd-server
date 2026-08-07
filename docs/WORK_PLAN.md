@@ -393,6 +393,13 @@ timeout.
 
 ## T11. Config: bind TOML by comptime reflection, not by hand
 
+**Status: landed 2026-08-07** (891 tests). `src/util/toml_bind.zig` walks
+`std.meta.fields(T)` (struct field = `[section]`, dotted paths recurse, `?T` =
+unset); both `zdtd_config.parse` and `mode.zig` bind through it and the
+hand-written key chains are deleted. Per-key behaviours are declarative
+(`aliases`, `ranges`, `enum_by_name` on the struct); unknown keys still abort
+with the same error names. Fuzz target over `bind` added.
+
 **Why:** `src/server/zdtd_config.zig` (985 lines) and `src/server/mode.zig` (432)
 are mostly `else if (std.mem.eql(u8, key, "..."))` chains. Every new tunable
 costs a parse arm, a validation arm, a docs row and a test, and every key name
@@ -450,6 +457,12 @@ only, so a reviewer can diff the deleted chains against the field lists.
 
 ## T12. Sim: move rule constants into a `Rules` struct
 
+**Status: landed 2026-08-07** (891 tests). `src/ecs/rules.zig` groups the
+constants (`combat`, `ai`, `bloodmoon`, `progression`, `world`); every read
+goes through `w.rules.<group>.<field>` and the file-scope constants are gone.
+Defaults pinned by a test; combat/blood-moon scenarios unchanged (no
+behavioural diff).
+
 **Why:** the sim's rule parameters are file-scope constants
 (`src/ecs/systems.zig:17-27` and `:1855`, and the blood-moon party constants in
 `src/ecs/aidirector.zig`), so no config surface can reach them. A game mode is
@@ -502,6 +515,14 @@ to config. T13 does the wiring.
 
 ## T13. Modes: make a mode pack a full `Rules` overlay
 
+**Status: landed 2026-08-07** (891 tests). Mode packs bind `[rules.*]` through
+the T11 binder; precedence stays operator-wins (zdtd.toml beats the pack; CLI >
+env > world/CWD zdtd.toml > pack > serverconfig > defaults). Example packs
+`modes/horde_lite.toml` + `modes/survival_crunch.toml` exercise the rules
+surface and double as fixtures; GAME_OPTIONS.md carries the generated
+reference with a coverage test pinning every `Rules` field to it. Scenario
+`mode-rules` shows a pack's attack_damage changing sim melee.
+
 **Why:** `modes/<name>.toml` and `--mode` ship, but a pack understands only 28
 stock serverconfig scalars and cannot touch a sim rule, so a custom game mode is
 still a fork ([ADR 0021](adr/0021-config-driven-game-modes.md) decision 3).
@@ -537,6 +558,12 @@ GAME_OPTIONS.md, so the reference cannot drift from the struct.
 ---
 
 ## T14. Rules: audit the stock-data precedence of every moved value
+
+**Status: landed 2026-08-07** (891 tests). `attack_damage`, `chase_speed` and
+`wander_speed` are classified **floors** (entityclasses/items XML wins when
+non-zero; one test per floor sets a conflicting `Rules` value and asserts the
+class wins); the other moved values are **policy**. HARDCODE_AUDIT A32 records
+the split and the multiplier-after-resolve rule (`zombie_speed_scale` shape).
 
 **Why:** [ADR 0021](adr/0021-config-driven-game-modes.md) decision 5: a `Rules`
 field must stay a floor, never a replacement for stock per-entity data. The
@@ -574,6 +601,14 @@ it as a Bucket A row and leave it a floor.
 ---
 
 ## T15. Plugins: hooks a game mode can actually be written against
+
+**Status: landed 2026-08-07** (891 tests). `on_player_death`,
+`on_entity_killed`, `on_block_damage`, `on_quest_complete` fire at their game
+events under the existing per-call budgets; a trap or OutOfFuel disables only
+that module. Verdict return: <0 deny, 0 keep, >0 percent. Kill verdict routed
+from the sim via `World.kill_verdict_fn`; block damage and the quest payout
+consult the hooks. C fixtures `plugin_rules.c` / `plugin_trap.c` prove the
+deny/adjust/trap-isolate paths (scenario `wasm-t15`).
 
 **Why:** the Wasm host exposes four observe-only hooks (`on_enable`, `on_tick`,
 `on_player_join`, `on_shutdown`). Behaviour that is not a number belongs in a

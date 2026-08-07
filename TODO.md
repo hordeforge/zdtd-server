@@ -105,23 +105,13 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ### Custom game modes (config-driven behaviour)
 
-Sim rules are file-scope constants, so a mode pack can only set 28 stock
-serverconfig scalars and a custom game mode still means a fork. Decision:
-[ADR 0021](docs/adr/0021-config-driven-game-modes.md). Plan:
-[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T11-T15, strictly ordered T11 to T14.
-
-- [ ] T11: bind TOML by comptime reflection; delete the two hand-written key
-      chains (`zdtd_config.zig` 985 lines, `mode.zig` 432). Net deletion, no
-      behaviour change.
-- [ ] T12: move the sim rule constants into `Rules` on `World`, defaults pinned
-      to today's values. No behaviour change.
-- [ ] T13: mode pack becomes a full `Rules` overlay; precedence stays
-      operator-wins; GAME_OPTIONS.md reference generated from the struct.
-- [ ] T14: classify each moved value floor vs policy; prove stock per-entity
-      data still outranks the configured floor (HARDCODE_AUDIT Bucket A rows).
-- [ ] T15: plugin hooks a mode can be written against (`on_player_death`,
-      `on_entity_killed`, `on_block_damage`, `on_quest_complete`) with a
-      deny/adjust return. Independent of T11-T14.
+**SHIPPED 2026-08-07** (ADR 0021, WORK_PLAN T11-T15). The TOML binder
+(`src/util/toml_bind.zig`) replaced the two hand-written key chains; sim rules
+live in `World.rules` (`src/ecs/rules.zig`, defaults pinned); mode packs set
+any `Rules` field via `[rules.*]` plus the stock keys; precedence stays
+operator-wins (`zdtd.toml` beats the pack); floors are classified in
+HARDCODE_AUDIT A32; the Wasm host gained the four event hooks with a
+deny/adjust return. See [docs/STATUS.md](docs/STATUS.md) wave 2026-08-07.
 
 ### Playtest suite (real client)
 
@@ -172,8 +162,8 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 - [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/archive/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
-- [ ] **Storm gameplay effects** (open; storm SM itself SHIPPED — state machine, blood-moon override, `NetPackageWeather`, `weather.zwt` persistence all WORKS): server reads none of the five weather params (no core temp, no wet/cold buffs, no stamina/food/water modifiers) and `weathersurvival.xml` is not loaded; `StormFrequency` is a compile-time GameStats default with no serverconfig/zdtd.toml knob. GAP rows: Weather gameplay effects (MISSING, §5.9), StormFrequency configurability (PARTIAL), Health regen/core temp (MISSING, §5.6.1).
-- [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted — blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Residual: rent/password/owner edit SM, C2S buy/sell onto the entity-less TE form, and disk persistence (see GAP vending row).
+- [x] **Storm gameplay effects (gates)** SHIPPED 2026-08-07: storm SM + `[sim] storm_frequency` (feeds the weather scheduler AND the GameStats wire), and the operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the server's sandbox gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults. Per RE (weather-environment.md §4) the stock *dedicated* server stubs felt-temperature helpers and does NOT compute wet/cold buffs — the local client computes felt temperature from the shipped per-biome params + weathersurvival.xml MinEvents — so server-side buff application would double-apply and is intentionally NOT implemented. **GSI advertising SHIPPED 2026-08-07**: the TCP GameServerInfo text (and the PlayerLoginAnswer copy) now carries `SandboxPreset`/`SandboxCode` (GameInfoString 18/19) when the operator set them; unset keys are omitted (empty = client default, same as GameStats).
+- [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted — blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Disk persistence ships (ZVNM). **Rent SM ships 2026-08-07** (server-authoritative rent/clear/extend/expire via `NetPackagePlayerVendingMachine`; scenario `vending-rent`). **Real-client trade CopyFrom ships 2026-08-07**: the stock NetPackageTraderData ToServer body is parsed and mirrored onto trader/vending stock (scenario `traderdata-copyfrom`). **Owner lock/password/allowed editing ships 2026-08-07** (vending TE composite C2S, owner-gated; scenario `vending-edit`). The vending row is closed.
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
 - [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)
@@ -181,7 +171,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] EAI ApproachSpot task (`has_spot` / spot_x,z; below chase, above wander)
 - [x] EAI DestroyArea + Territorial (home leash 32 m; destroy_area reuses break_block chew)
 - [x] EAI Look task + `Reset()` hook + `Continue()`/`CanExecute()` split (wander→look→wander cycle, `Entity::SeekYaw` body yaw)
-- [ ] EAI residual: Dodge (client animator only, and unreferenced by stock XML), Leap (jump physics + BodyDamage limbs + raycast), RangedAttack (item actions + projectiles), RunAway* (attacker attribution + per-class task lists), ApproachDistraction (dropped EntityItem with ItemClass flags); see MISSING §5.2.1
+- [ ] EAI residual: Dodge (client animator only, and unreferenced by stock XML), Leap (jump physics + BodyDamage limbs + raycast), RangedAttack (item actions + projectiles); see MISSING §5.2.1. **RunAway\* SHIPPED 2026-08-07** (AITask-1 hurt + AITask-2 proximity flee) and **ApproachDistraction SHIPPED 2026-08-07** (dropped-item distraction: `DistractionTags`/`DistractionRadius`/`Lifetime`/`Strength`/`EatTicks` from items.xml — stock ships decoy `zombie,requires_contact` — the 20-tick tickDistraction broadcast latches nearby zombies, the task walks over and chews eat items; see GAP §5.2.1).
 - [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
 - [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
 - [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
@@ -205,7 +195,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Phase / ownership / bounds reject counters (`phase_rejects`, `ownership_rejects`, `bounds_rejects` in apm + webui)
 - [x] Per-package phase matrix (`src/server/phase_gate.zig`; connecting|joined|playing; aggregate `phase_rejects`)
 - [x] Movement envelope first cut (`src/server/movement.zig`; soft 20 m/s clamp + `movement_rejects`; observe counts only)
-- [x] Inv cause ledger first cut (`ecs/inv_ledger.zig` ring + apm `inv_ledger_events`); evidence JSONL still open
+- [x] Inv cause ledger first cut (`ecs/inv_ledger.zig` ring + apm `inv_ledger_events`); **evidence JSONL flush ships 2026-08-07** (admin `evidence dump [path]`, `Game.dumpEvidenceFile`)
 - [x] Guard policy P4 (`src/server/guard_policy.zig`): weak signals, load shed, quarantine bits, dry-run kick
 
 ### Parked / rejected (not near-term research-clone work)
@@ -472,6 +462,13 @@ All items below shipped. Kept as historical checklist.
 ## P2 (ops / multiplayer polish)
 
 - [x] Party / ally echo (first cut) - full PlatformUserIdentifierAbs deferred
+- [x] **Ally persistence (P3)** SHIPPED 2026-08-07: `NetPackageAllyRequest` now
+  drives a real `AllyStore` table (`src/server/ally.zig`, ComputeTransition
+  per asm.il 885142), and relationships persist to `{world_dir}/allies.zal`
+  (magic ZAL1, zdtd-owned like claims.zlc) on the periodic + shutdown saves and
+  restore at init. Open: party membership (`NetPackagePartyActions`/`PartyData`
+  are entity-id keyed with no PUID, so it needs real `Party` state, not
+  identity — see docs/GAP_ANALYSIS.md §AUTHGATE).
 - [x] Kick/ban/list on admin TCP (first cut); ServerPassword = LiteNet connect key
 - [x] Admin TCP: kick/ban/unban/list/give/tele/say/save (not full telnet parity)
 - [x] LiteNet: reliable+frag HAVE; unreliable sendUnreliable; sequenced still MISSING

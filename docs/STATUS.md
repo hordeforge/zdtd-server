@@ -1,8 +1,8 @@
 # Status: stock-client join and play path
 
-**Date pin:** 2026-08-06  
+**Date pin:** 2026-08-07  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **845** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **917** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -141,6 +141,156 @@ gate **23/23** · playtest full suite green on a fresh world.
 (POI placement, restock; the NPC replicates with TraderData on both S2C paths,
 per-trader stock/hours ship, and quest rewards/actions pay out, WORK_PLAN T1),
 and player persistence depth.
+
+## Wave 2026-08-07 (config-driven game modes, ADR 0021)
+
+The full WORK_PLAN T11-T15 chain landed (ADR 0021 "config-driven game modes"),
+plus three priority gaps from GAP_ANALYSIS / TODO. 917 unit tests.
+
+- **T11 TOML binder** (`src/util/toml_bind.zig`): `zdtd.toml` and the mode
+  packs now parse through one comptime-reflected binder — struct fields are
+  `[section]`s (dotted `[rules.combat]` recurses), the field type drives value
+  parsing, `?T` means unset, and unknown keys/sections abort startup. The
+  per-key chains in `zdtd_config.zig` and `mode.zig` are deleted (net
+  deletion), with aliases/ranges/enum-by-name declared on the struct. Fuzz
+  target over `bind` added; the two existing config fuzz targets now exercise
+  the binder through the real surfaces.
+- **T12 `Rules` struct** (`src/ecs/rules.zig`): the sim rule constants moved
+  out of file scope into `World.rules.<group>.<field>` — `combat`
+  (attack_damage/range/cooldown), `ai` (LOD/sense/despawn ranges, chase/wander
+  speed), `bloodmoon` (party distances, enemy cap, party count). Defaults pin
+  the pre-move literals (a pin test fails loudly on drift); no behavioural
+  change.
+- **T13 mode packs are a full overlay**: `modes/<name>.toml` may set any
+  `Rules` field via `[rules.*]` sections plus the stock keys it already
+  accepted. Precedence stays operator-wins: `zdtd.toml` beats the pack for the
+  same key. Example packs `modes/horde_lite.toml` and
+  `modes/survival_crunch.toml` exercise the rules surface; GAME_OPTIONS.md
+  carries the generated reference, and a coverage test pins every `Rules`
+  field to the doc. Scenario `mode-rules` proves a pack's attack_damage lands
+  in the sim (melee 100->16 with the 42 floor).
+- **T14 precedence audit**: `attack_damage`, `chase_speed`, `wander_speed`
+  are classified **floors** (entityclasses/items XML wins when non-zero; tests
+  set a conflicting `Rules` value and assert the class value wins), everything
+  else moved is **policy**. HARDCODE_AUDIT A32 documents the split.
+- **T15 plugin event hooks**: `on_player_death`, `on_entity_killed`,
+  `on_block_damage`, `on_quest_complete` with a deny/adjust return (<0 deny,
+  0 keep, >0 percent). The kill verdict is routed from the sim via
+  `World.kill_verdict_fn`; block damage and quest payout consult the hooks in
+  game.zig. Static vtable grew the same four hooks. C fixtures
+  `plugin_rules.c` / `plugin_trap.c` prove deny/double/trap-isolate end to end
+  (scenario `wasm-t15`: death denied at 1 hp, block damage doubled, quest exp
+  doubled, the trapping module disabled while the server keeps ticking).
+  PLUGIN_DEV/PLUGIN_API/STATE_MACHINES updated.
+- **GAP 19 ServerVersion**: the GSI `ServerVersion` is now the stock
+  four-field `V.3.10.14` (`version.stock_wire_gsi_version`); the login
+  package keeps the display form `V 3.1.0`. The client's
+  `TryParseSerializedString` no longer sees a malformed string.
+- **GAP 13 block rotation**: the SetBlock path writes the client's full
+  `BlockValue.rawData` (rotation/meta upper bits) into the chunk plane via the
+  new `setBlockRawWorld`, so player-placed doors/wedges and switch meta render
+  rotated for a second client and survive relog (ZCH3 persists the u32 plane).
+  Store test covers the plane + save/reload round trip.
+- **StormFrequency knob**: `[sim] storm_frequency` (percent, default 100; 0
+  disables storms) feeds both the weather scheduler divisor and the GameStats
+  wire value, so client and server agree. No V3.1.0 serverconfig key exists
+  (world state); documented in GAME_OPTIONS and zdtd.toml.example.
+- **Storm survival gates (SandboxCode)**: the operator's `SandboxCode` /
+  `SandboxPreset` parse from serverconfig and ride the GameStats blob
+  (EnumGameStats 71/70), so a joining client decodes the server's sandbox
+  gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its
+  own defaults (RE sandbox-options §8). Wet/cold buffs stay client-computed by
+  design: the stock dedicated server stubs felt temperature (weather-env §4),
+  so server-side buffs would double-apply. GAP rows updated.
+- **GSI sandbox advertising (GameInfoString 18/19)**: the TCP GameServerInfo
+  text (and the PlayerLoginAnswer copy) carries `SandboxPreset`/`SandboxCode`
+  when the operator set them, so the server browser can show what the server
+  actually runs (RE network.md: SandboxPreset = 0x12, SandboxCode = 0x13).
+  Unset keys are omitted — empty = client default, the same semantics as the
+  GameStats(71) blob. `gsiSafe` sanitizes the values like every other GSI
+  field. Three unit tests (keys emitted, unset omitted, injection sanitized).
+- **Vending rent SM**: `NetPackagePlayerVendingMachine` (userId stream +
+  Vector3i + removing, asm.il 833593) is handled server-authoritatively:
+  identity-gated, rent pays `TraderInfo.RentCost` casinoCoin (inventory first,
+  trade's rule), the term is `rent_time` in-game days, one machine per player,
+  re-rent extends, expired rentals return to Unowned on the day roll, and
+  `removing` clears ownership while the block identity and stock survive
+  (`Vending.clear` no longer wipes pos). Scenario `vending-rent` covers the
+  whole SM. Residual: password/allowed-users editing and the stock
+  NetPackageTraderData ToServer buy body (GAP vending row).
+- **Real-client trade CopyFrom**: the stock `NetPackageTraderData` ToServer
+  body (isEntity | entityId/tePosition | hasTraderData | TraderData::Write,
+  asm.il 843046) is now parsed and mirrored (stock TraderData.CopyFrom) onto
+  the entity trader's sim stock and the vending store — count/markup/money
+  from the client's post-trade copy, price/sell stay server-owned. The
+  loadgen 9-byte trade body still works (length-distinguishable). Scenario
+  `traderdata-copyfrom` covers both branches. This is the real-client buy
+  path for both traders and vending machines.
+- **Vending owner editing**: the vending TE composite C2S (mirror of
+  TileEntityVendingMachine::write, payload version 3) is parsed and applied
+  owner-gated — only the machine's owner may change lock/password/allowed
+  users; ownership and the rental term stay server-applied (the rent SM owns
+  them); the reach check matches the other TE paths. Scenario `vending-edit`
+  covers owner apply + non-owner denial. The vending gap row is closed.
+- **P4 evidence JSONL flush**: admin `evidence dump [path]` writes the
+  authority-reject ring as JSONL to a file (default `<world>/evidence.jsonl`)
+  via `Game.dumpEvidenceFile`; fails loudly on I/O error. Test covers the
+  file round-trip. The P4 "evidence JSONL" TODO item is closed.
+- **EAIRunawayFromEntity**: the `.runaway` task now covers both AITask-1
+  (hurt) and AITask-2 (proximity) flee for passive animals: a 0.5 s fear scan
+  over players/zombies/other animals within `fleeDistance` 20 sets
+  `fear_target` (stock AITask-2 class filter maps to Kind), the gate accepts a
+  fresh fear source, and the update flees the nearest feared entity. Two unit
+  tests (flee within range, no flee beyond). GAP_ANALYSIS §5.2.1 updated;
+  three EAI tasks remain blocked on their subsystems.
+- **EAIApproachDistraction (decoy bait)**: dropped items carrying
+  `DistractionTags` now attract zombies. items.xml parses the tags
+  (`zombie`/`requires_contact`/`eat`; stock ships `resourceRockDecoy` with
+  `zombie,requires_contact`) plus the `DistractionRadius`/`Lifetime`/
+  `Strength`/`EatTicks` passive effects; the drop spawn seeds the sim loot-bag
+  state, and a 20-tick `tickDistraction` broadcast (EntityItem.tickDistraction,
+  asm.il EntityItem:1341) latches the nearest zombie within 25 m
+  (`pendingDistraction`, closer wins, sleeping excluded, kind-gated on the
+  `zombie` tag). The `.approach_distraction` task (MutexBits 3, priority 4 in
+  the stock list) walks over and chews eat items (`distractionEatTicks--`);
+  a non-eat decoy reached clears the latch and the zombie loses interest; a
+  chewed-up item is removed with EntityRemove(Despawned). Simplifications
+  documented in GAP_ANALYSIS §5.2.1 (no per-drop collision physics, no
+  per-entity resistance). Four unit tests + the items.xml parse test; the
+  stock-data decoy row is now live in V3.1.0 games.
+- **Ally persistence**: `NetPackageAllyRequest` drives a real `AllyStore`
+  table (`src/server/ally.zig`; ComputeTransition per asm.il 885142, both
+  directions mirrored), and relationships persist to `{world_dir}/allies.zal`
+  (magic ZAL1, zdtd-owned like claims.zlc) on the periodic + shutdown saves and
+  restore at init; a missing file is a fresh server, a corrupt one fails the
+  load loudly instead of silently clobbering. Unit test round-trips the file
+  and the corrupt path. Party membership stays open (entity-id keyed, needs
+  real `Party` state, not identity).
+- **GAP 12 fixed-size caps**: land claims 256→1024, containers 256→512
+  (heap encode buffer — the old stack buffer truncated saves), workstations
+  64→256, damaged blocks 64→256, bans 32→128, join-rate IPs 16→64. The join
+  PlayerId journal was capped at 2 quests (sim holds 8); all quests now ride
+  the PDF (scenario `journal-pdf` proves 5). Overflow tests: 300 claims /
+  300 containers round-trip, 100 workstations, 100 damaged blocks. Residuals
+  documented in GAP_ANALYSIS 12 (hp/raw sparse caches; persistent hp is the
+  proper fix).
+- **GAP 18 subbiome deco lists**: `decoSpeciesAt` resolves each cell through a
+  port of stock `GetBiomeOrSubAt` (`src/world/subbiome_noise.zig`: .NET
+  GameRandom, PerlinNoise Noise/FBM/Lattice, GetStableHashCode world-name
+  seed) and samples that subbiome's own `<decorations>` set, parsed per
+  `<subbiome>` in biome_layers. pine_forest's 8 subbiomes carry the real tree
+  mass (.06-.08 vs .001-.007 top level), so a join window gets stock-like
+  density instead of ~3 objects. Verified against stock biomes.xml + AssignIds
+  dump. Residual: the stock `_perm` literal is not byte-reproduced (classic
+  Ken Perlin table used); banding is stock-shaped, boundaries may drift
+  (HARDCODE_AUDIT A33, extraction owned by 7dtd-research).
+
+**Gates at this pin:** `make check` exit 0 · 917 unit tests · live stock-client
+gate 23/23 · playtest full suite green on a fresh world.
+
+**Known open:** see [WORK_PLAN.md](WORK_PLAN.md) (all T1-T15 tasks landed) and
+GAP_ANALYSIS "What to build next" (fixed-size caps, subbiome deco lists, storm
+survival effects, EAI residual tasks, worldgen W2b-W7).
 
 **Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
 whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs
@@ -337,7 +487,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
-| P3 | Party membership + ally persistence | PUID flows login → PersistentPlayerState → AllyStore; party packages carry no PUID (entity-id keyed) so party needs Party state, not identity |
+| P3 | Party membership + ally persistence | Ally persistence SHIPPED (allies.zal round-trip); PUID flows login → PersistentPlayerState → AllyStore; party packages carry no PUID (entity-id keyed) so party still needs Party state, not identity |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |

@@ -2865,6 +2865,517 @@ test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel
     );
 }
 
+test "scenario mode pack rules overlay changes sim behaviour" {
+    // T13 proof (WORK_PLAN / ADR 0021): a mode pack's [rules.*] sections flow
+    // through the real merge into World.rules, and the sim obeys the rule: the
+    // combat damage floor (class_table zero) is the pack's attack_damage, so a
+    // zombie in melee deals pack damage, not the default floor.
+    const mode_mod = @import("mode.zig");
+    const rules_mod = @import("../ecs/rules.zig");
+
+    var pack = try mode_mod.parse(std.testing.allocator,
+        \\name = "scenario_hard"
+        \\[rules.combat]
+        \\attack_damage = 42.0
+        \\[rules.ai]
+        \\sense_dist_sq = 36.0
+    );
+    defer pack.deinit();
+    var rules: rules_mod.Rules = .{};
+    rules_mod.mergeOverlay(&rules, &pack.rules);
+    try std.testing.expectEqual(@as(f32, 42.0), rules.combat.attack_damage);
+    try std.testing.expectEqual(@as(f32, 36.0), rules.ai.sense_dist_sq);
+
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_rules");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_rules", 0, .{ .rules = rules });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // The rule landed on the sim World.
+    try std.testing.expectEqual(@as(f32, 42.0), g.sim.rules.combat.attack_damage);
+
+    // Melee: class_table[1] is the offline floor path (attack_damage 0), so the
+    // pack's 42 is what the zombie deals. A zombie at (0,70,0), player at
+    // (1.2,70,0) reaches attack range and bites twice in 2 s.
+    const z = g.sim.spawnZombie(0, 70, 0, 40).?;
+    _ = g.sim.spawnPlayer(1.2, 70, 0, 0);
+    const zs = g.sim.slotOfNetId(z).?;
+    const ps = g.sim.playerByPeer(0).?;
+    const hp0 = g.sim.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systems.systemZombieAi(&g.sim, 0.05);
+    // Default floor is 8 (2 bites ~16); the pack floor 42 lands ~84.
+    try std.testing.expect(g.sim.health[ps].hp <= hp0 - 40);
+    const comps = @import("../ecs/components.zig");
+    try std.testing.expectEqual(comps.AiState.attack, g.sim.zombie_ai[zs].state);
+
+    std.debug.print(
+        "PASS mode-rules: pack attack_damage=42 melee hp {d}->{d}\n",
+        .{ hp0, g.sim.health[ps].hp },
+    );
+}
+
+test "scenario wasm T15 hooks: deny death, double block damage and quest reward, trap isolates" {
+    // T15 proof (WORK_PLAN): a .wasm module implements a visible mode rule end
+    // to end through the event hooks. plugin_rules denies every player death
+    // (victim survives at 1 hp), doubles block damage and doubles quest exp;
+    // plugin_trap traps in on_entity_killed and is disabled without stopping
+    // the kill or the server.
+    // Fresh world per run: block_hp persists in the world store, and the
+    // on_block_damage assert is absolute (WORK_PLAN W3).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{
+        "assets/fixtures/plugin_rules.wasm",
+        "assets/fixtures/plugin_trap.wasm",
+    };
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.count());
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+    const peer: usize = c.slot;
+
+    // --- on_player_death denies: a lethal hit leaves the player at 1 hp ---
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const hp0 = g.sim.health[ps].hp;
+    const res = g.sim.damage(c.entity_id, 99999);
+    try std.testing.expect(!res.killed);
+    try std.testing.expectEqual(@as(f32, 1), g.sim.health[ps].hp);
+    try std.testing.expect(hp0 > 1);
+
+    // --- on_block_damage doubles: 100 proposed -> 200 applied ---
+    const applied = g.addBlockDamage(10, 70, 10, 100);
+    try std.testing.expectEqual(@as(u16, 200), applied);
+
+    // --- on_quest_complete doubles: tier1_clear pays 1000 exp -> 2000 ---
+    const clear = g.sim.catalog.byName("tier1_clear").?;
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear.id));
+    systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.ty, clear.tz);
+    var k: u16 = 0;
+    while (k < clear.target_count) : (k += 1) systems.questOnZombieKilled(&g.sim, c.slot);
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, clear.id));
+    const xp_before = g.clients[peer].xp;
+    try g.step(); // tick-end payout runs the questComplete verdict
+    const xp_gain = g.clients[peer].xp - xp_before;
+    // 1000 exp x 200% = 2000 (xp_multiplier default 100 keeps it 1.0x).
+    try std.testing.expect(xp_gain >= 2000);
+
+    // --- on_entity_killed trap: the trap module is disabled, the kill still
+    // lands (verdict keep), and the server keeps stepping ---
+    const z = g.sim.spawnZombie(40, 70, 0, 40).?;
+    const killed = g.sim.damage(z, 99999);
+    try std.testing.expect(killed.killed);
+    try std.testing.expect(g.sim.slotOfNetId(z) == null or g.sim.health[g.sim.slotOfNetId(z).?].hp == 0);
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.disabledCount());
+    try std.testing.expect(g.wasm_plugins.slots[1].disabled);
+    try std.testing.expect(!g.wasm_plugins.slots[0].disabled);
+    try g.step();
+    try std.testing.expect(g.tick_n >= 2);
+
+    std.debug.print(
+        "PASS wasm-t15: deny death hp=1, block dmg 100->{d}, quest exp +{d}, trap disabled=1\n",
+        .{ applied, xp_gain },
+    );
+}
+
+test "scenario journal PDF carries max_journal quests (GAP 12)" {
+    // The join PlayerId journal was capped at 2 StockQuestWrite entries while
+    // the sim journal holds 8: a third active quest silently vanished from the
+    // client. Fill the sim journal past the old cap and assert every accepted
+    // quest (all client-known fixture defs) reaches the PDF snapshot.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap); // auto-accepts the starter
+    try std.testing.expect(c.entity_id > 0);
+
+    const accepted = [_][]const u8{ "tier1_clear", "tier1_fetch", "quest_activate_block", "clear_the_noise" };
+    var got: usize = 1; // starter
+    for (accepted) |nm| {
+        const d = g.sim.catalog.byName(nm) orelse continue;
+        if (systems.questAccept(&g.sim, c.slot, d.id)) got += 1;
+    }
+    try std.testing.expect(got >= 3); // at least two beyond the starter
+
+    var qbuf: [@import("../ecs/components.zig").max_journal]packages.stock_quest.StockQuestWrite = undefined;
+    var reward_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_reward_flags]packages.stock_quest.RewardWire = undefined;
+    var obj_val_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_phases]u8 = undefined;
+    var kind_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
+    // game.zig max_quest_position_data = 3; keep the two in lockstep.
+    var pos_store: [@import("../ecs/components.zig").max_journal][3]packages.stock_quest.PositionEntry = undefined;
+    const qn = g.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
+    try std.testing.expectEqual(got, qn);
+    try std.testing.expect(qn > 2); // the old hardcoded cap
+    try std.testing.expect(qn <= @import("../ecs/components.zig").max_journal);
+
+    std.debug.print("PASS journal-pdf: {d} quests reach the join PDF (cap was 2)\n", .{qn});
+}
+
+test "scenario vending rent state machine (loot-economy §6)" {
+    // NetPackagePlayerVendingMachine (rent / clear) handled server-
+    // authoritatively: only the sender's own identity may act, the rent costs
+    // TraderInfo.RentCost currency, the term is rent_time in-game days, one
+    // machine per player, and an expired rental returns to unowned.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const puid: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClientAs(&cap, puid);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // The wallet starts at 0; rent syncs it from the starter casinoCoin stack
+    // (50 coins) before checking the price.
+    try std.testing.expectEqual(@as(u32, 0), g.sim.wallet[ps].coins);
+
+    // A rentable machine (stock trader_info 5: rentable, rent_cost 2500).
+    const vm = g.vending.getOrCreate(.{ .x = 10, .y = 70, .z = 20 }, 1, 5).?;
+    const info = g.traders.traderInfo(5).?;
+    try std.testing.expect(info.rentable);
+    try std.testing.expectEqual(@as(i32, 2500), info.rent_cost);
+
+    const sendAccess = struct {
+        fn call(gg: *game_mod.Game, cc: anytype, x: i32, z: i32, removing: bool) !void {
+            var body: [128]u8 = undefined;
+            var w: binary.Writer = .{ .buf = &body };
+            try platform_user.write(&w, puid);
+            try w.writeI32(x);
+            try w.writeI32(70);
+            try w.writeI32(z);
+            try w.writeBool(removing);
+            var frame_buf: [256]u8 = undefined;
+            const framed = try packages.framed(&frame_buf, "NetPackagePlayerVendingMachine", w.written());
+            try gg.injectFramed(cc, framed);
+        }
+    }.call;
+
+    // Wallet short: starter 1000 < 2500 -> denied, machine stays unowned.
+    try sendAccess(g, c, 10, 20, false);
+    try std.testing.expectEqual(@as(u32, 0), vm.owner.id_len);
+    try std.testing.expectEqual(@as(i32, 0), vm.rental_end_day);
+
+    // Fund the wallet, rent succeeds: owner set, term = rent_time days, coins
+    // deducted (spend inventory first, then the wallet balance).
+    g.sim.wallet[ps].coins = 10000;
+    try sendAccess(g, c, 10, 20, false);
+    try std.testing.expectEqualStrings("9001", vm.owner.id[0..vm.owner.id_len]);
+    try std.testing.expectEqual(@as(i32, @intCast(g.sim.director.clock.day)) + info.rent_time, vm.rental_end_day);
+    try std.testing.expect(g.sim.wallet[ps].coins < 10000);
+
+    // Second machine: one per player (CanRent 2) blocks.
+    const vm2 = g.vending.getOrCreate(.{ .x = 30, .y = 70, .z = 40 }, 1, 5).?;
+    try sendAccess(g, c, 30, 40, false);
+    try std.testing.expectEqual(@as(u32, 0), vm2.owner.id_len);
+
+    // Re-rent extends the term by rent_time days.
+    const before = vm.rental_end_day;
+    g.sim.wallet[ps].coins = 10000;
+    try sendAccess(g, c, 10, 20, false);
+    try std.testing.expectEqual(before + info.rent_time, vm.rental_end_day);
+
+    // Another identity cannot clear or re-rent the machine.
+    const other: platform_user.Id = .{ .platform = "Steam", .id = "9002" };
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClientAs(&cap2, other);
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.wallet[ps2].coins = 10000;
+    const sendOther = struct {
+        fn call(gg: *game_mod.Game, cc: anytype, removing: bool) !void {
+            var body: [128]u8 = undefined;
+            var w: binary.Writer = .{ .buf = &body };
+            try platform_user.write(&w, other);
+            try w.writeI32(10);
+            try w.writeI32(70);
+            try w.writeI32(20);
+            try w.writeBool(removing);
+            var frame_buf: [256]u8 = undefined;
+            const framed = try packages.framed(&frame_buf, "NetPackagePlayerVendingMachine", w.written());
+            try gg.injectFramed(cc, framed);
+        }
+    }.call;
+    try sendOther(g, c2, false);
+    try std.testing.expectEqualStrings("9001", vm.owner.id[0..vm.owner.id_len]);
+    try sendOther(g, c2, true);
+    try std.testing.expectEqualStrings("9001", vm.owner.id[0..vm.owner.id_len]);
+
+    // Owner clears: machine returns to unowned.
+    try sendAccess(g, c, 10, 20, true);
+    try std.testing.expectEqual(@as(u32, 0), vm.owner.id_len);
+    try std.testing.expectEqual(@as(i32, 0), vm.rental_end_day);
+
+    // Expiry: a rented machine past rental_end_day returns to unowned on the
+    // day roll.
+    try sendAccess(g, c, 10, 20, false);
+    try std.testing.expect(vm.rental_end_day > 0);
+    g.sim.director.clock.day = @intCast(vm.rental_end_day + 1);
+    g.claims_last_day = 0;
+    try g.step();
+    try std.testing.expectEqual(@as(i32, 0), vm.rental_end_day);
+
+    std.debug.print(
+        "PASS vending-rent: rent cost={d} term={d} owner set/extend/clear/expire one-per-player ok\n",
+        .{ info.rent_cost, info.rent_time },
+    );
+}
+
+test "scenario stock NetPackageTraderData ToServer CopyFrom (real-client trade)" {
+    // A real client sends its post-trade TraderData back over
+    // NetPackageTraderData (isEntity | entityId/tePosition | hasTraderData |
+    // TraderData::Write). The stock server mirrors it (CopyFrom) onto the
+    // entity trader or vending TE; the wire carries no price, so price/sell
+    // stay server-owned. This is the real-client buy path (loot-economy §5).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const wood_wire = g.items.byStockName("resourceWood") orelse return error.SkipZigTest;
+    const wood_ecs = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood_ecs != 0);
+
+    // --- Entity trader CopyFrom ---
+    const tid = g.sim.spawnTrader("npcTraderJen", 50, 70, 60, 5, 5000).?;
+    const ts = g.sim.slotOfNetId(tid).?;
+    try std.testing.expect(g.sim.mask[ts].trader_stock);
+    g.sim.trader_stock[ts].entries[0] = .{ .item = wood_ecs, .count = 10, .price = 1, .sell = 1, .markup = 0 };
+    g.sim.trader_stock[ts].n = 1;
+    g.sim.trader_stock[ts].wallet = 5000;
+
+    var body: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeBool(true); // isEntity
+    try w.writeI32(tid);
+    try w.writeBool(true); // hasTraderData
+    const entry = packages.stock_entity.TraderStockEntry{
+        .item = .{ .type_id = wood_wire, .count = 3 },
+        .markup = -4,
+    };
+    try packages.stock_entity.writeTraderDataBody(&w, .{ .trader_id = 5, .available_money = 4000, .entries = &[_]packages.stock_entity.TraderStockEntry{entry} });
+    var frame_buf: [640]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageTraderData", w.written());
+    try g.injectFramed(c, framed);
+
+    // CopyFrom applied: count/markup/money from the client copy; price/sell
+    // survive as server-owned.
+    const st = &g.sim.trader_stock[ts];
+    try std.testing.expectEqual(@as(u16, 3), st.entries[0].count);
+    try std.testing.expectEqual(@as(i8, -4), st.entries[0].markup);
+    try std.testing.expectEqual(@as(u16, 1), st.entries[0].price);
+    try std.testing.expectEqual(@as(i32, 4000), st.wallet);
+
+    // --- Vending machine CopyFrom (isEntity=false, tePosition) ---
+    const vm = g.vending.getOrCreate(.{ .x = 10, .y = 70, .z = 20 }, 1, 5).?;
+    var vbody: [512]u8 = undefined;
+    var vw: binary.Writer = .{ .buf = &vbody };
+    try vw.writeBool(false); // isEntity = false -> tePosition
+    try vw.writeI32(10);
+    try vw.writeI32(70);
+    try vw.writeI32(20);
+    try vw.writeBool(true); // hasTraderData
+    try packages.stock_entity.writeTraderDataBody(&vw, .{ .trader_id = 5, .available_money = 3000, .entries = &[_]packages.stock_entity.TraderStockEntry{entry} });
+    const vframed = try packages.framed(&frame_buf, "NetPackageTraderData", vw.written());
+    try g.injectFramed(c, vframed);
+    try std.testing.expectEqual(@as(i32, wood_wire), vm.stock[0].type_id);
+    try std.testing.expectEqual(@as(i32, 3), vm.stock[0].count);
+    try std.testing.expectEqual(@as(i8, -4), vm.stock[0].markup);
+    try std.testing.expectEqual(@as(i32, 3000), vm.available_money);
+
+    std.debug.print("PASS traderdata-copyfrom: entity+vending CopyFrom count/markup/money ok\n", .{});
+}
+
+test "scenario vending lock/password/allowed editing (owner-gated)" {
+    // The owner's lock / password / allowed-user edits arrive as the vending
+    // TE composite C2S (the mirror of TileEntityVendingMachine::write). The
+    // server applies them only for the machine's owner; ownership and the
+    // rental term stay server-owned (the rent SM applies them).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const puid: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClientAs(&cap, puid);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.wallet[ps].coins = 10000;
+
+    // Rent the machine (server-authoritative rent SM).
+    const vm = g.vending.getOrCreate(.{ .x = 256, .y = 70, .z = 258 }, 1, 5).?;
+    var rent_body: [128]u8 = undefined;
+    var rw: binary.Writer = .{ .buf = &rent_body };
+    try platform_user.write(&rw, puid);
+    try rw.writeI32(256);
+    try rw.writeI32(70);
+    try rw.writeI32(258);
+    try rw.writeBool(false);
+    var frame_buf: [1024]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackagePlayerVendingMachine", rw.written()));
+    try std.testing.expect(vm.rental_end_day > 0);
+
+    // Owner edits: lock on, password "1234", one allowed user.
+    const buddy: platform_user.Id = .{ .platform = "Steam", .id = "9002" };
+    var te_body: [2048]u8 = undefined;
+    const te = try packages.stock_te.buildVendingTeBody(&te_body, 255, 256, 70, 258, .{
+        .block_id = 1,
+        .is_locked = true,
+        .owner = puid,
+        .password_hash = "1234",
+        .allowed = &[_]platform_user.Id{buddy},
+        .rental_end_day = vm.rental_end_day,
+        .trader_id = 5,
+        .entries = &.{},
+        .available_money = 0,
+        .rentable = true,
+    });
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageTileEntity", te));
+    try std.testing.expect(vm.is_locked);
+    try std.testing.expectEqual(@as(u8, 4), vm.password_len);
+    try std.testing.expectEqualStrings("1234", vm.password_hash[0..vm.password_len]);
+    try std.testing.expectEqual(@as(u8, 1), vm.allowed_n);
+    try std.testing.expectEqualStrings("9002", vm.allowed[0].id[0..vm.allowed[0].id_len]);
+    // The rental term is NOT client-editable: it stays server-owned.
+    try std.testing.expect(vm.rental_end_day > 0);
+
+    // A non-owner cannot edit.
+    const stranger: platform_user.Id = .{ .platform = "Steam", .id = "9003" };
+    var cap3: ln_peer.Capture = .{};
+    const c3 = try g.attachJoinedClientAs(&cap3, stranger);
+    var te2: [2048]u8 = undefined;
+    const te2b = try packages.stock_te.buildVendingTeBody(&te2, 255, 256, 70, 258, .{
+        .block_id = 1,
+        .is_locked = false,
+        .password_hash = "",
+        .rental_end_day = vm.rental_end_day,
+        .trader_id = 5,
+        .entries = &.{},
+        .available_money = 0,
+        .rentable = true,
+    });
+    try g.injectFramed(c3, try packages.framed(&frame_buf, "NetPackageTileEntity", te2b));
+    try std.testing.expect(vm.is_locked); // unchanged
+    try std.testing.expectEqualStrings("1234", vm.password_hash[0..vm.password_len]);
+
+    std.debug.print("PASS vending-edit: owner lock/password/allowed applied, non-owner denied\n", .{});
+}
+
+test "scenario storm_frequency knob reaches weather and the GameStats wire" {
+    // TODO open item: StormFrequency was a compile-time GameStats default with
+    // no knob. [sim] storm_frequency now feeds the weather scheduler divisor
+    // and the GameStats wire value the client is told, so the two agree.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    // config_dir so the biome-layers table loads and the weather manager
+    // initializes from the configured frequency (headless builtin skips it).
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .storm_frequency = 200,
+        .config_dir = "assets/fixtures",
+        .sandbox_code = "AAAJABJACJADJARFBNC",
+        .sandbox_preset = "Adventurer",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(i32, 200), g.storm_frequency);
+    // Weather scheduler divisor: 200% -> 2.0x (storms less often).
+    try std.testing.expectEqual(@as(f32, 2.0), g.world.weather.storm_frequency);
+    // The wire blob carries the same value the scheduler used.
+    try std.testing.expectEqual(@as(i32, 200), g.gameStatsValues().storm_freq);
+    // The operator's sandbox code (weather-survival / blood-moon gates) rides
+    // the GameStats blob so the client decodes the server's gates (RE
+    // sandbox-options §8). The stock default code is what the shipped
+    // serverconfig carries.
+    try std.testing.expectEqualStrings("AAAJABJACJADJARFBNC", g.gameStatsValues().sandbox_code);
+    var gs_buf: [1024]u8 = undefined;
+    const gs = try packages.buildGameStatsBodyValues(&gs_buf, g.gameStatsValues());
+    try std.testing.expect(std.mem.indexOf(u8, gs, "AAAJABJACJADJARFBNC") != null);
+
+    // 0 disables storms (weather-env.md: World.StormFrequency == 0).
+    const g2 = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .storm_frequency = 0, .config_dir = "assets/fixtures" });
+    defer {
+        g2.deinit();
+        gpa.destroy(g2);
+    }
+    try std.testing.expectEqual(@as(f32, 0), g2.world.weather.storm_frequency);
+    try std.testing.expectEqual(@as(i32, 0), g2.gameStatsValues().storm_freq);
+}
+
 test "scenario weather storm state survives a restart" {
     // Storm SM persistence (TODO residual): force biome 0 into an active storm,
     // deinit saves weather.zwt, and a fresh Game in the same world resumes the
@@ -3228,4 +3739,91 @@ test "scenario block_activated objective event advances the phase" {
     try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageQuestObjectiveUpdate", ub[0..21]));
     try std.testing.expectEqual(@as(u8, 2), s.phase);
     std.debug.print("PASS block-obj: block_activated event advanced the quest phase\n", .{});
+}
+
+/// Encode a NetPackagePartyActions body (currentOperation, invitedBy, invited,
+/// voiceLobbyId — RE parties-factions.md §3).
+fn buildPartyActionBody(buf: []u8, action: u8, invited_by: i32, invited: i32) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeByte(action);
+    try w.writeI32(invited_by);
+    try w.writeI32(invited);
+    try w.writeString("");
+    return w.written();
+}
+
+test "scenario party: accept invite fans a snapshot, leave disbands, disconnect removes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    const party_id = packages.idOf("NetPackagePartyData").?;
+    var body: [32]u8 = undefined;
+    var fbuf: [128]u8 = undefined;
+
+    // A accepts B's invite (AcceptInvite: invitedBy = A's own entity).
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&body, 1, ca.entity_id, cb.entity_id)));
+
+    // Both peers got the snapshot: party id 1, leader = A, members [A, B].
+    const b_body = cap_b.findPkgId(party_id) orelse return error.TestUnexpectedResult;
+    var r = binary.Reader{ .data = b_body };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32());
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // LeaderIndex: A
+    var vbuf: [32]u8 = undefined;
+    _ = try r.readString(&vbuf);
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // memberCount
+    const m1 = try r.readI32();
+    const m2 = try r.readI32();
+    try std.testing.expect((m1 == ca.entity_id and m2 == cb.entity_id) or (m1 == cb.entity_id and m2 == ca.entity_id));
+    try std.testing.expectEqual(@as(i32, cb.entity_id), try r.readI32()); // changedEntityID
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // accept_invite
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // not disband
+    try std.testing.expect(g.parties.partyByMember(ca.entity_id) != null);
+
+    // B leaves: the party of two disbands; A gets the disband snapshot.
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&body, 3, 0, 0)));
+    const a_body = cap_a.findPkgId(party_id) orelse return error.TestUnexpectedResult;
+    var r2 = binary.Reader{ .data = a_body };
+    try std.testing.expectEqual(@as(i32, 1), try r2.readI32());
+    _ = try r2.readByte();
+    _ = try r2.readString(&vbuf);
+    try std.testing.expectEqual(@as(i32, 0), try r2.readI32()); // no members left
+    _ = try r2.readI32(); // changed
+    _ = try r2.readByte();
+    try std.testing.expect(try r2.readByte() != 0); // disband true
+    try std.testing.expect(g.parties.partyByMember(ca.entity_id) == null);
+
+    // Re-join A+B then disconnect B: party shrinks, A stays.
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&body, 1, ca.entity_id, cb.entity_id)));
+    try std.testing.expect(g.parties.partyByMember(cb.entity_id) != null);
+    cap_a.clear();
+    g.dropClientSlot(cb.slot, "test-disconnect");
+    const a_body2 = cap_a.findPkgId(party_id) orelse return error.TestUnexpectedResult;
+    var r3 = binary.Reader{ .data = a_body2 };
+    _ = try r3.readI32();
+    _ = try r3.readByte();
+    _ = try r3.readString(&vbuf);
+    try std.testing.expectEqual(@as(i32, 1), try r3.readI32()); // only A left
+    try std.testing.expectEqual(@as(i32, ca.entity_id), try r3.readI32());
+    // Party of one auto-disbands (stock: last member auto-leaves).
+    try std.testing.expect(try r3.readByte() != 0); // disband
+    try std.testing.expect(g.parties.partyByMember(ca.entity_id) == null);
 }

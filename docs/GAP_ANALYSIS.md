@@ -275,20 +275,28 @@ area and the concrete work.
     so a client that sat past its first horde gets the next red-moon day instead
     of a stale HUD value (scenario `bmday-resend`).
 
-12. **Everywhere: raise or remove the fixed-size caps.**
-    64 damaged blocks world-wide, 128 block rotations world-wide (both FIFO with
-    O(n) eviction), 256 containers, 256 land claims, 64 workstations, 512 of 1892
-    entitygroups, 16 join-rate-limit IPs, 32 in-RAM bans, ~1200 of 1487 sleeper
-    POIs, 2 of 8 journal slots reaching the client. Each silently corrupts or
-    drops once exceeded (`src/server/game.zig:461-467`,
-    `src/world/containers.zig:9`, `src/world/workstations.zig:11`,
-    `src/assets/entitygroups.zig:7`).
+12. **DONE (majority) 2026-08-07.** Everywhere: raise or remove the
+    fixed-size caps. Land claims 256 → 1024, containers 256 → 512 (the save
+    path now encodes on the heap instead of a fixed stack buffer that
+    truncated the tail), workstations 64 → 256, damaged blocks 64 → 256,
+    block-rotation mirror 128 → 256, join-rate-limit IPs 16 → 64, in-RAM bans
+    32 → 128. The join PlayerId journal reached the client at 2 of its 8 sim
+    slots; all `max_journal` quests now ride the PDF (scenario `journal-pdf`,
+    5 quests proven). entitygroups were already flat-arena (no group-count
+    cap) and sleeper volumes are 8192. Each raise carries an overflow test
+    (300 claims / containers round-trip, 100 workstations, 100 damaged
+    blocks). Residuals: block_hp / block_raw remain FIFO sparse caches (the
+    raw plane is persisted per GAP 13; block durability is recovered from the
+    client's absolute wire damage after an eviction, so the larger table just
+    widens the window — persisting hp to ZCH3/blockmeta is the proper fix),
+    and container/workstation tables are fixed arrays sized at the cap.
 
-13. **World: store block rotation in the chunk plane.**
-    `setBlockWorld` truncates to the bare u16 id, so rotation and meta live only
-    in the 128-entry sparse cache the chunk encoder never consults. Every
-    player-placed door, wedge and shape re-renders unrotated for a second client
-    or after a relog (`src/world/store.zig:260-262`, `:653-658`).
+13. **DONE 2026-08-07.** World: store block rotation in the chunk plane.
+    The SetBlock path writes the client's full `BlockValue.rawData` (rotation /
+    meta upper bits) into the chunk plane via `World.setBlockRawWorld`, and the
+    switch-meta edit does the same; ZCH3 persists the u32 plane, so a second
+    client or a relog re-renders the rotation. Store test covers the plane and
+    a save/reload round trip (`src/world/store.zig`, game.zig SetBlock).
 
 14. **DONE 2026-08-06.** World: fix block repair. Stock repair calls
     `Block::DamageBlock` with a negated amount and sends the new **lower**
@@ -322,17 +330,28 @@ area and the concrete work.
     spawner's wave structure does not exist, and the world never escalates. The
     whole surface needed is visible at asm.il:955240 and :416434.
 
-18. **World: sample subbiome deco lists.** zdtd samples only the biome's
-    top-level `<decorations>` list (prob .001-.007 in pine_forest) where stock's
-    `decorateChunkRandom` resolves each cell through `GetBiomeOrSubAt` and samples
-    that subbiome's `m_DistantDecoBlocks` (.06-.08). Live result: 3 objects for a
-    whole join window (`src/assets/biome_layers.zig:415`, asm.il:1266039).
+18. **DONE 2026-08-07.** World: sample subbiome deco lists. `decoSpeciesAt`
+    now resolves each cell through a port of stock `GetBiomeOrSubAt`
+    (`src/world/subbiome_noise.zig`: `.NET` GameRandom, PerlinNoise
+    Noise/FBM/Lattice, GetStableHashCode seed from the world name, the
+    subbiome noise-window loop) and samples that subbiome's own
+    `<decorations>` set, parsed per `<subbiome noise="freq, min, max"
+    noiseoffset="x, y">` in `biome_layers.zig`. pine_forest's 8 subbiomes carry
+    the real tree mass (treeJuniper4m .06, treeDeadTree01 .07, treeDeadPineLeaf
+    .08); the top-level list stays the no-sub fallback. Verified against the
+    stock biomes.xml + AssignIds dump (sub total prob > 10x the top-level, real
+    ids). Residual: the stock `PerlinNoise` embeds a fixed 256-byte `_perm`
+    literal (`<PrivateImplementationDetails> 04715D0F...`); zdtd uses the
+    classic Ken Perlin table, so banding is stock-shaped (same FBM structure +
+    XML frequencies/offsets/windows) but not byte-identical to the stock
+    boundaries. Extracting the literal is a `../7dtd-research` task.
 
-19. **Net: fix `ServerVersion` and register with a master server.**
-    `src/version.zig:12` advertises `"V 3.1.0"`; the correct
-    `VersionInformation.SerializableString` is `"V.3.10.14"` (asm.il:2009306),
-    and the client logs a parse warning today. Then add Steam or EOS
-    registration, since direct IP is currently the only route in.
+19. **DONE (version) 2026-08-07.** Net: fix `ServerVersion` and register
+    with a master server. The GSI `ServerVersion` is now the stock four-field
+    `V.3.10.14` (`version.stock_wire_gsi_version`); the login package keeps the
+    display form `V 3.1.0` (protocol.md VersionLongString packing). The
+    client's `TryParseSerializedString` no longer warns. Remaining: Steam or
+    EOS registration (direct IP is currently the only route in).
 
 20. **Net: stop wasting the transport budget.**
     Everything goes reliable-ordered, uncompressed, one package per envelope, on
@@ -986,9 +1005,32 @@ parsed, and quest offering is unwired.
   LockRequest open (VendingMachineLockContext echoes the request's context type,
   byte-correct per `TileEntityVendingMachine::write`: chunkPos | ver 3 |
   isLocked | owner | password | allowed | rentalEndDay | TraderData |
-  nextAutoBuy-if-rentable). Residual: rent/password/owner editing state machine,
-  C2S buy/sell onto the entity-less TE form, and persistence (in-memory store;
-  not yet saved to disk).
+  nextAutoBuy-if-rentable). **Persistence** ships (`vending.zig` save/load,
+  ZVNM fuzzed). **Rent SM ships 2026-08-07**: `NetPackagePlayerVendingMachine`
+  (userId stream + Vector3i + removing, asm.il 833593) is handled
+  server-authoritatively - only the sender's own identity may act; rent costs
+  `TraderInfo.RentCost` casinoCoin currency (inventory first, then wallet,
+  trade's rule); the term is `rent_time` in-game days (stock default 30);
+  one machine per player (CanRent 2); re-rent extends; an expired rental
+  (currentDay > rentalEndDay) returns to Unowned on the day roll; `removing`
+  clears ownership only (the block identity and stock survive). Scenario
+  `vending-rent` covers rent/deny/extend/clear/expire/one-per-player.
+  **Real-client trade CopyFrom ships 2026-08-07**: the stock
+  NetPackageTraderData ToServer body (isEntity | entityId/tePosition |
+  hasTraderData | TraderData::Write, asm.il 843046) is parsed and mirrored
+  (stock TraderData.CopyFrom) onto the entity trader's sim stock or the
+  vending store — count/markup/money from the client's post-trade copy, while
+  price/sell stay server-owned (the wire carries no price). The loadgen/sim
+  9-byte trade body still works (length-distinguishable). Scenario
+  `traderdata-copyfrom` covers both branches.
+  **Owner lock/password/allowed editing ships 2026-08-07**: the vending TE
+  composite C2S (the mirror of TileEntityVendingMachine::write, payload
+  version i32 3) is parsed (`parseVendingTeBody`) and applied owner-gated —
+  only the machine's owner may change isLocked / password / the allowed-user
+  list; ownership and the rental term stay server-applied (the rent SM owns
+  them), and the reach check matches the other TE paths. Scenario
+  `vending-edit` covers owner apply + non-owner denial. The vending gap row
+  is now fully closed.
   *Anchors:* `src/world/vending.zig`, `src/wire/stock_te.zig:789-881`
   (`buildVendingTeBody`), `src/server/game.zig:6596-6618` (LockRequest vending
   branch), `:6760-6766` (place/remove lifecycle), `:9425-9480`
@@ -2838,17 +2880,31 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/game.zig:8211-8235`, `src/wire/packages.zig:2065-2075`,
   `asm.il:2054217-2054277`
 
-- **StormFrequency configurability** `PARTIAL`
-  `storm_frequency` is taken from the compile-time GameStatsValues default. No
-  serverconfig or zdtd.toml knob exists, so an operator cannot turn storms up, down
-  or off.
-  *Anchors:* `src/server/game.zig:950-956`, `src/wire/packages.zig:1910-1912`
+- **StormFrequency configurability** `DONE 2026-08-07`
+  `[sim] storm_frequency` (zdtd.toml, percent, default 100; 0 disables storms)
+  feeds both the weather scheduler divisor and the GameStats wire value, so the
+  client's storm scheduler and the server agree.
+  *Anchors:* `src/world/weather.zig:52-53`, `src/server/game.zig` `gameStatsValues`,
+  `docs/GAME_OPTIONS.md` `[sim]`
 
-- **Weather gameplay effects** `MISSING`
-  Weather is wire-cosmetic only. Nothing on the server reads the five params: no
-  core temperature, no wet or cold buffs, no stamina/food/water modifiers. The
-  client loads weathersurvival locally but the server never drives it.
-  *Anchors:* `src/world/weather.zig:9-11`, `src/server/game.zig:5670`
+- **Weather gameplay effects (gates)** `DONE 2026-08-07`; **buffs: client-owned by design**
+  The operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and
+  ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the
+  server's sandbox gates — TemperatureSurvival, StormFreq, blood-moon settings —
+  instead of its own defaults (RE sandbox-options.md §8: the client decodes
+  GameStats.GetString(71) in AfterPlayerRespawn). Per weather-environment.md §4,
+  the stock *dedicated* server stubs the felt-temperature helpers and does NOT
+  compute wet/cold buffs: the local client computes felt temperature from the
+  shipped per-biome params + weathersurvival.xml MinEvents. Server-side buff
+  application would double-apply and is intentionally not implemented. GSI
+  advertising SHIPPED 2026-08-07: the TCP GameServerInfo text (and the
+  PlayerLoginAnswer copy) carries `SandboxPreset`/`SandboxCode`
+  (GameInfoString 18/19) when the operator set them; unset keys are omitted
+  (empty = client default, same as GameStats).
+  *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
+  `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig` `gameStatsValues`,
+  `src/wire/packages.zig:2039-2040`,
+  `../7dtd-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
   WorldClock advances hours from real dt scaled by DayNightLength, dawn fixed at
@@ -3420,13 +3476,16 @@ persists so little that a restart visibly damages a built base.
   `asm.il:2009306-2009320`, `asm.il:2009539-2009570`, `asm.il:793930-793950`
 
 - **GameServerInfo key coverage** `PARTIAL`
-  17 keys emitted. The `GameInfoString` enum has 20 values; zdtd omits
+  19 keys emitted (17 fixed + SandboxPreset(18)/SandboxCode(19) when the
+  operator set them). The `GameInfoString` enum has 20 values; zdtd omits
   ServerDescription(3), ServerWebsiteURL(4), SteamID(8), Platform(10),
   ServerLoginConfirmationText(11), Region(12), Language(13), UniqueId(14),
-  CombinedPrimaryId(15), CombinedNativeId(16), PlayGroup(17), SandboxPreset(18) and
-  SandboxCode(19). SandboxCode is where V3.1.0 keeps the difficulty/loot/XP preset,
-  so the browser cannot show what the server is actually running.
-  *Anchors:* `src/server/serverinfo_tcp.zig:49-68`, `asm.il:796457-796476`
+  CombinedPrimaryId(15), CombinedNativeId(16) and PlayGroup(17) — platform /
+  identity fields zdtd does not own (no authorizer chain, no Steam/EOS
+  presence). SandboxCode is where V3.1.0 keeps the difficulty/loot/XP preset;
+  it now rides the GSI text when configured (empty = client default, matching
+  GameStats).
+  *Anchors:* `src/server/serverinfo_tcp.zig:49-100`, `asm.il:796457-796476`
 
 - **Steam / EOS master-server registration** `MISSING`
   Nothing in `src/` registers with Steam matchmaking or EOS lobbies. The only
@@ -3793,7 +3852,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
 | Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
 | Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
-| Party / ally (`AllyRequest/Response`) | PARTIAL (echo first cut) |
+| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` table + transition; party membership still echoed, see §AUTHGATE) |
 
 #### Quests / traders / dialog (stock)
 | Package | Priority |
@@ -4052,12 +4111,13 @@ Honest gaps:
   are counted as `path_replans_denied`. Nodes are still keyed on XZ only, so a
   column reachable at two heights resolves to whichever the search found first.
   No navmesh, no jump/climb, no stock pathCounter/relocateTicks fidelity.
-- **Five EAI tasks stay unimplemented, each on a hard missing dependency.**
+- **Three EAI tasks stay unimplemented, each on a hard missing dependency.**
   **BLOCKED (2026-08-07):** each needs a subsystem or data source that does
   not exist yet (client animator state, vertical movement / MoveHelper
-  physics, item actions + projectiles, per-class task graphs, dropped-item
-  entities with item-class flags). Not inventable without those subsystems;
-  the dependencies below are the evidence.
+  physics, item actions + projectiles). Not inventable without those
+  subsystems; the dependencies below are the evidence. The two
+  dropped-item / per-class ones (ApproachDistraction, RunawayFromEntity)
+  are now implemented.
   - *EAIDodge* (asm.il:426512): CanExecute reads the target's
     `avatarController.IsAnimationToDodge()` and Start calls
     `StartAnimationDodge` - client animator state the server does not have.
@@ -4075,14 +4135,35 @@ Honest gaps:
     held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
     Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
   - *EAIRunawayFromEntity* (asm.il:435190, base EAIRunAway asm.il:434778):
-    needs a fear-source scan over nearby entity classes (`EAIRunAway::FindFleePos`
-    plus the class filter), which zdtd's single nearest-player sense cannot
-    express. Its sibling *EAIRunawayWhenHurt* (asm.il:435616) is implemented:
-    see the revenge-target note below.
-  - *EAIApproachDistraction* (asm.il:423700): needs `EntityAlive.distraction`
-    to be a dropped `EntityItem` whose `ItemClass.IsEatDistraction` is true,
-    plus `AINoiseSeekDist` (8 for zombieTemplateMale). zdtd has no dropped-item
-    entity carrying item-class flags.
+    **DONE 2026-08-07** — the `.runaway` task now covers both AITask-1
+    (RunawayWhenHurt, revenge) and AITask-2 (RunawayFromEntity, proximity): a
+    0.5 s-cadence fear scan over the player/zombie/animal groups (the stock
+    `data="class=EntityPlayer,EntityZombie,EntityEnemyAnimal"` filter maps to
+    Kind membership) sets `fear_target`, the gate accepts a fresh fear source,
+    and the update flees the nearest feared entity within `fleeDistance` 20.
+    Kind-gated to passive animals like its sibling; a fleeing animal under no
+    player sense moves at the 0.1x LOD `active_scale` (same throttle as
+    wander), and an already-chasing animal is not preempted by fear (mutex
+    overlap) — both documented approximations. Two unit tests: flee within
+    range, no flee beyond it.
+  - *EAIApproachDistraction* (asm.il:423700): **DONE 2026-08-07** — the
+    `.approach_distraction` task (MutexBits 3, priority between Territorial and
+    ApproachAndAttack) walks to the dropped item that `EntityItem.tickDistraction`
+    (asm.il EntityItem:1341) broadcast into `pendingDistraction`, and eats it
+    when the item carries the `eat` DistractionTag. Data path: `DistractionTags`
+    + `DistractionRadius/Lifetime/Strength` passive effects parse from items.xml
+    (stock ships `resourceRockDecoy` with `zombie,requires_contact` / 25 / 1 /
+    100); the drop spawn seeds the sim loot-bag state; the 20-tick broadcast
+    scans 25 m for EntityAlive (kind-gated on the `zombie` tag, sleeping
+    excluded, closer pending wins, strength > 0); a non-eat item reached clears
+    the latch (zombie loses interest), an eat item is chewed down
+    (`distractionEatTicks--`) and Game removes + broadcasts EntityRemove when
+    consumed. Simplifications: no per-drop collision physics (the stock
+    `requires_contact` isCollided gate is a no-op: zdtd drops settle instantly),
+    no `distractionResistance` per-entity (strength > 0 passes), and the eat
+    tick source (PassiveEffects 69 `DistractionEatTicks`) is read from the
+    effect group like the others. Tests: parse, 25 m broadcast, walk across
+    decision re-evals, non-eat clear, eat-to-zero.
 
   (There is no EAISeekSmell class in stock; do not add one.)
 - **Look is body-yaw only.** `EAILook::Continue`'s `lookAtTicks` / 40-tick
@@ -4736,8 +4817,11 @@ HONEST GAPS:
   Party/PartyManager equivalent (AcceptInvite / ChangeLead / LeaveParty /
   KickFromParty / JoinAutoParty), not identity. This is also why party members
   are not exempt from the POI `PlayerInside` lockout (`src/ecs/systems.zig`).
-- **Ally persistence.** Relationships live in the server process only; stock
-  saves them in `PersistentPlayerList`. They reset on restart.
+- **Ally persistence.** Relationships now persist to `{world_dir}/allies.zal`
+  (magic ZAL1) on the periodic and shutdown saves and are restored at init;
+  stock keeps them in `PersistentPlayerList`. The saved file is zdtd-owned like
+  claims.zlc. What stock has and zdtd still lacks is party state (above), not
+  ally persistence.
 - **Player save key.** Persistence is still keyed on the login name, so a client
   can claim another player's save by picking their name. Stock loads the PDF from
   `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration
