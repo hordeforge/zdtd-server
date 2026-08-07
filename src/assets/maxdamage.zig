@@ -149,6 +149,16 @@ pub const Table = struct {
         return self.id_by_name.get(name);
     }
 
+    /// Reverse of idByName: the stock block name for an AssignIds id. Walks the
+    /// name table (no reverse index); used off the hot path (upgrade checks).
+    pub fn idName(self: *const Table, id: u16) ?[]const u8 {
+        var it = self.id_by_name.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.* == id) return e.key_ptr.*;
+        }
+        return null;
+    }
+
     /// Rows in the loaded AssignIds map. Zero means no dump: callers that
     /// negotiate ids with the client must refuse to send in that case.
     pub fn idNameCount(self: *const Table) u32 {

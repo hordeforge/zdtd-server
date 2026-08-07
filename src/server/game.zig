@@ -6845,6 +6845,19 @@ pub const Game = struct {
                     // Fresh place.
                     place_id = b.block_id;
                     out_dmg = 0;
+                    // Hammer upgrade (stock ItemActionUpgrade): the client sends
+                    // the upgrade target block id directly. Trust boundary: only
+                    // accept a target that is the current block's
+                    // UpgradeBlock.ToBlock (resolved by name), so a forged
+                    // SetBlock cannot swap in arbitrary block ids. A change on a
+                    // block with no upgrade path (or to the wrong target) is
+                    // rejected; placing onto air stays open.
+                    if (cur_id != 0 and b.block_id != cur_id) {
+                        const cur_name = self.maxdamage.idName(cur_id) orelse continue;
+                        const target_name = self.maxdamage.upgradeTarget(cur_name) orelse continue;
+                        const target_id = self.maxdamage.idByName(target_name) orelse continue;
+                        if (target_id != b.block_id) continue;
+                    }
                     self.clearBlockHp(b.x, b.y, b.z);
                     mutated = true;
                 }

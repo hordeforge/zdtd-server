@@ -11,6 +11,7 @@ const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
 const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
+const maxdamage = @import("../assets/maxdamage.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
@@ -305,6 +306,53 @@ test "scenario SetBlock lower damage repairs instead of adding" {
     // A further damage advance still works.
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, 250, 70, 250, world_store.block_stone, 80, 0, 0)));
     try std.testing.expectEqual(@as(u16, 80), g.getBlockHp(250, 70, 250));
+}
+
+test "scenario hammer upgrade validates the UpgradeBlock target" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_upgrade");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_upgrade", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Offline maxdamage has the AssignIds dump but no blocks.xml, so the
+    // upgrade ladder is empty: load the stock blocks.xml and swap it in (same
+    // pattern the trader tests use for traders.xml / npc.xml).
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const wood_id = g.maxdamage.idByName("woodMaster") orelse return error.SkipZigTest;
+    const cobble_id = g.maxdamage.idByName("cobblestoneMaster") orelse return error.SkipZigTest;
+    const bedroll_id = g.maxdamage.idByName("bedroll") orelse return error.SkipZigTest;
+
+    var frame_buf: [512]u8 = undefined;
+    var body: [64]u8 = undefined;
+    // Place a wood block with an upgrade path.
+    // y=150 is air above the flat surface; dig first in case a previous run's
+    // persisted world left a block at the cell (Game.deinit saves the world).
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, 0)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, wood_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == wood_id);
+
+    // Legitimate upgrade: cobblestoneMaster is woodMaster's ToBlock.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, cobble_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == cobble_id);
+
+    // Forged swap: bedroll is not in the upgrade ladder, so the block stays.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, bedroll_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == cobble_id);
+
+    std.debug.print("PASS upgrade: woodMaster -> cobblestoneMaster accepted, forged swap rejected\n", .{});
 }
 
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
