@@ -12,6 +12,7 @@ pub const zdtd_config = @import("zdtd_config.zig");
 pub const mode = @import("mode.zig");
 pub const admin = @import("admin.zig");
 pub const admin_cmds = @import("admin_cmds.zig");
+pub const admin_console = @import("admin_console.zig");
 pub const webui = @import("webui.zig");
 pub const serverinfo_tcp = @import("serverinfo_tcp.zig");
 pub const scenarios = @import("scenarios.zig");
