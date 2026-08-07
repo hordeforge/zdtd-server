@@ -1261,166 +1261,92 @@ fn secretCharsetOk(secret: []const u8) bool {
     return true;
 }
 
+/// The three login pages and the dashboard shell live under `assets/webui/` as
+/// real HTML files and are embedded at compile time, so they stay editable (and
+/// openable in a browser) instead of being escaped Zig string literals. Nothing
+/// is read from disk at runtime: the bytes are in the binary.
+///
+/// Zig multiline literals carry no trailing newline, so trim the file's to keep
+/// the served bytes identical to what the inline literals produced.
+fn embedTrimmed(comptime path: []const u8) []const u8 {
+    const raw = @embedFile(path);
+    return comptime if (raw.len > 0 and raw[raw.len - 1] == '\n') raw[0 .. raw.len - 1] else raw;
+}
+
+const login_html = embedTrimmed("webui/login.html");
+const login_failed_html = embedTrimmed("webui/login_failed.html");
+const login_lockout_html = embedTrimmed("webui/login_lockout.html");
+const shell_html = embedTrimmed("webui/shell.html");
+
 fn loginHintHtml(bad_token: bool) []const u8 {
-    if (bad_token) {
-        return
-        \\<!DOCTYPE html>
-        \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        \\<title>Sign in · zdtd</title>
-        \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
-        \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
-        \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
-        \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
-        \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
-        \\.err{color:#ff8585;margin:0.75rem 0}
-        \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:MarkText;background:Mark}}
-        \\</style></head>
-        \\<body><main><h1>zdtd webui</h1>
-        \\<p id="login-err" class="err" role="alert">Sign-in failed. The shared secret was not accepted.</p>
-        \\<form method="post" action="/login">
-        \\<label for="login-token">Shared secret</label>
-        \\<input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-invalid="true" aria-describedby="login-err login-help" autofocus>
-        \\<button type="submit">Sign in</button>
-        \\</form>
-        \\<p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-        \\<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main></body></html>
-        ;
-    }
-    return
-    \\<!DOCTYPE html>
-    \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    \\<title>Sign in · zdtd</title>
-    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
-    \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
-    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
-    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
-    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
-    \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
-    \\</style></head>
-    \\<body><main><h1>zdtd webui</h1>
-    \\<p>Sign in with the webui shared secret to set a session cookie.</p>
-    \\<form method="post" action="/login">
-    \\<label for="login-token">Shared secret</label>
-    \\<input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-describedby="login-help" autofocus>
-    \\<button type="submit">Sign in</button>
-    \\</form>
-    \\<p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-    \\<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main></body></html>
-    ;
+    return if (bad_token) login_failed_html else login_html;
 }
 
 /// Temporary lockout after too many failed sign-ins (same form chrome as login).
 fn loginLockoutHtml() []const u8 {
-    return
-    \\<!DOCTYPE html>
-    \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    \\<title>Sign in · zdtd</title>
-    \\<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
-    \\code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
-    \\label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
-    \\button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}button:disabled,input:disabled{opacity:0.55;cursor:not-allowed}
-    \\a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
-    \\.err{color:#ff8585;margin:0.75rem 0}
-    \\@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:MarkText;background:Mark}}
-    \\</style></head>
-    \\<body><main><h1>zdtd webui</h1>
-    \\<p id="login-err" class="err" role="alert" tabindex="-1" autofocus>Too many failed sign-ins. Wait about 30 seconds, then try again.</p>
-    \\<form method="post" action="/login" aria-describedby="login-err">
-    \\<label for="login-token">Shared secret</label>
-    \\<input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-invalid="true" aria-describedby="login-err login-help" disabled>
-    \\<button type="submit" disabled>Sign in</button>
-    \\</form>
-    \\<p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-    \\<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main></body></html>
-    ;
+    return login_lockout_html;
+}
+
+const Subst = struct { key: []const u8, val: []const u8 };
+
+/// Copy `src` into `buf`, replacing each `__ZDTD_*__` placeholder with its
+/// value. The templates use named placeholders rather than `{s}` so the CSS and
+/// JS can keep literal braces instead of doubling every one of them.
+///
+/// One forward pass: placeholders are literal ASCII and never nest, and a
+/// substituted value is never rescanned, so a value containing a placeholder
+/// cannot inject another. An unknown `__ZDTD_` run is copied through rather than
+/// dropped, so a template typo is visible on the page instead of vanishing.
+fn renderTemplate(buf: []u8, src: []const u8, subs: []const Subst) ![]const u8 {
+    var w: usize = 0;
+    var i: usize = 0;
+    outer: while (i < src.len) {
+        if (src[i] == '_' and std.mem.startsWith(u8, src[i..], "__ZDTD_")) {
+            for (subs) |sub| {
+                if (!std.mem.startsWith(u8, src[i..], sub.key)) continue;
+                if (w + sub.val.len > buf.len) return error.NoSpaceLeft;
+                @memcpy(buf[w..][0..sub.val.len], sub.val);
+                w += sub.val.len;
+                i += sub.key.len;
+                continue :outer;
+            }
+        }
+        if (w >= buf.len) return error.NoSpaceLeft;
+        buf[w] = src[i];
+        w += 1;
+        i += 1;
+    }
+    return buf[0..w];
+}
+
+test "shell template substitutes every placeholder" {
+    var buf: [64 * 1024]u8 = undefined;
+    const out = try renderShell(&buf, "deadbeef");
+    // A missed placeholder would ship "__ZDTD_CSRF__" to the browser and break
+    // the logout form, which no other test would notice.
+    try std.testing.expect(std.mem.indexOf(u8, out, "__ZDTD_") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "value=\"deadbeef\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, version.product) != null);
+}
+
+test "renderTemplate reports a buffer too small instead of truncating" {
+    var small: [8]u8 = undefined;
+    try std.testing.expectError(error.NoSpaceLeft, renderShell(&small, "x"));
+}
+
+test "renderTemplate leaves an unknown placeholder in place" {
+    var buf: [64]u8 = undefined;
+    const out = try renderTemplate(&buf, "a __ZDTD_NOPE__ b", &.{});
+    try std.testing.expectEqualStrings("a __ZDTD_NOPE__ b", out);
 }
 
 /// `csrf_token` must be the HMAC session token (not the shared secret).
 fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
-    return std.fmt.bufPrint(buf,
-        \\<!DOCTYPE html>
-        \\<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        \\<title>Server dashboard · zdtd</title>
-        \\<style>
-        \\:root{{color-scheme:dark;--bg:#12141a;--card:#1c2030;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--ok:#82d68b;--warn:#f0b64f;--err:#ff8585}}
-        \\*{{box-sizing:border-box}}body{{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.45}}
-        \\.skip-link{{position:absolute;left:1rem;top:0;transform:translateY(-150%);background:var(--warn);color:#0a0c10;padding:0.65rem 0.85rem;border-radius:0 0 6px 6px;font-weight:700;z-index:1}}.skip-link:focus{{transform:translateY(0)}}
-        \\header{{padding:1rem 1.25rem;border-bottom:1px solid #2a3144;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;background:var(--bg)}}
-        \\header h1{{font-size:1.15rem;margin:0;font-weight:600}}header .meta{{color:var(--muted);font-size:0.9rem}}
-        \\.refresh-ctrl{{margin-left:auto;display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-size:0.9rem;cursor:pointer;min-height:44px}}
-        \\.refresh-ctrl input{{width:1.5rem;height:1.5rem;min-width:1.5rem;min-height:1.5rem;accent-color:var(--acc)}}
-        \\.refresh-now,.logout-form button{{min-height:44px;padding:0.45rem 0.75rem;border:1px solid #6a738c;border-radius:6px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}}
-        \\.refresh-now:hover,.logout-form button:hover,.cmd-row button:hover{{filter:brightness(1.08)}}.refresh-now:active,.logout-form button:active,.cmd-row button:active{{filter:brightness(0.95)}}
-        \\.logout-form{{margin:0}}
-        \\.page-nav{{display:flex;flex-wrap:wrap;gap:0.35rem 0.85rem;padding:0.55rem 1.25rem;border-bottom:1px solid #2a3144;background:#161922;position:sticky;top:0;z-index:2}}
-        \\.page-nav a{{color:var(--acc);text-decoration:underline;min-height:44px;display:inline-flex;align-items:center;padding:0.2rem 0.15rem;font-size:0.9rem}}
-        \\main{{padding:1rem 1.25rem;display:grid;gap:1rem;max-width:56rem;width:100%;margin-inline:auto}}
-        \\section{{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid #2a3144;scroll-margin-top:3.5rem}}
-        \\section h2{{margin:0 0 0.6rem;font-size:0.95rem;color:var(--acc);font-weight:600;text-transform:uppercase;letter-spacing:0.04em}}
-        \\section h3{{margin:1rem 0 0.5rem;font-size:0.8rem;color:var(--muted);font-weight:600}}
-        \\table{{width:100%;border-collapse:collapse;font-size:0.9rem}}th,td{{text-align:left;padding:0.35rem 0.5rem;border-bottom:1px solid #2a3144}}
-        \\th{{color:var(--muted);font-weight:500}} .num{{font-variant-numeric:tabular-nums}}
-        \\.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
-        \\.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.5rem,1fr));gap:0.5rem;list-style:none;margin:0;padding:0}}
-        \\.stat{{background:#141824;border-radius:6px;padding:0.5rem 0.65rem}}.stat b{{display:block;font-size:1.1rem}}.stat span{{color:var(--muted);font-size:0.8rem}}
-        \\.warn-text{{color:var(--warn);font-weight:700}}
-        \\footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:0.8rem}}footer a{{color:var(--acc);text-decoration:underline}}
-        \\.cmd-row{{display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;align-items:center}}
-        \\.cmd-row input[type=text]{{flex:1;min-width:12rem;min-height:44px;background:#141824;border:1px solid #6a738c;color:var(--fg);padding:0.45rem 0.6rem;border-radius:6px;font-family:ui-monospace,monospace}}
-        \\.cmd-row button{{background:var(--acc);color:#0a0c10;border:0;border-radius:6px;padding:0.55rem 0.9rem;min-height:44px;min-width:4.5rem;font-weight:600;cursor:pointer}}.cmd-row button:disabled{{opacity:0.65;cursor:wait}}
-        \\a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,#console-log:focus-visible{{outline:3px solid var(--warn);outline-offset:3px}}
-        \\pre.cmd-out,pre.cmd-log{{margin:0.5rem 0 0;background:#0e1018;border-radius:6px;padding:0.6rem 0.75rem;font-size:0.85rem;overflow:auto;max-height:14rem;white-space:pre-wrap;word-break:break-word}}
-        \\pre .in{{color:var(--acc)}} .err{{color:var(--err)}} .ok{{color:var(--ok)}} pre .meta{{color:var(--muted)}}
-        \\#players{{overflow-x:auto}}#players:focus-visible{{outline:3px solid var(--warn);outline-offset:3px}}#players table{{min-width:30rem}}
-        \\.noscript{{margin:0;padding:0.75rem 1.25rem;background:#3a2410;color:var(--warn);border-bottom:1px solid #6a4a20}}
-        \\@media(max-width:36rem){{main{{padding:0.75rem}}header,footer,.page-nav{{padding-left:0.75rem;padding-right:0.75rem}}section{{padding:0.75rem}}.cmd-row{{display:grid;grid-template-columns:minmax(0,1fr) auto}}.cmd-row input[type=text]{{min-width:0}}.refresh-ctrl{{margin-left:0}}}}
-        \\@media(prefers-reduced-motion:reduce){{.skip-link{{transition:none}}html{{scroll-behavior:auto}}}}
-        \\@media(forced-colors:active){{:root{{--bg:Canvas;--card:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav{{background:Canvas;color:CanvasText;border-color:CanvasText}}.cmd-row input[type=text],.cmd-row button,.logout-form button,.refresh-now{{border:1px solid ButtonText}}.err,.noscript,.warn-text{{color:MarkText;background:Mark}}a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,#console-log:focus-visible,.skip-link:focus{{outline:3px solid Highlight;outline-offset:3px}}}}
-        \\</style></head>
-        \\<body>
-        \\<a class="skip-link" href="#main-content">Skip to dashboard</a>
-        \\<noscript><p class="noscript" role="status">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
-        \\<header>
-        \\<h1>zdtd</h1><span class="meta">{s} · {s} · ops dashboard</span>
-        \\<label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-        \\<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console-log">Refresh now</button>
-        \\<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="{s}"><button type="submit">Sign out</button></form>
-        \\</header>
-        \\<nav class="page-nav" aria-label="Dashboard sections">
-        \\<a href="#status-section">Status</a>
-        \\<a href="#apm-section">Performance</a>
-        \\<a href="#players-section">Players</a>
-        \\<a href="#console-section">Console</a>
-        \\</nav>
-        \\<main id="main-content" tabindex="-1">
-        \\<section id="status-section" aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-        \\<section id="apm-section" aria-labelledby="apm-heading"><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-        \\<section id="players-section" aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
-        \\<section id="console-section" aria-labelledby="console-heading">
-        \\<h2 id="console-heading">Console</h2>
-        \\<p id="cmd-help" class="meta" style="margin:0 0 0.4rem;color:var(--muted);font-size:0.85rem">Use the same commands as the admin console, such as help, status, give, kick, and settime.</p>
-        \\<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
-        \\<input type="hidden" name="csrf" value="{s}">
-        \\<label for="cmd-line" class="sr-only">Admin command</label>
-        \\<input type="text" name="line" id="cmd-line" placeholder="Enter a command, for example: status" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
-        \\<button type="submit">Run</button>
-        \\</form>
-        \\<div id="cmd-out" role="status" aria-live="polite" aria-atomic="true"></div>
-        \\<div id="console-log" role="region" aria-label="Recent commands" tabindex="0" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
-        \\</section>
-        \\</main>
-        \\<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">Performance JSON</a> · <a href="/healthz">Liveness check</a> · <a href="/readyz">Readiness check</a></footer>
-        \\<script>
-        \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;let inFlight=false;const swap=()=>{{if(inFlight)return Promise.resolve();inFlight=true;el.setAttribute('aria-busy','true');const keepFocus=el.contains(document.activeElement);const regionScroll=el.scrollLeft;const pre=el.querySelector('pre');const preScroll=pre?pre.scrollTop:0;return fetch(u,{{credentials:'same-origin'}}).then(r=>{{if(r.status===401){{window.location.assign('/login');return null;}}return r.ok?r.text():Promise.reject();}}).then(t=>{{if(t===null)return;el.innerHTML=t;el.removeAttribute('data-load-error');el.scrollLeft=regionScroll;const npre=el.querySelector('pre');if(npre)npre.scrollTop=preScroll;if(keepFocus&&!el.contains(document.activeElement)&&typeof el.focus==='function')el.focus({{preventScroll:true}});}}).catch(()=>{{if(!el.hasAttribute('data-load-error'))el.innerHTML='<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>{{inFlight=false;el.removeAttribute('aria-busy');}});}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
-        \\const polls=Array.from(document.querySelectorAll('[hx-get]'));polls.forEach(hxPoll);
-        \\const autoEl=document.getElementById('auto-refresh');const refreshState=document.getElementById('refresh-state');
-        \\function applyRefresh(){{const on=autoEl.checked;polls.forEach(el=>{{if(on)el._hxStart();else{{el._hxStop();if(!el.children.length)el._hxOnce();}}}});if(refreshState)refreshState.textContent=on?'Auto-refresh on':'Auto-refresh paused';}}
-        \\autoEl.addEventListener('change',applyRefresh);applyRefresh();
-        \\document.getElementById('refresh-now').addEventListener('click',async(e)=>{{const button=e.currentTarget;button.disabled=true;if(refreshState)refreshState.textContent='Refreshing…';await Promise.all(polls.map(el=>el._hxOnce?el._hxOnce():Promise.resolve()));button.disabled=false;button.focus();if(refreshState)refreshState.textContent=autoEl.checked?'Refreshed (auto-refresh on)':'Refreshed (auto-refresh paused)';}});
-        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const input=document.getElementById('cmd-line');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();if(!line){{input.setCustomValidity('Enter a command.');input.reportValidity();return;}}input.setCustomValidity('');const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick','ban','wipeplayer']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players or erase saved data.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.setAttribute('aria-busy','true');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});if(r.status===401){{window.location.assign('/login');return;}}const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;if(r.ok){{input.value='';input.focus();}}const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get')){{const pre=log.querySelector('pre');const preScroll=pre?pre.scrollTop:0;fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>{{log.innerHTML=t;const npre=log.querySelector('pre');if(npre)npre.scrollTop=preScroll;}}).catch(()=>{{}});}}}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{out.removeAttribute('aria-busy');button.disabled=false;button.textContent='Run';input.focus();}}}});
-        \\</script>
-        \\</body></html>
-    , .{ version.product, version.stock_wire, csrf_token, csrf_token });
+    return renderTemplate(buf, shell_html, &.{
+        .{ .key = "__ZDTD_PRODUCT__", .val = version.product },
+        .{ .key = "__ZDTD_STOCK_WIRE__", .val = version.stock_wire },
+        .{ .key = "__ZDTD_CSRF__", .val = csrf_token },
+    });
 }
 
 fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
