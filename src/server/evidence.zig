@@ -1,5 +1,6 @@
 //! P4 observe evidence: fixed ring of detector events (no secrets, no IP, no packets).
-//! Optional later: JSONL flush from admin `evidence dump` via io_fs.writeFile.
+//! Admin `evidence dump [path]` flushes the ring as JSONL via
+//! Game.dumpEvidenceFile (io_fs.writeFile); the ring itself stays fixed-size.
 
 const std = @import("std");
 

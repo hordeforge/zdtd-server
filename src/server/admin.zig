@@ -377,7 +377,9 @@ pub const Command = union(enum) {
     /// Clear guard quarantine bits + any armed policy kick on a peer slot
     /// (operator escape hatch for a false positive).
     guardclear: usize,
-    evidence,
+    /// `evidence` prints the ring inline; `evidence dump [path]` writes the
+    /// JSONL lines to a file (default `<world>/evidence.jsonl`).
+    evidence: ?[]const u8,
     /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
     apm,
     save,
@@ -502,7 +504,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
         return "help [topic]";
     if (std.mem.eql(u8, verb, "status")) return "status";
     if (std.mem.eql(u8, verb, "guardstats") or std.mem.eql(u8, verb, "gs")) return "guardstats";
-    if (std.mem.eql(u8, verb, "evidence") or std.mem.eql(u8, verb, "ev")) return "evidence";
+    if (std.mem.eql(u8, verb, "evidence") or std.mem.eql(u8, verb, "ev")) return "evidence [dump [path]]";
     if (std.mem.eql(u8, verb, "apm") or std.mem.eql(u8, verb, "metrics")) return "apm";
     if (std.mem.eql(u8, verb, "save")) return "save";
     if (std.mem.eql(u8, verb, "list") or std.mem.eql(u8, verb, "players")) return "list";
@@ -539,7 +541,14 @@ pub fn parseCommand(line: []const u8) Command {
         if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .guardclear = peer };
     }
-    if (std.mem.eql(u8, cmd, "evidence") or std.mem.eql(u8, cmd, "ev")) return if (it.next() == null) .evidence else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "evidence") or std.mem.eql(u8, cmd, "ev")) {
+        const rest = std.mem.trim(u8, it.rest(), " ");
+        if (rest.len == 0) return .{ .evidence = null };
+        var rit = std.mem.tokenizeAny(u8, rest, " \t");
+        const sub = rit.next() orelse return .{ .evidence = null };
+        if (!std.mem.eql(u8, sub, "dump")) return .{ .bad_args = cmd };
+        return .{ .evidence = std.mem.trim(u8, rit.rest(), " ") };
+    }
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "kick")) {

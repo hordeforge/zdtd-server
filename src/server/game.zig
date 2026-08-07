@@ -12,6 +12,7 @@ const wire_frame = @import("../wire/frame.zig");
 const wire_binary = @import("../wire/binary.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
+const subbiome_noise = @import("../world/subbiome_noise.zig");
 const world_tts = @import("../world/tts.zig");
 const deco_mirror = @import("../world/deco_mirror.zig");
 const ecs = @import("../ecs/root.zig");
@@ -87,7 +88,9 @@ fn bitOfPeerSlot(peer_slot: i32) ObsMask {
     return bitOf(@intCast(peer_slot));
 }
 
-const max_land_claims: usize = 256;
+/// Game embeds the claim table on the heap; 1024 covers a long-lived server
+/// (GAP 12: 256 silently dropped the 257th claim on register).
+const max_land_claims: usize = 1024;
 /// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
 const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
@@ -247,6 +250,11 @@ pub const InitOptions = struct {
     telnet_failed_logins_blocktime: u16 = 10,
     /// GameWorld, shown in the telnet greeting block.
     game_world: []const u8 = "Navezgane",
+    /// Stock sandbox code echoed into GameStats(71) so clients decode the
+    /// server's sandbox gates (TemperatureSurvival, StormFreq, ...) instead of
+    /// their own defaults (RE sandbox-options §8). Empty = client default.
+    sandbox_code: []const u8 = "",
+    sandbox_preset: []const u8 = "",
     /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
     webui_port: u16 = 0,
     webui_bind: []const u8 = "127.0.0.1",
@@ -345,8 +353,16 @@ pub const InitOptions = struct {
     /// Trader restock refill policy (zdtd.toml [sim] trader_restock_*).
     trader_restock_cap: u16 = default_trader_restock_cap,
     trader_restock_refill: u16 = default_trader_restock_refill,
+    /// Storm frequency percent (zdtd.toml [sim] storm_frequency): the
+    /// GameStats wire value and the weather scheduler divisor. Stock default
+    /// 100 (GamePrefs.StormFreq); 0 disables storms.
+    storm_frequency: i32 = default_storm_frequency,
     /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
+    /// Sim rule parameters (ADR 0021): the effective Rules after the
+    /// mode pack and zdtd.toml overlays (main.zig builds it). Installed on
+    /// World.rules at init; the sim reads w.rules.<group>.<field>.
+    rules: ecs.rules.Rules = .{},
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
@@ -400,6 +416,9 @@ pub const default_damage_burst_max: u8 = 4;
 /// entries grow toward the cap by at most the refill per restock.
 pub const default_trader_restock_cap: u16 = 50;
 pub const default_trader_restock_refill: u16 = 10;
+/// World::StormFrequency percent (stock GamePrefs.StormFreq default 100;
+/// packages.GameStatsValues.storm_freq). 0 disables storms.
+pub const default_storm_frequency: i32 = 100;
 pub const default_peer_stale_ms: u64 = 3000;
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
@@ -545,6 +564,31 @@ fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
     return g.tick_n;
 }
 
+/// Kill verdict routed from the sim (World.kill_verdict_fn, T15): players go
+/// to on_player_death, everything else to on_entity_killed. The static host
+/// votes first, then the Wasm host; the first non-zero verdict wins. A
+/// negative return denies the death; the sim keeps the victim at 1 hp.
+fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32) i32 {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
+    return switch (kind) {
+        .player => blk: {
+            const sv = g.plugins.playerDeath(victim);
+            break :blk if (sv != 0) sv else g.wasm_plugins.playerDeath(victim);
+        },
+        else => blk: {
+            const sv = g.plugins.entityKilled(victim, attacker);
+            break :blk if (sv != 0) sv else g.wasm_plugins.entityKilled(victim, attacker);
+        },
+    };
+}
+
+/// Combined block-damage verdict: static host first, then Wasm (first non-zero
+/// wins; 0 = no plugin vetoes/scales, keep today's behaviour).
+fn blockDamageVerdict(self: *Game, x: i32, y: i32, z: i32, dmg: i32) i32 {
+    const sv = self.plugins.blockDamage(x, y, z, dmg);
+    return if (sv != 0) sv else self.wasm_plugins.blockDamage(x, y, z, dmg);
+}
+
 /// Max bytes of one queued command string from a guest (bounds the tokenizer).
 const max_plugin_cmd_len: usize = 128;
 
@@ -678,6 +722,10 @@ pub const Game = struct {
     plugins: plugin_mod.PluginHost = .{},
     /// Wasm plugin runtime (ADR 0020): modules loaded from config at init.
     wasm_plugins: plugin_mod.wasm.WasmHost = .{},
+    /// Subbiome noise for per-cell deco resolution (GAP 18): seeded like stock
+    /// from the world name hash (or the worldgen seed for proc worlds), so a
+    /// save decorates identically across joins and restarts.
+    sub_noise: subbiome_noise.PerlinNoise = .{},
     /// Host callback context for Wasm guests; callbacks recover *Game from
     /// `data` and live in game.zig, so the plugin layer stays Game-free.
     wasm_ctx: plugin_mod.wasm.HostCtx = undefined,
@@ -690,6 +738,9 @@ pub const Game = struct {
     /// Ally relationships keyed on platform identity (stock AllyStore).
     /// In-memory only: stock persists these, zdtd does not yet.
     allies: ally_mod.Store = .{},
+    /// Per-session party groups keyed on runtime entity id (stock PartyManager;
+    /// RE parties-factions.md §2). Session only, thrown away on disband.
+    parties: ecs.party.Manager = .{},
     /// Load-shed valve: weak evidence + deferrable broadcasts are dropped while
     /// `tick_n < shed_until_tick`. Armed only by the real-time run() overrun branch.
     shed_until_tick: u64 = 0,
@@ -807,24 +858,35 @@ pub const Game = struct {
     lock_granted_ns: [16]u64 = .{0} ** 16,
     /// Position key for the locked TE (packed xyz); 0 = channel-only lock.
     lock_pos_key: [16]u64 = .{0} ** 16,
-    /// Per-IP join throttle (ms since epoch-ish via monoNs/1e6).
-    join_ip: [16]u32 = .{0} ** 16,
-    join_ip_ms: [16]u64 = .{0} ** 16,
+    /// Per-IP join throttle (ms since epoch-ish via monoNs/1e6). GAP 12: was 16,
+    /// so a busy subnet's extra sources were unthrottled rather than dropped.
+    join_ip: [64]u32 = .{0} ** 64,
+    join_ip_ms: [64]u64 = .{0} ** 64,
     join_ip_n: usize = 0,
-    ban_ip: [32]u32 = .{0} ** 32,
+    /// GAP 12: was 32; a long-lived server can ban more than a handful of
+    /// players without silently forgetting the tail.
+    ban_ip: [128]u32 = .{0} ** 128,
     ban_n: usize = 0,
     /// Sparse block durability: absolute BlockValue.damage at (x,y,z).
-    block_hp_key: [64]u64 = .{0} ** 64,
-    block_hp: [64]u16 = .{0} ** 64,
+    /// GAP 12: was 64, so the 65th damaged block silently lost its damage.
+    block_hp_key: [256]u64 = .{0} ** 256,
+    block_hp: [256]u16 = .{0} ** 256,
     block_hp_n: usize = 0,
     /// Sparse BlockValue.rawData (rotation/meta bits) for door/shape fidelity.
-    block_raw_key: [128]u64 = .{0} ** 128,
-    block_raw: [128]u32 = .{0} ** 128,
+    /// The chunk plane is the source of truth (GAP 13); this cache mirrors the
+    /// hot path and its eviction is a cache miss, not content loss.
+    block_raw_key: [256]u64 = .{0} ** 256,
+    block_raw: [256]u32 = .{0} ** 256,
     block_raw_n: usize = 0,
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
     world_name: []const u8 = "zdtd",
+    /// Sandbox code echoed in the GameStats blob (GameStatsValues.sandbox_code);
+    /// the client decodes TemperatureSurvival / StormFreq / blood-moon gates
+    /// from it (RE sandbox-options §8).
+    sandbox_code: []const u8 = "",
+    sandbox_preset: []const u8 = "",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
     /// Stock operator lists (`admin`, `ban`, `whitelist`), persisted beside
@@ -880,6 +942,7 @@ pub const Game = struct {
     trader_restock_cap: u16 = default_trader_restock_cap,
     trader_restock_refill: u16 = default_trader_restock_refill,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
+    storm_frequency: i32 = default_storm_frequency,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
     pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
@@ -969,6 +1032,9 @@ pub const Game = struct {
             .trader_restock_cap = opts.trader_restock_cap,
             .trader_restock_refill = opts.trader_restock_refill,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
+            .storm_frequency = opts.storm_frequency,
+            .sandbox_code = opts.sandbox_code,
+            .sandbox_preset = opts.sandbox_preset,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
                 .data = @ptrCast(self),
@@ -995,6 +1061,9 @@ pub const Game = struct {
         // Trader restock refill policy (zdtd.toml [sim] trader_restock_*).
         self.sim.trader_restock_cap = opts.trader_restock_cap;
         self.sim.trader_restock_refill = opts.trader_restock_refill;
+        // Sim rules (ADR 0021): defaults overlaid by the mode pack then
+        // zdtd.toml in main.zig; this is the single install point.
+        self.sim.rules = opts.rules;
         errdefer {
             // Network half first so fail-closed webui (after net/admin listen)
             // does not leak FDs in tests/library createWithOptions paths.
@@ -1073,6 +1142,14 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Ally relationships survive restart (allies.zal).
+        self.allies.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load allies", e);
+                return e;
+            }
+        };
+        self.parties.init();
         self.loadBlockMeta() catch |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load block meta", e);
@@ -1089,6 +1166,13 @@ pub const Game = struct {
             // echo it so a save stays reproducible across restarts and hosts.
             std.debug.print("zdtd: worldgen seed={d} (0x{X})\n", .{ seed, seed });
         }
+        // Subbiome noise seed (stock: GetStableHashCode(worldName), asm.il
+        // 1301189). The map name is the deterministic identity; a proc world
+        // keys off its own seed instead.
+        self.sub_noise = subbiome_noise.PerlinNoise.init(if (opts.worldgen_seed) |ws|
+            @intCast(ws & 0x7fffffff)
+        else
+            subbiome_noise.stableHash(opts.game_world));
 
         const assets_paths = @import("../assets/paths.zig");
         assets_paths.setOverrideDirs(opts.config_overrides);
@@ -1399,6 +1483,11 @@ pub const Game = struct {
             self.sim.director.stage_group_fn = &Game.pickStageGroup;
             self.sim.director.spawner_group_ctx = self;
             self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
+            // Plugin kill verdict (T15): routes the sim's death decision to the
+            // Wasm host (on_player_death for players, on_entity_killed for the
+            // rest). Unset hook = no plugins = today's behaviour.
+            self.sim.kill_verdict_ctx = self;
+            self.sim.kill_verdict_fn = &killVerdict;
             if (night_g.len > 0 or day_g.len > 0) {
                 std.debug.print("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
             }
@@ -1456,7 +1545,10 @@ pub const Game = struct {
                 self.world.weather.initFrom(&self.world.biome_layers_table, .{
                     .seed = opts.worldgen_seed orelse util_sim.default_seed,
                     .day_night_length = opts.day_night_length,
-                    .storm_frequency = @as(f32, @floatFromInt(gs_defaults.storm_freq)) / 100.0,
+                    // [sim] storm_frequency percent -> the 1.0x divisor the
+                    // scheduler divides by (0 disables storms). Mirrors the
+                    // GameStats wire value so client and server agree.
+                    .storm_frequency = @as(f32, @floatFromInt(self.storm_frequency)) / 100.0,
                     .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
                 });
                 self.restoreWeather();
@@ -1602,10 +1694,12 @@ pub const Game = struct {
                 .info_port = port,
                 .max_players = self.max_players,
                 .current_players = 0,
-                .server_version = version.stock_wire_announce,
+                .server_version = version.stock_wire_gsi_version,
                 .world_size = 6144,
                 .eac_enabled = false,
                 .password_protected = self.password.len > 0,
+                .sandbox_preset = self.sandbox_preset,
+                .sandbox_code = self.sandbox_code,
             }) catch |err| {
                 std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
             };
@@ -2080,7 +2174,15 @@ pub const Game = struct {
         const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
         const bm = g.world.biomes orelse return .{};
         const biome_id = bm.atWorld(wx, wz) orelse return .{};
-        const set = g.world.biome_layers_table.decosFor(biome_id);
+        // GAP 18: resolve the subbiome per cell (stock decorateChunkRandom ->
+        // GetBiomeOrSubAt). A subbiome hit samples its own list, where the
+        // tree probability mass lives; otherwise the biome's own list applies.
+        const subs = g.world.biome_layers_table.subBiomes(biome_id);
+        var set = g.world.biome_layers_table.decosFor(biome_id);
+        if (subs.len > 0) {
+            const si = subbiome_noise.subBiomeIdx(&g.sub_noise, subs, wx, wz);
+            if (si >= 0) set = subs[@intCast(si)].decos;
+        }
         var out: packages.stock_deco.SpeciesList = .{};
         for (set.slice()) |d| {
             if (out.n >= packages.stock_deco.max_species) break;
@@ -2320,9 +2422,10 @@ pub const Game = struct {
             self.world.flushWait();
         }
         self.sampleFlushCounters();
-        self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+        self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
         self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
+        self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
         self.saveClock() catch |e| logPersistErr(self, "save clock", e);
@@ -3565,10 +3668,26 @@ pub const Game = struct {
                 self.clients[peer].guard.kick_at_tick = 0;
                 self.adminReply("guard cleared\n");
             },
-            .evidence => {
-                var dump: [8192]u8 = undefined;
-                const n = self.evidence.dumpText(&dump);
-                if (n == 0) self.adminReply("evidence empty\n") else self.adminReply(dump[0..n]);
+            .evidence => |path_opt| {
+                if (path_opt) |p| {
+                    // JSONL flush (P4 evidence file): the ring only holds the
+                    // last 64 events, so the operator can persist them.
+                    var path_buf: [1024]u8 = undefined;
+                    const path = if (p.len == 0) blk: {
+                        break :blk std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{self.world.world_dir}) catch "evidence.jsonl";
+                    } else p;
+                    const n = self.dumpEvidenceFile(path) catch |err| {
+                        var eb: [256]u8 = undefined;
+                        self.adminReply(std.fmt.bufPrint(&eb, "evidence dump failed: {s}\n", .{@errorName(err)}) catch "evidence dump failed\n");
+                        return;
+                    };
+                    var mb: [256]u8 = undefined;
+                    self.adminReply(std.fmt.bufPrint(&mb, "evidence dump: {d} events -> {s}\n", .{ n, path }) catch "evidence dumped\n");
+                } else {
+                    var dump: [16384]u8 = undefined;
+                    const n = self.evidence.dumpText(&dump);
+                    if (n == 0) self.adminReply("evidence empty\n") else self.adminReply(dump[0..n]);
+                }
             },
             .gamestage => |maybe_slot| self.adminReplyGameStage(maybe_slot),
             .apm => {
@@ -3592,7 +3711,7 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save world", e);
                 };
-                self.containers.save(self.world.world_dir) catch |e| {
+                self.containers.save(self.world.world_dir, self.allocator) catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
                 };
@@ -3984,7 +4103,7 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save world", e);
                 };
-                self.containers.save(self.world.world_dir) catch |e| {
+                self.containers.save(self.world.world_dir, self.allocator) catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
                 };
@@ -4733,9 +4852,21 @@ pub const Game = struct {
         self.block_hp_n += 1;
     }
 
-    fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
+    /// Apply damage to a block (the single choke point for player dig, zombie
+    /// chew and admin edits). pub so scenarios can drive the on_block_damage
+    /// plugin verdict through the real path.
+    pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
+        // on_block_damage verdict (T15): <0 denies the damage, >0 applies that
+        // percent. No plugin exports the hook -> 0 -> today's behaviour.
+        var applied = dmg;
+        const v = blockDamageVerdict(self, x, y, z, @intCast(dmg));
+        if (v < 0) return self.getBlockHp(x, y, z);
+        if (v > 0) {
+            const scaled: u32 = @as(u32, dmg) * @as(u32, @intCast(v)) / 100;
+            applied = @intCast(@min(scaled, 65535));
+        }
         const cur = self.getBlockHp(x, y, z);
-        const sum: u32 = @as(u32, cur) + dmg;
+        const sum: u32 = @as(u32, cur) + applied;
         const abs: u16 = @intCast(@min(sum, 65535));
         self.setBlockHp(x, y, z, abs);
         return abs;
@@ -5288,10 +5419,12 @@ pub const Game = struct {
             .info_port = self.info_port,
             .max_players = self.max_players,
             .current_players = @intCast(self.countJoined()),
-            .server_version = version.stock_wire_announce,
+            .server_version = version.stock_wire_gsi_version,
             .world_size = 6144,
             .eac_enabled = false,
             .password_protected = self.password.len > 0,
+            .sandbox_preset = self.sandbox_preset,
+            .sandbox_code = self.sandbox_code,
         };
         return try serverinfo_tcp.buildInfoText(buf, info);
     }
@@ -5934,6 +6067,52 @@ pub const Game = struct {
         // Stock composite storage TE and/or zdtd ZTE1 bridge.
         if (std.mem.eql(u8, name, "NetPackageTileEntity")) {
             if (self.quarantineDenies(c, .container)) return;
+            // Vending TE (type 7) first: its payload version i32 (3) cleanly
+            // discriminates it from the storage size-marker and the
+            // workstation version byte, so no other parse can misroute it.
+            {
+                var v_plat: [packages.platform_user.max_platform_len]u8 = undefined;
+                var v_id: [packages.platform_user.max_id_len]u8 = undefined;
+                var v_pw: [vending_mod.max_password_hash]u8 = undefined;
+                var v_allowed_plat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
+                var v_allowed_id: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
+                if (stock_te.parseVendingTeBody(body, &v_plat, &v_id, &v_pw, &v_allowed_plat, &v_allowed_id) catch |err| blk: {
+                    std.debug.print("DBG vend parse err: {s}\n", .{@errorName(err)});
+                    break :blk null;
+                }) |ve| {
+                    const owner = self.sim.playerByPeer(c.slot) orelse return;
+                    const op = self.sim.transform[owner];
+                    const tdx = @as(f32, @floatFromInt(ve.world_x)) - op.x;
+                    const tdy = @as(f32, @floatFromInt(ve.world_y)) - op.y;
+                    const tdz = @as(f32, @floatFromInt(ve.world_z)) - op.z;
+                    const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
+                    if (te_d2 > self.max_edit_range * self.max_edit_range) {
+                        self.harness.counters.inc(.bounds_rejects);
+                        return;
+                    }
+                    const vm = self.vending.get(.{ .x = ve.world_x, .y = ve.world_y, .z = ve.world_z }) orelse return;
+                    // Owner-editable surface (lock / password / allowed users).
+                    // Only the machine's owner may edit; ownership and the
+                    // rental term stay server-applied (the rent SM owns them).
+                    const mine = c.puid_primary.get() orelse c.puid_native.get() orelse return;
+                    if (!vm.owner.matches(mine)) return;
+                    vm.is_locked = ve.is_locked;
+                    if (ve.password.len <= vending_mod.max_password_hash) {
+                        @memcpy(vm.password_hash[0..ve.password.len], ve.password);
+                        vm.password_len = @intCast(ve.password.len);
+                    }
+                    vm.allowed_n = @intCast(@min(ve.allowed_n, vending_mod.max_allowed_users));
+                    var ai: usize = 0;
+                    while (ai < vm.allowed_n) : (ai += 1) {
+                        vm.allowed[ai].set(ve.allowed[ai]) catch {
+                            vm.allowed_n = @intCast(ai);
+                            break;
+                        };
+                    }
+                    try self.sendVendingTe(peer, ve.world_x, ve.world_y, ve.world_z);
+                    return;
+                }
+            }
             if (stock_te.parseStorageTeBody(body)) |parsed| {
                 // Reach: TE writes must be near the acting player (cross-map chest
                 // overwrite + container-store fill guard).
@@ -6361,13 +6540,18 @@ pub const Game = struct {
             }
             return;
         }
-        // Party: echoed to the sender so the client UI unblocks. Neither
-        // NetPackagePartyActions (asm.il 829049) nor NetPackagePartyData
-        // (asm.il 829470) carries a platform identity (both are entity-id
-        // keyed), and zdtd holds no party membership, so there is nothing to
-        // route them to yet.
-        if (std.mem.eql(u8, name, "NetPackagePartyActions") or std.mem.eql(u8, name, "NetPackagePartyData")) {
-            try self.sendGame(peer, name, body);
+        // Party: NetPackagePartyActions (asm.il 829049) carries no platform
+        // identity (entity-id keyed); the server owns the Party state and fans
+        // NetPackagePartyData snapshots out (parties-factions.md §2.2).
+        if (std.mem.eql(u8, name, "NetPackagePartyActions")) {
+            try self.handlePartyActions(c, body);
+            return;
+        }
+        // NetPackagePartyData is ToClient (parties-factions.md §3): the server
+        // constructs every snapshot, so a client sending one is claiming state
+        // it does not own.
+        if (std.mem.eql(u8, name, "NetPackagePartyData")) {
+            self.harness.counters.inc(.ownership_rejects);
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {
@@ -6860,6 +7044,9 @@ pub const Game = struct {
                 // containers. Apply the raw, drive the power gate, echo it back.
                 if (cur_id != 0 and b.block_id == cur_id and b.damage == cur_dmg and b.raw != 0 and b.raw != cur_raw) {
                     self.setBlockRaw(b.x, b.y, b.z, b.raw);
+                    // GAP 13: the switch meta must survive in the chunk plane too
+                    // (persisted ZCH3), not only in the sparse in-memory cache.
+                    self.world.setBlockRawWorld(b.x, b.y, b.z, b.raw) catch {};
                     const on = (packages.blockMeta(b.raw) & packages.block_meta_on) != 0;
                     if (self.sim.power.setSwitchAt(b.x, b.y, b.z, on)) {
                         self.sim.power.resolve();
@@ -6956,7 +7143,16 @@ pub const Game = struct {
                 if (place_id != 0 and self.landClaimBlockId() == place_id) {
                     self.registerClaim(b.x, b.y, b.z, editor_ent);
                 }
-                try self.world.setBlockWorld(b.x, b.y, b.z, place_id);
+                // GAP 13: carry the client's full BlockValue (rotation/meta in
+                // the upper bits) into the chunk plane so doors/wedges render
+                // rotated for a second client and after a relog. Fall back to
+                // the bare id when the wire raw is absent or disagrees (legacy
+                // 14-byte bodies, forged ids).
+                const place_raw: u32 = if (b.raw != 0 and (b.raw & 0xffff) == place_id)
+                    b.raw
+                else
+                    place_id;
+                try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
                 // Vending TE lifecycle (stock BlockVendingMachine.OnBlockAdded /
                 // OnBlockRemoved): placing a vending block seeds its TraderData
                 // store from the blocks.xml TraderID; removal drops the store.
@@ -7184,6 +7380,18 @@ pub const Game = struct {
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageTraderData")) {
+            // Stock ToServer body (asm.il 843046): isEntity | entityId /
+            // tePosition | hasTraderData | TraderData::Write. A real client's
+            // post-trade copy is length-distinguishable from the loadgen/sim
+            // 9-byte trade body (which is exactly 9 bytes).
+            if (body.len > 9 and body[0] <= 1) {
+                if (packages.parseTraderDataToServer(body) catch null) |td| {
+                    if (td.has_trader_data) {
+                        try self.applyTraderDataCopyFrom(c, td);
+                        return;
+                    }
+                }
+            }
             if (body.len >= 9 and (body[8] == 0 or body[8] == 1)) {
                 try self.handleTrade(c, body);
                 return;
@@ -7218,6 +7426,71 @@ pub const Game = struct {
                 offers[0..on],
             );
             try self.sendGame(peer, "NetPackageNPCQuestList", qbody);
+            return;
+        }
+        if (std.mem.eql(u8, name, "NetPackagePlayerVendingMachine")) {
+            // Vending rent / clear (loot-economy.md §6, asm.il 833593):
+            // removing=false rents (or extends) the machine for the sender;
+            // removing=true clears ownership. Server-authoritative: only the
+            // sender's own identity may act, rent costs TraderInfo.RentCost
+            // currency, and the rental term is 30 in-game days.
+            var plat_buf: [packages.platform_user.max_platform_len]u8 = undefined;
+            var id_buf: [packages.platform_user.max_id_len]u8 = undefined;
+            const acc = packages.parseVendingMachineAccess(body, &plat_buf, &id_buf) catch return;
+            const mine = c.puid_primary.get() orelse c.puid_native.get() orelse return;
+            if (!acc.user.eql(mine)) return;
+            const key: vending_mod.PosKey = .{ .x = acc.x, .y = acc.y, .z = acc.z };
+            const vm = self.vending.get(key) orelse return;
+            const day = self.sim.director.clock.day;
+            // Expired rentals clear first (currentDay > rental_end_day).
+            if (vm.rental_end_day > 0 and day > vm.rental_end_day) vm.clear();
+            if (acc.removing) {
+                // Stock TryRemoveVendingMachinePosition acts on the sender's
+                // own per-player list: only the owner may clear the machine.
+                if (!vm.owner.matches(acc.user)) return;
+                vm.clear();
+                try self.sendVendingTe(peer, acc.x, acc.y, acc.z);
+                return;
+            }
+            const info = self.traders.traderInfo(@intCast(vm.trader_id)) orelse return;
+            if (!info.rentable) return;
+            if (vm.rental_end_day > 0 and !vm.owner.matches(acc.user)) return; // other owner (CanRent 1)
+            const coins = self.items.ecsIdByName("casinoCoin");
+            if (coins == 0) return;
+            const ps = self.sim.playerByPeer(c.slot) orelse return;
+            if (!self.sim.mask[ps].wallet) return;
+            // One machine per player (CanRent 2, checkAlreadyRentingVM).
+            if (vm.rental_end_day == 0) {
+                for (self.vending.items[0..], self.vending.used[0..]) |*other, u| {
+                    if (!u) continue;
+                    if (&other.* == vm) continue;
+                    if (other.rental_end_day > 0 and other.owner.matches(acc.user)) return;
+                }
+            }
+            // Sync wallet from inventory coins (same rule as trade).
+            if (self.sim.mask[ps].inventory) {
+                const inv_coins = self.sim.inventory[ps].countItem(coins);
+                if (inv_coins > self.sim.wallet[ps].coins) self.sim.wallet[ps].coins = inv_coins;
+            }
+            const cost: u32 = @intCast(@max(0, info.rent_cost));
+            if (self.sim.wallet[ps].coins < cost) return; // insufficient currency (CanRent 3)
+            if (self.sim.mask[ps].inventory) {
+                const have = self.sim.inventory[ps].countItem(coins);
+                const from_inv: u32 = @min(have, cost);
+                if (from_inv > 0) {
+                    if (!self.sim.inventory[ps].removeItem(coins, @intCast(from_inv))) return;
+                    self.sim.markDirty(ps, .{ .inv = true });
+                }
+            }
+            self.sim.wallet[ps].coins -= cost;
+            vm.owner.set(acc.user) catch return;
+            // Stock term: RentTimeInDays (trader_info rent_time, default 30).
+            const term: i32 = if (info.rent_time > 0) info.rent_time else 30;
+            const day_i: i32 = @intCast(day);
+            vm.rental_end_day = if (vm.rental_end_day > 0) vm.rental_end_day + term else day_i + term;
+            vm.rentable = info.rentable;
+            // The owning player sees its machine's stock; re-send the TE.
+            try self.sendVendingTe(peer, acc.x, acc.y, acc.z);
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageVehicleDataSync")) {
@@ -7411,6 +7684,71 @@ pub const Game = struct {
             const ts = self.sim.slotOfNetId(t.trader_entity);
             try self.sendTraderSnapshot(p, ts);
         }
+    }
+
+    /// Stock NetPackageTraderData::ProcessPackage (asm.il 843218): mirror the
+    /// client's post-trade TraderData onto the server's trader / vending stock
+    /// (TraderData.CopyFrom). The client computes prices and moves inventory
+    /// locally; the server accepts the resulting stock deltas and rebroadcasts
+    /// the now-authoritative copy to observers. Price/sell stay server-owned
+    /// (the wire TraderData carries no price; the client derives it from econ x
+    /// markup).
+    fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
+        var entries_buf: [ecs.components.max_stock]packages.stock_entity.TraderDataReadEntry = undefined;
+        var tr: wire_binary.Reader = .{ .data = td.trader_data };
+        const read = packages.stock_entity.readTraderDataBody(&tr, &entries_buf) catch return;
+        if (td.is_entity) {
+            const ts = self.sim.slotOfNetId(td.entity_id) orelse return;
+            if (!self.sim.mask[ts].trader_stock) return;
+            const st = &self.sim.trader_stock[ts];
+            var i: usize = 0;
+            while (i < read.n) : (i += 1) {
+                const src = entries_buf[i];
+                if (src.item.type_id == 0) {
+                    st.entries[i] = .{};
+                    continue;
+                }
+                const iname = self.items.nameByStockType(src.item.type_id) orelse continue;
+                const eid = self.items.ecsIdByName(iname);
+                if (eid == 0) continue;
+                st.entries[i] = .{
+                    .item = eid,
+                    .count = src.item.count,
+                    .markup = src.markup,
+                    .price = st.entries[i].price,
+                    .sell = st.entries[i].sell,
+                };
+            }
+            // Drop the entries the client did not send back.
+            while (i < st.entries.len) : (i += 1) st.entries[i] = .{};
+            if (read.money >= 0) st.wallet = read.money;
+            if (c.peer) |p| try self.sendTraderSnapshot(p, ts);
+            return;
+        }
+        const vm = self.vending.get(.{ .x = td.te_x, .y = td.te_y, .z = td.te_z }) orelse return;
+        var i: usize = 0;
+        while (i < read.n and i < vending_mod.max_vending_stock) : (i += 1) {
+            const src = entries_buf[i];
+            if (src.item.type_id == 0) {
+                vm.stock[i] = .{};
+                continue;
+            }
+            // The vending store is wire-oriented (type_id is the stock type).
+            vm.stock[i] = .{ .type_id = src.item.type_id, .count = src.item.count, .markup = src.markup };
+        }
+        while (i < vending_mod.max_vending_stock) : (i += 1) vm.stock[i] = .{};
+        if (read.money >= 0) vm.available_money = read.money;
+        try self.sendVendingTe(c.peer.?, td.te_x, td.te_y, td.te_z);
+    }
+
+    /// Write the P4 evidence ring as JSONL to `path` (admin `evidence dump`).
+    /// Returns the number of events written; fails loudly on I/O error so the
+    /// operator never mistakes a failed flush for a successful one.
+    pub fn dumpEvidenceFile(self: *Game, path: []const u8) !usize {
+        var dump: [16384]u8 = undefined;
+        const n = self.evidence.dumpText(&dump);
+        try io_fs.writeFile(self.allocator, path, dump[0..n]);
+        return self.evidence.n;
     }
 
     /// Stock multiplayer waits for NetPackageConfigFile for each SendToClients XML
@@ -7901,7 +8239,7 @@ pub const Game = struct {
     /// Resetting the slot to `.{}` also clears guard/quarantine state. `reason`
     /// names the dropping path so the server log keeps a complete join/leave
     /// trail: joins are logged, so drops (quit, kick, ban, guard) must be too.
-    fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
+    pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
         std.debug.print(
             "zdtd: player dropped slot={d} entity={d} reason={s}\n",
             .{ slot, self.clients[slot].entity_id, reason },
@@ -7921,6 +8259,13 @@ pub const Game = struct {
         self.clearLocksForPeer(slot);
         // Offline claims start their expiry clock and lose the online HP bonus.
         self.markClaimsForEntity(self.clients[slot].entity_id, false);
+        // Stock ServerHandleDisconnectParty (parties-factions.md §2.2): a
+        // disconnect removes the player from any party and notifies the rest.
+        if (self.parties.removePlayer(self.clients[slot].entity_id)) |r| {
+            self.broadcastPartyRemoval(r, @intFromEnum(packages.stock_party.PartyActions.disconnected)) catch |err| {
+                std.debug.print("zdtd: party disconnect broadcast failed: {s}\n", .{@errorName(err)});
+            };
+        }
         self.clients[slot] = .{};
         self.refreshInfoPlayers();
     }
@@ -8115,15 +8460,18 @@ pub const Game = struct {
         const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).
         _ = systems.questAcceptStarter(&self.sim, c.slot);
-        var qbuf: [2]packages.stock_quest.StockQuestWrite = undefined;
-        var reward_store: [2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire = undefined;
-        var obj_val_store: [2][ecs.quest.max_phases]u8 = undefined;
+        // GAP 12: the join PDF journal was capped at 2 quests while the sim
+        // journal holds max_journal (8); a third active quest silently vanished
+        // from the client. All stores now size to the sim journal.
+        var qbuf: [ecs.components.max_journal]packages.stock_quest.StockQuestWrite = undefined;
+        var reward_store: [ecs.components.max_journal][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire = undefined;
+        var obj_val_store: [ecs.components.max_journal][ecs.quest.max_phases]u8 = undefined;
         // Caller-frame storage for every slice StockQuestWrite points into:
         // the journal writer reads them after this frame's callees return, so
         // a callee-local store would dangle (kind_store used to live inside
         // fillStockJournalWrites and the body writer could read garbage).
-        var kind_store: [2][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
-        var pos_store: [2][max_quest_position_data]packages.stock_quest.PositionEntry = undefined;
+        var kind_store: [ecs.components.max_journal][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
+        var pos_store: [ecs.components.max_journal][max_quest_position_data]packages.stock_quest.PositionEntry = undefined;
         const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
         // Cap always_unlocked list so PlayerId stays under body_buf slice.
         var unlock_names: [64][]const u8 = undefined;
@@ -8273,7 +8621,9 @@ pub const Game = struct {
     }
 
     /// The bPersistent GameStats values (stock defaults otherwise).
-    fn gameStatsValues(self: *const Game) packages.GameStatsValues {
+    /// Effective GameStats blob values (wire NetPackageGameStats). pub so
+    /// scenarios can assert configured values (storm_frequency, ...) land.
+    pub fn gameStatsValues(self: *const Game) packages.GameStatsValues {
         const clk = self.sim.director.clock;
         return .{
             .game_difficulty = self.sim.director.difficulty,
@@ -8293,6 +8643,9 @@ pub const Game = struct {
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
             .air_drop_frequency = self.air_drop_interval_hours,
+            .storm_freq = self.storm_frequency,
+            .sandbox_preset = self.sandbox_preset,
+            .sandbox_code = self.sandbox_code,
         };
     }
 
@@ -8407,14 +8760,17 @@ pub const Game = struct {
         }
     }
 
-    fn fillStockJournalWrites(
+    /// Fill stock Quest.Write snapshots for active journal slots. pub so the
+    /// GAP 12 scenario can assert the full journal (not just the old 2) rides
+    /// the join PDF.
+    pub fn fillStockJournalWrites(
         self: *Game,
         peer_slot: usize,
         out: []packages.stock_quest.StockQuestWrite,
-        reward_store: *[2][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire,
-        obj_val_store: *[2][ecs.quest.max_phases]u8,
-        kind_store: *[2][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind,
-        pos_store: *[2][max_quest_position_data]packages.stock_quest.PositionEntry,
+        reward_store: *[ecs.components.max_journal][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire,
+        obj_val_store: *[ecs.components.max_journal][ecs.quest.max_phases]u8,
+        kind_store: *[ecs.components.max_journal][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind,
+        pos_store: *[ecs.components.max_journal][max_quest_position_data]packages.stock_quest.PositionEntry,
     ) usize {
         const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
         if (!self.sim.mask[ps].journal) return 0;
@@ -9943,6 +10299,20 @@ pub const Game = struct {
         client_entity_id: i32,
     ) !void {
         const bi = self.sim.slotOfNetId(net_id) orelse return;
+        // Stock ItemDropServer → EntityItem: a dropped item carrying
+        // DistractionTags (V3.1.0 ships decoy) seeds the EntityItem distraction
+        // state (SetupDistraction: DistractionRadius²/Lifetime/Strength) so
+        // tickItemDistractions can broadcast it to nearby zombies.
+        if (self.sim.mask[bi].inventory) {
+            const dropped_item = self.sim.inventory[bi].slots[0].item_id;
+            if (self.items.distractionFor(dropped_item)) |d| {
+                self.sim.loot_bag[bi].distraction_tags = d.tags;
+                self.sim.loot_bag[bi].distraction_radius_sq = d.radius * d.radius;
+                self.sim.loot_bag[bi].distraction_lifetime = d.lifetime;
+                self.sim.loot_bag[bi].distraction_strength = d.strength;
+                self.sim.loot_bag[bi].distraction_eat_ticks = d.eat_ticks;
+            }
+        }
         const slot = if (stack.type_id != 0) stack else blk: {
             // Rebuild from sim inventory first stack.
             if (self.sim.mask[bi].inventory) {
@@ -11118,9 +11488,31 @@ pub const Game = struct {
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
             self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
+            // A chewed-up eat distraction (EntityItem.OnUpdateEntity SetDead,
+            // asm.il EntityItem:0100-0113) is removed like a collected drop:
+            // EntityRemove(Despawned) so every observer drops the local item.
+            {
+                var bs: ecs.Slot = 0;
+                while (bs < ecs.max_entities) : (bs += 1) {
+                    if (!self.sim.alive[bs] or !self.sim.mask[bs].loot_bag) continue;
+                    const b = self.sim.loot_bag[bs];
+                    if ((b.distraction_tags & 1) == 0 or b.distraction_eat_ticks > 0) continue;
+                    const lid = self.sim.network_id[bs].id;
+                    if (packages.buildRemoveBodyReason(&self.body_buf, lid, .despawned)) |rm| {
+                        self.broadcast("NetPackageEntityRemove", rm) catch {};
+                    } else |_| {}
+                    self.sim.destroy(bs);
+                }
+            }
             // Land-claim expiry on the in-game day roll (owner offline too long).
             if (self.claims_last_day != self.sim.director.clock.day) {
                 self.claims_last_day = self.sim.director.clock.day;
+                // Expired vending rentals return to unowned (loot-economy §6:
+                // currentDay > rentalEndDay -> ClearVendingMachine).
+                for (self.vending.items[0..], self.vending.used[0..]) |*v, u| {
+                    if (!u) continue;
+                    if (v.rental_end_day > 0 and self.sim.director.clock.day > v.rental_end_day) v.clear();
+                }
                 self.expireClaims();
             }
             // BloodMoonDay re-send on the day roll (GAP §6): a client that
@@ -11253,15 +11645,25 @@ pub const Game = struct {
                 const peer: usize = @intCast(self.sim.player[cq.slot].peer_slot);
                 if (peer >= self.clients.len) continue;
                 const d = self.sim.catalog.byId(cq.def_id) orelse continue;
+                // on_quest_complete verdict (T15): <0 withholds the payout,
+                // >0 scales it (200 = double). 0 keeps today's behaviour. The
+                // wallet coins were credited in the sim at completion; this
+                // gates the item/exp half (and can be extended to coins when
+                // the sim gains a verdict path of its own).
+                const sv = self.plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
+                const v = if (sv != 0) sv else self.wasm_plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
+                if (v < 0) continue;
+                const pct: u32 = if (v > 0) @intCast(v) else 100;
                 var ri: usize = 0;
                 while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
                     const spec = d.rewards[ri];
+                    const scaled: u32 = @as(u32, spec.value) * pct / 100;
                     switch (spec.kind) {
                         .item, .loot_item => {
                             const eid = self.items.ecsIdByName(spec.item_name);
-                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(spec.value, 65535)));
+                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
                         },
-                        .exp => self.awardXp(peer, spec.value),
+                        .exp => self.awardXp(peer, scaled),
                         else => {},
                     }
                 }
@@ -11281,9 +11683,10 @@ pub const Game = struct {
                 defer es.end();
                 self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
             }
-            self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+            self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
             self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
             self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
+            self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
             self.saveClock() catch |e| logPersistErr(self, "save clock", e);
@@ -11617,6 +12020,159 @@ pub const Game = struct {
         try self.replicate();
     }
 
+    /// Stock `NetPackagePartyActions.ProcessPackage` (parties-factions.md §2.2):
+    /// the client never mutates the authoritative `Party`; each
+    /// `currentOperation` selects a server handler, and every mutation fans a
+    /// `NetPackagePartyData` snapshot out to the party-relevant peers. Entity
+    /// ids are validated against live joined clients at the trust boundary.
+    fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
+        var voice_buf: [64]u8 = undefined;
+        const a = packages.stock_party.readActions(body, &voice_buf) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return;
+        };
+        const me = c.entity_id;
+        // 2 ChangeLead targets a party member; 4 KickFromParty targets another
+        // player. Both must reference a live joined entity.
+        const target_ok = a.invited_entity >= 0 and self.clientByEntityId(a.invited_entity) != null;
+        switch (a.action) {
+            1 => { // AcceptInvite
+                if (a.invited_by_entity < 0 or !target_ok) return;
+                const p = self.parties.acceptInvite(a.invited_by_entity, a.invited_entity) orelse return;
+                try self.broadcastPartySnapshot(
+                    p.id,
+                    p.leader_index,
+                    p.voice_lobby[0..p.voice_len],
+                    p.members[0..p.n],
+                    a.invited_entity,
+                    a.action,
+                    false,
+                );
+            },
+            2 => { // ChangeLead
+                if (!target_ok) return;
+                const p = self.parties.partyByMember(me) orelse return;
+                if (!self.parties.setLeader(p.id, a.invited_entity)) return;
+                try self.broadcastPartySnapshot(
+                    p.id,
+                    p.leader_index,
+                    p.voice_lobby[0..p.voice_len],
+                    p.members[0..p.n],
+                    a.invited_entity,
+                    a.action,
+                    false,
+                );
+            },
+            3 => { // LeaveParty
+                if (self.parties.removePlayer(me)) |r| {
+                    try self.broadcastPartyRemoval(r, a.action);
+                }
+            },
+            4 => { // KickFromParty
+                if (!target_ok) return;
+                if (self.parties.removePlayer(a.invited_entity)) |r| {
+                    try self.broadcastPartyRemoval(r, a.action);
+                }
+            },
+            5 => { // Disconnected
+                if (self.parties.removePlayer(me)) |r| {
+                    try self.broadcastPartyRemoval(r, a.action);
+                }
+            },
+            6 => { // JoinAutoParty (AutoParty world stat is read by Game)
+                const p = self.parties.autoJoin(me) orelse return;
+                try self.broadcastPartySnapshot(
+                    p.id,
+                    p.leader_index,
+                    p.voice_lobby[0..p.voice_len],
+                    p.members[0..p.n],
+                    me,
+                    a.action,
+                    false,
+                );
+            },
+            7 => { // SetVoiceLobby
+                const p = self.parties.partyByMember(me) orelse return;
+                if (!self.parties.setVoiceLobby(p.id, a.voice_lobby)) return;
+                try self.broadcastPartySnapshot(
+                    p.id,
+                    p.leader_index,
+                    p.voice_lobby[0..p.voice_len],
+                    p.members[0..p.n],
+                    me,
+                    a.action,
+                    false,
+                );
+            },
+            // 0 SendInvite is invite bookkeeping only (AddPartyInvite +
+            // tooltip); no party mutation, so no snapshot.
+            else => {},
+        }
+    }
+
+    /// NetPackagePartyData fan-out (parties-factions.md §3): recipients are the
+    /// current members plus the changed entity (a kicked player must see the
+    /// party leave too); on disband only the last member gets the
+    /// `disbandParty=true` snapshot, matching stock's one-member auto-leave.
+    fn broadcastPartySnapshot(
+        self: *Game,
+        party_id: i32,
+        leader_index: u8,
+        voice: []const u8,
+        members: []const i32,
+        changed: i32,
+        action: u8,
+        disband: bool,
+    ) !void {
+        var pbuf: [256]u8 = undefined;
+        const body = try packages.stock_party.buildDataBody(&pbuf, .{
+            .party_id = party_id,
+            .leader_index = leader_index,
+            .voice_lobby = voice,
+            .members = members,
+            .changed_entity = changed,
+            .party_action = action,
+            .disband = disband,
+        });
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null) continue;
+            const is_member = !disband and blk: {
+                for (members) |m| {
+                    if (m == cl.entity_id) break :blk true;
+                }
+                break :blk false;
+            };
+            if (!is_member and cl.entity_id != changed) continue;
+            const peer = cl.peer.?;
+            self.sendGame(peer, "NetPackagePartyData", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send PartyData failed: {s}\n", .{@errorName(err)});
+            };
+        }
+    }
+
+    /// Snapshot after a removal: on disband the party is already freed, so the
+    /// Removal carries the surviving member ids + leader index.
+    fn broadcastPartyRemoval(self: *Game, r: ecs.party.Removal, action: u8) !void {
+        try self.broadcastPartySnapshot(
+            r.party_id,
+            r.leader_index,
+            "",
+            r.members[0..r.n],
+            r.changed_entity,
+            action,
+            r.disband,
+        );
+    }
+
+    /// Entity id → joined Client (max_clients is small; linear scan is fine).
+    fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
+        for (&self.clients) |*cl| {
+            if (cl.joined and cl.entity_id == entity_id) return cl;
+        }
+        return null;
+    }
+
     /// Stock `AllyStore::ProcessAllyRequest` (asm.il 885024): take the pair's
     /// current status, compute the transition, apply it, and tell the clients
     /// with `NetPackageAllyResponse` (asm.il 886390). Stock sends that to every
@@ -11925,6 +12481,87 @@ test "land claim removed when keystone breaks and expires offline" {
     g.land_claims[0].owner_seen_day = 1;
     g.expireClaims();
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+}
+
+test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
+    // The claim table was 256: the 257th register silently vanished. Now 1024;
+    // register 300 and prove the save/restart round trip keeps every claim.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    var i: usize = 0;
+    while (i < 300) : (i += 1) {
+        g.registerClaim(@intCast(1000 + i * 2), 70, @intCast(i), cl.entity_id);
+    }
+    try std.testing.expectEqual(@as(usize, 300), g.land_claims_n);
+    try g.saveClaims();
+
+    const g2 = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g2.deinit();
+        std.testing.allocator.destroy(g2);
+    }
+    try std.testing.expectEqual(@as(usize, 300), g2.land_claims_n);
+    std.debug.print("PASS claims-cap: 300 claims round-trip (cap was 256)\n", .{});
+}
+
+test "block durability holds past the old 64 cap (GAP 12)" {
+    // The sparse damage table was 64: the 65th damaged block silently lost its
+    // damage (FIFO eviction). Now 256; damage 100 distinct blocks and verify
+    // every one keeps its absolute value.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        _ = g.addBlockDamage(@intCast(200 + i), 70, 300, 5);
+    }
+    try std.testing.expectEqual(@as(usize, 100), g.block_hp_n);
+    var ok = true;
+    i = 0;
+    while (i < 100) : (i += 1) {
+        if (g.getBlockHp(@intCast(200 + i), 70, 300) != 5) ok = false;
+    }
+    try std.testing.expect(ok);
+    std.debug.print("PASS blockhp-cap: 100 damaged blocks retain damage (cap was 64)\n", .{});
+}
+
+test "evidence JSONL flush writes the ring to a file (P4)" {
+    // admin `evidence dump` persists the ring; the file must round-trip the
+    // formatted JSONL lines (no secrets, no packets).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    g.evidence.record(.{ .tick = 7, .peer_local = 2, .entity_id = 103, .detector = .bounds, .severity = .strong, .surface = .block, .observed = 100, .bound = 96 });
+    g.evidence.record(.{ .tick = 9, .detector = .phase, .severity = .hard });
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{world_dir});
+    const n = try g.dumpEvidenceFile(path);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    const read = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(read);
+    try std.testing.expect(std.mem.indexOf(u8, read, "\"det\":\"bounds\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, read, "\"sev\":\"hard\"") != null);
 }
 
 test "offline init failure restores deterministic sim globals" {

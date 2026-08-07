@@ -16,6 +16,7 @@ pub const stock_quest = @import("stock_quest.zig");
 pub const stock_buff = @import("stock_buff.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
+pub const stock_party = @import("stock_party.zig");
 pub const te_types = @import("te_types.zig");
 
 pub const PackageName = enum {
@@ -2959,6 +2960,28 @@ pub fn parseTraderTrade(body: []const u8) !struct { trader_entity: i32, item: u1
     };
 }
 
+/// Stock NetPackagePlayerVendingMachine.read (asm.il 833593-833690): a
+/// PlatformUserIdentifierAbs stream (FromStream(reader, false, false)), the
+/// Vector3i position, and the removing flag. The client sends it when it rents
+/// (removing=false) or clears (removing=true) a vending machine.
+pub const VendingMachineAccess = struct {
+    user: platform_user.Id,
+    x: i32,
+    y: i32,
+    z: i32,
+    removing: bool,
+};
+
+pub fn parseVendingMachineAccess(body: []const u8, plat_buf: []u8, id_buf: []u8) !VendingMachineAccess {
+    var r: binary.Reader = .{ .data = body };
+    const user = (try platform_user.read(&r, plat_buf, id_buf)) orelse return error.EndOfStream;
+    const x = try r.readI32();
+    const y = try r.readI32();
+    const z = try r.readI32();
+    const removing = try r.readBool();
+    return .{ .user = user, .x = x, .y = y, .z = z, .removing = removing };
+}
+
 pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, side: u8) ![]u8 {
     if (buf.len < 9) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], trader_entity, .little);
@@ -2966,6 +2989,42 @@ pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, 
     std.mem.writeInt(u16, buf[6..8], qty, .little);
     buf[8] = side;
     return buf[0..9];
+}
+
+/// Stock NetPackageTraderData ToServer header (asm.il 843046): the first byte
+/// is isEntity; then entityId (i32) or the TE position Vector3i (3 x i32);
+/// then hasTraderData; the TraderData::Write body follows when true. The real
+/// client sends its post-trade copy back here (loot-economy.md §5); the server
+/// mirrors it onto the trader / vending stock (TraderData.CopyFrom).
+pub const TraderDataToServer = struct {
+    is_entity: bool,
+    entity_id: i32 = -1,
+    te_x: i32 = 0,
+    te_y: i32 = 0,
+    te_z: i32 = 0,
+    has_trader_data: bool = false,
+    /// TraderData::Write body (when has_trader_data).
+    trader_data: []const u8 = &.{},
+};
+
+pub fn parseTraderDataToServer(body: []const u8) !TraderDataToServer {
+    if (body.len < 6) return error.EndOfStream;
+    const is_entity = body[0] != 0;
+    var t: TraderDataToServer = .{ .is_entity = is_entity };
+    if (is_entity) {
+        if (body.len < 6) return error.EndOfStream;
+        t.entity_id = std.mem.readInt(i32, body[1..5], .little);
+        t.has_trader_data = body[5] != 0;
+        t.trader_data = if (t.has_trader_data) body[6..] else &.{};
+    } else {
+        if (body.len < 14) return error.EndOfStream;
+        t.te_x = std.mem.readInt(i32, body[1..5], .little);
+        t.te_y = std.mem.readInt(i32, body[5..9], .little);
+        t.te_z = std.mem.readInt(i32, body[9..13], .little);
+        t.has_trader_data = body[13] != 0;
+        t.trader_data = if (t.has_trader_data) body[14..] else &.{};
+    }
+    return t;
 }
 
 /// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
