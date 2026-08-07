@@ -167,6 +167,14 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     const rm_id = packages.idOf("NetPackageEntityRemove").?;
     try std.testing.expect(cap_a.findPkgId(rm_id) == null);
     try std.testing.expect(cap_b.findPkgId(rm_id) == null);
+    // Mob health replication: the fatal hit marks hp dirty; the next replicate
+    // pass sends EntityStatChanged(health 0) to observers, so the client sees
+    // the death (kind health=0, value 0) instead of a full-health body.
+    try g.step();
+    const stat_id = packages.idOf("NetPackageEntityStatChanged").?;
+    const stat_b = cap_b.findPkgIdEntity(stat_id, zid) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), stat_b[8]); // health kind
+    try std.testing.expectApproxEqAbs(@as(f32, 0), @bitCast(std.mem.readInt(u32, stat_b[9..13], .little)), 0.01);
     // Fast-forward the dwell: the tick sweep broadcasts EntityRemove once the
     // corpse timer expires (0.2 s -> 4 ticks, then the sweep fires).
     g.sim.health[zs].corpse_seconds = 0.2;

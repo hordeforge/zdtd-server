@@ -1978,12 +1978,14 @@ gamestage, no wandering hordes, and no screamers.
   (sweep in tick, kill handler defers the remove), `asm.il:450657-450759`,
   `Data/Config/entityclasses.xml:692-693`
 
-- **Zombie health replication to clients** `MISSING`
-  EntityStatChanged is only sent for player vitals. Zombie HP lives server-side and
-  the client's local copy stays at the class default until EntityRemove arrives.
-  Acceptable for the current damage model but there is no server-to-client health
-  correction.
-  *Anchors:* `src/server/game.zig:6507-6543`, `:4936-4947`
+- **Zombie health replication to clients** `WORKS`
+  The dirty-hp replicate pass now sends `EntityStatChanged(health)` for
+  zombies and animals to observing clients (not just player vitals): C2S
+  damage, AI melee, admin damage and the corpse-dwell hp=0 all reach the
+  client, so the health bar drops and the death shows instead of a
+  full-health body until EntityRemove. Owner-skip logic stays player-only.
+  *Anchors:* `src/server/game.zig` (`replicatePlayerHealth`),
+  `asm.il:199650` (SendStatChangePacket), `asm.il:200440`
 
 - **Animation / ragdoll / look-at replication for AI** `MISSING`
   EntityAnimationData is accepted from clients and dropped; EntityRagdoll,

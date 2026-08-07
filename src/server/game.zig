@@ -10501,10 +10501,12 @@ pub const Game = struct {
             // stock clears Stat.Changed right after the poll, and a bit left set
             // would re-send the same value on every later tick.
             self.sim.dirty[i].hp = false;
-            // Player vitals only. Stock also runs EntityStats::TickWait for NPCs;
-            // zdtd still keeps zombie hp server-side, so nothing consumes the bit
-            // for them (docs/GAP_ANALYSIS.md, entity lifecycle).
-            if (!self.sim.mask[i].player or !self.sim.mask[i].health) continue;
+            const is_player = self.sim.mask[i].player;
+            const is_mob = self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal;
+            // Player vitals plus mob health (EntityStats::TickWait + SendStat
+            // ChangePacket cover NPCs too; the corpse-dwell hp=0 must reach the
+            // client so the death shows instead of a full-health body).
+            if ((!is_player and !is_mob) or !self.sim.mask[i].health) continue;
             if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
             const nid = self.sim.network_id[i].id;
             if (nid <= 0) continue;
@@ -10527,7 +10529,7 @@ pub const Game = struct {
                 const peer = cl.peer orelse continue;
                 // No owner skip here (motion has one): the victim's own client is
                 // exactly who needs this, it drives the flinch and the death screen.
-                const owner = self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot));
+                const owner = is_player and self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot));
                 if (!owner and !self.clientObserves(cl, tp.x, tp.z)) continue;
                 // Reliable: a dropped hp=0 leaves the player alive on their own
                 // screen but dead to the server, unable to fight back.
