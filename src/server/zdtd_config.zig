@@ -84,6 +84,10 @@ pub const Sim = struct {
     block_refill_ns: ?u64 = null,
     min_damage_gap_ns: ?u64 = null,
     damage_burst_max: ?u8 = null,
+    /// Trader restock refill policy: stackable entries grow toward the cap by
+    /// at most the refill each restock.
+    trader_restock_cap: ?u16 = null,
+    trader_restock_refill: ?u16 = null,
 };
 
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
@@ -278,6 +282,10 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
             f.sim.min_damage_gap_ns = try parseU64(val);
         } else if (std.mem.eql(u8, key, "damage_burst_max")) {
             f.sim.damage_burst_max = try parseU8(val);
+        } else if (std.mem.eql(u8, key, "trader_restock_cap")) {
+            f.sim.trader_restock_cap = try parseU16(val);
+        } else if (std.mem.eql(u8, key, "trader_restock_refill")) {
+            f.sim.trader_restock_refill = try parseU16(val);
         } else {
             return unknownKey(section, key);
         }
@@ -324,6 +332,9 @@ fn parseU64(v: []const u8) !u64 {
 }
 fn parseU8(v: []const u8) !u8 {
     return std.fmt.parseInt(u8, stripQuotes(v), 10);
+}
+fn parseU16(v: []const u8) !u16 {
+    return std.fmt.parseInt(u16, stripQuotes(v), 10);
 }
 fn parseI32(v: []const u8) !i32 {
     return std.fmt.parseInt(i32, stripQuotes(v), 10);
@@ -382,6 +393,8 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.block_refill_ns) |v| opts.block_refill_ns = v;
     if (f.sim.min_damage_gap_ns) |v| opts.min_damage_gap_ns = v;
     if (f.sim.damage_burst_max) |v| opts.damage_burst_max = v;
+    if (f.sim.trader_restock_cap) |v| opts.trader_restock_cap = v;
+    if (f.sim.trader_restock_refill) |v| opts.trader_restock_refill = v;
 }
 
 /// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
@@ -486,6 +499,14 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: damage_burst_max=0 invalid; using 1\n", .{});
         opts.damage_burst_max = 1;
     }
+    if (opts.trader_restock_cap == 0) {
+        std.debug.print("zdtd: trader_restock_cap=0 invalid; using 1\n", .{});
+        opts.trader_restock_cap = 1;
+    }
+    if (opts.trader_restock_refill == 0) {
+        std.debug.print("zdtd: trader_restock_refill=0 invalid; using 1\n", .{});
+        opts.trader_restock_refill = 1;
+    }
     if (opts.trader_wallet_dukes < 0) {
         std.debug.print("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
         opts.trader_wallet_dukes = 0;
@@ -573,6 +594,8 @@ test "applyToInitOptions deco_trees only when set" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -681,6 +704,8 @@ test "sanitizeInitOptions repairs bad radii" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{
@@ -722,6 +747,8 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{};
@@ -756,6 +783,8 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{ .max_streamed_chunks = 999 };
@@ -789,6 +818,8 @@ test "guard policy merges from [authority] and clamps" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -862,6 +893,8 @@ test "[perf] switches default off and merge only when set" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -922,6 +955,8 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
         block_refill_ns: u64 = 33_000_000,
         min_damage_gap_ns: u64 = 80_000_000,
         damage_burst_max: u8 = 4,
+        trader_restock_cap: u16 = 50,
+        trader_restock_refill: u16 = 10,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,

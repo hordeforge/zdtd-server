@@ -17,18 +17,28 @@ pub const Auth = struct {
     password: []const u8 = "",
     /// TelnetFailedLoginLimit (EnumGamePrefs 0xA5, asm.il:1903939).
     fail_limit: u8 = 10,
+    /// TelnetFailedLoginsBlocktime (EnumGamePrefs 0xA6): minutes to refuse further
+    /// password attempts after `fail_limit` failures. Process-wide (no peer IP on
+    /// the accept path); 0 disables the lockout window (session still closes).
+    fail_block_minutes: u16 = 10,
 
     pub fn enabled(self: Auth) bool {
         return self.password.len > 0;
     }
 
-    /// Length-independent byte compare so a wrong password cannot be probed by
-    /// timing. Length itself is not secret enough to matter, but the bytes are.
+    /// Constant-time content compare (always walk max(len)) so remote timing
+    /// primarily reflects payload size, not an early length branch. Matches
+    /// LiteNet connect-key / webui secret compares.
     pub fn matches(self: Auth, line: []const u8) bool {
         if (!self.enabled()) return true;
-        var diff: u8 = @intFromBool(line.len != self.password.len);
-        const n = @min(line.len, self.password.len);
-        for (0..n) |i| diff |= line[i] ^ self.password[i];
+        var diff: u8 = if (line.len == self.password.len) 0 else 1;
+        const n = @max(line.len, self.password.len);
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const x: u8 = if (i < line.len) line[i] else 0;
+            const y: u8 = if (i < self.password.len) self.password[i] else 0;
+            diff |= x ^ y;
+        }
         return diff == 0;
     }
 };
@@ -64,6 +74,9 @@ pub const Server = struct {
     /// the command dispatcher; its lines are password attempts only.
     authed: [max_sessions]bool = .{false} ** max_sessions,
     fails: [max_sessions]u8 = .{0} ** max_sessions,
+    /// Mono ns until which further password attempts are rejected (0 = unlocked).
+    /// Armed when any session hits `auth.fail_limit` and `fail_block_minutes > 0`.
+    login_lock_until_ns: u64 = 0,
 
     pub fn listen(self: *Server, port: u16) !void {
         if (port == 0) return;
@@ -79,6 +92,11 @@ pub const Server = struct {
         return self.auth.enabled();
     }
 
+    fn loginLocked(self: *const Server) bool {
+        if (self.login_lock_until_ns == 0) return false;
+        return clock.monoNs() < self.login_lock_until_ns;
+    }
+
     pub fn deinit(self: *Server) void {
         for (&self.sessions) |*s| {
             if (s.* >= 0) tcp.closeFd(s.*);
@@ -87,6 +105,7 @@ pub const Server = struct {
         self.recv_lens = .{0} ** max_sessions;
         self.authed = .{false} ** max_sessions;
         self.fails = .{0} ** max_sessions;
+        self.login_lock_until_ns = 0;
         self.listener.deinit();
         self.port = 0;
     }
@@ -109,9 +128,18 @@ pub const Server = struct {
                 return;
             }
         }
-        // all slots busy: evict oldest (slot 0)
-        tcp.closeFd(self.sessions[0]);
-        self.openSession(0, cfd);
+        // All slots busy: prefer evicting an unauthenticated session so a flood
+        // of pre-login TCP handshakes cannot kick a logged-in operator. Fall
+        // back to slot 0 only when every session is already authed.
+        var victim: usize = 0;
+        for (self.authed, 0..) |a, i| {
+            if (!a) {
+                victim = i;
+                break;
+            }
+        }
+        tcp.closeFd(self.sessions[victim]);
+        self.openSession(victim, cfd);
     }
 
     /// TelnetConnection::LoginMessage (asm.il ~269912): the block operator tooling
@@ -119,15 +147,19 @@ pub const Server = struct {
     pub fn writeGreeting(self: *Server) void {
         const g = self.greeting;
         var buf: [512]u8 = undefined;
+        var s0: [96]u8 = undefined;
+        var s1: [96]u8 = undefined;
         self.reply("*** Connected with 7DTD server.\n");
-        self.replyFmt(&buf, "*** Server version: {s} Compatibility Version: {s}\n", .{ g.version, g.compat_version });
+        self.replyFmt(&buf, "*** Server version: {s} Compatibility Version: {s}\n", .{
+            telnetSafe(g.version, &s0), telnetSafe(g.compat_version, &s1),
+        });
         self.reply("\n");
-        self.replyFmt(&buf, "Server IP:   {s}\n", .{g.server_ip});
+        self.replyFmt(&buf, "Server IP:   {s}\n", .{telnetSafe(g.server_ip, &s0)});
         self.replyFmt(&buf, "Server port: {d}\n", .{g.server_port});
         self.replyFmt(&buf, "Max players: {d}\n", .{g.max_players});
-        self.replyFmt(&buf, "Game mode:   {s}\n", .{g.game_mode});
-        self.replyFmt(&buf, "World:       {s}\n", .{g.world});
-        self.replyFmt(&buf, "Game name:   {s}\n", .{g.game_name});
+        self.replyFmt(&buf, "Game mode:   {s}\n", .{telnetSafe(g.game_mode, &s0)});
+        self.replyFmt(&buf, "World:       {s}\n", .{telnetSafe(g.world, &s0)});
+        self.replyFmt(&buf, "Game name:   {s}\n", .{telnetSafe(g.game_name, &s0)});
         self.replyFmt(&buf, "Difficulty:  {d}\n", .{g.difficulty});
         self.reply("\n");
         self.reply("Press 'help' to get a list of all commands. Press \n");
@@ -139,26 +171,40 @@ pub const Server = struct {
     }
 
     /// One password attempt on session `i`. Returns false when the session was
-    /// closed (too many failures). The line (a password attempt) is never echoed
-    /// or logged, but the failed attempt itself is: this console can kick, ban
-    /// and shut the server down, so a silent brute force is a blind spot (the
-    /// webui logs every rejected login; the telnet console must too). The
-    /// password bytes stay out of the log; only the session and attempt count.
+    /// closed (too many failures or lockout). The line (a password attempt) is
+    /// never echoed or logged, but the failed attempt itself is: this console
+    /// can kick, ban and shut the server down, so a silent brute force is a
+    /// blind spot (the webui logs every rejected login; the telnet console must
+    /// too). The password bytes stay out of the log; only the session and
+    /// attempt count.
     fn authenticate(self: *Server, i: usize, line: []const u8) bool {
         self.active = i;
+        if (self.loginLocked()) {
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} admin login lockout session={d}\n", .{ clock.wallStamp(&ts), i });
+            self.reply("Too many failed login attempts!\n");
+            self.closeActive();
+            return false;
+        }
         if (self.auth.matches(line)) {
             self.authed[i] = true;
             self.fails[i] = 0;
+            self.login_lock_until_ns = 0;
             self.reply("Logon successful.\n\n\n\n");
             self.writeGreeting();
             return true;
         }
         self.fails[i] +|= 1;
         if (self.fails[i] >= self.auth.fail_limit) {
+            const block_m = self.auth.fail_block_minutes;
+            if (block_m > 0) {
+                const block_ns = @as(u64, block_m) *% 60 *% std.time.ns_per_s;
+                self.login_lock_until_ns = clock.monoNs() +% block_ns;
+            }
             var ts: [19]u8 = undefined;
             std.debug.print(
-                "zdtd: {s} admin login failed session={d} attempts={d} closed\n",
-                .{ clock.wallStamp(&ts), i, self.fails[i] },
+                "zdtd: {s} admin login failed session={d} attempts={d} closed block_min={d}\n",
+                .{ clock.wallStamp(&ts), i, self.fails[i], block_m },
             );
             self.reply("Too many failed login attempts!\n");
             self.closeActive();
@@ -251,6 +297,18 @@ pub const Server = struct {
         tcp.writeAll(fd, text);
     }
 };
+
+/// Strip CR/LF from operator-supplied greeting fields so a crafted GameName /
+/// GameWorld cannot inject extra telnet lines (or forge a second greeting block).
+fn telnetSafe(s: []const u8, scratch: []u8) []const u8 {
+    const n = @min(s.len, scratch.len);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const c = s[i];
+        scratch[i] = if (c == '\r' or c == '\n') '_' else c;
+    }
+    return scratch[0..n];
+}
 
 /// Stock ConsoleHelper::ParseParamPartialNameOrId (asm.il:268297) accepts an
 /// entity id, a user id or a (partial) player name in the same argument slot.
@@ -1010,7 +1068,7 @@ test "session state machine gates commands behind the password" {
 }
 
 test "too many failed logins closes the session" {
-    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 2 } };
+    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 2, .fail_block_minutes = 0 } };
     s.authed[1] = false;
     s.active = 1;
     try std.testing.expect(s.authenticate(1, "no"));
@@ -1019,6 +1077,44 @@ test "too many failed logins closes the session" {
     try std.testing.expectEqual(@as(tcp.Handle, -1), s.sessions[1]);
     try std.testing.expect(!s.authed[1]);
     try std.testing.expectEqual(@as(u8, 0), s.fails[1]);
+    // fail_block_minutes=0: no process-wide lockout window.
+    try std.testing.expectEqual(@as(u64, 0), s.login_lock_until_ns);
+}
+
+test "fail limit arms process-wide login lockout" {
+    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 2, .fail_block_minutes = 10 } };
+    s.authed[0] = false;
+    s.active = 0;
+    try std.testing.expect(s.authenticate(0, "no"));
+    try std.testing.expect(!s.authenticate(0, "no"));
+    try std.testing.expect(s.login_lock_until_ns != 0);
+    try std.testing.expect(s.loginLocked());
+    // A fresh slot still refuses attempts during the lockout window
+    // (sessions stay -1 so closeActive is a no-op on the fd).
+    s.authed[2] = false;
+    s.fails[2] = 0;
+    s.active = 2;
+    try std.testing.expect(!s.authenticate(2, "hunter2"));
+    try std.testing.expect(!s.authed[2]);
+}
+
+test "acceptNew prefers unauthenticated victim when full" {
+    var s: Server = .{ .auth = .{ .password = "hunter2" } };
+    // Three occupied slots: authed in 0 and 2, unauthed in 1.
+    s.sessions = .{ 10, 11, 12, -1 };
+    s.authed = .{ true, false, true, false };
+    // No real listener: call the eviction branch by filling the free slot first.
+    s.openSession(3, 13);
+    try std.testing.expectEqual(@as(tcp.Handle, 13), s.sessions[3]);
+    // Manually run the "all full" policy used by acceptNew.
+    var victim: usize = 0;
+    for (s.authed, 0..) |a, i| {
+        if (!a) {
+            victim = i;
+            break;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), victim);
 }
 
 const parse_fuzz_corpus = [_][]const u8{

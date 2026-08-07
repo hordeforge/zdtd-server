@@ -247,6 +247,19 @@ fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 
     return if (config_name.len > 0) config_name else null;
 }
 
+/// True when `name` is a single path segment safe to join under Data/Worlds/.
+/// Rejects empty, absolute, parent, and multi-segment names so CLI/serverconfig
+/// cannot escape `game-dir` via `../` or absolute paths.
+fn isSafeWorldDirName(name: []const u8) bool {
+    if (name.len == 0 or name.len > 128) return false;
+    if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) return false;
+    if (std.mem.indexOfScalar(u8, name, 0) != null) return false;
+    for (name) |c| {
+        if (c == '/' or c == '\\') return false;
+    }
+    return true;
+}
+
 fn isLoopbackBind(host: []const u8) bool {
     // IPv4 only (webui parseIpv4 / tcp_listen listen are IPv4).
     return std.mem.eql(u8, host, "127.0.0.1") or
@@ -442,6 +455,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Require --game-dir (or serverconfig paths); no absolute Steam default.
     if (map_dir == null) {
         if (world_name) |wn| {
+            if (!isSafeWorldDirName(wn)) {
+                if (world_name_cli) {
+                    usageError("invalid --world-name '{s}' (single folder name under Data/Worlds only)", .{wn});
+                }
+                fatal("configured world name '{s}' is not a safe path segment under Data/Worlds", .{wn});
+            }
             if (game_dir) |root| {
                 const candidate = try std.fmt.bufPrint(&map_path_buf, "{s}/Data/Worlds/{s}", .{ root, wn });
                 if (io_fs.dirExistsSimple(candidate)) {
@@ -527,6 +546,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .password = cfg.password,
         .telnet_password = cfg.telnet_password,
         .telnet_failed_login_limit = cfg.telnet_failed_login_limit,
+        .telnet_failed_logins_blocktime = cfg.telnet_failed_logins_blocktime,
         .game_world = if (cfg.game_world.len > 0) cfg.game_world else "Navezgane",
         .game_difficulty = cfg.game_difficulty,
         .blood_moon_frequency = cfg.blood_moon_frequency,
@@ -869,6 +889,18 @@ test "explicit world name overrides serverconfig game name" {
     try std.testing.expectEqualStrings("CliWorld", resolveWorldName("CliWorld", "ConfigWorld").?);
     try std.testing.expectEqualStrings("ConfigWorld", resolveWorldName(null, "ConfigWorld").?);
     try std.testing.expect(resolveWorldName(null, "") == null);
+}
+
+test "isSafeWorldDirName rejects path escape forms" {
+    try std.testing.expect(isSafeWorldDirName("Navezgane"));
+    try std.testing.expect(isSafeWorldDirName("Pregen06k01"));
+    try std.testing.expect(!isSafeWorldDirName(""));
+    try std.testing.expect(!isSafeWorldDirName("."));
+    try std.testing.expect(!isSafeWorldDirName(".."));
+    try std.testing.expect(!isSafeWorldDirName("../etc"));
+    try std.testing.expect(!isSafeWorldDirName("foo/bar"));
+    try std.testing.expect(!isSafeWorldDirName("foo\\bar"));
+    try std.testing.expect(!isSafeWorldDirName("/absolute"));
 }
 
 test "server port must leave room for LiteNet offset" {

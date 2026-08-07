@@ -67,6 +67,9 @@ block_id_mapping = true
 # block_refill_ns = 33000000
 # min_damage_gap_ns = 80000000
 # damage_burst_max = 4
+# Trader restock refill policy (stackables grow toward the cap each restock).
+# trader_restock_cap = 50
+# trader_restock_refill = 10
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]
