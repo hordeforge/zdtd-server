@@ -37,6 +37,24 @@ pub const UserRef = struct {
     platform_len: u8 = 0,
     id: [max_id_len]u8 = .{0} ** max_id_len,
     id_len: u8 = 0,
+
+    /// Copy an identity in (rent sets the owner). Overlong strings are
+    /// rejected: truncating an id would merge two accounts onto one machine.
+    pub fn set(self: *UserRef, v: anytype) error{Overflow}!void {
+        if (v.platform.len > max_platform_len or v.id.len > max_id_len) return error.Overflow;
+        @memcpy(self.platform[0..v.platform.len], v.platform);
+        @memcpy(self.id[0..v.id.len], v.id);
+        self.platform_len = @intCast(v.platform.len);
+        self.id_len = @intCast(v.id.len);
+    }
+
+    /// True when the stored owner equals `v` (or when both are absent).
+    pub fn matches(self: *const UserRef, v: anytype) bool {
+        if (self.platform_len == 0) return false;
+        if (v.platform.len != self.platform_len or v.id.len != self.id_len) return false;
+        return std.mem.eql(u8, self.platform[0..self.platform_len], v.platform) and
+            std.mem.eql(u8, self.id[0..self.id_len], v.id);
+    }
 };
 
 /// TE payload fields shared with the wire writer, buffer-sized for sim.
@@ -64,8 +82,21 @@ pub const Vending = struct {
     rentable: bool = false,
     next_auto_buy: u64 = 0,
 
+    /// ClearVendingMachine / ClearOwner (loot-economy §6): the machine returns
+    /// to Unowned. The block identity (pos / block_id / trader_id) and the
+    /// stocked entries survive; only ownership, access and the rental term go.
     pub fn clear(self: *Vending) void {
+        const pos = self.pos;
+        const block_id = self.block_id;
+        const trader_id = self.trader_id;
+        const stock = self.stock;
+        const stock_n = self.stock_n;
         self.* = .{};
+        self.pos = pos;
+        self.block_id = block_id;
+        self.trader_id = trader_id;
+        self.stock = stock;
+        self.stock_n = stock_n;
     }
 };
 

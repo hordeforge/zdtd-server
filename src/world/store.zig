@@ -707,6 +707,16 @@ pub const World = struct {
         try c.setBlock(self.allocator, t.lx, y, t.lz, id);
     }
 
+    /// World-space full BlockValue.rawData write (type low 16 + rotation/meta
+    /// upper bits), GAP_ANALYSIS 13: player-placed doors/wedges/switch meta
+    /// must land in the chunk plane so a second client or a relog re-renders
+    /// the rotation, not a bare unrotated id (ZCH3 persists the u32 plane).
+    pub fn setBlockRawWorld(self: *World, x: i32, y: i32, z: i32, raw: u32) !void {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        try c.setBlockRaw(self.allocator, t.lx, y, t.lz, raw);
+    }
+
     /// World-space raw+texture set (POI reset re-paint path): keeps the baked
     /// texture and density like the chunk-load paint.
     pub fn setBlockTexDensWorld(self: *World, x: i32, y: i32, z: i32, raw: u32, tex: u64, dens: ?u8) !void {
@@ -1304,6 +1314,35 @@ test "async flush round-trips a save into a fresh World" {
     defer w2.deinit();
     try std.testing.expectEqual(block_dirt, try w2.blockWorld(5, 70, 5));
     try std.testing.expectEqual(block_stone, try w2.blockWorld(6, 71, 5));
+}
+
+test "rotation raw lives in the chunk plane and survives save/reload" {
+    // GAP_ANALYSIS 13: a placed block's full BlockValue (type low 16, rotation
+    // / meta upper bits) must reach the chunk plane and the ZCH3 save, so a
+    // second client or a relog re-renders the rotation instead of a bare id.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const raw_door: u32 = block_dirt | (@as(u32, 0x0005) << 16); // arbitrary upper meta bits
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    try w.setBlockRawWorld(5, 70, 5, raw_door);
+    // The plane carries the full raw; the u16 read still answers the type id.
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(raw_door, c.rawAt(5, 70, 5));
+    try std.testing.expectEqual(block_dirt, c.blockAt(5, 70, 5));
+    try w.saveAll();
+
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    try std.testing.expectEqual(block_dirt, try w2.blockWorld(5, 70, 5));
+    const c2 = try w2.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(raw_door, c2.rawAt(5, 70, 5));
+    // Clearing to air writes a zero raw and drops the meta with the block.
+    try w2.setBlockRawWorld(5, 70, 5, 0);
+    try std.testing.expectEqual(@as(u32, 0), c2.rawAt(5, 70, 5));
 }
 
 test "asyncEnabled is false under force-serial (DST keeps the sync path)" {

@@ -5,8 +5,10 @@ const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
 pub const max_container_slots: usize = 54; // 9x6 common chest
-/// Keep small: Game embeds ContainerStore; large arrays blow the stack on init.
-pub const max_containers: usize = 256;
+/// Game embeds ContainerStore on the heap (allocator.create), so the array is
+/// sized for a long-lived world; the save path buffers on the heap, not the
+/// stack (GAP 12: 256 silently dropped the 257th container on save).
+pub const max_containers: usize = 512;
 const persisted_container_size: usize = 20 + max_container_slots * 7 + 4; // + touched_day u32
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
@@ -129,15 +131,19 @@ pub const ContainerStore = struct {
     ///
     /// Records are sorted by world pos so bytes are independent of sparse slot
     /// assignment order (needed for DST fault injection / mid-save replay).
-    pub fn save(self: *const ContainerStore, dir: []const u8) !void {
+    /// `allocator` owns the encode buffer (max_containers x 400+ bytes is too
+    /// large for a stack frame; the GAP 12 save path used to truncate the
+    /// tail once the fixed buffer filled).
+    pub fn save(self: *const ContainerStore, dir: []const u8, allocator: std.mem.Allocator) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/containers.zct", .{dir});
-        var buf: [save_capacity]u8 = undefined;
+        const buf = try allocator.alloc(u8, save_capacity);
+        defer allocator.free(buf);
         var o: usize = 0;
         @memcpy(buf[0..4], "ZCT1");
         o = 6; // count patched below
 
-        // Collect used indices, sort by (x,y,z). Stack-only: max_containers is fixed.
+        // Collect used indices, sort by (x,y,z). max_containers is fixed.
         var idxs: [max_containers]u16 = undefined;
         var n_idx: usize = 0;
         var i: usize = 0;
@@ -248,11 +254,37 @@ pub const ContainerStore = struct {
     }
 };
 
+test "container store saves past the old 256 cap (GAP 12)" {
+    // The fixed save buffer used to truncate the tail once it filled (256
+    // containers); the encode now buffers on the heap sized for max_containers.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var s: ContainerStore = .{};
+    var i: usize = 0;
+    while (i < 300) : (i += 1) {
+        const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = @intCast(i * 3) }, 8, 42).?;
+        c.setSlot(0, .{ .item_id = 7, .count = 1, .quality = 1, .meta = 0 });
+    }
+    try s.save(dir, std.testing.allocator);
+    var s2: ContainerStore = .{};
+    try s2.load(dir);
+    var found: usize = 0;
+    for (s2.used) |u| {
+        if (u) found += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 300), found);
+    const tail = s2.get(.{ .x = 299, .y = 70, .z = 897 }).?;
+    try std.testing.expectEqual(@as(u16, 7), tail.slots[0].item_id);
+    std.debug.print("PASS containers-cap: 300 containers round-trip (cap was 256)\n", .{});
+}
+
 test "container store save load roundtrip" {
     var s: ContainerStore = .{};
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 8, 42).?;
     c.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 2, .meta = 3 });
-    try s.save(".");
+    try s.save(".", std.testing.allocator);
     var s2: ContainerStore = .{};
     try s2.load(".");
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
@@ -269,7 +301,7 @@ test "container save order is pos-sorted not slot-order" {
     var s: ContainerStore = .{};
     _ = s.getOrCreate(.{ .x = 9, .y = 70, .z = 0 }, 8, 1).?;
     _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
-    try s.save(".zdtd_cfg_cache");
+    try s.save(".zdtd_cfg_cache", std.testing.allocator);
     const data = try io_fs.readFileAll(std.testing.allocator, ".zdtd_cfg_cache/containers.zct");
     defer std.testing.allocator.free(data);
     try std.testing.expect(data.len >= 6 + 40);
@@ -296,7 +328,7 @@ test "container persistence retains every full-capacity container" {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = 0 }, max_container_slots, 42).?;
         c.setSlot(max_container_slots - 1, .{ .item_id = 7, .count = @intCast(i + 1) });
     }
-    try s.save(".");
+    try s.save(".", std.testing.allocator);
     var s2: ContainerStore = .{};
     try s2.load(".");
     try std.testing.expectEqual(max_containers, s2.n);

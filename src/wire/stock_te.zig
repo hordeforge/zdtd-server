@@ -851,6 +851,82 @@ pub fn buildVendingTeBody(
     return w.written();
 }
 
+/// C2S vending TE (TileEntityVendingMachine, type 7): the owner's edits to the
+/// lock / password / allowed-user list, sent back as the full TE composite
+/// (the mirror of buildVendingTeBody; stock TileEntityVendingMachine::read).
+/// Ownership and the rental term stay server-owned (the rent SM applies them);
+/// this parse captures the owner-editable fields and skips the rest.
+pub const ParsedVending = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    is_locked: bool = false,
+    /// Slices into the caller-provided owner buffers.
+    owner: platform_user.Id = .{ .platform = "", .id = "" },
+    has_owner: bool = false,
+    /// Slices into the caller-provided password buffer.
+    password: []const u8 = "",
+    allowed_n: u8 = 0,
+    allowed: [max_vending_allowed]platform_user.Id = undefined,
+    rental_end_day: i32 = 0,
+    rentable: bool = false,
+    next_auto_buy: u64 = 0,
+};
+
+pub const max_vending_allowed: usize = 8;
+
+/// Read the vending TE composite. `plat_buf` / `id_buf` / `pw_buf` are the
+/// caller's scratch for the owner identity, allowed-user identities and the
+/// password string; `allowed` storage lives in the returned struct.
+pub fn parseVendingTeBody(
+    body: []const u8,
+    plat_buf: []u8,
+    id_buf: []u8,
+    pw_buf: []u8,
+    allowed_plat: []u8,
+    allowed_id: []u8,
+) binary.ReadError!ParsedVending {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedVending = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+    _ = try pr.readI32(); // chunkPos x
+    _ = try pr.readI32(); // chunkPos y
+    _ = try pr.readI32(); // chunkPos z
+    const ver = try pr.readI32();
+    if (ver != 3) return error.InvalidString;
+    out.is_locked = try pr.readBool();
+    if (try platform_user.read(&pr, plat_buf, id_buf)) |uid| {
+        out.owner = uid;
+        out.has_owner = true;
+    }
+    out.password = try pr.readString(pw_buf);
+    const allowed_count = try pr.readI32();
+    if (allowed_count < 0 or allowed_count > 64) return error.InvalidString;
+    var i: i32 = 0;
+    while (i < allowed_count) : (i += 1) {
+        if (out.allowed_n < max_vending_allowed) {
+            const bp = allowed_plat[out.allowed_n * platform_user.max_platform_len ..][0..platform_user.max_platform_len];
+            const bi = allowed_id[out.allowed_n * platform_user.max_id_len ..][0..platform_user.max_id_len];
+            if (try platform_user.read(&pr, bp, bi)) |uid| {
+                out.allowed[out.allowed_n] = uid;
+                out.allowed_n += 1;
+            }
+        } else {
+            var tmp_p: [platform_user.max_platform_len]u8 = undefined;
+            var tmp_i: [platform_user.max_id_len]u8 = undefined;
+            _ = try platform_user.read(&pr, &tmp_p, &tmp_i);
+        }
+    }
+    out.rental_end_day = try pr.readI32();
+    // TraderData follows; the store's rentable flag decides whether the u64
+    // nextAutoBuy tail exists, so it cannot be parsed from the body alone.
+    return out;
+}
+
 /// TileEntityPoweredTrigger network payload (TileEntityType.Trigger = 19).
 ///
 /// TileEntity::write network modes emit chunkPos only; the u16 version and
@@ -1165,6 +1241,37 @@ test "powered trigger body rejects truncation and oversized wire counts" {
     @memcpy(oversized[0..body.len], body);
     oversized[21 + 12 + 4 + 1 + 1] = 0xff; // wireCount byte
     try std.testing.expectError(error.EndOfStream, parsePoweredTriggerTeBody(oversized[0..body.len]));
+}
+
+test "vending TE parse round-trips the owner-editable fields" {
+    var buf: [2048]u8 = undefined;
+    const body = try buildVendingTeBody(&buf, 0xAB, 10, 70, -3, .{
+        .block_id = 300,
+        .is_locked = true,
+        .owner = .{ .platform = "Steam", .id = "76561198000000001" },
+        .password_hash = "pw123",
+        .allowed = &.{.{ .platform = "EOS", .id = "abc" }},
+        .rental_end_day = 42,
+        .trader_id = 4,
+        .entries = &.{},
+        .available_money = 1234,
+        .rentable = true,
+        .next_auto_buy = 999,
+    });
+    var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+    var id_buf: [platform_user.max_id_len]u8 = undefined;
+    var pw_buf: [64]u8 = undefined;
+    var allowed_plat: [8 * platform_user.max_platform_len]u8 = undefined;
+    var allowed_id: [8 * platform_user.max_id_len]u8 = undefined;
+    const v = try parseVendingTeBody(body, &plat_buf, &id_buf, &pw_buf, &allowed_plat, &allowed_id);
+    try std.testing.expectEqual(@as(u8, 0xAB), v.handle);
+    try std.testing.expectEqual(@as(i32, 10), v.world_x);
+    try std.testing.expect(v.is_locked);
+    try std.testing.expectEqualStrings("76561198000000001", v.owner.id);
+    try std.testing.expectEqualStrings("pw123", v.password);
+    try std.testing.expectEqual(@as(u8, 1), v.allowed_n);
+    try std.testing.expectEqualStrings("abc", v.allowed[0].id);
+    try std.testing.expectEqual(@as(i32, 42), v.rental_end_day);
 }
 
 test "vending TE body matches TileEntityVendingMachine::write layout" {

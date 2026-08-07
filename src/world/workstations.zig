@@ -8,7 +8,8 @@
 const std = @import("std");
 const components = @import("../ecs/components.zig");
 
-pub const max_workstations: usize = 64;
+/// Game embeds WorkstationStore on the heap; 256 covers a long-lived base.
+pub const max_workstations: usize = 256;
 /// Widest stock workstation array we accept. The ctor sizes are fuel 3, tools 3,
 /// output 6, input 3, lastInput 3 (asm.il ~1330158) and OnSetLocalChunkPosition
 /// grows input to 3 + InputMaterials for a forge (asm.il ~1330219).
@@ -431,6 +432,16 @@ test "workstation crafts the last queue slot and empties it" {
     try std.testing.expectEqual(@as(i16, 0), w.queue[last].multiplier);
     try std.testing.expectEqual(@as(u8, stock_queue_len), w.queue_len);
     try std.testing.expect(w.dirty);
+}
+
+test "workstation store holds past the old 64 cap (GAP 12)" {
+    var s: WorkstationStore = .{};
+    var i: usize = 0;
+    var created: usize = 0;
+    while (i < 100) : (i += 1) {
+        if (s.getOrCreate(@intCast(i), 70, @intCast(i * 2)) != null) created += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 100), created);
 }
 
 test "workstation craft materializes output and records a craft complete" {
