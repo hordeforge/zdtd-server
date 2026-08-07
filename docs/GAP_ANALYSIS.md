@@ -2090,13 +2090,13 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`,
   `src/server/game.zig:4679-4683`, `asm.il:1413451-1413530`
 
-- **Block upgrade path (hammer upgrade)** `PARTIAL`
+- **Block upgrade path (hammer upgrade)** `WORKS`
   `blocks.xml` `UpgradeBlock.ToBlock` is parsed (property class, through the
-  Extends chain) and exposed as `maxdamage.upgradeTarget(name)`, so the wood →
-  cobblestone → concrete → steel ladder is data-driven (verified against stock:
-  `woodMaster` → `cobblestoneMaster`). Residual: the hammer SetBlock upgrade
-  handling in Game does not consume it yet, so hitting a block still changes
-  nothing server-side.
+  Extends chain) and the SetBlock handler only accepts a block swap onto an
+  occupied cell when the new id is the current block's upgrade target (resolved
+  by name), so the wood → cobblestone → concrete → steel ladder is data-driven
+  and a forged SetBlock cannot swap in arbitrary block ids. Scenario covers the
+  legal upgrade, a forged swap and the idempotent rerun.
   *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig:6670-6680`
 
 - **recipes.xml load** `PARTIAL`
