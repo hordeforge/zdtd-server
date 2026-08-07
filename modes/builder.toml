@@ -1,0 +1,25 @@
+# builder: a creative-leaning mode with nothing hunting you (ADR 0021).
+# Exercises the [rules.systems] surface: turning a whole sim system off, which
+# is the thing a mode pack could not do before.
+# Load: --mode builder  or  zdtd.toml [mode] name = "builder"
+
+name = "builder"
+
+# Stock serverconfig keys
+max_spawned_zombies = 0
+drop_on_death = 0
+
+[rules.systems]
+# No spawning. The director still owns the world clock, the blood-moon flag and
+# the daily trader restock, so day and night keep running and traders restock.
+director = false
+# Nothing left to path or attack, so skip the AI pass entirely.
+ai = false
+# Nothing spawns, so there is nothing to despawn. Off saves the scan.
+despawn = false
+
+[rules.progression]
+# Survival off: food and water never drain, so a build session is not a
+# fetch-quest for cans. Health regen stays on.
+food_depletion_per_hour = 0.0
+water_depletion_per_hour = 0.0

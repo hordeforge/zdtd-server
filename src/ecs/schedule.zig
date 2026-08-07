@@ -42,29 +42,45 @@ pub const TickResult = struct {
     path_replans_denied: u32 = 0,
 };
 
+/// Documented run order, pinned by the test below. A mode pack may disable an
+/// entry (`w.rules.systems.<name>`) but never reorder one: the order encodes a
+/// real dependency (buffs before ai so movement and damage read this tick's
+/// buff state), so reordering would break determinism rather than customise it.
+pub const order = [_][]const u8{
+    "buffs", "director", "ai", "vehicles", "turrets", "despawn", "commands",
+};
+
 /// Run full sim tick: beginTick → buffs → director → ai → vehicles → turrets →
 /// despawn → drain commands. Power resolve stays in Game.step (daylight).
+///
+/// Each system is gated on `w.rules.systems`, which defaults to all-on, so the
+/// default pipeline is exactly the stock one. A disabled system is skipped, not
+/// stubbed: its slice of TickResult stays zero, which callers already treat as
+/// "nothing happened this tick".
 pub fn run(w: *World, dt: f32) TickResult {
     w.beginTick();
+    const on = w.rules.systems;
 
     var buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16;
-    const buff_n = systems.systemBuffs(w, buff_expired[0..]);
+    const buff_n = if (on.buffs) systems.systemBuffs(w, buff_expired[0..]) else 0;
 
+    // Always run: the director owns the world clock and the daily restock, so
+    // the `director` toggle is applied inside it (spawning only), not here.
     const dr = systems.systemDirector(w, dt);
-    const hits = systems.systemZombieAi(w, dt);
-    systems.systemVehicles(w, dt);
+    const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;
+    if (on.vehicles) systems.systemVehicles(w, dt);
     // Power resolves once per tick in Game.step (power.tick with real daylight);
     // an extra resolve here doubled the grid BFS and forced daylight=true, so
     // turrets read solar as powered at night. Turrets use last tick's resolve.
-    const tk = systems.systemTurrets(w, dt);
+    const tk = if (on.turrets) systems.systemTurrets(w, dt) else systems.TurretTick{};
 
     var de_ids: [8]i32 = .{0} ** 8;
-    const de_n = systems.systemDespawnFar(w, de_ids[0..]);
+    const de_n = if (on.despawn) systems.systemDespawnFar(w, de_ids[0..]) else 0;
 
     // Deferred ops from systems/plugins: apply after sim mutations settle.
     // Drain clears the buffer (frame leftover). apm: commands_applied counter
     // on TickResult is enough without importing apm from ecs (cycle).
-    const cmd = w.drainCommands();
+    const cmd = if (on.commands) w.drainCommands() else @TypeOf(w.drainCommands()){};
 
     var out: TickResult = .{
         .ai_hits = hits,
@@ -100,3 +116,33 @@ test "schedule.run drains commands and clears locals" {
     try std.testing.expectEqual(@as(u8, 0), w.locals.interest_n);
     try std.testing.expectEqual(@as(usize, 0), w.commands.len());
 }
+
+test "default pipeline order is pinned" {
+    // The order encodes a dependency (buffs before ai). A reorder is a
+    // behaviour change and must fail here rather than pass silently.
+    try std.testing.expectEqual(@as(usize, 7), order.len);
+    const want = [_][]const u8{ "buffs", "director", "ai", "vehicles", "turrets", "despawn", "commands" };
+    for (order, want) |got, exp| try std.testing.expectEqualStrings(exp, got);
+    // Every entry has a toggle, and every toggle defaults on.
+    const Systems = @import("rules.zig").Systems;
+    inline for (std.meta.fields(Systems)) |f| {
+        try std.testing.expect(@as(*const bool, @ptrCast(f.default_value_ptr.?)).*);
+    }
+    try std.testing.expectEqual(order.len, std.meta.fields(Systems).len);
+}
+
+test "a disabled system is skipped and the rest still run" {
+    var w: World = .{};
+    w.rules.systems.despawn = false;
+    w.rules.systems.ai = false;
+    const r = run(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 0), r.ai_hits);
+    try std.testing.expectEqual(@as(u8, 0), r.despawned_n);
+    // The director keeps the world clock even with spawning off, so time never
+    // freezes for a mode that turns systems off.
+    w.rules.systems.director = false;
+    const r2 = run(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 0), r2.director_spawned);
+    try std.testing.expect(r2.world_time > 0);
+}
+

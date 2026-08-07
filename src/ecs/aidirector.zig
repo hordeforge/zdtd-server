@@ -299,6 +299,18 @@ pub const Director = struct {
 
         self.bloodmoon_active = self.clock.isBloodMoonNight();
         w.zombie_speed_scale = self.zombieSpeedScale();
+
+        // `[systems] director = false` means "stop spawning", not "stop time".
+        // The world clock, blood-moon flag and daily trader restock live on this
+        // path, so gating the whole system in schedule.run would freeze day and
+        // night for the mode that disabled it.
+        if (!w.rules.systems.director) {
+            if (self.clock.day != day_before) {
+                @import("systems.zig").traderRestock(w);
+            }
+            return .{ .spawned = 0, .world_time = self.clock.worldTimeBits() };
+        }
+
         const alive_z = w.countKind(.zombie);
         if (alive_z >= self.max_alive) {
             // Daily trader restock still runs below; skip spawn branches.

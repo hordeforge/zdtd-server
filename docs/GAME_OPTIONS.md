@@ -120,6 +120,14 @@ test, so a retune cannot land silently).
 
 | Section / key | Default | Floor / policy |
 |---|---|---|
+| `[rules.systems]` | | Which sim systems run. All default `true`, so the default pipeline is the stock one. A disabled system is skipped, not stubbed: its slice of `TickResult` stays zero. Order is not configurable (it encodes a real dependency: buffs before ai) |
+| `buffs` | true | Off means no buff ever ticks down |
+| `director` | true | Off stops **spawning only**. The director owns the world clock, the blood-moon flag and the daily trader restock, so time still advances |
+| `ai` | true | Off means zombies never select or run a task |
+| `vehicles` | true | |
+| `turrets` | true | |
+| `despawn` | true | Off means spawns accumulate; pair with `director = false` or a lower cap |
+| `commands` | true | Off means queued `SimCommand`s (plugins, admin) are never applied. Leave on unless the mode owns the queue |
 | `[rules.combat]` | | |
 | `attack_damage` | 8.0 | **Floor**: `entityclasses.xml` `HandItem` → `items.xml` `DamageEntity` wins when non-zero |
 | `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
@@ -127,7 +135,7 @@ test, so a retune cannot land silently).
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
-| `sense_dist_sq` | 2304.0 | Policy (sense range) |
+| `sense_dist_sq` | 2304.0 | **Floor**: `entityclasses.xml` `SightRange` wins per class (stock ships 27, 30, 40 m) |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
 | `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |

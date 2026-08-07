@@ -11,6 +11,32 @@
 const std = @import("std");
 const toml_bind = @import("../util/toml_bind.zig");
 
+/// Which sim systems run (ADR 0021: behaviour, not just numbers). Every entry
+/// defaults on, so the default table is exactly the stock pipeline; a mode pack
+/// turns one off with `[systems] director = false`.
+///
+/// A disabled system is skipped, not stubbed: its slice of `TickResult` stays
+/// zero, which is what a caller already handles for "nothing happened this
+/// tick". Ordering is not configurable, because the phases document a real
+/// dependency (buffs before ai so movement reads this tick's buff state) and a
+/// mode reordering them would break determinism, not customise it.
+pub const Systems = struct {
+    /// Buff expiry and stacking. Off means no buff ever ticks down.
+    buffs: bool = true,
+    /// Spawn director, including the blood-moon horde.
+    director: bool = true,
+    /// Zombie AI task selection and movement.
+    ai: bool = true,
+    vehicles: bool = true,
+    turrets: bool = true,
+    /// Far-entity despawn. Off means director spawns accumulate; pair it with
+    /// `director = false` or a lower spawn cap.
+    despawn: bool = true,
+    /// Deferred SimCommand drain (plugins, admin). Off means queued commands
+    /// are never applied, so leave it on unless a mode owns the queue.
+    commands: bool = true,
+};
+
 /// Melee / combat tuning read by the systems.zig attack path.
 pub const Combat = struct {
     /// Damage per melee hit, in hp. **Floor**: entityclasses.xml HandItem →
@@ -106,6 +132,7 @@ pub const WorldGroup = struct {};
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
+    systems: Systems = .{},
     combat: Combat = .{},
     ai: Ai = .{},
     bloodmoon: Bloodmoon = .{},
@@ -150,11 +177,22 @@ pub const ProgressionOverlay = struct {
 
 pub const WorldGroupOverlay = struct {};
 
+pub const SystemsOverlay = struct {
+    buffs: ?bool = null,
+    director: ?bool = null,
+    ai: ?bool = null,
+    vehicles: ?bool = null,
+    turrets: ?bool = null,
+    despawn: ?bool = null,
+    commands: ?bool = null,
+};
+
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
 /// below pins the two together so a new rule cannot land without its overlay.
 pub const RulesOverlay = struct {
+    systems: SystemsOverlay = .{},
     combat: CombatOverlay = .{},
     ai: AiOverlay = .{},
     bloodmoon: BloodmoonOverlay = .{},
