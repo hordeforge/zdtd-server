@@ -44,6 +44,8 @@ pub const EntityClass = struct {
     wander_speed: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
+    /// TimeStayAfterDeath seconds a corpse lingers (entityclasses.xml).
+    time_stay: f32 = 0,
 };
 
 pub const World = struct {
@@ -504,6 +506,7 @@ pub const World = struct {
             .hash = ct.hash,
             .loot_list = ct.loot_list,
             .drop_prob = ct.drop_prob,
+            .time_stay = ct.time_stay,
         };
         self.registerNet(s, nid);
         return s;
@@ -745,7 +748,24 @@ pub const World = struct {
                 const loot_name = if (self.mask[s].class_id) self.class_id[s].loot_list else "";
                 const drop_prob = if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0;
                 const nid = self.network_id[s].id;
-                self.destroy(s);
+                // Corpse dwell (EntityAlive::OnDeathUpdate, TimeStayAfterDeath):
+                // keep the body in world at hp 0 so the client's ragdoll is not
+                // yanked mid-animation; the tick sweep destroys it later. A
+                // second hit must not re-fire kill side effects (hp <= 0 guard
+                // above already returns).
+                const dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
+                    self.class_id[s].time_stay
+                else if (self.kind[s] == .animal)
+                    300.0
+                else
+                    30.0;
+                self.health[s].corpse_seconds = dwell;
+                // The corpse does not act: stop its AI and any chase.
+                if (self.mask[s].zombie_ai) {
+                    self.zombie_ai[s].state = .idle;
+                    self.zombie_ai[s].target_id = -1;
+                    self.zombie_ai[s].alert = false;
+                }
                 if (!self.rollLootDrop(nid, drop_prob)) {
                     // zPackReg is a 4% bag: most kills drop nothing, like stock.
                     return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name };
@@ -786,6 +806,22 @@ pub const World = struct {
 
     pub fn countKind(self: *const World, kind: Kind) u32 {
         return self.kind_groups.count(kind);
+    }
+
+    /// Corpse sweep: decrement dwell timers; destroy expired corpses. Returns
+    /// the removed net ids (caller broadcasts EntityRemove).
+    pub fn sweepCorpses(self: *World, dt: f32, out: []NetId) usize {
+        var n: usize = 0;
+        var s: Slot = 0;
+        while (s < max_entities) : (s += 1) {
+            if (!self.alive[s] or self.health[s].corpse_seconds <= 0) continue;
+            self.health[s].corpse_seconds -= dt;
+            if (self.health[s].corpse_seconds > 0) continue;
+            if (n < out.len) out[n] = self.network_id[s].id;
+            n += 1;
+            self.destroy(s);
+        }
+        return n;
     }
 
     /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.
@@ -844,6 +880,12 @@ test "ecs spawn player zombie damage" {
     try std.testing.expect(w.mask[ps].inventory);
     try std.testing.expect(w.inventory[ps].countItem(8) >= 1);
     try std.testing.expect(w.damage(z, 100).killed);
+    // Corpse dwell: the body stays at hp 0 until the sweep destroys it.
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(w.health[zs].hp <= 0);
+    try std.testing.expect(w.health[zs].corpse_seconds > 0);
+    var out: [2]NetId = undefined;
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
     try std.testing.expect(w.slotOfNetId(z) == null);
 }
 
@@ -1096,4 +1138,31 @@ test "death during a blood moon sets IsBloodMoonDead, daytime death does not" {
     w.director.clock.hours = 12.0;
     _ = w.damage(nid, 9999);
     try std.testing.expect(!w.player[ps].is_blood_moon_dead);
+}
+
+test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
+    var w: World = .{};
+    defer w.deinit();
+    const id = w.spawnZombie(0, 70, 0, 50).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(@as(f32, 0), w.health[s].corpse_seconds);
+    const killed = w.damage(id, 9999);
+    try std.testing.expect(killed.killed);
+    // The corpse stays in world (builtin class has no TimeStayAfterDeath, so
+    // the 30 s zombie default applies) with its AI stopped.
+    try std.testing.expect(w.alive[s]);
+    try std.testing.expect(w.health[s].hp <= 0);
+    try std.testing.expect(w.health[s].corpse_seconds > 0 and w.health[s].corpse_seconds <= 30);
+    try std.testing.expect(w.zombie_ai[s].state == .idle);
+    // A second hit must not re-fire kill side effects.
+    const again = w.damage(id, 9999);
+    try std.testing.expect(!again.killed);
+    try std.testing.expect(w.alive[s]);
+    // The sweep leaves the body until the dwell elapses, then destroys it.
+    var out: [4]NetId = undefined;
+    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(5, &out));
+    try std.testing.expect(w.alive[s]);
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(id, out[0]);
+    try std.testing.expect(!w.alive[s]);
 }

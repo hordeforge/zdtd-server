@@ -27,10 +27,12 @@ This is complementary to:
 
 | Prompt | Focus |
 |---|---|
-| `review-zig-idiomatic.md` | Language, comptime, `std.Io`, hot-path no-alloc |
-| `review-abstractions.md` | Whether a helper/layer should exist |
-| `review-simd.md` | Dense-loop vectorization after SoA is correct |
-| `audit-hardcoded-data.md` | Stock XML vs config hardcodes |
+| `zig-idiomatic-review.md` | Language use: allocators, error handling, `std.Io`, hot-path no-alloc |
+| `zig-0.16-changelog-review.md` | Zig 0.16 conformance: removed/deprecated APIs, upgrade guides |
+| `abstractions-review.md` | Whether a helper/layer should exist |
+| `simd-review.md` | Dense-loop vectorization after SoA is correct |
+| `zig-best-practices-review.md` | Layout, naming, comptime discipline, builtin choice, zero-cost habits |
+| `hardcoded-data-review.md` | Stock XML vs config hardcodes |
 
 **Do not** adopt a third-party ECS core (Bevy-style archetypes, flecs, etc.).
 zdtd keeps **dense Slot + SoA columns + Mask + systems as functions**. Steal
@@ -76,7 +78,7 @@ ergonomics (`query`, `command`) only when they preserve that shape
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings tables + optional `docs/ECS_REVIEW.md`. No code. |
+| **Review only** | Findings tables + `docs/ECS_REVIEW.md`. No code. |
 | **Review + fix P0** | Fix mis-owned state and AoS regressions that break tick or authority. |
 | **Deep pass** | Full inventory of `src/server/game.zig` C2S paths vs ecs systems; propose moves. |
 
@@ -258,6 +260,10 @@ hook except full Game.
 
 ## Output format
 
+Always write the findings to **`docs/ECS_REVIEW.md`** (create or update;
+`docs/INDEX.md` maps this prompt to that doc) and post a short chat note with
+the top findings. Sections below are the doc's structure.
+
 ### Summary
 
 2-5 sentences: overall ECS health, worst ownership bugs, whether tick stays SoA-safe.
@@ -320,7 +326,7 @@ filters). Update `docs/ECS.md` / STATUS only if ownership surface changed.
 # layout + system entrypoints
 rg -n "pub fn tickAll|forEach|pushCommand|spawnZombie|mask\\[" src/ecs/
 
-# stranded mutation in wire (should be empty for sim)
+# stranded mutation in wire (code hits are findings; doc-comment hits are fine)
 rg -n "sim\\.|world\\.|health\\[|inventory\\[" src/wire/ --glob '*.zig'
 
 # C2S arms that might own too much logic
@@ -329,9 +335,18 @@ rg -n "if \\(std.mem.eql\\(u8, name" src/server/game.zig | wc -l
 zig build test
 ```
 
-## Done when
+## Success criteria
 
 - [ ] Ownership table filled for scope
 - [ ] P0/P1 findings listed with correct home
 - [ ] No recommendation to import a foreign ECS
+- [ ] `docs/ECS_REVIEW.md` created or updated
 - [ ] If code changed: tests green; ECS.md updated if public shape changed
+- [ ] No em dashes / AI attribution
+
+## Optional user addenda
+
+- "Deep pass: full inventory of `src/server/game.zig` C2S arms vs ecs systems."
+- "Review only the `src/ecs` / `src/world` boundary; skip session and wire."
+- "Fix the P0 ownership bugs found; minimal diffs, tests green."
+- "Grade the ownership scorecard for the whole tree, not just touched files."

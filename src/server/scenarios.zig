@@ -157,10 +157,22 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     cap_b.clear();
     try g.injectFramed(ca, framed);
 
-    try std.testing.expect(g.sim.slotOfNetId(zid) == null);
+    // Corpse dwell (EntityAlive::OnDeathUpdate, TimeStayAfterDeath): the body
+    // stays in world at hp 0; the EntityRemove is deferred to the tick sweep,
+    // so the client's ragdoll is not yanked mid-animation.
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.health[zs].hp <= 0);
+    try std.testing.expect(g.sim.health[zs].corpse_seconds > 0);
     try std.testing.expect(g.sim.countKind(.loot_bag) >= 1);
-
     const rm_id = packages.idOf("NetPackageEntityRemove").?;
+    try std.testing.expect(cap_a.findPkgId(rm_id) == null);
+    try std.testing.expect(cap_b.findPkgId(rm_id) == null);
+    // Fast-forward the dwell: the tick sweep broadcasts EntityRemove once the
+    // corpse timer expires (0.2 s -> 4 ticks, then the sweep fires).
+    g.sim.health[zs].corpse_seconds = 0.2;
+    var step: u32 = 0;
+    while (step < 10) : (step += 1) try g.step();
+    try std.testing.expect(g.sim.slotOfNetId(zid) == null);
     const rm_a = cap_a.findPkgId(rm_id);
     const rm_b = cap_b.findPkgId(rm_id);
     try std.testing.expect(rm_a != null);
@@ -1241,8 +1253,15 @@ test "scenario vehicle enter drive and turret kills with power" {
     cap.clear();
     var k: u32 = 0;
     while (k < 50) : (k += 1) try g.step();
-    try std.testing.expect(g.sim.slotOfNetId(zid) == null);
+    // Corpse dwell: the body stays at hp 0 until the sweep destroys it; the
+    // next tick then broadcasts EntityRemove (Turret kill path shares the sim).
+    try std.testing.expect(g.sim.slotOfNetId(zid) != null);
     try std.testing.expect(g.sim.countKind(.loot_bag) >= 1);
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.health[zs].corpse_seconds = 0.2;
+    var step: u32 = 0;
+    while (step < 10) : (step += 1) try g.step();
+    try std.testing.expect(g.sim.slotOfNetId(zid) == null);
     // Turret kill must S2C EntityRemove for the zombie and DroppedLootContainer ECD.
     const rm_id = packages.idOf("NetPackageEntityRemove").?;
     const spawn_id = packages.idOf("NetPackageEntitySpawn").?;

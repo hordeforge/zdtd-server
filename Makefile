@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check lint fmt release-check release smoke clean need-zig need-release-tools
+.PHONY: all build test fuzz run check lint fmt release-check release repro smoke clean need-zig need-release-tools
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -105,6 +105,13 @@ check:
 # Operator-binary smoke (CI after `make release`; also local release verification).
 smoke: release
 	bash scripts/smoke-release.sh
+
+# Reproducibility gate (docs/RELEASES.md step 6): build the release config
+# twice in independent cache trees and require byte-identical binaries.
+# Depends on release-check so the pinned toolchain builds both halves.
+# Deliberately NOT part of `make check`: it costs two full ReleaseSafe builds.
+repro: release-check need-zig
+	bash scripts/repro-release.sh
 
 clean:
 	rm -rf zig-out .zig-cache .zdtd_cfg_cache

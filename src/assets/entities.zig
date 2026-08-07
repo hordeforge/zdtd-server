@@ -28,6 +28,8 @@ pub const EntityDef = struct {
     chase_speed: f32 = 0,
     /// MoveSpeed (wander shamble). 0 = unset.
     wander_speed: f32 = 0,
+    /// TimeStayAfterDeath seconds a corpse lingers (30 zombies, 300 animals).
+    time_stay: f32 = 0,
     /// HandItem name (items.xml melee hand); empty = unset.
     hand_item: []const u8 = "",
     /// Resolved Action0 DamageEntity for hand_item (0 = unresolved).
@@ -292,6 +294,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         if (resolveProp(&classes, name, "MoveSpeed", 0)) |ms| {
             if (xml.parseF32(ms)) |f| wander = f;
         }
+        var time_stay: f32 = 0;
+        if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
+            if (xml.parseF32(ts)) |f| {
+                // Bounds: a corpse left forever (or negative) would pin its
+                // slot; clamp to [1, 3600] seconds.
+                if (f >= 1 and f <= 3600) time_stay = f;
+            }
+        }
         const hand = resolveProp(&classes, name, "HandItem", 0) orelse "";
         try list.append(allocator, .{
             .name = name,
@@ -304,6 +314,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .is_enemy = is_enemy,
             .chase_speed = chase,
             .wander_speed = wander,
+            .time_stay = time_stay,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
     }

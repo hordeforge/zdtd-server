@@ -681,10 +681,17 @@ test "parse give" {
 }
 
 test "parse ban kick list" {
-    try std.testing.expect(parseCommand("kick 1") == .kick);
-    try std.testing.expect(parseCommand("ban add 2 1 day") == .ban);
+    const k = parseCommand("kick 1");
+    try std.testing.expectEqual(@as(i32, 1), k.kick.target.id);
+    try std.testing.expectEqual(@as(usize, 0), k.kick.reason.len);
+
+    const b = parseCommand("ban add 2 1 day");
+    try std.testing.expectEqual(@as(i32, 2), b.ban.add.target.id);
+    try std.testing.expectEqual(@as(i64, 86400), b.ban.add.seconds);
+    try std.testing.expectEqual(@as(usize, 0), b.ban.add.reason.len);
+
     try std.testing.expect(parseCommand("list") == .list);
-    try std.testing.expect(parseCommand("unban 7f000001") == .unban);
+    try std.testing.expectEqual(@as(u32, 0x7f000001), parseCommand("unban 7f000001").unban);
 }
 
 test "parse tp alias for tele" {
@@ -967,10 +974,23 @@ test "listen binds loopback without a password and INADDR_ANY with one" {
     var open: Server = .{ .auth = .{ .password = "hunter2" } };
     try std.testing.expect(open.public());
 
-    // Bind for real on an ephemeral port: the rule is only worth anything if the
-    // socket actually lands where `public()` claims.
+    // Port 0 means console disabled (no bind), not "pick an ephemeral port".
     try closed.listen(0);
     try std.testing.expectEqual(@as(u16, 0), closed.port);
+    try std.testing.expect(!closed.listener.enabled());
+
+    // Real binds on high ports (reuse_address). SkipZigTest if the port is busy.
+    // Host selection (loopback vs ANY) is asserted in util/tcp_listen.zig; here we
+    // prove the admin Server path actually opens a socket and records the port.
+    closed.listen(19877) catch return error.SkipZigTest;
+    defer closed.deinit();
+    try std.testing.expect(closed.listener.enabled());
+    try std.testing.expectEqual(@as(u16, 19877), closed.port);
+
+    open.listen(19878) catch return error.SkipZigTest;
+    defer open.deinit();
+    try std.testing.expect(open.listener.enabled());
+    try std.testing.expectEqual(@as(u16, 19878), open.port);
 }
 
 test "session state machine gates commands behind the password" {

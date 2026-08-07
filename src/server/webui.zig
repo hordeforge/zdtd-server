@@ -165,6 +165,10 @@ pub const Server = struct {
     login_fails: u32 = 0,
     /// Mono ns until which further login attempts are rejected (0 = unlocked).
     login_lock_until_ns: u64 = 0,
+    /// When `client_fd < 0` (unit tests), the last response is copied here so
+    /// assertions can check status lines without a real socket.
+    test_resp_len: usize = 0,
+    test_resp: [4096]u8 = undefined,
 
     pub fn enabled(self: *const Server) bool {
         return self.listener.enabled();
@@ -364,7 +368,17 @@ pub const Server = struct {
         var out_buf: [49152]u8 = undefined;
         var out_w: std.Io.Writer = .fixed(&out_buf);
         var http_srv = http.Server.init(&in_r, &out_w);
-        var req = try http_srv.receiveHead();
+        var req = http_srv.receiveHead() catch |err| {
+            // A malformed request line / bad headers is a client fault (400/431),
+            // never an internal error (500). Truncated or closing reads mean the
+            // peer is gone; close without responding.
+            switch (err) {
+                error.HttpHeadersInvalid => self.rawRespond(400, "text/plain; charset=utf-8", "bad request\n"),
+                error.HttpHeadersOversize => self.rawRespond(431, "text/plain; charset=utf-8", "request header fields too large\n"),
+                else => {},
+            }
+            return;
+        };
 
         const path = pathOnly(req.head.target);
         const method = req.head.method;
@@ -410,6 +424,11 @@ pub const Server = struct {
 
         if (std.mem.eql(u8, path, "/login")) {
             if (method == .GET) {
+                // Already signed in (bookmark or reopened /login): go to dashboard.
+                if (requestAuthorizedHttp(&req, self.secret(), self.sessionTok())) {
+                    try self.httpRedirect(&req, "/");
+                    return;
+                }
                 // Show lockout on the form page so operators know why Sign in is refused.
                 if (self.loginLocked()) {
                     try self.httpRespond(&req, .too_many_requests, "text/html; charset=utf-8", loginLockoutHtml(), &.{
@@ -512,7 +531,8 @@ pub const Server = struct {
             return;
         }
 
-        var body_buf: [12288]u8 = undefined;
+        // Shell HTML is the largest body; keep headroom for CSS/JS polish (poll path only).
+        var body_buf: [16384]u8 = undefined;
 
         if (std.mem.eql(u8, path, "/api/cmd")) {
             if (method != .POST) {
@@ -526,9 +546,10 @@ pub const Server = struct {
         }
 
         if (isGetOnlyPath(path)) {
-            if (method != .GET) {
+            // HEAD works wherever GET does (RFC 9110); std.http elides the body.
+            if (method != .GET and method != .HEAD) {
                 try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
-                    .{ .name = "Allow", .value = "GET" },
+                    .{ .name = "Allow", .value = "GET, HEAD" },
                 });
                 return;
             }
@@ -766,24 +787,44 @@ pub const Server = struct {
     }
 
     fn flushHttpOut(self: *Server, req: *http.Server.Request) void {
-        const fd = self.client_fd;
-        if (fd < 0) return;
         const out = req.server.out.buffered();
-        if (out.len > 0) tcp.writeAll(fd, out);
+        if (out.len == 0) return;
+        const fd = self.client_fd;
+        if (fd < 0) {
+            self.captureTestResp(out);
+            return;
+        }
+        tcp.writeAll(fd, out);
     }
 
     /// Fallback when http.Server is not yet set up (buffer overflow before parse).
     fn rawRespond(self: *Server, status: u16, content_type: []const u8, body: []const u8) void {
-        const fd = self.client_fd;
-        if (fd < 0) return;
         var hdr: [640]u8 = undefined;
         const h = std.fmt.bufPrint(
             &hdr,
             "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {s}\r\nPermissions-Policy: camera=(), microphone=(), geolocation=()\r\nConnection: close\r\n\r\n",
             .{ status, httpReasonPhrase(status), content_type, body.len, csp_policy },
         ) catch return;
+        const fd = self.client_fd;
+        if (fd < 0) {
+            self.captureTestResp(h);
+            self.captureTestResp(body);
+            return;
+        }
         tcp.writeAll(fd, h);
         tcp.writeAll(fd, body);
+    }
+
+    fn captureTestResp(self: *Server, data: []const u8) void {
+        const space = self.test_resp.len - self.test_resp_len;
+        const n = @min(data.len, space);
+        if (n == 0) return;
+        @memcpy(self.test_resp[self.test_resp_len..][0..n], data[0..n]);
+        self.test_resp_len += n;
+    }
+
+    fn testResp(self: *const Server) []const u8 {
+        return self.test_resp[0..self.test_resp_len];
     }
 };
 
@@ -811,6 +852,7 @@ fn httpReasonPhrase(status: u16) []const u8 {
         413 => "Content Too Large",
         415 => "Unsupported Media Type",
         429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         503 => "Service Unavailable",
         else => "Error",
@@ -1099,8 +1141,16 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
         while (k < n) : (k += 1) {
             const idx = (@as(usize, s.audit_i) + max_audit - n + k) % max_audit;
             const len = s.audit_lens[idx];
-            try htmlEscape(&w, s.audit_lines[idx][0..len]);
-            try w.writeAll("\n");
+            const line = s.audit_lines[idx][0..len];
+            // Match cmd-out failure styling so history is scannable for errors.
+            if (adminReplyLooksFailed(line)) {
+                try w.writeAll("<span class=\"err\">");
+                try htmlEscape(&w, line);
+                try w.writeAll("</span>\n");
+            } else {
+                try htmlEscape(&w, line);
+                try w.writeAll("\n");
+            }
         }
     }
     try w.writeAll("</pre>");
@@ -1295,17 +1345,17 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\:root{{color-scheme:dark;--bg:#12141a;--card:#1c2030;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--ok:#82d68b;--warn:#f0b64f;--err:#ff8585}}
         \\*{{box-sizing:border-box}}body{{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.45}}
         \\.skip-link{{position:absolute;left:1rem;top:0;transform:translateY(-150%);background:var(--warn);color:#0a0c10;padding:0.65rem 0.85rem;border-radius:0 0 6px 6px;font-weight:700;z-index:1}}.skip-link:focus{{transform:translateY(0)}}
-        \\header{{padding:1rem 1.25rem;border-bottom:1px solid #2a3144;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}}
+        \\header{{padding:1rem 1.25rem;border-bottom:1px solid #2a3144;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;background:var(--bg)}}
         \\header h1{{font-size:1.15rem;margin:0;font-weight:600}}header .meta{{color:var(--muted);font-size:0.9rem}}
         \\.refresh-ctrl{{margin-left:auto;display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-size:0.9rem;cursor:pointer;min-height:44px}}
         \\.refresh-ctrl input{{width:1.5rem;height:1.5rem;min-width:1.5rem;min-height:1.5rem;accent-color:var(--acc)}}
         \\.refresh-now,.logout-form button{{min-height:44px;padding:0.45rem 0.75rem;border:1px solid #6a738c;border-radius:6px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}}
         \\.refresh-now:hover,.logout-form button:hover,.cmd-row button:hover{{filter:brightness(1.08)}}.refresh-now:active,.logout-form button:active,.cmd-row button:active{{filter:brightness(0.95)}}
         \\.logout-form{{margin:0}}
-        \\.page-nav{{display:flex;flex-wrap:wrap;gap:0.35rem 0.85rem;padding:0.55rem 1.25rem;border-bottom:1px solid #2a3144;background:#161922}}
+        \\.page-nav{{display:flex;flex-wrap:wrap;gap:0.35rem 0.85rem;padding:0.55rem 1.25rem;border-bottom:1px solid #2a3144;background:#161922;position:sticky;top:0;z-index:2}}
         \\.page-nav a{{color:var(--acc);text-decoration:underline;min-height:44px;display:inline-flex;align-items:center;padding:0.2rem 0.15rem;font-size:0.9rem}}
         \\main{{padding:1rem 1.25rem;display:grid;gap:1rem;max-width:56rem;width:100%;margin-inline:auto}}
-        \\section{{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid #2a3144;scroll-margin-top:0.75rem}}
+        \\section{{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid #2a3144;scroll-margin-top:3.5rem}}
         \\section h2{{margin:0 0 0.6rem;font-size:0.95rem;color:var(--acc);font-weight:600;text-transform:uppercase;letter-spacing:0.04em}}
         \\section h3{{margin:1rem 0 0.5rem;font-size:0.8rem;color:var(--muted);font-weight:600}}
         \\table{{width:100%;border-collapse:collapse;font-size:0.9rem}}th,td{{text-align:left;padding:0.35rem 0.5rem;border-bottom:1px solid #2a3144}}
@@ -1325,7 +1375,7 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\.noscript{{margin:0;padding:0.75rem 1.25rem;background:#3a2410;color:var(--warn);border-bottom:1px solid #6a4a20}}
         \\@media(max-width:36rem){{main{{padding:0.75rem}}header,footer,.page-nav{{padding-left:0.75rem;padding-right:0.75rem}}section{{padding:0.75rem}}.cmd-row{{display:grid;grid-template-columns:minmax(0,1fr) auto}}.cmd-row input[type=text]{{min-width:0}}.refresh-ctrl{{margin-left:0}}}}
         \\@media(prefers-reduced-motion:reduce){{.skip-link{{transition:none}}html{{scroll-behavior:auto}}}}
-        \\@media(forced-colors:active){{:root{{--bg:Canvas;--card:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav{{background:Canvas;color:CanvasText;border-color:CanvasText}}.cmd-row input[type=text],.cmd-row button,.logout-form button,.refresh-now{{border:1px solid ButtonText}}.err,.noscript{{color:MarkText;background:Mark}}a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,#console-log:focus-visible,.skip-link:focus{{outline:3px solid Highlight;outline-offset:3px}}}}
+        \\@media(forced-colors:active){{:root{{--bg:Canvas;--card:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav{{background:Canvas;color:CanvasText;border-color:CanvasText}}.cmd-row input[type=text],.cmd-row button,.logout-form button,.refresh-now{{border:1px solid ButtonText}}.err,.noscript,.warn-text{{color:MarkText;background:Mark}}a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,#console-log:focus-visible,.skip-link:focus{{outline:3px solid Highlight;outline-offset:3px}}}}
         \\</style></head>
         \\<body>
         \\<a class="skip-link" href="#main-content">Skip to dashboard</a>
@@ -1356,18 +1406,18 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
         \\<button type="submit">Run</button>
         \\</form>
         \\<div id="cmd-out" role="status" aria-live="polite" aria-atomic="true"></div>
-        \\<div id="console-log" role="region" aria-label="Recent commands" tabindex="0" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
+        \\<div id="console-log" role="region" aria-label="Recent commands" tabindex="0" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
         \\</section>
         \\</main>
         \\<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">Performance JSON</a> · <a href="/healthz">Liveness check</a> · <a href="/readyz">Readiness check</a></footer>
         \\<script>
-        \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;let inFlight=false;const swap=()=>{{if(inFlight)return Promise.resolve();inFlight=true;el.setAttribute('aria-busy','true');return fetch(u,{{credentials:'same-origin'}}).then(r=>{{if(r.status===401){{window.location.assign('/login');return null;}}return r.ok?r.text():Promise.reject();}}).then(t=>{{if(t===null)return;el.innerHTML=t;el.removeAttribute('data-load-error');}}).catch(()=>{{if(!el.hasAttribute('data-load-error'))el.innerHTML='<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>{{inFlight=false;el.removeAttribute('aria-busy');}});}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
+        \\function hxPoll(el){{const u=el.getAttribute('hx-get');if(!u)return;let timer=null;let inFlight=false;const swap=()=>{{if(inFlight)return Promise.resolve();inFlight=true;el.setAttribute('aria-busy','true');const keepFocus=el.contains(document.activeElement);const regionScroll=el.scrollLeft;const pre=el.querySelector('pre');const preScroll=pre?pre.scrollTop:0;return fetch(u,{{credentials:'same-origin'}}).then(r=>{{if(r.status===401){{window.location.assign('/login');return null;}}return r.ok?r.text():Promise.reject();}}).then(t=>{{if(t===null)return;el.innerHTML=t;el.removeAttribute('data-load-error');el.scrollLeft=regionScroll;const npre=el.querySelector('pre');if(npre)npre.scrollTop=preScroll;if(keepFocus&&!el.contains(document.activeElement)&&typeof el.focus==='function')el.focus({{preventScroll:true}});}}).catch(()=>{{if(!el.hasAttribute('data-load-error'))el.innerHTML='<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';el.setAttribute('data-load-error','true');}}).finally(()=>{{inFlight=false;el.removeAttribute('aria-busy');}});}};const ms=el.getAttribute('hx-trigger')&&el.getAttribute('hx-trigger').indexOf('5s')>=0?5000:2000;el._hxStart=()=>{{if(timer)return;swap();timer=setInterval(swap,ms);}};el._hxStop=()=>{{if(timer){{clearInterval(timer);timer=null;}}}};el._hxOnce=swap;}}
         \\const polls=Array.from(document.querySelectorAll('[hx-get]'));polls.forEach(hxPoll);
         \\const autoEl=document.getElementById('auto-refresh');const refreshState=document.getElementById('refresh-state');
         \\function applyRefresh(){{const on=autoEl.checked;polls.forEach(el=>{{if(on)el._hxStart();else{{el._hxStop();if(!el.children.length)el._hxOnce();}}}});if(refreshState)refreshState.textContent=on?'Auto-refresh on':'Auto-refresh paused';}}
         \\autoEl.addEventListener('change',applyRefresh);applyRefresh();
         \\document.getElementById('refresh-now').addEventListener('click',async(e)=>{{const button=e.currentTarget;button.disabled=true;if(refreshState)refreshState.textContent='Refreshing…';await Promise.all(polls.map(el=>el._hxOnce?el._hxOnce():Promise.resolve()));button.disabled=false;button.focus();if(refreshState)refreshState.textContent=autoEl.checked?'Refreshed (auto-refresh on)':'Refreshed (auto-refresh paused)';}});
-        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const input=document.getElementById('cmd-line');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();if(!line){{input.setCustomValidity('Enter a command.');input.reportValidity();return;}}input.setCustomValidity('');const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick','ban','wipeplayer']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players or erase saved data.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.setAttribute('aria-busy','true');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});if(r.status===401){{window.location.assign('/login');return;}}const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;if(r.ok){{input.value='';input.focus();}}const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get'))fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>log.innerHTML=t).catch(()=>{{}});}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{out.removeAttribute('aria-busy');button.disabled=false;button.textContent='Run';input.focus();}}}});
+        \\document.getElementById('cmd-form').addEventListener('submit',async(e)=>{{e.preventDefault();const form=e.target;const button=form.querySelector('button');const input=document.getElementById('cmd-line');const fd=new FormData(form);const line=String(fd.get('line')||'').trim();if(!line){{input.setCustomValidity('Enter a command.');input.reportValidity();return;}}input.setCustomValidity('');const verb=line.split(/\\s+/,1)[0].toLowerCase();const destructive=new Set(['shutdown','killall','kick','ban','wipeplayer']);if(destructive.has(verb)&&!window.confirm('Run "'+verb+'"? This can interrupt players or erase saved data.'))return;const out=document.getElementById('cmd-out');button.disabled=true;button.textContent='Running…';out.setAttribute('role','status');out.setAttribute('aria-busy','true');out.innerHTML='<pre class="meta">Running command…</pre>';try{{const r=await fetch('/api/cmd',{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(fd)}});if(r.status===401){{window.location.assign('/login');return;}}const response=await r.text();out.setAttribute('role',r.ok?'status':'alert');out.innerHTML=response;if(r.ok){{input.value='';input.focus();}}const log=document.getElementById('console-log');if(log&&log.getAttribute('hx-get')){{const pre=log.querySelector('pre');const preScroll=pre?pre.scrollTop:0;fetch(log.getAttribute('hx-get'),{{credentials:'same-origin'}}).then(x=>x.ok?x.text():Promise.reject()).then(t=>{{log.innerHTML=t;const npre=log.querySelector('pre');if(npre)npre.scrollTop=preScroll;}}).catch(()=>{{}});}}}}catch(err){{out.setAttribute('role','alert');out.innerHTML='<pre class="err">Command could not be sent. Check the connection and try again.</pre>';}}finally{{out.removeAttribute('aria-busy');button.disabled=false;button.textContent='Run';input.focus();}}}});
         \\</script>
         \\</body></html>
     , .{ version.product, version.stock_wire, csrf_token, csrf_token });
@@ -1379,19 +1429,21 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
     const mm: u32 = @intFromFloat(@floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0));
     const bm: []const u8 = if (s.bloodmoon_active) "<span class=\"warn-text\">ACTIVE</span>" else "idle";
     const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
-    const pw: []const u8 = if (s.password_set) "set" else "open";
+    // HTML display only (JSON keeps "set"/"open" for tool stability).
+    const pw: []const u8 = if (s.password_set) "set" else "not set";
     const wc: []const u8 = if (s.wire_chunks) "on" else "off";
+    const overrun_cls: []const u8 = if (s.tick_overruns > 0) "num warn-text" else "num";
     var w: std.Io.Writer = .fixed(buf);
     try w.print(
         \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d}</b><span>tick</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>server tick</span></li>
         \\<li class="stat"><b class="num">d{d} {d:0>2}:{d:0>2}</b><span>world time</span></li>
         \\<li class="stat"><b>{s}</b><span>blood moon (every {d}d)</span></li>
         \\<li class="stat"><b class="num">{d}/{d}</b><span>joined / max</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>entered world</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>peers connected</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>chunks in memory</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>tick overruns</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>tick overruns</span></li>
         \\</ul>
     , .{
         s.tick_n,
@@ -1405,6 +1457,7 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.entered,
         s.peers_alive,
         s.chunks,
+        overrun_cls,
         s.tick_overruns,
     });
     try w.print(
@@ -1434,7 +1487,11 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<li class="stat"><b>
     );
     // World names come from config/CLI; still escape so a crafted path cannot break HTML.
-    try htmlEscape(&w, wn);
+    if (wn.len == 0) {
+        try w.writeAll("<span class=\"meta\">(unnamed)</span>");
+    } else {
+        try htmlEscape(&w, wn);
+    }
     try w.print(
         \\</b><span>world</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>info port</span></li>
@@ -1491,14 +1548,25 @@ fn ms(ns: u64) u64 {
     return ns / 1_000_000;
 }
 
+/// Class for a counter value: neutral when zero, warn/err when non-zero so
+/// operators can scan the grid for problems without reading every label.
+fn alertNumClass(n: u64, severe: bool) []const u8 {
+    if (n == 0) return "num";
+    return if (severe) "num err" else "num warn-text";
+}
+
 fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
+    // Tick budget is 50 ms (20 TPS). Flag p99/max when they breach it.
+    const tick_budget_ns: u64 = 50 * std.time.ns_per_ms;
+    const p99_cls: []const u8 = if (s.tick_p99_ns > tick_budget_ns) "num warn-text" else "num";
+    const max_cls: []const u8 = if (s.tick_max_ns > tick_budget_ns) "num warn-text" else "num";
     try w.print(
         \\<h3 style="margin-top:0">Latency (tick budget 50 ms)</h3>
         \\<ul class="grid">
         \\<li class="stat"><b class="num">{d} ms</b><span>tick mean</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} ms</b><span>tick p50 / p99</span></li>
-        \\<li class="stat"><b class="num">{d} ms</b><span>tick max</span></li>
+        \\<li class="stat"><b class="{s}">{d} / {d} ms</b><span>tick p50 / p99</span></li>
+        \\<li class="stat"><b class="{s}">{d} ms</b><span>tick max</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>net mean / p99</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>sim mean / p99</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>replicate mean / p99</span></li>
@@ -1507,8 +1575,10 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\</ul>
     , .{
         ms(s.tick_mean_ns),
+        p99_cls,
         ms(s.tick_p50_ns),
         ms(s.tick_p99_ns),
+        max_cls,
         ms(s.tick_max_ns),
         us(s.net_mean_ns),
         us(s.net_p99_ns),
@@ -1540,41 +1610,57 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.packages_broadcast,
         s.entities_ticked,
     });
+    const join_cls = alertNumClass(s.join_fail, true);
     try w.print(
         \\<h3>Errors and rejections</h3>
         \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d}/{d}</b><span>join ok / fail</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>tick overruns</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>encode errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>stream errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>net poll errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>payload errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>send errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>window drops</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>persist errors</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>stale peers reaped</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>phase rejects</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>ownership rejects</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>bounds rejects</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>movement rejects</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>decode rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}/{d}</b><span>join ok / fail</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>tick overruns</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>encode errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>stream errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>net poll errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>payload errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>send errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>window drops</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>persist errors</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>stale peers reaped</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>phase rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>ownership rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>bounds rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>movement rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>decode rejects</span></li>
         \\</ul>
     , .{
+        join_cls,
         s.join_ok,
         s.join_fail,
+        alertNumClass(s.tick_overruns, false),
         s.tick_overruns,
+        alertNumClass(s.encode_errors, true),
         s.encode_errors,
+        alertNumClass(s.stream_errors, true),
         s.stream_errors,
+        alertNumClass(s.net_poll_errors, true),
         s.net_poll_errors,
+        alertNumClass(s.net_payload_errors, true),
         s.net_payload_errors,
+        alertNumClass(s.net_send_errors, true),
         s.net_send_errors,
+        alertNumClass(s.reliable_window_drops, false),
         s.reliable_window_drops,
+        alertNumClass(s.persistence_errors, true),
         s.persistence_errors,
+        alertNumClass(s.stale_peers_reaped, false),
         s.stale_peers_reaped,
+        alertNumClass(s.phase_rejects, false),
         s.phase_rejects,
+        alertNumClass(s.ownership_rejects, false),
         s.ownership_rejects,
+        alertNumClass(s.bounds_rejects, false),
         s.bounds_rejects,
+        alertNumClass(s.movement_rejects, false),
         s.movement_rejects,
+        alertNumClass(s.decode_rejects, false),
         s.decode_rejects,
     });
     return w.buffered();
@@ -1787,7 +1873,8 @@ fn testServeHttp(s: *Server, request: []const u8) !void {
     if (request.len > s.recv_buf.len) return error.Overflow;
     @memcpy(s.recv_buf[0..request.len], request);
     s.recv_len = request.len;
-    s.client_fd = -1; // no socket write; response stays in Writer buffer
+    s.client_fd = -1; // no socket write; response is captured into test_resp
+    s.test_resp_len = 0;
     try s.serveHttp();
 }
 
@@ -1799,16 +1886,93 @@ test "POST /login sets session cookie only on valid token" {
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(s.set_cookie);
+    // PRG: 303 See Other to the dashboard (not 200 with a form body).
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 303 ") != null);
     s.set_cookie = false;
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 11\r\n\r\ntoken=wrong");
     try std.testing.expect(!s.set_cookie);
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 401 ") != null);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(!s.set_cookie);
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 415 ") != null);
     // Missing token field: no cookie; client mistake (distinct from wrong secret).
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 0\r\n\r\n");
     try std.testing.expect(!s.set_cookie);
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 400 ") != null);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 6\r\n\r\ntoken=");
     try std.testing.expect(!s.set_cookie);
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 400 ") != null);
+}
+
+test "malformed request lines are client faults, not internal errors" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    // serveHttp must answer protocol faults itself (400-class) instead of
+    // letting receiveHead errors bubble up to the 500 handler: garbage request
+    // line, unsupported HTTP version, header without a name.
+    const cases = [_][]const u8{
+        "GARBAGE\r\n\r\n",
+        "GET / HTTP/9.9\r\n\r\n",
+        "GET / HTTP/1.1\r\n: nokey\r\n\r\n",
+    };
+    for (cases) |req| {
+        try testServeHttp(&s, req);
+        const resp = s.testResp();
+        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 400 ") != null);
+        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 500 ") == null);
+        try std.testing.expect(std.mem.indexOf(u8, resp, "bad request") != null);
+    }
+}
+
+test "HEAD accepted on GET-only dashboard routes" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    // Same contract as /healthz + /readyz: HEAD mirrors GET (200, empty body).
+    const cases = [_][]const u8{
+        "HEAD / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "HEAD /partials/status HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "HEAD /api/apm.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+    };
+    for (cases) |req| {
+        try testServeHttp(&s, req);
+        const resp = s.testResp();
+        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 200 ") != null);
+        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 405 ") == null);
+        // HEAD must not carry a body after the header block.
+        if (std.mem.indexOf(u8, resp, "\r\n\r\n")) |end| {
+            try std.testing.expectEqual(@as(usize, 0), resp[end + 4 ..].len);
+        } else {
+            return error.TestUnexpectedResult;
+        }
+    }
+}
+
+test "GET /login redirects when session cookie is already valid" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    var req_buf: [160]u8 = undefined;
+    const req = try std.fmt.bufPrint(
+        &req_buf,
+        "GET /login HTTP/1.1\r\nCookie: zdtd_webui={s}\r\n\r\n",
+        .{s.session_token[0..]},
+    );
+    try testServeHttp(&s, req);
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 303 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "Location: /") != null);
+    // Anonymous GET /login still serves the form.
+    try testServeHttp(&s, "GET /login HTTP/1.1\r\n\r\n");
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "Shared secret") != null);
 }
 
 test "fillSessionToken rotates with its nonce and is not the secret" {
@@ -2057,18 +2221,21 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.indexOf(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "aria-labelledby=\"status-heading\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Loading performance data") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "Loading command history") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "position:sticky") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "keepFocus") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "r.status===401") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "let inFlight=false") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "if(!el.hasAttribute('data-load-error'))") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "forced-color-adjust:none") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, ".err,.noscript{color:MarkText;background:Mark}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "prefers-reduced-motion: reduce').matches") == null);
     try std.testing.expect(std.mem.indexOf(u8, html, "JavaScript is required for live updates") != null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
     try std.testing.expect(std.mem.indexOf(u8, html, "s3cr3t") == null);
     try std.testing.expect(std.mem.indexOf(u8, html, sess[0..]) != null);
-    // Runtime body_buf for GET / is 12288; shell must fit.
-    try std.testing.expect(html.len < 12288);
+    // Runtime body_buf for GET / is 16384; shell must fit.
+    try std.testing.expect(html.len < 16384);
 }
 
 test "loginHintHtml exposes labeled secret form" {
@@ -2127,6 +2294,12 @@ test "command result marks known failures and is keyboard-scrollable" {
     const log = try renderConsoleLog(&log_buf, &s);
     try std.testing.expect(std.mem.indexOf(u8, log, "tabindex=\"0\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, log, "aria-label=\"Recent commands\"") == null);
+    // Failure replies in the audit ring keep the same err styling as #cmd-out.
+    s.pushAudit("> frob");
+    s.pushAudit("unknown command 'frob'. 'help' for list.");
+    const log_err = try renderConsoleLog(&log_buf, &s);
+    try std.testing.expect(std.mem.indexOf(u8, log_err, "<span class=\"err\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, log_err, "unknown command") != null);
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x44} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
@@ -2141,10 +2314,22 @@ test "renderStatus and renderApm use list markup for stat grids" {
     const status = try renderStatus(&buf, &snap);
     try std.testing.expect(std.mem.indexOf(u8, status, "<ul class=\"grid\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, status, "<li class=\"stat\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status, "server tick") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status, "not set") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status, "(unnamed)") != null);
+    // Zero overruns stay neutral; non-zero overruns use warn styling.
+    try std.testing.expect(std.mem.indexOf(u8, status, "class=\"num warn-text\"") == null);
+    snap.tick_overruns = 3;
+    const status_warn = try renderStatus(&buf, &snap);
+    try std.testing.expect(std.mem.indexOf(u8, status_warn, "class=\"num warn-text\"") != null);
     var apm_buf: [8192]u8 = undefined;
     const apm = try renderApm(&apm_buf, &snap);
     try std.testing.expect(std.mem.indexOf(u8, apm, "<ul class=\"grid\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, apm, "<li class=\"stat\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, apm, "class=\"num warn-text\"") != null);
+    snap.join_fail = 2;
+    const apm_err = try renderApm(&apm_buf, &snap);
+    try std.testing.expect(std.mem.indexOf(u8, apm_err, "class=\"num err\"") != null);
 }
 
 test "renderStatus uses h3 for subsections under shell Status h2" {

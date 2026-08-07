@@ -297,7 +297,8 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
     if (slot >= c.max_inv_slots) return .{};
     const s = w.inventory[ps].slots[slot];
     if (s.count == 0 or s.item_id == 0) return .{};
-    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
+    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
+    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
     const iid = s.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};

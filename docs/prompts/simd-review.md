@@ -13,16 +13,27 @@ related vectorization) opportunities: places where dense numeric or byte loops
 can use Zig `@Vector`, `std.simd`, or auto-vectorization-friendly structure
 without breaking stock wire fidelity or the 20 TPS budget rules.
 
-You may **review only** or **implement** high-value wins (user chooses).
+Scope modes (user picks one):
+
+| Mode | Do |
+|---|---|
+| **Review only** | Candidate table + `docs/SIMD_REVIEW.md`. No code. |
+| **Implement P1** | Review + ship chosen kernels with scalar goldens; `make check` green. |
+| **Targeted files** | Either of the above, restricted to files the user lists. |
+
+Default if unspecified: **review only**.
 
 Related prompts (do not conflate):
 
 | Prompt | Focus |
 |---|---|
-| `review-zig-idiomatic.md` | Language, hot-path no-alloc, std.Io, Zen |
-| `review-abstractions.md` | When to build helpers/layers |
-| `audit-hardcoded-data.md` | Stock data vs config |
-| **this file** | Vector width work on dense loops |
+| `zig-idiomatic-review.md` | Language, hot-path no-alloc, std.Io, Zen |
+| `abstractions-review.md` | When to build helpers/layers |
+| `zig-best-practices-review.md` | Layout, naming, builtin choice, zero-cost abstractions |
+| `hardcoded-data-review.md` | Stock data vs config |
+| `ecs-soa-review.md` | State ownership + SoA layout; fix layout there **before** SIMD here |
+| `zig-0.16-changelog-review.md` | 0.16 conformance; authority for Zig 0.16 API facts |
+| **this file** | Vector width work on dense loops, after SoA is correct |
 
 ## Read first
 
@@ -60,7 +71,7 @@ Related prompts (do not conflate):
 | `@Vector(N, T)` | Fixed-width vectors (N often 4/8/16/32 for i32/f32/u8) |
 | `@as(@Vector(N,T), @splat(x))` | Broadcast |
 | `@shuffle`, `@reduce` | Permute / horizontal ops (use carefully; document) |
-| `std.simd` | Helpers when available in this Zig version |
+| `std.simd` | Helpers; `suggestVectorLength(T)` returns `?comptime_int` in 0.16 |
 | `inline for` over lanes | Small N, clarity |
 | Alignment | Prefer natural alignment of element arrays; avoid unaligned assumptions without `@alignCast` honesty |
 | Auto-vectorization | Simple counted loops, no aliasing, `@memcpy`/`@memset` already good |
@@ -136,7 +147,7 @@ Search and read these even on a "whole repo" pass:
 **Noise octave sum:**
 
 ```zig
-// Multiple lattice evaluations; vectorize coordinates or batch cells 4–8 at a time
+// Multiple lattice evaluations; vectorize coordinates or batch cells 4-8 at a time
 // Keep scalar golden test for determinism
 ```
 
@@ -155,7 +166,7 @@ Search and read these even on a "whole repo" pass:
 1. Is it on tick / stream / gen / interest hot path?
    NO → note as P3 or skip.
 2. Is data contiguous SoA / array of numbers or bytes?
-   NO → skip (or suggest SoA layout first, abstraction review).
+   NO → skip (or suggest SoA layout first; that is ecs-soa-review.md territory).
 3. Is the op map/filter/reduce with weak dependencies?
    NO → skip.
 4. Can scalar and SIMD share a tested pure function?
@@ -177,9 +188,9 @@ Search and read these even on a "whole repo" pass:
    For worldgen, document if f32 reduction order is frozen (e.g. always scalar
    octave sum order even if outer batch is SIMD).
 3. **Tail:** handle `len % N != 0` with scalar loop or masked ops.
-4. **Width:** start with `@Vector(8, f32)` or `@Vector(16, u8)` etc.; use
-   `std.simd.suggestVectorLength(T)` only if available and tested; avoid
-   over-specializing every CPU.
+4. **Width:** start with `@Vector(8, f32)` or `@Vector(16, u8)` etc.;
+   `std.simd.suggestVectorLength(T)` is fine if the `null` case falls back to
+   scalar; avoid over-specializing every CPU.
 5. **No alloc:** stack vectors, or operate in-place on existing buffers.
 6. **apm:** if the kernel is a known hot section, keep/add section timer.
 7. **Name:** `densityFillSimd` / clear comment "scalar equivalent: …".
@@ -227,7 +238,8 @@ Prefer **ast-grep** for `for` over slice of numbers when helpful.
 Create/update **`docs/SIMD_REVIEW.md`**:
 
 - Scope, date, Zig version
-- Existing `@Vector` usage (if any)
+- Existing `@Vector` usage (kernels already live in `wire/stock_chunk.zig` and
+  `ecs/interest.zig`; audit their tails and goldens, do not only propose new ones)
 - Full candidate table
 - Top 5 recommended wins with sketch (width, scalar golden, files)
 - Explicit rejects
@@ -265,7 +277,7 @@ Create/update **`docs/SIMD_REVIEW.md`**:
 ```zig
 // Clear 256 heights, independent columns
 fn fillDensityFromHeights(out: []u8, heights: *const [256]u8, y: u8) void
-// → process 16–32 columns per vector of compares
+// → process 16-32 columns per vector of compares
 ```
 
 ### Bad target

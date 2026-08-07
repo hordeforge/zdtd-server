@@ -27,6 +27,10 @@ pub const Health = struct {
     food_max: f32 = 100,
     water: f32 = 0,
     water_max: f32 = 100,
+    /// Corpse dwell seconds left (TimeStayAfterDeath: 30 zombies, 300 animals).
+    /// > 0 means dead-but-in-world: the corpse stays replicated until the sweep
+    /// destroys it, so the client's ragdoll is not yanked mid-animation.
+    corpse_seconds: f32 = 0,
 };
 
 pub const NetworkId = struct {
@@ -52,6 +56,8 @@ pub const ClassId = struct {
     loot_list: []const u8 = "",
     /// LootDropProb chance a death drops the bag; 1.0 default.
     drop_prob: f32 = 1.0,
+    /// TimeStayAfterDeath seconds the corpse lingers (30 zombies, 300 animals).
+    time_stay: f32 = 0,
 };
 
 pub const AiState = enum(u8) {

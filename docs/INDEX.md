@@ -99,6 +99,8 @@ run and is a snapshot, not a live inventory.
 | [prompts/simd-review.md](prompts/simd-review.md) | [SIMD_REVIEW.md](SIMD_REVIEW.md) |
 | [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | [ECS_REVIEW.md](ECS_REVIEW.md) |
 | [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](HARDCODE_AUDIT.md) |
+| [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](ZIG_0_16_REVIEW.md) |
+| [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | [ZIG_PRACTICES_REVIEW.md](ZIG_PRACTICES_REVIEW.md) |
 
 ## Scale (parked until M11 numbers exist)
 

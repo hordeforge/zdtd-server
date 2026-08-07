@@ -120,7 +120,10 @@ even on unknown paths or wrong methods. Authenticated: wrong method on a known
 path returns **405** with `Allow` (not 404); unknown paths return **404**. Unauthenticated `/api/*`
 returns plain `401 unauthorized` plus `WWW-Authenticate: Bearer realm="zdtd-webui"`
 (HTML login form is for browser routes). `/readyz` returns **503** with
-`Retry-After: 1` until the first live tick snapshot.
+`Retry-After: 1` until the first live tick snapshot. All GET-only routes
+(`/`, `/partials/*`, `/api/apm.json`) also accept `HEAD` (same status and
+headers, empty body), matching `/healthz` and `/readyz`; their `405` responses
+advertise `Allow: GET, HEAD`.
 
 Optional later:
 

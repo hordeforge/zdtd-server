@@ -9,7 +9,7 @@ Copy everything below the line into a fresh agent session (or `@` this file).
 ## Role
 
 You are working in **zdtd** (`/home/maci/Desktop/7dtd/zdtd`): a clean-room Zig
-dedicated server for the stock 7 Days to Die client wire (EAC off).
+0.16 dedicated server for the stock 7 Days to Die client wire (EAC off).
 
 Your job is a **codebase audit + implementation plan (and optional fixes)** for
 hardcoding. Classify every hit into exactly one of:
@@ -22,6 +22,28 @@ hardcoding. Classify every hit into exactly one of:
 
 Do **not** invent wire layouts, fake catalogs, or parallel id spaces. Follow
 project rules strictly.
+
+This is complementary to (do not conflate):
+
+| Prompt | Focus |
+|---|---|
+| `zig-idiomatic-review.md` | Language use, hot-path no-alloc, `std.Io`, tick discipline |
+| `zig-0.16-changelog-review.md` | Zig 0.16 API conformance (authority on 0.16 API facts) |
+| `zig-best-practices-review.md` | Layout, naming, comptime policy, builtin selection |
+| `abstractions-review.md` | Whether a helper/facade/layer should exist |
+| `ecs-soa-review.md` | State ownership (ECS vs resource vs world), SoA layout |
+| `simd-review.md` | Dense-loop vectorization after SoA is correct |
+| **this file** | Bucket A (stock XML/AssignIds) vs Bucket B (zdtd config) vs OK constants |
+
+## Scope modes (user may pick one)
+
+| Mode | Do |
+|---|---|
+| **Audit only** | Findings + `docs/HARDCODE_AUDIT.md`. No code. |
+| **Fix Bucket A** | Audit + implement P0/P1 loader / name-resolve fixes. |
+| **Extract Bucket B** | Audit + move listed caps into serverconfig / zdtd.toml. |
+
+Default if unspecified: **audit only**.
 
 ## Non-negotiable project rules
 
@@ -55,8 +77,8 @@ Read first (in order):
   than missing.
 - **No em dashes. No AI attribution** in commits, docs, comments, or PRs.
 - Keep `make check` / `zig build test` green. Prefer missing over fake content.
-- Prefer extending existing loaders (`src/assets/*`) and `src/server/config.zig`
-  over new parallel mechanisms.
+- Prefer extending existing loaders (`src/assets/*`), `src/server/config.zig`,
+  and `src/server/zdtd_config.zig` over new parallel mechanisms.
 - One stock package shape → one builder. Incomplete packages that fail stock
   `Read` must not be sent.
 
@@ -126,7 +148,7 @@ Scan `$game/Data/Config/` and mark each file: **HAVE loader** / **PARTIAL** /
 
 | HAVE / PARTIAL loader | Often NONE (flag if server starts needing them) |
 |---|---|
-| blocks, materials (via maxdamage), items, entities, entitygroups, recipes, loot, quests, traders, biomes (layers+weather), painting, spawning, buffs, progression, vehicles, storage_pairs, signs, block_textures | archetypes, blockplaceholders, challenges, dialogs, dmscontent, events, gameevents, gamestages, item_modifiers, misc, music, nav_objects, npc, physicsbodies, qualityinfo, rwgmixer, sandbox_overrides, shapes, sounds, twitch*, ui_display, utilityai, videos, weathersurvival, worldglobal, Localization, loadingscreen, XUi_* |
+| blocks, materials (via maxdamage), items, entities, entitygroups, recipes, loot, quests, traders, biomes (layers+weather), painting, spawning, buffs, progression, vehicles, storage_pairs, signs, block_textures, gamestages, npc | archetypes, blockplaceholders, challenges, dialogs, dmscontent, events, gameevents, item_modifiers, misc, music, nav_objects, physicsbodies, qualityinfo, rwgmixer, sandbox_overrides, shapes, sounds, twitch*, ui_display, utilityai, videos, weathersurvival, worldglobal, Localization, loadingscreen, XUi_* |
 
 A **NONE** file is not automatically a bug. It becomes Bucket A P1/P2 when
 code **behaves as if** that data exists (hardcoded substitute) or STATUS claims
@@ -305,7 +327,7 @@ rule (solar has no MaxFuel → no fuel budget; day gate is separate). Do not inv
 | Area | Files | Stock source |
 |---|---|---|
 | **Terrain / block ids** | `world/store.zig` `block_*`, `biome_layers` defaults, `game.zig` IdCtx terr* pins, `tts` filler skip, `inventory` place_*_block_id | AssignIds dump + blocks.xml names |
-| **Item ecs ids / aliases** | `items.builtin_defs`, `builtinStockName`, `ecsIdFromItemName` return 6/7, `coin_item_id_default` | items.xml names + stock_type assign |
+| **Item ecs ids / aliases** | `items.builtin_defs`, `builtinStockName`, `ecsIdByName` builtin fallback, `ecsIdFromItemName` (`game.zig`, return 6/7 offline aliases), `coin_item_id` resolve (`systems.trade`) | items.xml names + stock_type assign |
 | Power fuel/SoC/watts | `ecs/electric.zig`, `ecs/powerblocks.zig`, `assets/maxdamage.zig` | blocks.xml MaxFuel, MaxPower, OutputPerFuel, OutputPerCharge |
 | Weather defaults | `assets/biome_layers.zig`, `server/game.zig` | biomes.xml weather groups |
 | Craft unlock seeds | `assets/recipes.zig` `appendAlwaysUnlocked` extras | recipes.xml always_unlocked + progression |
@@ -321,14 +343,7 @@ rule (solar has no MaxFuel → no fuel budget; day gate is separate). Do not inv
 | Gravity / vehicle physics | `systems.gravity_accel = -9.81` | OK if documented physics; not stock XML |
 | Package default_mappings | `wire/packages.zig` | fixture/negotiated map; not permanent ids |
 
-#### Severity guide for id/name issues
-
-| Severity | Example |
-|---|---|
-| **P0** | Wrong block/item id on wire vs client AssignIds (desync, NRE, grey clay, wrong place) |
-| **P1** | Production path uses builtin id when game-dir XML/dump loaded; silent fallback |
-| **P2** | Offline pins duplicated in multiple files; name string typos vs stock |
-| **P3** | Tests hardcode ids without fixture dump comment |
+Severity for id/name hits: use the **Finding severity** table below.
 
 ---
 
@@ -344,7 +359,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 
 | Concern | Typical code today | Config key ideas |
 |---|---|---|
-| Chunk stream radius vs ViewRadius | `view_radius`, stream r 6..8 | Prefer stock `ViewRadius`; zdtd `stream_radius_min/max`, `chunk_adds_per_tick` |
+| Chunk stream radius vs ViewRadius | `view_radius`, stream r 6..8 | Prefer stock `ViewRadius`; zdtd `stream_radius_min/max`, `chunk_adds_per_stream_tick` (implemented `[stream]` key) |
 | Max chunks buffered per peer | `max_streamed_chunks = 169` | `max_streamed_chunks` |
 | Interest fan-out range | `interest_range = 160` | `interest_range_blocks` |
 | Edit / explosion reach | `max_edit_range = 96` | `max_edit_range_blocks` |
@@ -367,7 +382,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 
 | Concern | Typical code | Notes |
 |---|---|---|
-| Trader placeholder dukes pool | `trader_wallet_dukes = 5000` | First try RE/traders.xml; else zdtd `trader_wallet_dukes` until stock key known |
+| Trader placeholder dukes pool | `trader_wallet_dukes = 5000` | Resolved: no stock key (traders.xml has no wallet property); zdtd.toml `[sim] trader_wallet_dukes` |
 | Craft batch cap | `times` clamped to 20 | `craft_max_times` |
 | Lock table size / stale lock | lock_channel[16], grant timeout | `lock_channels`, `lock_stale_ms` |
 | AI distance bands | `full_ai_dist_sq`, `sense_dist_sq`, … | `ai_full_range`, `ai_sense_range` (if not from entity XML) |
@@ -380,7 +395,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 | Concern | Config key ideas |
 |---|---|
 | World dir, game-dir, map | CLI already; file defaults OK |
-| Save interval (ticks) | `save_every_ticks` (today `% 100`) |
+| Save interval (ticks) | `save_interval_ticks` (implemented `[stream]` key; today `% 100`) |
 | Players dirty debounce | `players_save_debounce_ticks` |
 | ZCH format pin | document; rarely operator-facing |
 | APM dump interval / path | `apm_dump_every_s`, `apm_path` |
@@ -391,7 +406,7 @@ Zig**, that is **not** stock content. If you leave it as a bare `const` in
 
 | Concern | Config key ideas |
 |---|---|
-| Proc seed / mode | `--worldgen seed=` / `worldgen_seed`, `terrain_source=flat\|baked\|dem\|proc` |
+| Proc seed / mode | `--worldgen-seed` / `worldgen_seed`, `terrain_source=flat\|baked\|dem\|proc` |
 | Gen worker count / queue depth | `worldgen_workers`, `worldgen_queue_cap` |
 | Prefetch ring | `worldgen_prefetch_radius` |
 | DEM blend weights | after WORLDGEN W6 |
@@ -413,17 +428,17 @@ See `docs/GAME_OPTIONS.md`. Finding = "default in Zig but not loaded" or
 ### Required behavior (Bucket B)
 
 1. **Single load at init** (main / Game.create). No `std.fs` open on the tick path.
-2. **Precedence (document in GAME_OPTIONS):**
+2. **Precedence (implemented; documented in GAME_OPTIONS, keep in sync):**
    ```text
-   CLI flags  >  world dir zdtd.toml  >  CWD zdtd.toml  >  serverconfig.xml (stock keys)
-              >  built-in defaults (same as today's const values)
+   CLI flags  >  env (webui secret)  >  world dir zdtd.toml  >  CWD zdtd.toml
+              >  mode pack  >  serverconfig.xml (stock keys)  >  code defaults
    ```
 3. **Two surfaces, clear split:**
    - **Stock-shaped:** `serverconfig.xml` `<property name="ViewRadius" …>` via
      `src/server/config.zig` (names match TFP).
-   - **zdtd-only:** one file, e.g. `zdtd.toml` next to world or CWD, loaded by
-     `src/server/zdtd_config.zig` (or extend config.zig with a second parser).
-     Do **not** invent fake stock property names the client never sends.
+   - **zdtd-only:** `zdtd.toml` next to world or CWD, loaded by the existing
+     `src/server/zdtd_config.zig`. Extend it; do not add a second parser, and
+     do **not** invent fake stock property names the client never sends.
 4. **Tick code reads structs only:** `self.opts.*` / `self.cfg.*` / `self.zdtd.*`.
    No scattered magic numbers on hot paths.
 5. **Defaults must match current behavior** so playtests and STATUS numbers do
@@ -431,66 +446,59 @@ See `docs/GAME_OPTIONS.md`. Finding = "default in Zig but not loaded" or
 6. **Named module const → field migration:** keep the name as the default
    initializer on the config struct (`max_streamed_chunks: usize = 169`), delete
    the free-floating `const` once all call sites use the field.
-7. **Validation:** clamp ranges at load (same style as config.zig `clampRange`).
-   Invalid file → log + defaults, do not crash listen if avoidable.
+7. **Validation:** clamp ranges at load (same style as config.zig
+   `clampRangeNamed`). Implemented zdtd.toml policy is fail closed: unknown
+   keys or malformed assignments abort startup (see `zdtd.toml.example`).
 
-### Proposed zdtd.toml schema (draft for HARDCODE_AUDIT)
+### zdtd.toml schema (audit against the existing surface)
 
-Agent should refine after the hunt; start from this skeleton:
+`zdtd.toml` is implemented: `src/server/zdtd_config.zig` parses sections
+`[stream] [authority] [feature] [perf] [sim] [mode] [plugin]`; template
+`zdtd.toml.example`; keys in `docs/GAME_OPTIONS.md`. Audit = diff each Bucket B
+finding against the parsed `File` struct: key exists → wire the call site, key
+missing → propose it in the matching section. Never add a synonym for an
+existing key. Candidate keys still unimplemented (verify first):
 
 ```toml
-# zdtd.toml: zdtd-only operator tunables (not stock serverconfig)
-# Precedence: CLI > this file (world dir then CWD) > code defaults
-
-[stream]
-# max_streamed_chunks = 169
-# chunk_adds_per_tick = 8
-# stream_radius_min = 6
-# stream_radius_max = 8
-# interest_range_blocks = 160.0
+# Implemented (spelling per zdtd_config.zig, shown for orientation):
+#   [stream] max_streamed_chunks, chunk_adds_per_stream_tick,
+#            stream_radius_min/max, world_time_send_ticks,
+#            vehicle_pos_send_ticks, save_interval_ticks, ...
+#   [authority] interest_range_blocks, max_edit_range_blocks,
+#            max_claimed_damage, peer_stale_ms, mode, guard_*
+#   [feature] wire_chunks, deco_trees, deco_mirror, block_id_mapping
+#   [sim] trader_wallet_dukes
 
 [authority]
-# max_edit_range_blocks = 96.0
-# max_claimed_damage = 200
-# peer_stale_ms = 3000
 # lock_stale_ms = 120000
 # lock_channels = 16
 
 [sim]
 # craft_max_times = 20
-# trader_wallet_dukes = 5000   # until stock key RE'd
-# save_every_ticks = 100
 
-[net]
-# world_time_send_ticks = 20
-# vehicle_pos_send_ticks = 5
+[net]        # candidate section
 # weather_send_with_world_time = true
 # litenet_port_offset = 2
 
-[ai]
+[ai]         # candidate section
 # full_range_blocks = 64.0
 # sense_range_blocks = 48.0
 # mid_range_blocks = 15.0
 # attack_range_blocks = 2.0
 
-[apm]
+[apm]        # candidate section
 # dump_every_s = 0
 # path = ""
 
-[worldgen]
+[worldgen]   # candidate section
 # enabled = false
 # seed = 0
 # prefetch_radius = 2
 # workers = 0
-
-[feature]
-# deco_trees = true
-# wire_chunks = true
 ```
 
-Format choice (toml vs json vs ini) is implementer preference; **one** file, one
-loader, documented. Prefer a format with a small pure-Zig or existing dep story;
-do not pull heavy frameworks.
+Format is decided: minimal TOML subset, **one** file, one loader
+(`zdtd_config.zig`). Do not add a second format, parser, or heavy framework.
 
 ### Examples of Bucket B violations
 
@@ -525,6 +533,9 @@ src/main.zig:
 
 ### Bucket B hot spots (start here; re-verify)
 
+Several caps below are already zdtd.toml-backed config fields; hunt for
+residual bare consts and new drift, not the already-extracted keys.
+
 | Location | Examples | Destination |
 |---|---|---|
 | `server/game.zig` | `max_streamed_chunks=169`, `max_edit_range=96`, `interest_range=160`, `max_claimed_damage=200`, `trader_wallet_dukes=5000`, `stale_ns=3s`, lock_channel[16], `tick_n % 20/10/5/100`, body_buf sizes if policy | zdtd.toml +/or serverconfig |
@@ -532,7 +543,7 @@ src/main.zig:
 | `ecs/systems.zig` | `full_ai_dist_sq`, `mid_ai_dist_sq`, `sense_dist_sq`, `attack_range_sq`, `despawn_dist_sq=200²`, `execute_delay_scale` | zdtd.toml **or** A if entity XML |
 | `ecs/systems.zig` | `attack_damage=8`, `chase_speed=2.2`, `wander_speed=0.8`, `attack_cooldown_s=1.2` | **A first** (entity/items); residual floor → B |
 | `ecs/electric.zig` | fuel defaults after A fix should vanish; timer policy only → B | A then B |
-| `ecs/quest.zig` | `max_quests=512`, `max_phases=32` | B caps (engineering) |
+| `ecs/quest.zig` | `max_phases=32`, `max_actions=8`, `max_reward_flags=16` | B caps (engineering) |
 | `world/sleepers.zig` | `max_volumes=8192` | B cap |
 | `ecs/world.zig` / `entity.zig` | `max_entities` | B / architecture doc |
 | `util/parallel.zig` | `min_parallel_items`, worker count | B |
@@ -585,6 +596,19 @@ List these explicitly in the audit when you skip them:
 
 ---
 
+## Finding severity
+
+One scale for both buckets. Cite it per finding.
+
+| Sev | Meaning | Examples |
+|---|---|---|
+| **P0** | Join breaks or ids corrupt on wire | Wrong block/item id vs client AssignIds (desync, NRE, grey clay, wrong place) |
+| **P1** | Playability / silent divergence from stock | Production path uses builtin id or invented balance when game-dir XML/dump loaded; silent fallback without loud warning |
+| **P2** | Polish | Offline pins duplicated in multiple files; name string typos vs stock; policy const an operator cannot tune |
+| **P3** | Cleanup | Tests hardcode ids without fixture dump comment |
+
+---
+
 ## Audit method (procedure)
 
 ### 1. Inventory loaders (Bucket A ground truth)
@@ -634,7 +658,7 @@ For **every** hit:
 | Value / shape | what is hardcoded |
 | Stock source | file/key or "none" |
 | Bucket | A / B / OK |
-| Severity | P0 join/corrupt ids · P1 playability · P2 polish · P3 cleanup |
+| Severity | P0-P3 per the Finding severity table above |
 | Fix shape | loader X / serverconfig key / zdtd.toml key / delete / cite OK |
 | Default after fix | must equal today's behavior |
 | Test plan | unit / scenarios / loadgen note |
@@ -643,7 +667,7 @@ For **every** hit:
 
 Always produce:
 
-1. **`docs/HARDCODE_AUDIT.md`** (create) with:
+1. **`docs/HARDCODE_AUDIT.md`** (create or update) with:
    - Executive summary (counts by bucket × severity)
    - Full finding tables (A and B separate)
    - OK false-positive list
@@ -685,8 +709,8 @@ Always produce:
 ### Bucket B fixes
 
 1. Stock name exists → `config.zig` + serverconfig.xml + GAME_OPTIONS row.
-2. zdtd-only → **one** loader module + one file format + GAME_OPTIONS section
-   "zdtd.toml".
+2. zdtd-only → extend `src/server/zdtd_config.zig` (one loader, one file) +
+   GAME_OPTIONS "zdtd.toml" section.
 3. Struct fields with defaults == current consts; migrate call sites; delete consts.
 4. Clamp at load; CLI overrides file; document precedence.
 5. Init-only I/O; tick reads memory.
@@ -725,7 +749,8 @@ When touching join/stream/catalog load:
 src/assets/*.zig           # loaders + builtin fallbacks
 src/server/game.zig        # caps, craft/trade, weather, locks, stream
 src/server/config.zig      # serverconfig surface
-src/server/main path       # CLI
+src/server/zdtd_config.zig # zdtd.toml surface
+src/main.zig               # CLI
 src/ecs/systems.zig        # AI bands, combat baselines
 src/ecs/electric.zig       # power defaults (A)
 src/ecs/powerblocks.zig
@@ -784,6 +809,7 @@ $HOME/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Co
 - [ ] OK hardcodes listed with cites
 - [ ] `make check` green
 - [ ] STATUS/TODO updated if play surface changed
+- [ ] No em dashes / AI attribution
 
 ---
 
@@ -793,13 +819,13 @@ Append any of these if needed:
 
 - "Audit only, do not implement."
 - "Implement P0/P1 Bucket A only."
-- "Implement Bucket B: add zdtd.toml + move stream/interest/edit/stale caps."
+- "Implement Bucket B: extend zdtd.toml + move remaining bare-const caps."
 - "Focus on weather/biomes/quests/craft paths."
 - "Focus on power MaxFuel/OutputPerFuel/OutputPerCharge from blocks.xml."
 - "Diff against stock V3.1.x Config and list XML files with zero loader."
 - "Anything that looks like game balance and exists in Data/Config must be loaded, not const."
 - "Anything that looks like server policy and is not in Data/Config must be zdtd config, not bare const."
 - "Item/block/terrain **ids and content enums** must not be hardcoded; names + AssignIds/XML only."
-- "Audit assignids_comptime + store.block_* + place_*_block_id + ecsIdFromItemName aliases."
+- "Audit assignids_comptime + store.block_* + place_*_block_id + builtinStockName + ecsIdFromItemName aliases."
 - "Do not touch worldgen/M11."
 - "Include full proposed zdtd.toml with every B finding as a commented key."

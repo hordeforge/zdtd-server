@@ -127,6 +127,16 @@ pub fn writeAll(fd: Handle, data: []const u8) void {
     }
 }
 
+/// Host-order IPv4 of the bound listen address (test helper).
+fn boundHostBe(self: *const Listener) !u32 {
+    const srv = self.server orelse return error.NotListening;
+    const ip4 = switch (srv.socket.address) {
+        .ip4 => |a| a,
+        .ip6 => return error.NotIpv4,
+    };
+    return std.mem.readInt(u32, &ip4.bytes, .big);
+}
+
 test "Listener loopback accept empty" {
     var L: Listener = .{};
     // High port unlikely to collide in CI; SkipZigTest (not silent pass) if bind fails.
@@ -134,6 +144,16 @@ test "Listener loopback accept empty" {
     defer L.deinit();
     try std.testing.expect(L.enabled());
     try std.testing.expectEqual(@as(u16, 19876), L.port);
+    try std.testing.expectEqual(@as(u32, 0x7f000001), try boundHostBe(&L));
     const h = try L.accept();
     try std.testing.expect(h == null);
+}
+
+test "Listener ANY bind is not loopback" {
+    var L: Listener = .{};
+    L.listen(0, 19879, 4) catch return error.SkipZigTest;
+    defer L.deinit();
+    try std.testing.expect(L.enabled());
+    // 0.0.0.0 is distinct from 127.0.0.1 (admin/webui host selection relies on this).
+    try std.testing.expectEqual(@as(u32, 0), try boundHostBe(&L));
 }

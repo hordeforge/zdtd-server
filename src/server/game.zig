@@ -397,6 +397,13 @@ pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
 /// reconnect flood into repeated IdMapping WindowFull drops.
 const window_fast_attempts: u32 = 16;
 const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms every 4th attempt after the fast window
+/// Wall-clock cap on the paced WindowFull retry phase in sendGame. One client
+/// ACK batch cycle (~15 ms, see above) is enough for a live peer to open its
+/// window; beyond that the peer is stuck, so the package takes the existing
+/// drop path instead of holding the 50 ms tick. Without this cap a stuck peer
+/// paced the full attempt budget (~1 s for a chunk's 4000 attempts) and the
+/// per-pass chunk stream multiplied it: observed 9.86 s single-tick overrun.
+const window_retry_budget_ns: u64 = 16_000_000; // 16 ms
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
@@ -1159,6 +1166,7 @@ pub const Game = struct {
                 .chase_speed = zdef.chase_speed,
                 .wander_speed = zdef.wander_speed,
                 .attack_damage = self.handItemDamage(zdef.hand_item),
+                .time_stay = zdef.time_stay,
             });
             const adef = self.entities.defaultAnimal();
             self.sim.setClassDef(7, .{
@@ -1171,6 +1179,7 @@ pub const Game = struct {
                 .chase_speed = adef.chase_speed,
                 .wander_speed = adef.wander_speed,
                 .attack_damage = self.handItemDamage(adef.hand_item),
+                .time_stay = adef.time_stay,
             });
             std.debug.print("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
                 self.entities.defs.len, zdef.name, zdef.hash,
@@ -1222,6 +1231,7 @@ pub const Game = struct {
                     .chase_speed = def.chase_speed,
                     .wander_speed = def.wander_speed,
                     .attack_damage = self.handItemDamage(def.hand_item),
+                    .time_stay = def.time_stay,
                 });
                 zslot = if (zslot == 1) 8 else zslot + 1;
                 if (pick_seed > 32) break;
@@ -4174,6 +4184,9 @@ pub const Game = struct {
             64
         else
             960;
+        // One client ACK batch cycle for the paced phase; the fast phase (no
+        // sleep) is untouched, so healthy peers drain exactly as before.
+        const retry_deadline = clock.monoNs() + window_retry_budget_ns;
         var attempts: u32 = 0;
         while (attempts < max_attempts) : (attempts += 1) {
             peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
@@ -4191,7 +4204,15 @@ pub const Game = struct {
                         }
                     };
                     self.pollNetOnce();
-                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
+                    if (attempts >= window_fast_attempts) {
+                        // Paced phase: a live peer opens its window inside one
+                        // ACK batch cycle; past the deadline the window is stuck,
+                        // so fall through to the drop path instead of stalling
+                        // the 50 ms tick (~1 s per chunk × up to 8 per stream
+                        // pass before this cap: 9.86 s observed overrun).
+                        if (clock.monoNs() >= retry_deadline) break;
+                        if (attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
+                    }
                     continue;
                 },
                 else => {
@@ -6529,8 +6550,11 @@ pub const Game = struct {
                     break :blk false;
                 };
                 if (!target_is_player) {
-                    const rm = try packages.buildRemoveBody(&self.body_buf, d.entity_id);
-                    try self.broadcast("NetPackageEntityRemove", rm);
+                    // Corpse dwell (EntityAlive::OnDeathUpdate): the body stays
+                    // in world for TimeStayAfterDeath (30 s zombies, 300 s
+                    // animals) so the client's ragdoll is not yanked mid
+                    // animation; the tick sweep broadcasts EntityRemove when
+                    // the dwell expires. The loot bag below still spawns now.
                 } else {
                     // DropOnDeath: 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete.
                     // Modes 1..3 drop a loot bag at the death position; 0/4 drop nothing.
@@ -11063,6 +11087,17 @@ pub const Game = struct {
             _ = self.sim.power.tick(dt, daylight);
             self.broadcastPowerVisuals();
             self.reapStaleLocks();
+            // Corpse dwell sweep (TimeStayAfterDeath): expired bodies get the
+            // EntityRemove broadcast, so the client's ragdoll lasts its dwell.
+            {
+                var corpses: [16]ecs.entity.NetId = undefined;
+                const nc = self.sim.sweepCorpses(dt, &corpses);
+                var ci: usize = 0;
+                while (ci < nc) : (ci += 1) {
+                    const rm = packages.buildRemoveBody(&self.body_buf, corpses[ci]) catch continue;
+                    self.broadcast("NetPackageEntityRemove", rm) catch continue;
+                }
+            }
             // Trader open/close cycle (edge-latched per trader).
             self.tickTraderAreas();
             if (r.turret_kills > 0) {

@@ -22,8 +22,12 @@ This is complementary to:
 
 | Prompt | Focus |
 |---|---|
-| `review-zig-idiomatic.md` | Language idioms, comptime, hot-path no-alloc, `std.Io`, Zig Zen |
-| `audit-hardcoded-data.md` | Stock data vs config hardcodes |
+| `zig-idiomatic-review.md` | Language idioms, comptime, hot-path no-alloc, `std.Io`, Zig Zen |
+| `zig-0.16-changelog-review.md` | Removed/deprecated API names per the 0.16 release notes |
+| `zig-best-practices-review.md` | Layout, naming, builtin choice, zero-cost abstractions |
+| `ecs-soa-review.md` | State ownership (ECS vs world vs session), SoA layout, systems as sole mutators |
+| `simd-review.md` | Dense-loop vectorization after SoA is correct |
+| `hardcoded-data-review.md` | Stock data vs config hardcodes |
 
 Do **not** invent enterprise frameworks. Prefer **fewer, thinner, named**
 abstractions that match stock boundaries and stdlib.
@@ -56,11 +60,21 @@ abstractions that match stock boundaries and stdlib.
   stock" into a second encoder.
 - **`make check` green** if you change code.
 
+## Scope modes (user may pick one)
+
+| Mode | Do |
+|---|---|
+| **Review only** | Verdict tables + `docs/ABSTRACTION_REVIEW.md`. No code. |
+| **Review + fix P0/P1** | Also delete/merge dual paths and mis-layered helpers; `make check` green. |
+| **Deep pass** | Full inventory of a named dir; score every public helper/facade. |
+
+Default: **Review only** unless the user asks for patches.
+
 ---
 
 ## What counts as an "abstraction" here
 
-Anything that **indirection or names a concept** above open code:
+Anything that **adds indirection or names a concept** above open code:
 
 | Kind | Examples in zdtd | Default stance |
 |---|---|---|
@@ -69,7 +83,7 @@ Anything that **indirection or names a concept** above open code:
 | **Layer facade** | `ecs/root.zig`, `wire/packages.zig`, `assets/root.zig` | OK for imports / public surface |
 | **Domain type** | `PowerNode`, `RecipeDef`, `Chunk`, `PackageIds` | OK when it makes illegal states harder |
 | **Callback / hook** | `id_by_name`, `ground_fn`, `place_fn` | OK at trust/load boundaries |
-| **Strategy / plugin API** | Full plugin host, generic "System" trait objects | **Skeptical** unless STATUS demands it |
+| **Strategy / plugin API** | Wasm plugin host (`plugin/`, ADR 0020), generic "System" trait objects | **Skeptical**; the Wasm host is the one sanctioned instance, no second mechanism |
 | **Parallel mechanism** | Second FS stack, second package encoder, second id space | **Reject** |
 
 ---
@@ -196,7 +210,7 @@ Unless you add real policy (path allowlist, size cap, metrics).
 
 - Second chunk encoder
 - Second id resolve (`assignids` pin vs `idByName` without a single entry point)
-- Second FS stack (`linux_fs` + `io_fs` both growing)
+- Second FS stack beside `io_fs` (the old `linux_fs` is deleted; do not reintroduce one)
 - Client mod inventing S2C the server should send
 
 Delete or merge; do not "abstract over both."
@@ -223,12 +237,13 @@ Prefer caller scratch + count, or fixed cap arrays.
 ### 7. Content as abstraction
 
 Do not build a "BlockType enum of all blocks." Names + AssignIds + XML props.
-Abstractions **mechanics** (NodeKind, QuestKind collapsed for sim), not the catalog.
+Abstract **mechanics** (NodeKind, QuestKind collapsed for sim), not the catalog.
 
-### 8. Premature plugin / mod API
+### 8. Second plugin / mod API
 
-zdtd is **not** a mod host. Native plugin designs stay in docs until STATUS says
-otherwise. No IModApi cosplay.
+zdtd is **not** a mod host. The plugin surface is the Wasm host in `src/plugin/`
+(`docs/PLUGIN_API.md`, ADR 0020); review it under the same rules. No second
+plugin mechanism, no IModApi cosplay.
 
 ---
 
@@ -267,9 +282,10 @@ If you cannot name it without "Manager", "Helper", "Util2", "Base", rethink.
 | `world/` | store, tts, worldgen, chunk path | Package send |
 | `server/` | join SM, orchestration, config | Open-coded wire fields |
 | `litenet/` | framing, peers, UDP batch | Sim, XML |
+| `plugin/` | Wasm runtime, api vtable, static test host | Imports of server/ecs/wire; native dynlib ABI |
 | `apm/` | counters, sections | Game logic |
 
-Facades (`*_root.zig`, `packages.zig`): **re-export and group**, do not grow fat
+Facades (`root.zig`, `packages.zig`): **re-export and group**, do not grow fat
 logic. Logic stays in the leaf file that owns the tests.
 
 ---
@@ -291,9 +307,9 @@ For each row: **keep / thin / move layer / merge / delete / do not add**.
 ### 3. Dual-path hunt
 
 ```text
-rg -n 'linux_fs|io_fs' src          # two FS stories?
-rg -n 'buildXxx|encodeXxx' src/wire # two encoders?
-rg -n 'idByName|assignids\.' src    # two id authorities?
+rg -n 'linux_fs' src              # must be empty: second FS path was deleted, keep it gone
+rg -n 'pub fn build' src/wire     # one builder per stock shape; flag near-duplicate bodies
+rg -n 'idByName|assignids\.' src  # two id authorities?
 ```
 
 ### 4. Hot-path check
@@ -309,9 +325,9 @@ Any abstraction called from tick/interest/stream:
 Could this be `std.Io` / `std.mem` / existing util? If yes and the wrapper adds
 nothing → delete wrapper.
 
-### 6. Deliverable
+### 6. Deliverable (always)
 
-Write or update **`docs/ABSTRACTION_REVIEW.md`** (or a section in a PR summary):
+Write or update **`docs/ABSTRACTION_REVIEW.md`**:
 
 - Scope and date
 - Table of findings (name, verdict, severity, action)
@@ -319,12 +335,14 @@ Write or update **`docs/ABSTRACTION_REVIEW.md`** (or a section in a PR summary):
 - Abstractions that should be added (only if score says so) with proposed home layer
 - Explicit **do not build** list (rejected ideas)
 
+Plus a short chat note: top findings and whether `make check` ran.
+
 Severity:
 
 | Sev | Meaning |
 |---|---|
 | **P0** | Wrong layer causing bugs; dual wire encoder; hot-path alloc hidden in helper |
-| **P1** | Premature framework; dual FS; facade god-object; abstraction blocks std migration |
+| **P1** | Premature framework; reintroduced dual FS path; facade god-object; abstraction blocks std migration |
 | **P2** | Weak name; 1-call-site util file; extract candidate with 3+ sites not shared yet |
 | **P3** | Doc/import hygiene |
 
@@ -389,8 +407,9 @@ Severity:
 ### Bad: two abstractions for one job
 
 ```text
-// linux_fs.readFileAll AND io_fs.readFileAll both public
-// Why: violates one obvious way; delete linux_fs
+// a new fs helper with readFileAll public beside io_fs.readFileAll
+// Why: violates one obvious way; the linux_fs dual path was deleted
+// once, do not let a second FS story regrow
 ```
 
 ---
@@ -404,11 +423,11 @@ Severity:
 | Favor reading over writing | Fewer layers; jump-to-definition should land on logic fast |
 | One obvious way | No dual paths; prefer std |
 | Compile errors > runtime crashes | Types/enums over stringly APIs where cheap |
-| Incremental improvements | Extract on third site; migrate legacy when touching |
+| Incremental improvements | Extract on third site; finish a migration fully rather than keeping both paths |
 | Avoid local maximums | Do not keep raw syscalls because a wrapper is "done" |
 | Reduce what one must remember | Caps and policies in one place |
 | Memory is a resource | No alloc-hiding helpers on hot path |
-| Serve the users | Abstractions playability and TPS, not architecture cosplay |
+| Serve the users | Abstractions serve playability and TPS, not architecture cosplay |
 
 ---
 

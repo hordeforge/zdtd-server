@@ -347,7 +347,7 @@ pub const Director = struct {
         if (self.wandering_next == 0) {
             if (wt > wander_start_after) self.wandering_next = self.nextWanderingTime();
         } else if (wt >= self.wandering_next) {
-            if (self.anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
+            if (anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
             self.wandering_next = self.nextWanderingTime();
         }
         // Heat map: decay + the 5 s scout check (AIDirectorChunkEventComponent).
@@ -611,8 +611,7 @@ pub const Director = struct {
     }
 
     /// True when at least one online player exists (wandering horde gate).
-    fn anyPlayer(self: *const Director, w: *ecs_world.World) bool {
-        _ = self;
+    fn anyPlayer(w: *ecs_world.World) bool {
         var p: ecs_world.Slot = 0;
         while (p < ecs_world.max_entities) : (p += 1) {
             if (w.alive[p] and w.mask[p].player) return true;

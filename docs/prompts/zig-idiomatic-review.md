@@ -15,11 +15,19 @@ stock 7DTD client wire.
 Your job is a **style / idioms / correctness review** against house rules and
 modern Zig practice, then a **prioritized fix list** (and optional patches).
 
-This is **not** the hardcode/data audit (`audit-hardcoded-data.md`), **not**
-the abstraction lifecycle review (`review-abstractions.md`), and **not** the
-SIMD pass (`review-simd.md`). Focus on language use, structure, memory, errors,
-comptime, I/O, and tick-path discipline. For "should this helper exist?", use
-`review-abstractions.md`. For dense-loop vectorization, use `review-simd.md`.
+This is **not** the hardcode/data audit (`hardcoded-data-review.md`), **not**
+the abstraction lifecycle review (`abstractions-review.md`), **not** the
+ECS/SoA state-ownership review (`ecs-soa-review.md`), **not** the SIMD
+pass (`simd-review.md`), **not** the 0.16 changelog conformance review
+(`zig-0.16-changelog-review.md`), and **not** the language best-practices
+review (`zig-best-practices-review.md`). Focus on language use, structure,
+memory, errors, comptime, I/O, and tick-path discipline. For "should this
+helper exist?", use `abstractions-review.md`. For state ownership (ECS vs
+resource vs world vs session) and SoA layout, use `ecs-soa-review.md`. For
+dense-loop vectorization, use `simd-review.md`. For removed/deprecated API
+names per the 0.16 release notes, use `zig-0.16-changelog-review.md`. For
+layout/naming/builtin choice/zero-cost abstractions, use
+`zig-best-practices-review.md`.
 
 ## Read first
 
@@ -37,11 +45,12 @@ comptime, I/O, and tick-path discipline. For "should this helper exist?", use
 - **Stdlib abstractions over OS-specific guts** (AGENTS rule 24): prefer
   `std.Io`, `std.Io.Dir` / `File`, `std.Io.Threaded`, `std.mem`, `std.fmt`,
   `std.Thread` (via project pool), `util/io_fs.zig`. Do **not** open-code
-  `std.os.linux.*`, raw `std.posix` file loops, or expand `linux_fs` for ordinary
-  work. Zig has no OOP "abstract classes"; the idiomatic equivalent is **stdlib
-  interfaces / vtables** (`std.Io`) and shared helpers on top of them. Legacy
-  LiteNet/UDP batch path stays until deliberately migrated; do not invent a
-  second raw net stack.
+  `std.os.linux.*` or raw `std.posix` file loops for ordinary work, and do not
+  reintroduce a second FS path (the old `linux_fs` module is gone; `io_fs` /
+  `std.Io` is the only one). Zig has no OOP "abstract classes"; the idiomatic
+  equivalent is **stdlib interfaces / vtables** (`std.Io`) and shared helpers on
+  top of them. LiteNet UDP is `litenet/udp_socket.zig` via `std.Io.net`, the
+  sanctioned path; do not invent a second raw net stack.
 - **Follow Zig Zen** (see below): intent, edge cases, one obvious way, fail
   early, memory is a resource, serve the users.
 - **Keep `make check` / `zig build test` green.**
@@ -63,7 +72,7 @@ Use these as a severity tie-break when two fixes both "work." Official spirit
 | Only one obvious way to do things | One package builder per stock shape; one FS helper (`io_fs`); one parallel pool |
 | Runtime crashes better than bugs | `assert` internal invariants; do not paper over corrupt sim state |
 | Compile errors better than runtime crashes | Exhaustive enum switches; comptime layout checks; typed ids where cheap |
-| Incremental improvements | Small PRs; migrate one file from `linux_fs` → `io_fs` when touching it |
+| Incremental improvements | Small PRs; fix idiom drift in files you touch instead of big-bang rewrites |
 | Avoid local maximums | Do not micro-opt with raw syscalls if it blocks std.Io migration |
 | Reduce the amount one must remember | Named caps; no magic numbers; no dual id spaces |
 | Focus on code rather than style | Fix real footguns first; bikeshed last |
@@ -98,13 +107,12 @@ House style is **zdtd-shaped**, not generic blog Zig. Optimize for:
 1. Explicit allocators and ownership
 2. Caller-owned buffers on wire/tick paths
 3. **Zero heap allocation on the hot path** (see Hot path memory)
-4. Caller-owned buffers on wire/tick paths
-5. Closed sets and bit layouts at **comptime** where it removes runtime cost or
+4. Closed sets and bit layouts at **comptime** where it removes runtime cost or
    duplication without hurting readability
-6. Clear error sets and fail-closed untrusted input
-7. SoA + fixed caps over clever dynamic graphs
-8. **Stdlib abstractions first** (`std.Io`, `std.mem`, …) over OS-specific glue
-9. Zig Zen: one obvious way, edge cases, memory is a resource
+5. Clear error sets and fail-closed untrusted input
+6. SoA + fixed caps over clever dynamic graphs
+7. **Stdlib abstractions first** (`std.Io`, `std.mem`, …) over OS-specific glue
+8. Zig Zen: one obvious way, edge cases, memory is a resource
 
 Reference naming (from AGENTS.md):
 
@@ -122,6 +130,10 @@ Reference naming (from AGENTS.md):
 ## Review checklist (work through every section)
 
 ### 1. Comptime (use it well; do not abuse it)
+
+Comptime-vs-runtime policy and builtin selection at large belong to
+`zig-best-practices-review.md`; review comptime here where it intersects
+memory, generics/`anytype` quality, and the hot path.
 
 **Prefer comptime for:**
 
@@ -143,15 +155,17 @@ Reference naming (from AGENTS.md):
   builders or AI systems.
 - Avoid `comptime` that makes **error messages unreadable** or compile times
   explode for little gain.
-- Prefer `@Type(.enum …)` / `@Int` / `@Struct` style over removed `@Type()` hacks
-  if anything still uses old reflection.
+- Use `@Int` / `@Enum` / `@Struct` / `@Union` / `@Pointer` / `@Fn` / `@Tuple` /
+  `@EnumLiteral` for type reification; `@Type` was removed in 0.16 and
+  `std.meta.Int` is deprecated in its favor. For removed/deprecated-name
+  verdicts, `zig-0.16-changelog-review.md` is the authority.
 
 **Findings to hunt:**
 
 ```text
 rg -n 'inline fn|inline for|comptime ' src --type zig
 rg -n '@Type\(|@typeInfo|anytype' src --type zig
-rg -n 'std\.meta\.|std\.mem\.|' src --type zig   # ok patterns vs reinvented
+rg -n 'std\.meta\.|std\.mem\.' src --type zig   # ok patterns vs reinvented
 ```
 
 Mark each: **good comptime** / **should be comptime** / **should not be comptime** /
@@ -311,14 +325,14 @@ kernel wants." Thin project wrappers are OK only if they wrap std (`io_fs` →
 
 | Domain | Idiomatic (prefer) | Non-idiomatic (avoid in new/touched code) |
 |---|---|---|
-| Files / dirs | `std.Io.Threaded` + `std.Io.Dir` / `File`; `util/io_fs.zig` | `std.os.linux.open/read/write/getdents*`, ad-hoc `posix` loops, expanding `linux_fs` |
+| Files / dirs | `std.Io.Threaded` + `std.Io.Dir` / `File`; `util/io_fs.zig` | `std.os.linux.open/read/write/getdents*`, ad-hoc `posix` loops, any second FS path |
 | Paths | `std.fs.path` / `bufPrint` into stack | Hardcoded `/tmp` for large caches; machine-local Steam paths outside tests |
-| Sync | `std.Io.Mutex` / `Condition` (with Io) | Old `std.Thread.Mutex` if not the 0.16 API; spinlocks without need |
+| Sync | `std.Io.Mutex` / `Condition` (with Io) | `std.Thread.Mutex`/`Condition`/`ResetEvent` (removed in 0.16; migrate to `Io.Mutex`/`Condition`/`Event`, verdicts per `zig-0.16-changelog-review.md`); spinlocks without need |
 | Threads | `util/parallel.zig` persistent pool | `Thread.spawn` per parallel-for; detached fire-and-forget on tick |
 | Formatting | `std.fmt.bufPrint` | `allocPrint` on hot path; manual digit loops without reason |
 | Mem | `std.mem`, `@memcpy`/`@memset` | Hand-rolled copy that ignores aliasing/overlap |
 | Random (sim) | Explicit seeded PRNG state | `std.crypto.random` on loot/AI tick |
-| Net (new code) | Prefer std abstractions where they fit the design | Second raw-syscall UDP stack beside LiteNet |
+| Net (new code) | `litenet/udp_socket.zig` (`std.Io.net`) for UDP; `util/tcp_listen.zig` for TCP (AGENTS rule 24) | Second raw-syscall UDP stack beside LiteNet |
 | ArrayList | `.empty` + methods take `allocator` | Pre-0.16 init styles; grow on tick |
 
 **Layering (top → bottom; stay high):**
@@ -337,14 +351,14 @@ kernel wants." Thin project wrappers are OK only if they wrap std (`io_fs` →
 ```
 
 Crossing below `std.Io` in application code is a **P1** (P0 if new file or
-hot path). Migrating legacy `linux_fs` callers when you touch the file is the
-incremental Zen path.
+hot path). No legacy `linux_fs` remains in `src/util` (the migration is done);
+keep it that way and never reintroduce a second FS path.
 
 Hunt residual low-level I/O:
 
 ```text
 rg -n 'std\.os\.linux\.|std\.posix\.(open|read|write|close)|std\.c\.(open|read)' src --type zig
-rg -n 'linux_fs\.' src --type zig
+rg -n 'linux_fs\.' src --type zig   # should be empty: migration done, regression guard
 rg -n 'io_fs\.|std\.Io\.' src --type zig
 ```
 
@@ -352,6 +366,10 @@ Classify each hit: **legacy OK (cite why)** vs **migrate when touching** vs
 **must fix now**.
 
 ### 8. Structure and layers
+
+Folder structure and layering policy in depth belongs to
+`zig-best-practices-review.md`; here, flag only violations of the zdtd layer
+table below.
 
 | Layer | Holds | Must not hold |
 |---|---|---|
@@ -362,10 +380,17 @@ Classify each hit: **legacy OK (cite why)** vs **migrate when touching** vs
 | `assets/*` | XML/tables load | Tick logic |
 | `litenet/*` | Framing, UDP | Sim |
 
+(`apm/*`, `util/*`, `plugin/*`, and top-level `main.zig` / `protocol.zig` /
+`fuzz.zig` / `version.zig` also exist; review them by the general rules above.)
+
 Findings: cyclic imports, god-files that should split, `pub` on helpers that
 should be file-private, duplicated encoders for one stock package shape.
 
 ### 9. Naming and API clarity
+
+Naming policy (full table, casing rules) is owned by
+`zig-best-practices-review.md`; here, flag names that misstate behavior or hide
+ownership.
 
 - Flags named for **what they do** (`stream_chunks` not `world_enabled` if it
   only throttles streaming).
@@ -408,7 +433,7 @@ Review any change that runs per tick or per packet:
 | Sev | Meaning | Examples |
 |---|---|---|
 | **P0** | Wrong / unsafe / tick bomb | Leak on hot path, raw syscall in new code, catch on C2S that applies bad state, non-exhaustive switch crash |
-| **P1** | Clear non-idiomatic with real cost or footgun | Alloc per package send, inline 200-line fn, anytype public API, linux_fs expanded |
+| **P1** | Clear non-idiomatic with real cost or footgun | Alloc per package send, inline 200-line fn, anytype public API, second FS path reintroduced |
 | **P2** | Style / maintainability | Naming drift, missing `//!`, comptime that should be runtime (or reverse), god-file split candidate |
 | **P3** | Nit | Comment polish, import order, micro-readability |
 
@@ -454,7 +479,7 @@ rg -n 'Thread\.spawn' src --type zig
 
 # I/O debt
 rg -n 'std\.os\.linux\.|std\.posix\.(open|read|write|close)' src --type zig
-rg -n 'linux_fs\.' src --type zig
+rg -n 'linux_fs\.' src --type zig   # should be empty: proves the no-second-FS guard held
 rg -n 'io_fs\.' src --type zig
 
 # Errors
@@ -463,8 +488,8 @@ rg -n 'catch \{\s*\}|catch unreachable' src --type zig
 # Zig 0.16 ArrayList style drift
 rg -n 'ArrayList\(' src --type zig
 
-# Public surface sprawl
-rg -n '^pub fn ' src/server/game.zig | wc -l
+# Public surface sprawl (methods are indented inside `pub const Game = struct`)
+rg -c 'pub fn ' src/server/game.zig
 ```
 
 Prefer **ast-grep** for structural patterns (e.g. all `catch {}` blocks, all
@@ -531,7 +556,8 @@ var n: usize = 0;
 
 ```zig
 try io_fs.writeFile(allocator, path, bytes);
-// or:
+// or, constructed ONCE at startup and the `io` passed down
+// (Threaded.init installs signal handlers; never build one per call):
 var threaded = std.Io.Threaded.init(allocator, .{});
 defer threaded.deinit();
 const io = threaded.io();
@@ -541,7 +567,7 @@ try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = bytes });
 ### I/O via OS-specific syscalls (bad in app code)
 
 ```zig
-const fd = std.os.linux.open(...); // or linux_fs wrapping the same
+const fd = std.os.linux.open(...); // or a project wrapper re-exporting the same
 _ = std.os.linux.getdents64(fd, ...);
 ```
 
@@ -565,7 +591,7 @@ _ = parse(...) catch {}; // applied nothing, caller thinks success
 ## Anti-patterns (quick list)
 
 - Dropping to `std.os.linux` / raw `posix` / `std.c` for ordinary FS or process I/O
-- Expanding `linux_fs` instead of `io_fs` / `std.Io`
+- Reintroducing a second FS path beside `io_fs` / `std.Io` (the `linux_fs` migration is done)
 - Reimplementing what `std.mem` / `std.fmt` / `std.Io` already do
 - Two ways to do the same I/O or encode (violates "one obvious way")
 - **Any heap allocation on tick / per-packet / per-peer encode path**
@@ -603,7 +629,7 @@ _ = parse(...) catch {}; // applied nothing, caller thinks success
 ## Optional user addenda
 
 - "Review only `src/util/parallel.zig` and `src/world/worldgen.zig`."
-- "Fix all P0/P1 I/O: migrate touched files to std.Io / io_fs; no new linux_fs."
+- "Fix all P0/P1 I/O: migrate touched files to std.Io / io_fs; no second FS path."
 - "Comptime focus: package maps and binary layouts."
 - "Hot path only: fail every heap alloc / growing list on tick and interest."
 - "Apply Zig Zen as the primary rubric; cite which zen line each P0/P1 maps to."
