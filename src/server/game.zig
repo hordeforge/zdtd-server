@@ -9615,7 +9615,8 @@ pub const Game = struct {
 
     /// Seed a vending TE's TraderData from trader_info: TraderData.TraderID is
     /// the block's blocks.xml TraderID (stock BlockVendingMachine.OnBlockAdded
-    /// sets exactly that). trader_info price markups apply like entity traders.
+    /// sets exactly that). Vending is owner-priced, so rows start at markup 0
+    /// (base EconomicValue); trader_info markups do not apply here.
     fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
         const tt = self.traders;
         var n: usize = 0;
@@ -9633,25 +9634,16 @@ pub const Game = struct {
             if (tt.entries.len == 0) return;
             fill = tt.entries; // traderAlways fallback (GAP: traderAlways sells vending stock)
         }
-        var buy_markup: f32 = 1.0;
-        var sell_markup: f32 = 0.02;
-        if (v.trader_id > 0 and v.trader_id <= 65535) {
-            if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
-                if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
-                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
-            }
-        }
-        if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
-        if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
+        // Vending is owner-priced: the renter sets each entry's markup, so the
+        // trader_info buy/sell multipliers do not apply here (loot-economy.md
+        // 6). Rows start at markup 0 = base EconomicValue, which the client
+        // prices from; the purchase delta runs server-side.
         for (fill) |e| {
             if (n >= vending_mod.max_vending_stock) break;
             const iid = self.ecsIdFromItemName(e.name);
             if (iid == 0) continue;
             const type_id = resolveItemType(@ptrCast(self), iid);
             if (type_id == 0) continue;
-            const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
-            // Price is client display; the purchase delta runs server-side.
-            _ = econ;
             v.stock[n] = .{
                 .type_id = type_id,
                 .count = @intCast(e.count),
