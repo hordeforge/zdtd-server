@@ -241,6 +241,22 @@ pub fn use(w: *World, peer: usize, slot: u16) bool {
     return useEx(w, peer, slot, null, null).ok;
 }
 
+/// Reduce one inventory slot's remaining ItemValue.UseTimes (tool wear) and
+/// mark the inventory dirty so replication relays it. Clamps at 0; stock keeps
+/// the stack present at use_times 0 (broken, repairable) rather than removing
+/// it. The attack / dig call sites in Game.dealDamage consume this.
+pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
+    const ps = w.playerByPeer(peer) orelse return false;
+    if (!w.mask[ps].inventory) return false;
+    if (slot >= c.max_inv_slots) return false;
+    const s = &w.inventory[ps].slots[slot];
+    if (s.count == 0 or s.item_id == 0) return false;
+    const before = s.use_times;
+    s.use_times = if (s.use_times > amount) s.use_times - amount else 0;
+    if (s.use_times != before) markInv(w, ps);
+    return true;
+}
+
 /// Apply one consumable unit's Food/Water/HP (no inventory take). Shared by InvTx use
 /// and PlayerInventory stack-loss detect (ADR 0007 stock client path).
 pub fn applyEatProps(w: *World, ps: Slot, props: EatProps) Result {
@@ -281,8 +297,7 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
     if (slot >= c.max_inv_slots) return .{};
     const s = w.inventory[ps].slots[slot];
     if (s.count == 0 or s.item_id == 0) return .{};
-    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);
-    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
+    const props: EatProps = if (resolve) |r| r(ctx, s.item_id) else defaultEatProps(s.item_id);    if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
     const iid = s.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
@@ -695,4 +710,43 @@ test "equip armor and place wood" {
     const pr = placeBlock(&w, 0, wood_slot, 1, 70, 1);
     try std.testing.expect(pr.ok);
     try std.testing.expectEqual(place_wood_block_id, pr.place_block);
+}
+
+test "degradeUse wears a tool down and clamps at zero" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(give(&w, 0, 1, 1)); // resourceScrapIron (tool-ish)
+    const ps = w.playerByPeer(0).?;
+    var tool_slot: u16 = 0;
+    for (w.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == 1) {
+            tool_slot = @intCast(i);
+            break;
+        }
+    }
+    w.inventory[ps].slots[tool_slot].use_times = 100;
+    w.dirty[ps] = .{};
+
+    try std.testing.expect(degradeUse(&w, 0, tool_slot, 1));
+    try std.testing.expectEqual(@as(f32, 99), w.inventory[ps].slots[tool_slot].use_times);
+    try std.testing.expect(w.dirty[ps].inv);
+
+    // A big chunk clamps at 0 but keeps the stack present (broken, repairable).
+    try std.testing.expect(degradeUse(&w, 0, tool_slot, 500));
+    try std.testing.expectEqual(@as(f32, 0), w.inventory[ps].slots[tool_slot].use_times);
+    try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[tool_slot].count);
+
+    // Empty slots / bad indices are a no-op.
+    var empty_slot: u16 = 0;
+    for (w.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == 0) {
+            empty_slot = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(!degradeUse(&w, 0, empty_slot, 1));
+    try std.testing.expect(!degradeUse(&w, 0, 9999, 1));
 }

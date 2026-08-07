@@ -343,6 +343,10 @@ pub const InvSlot = struct {
     count: u16 = 0,
     quality: u8 = 0,
     meta: u16 = 0, // durability / seed / etc.
+    /// Stock ItemValue.UseTimes (remaining uses; f32 on the wire). Tools wear
+    /// down to 0 and stay present (broken) until repaired; players.zsv does not
+    /// persist this yet (GAP: durability is dropped on save/restore).
+    use_times: f32 = 0,
 };
 
 /// Offline stack caps when `World.stack_fn` is null. Must match

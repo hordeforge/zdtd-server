@@ -257,6 +257,7 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
         .count = s.count,
         .quality = s.quality,
         .meta = s.meta,
+        .use_times = s.use_times,
     };
 }
 
@@ -781,6 +782,7 @@ fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) components.I
         .count = s.count,
         .quality = @min(s.quality, 255),
         .meta = s.meta,
+        .use_times = s.use_times,
     };
 }
 
@@ -1354,4 +1356,21 @@ test "drop items container encode decode" {
     try std.testing.expectEqual(@as(f32, 1.5), p.x);
     try std.testing.expectEqual(@as(usize, 2), p.item_count);
     try std.testing.expectEqual(@as(u16, 5), p.items[0].count);
+}
+
+test "use_times round-trips through the wire slot conversion" {
+    const ecs_slot = components.InvSlot{
+        .item_id = 7,
+        .count = 1,
+        .quality = 1,
+        .meta = 0,
+        .use_times = 42.5,
+    };
+    const stock = slotFromEcs(ecs_slot, null, null);
+    try std.testing.expectEqual(@as(f32, 42.5), stock.use_times);
+    const back = toEcs(stock, null, null);
+    try std.testing.expectEqual(@as(f32, 42.5), back.use_times);
+    // An empty slot resets use_times to 0 (no phantom durability).
+    const empty = slotFromEcs(components.InvSlot{ .item_id = 0, .count = 0 }, null, null);
+    try std.testing.expectEqual(@as(f32, 0), empty.use_times);
 }

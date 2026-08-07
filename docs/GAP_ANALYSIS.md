@@ -2039,12 +2039,15 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/wire/stock_inv.zig:93-95`, `:535-548`,
   `src/ecs/components.zig:296-301`
 
-- **Item durability (ItemValue.UseTimes)** `MISSING`
-  `StockSlot.use_times` exists on the wire but the ECS `InvSlot` has only quality
-  and meta; nothing ever decrements or persists UseTimes. Tools never wear out and
-  durability is dropped on save/restore.
-  *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:299-300`,
-  `src/server/game.zig:1910-1913`
+- **Item durability (ItemValue.UseTimes)** `PARTIAL`
+  `InvSlot.use_times` now carries the stock `ItemValue.UseTimes` (f32) and both
+  wire conversions round-trip it, so a tool's remaining durability reaches the
+  client and comes back; `inventory.degradeUse` wears a slot toward 0 (clamped,
+  stack stays present as a broken repairable item). Residual: `players.zsv` does
+  not persist use_times yet (dropped on save/restore), and the attack / dig call
+  sites in Game.dealDamage have not been wired to degradeUse.
+  *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
+  `src/ecs/inventory.zig:243-257`, `src/server/game.zig:1910-1913`
 
 - **Item quality tier** `PARTIAL`
   quality rides the wire, the TE and players.zsv, and stack merges refuse to blend
