@@ -1964,14 +1964,19 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game.zig:8871-8891`, `src/wire/packages.zig:861-880`,
   `asm.il:801228-801276`, `asm.il:1227761`
 
-- **Corpse dwell time (TimeStayAfterDeath)** `MISSING`
-  zdtd broadcasts EntityRemove the instant HP hits 0. Stock
-  `EntityAlive::OnDeathUpdate` counts up to TimeStayAfterDeath (30 for
-  zombieTemplateMale, 300 for animals) before unloading, with DeadBodyHitPoints
-  governing corpse destruction. Bodies pop out of existence mid animation and
-  cannot be harvested.
-  *Anchors:* `asm.il:450657-450759`, `Data/Config/entityclasses.xml:692-693`,
-  `src/server/game.zig:4945-4947`
+- **Corpse dwell time (TimeStayAfterDeath)** `WORKS` (corpse harvest residual)
+  A zombie/animal death keeps the body in world at hp 0 for its
+  `TimeStayAfterDeath` (entityclasses.xml per class: 30 zombieTemplateMale,
+  300 animals; per-kind defaults when unset), with the corpse's AI stopped and
+  re-kills suppressed; the tick sweep (`sweepCorpses`) destroys the body when
+  the dwell elapses and broadcasts the EntityRemove, so the client's ragdoll is
+  not yanked mid-animation. `DeadBodyHitPoints` corpse destruction/harvesting
+  is residual.
+  *Anchors:* `src/ecs/world.zig` (`damageFrom` corpse branch, `sweepCorpses`),
+  `src/ecs/components.zig` (`Health.corpse_seconds`, `ClassId.time_stay`),
+  `src/assets/entities.zig` (`TimeStayAfterDeath`), `src/server/game.zig`
+  (sweep in tick, kill handler defers the remove), `asm.il:450657-450759`,
+  `Data/Config/entityclasses.xml:692-693`
 
 - **Zombie health replication to clients** `MISSING`
   EntityStatChanged is only sent for player vitals. Zombie HP lives server-side and

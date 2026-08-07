@@ -178,6 +178,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Blood-moon parties | **PASS** | players within 80 m pool into one party (focus + per-party cap min(30, EnemyCount×members)); one shared wave per party; gamestage frozen at dusk; horde zombies > 150 m teleport back; horde marks + frozen stage cleared at dawn |
 | Biome spawn groups | **PASS** | night/day/animal group per spawn-point biome via spawning.xml rules (biome map id → biomes.xml name → rule); wasteland at midnight gets `ZombiesWastelandNight`, not pine_forest's `ZombiesNight`; fallback on unknown biome |
 | Zombie population bound | **PASS** | alive-cap 24 + far-despawn (>200 blocks, reason=Despawned); pw27 Ent stable 3-4 vs prior 7→34 creep |
+| Corpse dwell | **PASS** | dead zombies/animals linger at hp 0 for TimeStayAfterDeath (30/300 s, entityclasses.xml) with AI stopped; the tick sweep removes expired bodies with EntityRemove; corpse harvest residual |
 | Wandering hordes | **PASS** | HordeNextTime arms after day 1 at +12-24h (deterministic roll), player-gated; expiry spawns a 6-pack of horde zombies at ~92 m chasing the party; pack path-walk residual |
 | ItemValue/Explosion wire | **PASS** | ReadData + ExplosionData positional per IL (no remaining() or scan heuristics); unit tests |
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |

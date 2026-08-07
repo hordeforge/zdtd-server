@@ -173,8 +173,8 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     var step: u32 = 0;
     while (step < 10) : (step += 1) try g.step();
     try std.testing.expect(g.sim.slotOfNetId(zid) == null);
-    const rm_a = cap_a.findPkgId(rm_id);
-    const rm_b = cap_b.findPkgId(rm_id);
+    const rm_a = cap_a.findPkgIdEntity(rm_id, zid);
+    const rm_b = cap_b.findPkgIdEntity(rm_id, zid);
     try std.testing.expect(rm_a != null);
     try std.testing.expect(rm_b != null);
     try std.testing.expectEqual(zid, std.mem.readInt(i32, rm_b.?[0..4], .little));
@@ -1253,6 +1253,11 @@ test "scenario vehicle enter drive and turret kills with power" {
     cap.clear();
     var k: u32 = 0;
     while (k < 50) : (k += 1) try g.step();
+    if (g.sim.slotOfNetId(zid)) |zs_d| {
+        std.debug.print("TURRETDBG alive slot={d} hp={d} corpse={d:.1}\n", .{ zs_d, g.sim.health[zs_d].hp, g.sim.health[zs_d].corpse_seconds });
+    } else {
+        std.debug.print("TURRETDBG zid gone\n", .{});
+    }
     // Corpse dwell: the body stays at hp 0 until the sweep destroys it; the
     // next tick then broadcasts EntityRemove (Turret kill path shares the sim).
     try std.testing.expect(g.sim.slotOfNetId(zid) != null);

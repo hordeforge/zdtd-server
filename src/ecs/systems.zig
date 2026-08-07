@@ -1817,9 +1817,21 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             const z = if (w.mask[i].transform) w.transform[i].z else 0;
             const zid: i32 = if (w.mask[i].network_id) w.network_id[i].id else -1;
             // Same drop_prob roll as player kills (class_id LootDropProb);
-            // read before destroy, which clears the mask.
+            // read before the corpse marking, which keeps the slot.
             const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
-            w.destroy(i);
+            // Corpse dwell like player kills: the body stays at hp 0 for
+            // TimeStayAfterDeath; the tick sweep destroys it later.
+            const dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
+                w.class_id[i].time_stay
+            else
+                30.0;
+            w.health[i].hp = 0;
+            w.health[i].corpse_seconds = dwell;
+            if (w.mask[i].zombie_ai) {
+                w.zombie_ai[i].state = .idle;
+                w.zombie_ai[i].target_id = -1;
+                w.zombie_ai[i].alert = false;
+            }
             out.kills += 1;
             if (zid > 0 and out.killed_n < out.killed_ids.len) {
                 out.killed_ids[out.killed_n] = zid;
