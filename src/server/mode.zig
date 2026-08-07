@@ -11,8 +11,35 @@ const max_mode_bytes: usize = 64 * 1024;
 /// Optional InitOptions overrides from a mode pack.
 pub const Pack = struct {
     name: []const u8 = "default",
+    // Gameplay keys (snake_case; same names as InitOptions / serverconfig).
+    // A mode is a complete behavior pack: set any subset, the rest fall
+    // through to serverconfig / zdtd.toml / code defaults.
     max_spawned_zombies: ?u16 = null,
     blood_moon_frequency: ?u8 = null,
+    game_difficulty: ?u8 = null,
+    blood_moon_enemy_count: ?u8 = null,
+    blood_moon_range: ?u8 = null,
+    player_killing_mode: ?u8 = null,
+    day_night_length: ?u16 = null,
+    day_light_length: ?u8 = null,
+    zombie_move: ?u8 = null,
+    zombie_move_night: ?u8 = null,
+    zombie_feral_move: ?u8 = null,
+    zombie_bm_move: ?u8 = null,
+    enemy_difficulty: ?u8 = null,
+    loot_abundance: ?u16 = null,
+    xp_multiplier: ?u16 = null,
+    block_damage_player: ?u16 = null,
+    block_damage_ai: ?u16 = null,
+    block_damage_ai_bm: ?u16 = null,
+    max_spawned_animals: ?u16 = null,
+    air_drop_frequency: ?u16 = null,
+    drop_on_death: ?u8 = null,
+    land_claim_size: ?u16 = null,
+    land_claim_online_durability_modifier: ?u16 = null,
+    land_claim_offline_durability_modifier: ?u16 = null,
+    land_claim_expiry_days: ?u16 = null,
+    loot_respawn_days: ?u16 = null,
     enable_sample_plugin: ?bool = null,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
@@ -113,6 +140,54 @@ fn applyKV(p: *Pack, a: std.mem.Allocator, section: []const u8, key: []const u8,
         p.max_spawned_zombies = try parseU16(val);
     } else if (std.mem.eql(u8, key, "blood_moon_frequency") or std.mem.eql(u8, key, "bloodmoon_frequency")) {
         p.blood_moon_frequency = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "game_difficulty")) {
+        p.game_difficulty = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "blood_moon_enemy_count")) {
+        p.blood_moon_enemy_count = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "blood_moon_range")) {
+        p.blood_moon_range = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "player_killing_mode")) {
+        p.player_killing_mode = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "day_night_length")) {
+        p.day_night_length = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "day_light_length")) {
+        p.day_light_length = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "zombie_move")) {
+        p.zombie_move = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "zombie_move_night")) {
+        p.zombie_move_night = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "zombie_feral_move")) {
+        p.zombie_feral_move = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "zombie_bm_move")) {
+        p.zombie_bm_move = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "enemy_difficulty")) {
+        p.enemy_difficulty = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "loot_abundance")) {
+        p.loot_abundance = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "xp_multiplier")) {
+        p.xp_multiplier = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "block_damage_player")) {
+        p.block_damage_player = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "block_damage_ai")) {
+        p.block_damage_ai = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "block_damage_ai_bm")) {
+        p.block_damage_ai_bm = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "max_spawned_animals")) {
+        p.max_spawned_animals = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "air_drop_frequency")) {
+        p.air_drop_frequency = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "drop_on_death")) {
+        p.drop_on_death = try parseU8(val);
+    } else if (std.mem.eql(u8, key, "land_claim_size")) {
+        p.land_claim_size = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "land_claim_online_durability_modifier")) {
+        p.land_claim_online_durability_modifier = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "land_claim_offline_durability_modifier")) {
+        p.land_claim_offline_durability_modifier = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "land_claim_expiry_days")) {
+        p.land_claim_expiry_days = try parseU16(val);
+    } else if (std.mem.eql(u8, key, "loot_respawn_days")) {
+        p.loot_respawn_days = try parseU16(val);
     } else if (std.mem.eql(u8, key, "enable_sample_plugin")) {
         p.enable_sample_plugin = try parseBool(val);
     } else {
@@ -175,7 +250,47 @@ pub fn applyToInitOptions(p: *const Pack, opts: anytype) void {
         opts.max_spawned_zombies = c;
     }
     if (p.blood_moon_frequency) |v| opts.blood_moon_frequency = v;
+    if (p.game_difficulty) |v| opts.game_difficulty = clampU8(v, 0, 5, "game_difficulty");
+    if (p.blood_moon_enemy_count) |v| opts.blood_moon_enemy_count = clampU8(v, 0, 60, "blood_moon_enemy_count");
+    if (p.blood_moon_range) |v| opts.blood_moon_range = clampU8(v, 0, 15, "blood_moon_range");
+    if (p.player_killing_mode) |v| opts.player_killing_mode = clampU8(v, 0, 3, "player_killing_mode");
+    if (p.day_night_length) |v| opts.day_night_length = clampU16(v, 10, 1200, "day_night_length");
+    if (p.day_light_length) |v| opts.day_light_length = clampU8(v, 1, 23, "day_light_length");
+    if (p.zombie_move) |v| opts.zombie_move = clampU8(v, 0, 4, "zombie_move");
+    if (p.zombie_move_night) |v| opts.zombie_move_night = clampU8(v, 0, 4, "zombie_move_night");
+    if (p.zombie_feral_move) |v| opts.zombie_feral_move = clampU8(v, 0, 4, "zombie_feral_move");
+    if (p.zombie_bm_move) |v| opts.zombie_bm_move = clampU8(v, 0, 4, "zombie_bm_move");
+    if (p.enemy_difficulty) |v| opts.enemy_difficulty = clampU8(v, 0, 1, "enemy_difficulty");
+    if (p.loot_abundance) |v| opts.loot_abundance = clampU16(v, 1, 1000, "loot_abundance");
+    if (p.xp_multiplier) |v| opts.xp_multiplier = clampU16(v, 1, 1000, "xp_multiplier");
+    if (p.block_damage_player) |v| opts.block_damage_player = clampU16(v, 1, 1000, "block_damage_player");
+    if (p.block_damage_ai) |v| opts.block_damage_ai = clampU16(v, 1, 1000, "block_damage_ai");
+    if (p.block_damage_ai_bm) |v| opts.block_damage_ai_bm = clampU16(v, 1, 1000, "block_damage_ai_bm");
+    if (p.max_spawned_animals) |v| opts.max_spawned_animals = clampU16(v, 0, 2048, "max_spawned_animals");
+    if (p.air_drop_frequency) |v| opts.air_drop_frequency = clampU16(v, 0, 168, "air_drop_frequency");
+    if (p.drop_on_death) |v| opts.drop_on_death = clampU8(v, 0, 4, "drop_on_death");
+    if (p.land_claim_size) |v| opts.land_claim_size = clampU16(v, 1, 256, "land_claim_size");
+    if (p.land_claim_online_durability_modifier) |v| opts.land_claim_online_durability_modifier = clampU16(v, 1, 1000, "land_claim_online_durability_modifier");
+    if (p.land_claim_offline_durability_modifier) |v| opts.land_claim_offline_durability_modifier = clampU16(v, 1, 1000, "land_claim_offline_durability_modifier");
+    if (p.land_claim_expiry_days) |v| opts.land_claim_expiry_days = clampU16(v, 0, 3650, "land_claim_expiry_days");
+    if (p.loot_respawn_days) |v| opts.loot_respawn_days = clampU16(v, 0, 365, "loot_respawn_days");
     if (p.enable_sample_plugin) |v| opts.enable_sample_plugin = v;
+}
+
+fn clampU8(v: u8, lo: u8, hi: u8, key: []const u8) u8 {
+    const c = @min(@max(v, lo), hi);
+    if (c != v) {
+        std.debug.print("zdtd: mode pack {s}={d} out of range [{d}..{d}]; using {d}\n", .{ key, v, lo, hi, c });
+    }
+    return c;
+}
+
+fn clampU16(v: u16, lo: u16, hi: u16, key: []const u8) u16 {
+    const c = @min(@max(v, lo), hi);
+    if (c != v) {
+        std.debug.print("zdtd: mode pack {s}={d} out of range [{d}..{d}]; using {d}\n", .{ key, v, lo, hi, c });
+    }
+    return c;
 }
 
 test "parse default pack" {
@@ -191,6 +306,30 @@ test "applyToInitOptions overrides only set fields" {
     const Opts = struct {
         max_spawned_zombies: u16 = 100,
         blood_moon_frequency: u8 = 3,
+        game_difficulty: u8 = 2,
+        blood_moon_enemy_count: u8 = 8,
+        blood_moon_range: u8 = 0,
+        player_killing_mode: u8 = 3,
+        day_night_length: u16 = 60,
+        day_light_length: u8 = 18,
+        zombie_move: u8 = 0,
+        zombie_move_night: u8 = 3,
+        zombie_feral_move: u8 = 3,
+        zombie_bm_move: u8 = 3,
+        enemy_difficulty: u8 = 0,
+        loot_abundance: u16 = 100,
+        xp_multiplier: u16 = 100,
+        block_damage_player: u16 = 100,
+        block_damage_ai: u16 = 100,
+        block_damage_ai_bm: u16 = 100,
+        max_spawned_animals: u16 = 50,
+        air_drop_frequency: u16 = 72,
+        drop_on_death: u8 = 1,
+        land_claim_size: u16 = 41,
+        land_claim_online_durability_modifier: u16 = 4,
+        land_claim_offline_durability_modifier: u16 = 4,
+        land_claim_expiry_days: u16 = 3,
+        loot_respawn_days: u16 = 7,
         enable_sample_plugin: bool = false,
         wire_chunks: bool = true,
     };
@@ -211,6 +350,30 @@ test "applyToInitOptions clamps max_spawned_zombies" {
     const Opts = struct {
         max_spawned_zombies: u16 = 64,
         blood_moon_frequency: u8 = 7,
+        game_difficulty: u8 = 2,
+        blood_moon_enemy_count: u8 = 8,
+        blood_moon_range: u8 = 0,
+        player_killing_mode: u8 = 3,
+        day_night_length: u16 = 60,
+        day_light_length: u8 = 18,
+        zombie_move: u8 = 0,
+        zombie_move_night: u8 = 3,
+        zombie_feral_move: u8 = 3,
+        zombie_bm_move: u8 = 3,
+        enemy_difficulty: u8 = 0,
+        loot_abundance: u16 = 100,
+        xp_multiplier: u16 = 100,
+        block_damage_player: u16 = 100,
+        block_damage_ai: u16 = 100,
+        block_damage_ai_bm: u16 = 100,
+        max_spawned_animals: u16 = 50,
+        air_drop_frequency: u16 = 72,
+        drop_on_death: u8 = 1,
+        land_claim_size: u16 = 41,
+        land_claim_online_durability_modifier: u16 = 4,
+        land_claim_offline_durability_modifier: u16 = 4,
+        land_claim_expiry_days: u16 = 3,
+        loot_respawn_days: u16 = 7,
         enable_sample_plugin: bool = false,
     };
     var o: Opts = .{};

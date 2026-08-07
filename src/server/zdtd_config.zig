@@ -75,6 +75,15 @@ pub const Sim = struct {
     /// Trader AvailableMoney display pool (no stock key: stock Traders.xml has
     /// no wallet property; AvailableMoney is engine-managed per-day).
     trader_wallet_dukes: ?i32 = null,
+    /// Anti-abuse rate limits (per-peer flood gates). Mono-ns values; token
+    /// buckets shape the inv/block accept path, gaps pace chat and damage.
+    min_chat_gap_ns: ?u64 = null,
+    inv_bucket_cap: ?u8 = null,
+    inv_refill_ns: ?u64 = null,
+    block_bucket_cap: ?u8 = null,
+    block_refill_ns: ?u64 = null,
+    min_damage_gap_ns: ?u64 = null,
+    damage_burst_max: ?u8 = null,
 };
 
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
@@ -255,6 +264,20 @@ fn applyKV(f: *File, a: std.mem.Allocator, section: []const u8, key: []const u8,
     } else if (std.mem.eql(u8, section, "sim")) {
         if (std.mem.eql(u8, key, "trader_wallet_dukes")) {
             f.sim.trader_wallet_dukes = try parseI32(val);
+        } else if (std.mem.eql(u8, key, "min_chat_gap_ns")) {
+            f.sim.min_chat_gap_ns = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "inv_bucket_cap")) {
+            f.sim.inv_bucket_cap = try parseU8(val);
+        } else if (std.mem.eql(u8, key, "inv_refill_ns")) {
+            f.sim.inv_refill_ns = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "block_bucket_cap")) {
+            f.sim.block_bucket_cap = try parseU8(val);
+        } else if (std.mem.eql(u8, key, "block_refill_ns")) {
+            f.sim.block_refill_ns = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "min_damage_gap_ns")) {
+            f.sim.min_damage_gap_ns = try parseU64(val);
+        } else if (std.mem.eql(u8, key, "damage_burst_max")) {
+            f.sim.damage_burst_max = try parseU8(val);
         } else {
             return unknownKey(section, key);
         }
@@ -298,6 +321,9 @@ fn parseU32(v: []const u8) !u32 {
 }
 fn parseU64(v: []const u8) !u64 {
     return std.fmt.parseInt(u64, stripQuotes(v), 10);
+}
+fn parseU8(v: []const u8) !u8 {
+    return std.fmt.parseInt(u8, stripQuotes(v), 10);
 }
 fn parseI32(v: []const u8) !i32 {
     return std.fmt.parseInt(i32, stripQuotes(v), 10);
@@ -349,6 +375,13 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
     if (f.sim.trader_wallet_dukes) |v| opts.trader_wallet_dukes = v;
+    if (f.sim.min_chat_gap_ns) |v| opts.min_chat_gap_ns = v;
+    if (f.sim.inv_bucket_cap) |v| opts.inv_bucket_cap = v;
+    if (f.sim.inv_refill_ns) |v| opts.inv_refill_ns = v;
+    if (f.sim.block_bucket_cap) |v| opts.block_bucket_cap = v;
+    if (f.sim.block_refill_ns) |v| opts.block_refill_ns = v;
+    if (f.sim.min_damage_gap_ns) |v| opts.min_damage_gap_ns = v;
+    if (f.sim.damage_burst_max) |v| opts.damage_burst_max = v;
 }
 
 /// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
@@ -431,6 +464,28 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
     }
+    // Anti-abuse rate limits: caps and bursts must stay >= 1 (a 0 cap would
+    // permanently starve the bucket; a 0 burst would reject every combo).
+    if (opts.inv_bucket_cap == 0) {
+        std.debug.print("zdtd: inv_bucket_cap=0 invalid; using 1\n", .{});
+        opts.inv_bucket_cap = 1;
+    }
+    if (opts.inv_refill_ns == 0) {
+        std.debug.print("zdtd: inv_refill_ns=0 invalid; using 1\n", .{});
+        opts.inv_refill_ns = 1;
+    }
+    if (opts.block_bucket_cap == 0) {
+        std.debug.print("zdtd: block_bucket_cap=0 invalid; using 1\n", .{});
+        opts.block_bucket_cap = 1;
+    }
+    if (opts.block_refill_ns == 0) {
+        std.debug.print("zdtd: block_refill_ns=0 invalid; using 1\n", .{});
+        opts.block_refill_ns = 1;
+    }
+    if (opts.damage_burst_max == 0) {
+        std.debug.print("zdtd: damage_burst_max=0 invalid; using 1\n", .{});
+        opts.damage_burst_max = 1;
+    }
     if (opts.trader_wallet_dukes < 0) {
         std.debug.print("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
         opts.trader_wallet_dukes = 0;
@@ -511,6 +566,13 @@ test "applyToInitOptions deco_trees only when set" {
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -612,6 +674,13 @@ test "sanitizeInitOptions repairs bad radii" {
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{
@@ -646,6 +715,13 @@ test "sanitizeInitOptions rejects non-finite ranges" {
         interest_range: f32 = std.math.inf(f32),
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{};
@@ -673,6 +749,13 @@ test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
         interest_range: f32 = 160,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         guard: guard_policy.Policy = .{},
     };
     var o: Opts = .{ .max_streamed_chunks = 999 };
@@ -699,6 +782,13 @@ test "guard policy merges from [authority] and clamps" {
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -765,6 +855,13 @@ test "[perf] switches default off and merge only when set" {
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,
@@ -818,6 +915,13 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
         max_claimed_damage: i32 = 200,
         peer_stale_ms: u64 = 3000,
         trader_wallet_dukes: i32 = 5000,
+        min_chat_gap_ns: u64 = 200_000_000,
+        inv_bucket_cap: u8 = 40,
+        inv_refill_ns: u64 = 50_000_000,
+        block_bucket_cap: u8 = 30,
+        block_refill_ns: u64 = 33_000_000,
+        min_damage_gap_ns: u64 = 80_000_000,
+        damage_burst_max: u8 = 4,
         wire_chunks: bool = true,
         deco_trees: bool = true,
         deco_mirror: bool = true,

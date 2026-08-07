@@ -96,6 +96,17 @@ pub const ItemTable = struct {
         return null;
     }
 
+    /// Stock ItemValue.type → item name (reverse of stockTypeFor). Walks the
+    /// defs; used off the hot path for trust-boundary checks (workstation queue
+    /// validation). Builtin rows carry no stock type, so this only resolves
+    /// after items.xml loads.
+    pub fn nameByStockType(self: *const ItemTable, stock_type: i32) ?[]const u8 {
+        for (self.defs) |d| {
+            if (d.stock_type == stock_type and d.name.len > 0) return d.name;
+        }
+        return null;
+    }
+
     /// ECS id for a stock or short name (0 unknown). Prefers defs after XML load.
     pub fn ecsIdByName(self: *const ItemTable, name: []const u8) u16 {
         if (self.byName(name)) |d| return d.id;

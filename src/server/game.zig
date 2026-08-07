@@ -331,6 +331,15 @@ pub const InitOptions = struct {
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
     lock_stale_ns: u64 = default_lock_stale_ns,
+    /// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
+    /// bucket shape, plus the damage-accept gap and burst cap.
+    min_chat_gap_ns: u64 = default_min_chat_gap_ns,
+    inv_bucket_cap: u8 = default_inv_bucket_cap,
+    inv_refill_ns: u64 = default_inv_refill_ns,
+    block_bucket_cap: u8 = default_block_bucket_cap,
+    block_refill_ns: u64 = default_block_refill_ns,
+    min_damage_gap_ns: u64 = default_min_damage_gap_ns,
+    damage_burst_max: u8 = default_damage_burst_max,
     /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Register in-tree sample_hello static plugin (logs once on enable).
@@ -373,16 +382,15 @@ pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
 /// Max UTF-8 bytes in a player Global chat message (canonical: c2s_text).
 pub const max_chat_msg_len: usize = c2s_text.max_chat_msg_len;
-/// Minimum gap between accepted chat broadcasts from one peer (mono ns).
-pub const min_chat_gap_ns: u64 = 200_000_000;
-/// Inv/block token buckets: capacity and refill period (mono ns).
-pub const inv_bucket_cap: u8 = 40;
-pub const inv_refill_ns: u64 = 50_000_000; // +1 token / 50 ms
-pub const block_bucket_cap: u8 = 30;
-pub const block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
-/// Min gap between DamageEntity accepts (mono ns); burst allows short combos.
-pub const min_damage_gap_ns: u64 = 80_000_000;
-pub const damage_burst_max: u8 = 4;
+/// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
+/// bucket shape, plus the damage-accept gap and burst cap.
+pub const default_min_chat_gap_ns: u64 = 200_000_000;
+pub const default_inv_bucket_cap: u8 = 40;
+pub const default_inv_refill_ns: u64 = 50_000_000; // +1 token / 50 ms
+pub const default_block_bucket_cap: u8 = 30;
+pub const default_block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
+pub const default_min_damage_gap_ns: u64 = 80_000_000;
+pub const default_damage_burst_max: u8 = 4;
 pub const default_peer_stale_ms: u64 = 3000;
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
@@ -486,9 +494,9 @@ const Client = struct {
     /// Last accepted chat broadcast (mono ns); flood throttle for Global chat.
     last_chat_ns: u64 = 0,
     /// Cost-class token buckets (refill on accept path).
-    inv_tokens: u8 = inv_bucket_cap,
+    inv_tokens: u8 = 0,
     inv_refill_ns: u64 = 0,
-    block_tokens: u8 = block_bucket_cap,
+    block_tokens: u8 = 0,
     block_refill_ns: u64 = 0,
     /// Combat ledger: last DamageEntity mono ns + short burst count.
     last_damage_ns: u64 = 0,
@@ -853,6 +861,13 @@ pub const Game = struct {
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
     lock_stale_ns: u64 = default_lock_stale_ns,
+    min_chat_gap_ns: u64 = default_min_chat_gap_ns,
+    inv_bucket_cap: u8 = default_inv_bucket_cap,
+    inv_refill_ns: u64 = default_inv_refill_ns,
+    block_bucket_cap: u8 = default_block_bucket_cap,
+    block_refill_ns: u64 = default_block_refill_ns,
+    min_damage_gap_ns: u64 = default_min_damage_gap_ns,
+    damage_burst_max: u8 = default_damage_burst_max,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
@@ -933,6 +948,13 @@ pub const Game = struct {
             .interest_range = opts.interest_range,
             .peer_stale_ms = opts.peer_stale_ms,
             .lock_stale_ns = opts.lock_stale_ns,
+            .min_chat_gap_ns = opts.min_chat_gap_ns,
+            .inv_bucket_cap = opts.inv_bucket_cap,
+            .inv_refill_ns = opts.inv_refill_ns,
+            .block_bucket_cap = opts.block_bucket_cap,
+            .block_refill_ns = opts.block_refill_ns,
+            .min_damage_gap_ns = opts.min_damage_gap_ns,
+            .damage_burst_max = opts.damage_burst_max,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
@@ -5936,7 +5958,30 @@ pub const Game = struct {
                     applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
                     @memcpy(st.last_input[0..ws.last_input_blob_len], ws.last_input[0..ws.last_input_blob_len]);
                     st.last_input_blob_len = ws.last_input_blob_len;
-                    @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
+                    // Trust boundary (GAP: workstation recipe validation): the
+                    // queued output type/count come from the client blob verbatim,
+                    // so a modified client could queue any output at any rate.
+                    // With stock recipes.xml loaded, only queue items whose output
+                    // type resolves to a recipe output survive; unresolvable
+                    // types and non-recipe outputs are dropped. Builtin recipes
+                    // (offline/test) carry no stock types, so validation is off.
+                    if (self.recipes.source == .xml) {
+                        var q_ok: [workstations_mod.max_ws_queue]workstations_mod.QueueItem = undefined;
+                        var qn: usize = 0;
+                        for (ws.queue[0..ws.queue_n]) |q| {
+                            if (q.output_type == 0 or q.output_count <= 0) continue;
+                            const iname = self.items.nameByStockType(q.output_type) orelse continue;
+                            if (self.recipes.byName(iname) == null) continue;
+                            q_ok[qn] = q;
+                            qn += 1;
+                        }
+                        @memcpy(st.queue[0..qn], q_ok[0..qn]);
+                        // Clear the slots the validation dropped so a previous
+                        // tick's queue cannot linger as a live craft.
+                        for (st.queue[qn..]) |*q| q.* = .{};
+                    } else {
+                        @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
+                    }
                     @memcpy(st.melt[0..ws.melt_n], ws.melt[0..ws.melt_n]);
                     // The client returns the craft-complete entries its
                     // CheckForCraftComplete has not consumed: that list is the
@@ -7905,12 +7950,16 @@ pub const Game = struct {
 
     /// Refill + spend one inv token. False → caller should drop and count throttle.
     fn takeInvToken(self: *Game, c: *Client) bool {
-        _ = self;
         const now = clock.monoNs();
-        if (c.inv_refill_ns == 0) c.inv_refill_ns = now;
-        while (c.inv_tokens < inv_bucket_cap and now -% c.inv_refill_ns >= inv_refill_ns) {
+        // A fresh bucket starts full (tokens default 0 on the struct so the
+        // cap stays a config value; the first call seeds the configured cap).
+        if (c.inv_refill_ns == 0) {
+            c.inv_refill_ns = now;
+            c.inv_tokens = self.inv_bucket_cap;
+        }
+        while (c.inv_tokens < self.inv_bucket_cap and now -% c.inv_refill_ns >= self.inv_refill_ns) {
             c.inv_tokens += 1;
-            c.inv_refill_ns +%= inv_refill_ns;
+            c.inv_refill_ns +%= self.inv_refill_ns;
         }
         if (c.inv_tokens == 0) return false;
         c.inv_tokens -= 1;
@@ -7918,12 +7967,14 @@ pub const Game = struct {
     }
 
     fn takeBlockToken(self: *Game, c: *Client) bool {
-        _ = self;
         const now = clock.monoNs();
-        if (c.block_refill_ns == 0) c.block_refill_ns = now;
-        while (c.block_tokens < block_bucket_cap and now -% c.block_refill_ns >= block_refill_ns) {
+        if (c.block_refill_ns == 0) {
+            c.block_refill_ns = now;
+            c.block_tokens = self.block_bucket_cap;
+        }
+        while (c.block_tokens < self.block_bucket_cap and now -% c.block_refill_ns >= self.block_refill_ns) {
             c.block_tokens += 1;
-            c.block_refill_ns +%= block_refill_ns;
+            c.block_refill_ns +%= self.block_refill_ns;
         }
         if (c.block_tokens == 0) return false;
         c.block_tokens -= 1;
@@ -7932,10 +7983,9 @@ pub const Game = struct {
 
     /// Combat rate gate: allow burst of damage_burst_max within min_damage_gap.
     fn takeDamageToken(self: *Game, c: *Client) bool {
-        _ = self;
         const now = clock.monoNs();
-        if (c.last_damage_ns != 0 and now -% c.last_damage_ns < min_damage_gap_ns) {
-            if (c.damage_burst >= damage_burst_max) return false;
+        if (c.last_damage_ns != 0 and now -% c.last_damage_ns < self.min_damage_gap_ns) {
+            if (c.damage_burst >= self.damage_burst_max) return false;
             c.damage_burst += 1;
         } else {
             c.damage_burst = 1;
@@ -7946,9 +7996,8 @@ pub const Game = struct {
 
     /// Per-peer chat flood gate. Returns true and stamps `last_chat_ns` when allowed.
     fn acceptChatRate(self: *const Game, c: *Client) bool {
-        _ = self;
         const now = clock.monoNs();
-        if (c.last_chat_ns != 0 and now -% c.last_chat_ns < min_chat_gap_ns) return false;
+        if (c.last_chat_ns != 0 and now -% c.last_chat_ns < self.min_chat_gap_ns) return false;
         c.last_chat_ns = now;
         return true;
     }
