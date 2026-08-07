@@ -29,7 +29,9 @@ observable, on the live stock client:
 - **Combat and replication.** Player HP changes reach the client, mobs that leave
   a client's interest box are unloaded instead of standing frozen forever, and
   the replicate pass gained alive/dirty bitsets with per-entity observer masks.
-- **Features:** deco NameIdMapping + biome density + world-store mirror, weather
+- **Features:** deco NameIdMapping + biome density + world-store mirror (with
+  stock `GetRandomRotation` rolls in rawData bits 16..20, keyed to the placement
+  cell so windows and the mirror agree), weather
   storm/bloodMoon state machine, quest rally objectives, workstation RecipeQueue,
   power trigger TE wire, A* pathfinding, gamestages, buffs depth, vehicle
   multi-seat, party PlatformUserId, stock telnet console surface.
