@@ -1171,14 +1171,22 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:165`, `:240`, `asm.il:413135`,
   `asm.il:414107`, `asm.il:413541`
 
-- **Blood-moon party grouping (multiplayer)** `MISSING`
-  No party concept: every player independently gets `wave` zombies per burst.
-  Stock groups players within `cPartyJoinDistance = 80`, computes one shared
-  gamestage frozen for the night, spawns against the party focus, and teleports a
-  drifting party zombie back past `cTeleportDist = 150`. With 2+ players zdtd
-  doubles the spawn rate where stock would pool it.
-  *Anchors:* `src/ecs/aidirector.zig:233`, `asm.il:413090`, `asm.il:412744`,
-  `asm.il:414221`
+- **Blood-moon party grouping (multiplayer)** `WORKS`
+  Online players are clustered into blood-moon parties (within
+  `cPartyJoinDistance = 80`), each with a focus (running average) and a
+  per-party alive ceiling `min(cPartyEnemyMax 30, BloodMoonEnemyCount x
+  members)`. One shared wave spawns per party around the focus (`cSpawnDistance`
+  40 + up to 10 jitter, rotating ~120 degrees), marked `IsHordeZombie`
+  (`zombie_ai.is_horde`); the party gamestage is frozen at dusk
+  (`bm_stage_frozen`, InitParty) for the night's ladder; horde zombies past
+  `cTeleportDist = 150` from their nearest focus are teleported back every tick;
+  dawn clears horde marks and the frozen stage (EndBloodMoon). 2 players in
+  range now get one pooled horde, not double spawns.
+  *Anchors:* `src/ecs/aidirector.zig` (`party_join_dist`/`BmParty`,
+  `buildBloodMoonParties`, `spawnBloodMoonParties`, `recountAndTeleportHorde`,
+  `clearHordeMarks`), `src/ecs/components.zig` (`ZombieAi.is_horde`),
+  `asm.il:413090`, `asm.il:412744`, `asm.il:413818` (InitParty), `asm.il:414221`,
+  `asm.il:412618` (EndBloodMoon)
 
 - **Blood-moon zombie strength** `PARTIAL`
   Real and observable: hp x1.5 on top of the GameDifficulty scale, `ZombieBMMove`

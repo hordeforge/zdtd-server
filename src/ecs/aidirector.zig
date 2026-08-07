@@ -772,3 +772,29 @@ test "bloodMoonDayFor returns the jittered horde day, not the multiple" {
     cl.bloodmoon_frequency = 0;
     try std.testing.expectEqual(@as(i32, 0), cl.bloodMoonDayFor(1));
 }
+
+test "blood moon party clustering pools nearby players and splits stragglers" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    // Two players 40 m apart and one 200 m away: 2 parties (cPartyJoinDistance 80).
+    const a = w.spawnPlayer(0, 70, 0, 0).?;
+    const b = w.spawnPlayer(40, 70, 0, 1).?;
+    _ = w.spawnPlayer(200, 70, 200, 2).?;
+    var d: Director = .{};
+    d.buildBloodMoonParties(&w);
+    try std.testing.expectEqual(@as(u8, 2), d.bm_party_n);
+    // The near pair shares one focus (their average), the straggler its own.
+    const near = d.bm_parties[0];
+    try std.testing.expect(near.members == 2);
+    try std.testing.expect(@abs(near.focus_x - 20.0) < 0.01);
+    const far = d.bm_parties[1];
+    try std.testing.expect(far.members == 1);
+    // No players at all -> no parties.
+    var w2: ecs_world.World = .{};
+    defer w2.deinit();
+    var d2: Director = .{};
+    d2.buildBloodMoonParties(&w2);
+    try std.testing.expectEqual(@as(u8, 0), d2.bm_party_n);
+    _ = a;
+    _ = b;
+}

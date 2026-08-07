@@ -172,6 +172,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Trader open/close | **PASS** | per-trader edge-latched close cycle (EntityTrader::OnUpdateLive shape): close force-unlocks the held trade channel and toggles `TraderOnOff` gate blocks (light meta; door lock via TE features residual); open latch reopens |
 | Vending machines | **PASS** | TileEntityVendingMachine (type 7) emitted: blocks.xml Class/TraderID + Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream and LockRequest open (VendingMachineLockContext); rent/edit SM + C2S buy and disk persistence residual |
 | Director class variety | **PASS** | zombie slots 1+8..11 from entitygroups weighted picks; rotation per spawn |
+| Blood-moon parties | **PASS** | players within 80 m pool into one party (focus + per-party cap min(30, EnemyCount×members)); one shared wave per party; gamestage frozen at dusk; horde zombies > 150 m teleport back; horde marks + frozen stage cleared at dawn |
 | Biome spawn groups | **PASS** | night/day/animal group per spawn-point biome via spawning.xml rules (biome map id → biomes.xml name → rule); wasteland at midnight gets `ZombiesWastelandNight`, not pine_forest's `ZombiesNight`; fallback on unknown biome |
 | Zombie population bound | **PASS** | alive-cap 24 + far-despawn (>200 blocks, reason=Despawned); pw27 Ent stable 3-4 vs prior 7→34 creep |
 | ItemValue/Explosion wire | **PASS** | ReadData + ExplosionData positional per IL (no remaining() or scan heuristics); unit tests |

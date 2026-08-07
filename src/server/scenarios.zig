@@ -9,6 +9,7 @@ const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
+const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
@@ -1003,6 +1004,70 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     try std.testing.expect(!g.sim.trader_stock[ts].is_closed);
 
     std.debug.print("PASS scenario: trader close cycle force-unlock + reopen latch\n", .{});
+}
+
+test "scenario blood moon parties pool nearby players into one horde" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_bmparty");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmparty", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    // Both clients sit at the flat-world spawn (256,70,256): within 80 m, so
+    // stock would pool them into ONE blood-moon party.
+    try std.testing.expect(g.sim.director.bm_party_n == 0);
+
+    // Blood moon night: day 7 at dusk (frequency 7), enemy count 8.
+    g.sim.director.clock.day = 7;
+    g.sim.director.clock.hours = 22.0;
+    g.sim.director.bloodmoon_enemy_count = 8;
+    g.sim.director.bloodmoon_cd = 0;
+    try g.step();
+    try std.testing.expect(g.sim.director.bm_party_n == 1);
+    try std.testing.expect(g.sim.director.bm_stage_frozen != 0);
+
+    // One wave per party: max(1, 8/2) = 4 horde zombies, NOT 8 (per player).
+    var horde: u32 = 0;
+    var horde_slot: ?ecs.Slot = null;
+    var s: ecs.Slot = 0;
+    while (s < ecs.max_entities) : (s += 1) {
+        if (!g.sim.alive[s] or !g.sim.zombie_ai[s].is_horde) continue;
+        horde += 1;
+        horde_slot = s;
+    }
+    try std.testing.expect(horde >= 1 and horde <= 4);
+    const hs = horde_slot orelse return error.TestUnexpectedResult;
+
+    // Teleport-back: drag the horde zombie 200 m from the focus; the next tick
+    // brings it inside cTeleportDist (150 m) of the party focus.
+    const focus = g.sim.director.bm_parties[0];
+    g.sim.setPos(g.sim.network_id[hs].id, focus.focus_x + 200, g.sim.transform[hs].y, focus.focus_z, 0);
+    try g.step();
+    const dx = g.sim.transform[hs].x - focus.focus_x;
+    const dz = g.sim.transform[hs].z - focus.focus_z;
+    try std.testing.expect(dx * dx + dz * dz <= 150.0 * 150.0);
+
+    // Dawn clears the horde marks and the frozen stage (EndBloodMoon).
+    g.sim.director.clock.day = 8;
+    g.sim.director.clock.hours = 5.0;
+    try g.step();
+    try std.testing.expect(g.sim.director.bm_stage_frozen == 0);
+    var still_horde = false;
+    var s2: ecs.Slot = 0;
+    while (s2 < ecs.max_entities) : (s2 += 1) {
+        if (g.sim.alive[s2] and g.sim.zombie_ai[s2].is_horde) still_horde = true;
+    }
+    try std.testing.expect(!still_horde);
+
+    std.debug.print("PASS scenario: blood moon parties pool 2 players -> 1 horde (n={d}) teleport+dawn clear\n", .{horde});
 }
 
 test "scenario trader RemoveQuest accepts and drops the quest from offers" {
