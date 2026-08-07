@@ -11940,10 +11940,17 @@ test "offline init records default DST run seed" {
 
 test "offline steps replay same world_time for same seed" {
     io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    // Unique per invocation: concurrent test processes share .zdtd_cfg_cache,
+    // so fixed dir names would race on each other's saved clock state.
+    const ts = clock.monoNs();
+    var dir_a_buf: [128]u8 = undefined;
+    var dir_b_buf: [128]u8 = undefined;
+    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_replay_a_{d}", .{ts}) catch ".";
+    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_replay_b_{d}", .{ts}) catch ".";
     var t_a: u64 = 0;
     var t_b: u64 = 0;
     {
-        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_replay_a", 0, .{
+        const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
             .worldgen_seed = 99,
             .enable_sample_plugin = false,
         });
@@ -11957,7 +11964,7 @@ test "offline steps replay same world_time for same seed" {
         t_a = g.sim.director.clock.worldTimeBits();
     }
     {
-        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_replay_b", 0, .{
+        const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
             .worldgen_seed = 99,
             .enable_sample_plugin = false,
         });

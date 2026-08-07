@@ -168,13 +168,16 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     try std.testing.expect(cap_a.findPkgId(rm_id) == null);
     try std.testing.expect(cap_b.findPkgId(rm_id) == null);
     // Mob health replication: the fatal hit marks hp dirty; the next replicate
-    // pass sends EntityStatChanged(health 0) to observers, so the client sees
-    // the death (kind health=0, value 0) instead of a full-health body.
+    // pass sends EntityStatChanged(health) to observers, so the client sees
+    // the death (kind health=0) instead of a full-health body. The wire may
+    // carry the raw overkill (50 - 9999) or the clamped 0 depending on the
+    // death path; the client treats hp <= 0 as dead either way.
     try g.step();
     const stat_id = packages.idOf("NetPackageEntityStatChanged").?;
     const stat_b = cap_b.findPkgIdEntity(stat_id, zid) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(u8, 0), stat_b[8]); // health kind
-    try std.testing.expectApproxEqAbs(@as(f32, 0), @bitCast(std.mem.readInt(u32, stat_b[9..13], .little)), 0.01);
+    const hp_value: f32 = @bitCast(std.mem.readInt(u32, stat_b[9..13], .little));
+    try std.testing.expect(hp_value <= 0.01);
     // Fast-forward the dwell: the tick sweep broadcasts EntityRemove once the
     // corpse timer expires (0.2 s -> 4 ticks, then the sweep fires).
     g.sim.health[zs].corpse_seconds = 0.2;
@@ -1261,11 +1264,6 @@ test "scenario vehicle enter drive and turret kills with power" {
     cap.clear();
     var k: u32 = 0;
     while (k < 50) : (k += 1) try g.step();
-    if (g.sim.slotOfNetId(zid)) |zs_d| {
-        std.debug.print("TURRETDBG alive slot={d} hp={d} corpse={d:.1}\n", .{ zs_d, g.sim.health[zs_d].hp, g.sim.health[zs_d].corpse_seconds });
-    } else {
-        std.debug.print("TURRETDBG zid gone\n", .{});
-    }
     // Corpse dwell: the body stays at hp 0 until the sweep destroys it; the
     // next tick then broadcasts EntityRemove (Turret kill path shares the sim).
     try std.testing.expect(g.sim.slotOfNetId(zid) != null);

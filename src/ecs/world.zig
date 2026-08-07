@@ -63,6 +63,11 @@ pub const World = struct {
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
     trader_stock: [max_entities]c.TraderStock = [_]c.TraderStock{.{}} ** max_entities,
+    /// Trader restock refill policy (zdtd.toml [sim] trader_restock_*): each
+    /// restock grows stackable entries toward `trader_restock_cap` by at most
+    /// `trader_restock_refill`. Bucket B (zdtd sim strategy, not stock data).
+    trader_restock_cap: u16 = 50,
+    trader_restock_refill: u16 = 10,
     journal: [max_entities]c.Journal = [_]c.Journal{.{}} ** max_entities,
     wallet: [max_entities]c.Wallet = [_]c.Wallet{.{}} ** max_entities,
     inventory: [max_entities]c.Inventory = [_]c.Inventory{.{}} ** max_entities,
@@ -753,6 +758,7 @@ pub const World = struct {
                 // yanked mid-animation; the tick sweep destroys it later. A
                 // second hit must not re-fire kill side effects (hp <= 0 guard
                 // above already returns).
+                self.health[s].hp = 0; // clamp: the wire stat shows 0, not the overkill
                 const dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
                     self.class_id[s].time_stay
                 else if (self.kind[s] == .animal)
