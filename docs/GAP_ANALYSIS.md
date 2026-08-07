@@ -353,30 +353,60 @@ area and the concrete work.
     client's `TryParseSerializedString` no longer warns. Remaining: Steam or
     EOS registration (direct IP is currently the only route in).
 
-20. **Net: stop wasting the transport budget.**
-    Everything goes reliable-ordered, uncompressed, one package per envelope, on
-    one channel. Stock marks five motion packages unreliable (asm.il:816202 and
-    four siblings), compresses eight (asm.il:808641 and siblings), and puts bulk
-    world data on channel 1 (asm.il:808632). One join costs 6.4 MB out and drops
-    the block `IdMapping` to `WindowFull` (live: `reliable_window_drops=1`).
+20. **Net: stop wasting the transport budget.** `PARTIAL` (2026-08-07): the
+    five stock motion packages now go unreliable (`isUnreliablePackage`,
+    falling back to reliable past the single-datagram cap), the block
+    `NameIdMapping` rides a deflate-compressed frame on channel 2, and
+    **`NetPackageChunk` and `NetPackageSignDataResponse` are now deflated
+    too** (`trySendCompressed` in `sendGame`, the stock asm.il:808641
+    compress set) so the join/stream cost drops; any overflow falls through
+    to the uncompressed frame. The join drop `reliable_window_drops=1` is
+    gone. Still open: the remaining stock compressed set (ConfigFile has no
+    payload in zdtd's LoadLocal path; DynamicMesh/MapChunks/POIAround are not
+    sent), bulk world data on channel 1, and multi-package envelopes
+    (`src/server/game.zig` send path).
 
-21. **Progression: build a buff runtime.** 482 buff defs load and none can be
-    applied, ticked, expired, relayed or persisted: no buff component, no buff
-    system, no `AddRemoveBuff` relay (stock relays it at asm.il:202530).
-    Injuries, infection, food effects, weather and set bonuses are client-local
-    fiction (`src/ecs/components.zig:538-560`, `src/server/game.zig:4785`).
+21. **Progression: build a buff runtime.** `PARTIAL` (2026-08-07): buffs are
+    no longer inert. `NetPackageAddRemoveBuff` is decoded, catalog-checked
+    (unknown names rejected with `buff_rejects`) and owner-gated; the sim
+    `BuffSet` applies/removes by def id, ticks durations/expiry and
+    `remove_on_death`, and the tick sweep relays adds/removes to observers
+    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). Still open: buff
+    **effects** (FoodChangeOT/HealthChangeOT cvars and stat deltas — the
+    survival loop they feed is item 22), and persisting active buffs across
+    restart (they ride ZPV3 already; effect application is the gap).
 
-22. **Progression: simulate survival.** Nothing decrements food or water,
-    stamina is a hardcoded `100/100` sent once at join, and there is no regen,
-    wellness or core temperature. Also fix the eat hack that drops food to 50% of
-    max when it is at or above 85% before adding
-    (`src/ecs/inventory.zig:256-261`, `src/server/game.zig:6529`).
+22. ~~**Progression: simulate survival.**~~ **PARTIAL → DEPLETION LOOP SHIPPED
+    2026-08-07**: `Game.tickSurvival` (after tickAll, when the world clock
+    advanced) depletes Food/Water with in-game time, drains HP while either is
+    exhausted and regens when well-fed (UpdatePlayerHealthOT branches), clamps
+    at zero, and syncs the changed totals to the owner on a throttle
+    (`sendSurvivalStats`, `survival_sync_seconds`). The rates are ADR 0021
+    policy tunables in `[rules.progression]` (`food_depletion_per_hour`,
+    `water_depletion_per_hour`, `starvation_damage_per_hour`,
+    `well_fed_regen_per_hour`, `well_fed_threshold`, `survival_sync_seconds`)
+    because the stock FoodChangeOT/WaterOT/HealthChangeOT passive-effect
+    defaults are not in the V3.1.0 IL corpus (Stat.Tick is not dumped); the
+    defaults reproduce the stock feel (full Food drains in ~2 in-game days).
+    **Stamina SHIPPED 2026-08-07**: sprinting (MovementState 3 from
+    `NetPackageEntitySpeeds`, lapsed by `sprint_stale_seconds`) drains Stamina,
+    idle regenerates, and the changed value syncs as EntityStatChanged kind 1
+    on the same throttle (`stamina_drain_per_second` /
+    `stamina_regen_per_second` tunables). Still open: core temperature,
+    wellness, and replacing the `applyEatProps` "drop food to 50% of max when
+    ≥ 85%" playtest workaround now that a real decrement loop exists.
 
-23. **Entities: add wandering hordes and the screamer heat map.**
-    Both sibling AIDirector components are absent (asm.il:409345). Every constant
-    needed is a single literal block at asm.il:416218. Without them, base
-    activity has zero consequence and the only threat between blood moons is a
-    2-zombie drip every 45 s.
+23. ~~**Entities: add wandering hordes and the screamer heat map.**~~
+    **DONE 2026-08-07** (verified against asm.il:416218 constants): the
+    wandering-horde schedule (`AIDirectorWanderingHordeComponent`: start after
+    28 000 world time, group of 6 at ~92 m every 12-24 in-game hours, horde
+    marks + chase, player-gated) and the chunk-heat map
+    (`AIDirectorChunkEventComponent`: region decay, 5 s check, cooldown +
+    neighbours, scout-party spawn on threshold, feral double-cooldown roll)
+    both live in `src/ecs/aidirector.zig` (tick 342-356, 703-770). Residual:
+    the stock startPos→endPos pack path (AstarManager location line) is
+    simplified to direct chase, and heat input is driven from game events
+    rather than `AIDirectorData.noisySounds` named-sound volume/strength.
 
 24. ~~**World: add the stability plane and falling blocks.**~~
     **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
@@ -387,12 +417,14 @@ area and the concrete work.
     broadcasts the collapse; placing re-spreads from supported neighbours.
     Support/ignore membership resolves from the block tables, not hardcoded.
 
-25. **Net: count and log unhandled C2S packages, then close the list.**
-    35 packages the stock client genuinely sends fall off the end of
-    `handlePackage` with no counter and no log, including `SetBlockTexture`,
-    `PickupBlock`, `ItemReload`, `Waypoint`, `PlayerVendingMachine`,
-    `QuestGotoPoint` and `PlayerDisconnect`. Players see tools that do nothing
-    and an operator cannot notice (`src/server/game.zig:3771-5480`).
+25. ~~**Net: count and log unhandled C2S packages, then close the list.**~~
+    **DONE 2026-08-07**: every named C2S package with no handler arm hits a
+    `c2s_unhandled` counter with a rate-limited log (`n == 1 or n % 100 == 0`)
+    at the end of `handlePackage`, so a new stock-client package surfaces
+    instead of vanishing (`src/server/game.zig:7691`). The historical list
+    (SetBlockTexture, PickupBlock, ItemReload, Waypoint, PlayerVendingMachine,
+    QuestGotoPoint, PlayerDisconnect) is now handled: each is either decoded +
+    applied or explicitly dropped with a comment.
 
 ---
 
@@ -621,14 +653,18 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/server/game.zig` NPCQuestList remove_quest branch,
   `buildTraderQuestOffers`, `asm.il:827849-827902`
 
-- **NetPackageQuestEvent parse/build and rally handshake** `PARTIAL`
+- **NetPackageQuestEvent parse/build and rally handshake** `PARTIAL → reraised (2026-08-07)`
   The head and per-event tails are parsed with bounds checks; TryRallyMarker is
   answered with the full stock reason switch; LockPOI/UnlockPOI drive
   `ecs/poi_lock.zig`; a peer may only raise events for its own entity. Dropped by
   the `else => return` arm: ClearSleeper (9), SetupFetch (12), SetupRestorePower
-  (13), FinishManagedQuest (14), ResetTraderQuests (16). A fetch quest never gets
-  its satchel and a clear quest never gets sleeper-cleared notifications, so
-  neither can complete even though the rally marker arms correctly.
+  (13), FinishManagedQuest (14), ResetTraderQuests (16). These are client
+  notifications for stock's event-driven completion; zdtd's fetch/clear quests
+  complete through the action hooks (`questOnFetchItem` / `questOnZombieKilled`),
+  so the dropped events do not block them — the earlier "neither can complete"
+  claim was based on the stock model. Stock also relays ClearSleeper so
+  sleeper volumes do not respawn after the quest; that suppression is the open
+  part here (sleeper volumes re-arm on volume re-trigger).
   *Anchors:* `src/wire/stock_quest.zig:438`, `:463`, `:478`,
   `src/server/game.zig:6288`, `:6322`, `asm.il:835620-836087`, `asm.il:999755`
 
@@ -697,15 +733,14 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/server/game.zig:4961`, `:2886`, `src/ecs/systems.zig:503`,
   `:473`, `:388`, `src/assets/quests.zig:227`
 
-- **Starter quest granted at join** `PARTIAL`
-  `hasActive` only matches slots that are active and not completed, and
-  `findFree`'s second pass reuses non-active slots, so a starter quest completed
-  in an earlier session is granted again on the next login and the completed
-  record can be overwritten. `max_journal` is 8 slots but
-  `fillStockJournalWrites` is called with a 2-entry buffer, so at most the first
-  two journal slots ever reach the client.
-  *Anchors:* `src/server/game.zig:6779`, `src/ecs/systems.zig:314`,
-  `src/ecs/components.zig:284`, `:274`, `src/server/game.zig:6780`
+- **Starter quest granted at join** `PARTIAL → re-grant FIXED (2026-08-07)`
+  `questAcceptStarter` now scans every journal slot for the starter (active or
+  completed) and refuses to grant it again on the next login, so a completed
+  starter survives restart instead of being overwritten and re-offered. The
+  join PDF journal cap (2 of 8 slots) was already fixed by GAP 12 (all quests
+  ride the PDF, scenario `journal-pdf` proves 5).
+  *Anchors:* `src/ecs/systems.zig` `questAcceptStarter`,
+  `src/server/game.zig` join path
 
 - **Quest journal persistence (players.zsv ZPV3)** `PARTIAL`
   Stores def_id, quest_code, a flags byte, progress and phase, and re-resolves
@@ -723,12 +758,14 @@ because the per-objective Write shapes are wrong.
   def coordinate or the world primary spawn.
   *Anchors:* `src/server/game.zig:6245`, `:6257`, `asm.il:959379-959389`
 
-- **Client-known-name gate before writing a quest to the wire** `PARTIAL`
-  `isStockClientQuestName` accepts only `quest_` or `tier` prefixes, which keeps
-  unresolvable ids out of the PDF but also silently drops legitimate stock quests:
-  `intro_buried_supplies`, `treasure_*`, `challengegroup_reward_*`, `test_*`. A
-  membership check against the parsed catalog would be exact.
-  *Anchors:* `src/server/game.zig:6276`, `:6341`, `:6448`
+- **Client-known-name gate before writing a quest to the wire** `PARTIAL → CLOSED (2026-08-07)`
+  `isStockClientQuestName` now accepts every stock quest-name family the
+  client's quests.xml knows (`quest_`, `tier`, `intro_`, `test_`,
+  `challengegroup_reward_`, `treasure_`), and a stock_xml catalog passes
+  everything by construction (both sides load the same quests.xml); the gate
+  only proxies the client catalog for builtin/offline defs. Verified against
+  the stock quests.xml id families.
+  *Anchors:* `src/server/game.zig` `isStockClientQuestName`
 
 - **Fuzz coverage of the quest surface** `WORKS`
   `parseCatalog` is fuzzed over arbitrary bytes; `parseNpcQuestList`,
@@ -854,12 +891,13 @@ parsed, and quest offering is unwired.
   `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
   `:1469`, `:1472`, `:1488`
 
-- **traders.xml root economy attributes** `MISSING`
-  `buy_markup="3"`, `sell_markdown="0.2"`, `quality_mod="1,2"` and
-  `quest_tier_mod` are all ignored. `casinoCoin` is hardcoded by name in
-  `game.zig` rather than read from `currency_item`.
-  *Anchors:* `src/assets/traders.zig:114-177`, `src/server/game.zig:5530`,
-  `Data/Config/traders.xml:3`
+- **traders.xml root economy attributes** `PARTIAL` (2026-08-07):
+  `buy_markup` / `sell_markdown` were already parsed; `currency_item` is now
+  parsed too and `Game.coinItemId` pays trade/rent in that item instead of a
+  hardcoded "casinoCoin" name (falling back to the stock name when unset).
+  Still ignored: `quality_mod` and `quest_tier_mod`.
+  *Anchors:* `src/assets/traders.zig` root row, `src/server/game.zig`
+  `coinItemId`, `Data/Config/traders.xml:3`
 
 - **Inventory roll (count ranges, prob, unique_only, quality, RNG)** `PARTIAL`
   `lowCount` always takes the low bound, so counts are deterministic minima
@@ -3561,11 +3599,17 @@ persists so little that a restart visibly damages a built base.
   the world.
   *Anchors:* `src/server/game.zig:416-417`, `:1704`, `:3145-3172`
 
-- **Vehicle, turret, power and quest-NPC persistence** `MISSING`
-  No save/load path exists for spawned vehicles, turrets, the power grid graph or
-  trader/NPC quest offer state. Park a minibike or wire a generator bank, restart,
-  and it is gone.
-  *Anchors:* `src/server/game.zig:1686-1706`, `:8130-8146`
+- **Vehicle, turret, power and quest-NPC persistence** `PARTIAL` (2026-08-07)
+  Spawned vehicles and turrets now survive restart via `entities.zen` (ZENT1,
+  zdtd-owned like claims.zlc): `saveEntities` writes kind/position/yaw/fuel/
+  seats for vehicles and position/range/damage/ammo for turrets on the periodic
+  and shutdown saves; `loadEntities` restores them at init, re-deriving turret
+  power from the block grid. Power grid **nodes** rebuild from the chunk block
+  grid on first chunk load (`scanChunkPower`, `power_scanned` per chunk), so a
+  generator/consumer/battery layout survives restart without saving the graph.
+  Still missing: the wire **edges** between nodes (links are runtime state, not
+  saved) and trader/NPC quest offer state.
+  *Anchors:* `src/server/game.zig` `saveEntities` / `loadEntities` / `scanChunkPower`
 
 - **Autosave and shutdown save** `WORKS`
   Every 100 ticks (5 s at 20 Hz) the tick flushes world chunks, containers and
@@ -4288,7 +4332,8 @@ Remaining gaps:
   `QuestLock` (live lock in `ecs/poi_lock.zig`) and `PlayerInside` (another
   player standing in the prefab rect). `Bedroll` and `LandClaim` need home /
   claim tracking the server does not have, so they never fire. Party members
-  are not exempt from `PlayerInside` because zdtd tracks no parties.
+  are exempt from `PlayerInside` (stock CheckForPOILockouts, asm.il 998957)
+  via the `World.party_same_fn` hook wired to `Game.parties`.
 - **Objective-type coverage.** Executed: ClearSleepers/EntityKill/AnimalKill
   (kill), Goto family (goto/trader), Fetch family + TreasureChest (fetch),
   InteractWithNPC/ReturnToNPC (trader-interact). Mapped to `auto` or ignored:
@@ -4822,12 +4867,26 @@ HONEST GAPS:
   `Party.GetPartyXP` (`base * (1 - 0.1 * MemberCountInRange)`, range from
   GameStats[54] party_shared_kill_range = 100) splits the killer's award and
   every other in-range member receives the same split via
-  `NetPackageSharedPartyKill` (stock §2.3). What stock has and zdtd still
-  lacks is the rest of the shared scope: shared quests
-  (`NetPackagePartyQuestChange`), the party gamestage/loot max
-  (`Party.get_HighestGameStage` / `GetHighestLootStage`), and party members
-  are still not exempt from the POI `PlayerInside` lockout
-  (`src/ecs/systems.zig`).
+  `NetPackageSharedPartyKill` (stock §2.3). **POI lockout exemption SHIPPED
+  2026-08-07**: a party member inside a quest POI no longer blocks the rally
+  (`World.party_same_fn` → `Game.parties`). **Party quest sharing SHIPPED
+  2026-08-07**: a newly accepted quest is shared with the owner's party
+  (`acceptQuestFor` → `shareQuestWithParty`, fanning a stock
+  `NetPackageSharedQuest` share_quest body to the other members and marking
+  the journal slot `is_shared`), and a disconnect fans remove_quest events so
+  the party mirrors clear (PartyQuests.RemovePlayerFromSharedWiths).
+  **Per-objective delta relay SHIPPED 2026-08-07**: `NetPackagePartyQuestChange`
+  (sender i32 | objectiveIndex u8 | isComplete bool | questCode i32) is
+  parsed, owner-gated (the sender must speak for its own entity) and fanned
+  verbatim to the other party members, whose clients apply the objective
+  delta (the stock HandlePlayer rect/distance gate is client-side).
+  **Per-player party loot stage SHIPPED 2026-08-07**: `lootStageForPlayer`
+  (Party.GetHighestLootStage) feeds the death-bag and air-drop rolls at the
+  player-facing call sites, so a grouped player's bag rolls the party high
+  water mark instead of the global one; world-gen fills with no player
+  context keep the global `partyLootStage`. Still open: the party
+  gamestage max for director/sleeper difficulty (`Party.get_HighestGameStage`,
+  approximated by the radius-based `partyStageAround`).
 - **Ally persistence.** Relationships now persist to `{world_dir}/allies.zal`
   (magic ZAL1) on the periodic and shutdown saves and are restored at init;
   stock keeps them in `PersistentPlayerList`. The saved file is zdtd-owned like

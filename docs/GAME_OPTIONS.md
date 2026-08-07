@@ -137,7 +137,16 @@ test, so a retune cannot land silently).
 | `party_spawn_dist` | 40.0 | Policy (AIDirectorBloodMoonParty constant) |
 | `party_enemy_max` | 30 | Policy (cPartyEnemyMax) |
 | `max_parties` | 8 | Policy; clamped to the storage array bound at use |
-| `[rules.progression]` | (empty) | Added as constants move; no fields invented |
+| `[rules.progression]` | | |
+| `food_depletion_per_hour` | 2.0 | Policy (GAP 22 survival): Food units lost per in-game hour; stock applies FoodChangeOT through Stat.Tick whose per-effect default is not in the V3.1.0 IL corpus, so the rate is operator-tunable |
+| `water_depletion_per_hour` | 2.5 | Policy (GAP 22 survival): Water units lost per in-game hour |
+| `starvation_damage_per_hour` | 12.0 | Policy: HP lost per in-game hour while Food or Water is exhausted (UpdatePlayerHealthOT starvation branch) |
+| `well_fed_regen_per_hour` | 10.0 | Policy: HP regenerated per in-game hour while fed and hydrated |
+| `well_fed_threshold` | 80.0 | Policy: Food/Water above this count as well-fed |
+| `stamina_drain_per_second` | 12.0 | Policy (GAP 22): Stamina drained per real second while sprinting (MovementState 3) |
+| `stamina_regen_per_second` | 8.0 | Policy (GAP 22): Stamina regenerated per real second while not sprinting |
+| `sprint_stale_seconds` | 0.5 | Policy (GAP 22): seconds without an EntitySpeeds update before the sprint latch lapses |
+| `survival_sync_seconds` | 2.0 | Policy: per-player survival S2C refresh throttle |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved

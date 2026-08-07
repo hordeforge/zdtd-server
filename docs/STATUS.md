@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-07  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **930** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
+**Unit tests:** `zig build test` → **949** total (prefer `zig build test`; running the cached test binary with Zig's `--listen=-` IPC by hand can hang, and the build-runner run can end in a benign trailing `failed command` while still exiting 0; the count comes from running the cached binary directly).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -145,7 +145,7 @@ and player persistence depth.
 ## Wave 2026-08-07 (config-driven game modes, ADR 0021)
 
 The full WORK_PLAN T11-T15 chain landed (ADR 0021 "config-driven game modes"),
-plus three priority gaps from GAP_ANALYSIS / TODO. 930 unit tests.
+plus four priority gaps from GAP_ANALYSIS / TODO. 949 unit tests.
 
 - **T11 TOML binder** (`src/util/toml_bind.zig`): `zdtd.toml` and the mode
   packs now parse through one comptime-reflected binder — struct fields are
@@ -279,9 +279,76 @@ plus three priority gaps from GAP_ANALYSIS / TODO. 930 unit tests.
   (`base * (1 - 0.1 * MemberCountInRange)`, range GameStats[54] = 100) splits
   the killer's award and every in-range mate gets the same split via
   `NetPackageSharedPartyKill` (scenario covers the 90/90 split and the solo
-  full award). Wire layout + parse tests, a 7-case state-machine test, and
-  two-peer scenarios cover accept → leave → disconnect → shared kill. Open:
-  the rest of the shared scope (shared quests, party gamestage/loot max).
+  full award). **POI lockout exemption**: a party member inside a quest POI no
+  longer blocks the rally (`World.party_same_fn` hook → `Game.parties`, stock
+  CheckForPOILockouts). Wire layout + parse tests, a 7-case state-machine test,
+  and two-peer scenarios cover accept → leave → disconnect → shared kill →
+  POI lockout exemption. **Quest sharing SHIPPED**: a newly accepted quest
+  fans a stock `NetPackageSharedQuest` share_quest body to the party and the
+  journal slot is marked `is_shared`; a disconnect fans remove_quest events.
+  Open: party gamestage/loot max and the per-objective shared-quest progress
+  sync. **Per-objective delta relay SHIPPED**: `NetPackagePartyQuestChange`
+  (sender | objectiveIndex | isComplete | questCode) is owner-gated and
+  fanned to the other members so their shared-quest mirrors advance.
+  **Per-player party loot stage SHIPPED**: `lootStageForPlayer`
+  (Party.GetHighestLootStage) feeds death-bag/air-drop rolls.
+- **Survival simulation (GAP 22)**: `Game.tickSurvival` depletes Food/Water
+  with in-game time (rates from `[rules.progression]`, ADR 0021 tunables),
+  drains HP while starving/dehydrated, regens when well-fed, clamps at zero,
+  and syncs to the owner on a throttle via `NetPackageEntityStatChanged`.
+  The stock passive-effect defaults (FoodChangeOT etc. through Stat.Tick) are
+  not in the V3.1.0 IL corpus, so the rates are operator policy with stock-feel
+  defaults (full Food ≈ 2 in-game days). **Stamina SHIPPED**: sprinting
+  (MovementState 3, lapsed by a stale timer) drains, idle regens, synced as
+  EntityStatChanged kind 1 on the same throttle. Unit test covers depletion,
+  starvation damage, well-fed regen, clamp, sprint drain/regen and the S2C
+  sync; the melee damage test now pins its own depletion off.
+- **Vehicle/turret/power persistence (GAP)**: `entities.zen` (ZENT1) saves
+  spawned vehicles (kind/pos/yaw/fuel/seats) and turrets (pos/range/damage/ammo)
+  on the periodic + shutdown saves and restores them at init; turret power
+  re-derives from the block grid, and power grid **nodes** rebuild from the
+  chunk block grid on first chunk load (`scanChunkPower`, `power_scanned` per
+  chunk) so a generator/consumer/battery layout survives restart. Restart keeps
+  a parked minibike, a turret, and its power network. Open: wire edges (links
+  between nodes stay runtime) and trader quest-offer state.
+- **Procedural biome surface (W3 step 1)**: the proc generator samples a
+  continuous low-frequency biome field (`WorldGen.biomeAt`, deterministic,
+  region-contiguous — a biome is a landmass, not per-column static) and fills
+  each column with its biome's `biomes.xml` surface stack when the loaded
+  table resolves more than one biome; the single-biome default is unchanged.
+  Two tests: field determinism/contiguity/range and multi-biome chunk fill.
+  The chunk `biome_id` sent to the client now follows the same field for proc
+  worlds, so the displayed biome matches the surface blocks; the resolved-list
+  index is translated to the real sparse biomemap id (stock ids 1, 3, 5, 6, 7,
+  8, 9, 13, …), so surface and display land on the right biome.- **Quest name gate closed**: `isStockClientQuestName` accepts every stock
+  quest-name family (`treasure_` added; `quest_`/`tier`/`intro_`/`test_`/
+  `challengegroup_reward_` already there), verified against stock quests.xml.
+- **Chunk compression (GAP 20)**: `NetPackageChunk` is now deflated through
+  the streaming `DeflateFramer` (same stock compressed-frame format as the
+  `NameIdMapping`) before the reliable send, so the join stream carries a
+  fraction of the raw block/texture payload; overflow falls back to the
+  uncompressed frame. The same helper covers `NetPackageSignDataResponse`
+  (both in the stock asm.il:808641 compress set). Test round-trips a 4 KiB
+  payload through the inbound parser for both packages.
+- **Starter quest re-grant fix**: `questAcceptStarter` scans every journal slot
+  (active or completed) and refuses to re-grant a starter finished in an
+  earlier session, so the completed record survives restart. Two quest
+  scenarios that relied on the old re-grant behaviour moved to tmp dirs (a
+  completed starter now persists in ZPV3).
+- **Trader currency_item (traders.xml root)**: `Game.coinItemId` pays trade
+  and vending rent in the root `currency_item` (stock: casinoCoin) instead of a
+  hardcoded name, falling back to the stock name when unset. Parse test covers
+  a custom currency and the empty fallback; `quality_mod` / `quest_tier_mod`
+  root attributes are still ignored (GAP trader economy row).
+- **Chat recipient routing (EChatType)**: `NetPackageChat` now parses and
+  preserves the full stock body (chatType, sender, msg, msgSender, bbMode,
+  recipientEntityIds — chat.md §1). Routing follows stock
+  `ChatMessageServer` (chat.md §2): a non-empty recipient list sends only to
+  those clients (Party/Friends/Whisper), otherwise broadcast; the channel
+  rides the re-encode so a party message keeps its Party styling instead of
+  being flattened to Global. Recipient lists over the 8 cap are rejected, not
+  truncated. Two wire tests + a three-peer scenario (party chat reaches only
+  the recipient, global reaches everyone but the sender).
 - **GAP 12 fixed-size caps**: land claims 256→1024, containers 256→512
   (heap encode buffer — the old stack buffer truncated saves), workstations
   64→256, damaged blocks 64→256, bans 32→128, join-rate IPs 16→64. The join
@@ -301,12 +368,14 @@ plus three priority gaps from GAP_ANALYSIS / TODO. 930 unit tests.
   Ken Perlin table used); banding is stock-shaped, boundaries may drift
   (HARDCODE_AUDIT A33, extraction owned by 7dtd-research).
 
-**Gates at this pin:** `make check` exit 0 · 930 unit tests · live stock-client
+**Gates at this pin:** `make check` exit 0 · 949 unit tests · live stock-client
 gate 23/23 · playtest full suite green on a fresh world.
 
 **Known open:** see [WORK_PLAN.md](WORK_PLAN.md) (all T1-T15 tasks landed) and
-GAP_ANALYSIS "What to build next" (fixed-size caps, subbiome deco lists, storm
-survival effects, EAI residual tasks, worldgen W2b-W7).
+GAP_ANALYSIS "What to build next" (survival stamina/core-temp residuals,
+worldgen W2b-W7, three EAI tasks blocked on missing subsystems, party
+gamestage/loot max, trader quality_mod). M11 CPU work stays parked until apm
+shows need.
 
 **Conflict rule:** if STATUS and GAP_ANALYSIS / IMPLEMENTATION_PLAN disagree on
 whether a gate or feature shipped, **STATUS wins**. Refresh the inventory docs

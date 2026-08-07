@@ -162,6 +162,13 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 - [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/archive/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
+- [x] **Survival loop (GAP 22)** SHIPPED 2026-08-07: `Game.tickSurvival`
+  depletes Food/Water with in-game time, drains HP while starving/dehydrated,
+  regens when well-fed, and syncs via `NetPackageEntityStatChanged`; rates are
+  `[rules.progression]` tunables (stock passive-effect defaults not in the
+  V3.1.0 IL corpus). **Stamina SHIPPED** (sprint drain via MovementState 3,
+  idle regen, EntityStatChanged kind 1 sync). Open: core temperature,
+  wellness.
 - [x] **Storm gameplay effects (gates)** SHIPPED 2026-08-07: storm SM + `[sim] storm_frequency` (feeds the weather scheduler AND the GameStats wire), and the operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the server's sandbox gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults. Per RE (weather-environment.md §4) the stock *dedicated* server stubs felt-temperature helpers and does NOT compute wet/cold buffs — the local client computes felt temperature from the shipped per-biome params + weathersurvival.xml MinEvents — so server-side buff application would double-apply and is intentionally NOT implemented. **GSI advertising SHIPPED 2026-08-07**: the TCP GameServerInfo text (and the PlayerLoginAnswer copy) now carries `SandboxPreset`/`SandboxCode` (GameInfoString 18/19) when the operator set them; unset keys are omitted (empty = client default, same as GameStats).
 - [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted — blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Disk persistence ships (ZVNM). **Rent SM ships 2026-08-07** (server-authoritative rent/clear/extend/expire via `NetPackagePlayerVendingMachine`; scenario `vending-rent`). **Real-client trade CopyFrom ships 2026-08-07**: the stock NetPackageTraderData ToServer body is parsed and mirrored onto trader/vending stock (scenario `traderdata-copyfrom`). **Owner lock/password/allowed editing ships 2026-08-07** (vending TE composite C2S, owner-gated; scenario `vending-edit`). The vending row is closed.
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
@@ -234,7 +241,7 @@ PR); unpark the rest after core demo depth + M11 unless prioritized.
 - [x] **W1** OpenSimplex2 + fBm/ridged + domain warp in Zig; determinism tests
 - [x] **W2** 3D density + coarse-cell interp + `y_clamped_gradient` filling chunks **at stream time**; stock chunk wire unchanged (5×5×33 coarse grid, cell 4×8×4, world-snapped so chunk borders cannot seam; overhangs measured 12.4% of columns; 126 µs/chunk ReleaseFast, 1.7 ms Debug; apm `chunk_gen`). Fluids/biomes/caves/POI stay W3–W5
 - [ ] **W2b** Async gen workers + prefetch ring + apm; tick never blocks on bulk gen (multi-milestone)
-- [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names (multi-milestone)
+- [ ] **W3** 6-axis climate + biome surface blocks via biomes.xml / AssignIds names (multi-milestone). **Surface blocks SHIPPED 2026-08-07**: the procedural generator now samples a continuous low-frequency biome field (`WorldGen.biomeAt`, deterministic, region-contiguous) and fills each column with its biome's `biomes.xml` surface stack (`stackFor`) when more than one biome resolved; single-biome fallback unchanged. Still open: the 6-axis climate and biome-driven detail/vegetation density.
 - [ ] **W4** Caves (cheese/spaghetti/noodle) + aquifers (multi-milestone)
 - [ ] **W5** Deterministic POI placement (cell hash, cross-chunk), `.tts` stamp on first touch (multi-milestone)
 - [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1 (multi-milestone)
@@ -475,9 +482,12 @@ All items below shipped. Kept as historical checklist.
   `NetPackagePartyData` snapshot out (party id, leader, voice lobby, member ids,
   changed entity, action, disband); party-of-one auto-disbands and disconnect
   removes. **Shared kill XP SHIPPED 2026-08-07** (`Party.GetPartyXP` split by
-  in-range members + `NetPackageSharedPartyKill`). Open: the rest of the shared
-  scope — shared quests, party gamestage/loot max (see
-  docs/GAP_ANALYSIS.md §AUTHGATE).
+  in-range members + `NetPackageSharedPartyKill`). **POI lockout exemption
+  SHIPPED** (party members inside a quest POI no longer block the rally).
+  **Quest sharing SHIPPED** (accept → `NetPackageSharedQuest` to the party,
+  disconnect → remove_quest). **Per-objective delta relay SHIPPED**
+  (`NetPackagePartyQuestChange` fanned to the members). Open: party
+  gamestage/loot max (see docs/GAP_ANALYSIS.md §AUTHGATE).
 - [x] Kick/ban/list on admin TCP (first cut); ServerPassword = LiteNet connect key
 - [x] Admin TCP: kick/ban/unban/list/give/tele/say/save (not full telnet parity)
 - [x] LiteNet: reliable+frag HAVE; unreliable sendUnreliable; sequenced still MISSING
