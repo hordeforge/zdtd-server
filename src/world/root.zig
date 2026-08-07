@@ -23,6 +23,7 @@ pub const worldgen = @import("worldgen.zig");
 pub const noise = @import("noise.zig");
 pub const deco_mirror = @import("deco_mirror.zig");
 pub const stability = @import("stability.zig");
+pub const subbiome_noise = @import("subbiome_noise.zig");
 
 test {
     _ = store;
@@ -43,4 +44,5 @@ test {
     _ = noise;
     _ = deco_mirror;
     _ = stability;
+    _ = subbiome_noise;
 }

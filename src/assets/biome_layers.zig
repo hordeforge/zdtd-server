@@ -1,10 +1,12 @@
-//! Stock biomes.xml → per-biomemap-id terrain column layers (top → bottom).
-//! Subbiomes ignored (noise); default biome layers only. Block names resolve
-//! via AssignIds (idByName), never XML ordinals.
+//! Stock biomes.xml → per-biomemap-id terrain column layers (top → bottom),
+//! weather groups, distant decorations and per-subbiome deco sets + noise
+//! windows (GAP 18). Block names resolve via AssignIds (idByName), never XML
+//! ordinals.
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const maxdamage = @import("maxdamage.zig");
 const assignids = @import("assignids_comptime.zig");
 
 pub const max_layers: usize = 8;
@@ -49,6 +51,23 @@ pub const DecoSet = struct {
         return self.blocks[0..self.n];
     }
 };
+
+/// One `<subbiome noise="freq, min, max" noiseoffset="x, y">` of a biome: its
+/// own distant-deco set (GAP_ANALYSIS 18) and the noise window the resolver
+/// uses. `decorateChunkRandom` resolves each cell through GetBiomeOrSubAt and
+/// samples the subbiome's m_DistantDecoBlocks, where the real tree probability
+/// mass lives (pine_forest sub lists carry .06-.08 vs .001-.007 top level).
+pub const SubBiome = struct {
+    noise_freq: f32 = 0,
+    noise_min: f32 = 0,
+    noise_max: f32 = 0,
+    noise_ox: f32 = 0,
+    noise_oz: f32 = 0,
+    decos: DecoSet = .{},
+};
+
+/// Stock pine_forest has 8 subbiomes; other biomes top out at 2-3.
+pub const max_subs_per_biome: usize = 12;
 
 /// Pine-forest-like fallback when biomes.xml is not loaded.
 pub fn defaultStack() Stack {
@@ -142,6 +161,10 @@ pub const Table = struct {
     /// biomemap id → distant-decoration set (empty when the biome declares none,
     /// or when nothing in it resolved: no fabricated species).
     decos: [max_biomemap_id]DecoSet = [_]DecoSet{.{}} ** max_biomemap_id,
+    /// biomemap id → per-subbiome distant-deco sets + noise windows (GAP 18).
+    subs: [max_biomemap_id][max_subs_per_biome]SubBiome =
+        [_][max_subs_per_biome]SubBiome{[_]SubBiome{.{}} ** max_subs_per_biome} ** max_biomemap_id,
+    sub_n: [max_biomemap_id]u8 = .{0} ** max_biomemap_id,
     /// biomemap id → biome name ("pine_forest", "wasteland", …), for the spawn
     /// system's per-biome entitygroup resolution.
     names: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id,
@@ -176,6 +199,14 @@ pub const Table = struct {
     pub fn decosFor(self: *const Table, biome_id: u8) DecoSet {
         if (biome_id >= max_biomemap_id) return .{};
         return self.decos[biome_id];
+    }
+
+    /// Per-subbiome deco sets + noise windows for a biomemap id (GAP 18). The
+    /// resolver (subbiome_noise.subBiomeIdx) picks one per cell; -1 means the
+    /// biome's own `decosFor` list.
+    pub fn subBiomes(self: *const Table, biome_id: u8) []const SubBiome {
+        if (biome_id >= max_biomemap_id) return &.{};
+        return self.subs[biome_id][0..self.sub_n[biome_id]];
     }
 
     /// True when at least one biome resolved a distant-decoration species.
@@ -428,12 +459,10 @@ fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const 
 
 /// Body of the biome's own `<decorations>` group, i.e. the one that is not
 /// inside a `<subbiome>`. That is the group `IBiomeProvider::GetBiomeOrSubAt`
-/// resolves to wherever no subbiome noise hits, which is most of the biome.
-/// zdtd does not evaluate subbiome noise, so the first subbiome's group is only
-/// used as a fallback when the biome declares none of its own (the same
-/// approximation `parseStackBody` already makes for `<layers>`).
+/// resolves to wherever no subbiome noise hits. Subbiome groups are parsed
+/// separately (parseSubBiomes, GAP 18), so a biome whose only decorations live
+/// inside subbiomes reports no own list instead of borrowing the first sub's.
 fn decorationsBody(body: []const u8) ?[]const u8 {
-    var first_in_sub: ?[]const u8 = null;
     var i: usize = 0;
     var sub_end: usize = 0;
     while (i < body.len) {
@@ -455,10 +484,73 @@ fn decorationsBody(body: []const u8) ?[]const u8 {
             }
         }
         if (sub_end == 0) return inner;
-        if (first_in_sub == null) first_in_sub = inner;
         i = close + 14;
     }
-    return first_in_sub;
+    return null;
+}
+
+/// Parse the comma-separated float list of a `noise` / `noiseoffset` attribute
+/// into `out`; returns the count written (0 on malformed input, fail closed).
+fn parseFloats(v: []const u8, out: []f32) u8 {
+    var n: u8 = 0;
+    var it = std.mem.splitScalar(u8, v, ',');
+    while (it.next()) |part| {
+        if (n >= out.len) break;
+        const trimmed = std.mem.trim(u8, part, " \t");
+        if (trimmed.len == 0) continue;
+        const f = xml.parseF32(trimmed) orelse return 0;
+        out[n] = f;
+        n += 1;
+    }
+    return n;
+}
+
+/// Parse every `<subbiome>` of a biome body: the noise window
+/// (`noise="freq, min, max"`, optional `noiseoffset="x, y"`) and the
+/// subbiome's own distant-deco set (its `<decorations>` group). Out-of-range
+/// subbiomes are dropped; a malformed noise window drops just that subbiome.
+fn parseSubBiomes(
+    body: []const u8,
+    id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
+    is_distant_deco: *const fn (?*anyopaque, []const u8) bool,
+    ctx: ?*anyopaque,
+    out: []SubBiome,
+) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < body.len and n < out.len) {
+        const si = std.mem.indexOfPos(u8, body, i, "<subbiome") orelse break;
+        const gt = std.mem.indexOfPos(u8, body, si, ">") orelse break;
+        const close = std.mem.indexOfPos(u8, body, gt, "</subbiome>") orelse break;
+        var noise_vals: [3]f32 = undefined;
+        const noise_s = xml.attr(body, si, "noise") orelse {
+            i = close + 11;
+            continue;
+        };
+        if (parseFloats(noise_s, &noise_vals) != 3) {
+            i = close + 11;
+            continue;
+        }
+        var off_vals: [2]f32 = .{ 0, 0 };
+        if (xml.attr(body, si, "noiseoffset")) |off_s| {
+            if (parseFloats(off_s, &off_vals) != 2) {
+                i = close + 11;
+                continue;
+            }
+        }
+        const inner = body[gt + 1 .. close];
+        out[n] = .{
+            .noise_freq = noise_vals[0],
+            .noise_min = noise_vals[1],
+            .noise_max = noise_vals[2],
+            .noise_ox = off_vals[0],
+            .noise_oz = off_vals[1],
+            .decos = parseDecoBody(inner, id_by_name, is_distant_deco, ctx),
+        };
+        n += 1;
+        i = close + 11;
+    }
+    return n;
 }
 
 fn parseDecoBody(
@@ -547,6 +639,8 @@ pub fn loadFromPath(
     defer bodies_by_name.deinit(allocator);
     var decos_by_name: std.StringHashMapUnmanaged(DecoSet) = .{};
     defer decos_by_name.deinit(allocator);
+    var subs_by_name: std.StringHashMapUnmanaged([]SubBiome) = .{};
+    defer subs_by_name.deinit(allocator);
     const deco_ok = is_distant_deco orelse noDistantDeco;
     i = 0;
     while (i < clean.len) {
@@ -568,6 +662,14 @@ pub fn loadFromPath(
         if (ds.n > 0) {
             try decos_by_name.put(allocator, bname, ds);
         }
+        // Per-subbiome deco sets (GAP 18): each sub carries its own list and a
+        // noise window; the top-level decos above stay the no-sub fallback.
+        var sub_buf: [max_subs_per_biome]SubBiome = undefined;
+        const sn = parseSubBiomes(body, id_by_name, deco_ok, ctx, &sub_buf);
+        if (sn > 0) {
+            const kept = try arena.dupe(SubBiome, sub_buf[0..sn]);
+            try subs_by_name.put(allocator, bname, kept);
+        }
         i = close + 8;
     }
 
@@ -586,6 +688,11 @@ pub fn loadFromPath(
         }
         if (decos_by_name.get(nm)) |ds| {
             table.decos[id] = ds;
+        }
+        if (subs_by_name.get(nm)) |sn| {
+            table.sub_n[id] = @intCast(@min(sn.len, max_subs_per_biome));
+            var si: usize = 0;
+            while (si < table.sub_n[id]) : (si += 1) table.subs[id][si] = sn[si];
         }
         const body = bodies_by_name.get(nm) orelse continue;
         if (table.weather_n >= max_weather_biomes) continue;
@@ -743,6 +850,17 @@ test "decorations parse keeps distant deco in XML order" {
     try std.testing.expectEqual(@as(u16, 24630), pine.slice()[0].block_id);
     try std.testing.expectApproxEqAbs(@as(f32, 0.06), pine.slice()[0].prob, 1e-6);
     try std.testing.expectEqual(@as(u16, 24629), pine.slice()[1].block_id);
+    // GAP 18: the subbiome's own group parses into its own set + noise window.
+    const subs = t.subBiomes(3);
+    try std.testing.expectEqual(@as(usize, 1), subs.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.01), subs[0].noise_freq, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), subs[0].noise_min, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), subs[0].noise_max, 1e-6);
+    try std.testing.expectEqual(@as(u8, 1), subs[0].decos.n);
+    try std.testing.expectEqual(@as(u16, 24629), subs[0].decos.slice()[0].block_id); // treeOak
+    // A biome with no subbiomes reports an empty list, never a fabricated one.
+    try std.testing.expectEqual(@as(usize, 0), t.subBiomes(5).len);
+    try std.testing.expectEqual(@as(usize, 0), t.subBiomes(max_biomemap_id).len);
     // Grass and the unresolvable name are both dropped, never fabricated.
     for (pine.slice()) |d| {
         try std.testing.expect(d.block_id != 24700 and d.block_id != 24701);
@@ -813,6 +931,55 @@ test "load stock biomes.xml when present" {
     while (i < t.weather_n) : (i += 1) {
         try std.testing.expect(t.weather_groups[i].findIndex("bloodMoon") != null);
     }
+}
+
+test "stock biomes.xml subbiomes carry the dense tree lists (GAP 18)" {
+    // The GAP's core claim: pine_forest's subbiome `<decorations>` lists carry
+    // the real tree probability mass (treeJuniper4m .06, treeDeadTree01 .07,
+    // treeDeadPineLeaf .08) while the top-level list is .001-.007, so a cell
+    // that resolves a subbiome gets stock-like density instead of ~3 objects
+    // per join window. Real ids come from the maxdamage table.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var md = (try maxdamage.tryLoad(std.testing.allocator, game_dir, null)) orelse return error.SkipZigTest;
+    defer md.deinit();
+    // Production Game merges the operator's AssignIds dump; the test uses the
+    // bundled one so tree names resolve to real wire ids.
+    md.tryMergeBundledAssignIds(std.testing.allocator);
+    try std.testing.expect(md.idByName("treeJuniper4m") != null);
+    const DecoCtx = struct {
+        md: *const maxdamage.Table,
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            return @as(*const @This(), @ptrCast(@alignCast(ctx.?))).md.idByName(name);
+        }
+        fn distant(ctx: ?*anyopaque, name: []const u8) bool {
+            return @as(*const @This(), @ptrCast(@alignCast(ctx.?))).md.isDistantDeco(name);
+        }
+    };
+    var deco_ctx: DecoCtx = .{ .md = &md };
+    var t = try loadFromPath(std.testing.allocator, game_dir ++ "/Data/Config/biomes.xml", DecoCtx.lookup, DecoCtx.distant, &deco_ctx);
+    defer t.deinit();
+
+    const subs = t.subBiomes(3); // pine_forest
+    try std.testing.expect(subs.len >= 2);
+    // Sub lists carry a dense tree row (prob > .05); the sub total dominates
+    // the top-level total by an order of magnitude.
+    var found_dense = false;
+    for (subs) |sb| {
+        for (sb.decos.slice()) |d| {
+            if (d.prob > 0.05) found_dense = true;
+        }
+    }
+    try std.testing.expect(found_dense);
+    var top_prob: f32 = 0;
+    for (t.decosFor(3).slice()) |d| top_prob += d.prob;
+    var sub_prob: f32 = 0;
+    for (subs) |sb| {
+        for (sb.decos.slice()) |d| sub_prob += d.prob;
+    }
+    try std.testing.expect(sub_prob > top_prob * 10);
+    // The resolver windows come from the XML noise attrs.
+    try std.testing.expect(subs[0].noise_freq > 0 and subs[0].noise_max > subs[0].noise_min);
 }
 
 const pine_weather_xml =
