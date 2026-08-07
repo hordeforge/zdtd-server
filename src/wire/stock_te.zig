@@ -16,6 +16,8 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
+const stock_entity = @import("stock_entity.zig");
+const platform_user = @import("platform_user.zig");
 const containers = @import("../world/containers.zig");
 const workstations = @import("../world/workstations.zig");
 
@@ -784,6 +786,71 @@ test "storage te encode decode roundtrip" {
     try std.testing.expectEqual(@as(i32, stock_inv.items_start_here + 7), parsed.items[0].type_id);
 }
 
+// --- TileEntityVendingMachine (TileEntityType.VendingMachine = 7) ---
+//
+// Network payload (TileEntityVendingMachine::write asm.il ~440486):
+//   TileEntity::write network: chunkPos Vector3i
+//   i32 3                       // version constant
+//   bool isLocked
+//   PlatformUserIdentifierAbs.ToStream(ownerID, false)  // null = unowned
+//   string passwordHash
+//   i32 n | n x ToStream(allowedUserIds[i], false)
+//   i32 rentalEndDay
+//   TraderData.Write (writeTraderDataBody)
+//   if TraderInfo.Rentable: u64 nextAutoBuy
+
+pub const VendingTeInfo = struct {
+    block_id: i32,
+    is_locked: bool = false,
+    owner: ?platform_user.Id = null,
+    password_hash: []const u8 = "",
+    allowed: []const platform_user.Id = &.{},
+    rental_end_day: i32 = 0,
+    trader_id: i32 = 0,
+    entries: []const stock_entity.TraderStockEntry = &.{},
+    available_money: i32 = 0,
+    rentable: bool = false,
+    next_auto_buy: u64 = 0,
+};
+
+/// Build NetPackageTileEntity body for a vending machine. Outer header carries
+/// the vending block id; the payload is the TE write above (byte-identical for
+/// both network directions, like the workstation).
+pub fn buildVendingTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    info: VendingTeInfo,
+) ![]u8 {
+    var payload: [8192]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeI32(3); // version constant (IL_0008-IL_000A)
+    try pw.writeBool(info.is_locked);
+    try platform_user.write(&pw, info.owner);
+    try pw.writeString(info.password_hash);
+    try pw.writeI32(@intCast(info.allowed.len));
+    for (info.allowed) |uid| try platform_user.write(&pw, uid);
+    try pw.writeI32(info.rental_end_day);
+    try stock_entity.writeTraderDataBody(&pw, .{
+        .trader_id = info.trader_id,
+        .available_money = info.available_money,
+        .entries = info.entries,
+    });
+    if (info.rentable) try pw.writeU64(info.next_auto_buy);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, info.block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
 /// TileEntityPoweredTrigger network payload (TileEntityType.Trigger = 19).
 ///
 /// TileEntity::write network modes emit chunkPos only; the u16 version and
@@ -1098,4 +1165,89 @@ test "powered trigger body rejects truncation and oversized wire counts" {
     @memcpy(oversized[0..body.len], body);
     oversized[21 + 12 + 4 + 1 + 1] = 0xff; // wireCount byte
     try std.testing.expectError(error.EndOfStream, parsePoweredTriggerTeBody(oversized[0..body.len]));
+}
+
+test "vending TE body matches TileEntityVendingMachine::write layout" {
+    // Outer header: handle | worldPos | teBlockId | payloadLen | payload.
+    var buf: [2048]u8 = undefined;
+    const body = try buildVendingTeBody(&buf, 0xAB, 10, 70, -3, .{
+        .block_id = 300,
+        .is_locked = true,
+        .owner = .{ .platform = "Steam", .id = "76561198000000001" },
+        .password_hash = "pw123",
+        .allowed = &.{.{ .platform = "EOS", .id = "abc" }},
+        .rental_end_day = 42,
+        .trader_id = 4,
+        .entries = &.{.{
+            .item = .{ .type_id = 700, .count = 2, .quality = 1 },
+            .markup = 0,
+        }},
+        .available_money = 1234,
+        .rentable = true,
+        .next_auto_buy = 999,
+    });
+
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(u8, 0xAB), try r.readByte());
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, -3), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 300), try r.readI32());
+    const pay_len: usize = @intCast(try r.readI32());
+    try std.testing.expectEqual(@as(usize, body.len - 21), pay_len);
+    const pay = body[21..];
+
+    var pr: binary.Reader = .{ .data = pay };
+    // TileEntity::write network: chunkPos only (x/z mod 16, y raw).
+    try std.testing.expectEqual(@as(i32, 10), try pr.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try pr.readI32());
+    try std.testing.expectEqual(@as(i32, 13), try pr.readI32());
+    // version constant 3
+    try std.testing.expectEqual(@as(i32, 3), try pr.readI32());
+    try std.testing.expect(pr.readBool() catch false);
+    // owner platform id
+    var pb: [16]u8 = undefined;
+    var ib: [64]u8 = undefined;
+    const owner = (try platform_user.read(&pr, &pb, &ib)).?;
+    try std.testing.expectEqualStrings("Steam", owner.platform);
+    try std.testing.expectEqualStrings("76561198000000001", owner.id);
+    // passwordHash
+    try std.testing.expectEqualStrings("pw123", try pr.readString(&pb));
+    // allowed users
+    try std.testing.expectEqual(@as(i32, 1), try pr.readI32());
+    const allowed = (try platform_user.read(&pr, &pb, &ib)).?;
+    try std.testing.expectEqualStrings("EOS", allowed.platform);
+    try std.testing.expectEqualStrings("abc", allowed.id);
+    // rentalEndDay
+    try std.testing.expectEqual(@as(i32, 42), try pr.readI32());
+    // TraderData.Write: trader id, lastInventoryUpdate u64, FileVersion 2,
+    // entry count, ItemStack + markup + AddedByPlayer, tier count, money.
+    try std.testing.expectEqual(@as(i32, 4), try pr.readI32());
+    try std.testing.expectEqual(@as(u64, 0), try pr.readU64());
+    try std.testing.expectEqual(@as(u8, 2), try pr.readByte());
+    try std.testing.expectEqual(@as(i32, 1), try pr.readI32());
+    try std.testing.expectEqual(@as(u16, 2), try pr.readU16()); // ItemStack count
+    // ItemValue.Write (v9): version | flags | wire_type u16 | use_times f32 |
+    // quality u16 | meta u16 | metadata count | mods | cosmetics | activated |
+    // ammo_index | seed u16 | TextureFullArray.
+    try std.testing.expectEqual(@as(u8, stock_inv.item_value_save_version), try pr.readByte());
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // flags
+    try std.testing.expectEqual(@as(u16, 700), try pr.readU16()); // type id
+    try std.testing.expectEqual(@as(f32, 0), try pr.readF32()); // use_times
+    try std.testing.expectEqual(@as(u16, 1), try pr.readU16()); // quality
+    try std.testing.expectEqual(@as(u16, 0), try pr.readU16()); // meta
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // metadata count
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // Modifications
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // CosmeticMods
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // activated
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // ammo_index
+    try std.testing.expectEqual(@as(u16, 0), try pr.readU16()); // seed
+    try std.testing.expect(!(pr.readBool() catch true)); // TextureFullArray
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // markup
+    try std.testing.expect(pr.readBool() catch false == false); // AddedByPlayer
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // tier groups
+    try std.testing.expectEqual(@as(i32, 1234), try pr.readI32()); // money
+    // rentable: nextAutoBuy u64
+    try std.testing.expectEqual(@as(u64, 999), try pr.readU64());
+    try std.testing.expectEqual(@as(usize, 0), pr.remaining());
 }

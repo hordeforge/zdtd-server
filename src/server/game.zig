@@ -51,6 +51,7 @@ const admin_cmds = @import("admin_cmds.zig");
 const webui_mod = @import("webui.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
+const vending_mod = @import("../world/vending.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
@@ -769,6 +770,9 @@ pub const Game = struct {
     sleepers: sleepers_mod.Store = sleepers_mod.Store.empty(),
     containers: containers_mod.ContainerStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
+    /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
+    /// store keyed by world pos. Created on place, cleared on removal.
+    vending: vending_mod.VendingStore = .{},
     /// Lock table: channel → holder peer slot (-1 free).
     lock_channel: [16]i32 = .{-1} ** 16,
     lock_holder_entity: [16]i32 = .{-1} ** 16,
@@ -6479,6 +6483,7 @@ pub const Game = struct {
                     // NetPackageTraderData is ToServer-only). Detect an entity target
                     // whose slot is a trader and build that context.
                     var trader_slot: ?ecs.Slot = null;
+                    var vending_pos: ?vending_mod.PosKey = null;
                     if (req.targets_blob.len >= 4) {
                         var tr: wire_binary.Reader = .{ .data = req.targets_blob };
                         const n = tr.readI32() catch 0;
@@ -6496,10 +6501,15 @@ pub const Game = struct {
                                     }
                                 }
                             } else if (ty == 0 or ty == 1) {
-                                _ = tr.readI32() catch break;
-                                _ = tr.readI32() catch break;
-                                _ = tr.readI32() catch break;
+                                const tx = tr.readI32() catch break;
+                                const tty = tr.readI32() catch break;
+                                const tz = tr.readI32() catch break;
                                 if (ty == 1) tr.skipString() catch {};
+                                // TileEntity lock target (type 0): a vending block
+                                // under the position opens as a vending machine.
+                                if (self.vending.get(.{ .x = tx, .y = tty, .z = tz }) != null) {
+                                    vending_pos = .{ .x = tx, .y = tty, .z = tz };
+                                }
                             } else if (ty == 3) {
                                 if (tr.remaining() < 16) break;
                                 tr.pos += 16;
@@ -6523,6 +6533,22 @@ pub const Game = struct {
                             .entries = ent_buf[0..n],
                         });
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    } else if (vending_pos) |vp| {
+                        // Vending machines are always open (trader_info has no
+                        // hours). The LockResponse carries the machine's
+                        // TraderData under the request's VendingMachineLockContext
+                        // type name; the client opens the trader window from it.
+                        const v = self.vending.get(vp) orelse return;
+                        if (v.stock_n == 0) self.fillVendingStore(v);
+                        var vent_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
+                        const vn = self.vendingEntries(v, &vent_buf);
+                        const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
+                            .trader_id = v.trader_id,
+                            .available_money = v.available_money,
+                            .entries = vent_buf[0..vn],
+                        });
+                        try self.sendGame(peer, "NetPackageLockResponse", resp);
+                        try self.sendVendingTe(peer, vp.x, vp.y, vp.z);
                     } else {
                         const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
@@ -6544,6 +6570,7 @@ pub const Game = struct {
                                 if (ty == 1) tr.skipString() catch {};
                                 try self.sendStorageTe(peer, x, y, z);
                                 try self.sendWorkstationTe(peer, x, y, z);
+                                try self.sendVendingTe(peer, x, y, z);
                             } else if (ty == 2) {
                                 _ = tr.readI32() catch break;
                             } else if (ty == 3) {
@@ -6707,6 +6734,14 @@ pub const Game = struct {
                     self.registerClaim(b.x, b.y, b.z, editor_ent);
                 }
                 try self.world.setBlockWorld(b.x, b.y, b.z, place_id);
+                // Vending TE lifecycle (stock BlockVendingMachine.OnBlockAdded /
+                // OnBlockRemoved): placing a vending block seeds its TraderData
+                // store from the blocks.xml TraderID; removal drops the store.
+                if (place_id != 0 and self.blocks.isVending(place_id)) {
+                    _ = self.vending.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, place_id, self.blocks.traderId(place_id));
+                } else if (place_id == 0) {
+                    self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
+                }
                 if (place_id != 0) {
                     if (self.power_registry.lookup(place_id)) |pn| {
                         if (self.sim.power.addNodeAt(pn.kind, b.x, b.y, b.z, pn.watts)) |nid| {
@@ -9319,6 +9354,115 @@ pub const Game = struct {
         try self.sendGame(peer, "NetPackageTileEntity", body);
     }
 
+    /// Store stock rows as wire TraderStockEntry (ItemStack + markup).
+    fn vendingEntries(self: *Game, v: *const vending_mod.Vending, out: []packages.TraderStockEntry) usize {
+        _ = self;
+        var n: usize = 0;
+        var e: usize = 0;
+        while (e < v.stock_n and n < out.len) : (e += 1) {
+            const ent = v.stock[e];
+            if (ent.type_id == 0) continue;
+            out[n] = .{
+                .item = .{
+                    .type_id = ent.type_id,
+                    .count = @intCast(@min(ent.count, 65535)),
+                    .quality = ent.quality,
+                },
+                .markup = ent.markup,
+            };
+            n += 1;
+        }
+        return n;
+    }
+
+    /// Seed a vending TE's TraderData from trader_info: TraderData.TraderID is
+    /// the block's blocks.xml TraderID (stock BlockVendingMachine.OnBlockAdded
+    /// sets exactly that). trader_info price markups apply like entity traders.
+    fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
+        const tt = self.traders;
+        var n: usize = 0;
+        var fill: []const assets_traders.Entry = &.{};
+        var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
+        if (v.trader_id > 0 and v.trader_id <= 65535) {
+            if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
+                if (ti.refs.len > 0) {
+                    const en = tt.expandTraderRefs(ti, &per_trader);
+                    fill = per_trader[0..en];
+                }
+            }
+        }
+        if (fill.len == 0) {
+            if (tt.entries.len == 0) return;
+            fill = tt.entries; // traderAlways fallback (GAP: traderAlways sells vending stock)
+        }
+        var buy_markup: f32 = 1.0;
+        var sell_markup: f32 = 0.02;
+        if (v.trader_id > 0 and v.trader_id <= 65535) {
+            if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
+                if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
+                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+            }
+        }
+        if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
+        if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
+        for (fill) |e| {
+            if (n >= vending_mod.max_vending_stock) break;
+            const iid = self.ecsIdFromItemName(e.name);
+            if (iid == 0) continue;
+            const type_id = resolveItemType(@ptrCast(self), iid);
+            if (type_id == 0) continue;
+            const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
+            // Price is client display; the purchase delta runs server-side.
+            _ = econ;
+            v.stock[n] = .{
+                .type_id = type_id,
+                .count = @intCast(e.count),
+                .quality = 1,
+                .markup = 0,
+            };
+            n += 1;
+        }
+        v.stock_n = @intCast(n);
+    }
+
+    /// Push a vending machine's TE to one peer (LockRequest open path and chunk
+    /// stream). Missing store = no TE (fail closed).
+    pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
+        const v = self.vending.get(.{ .x = x, .y = y, .z = z }) orelse return;
+        var entries_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
+        const n = self.vendingEntries(v, &entries_buf);
+        const body = try stock_te.buildVendingTeBody(
+            self.body_buf[0..4096],
+            255,
+            v.pos.x,
+            v.pos.y,
+            v.pos.z,
+            .{
+                .block_id = v.block_id,
+                .is_locked = v.is_locked,
+                .owner = self.vendingOwnerId(v),
+                .password_hash = v.password_hash[0..v.password_len],
+                .rental_end_day = v.rental_end_day,
+                .trader_id = v.trader_id,
+                .entries = entries_buf[0..n],
+                .available_money = v.available_money,
+                .rentable = v.rentable,
+                .next_auto_buy = v.next_auto_buy,
+            },
+        );
+        try self.sendGame(peer, "NetPackageTileEntity", body);
+    }
+
+    /// Convert a stored UserRef to a platform id slice (empty when absent).
+    fn vendingOwnerId(self: *Game, v: *const vending_mod.Vending) ?packages.platform_user.Id {
+        _ = self;
+        if (v.owner.platform_len == 0) return null;
+        return .{
+            .platform = v.owner.platform[0..v.owner.platform_len],
+            .id = v.owner.id[0..v.owner.id_len],
+        };
+    }
+
     fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         const bi = self.sim.slotOfNetId(net_id) orelse return;
         // Death / multi-stack bags: DroppedLootContainer + ECD bag field.
@@ -9641,6 +9785,13 @@ pub const Game = struct {
             const cont = &self.containers.items[i];
             if (cont.pos.x < x0 or cont.pos.x >= x1 or cont.pos.z < z0 or cont.pos.z >= z1) continue;
             try self.sendStorageTe(peer, cont.pos.x, cont.pos.y, cont.pos.z);
+        }
+        var vi: usize = 0;
+        while (vi < vending_mod.max_vending) : (vi += 1) {
+            if (!self.vending.used[vi]) continue;
+            const v = &self.vending.items[vi];
+            if (v.pos.x < x0 or v.pos.x >= x1 or v.pos.z < z0 or v.pos.z >= z1) continue;
+            try self.sendVendingTe(peer, v.pos.x, v.pos.y, v.pos.z);
         }
     }
 

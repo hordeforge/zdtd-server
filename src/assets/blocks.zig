@@ -12,6 +12,11 @@ pub const BlockDef = struct {
     id: u16 = 0,
     name: []const u8 = "",
     solid: bool = true,
+    /// Block Class property (engine class name, e.g. "VendingMachine"). 0
+    /// length = not parsed / unknown.
+    class: []const u8 = "",
+    /// TraderID property (blocks.xml), resolved through the Extends chain.
+    trader_id: i32 = 0,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -51,6 +56,20 @@ pub const BlockTable = struct {
         if (id == 0) return false;
         if (self.byId(id)) |d| return d.solid;
         return true;
+    }
+
+    /// True for blocks whose resolved Class is VendingMachine (own or inherited
+    /// through Extends): the TE the client instantiates for these is
+    /// TileEntityVendingMachine (TileEntityType.VendingMachine = 7).
+    pub fn isVending(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return std.mem.eql(u8, d.class, "VendingMachine");
+        return false;
+    }
+
+    /// TraderID for a block (TraderData.TraderID drives trader_info stock).
+    pub fn traderId(self: *const BlockTable, id: u16) i32 {
+        if (self.byId(id)) |d| return d.trader_id;
+        return 0;
     }
 };
 
@@ -102,8 +121,22 @@ pub fn loadFromPath(
     var seen: std.StringHashMapUnmanaged(void) = .{};
     defer seen.deinit(allocator);
 
+    // Raw per-block props for Class / TraderID / Extends, keyed by name, so the
+    // extends chain can be resolved after the single scan pass.
+    const Parsed = struct {
+        id: u16,
+        name: []const u8,
+        class: ?[]const u8 = null,
+        trader_id: i32 = -1, // -1 = not declared
+        extends: ?[]const u8 = null,
+    };
+    var parsed: std.ArrayList(Parsed) = .empty;
+    defer parsed.deinit(allocator);
+    var name_idx: std.StringHashMapUnmanaged(usize) = .{};
+    defer name_idx.deinit(allocator);
+
     var i: usize = 0;
-    while (i < clean.len and list.items.len < max_blocks) {
+    while (i < clean.len and parsed.items.len < max_blocks) {
         const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
         const name = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
@@ -119,23 +152,88 @@ pub fn loadFromPath(
         };
         const kn = try arena.dupe(u8, name);
         try seen.put(allocator, kn, {});
-        try list.append(allocator, .{
+        // Scan this block's body for Class / TraderID / Extends.
+        var class: ?[]const u8 = null;
+        var trader_id: i32 = -1;
+        var extends: ?[]const u8 = null;
+        const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
+        var p = bi + 7;
+        while (p < body_end) : (p += 1) {
+            const pi = std.mem.indexOfPos(u8, clean, p, "<property ") orelse break;
+            if (pi > body_end) break;
+            const pname = xml.attr(clean, pi, "name") orelse {
+                p = pi + 10;
+                continue;
+            };
+            if (std.mem.eql(u8, pname, "Class")) {
+                class = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "TraderID")) {
+                if (xml.attr(clean, pi, "value")) |v| trader_id = std.fmt.parseInt(i32, v, 10) catch -1;
+            } else if (std.mem.eql(u8, pname, "Extends")) {
+                extends = xml.attr(clean, pi, "value");
+            }
+            p = pi + 10;
+        }
+        const idx = parsed.items.len;
+        try name_idx.put(allocator, kn, idx);
+        try parsed.append(allocator, .{
             .id = id,
             .name = kn,
-            .solid = isSolidName(name),
+            .class = class,
+            .trader_id = trader_id,
+            .extends = extends,
         });
         i = bi + 7;
     }
 
-    if (list.items.len == 0) {
+    if (parsed.items.len == 0) {
         // No dump match: fall back to builtin pins (offline).
         arena_holder.deinit();
         allocator.destroy(arena_holder);
         return BlockTable.builtin();
     }
 
-    const defs = try arena.alloc(BlockDef, list.items.len);
-    @memcpy(defs, list.items);
+    // Resolve the Extends chain for Class / TraderID (own props win). Depth-capped
+    // so a corrupt cycle cannot spin; a block inheriting a VendingMachine class is
+    // itself treated as vending (cntVendingMachineTrader extends cntVendingMachine).
+    const max_extends_depth: usize = 8;
+    for (parsed.items, 0..) |*pb, idx_cur| {
+        var depth: usize = 0;
+        var seen_chain: [max_extends_depth]usize = undefined;
+        var chain_n: usize = 0;
+        var own_class = pb.class;
+        var own_trader = pb.trader_id;
+        var ext = pb.extends;
+        while (ext) |e| : (depth += 1) {
+            if (depth >= max_extends_depth) break;
+            if (own_class != null and own_trader >= 0) break;
+            var dup = false;
+            for (seen_chain[0..chain_n]) |s| {
+                if (s == idx_cur) dup = true;
+            }
+            if (dup) break;
+            seen_chain[chain_n] = idx_cur;
+            chain_n += 1;
+            const base = name_idx.get(e) orelse break;
+            const base_p = &parsed.items[base];
+            if (own_class == null) own_class = base_p.class;
+            if (own_trader < 0) own_trader = base_p.trader_id;
+            ext = base_p.extends;
+        }
+        pb.class = own_class;
+        pb.trader_id = if (own_trader < 0) 0 else own_trader;
+    }
+
+    const defs = try arena.alloc(BlockDef, parsed.items.len);
+    for (parsed.items, 0..) |pb, di| {
+        defs[di] = .{
+            .id = pb.id,
+            .name = pb.name,
+            .solid = isSolidName(pb.name),
+            .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
+            .trader_id = pb.trader_id,
+        };
+    }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
 }
 
@@ -182,4 +280,71 @@ test "builtin block table" {
     try std.testing.expectEqualStrings("terrainFiller", t.byId(2).?.name);
     try std.testing.expectEqualStrings("terrDirt", t.byId(5).?.name);
     try std.testing.expect(!t.isSolid(240)); // water
+}
+
+test "vending class and TraderID resolve with Extends inheritance" {
+    // Fixture mirrors the stock chain: cntVendingMachineTrader extends
+    // cntVendingMachine (Class inherited, TraderID overridden), the soda
+    // machines extend cntVendingMachine2Broken (TraderID overridden).
+    const src =
+        \\<blocks>
+        \\<block name="cntVendingMachine">
+        \\  <property name="Class" value="VendingMachine"/>
+        \\  <property name="TraderID" value="3"/>
+        \\</block>
+        \\<block name="cntVendingMachineTrader">
+        \\  <property name="Extends" value="cntVendingMachine"/>
+        \\  <property name="TraderID" value="5"/>
+        \\</block>
+        \\<block name="cntVendingMachine2Broken">
+        \\  <property name="Class" value="VendingMachine"/>
+        \\  <property name="TraderID" value="10"/>
+        \\</block>
+        \\<block name="cntVendingMachine2">
+        \\  <property name="Extends" value="cntVendingMachine2Broken"/>
+        \\  <property name="TraderID" value="4"/>
+        \\</block>
+        \\<block name="cntWoodCrateWood01">
+        \\  <property name="Class" value="Storage"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_vending.xml";
+    try io_fs.writeFile(std.testing.allocator, path, src);
+    defer io_fs.deleteFile(std.testing.allocator, path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    try std.testing.expect(t.source == .xml);
+
+    const vm = t.byName("cntVendingMachine").?;
+    try std.testing.expect(t.isVending(vm.id));
+    try std.testing.expectEqual(@as(i32, 3), t.traderId(vm.id));
+    // Inherited class + overridden TraderID through Extends.
+    const vmt = t.byName("cntVendingMachineTrader").?;
+    try std.testing.expect(t.isVending(vmt.id));
+    try std.testing.expectEqual(@as(i32, 5), t.traderId(vmt.id));
+    // Soda machine: extends cntVendingMachine2Broken, own TraderID 4.
+    const soda = t.byName("cntVendingMachine2").?;
+    try std.testing.expect(t.isVending(soda.id));
+    try std.testing.expectEqual(@as(i32, 4), t.traderId(soda.id));
+    // Non-vending block stays clear.
+    const crate = t.byName("cntWoodCrateWood01").?;
+    try std.testing.expect(!t.isVending(crate.id));
+    try std.testing.expectEqual(@as(i32, 0), t.traderId(crate.id));
+}
+
+fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
+    // Stable fixture ids (test-only; not the AssignIds table).
+    const map = .{
+        .{ "cntVendingMachine", 100 },
+        .{ "cntVendingMachineTrader", 101 },
+        .{ "cntVendingMachine2Broken", 102 },
+        .{ "cntVendingMachine2", 103 },
+        .{ "cntWoodCrateWood01", 104 },
+    };
+    inline for (map) |e| {
+        if (std.mem.eql(u8, name, e[0])) return e[1];
+    }
+    return null;
 }

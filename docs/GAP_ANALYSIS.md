@@ -949,13 +949,23 @@ parsed, and quest offering is unwired.
   `src/server/game.zig` (`sendWorldAreas`), `src/world/prefabs.zig`
   (`QuestData.is_trader_area`), `../7dtd-research il dump` `TraderArea.il.txt:721`
 
-- **Vending machines** `MISSING`
-  `te_types.trader = 2` is a named constant only; no vending TE is ever emitted
-  and the storage/workstation handlers explicitly exclude it. `blocks.xml` carries
-  TraderID 4/10 for vending blocks and `traderAlways` even sells
-  `cntVendingMachine`.
-  *Anchors:* `src/wire/te_types.zig:7`, `src/server/game.zig:7423`,
-  `Data/Config/blocks.xml:51206`, `Data/Config/traders.xml:1472`
+- **Vending machines** `WORKS` (open + stock; rent/edit SM and C2S buy residual)
+  The vending TE (TileEntityVendingMachine, type 7) is now emitted: a
+  world-position `vending` store keyed by block place/remove, TraderData seeded
+  from trader_info by the block's `TraderID` (blocks.xml Class/TraderID parsed
+  with Extends resolution), `NetPackageTileEntity` pushed on chunk stream and on
+  LockRequest open (VendingMachineLockContext echoes the request's context type,
+  byte-correct per `TileEntityVendingMachine::write`: chunkPos | ver 3 |
+  isLocked | owner | password | allowed | rentalEndDay | TraderData |
+  nextAutoBuy-if-rentable). Residual: rent/password/owner editing state machine,
+  C2S buy/sell onto the entity-less TE form, and persistence (in-memory store;
+  not yet saved to disk).
+  *Anchors:* `src/world/vending.zig`, `src/wire/stock_te.zig:789-881`
+  (`buildVendingTeBody`), `src/server/game.zig:6596-6618` (LockRequest vending
+  branch), `:6760-6766` (place/remove lifecycle), `:9425-9480`
+  (`sendVendingTe`/`fillVendingStore`), `src/assets/blocks.zig:124-237`
+  (Class/TraderID + Extends), `asm.il:440486` (`TileEntityVendingMachine::write`),
+  `Data/Config/blocks.xml:51104`, `Data/Config/traders.xml:1472`
 
 - **Quest offering via NetPackageNPCQuestList** `PARTIAL`
   The reply is legal (base direction Both) and the bodies are right, but the

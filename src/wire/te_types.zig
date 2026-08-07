@@ -10,6 +10,8 @@ pub const fortress_rubble: u8 = 4;
 /// CompositeTileEntity / storage path used by zdtd stock_te (RE capture).
 pub const composite: u8 = 5;
 pub const secure_loot: u8 = 6;
+/// TileEntityVendingMachine (RE TileEntityType: VendingMachine = 7).
+pub const vending: u8 = 7;
 pub const workstation: u8 = 12;
 pub const sign: u8 = 0x16;
 pub const light: u8 = 0x19;

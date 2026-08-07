@@ -13,9 +13,10 @@ const io_fs = @import("../util/io_fs.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
-const platform_user = @import("../wire/platform_user.zig");
+const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const containers_mod = @import("../world/containers.zig");
+const vending_mod = @import("../world/vending.zig");
 
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPathSimple("worlds");
@@ -828,6 +829,101 @@ test "scenario quest accept kill complete and trader buy" {
         "PASS systems: quest_complete coins={d} ai_state={s}\n",
         .{ systems.questCoins(&g.sim, c.slot), @tagName(g.sim.zombie_ai[zi].state) },
     );
+}
+
+test "scenario vending machine opens via LockRequest with TraderData" {
+    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPathSimple("worlds/zdtd_sc_vending");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_vending", 0, .{});
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Seed a vending machine at (1,70,2): TraderID 3 (player-owned vending).
+    const vp: vending_mod.PosKey = .{ .x = 1, .y = 70, .z = 2 };
+    const v = g.vending.getOrCreate(vp, 1234, 3).?;
+    v.available_money = 5000;
+    try std.testing.expect(g.vending.count() == 1);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Client opens the machine: LockRequest with a TileEntity target (type 0)
+    // and the VendingMachineLockContext type name. Server fills TraderData.
+    cap.clear();
+    var lr_body: [128]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_body };
+    try lw.writeBool(true); // locking
+    try lw.writeU16(0); // channel
+    try lw.writeI32(1); // target count
+    try lw.writeByte(1); // present
+    try lw.writeByte(0); // TileEntity target
+    try lw.writeI32(1);
+    try lw.writeI32(70);
+    try lw.writeI32(2);
+    try lw.writeString("VendingMachineLockContext");
+    var lfb: [256]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+
+    // LockResponse: locking+success, echoes the vending context type, and
+    // carries server TraderData (trader id 3).
+    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    const resp_body = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+    var rr: binary.Reader = .{ .data = resp_body };
+    try std.testing.expectEqual(true, try rr.readBool()); // locking
+    try std.testing.expectEqual(true, try rr.readBool()); // success
+    var scratch: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // error
+    try std.testing.expectEqual(false, try rr.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 0), try rr.readU16()); // channel
+    try std.testing.expectEqual(@as(i32, 1), try rr.readI32()); // target count
+    try std.testing.expectEqual(@as(u8, 1), try rr.readByte()); // present
+    try std.testing.expectEqual(@as(u8, 0), try rr.readByte()); // TileEntity
+    try std.testing.expectEqual(@as(i32, 1), try rr.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try rr.readI32());
+    try std.testing.expectEqual(@as(i32, 2), try rr.readI32());
+    // Context type name preserved from the request.
+    try std.testing.expectEqualStrings("VendingMachineLockContext", try rr.readString(&scratch));
+    try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // command
+    try std.testing.expectEqual(true, try rr.readBool()); // hasTraderData
+    try std.testing.expectEqual(@as(i32, 3), try rr.readI32()); // trader id
+
+    // The machine's TE (type 7 payload) is pushed to the peer too.
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    const te_body = cap.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    var tr: binary.Reader = .{ .data = te_body };
+    try std.testing.expectEqual(@as(u8, 255), try tr.readByte()); // handle
+    try std.testing.expectEqual(@as(i32, 1), try tr.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try tr.readI32());
+    try std.testing.expectEqual(@as(i32, 2), try tr.readI32());
+    try std.testing.expectEqual(@as(i32, 1234), try tr.readI32()); // teBlockId
+    const te_pay_len: usize = @intCast(try tr.readI32());
+    const te_pay = te_body[te_body.len - te_pay_len ..];
+    var pr: binary.Reader = .{ .data = te_pay };
+    try std.testing.expectEqual(@as(i32, 1), try pr.readI32()); // chunkPos x
+    try std.testing.expectEqual(@as(i32, 70), try pr.readI32()); // chunkPos y
+    try std.testing.expectEqual(@as(i32, 2), try pr.readI32()); // chunkPos z
+    try std.testing.expectEqual(@as(i32, 3), try pr.readI32()); // vending TE version
+    try std.testing.expectEqual(false, try pr.readBool()); // isLocked
+    try std.testing.expectEqual(false, try pr.readBool()); // owner: null identity
+    try std.testing.expectEqualStrings("", try pr.readString(&scratch)); // passwordHash
+    try std.testing.expectEqual(@as(i32, 0), try pr.readI32()); // allowed users
+    try std.testing.expectEqual(@as(i32, 0), try pr.readI32()); // rentalEndDay
+    try std.testing.expectEqual(@as(i32, 3), try pr.readI32()); // TraderData trader id
+    // TraderData rest: lastInventoryUpdate | FileVersion | entry count |
+    // entries | tier groups | available money.
+    try std.testing.expectEqual(@as(u64, 0), try pr.readU64());
+    try std.testing.expectEqual(@as(u8, 2), try pr.readByte()); // FileVersion
+    try std.testing.expectEqual(@as(i32, 0), try pr.readI32()); // entries (offline empty)
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // tier groups
+    try std.testing.expectEqual(@as(i32, 5000), try pr.readI32()); // available money
+    // trader_info 3 is not rentable → no nextAutoBuy tail.
+    try std.testing.expectEqual(@as(usize, 0), pr.remaining());
+
+    std.debug.print("PASS scenario: vending open LockResponse trader_id=3 te_pay={d}\n", .{te_pay_len});
 }
 
 test "scenario trader RemoveQuest accepts and drops the quest from offers" {
