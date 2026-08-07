@@ -750,9 +750,10 @@ pub fn traderRestock(w: *World) void {
         stock.last_restock_day = day;
         var e: usize = 0;
         while (e < stock.n) : (e += 1) {
-            // Grow toward a soft cap of 50 for stackables.
-            if (stock.entries[e].count < 50) {
-                stock.entries[e].count +%= @min(10, 50 - stock.entries[e].count);
+            // Grow toward the configured soft cap for stackables
+            // (zdtd.toml [sim] trader_restock_cap / trader_restock_refill).
+            if (stock.entries[e].count < w.trader_restock_cap) {
+                stock.entries[e].count +%= @min(w.trader_restock_refill, w.trader_restock_cap -| stock.entries[e].count);
             }
             // Fresh entries: demand resets (stock HandleFullReset rebuilds the
             // inventory, which drops the old markups).
@@ -2977,6 +2978,29 @@ test "traderRestock honors per-trader reset_interval (never vs every N days)" {
     w.director.clock.day = 7;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i32, 1000), w.trader_stock[st].wallet);
+}
+
+test "traderRestock honors the configured cap and refill" {
+    var w: World = .{};
+    defer w.deinit();
+    const tid = w.spawnTrader("TraderCfg", 100, 70, 100, 0, 1000).?;
+    const ts = w.slotOfNetId(tid).?;
+    w.trader_restock_cap = 200;
+    w.trader_restock_refill = 25;
+    w.trader_stock[ts].reset_interval = 0; // daily
+    w.trader_stock[ts].entries[0].count = 1;
+    w.director.clock.day = 1;
+    traderRestock(&w);
+    // 1 + 25 = 26, not the default +10.
+    try std.testing.expectEqual(@as(u16, 26), w.trader_stock[ts].entries[0].count);
+    // Near the cap the refill clamps so the count never overshoots.
+    w.director.clock.day = 2;
+    w.trader_stock[ts].entries[0].count = 190;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(u16, 200), w.trader_stock[ts].entries[0].count);
+    w.director.clock.day = 3;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(u16, 200), w.trader_stock[ts].entries[0].count);
 }
 
 test "zombie melee marks the victim hp dirty so replication can see it" {

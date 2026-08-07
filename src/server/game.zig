@@ -243,6 +243,8 @@ pub const InitOptions = struct {
     /// non-empty enables the stock login and the INADDR_ANY bind.
     telnet_password: []const u8 = "",
     telnet_failed_login_limit: u8 = 10,
+    /// TelnetFailedLoginsBlocktime (minutes). 0 = close session only, no lockout window.
+    telnet_failed_logins_blocktime: u16 = 10,
     /// GameWorld, shown in the telnet greeting block.
     game_world: []const u8 = "Navezgane",
     /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
@@ -340,6 +342,9 @@ pub const InitOptions = struct {
     block_refill_ns: u64 = default_block_refill_ns,
     min_damage_gap_ns: u64 = default_min_damage_gap_ns,
     damage_burst_max: u8 = default_damage_burst_max,
+    /// Trader restock refill policy (zdtd.toml [sim] trader_restock_*).
+    trader_restock_cap: u16 = default_trader_restock_cap,
+    trader_restock_refill: u16 = default_trader_restock_refill,
     /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Register in-tree sample_hello static plugin (logs once on enable).
@@ -391,6 +396,10 @@ pub const default_block_bucket_cap: u8 = 30;
 pub const default_block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
 pub const default_min_damage_gap_ns: u64 = 80_000_000;
 pub const default_damage_burst_max: u8 = 4;
+/// Trader restock refill policy (zdtd.toml [sim] trader_restock_*): stackable
+/// entries grow toward the cap by at most the refill per restock.
+pub const default_trader_restock_cap: u16 = 50;
+pub const default_trader_restock_refill: u16 = 10;
 pub const default_peer_stale_ms: u64 = 3000;
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
@@ -868,6 +877,8 @@ pub const Game = struct {
     block_refill_ns: u64 = default_block_refill_ns,
     min_damage_gap_ns: u64 = default_min_damage_gap_ns,
     damage_burst_max: u8 = default_damage_burst_max,
+    trader_restock_cap: u16 = default_trader_restock_cap,
+    trader_restock_refill: u16 = default_trader_restock_refill,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
@@ -955,6 +966,8 @@ pub const Game = struct {
             .block_refill_ns = opts.block_refill_ns,
             .min_damage_gap_ns = opts.min_damage_gap_ns,
             .damage_burst_max = opts.damage_burst_max,
+            .trader_restock_cap = opts.trader_restock_cap,
+            .trader_restock_refill = opts.trader_restock_refill,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
@@ -979,6 +992,9 @@ pub const Game = struct {
         self.sim.director.clock.bloodmoon_range = opts.blood_moon_range;
         self.sim.director.clock.setDayNightLength(opts.day_night_length);
         self.sim.director.clock.setDayLightLength(opts.day_light_length);
+        // Trader restock refill policy (zdtd.toml [sim] trader_restock_*).
+        self.sim.trader_restock_cap = opts.trader_restock_cap;
+        self.sim.trader_restock_refill = opts.trader_restock_refill;
         errdefer {
             // Network half first so fail-closed webui (after net/admin listen)
             // does not leak FDs in tests/library createWithOptions paths.
@@ -1069,6 +1085,9 @@ pub const Game = struct {
         } else if (opts.worldgen_seed) |seed| {
             self.world.enableProc(seed);
             self.world_name = "proc";
+            // The single value that regenerates terrain, weather and deco;
+            // echo it so a save stays reproducible across restarts and hosts.
+            std.debug.print("zdtd: worldgen seed={d} (0x{X})\n", .{ seed, seed });
         }
 
         const assets_paths = @import("../assets/paths.zig");
@@ -1565,6 +1584,8 @@ pub const Game = struct {
         if (port == 0) {
             const seed = opts.worldgen_seed orelse util_sim.default_seed;
             util_sim.enableSeeded(util_sim.default_start_ns, seed);
+            // DST replay key: the single value that reproduces this run.
+            std.debug.print("zdtd: DST run seed={d}\n", .{seed});
         }
         // A later init error (for example invalid WebUI configuration) must not
         // leak process-wide virtual time or forced-serial scheduling into the
@@ -1596,6 +1617,7 @@ pub const Game = struct {
             self.admin.auth = .{
                 .password = opts.telnet_password,
                 .fail_limit = opts.telnet_failed_login_limit,
+                .fail_block_minutes = opts.telnet_failed_logins_blocktime,
             };
             self.admin.greeting = .{
                 .version = version.stock_wire_announce,
@@ -9186,7 +9208,8 @@ pub const Game = struct {
         try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
     }
 
-    test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {        const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
+        const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
         const map = game_dir ++ "/Data/Worlds/Navezgane";
         if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
         io_fs.mkdirPathSimple(".zdtd_cfg_cache");

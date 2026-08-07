@@ -149,6 +149,10 @@ pub const VendingStore = struct {
         o.* += 1;
         @memcpy(&u.id, buf[o.*..][0..max_id_len]);
         o.* += max_id_len;
+        // The wire send path slices these fixed buffers by the declared lengths
+        // (game.zig vendingOwnerId); a corrupt save claiming more than the
+        // stored bytes must fail closed, not pass a bad UserRef on.
+        if (u.platform_len > max_platform_len or u.id_len > max_id_len) return false;
         return true;
     }
 
@@ -251,11 +255,16 @@ pub const VendingStore = struct {
             if (!readUserRef(buf, &o, &v.owner)) return error.ReadFailed;
             if (o + 1 + max_password_hash > len) return error.ReadFailed;
             v.password_len = buf[o];
+            // Same fail-closed rule as UserRef: password_len must fit the
+            // fixed hash buffer the wire path slices (game.zig password_hash).
+            if (v.password_len > max_password_hash) return error.ReadFailed;
             o += 1;
             @memcpy(&v.password_hash, buf[o..][0..max_password_hash]);
             o += max_password_hash;
             if (o + 1 > len) return error.ReadFailed;
-            v.allowed_n = buf[o];
+            // Same clamp rule as stock_n: the skip loop below can parse more
+            // entries, but the stored count must never exceed the fixed array.
+            v.allowed_n = @min(buf[o], max_allowed_users);
             o += 1;
             var ai: usize = 0;
             while (ai < v.allowed_n) : (ai += 1) {

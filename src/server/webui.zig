@@ -2158,6 +2158,13 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
     const path = pathOnly(head);
     try std.testing.expect(path.len <= @max(head.len, 1));
     _ = contentLength(head);
+    // Strict framing (duplicate Content-Length / Transfer-Encoding rejection)
+    // must not panic, and when it accepts a header block it must agree with
+    // the lenient parse used by the happy path.
+    if (validatedContentLength(head)) |strict| {
+        try std.testing.expectEqual(contentLength(head), strict);
+    } else |_| {}
+    _ = peekContentLength(head) catch {};
     _ = isFormContentType(headerValue(head, "Content-Type"));
     if (headerValue(head, "Cookie")) |ck| {
         if (cookieValue(ck, "zdtd_webui")) |cv| try std.testing.expect(cv.len <= head.len);
