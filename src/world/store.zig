@@ -95,6 +95,9 @@ pub const Chunk = struct {
     dirty: bool = false,
     /// Runtime-only: server finished its one-time storage-TE scan of this chunk.
     te_scanned: bool = false,
+    /// Power nodes re-derived from this chunk's blocks after a restart (GAP
+    /// power persistence); the grid is runtime state rebuilt on first touch.
+    power_scanned: bool = false,
     /// Runtime-only: dominant biome, computed once per resident chunk (the
     /// biome map is static). Recomputing costs 256 map lookups per chunk send.
     biome_id: ?u8 = null,
@@ -488,6 +491,29 @@ pub const World = struct {
         self.spawn_count = 0;
         self.terrain_source = .proc;
         self.worldgen = worldgen_mod.WorldGen.init(seed);
+        self.syncWorldgenBiomes();
+    }
+
+    /// Point the procedural generator at the loaded biome table (W3): more than
+    /// one resolved biome turns on the biome field, so columns fill with their
+    /// biome's surface stack instead of the single-biome default.
+    pub fn syncWorldgenBiomes(self: *World) void {
+        if (self.worldgen) |*wg| {
+            const n = self.biome_layers_table.biomeCount();
+            wg.biome_n = n;
+            wg.biome_table = if (n > 1) &self.biome_layers_table else null;
+        }
+    }
+
+    /// Procedural biome id at a chunk's center (W3): the same field that drove
+    /// the surface fill, so the client's displayed biome matches the blocks.
+    /// Falls back to the single-biome id (0) when the field is off.
+    pub fn procBiomeAt(self: *const World, cx: i32, cz: i32) u8 {
+        const wg = &self.worldgen.?;
+        const wx = @as(f32, @floatFromInt(cx * worldgen_mod.chunk_size + worldgen_mod.chunk_size / 2));
+        const wz = @as(f32, @floatFromInt(cz * worldgen_mod.chunk_size + worldgen_mod.chunk_size / 2));
+        // Translate the resolved-list index to the real biomemap id (sparse).
+        return self.biome_layers_table.biomeIdAt(wg.biomeAt(wx, wz));
     }
 
     pub fn loadStockMap(self: *World, map_dir: []const u8) !void {
@@ -663,7 +689,7 @@ pub const World = struct {
                         .base_x = pos.x * 16,
                         .base_z = pos.z * 16,
                     };
-                    pf.applyTtsPaintToChunk(pos.x, pos.z, PaintCtx.put, &pc);
+                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
                             "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",
@@ -1462,4 +1488,37 @@ test "water sources fill lake columns with water blocks" {
     try std.testing.expectEqual(@as(u32, block_dirt), chunk.blocks.?[blockIndex(0, 70, 0)]);
     // Column (15,15) is outside the radius-12 source ring (dx=10,dz=10 → 200 > 144).
     try std.testing.expectEqual(@as(u32, block_air), chunk.blocks.?[blockIndex(15, 65, 15)]);
+}
+
+test "procBiomeAt follows the surface fill field deterministically" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(77);
+    // Two resolved biomes at sparse stock ids (biomes.xml: 3 pine_forest,
+    // 5 desert) turn the field on and translate index -> real id.
+    w.biome_layers_table.names[3] = "pine_forest";
+    w.biome_layers_table.names[5] = "desert";
+    w.syncWorldgenBiomes();
+    try std.testing.expectEqual(@as(u8, 2), w.worldgen.?.biome_n);
+    try std.testing.expectEqual(@as(u8, 3), w.biome_layers_table.biomeIdAt(0));
+    try std.testing.expectEqual(@as(u8, 5), w.biome_layers_table.biomeIdAt(1));
+    // Deterministic and translated into the real id set at any chunk.
+    for ([_]i32{ -3, 0, 1, 12 }) |cx| {
+        for ([_]i32{ -2, 0, 5 }) |cz| {
+            const b = w.procBiomeAt(cx, cz);
+            try std.testing.expect(b == 3 or b == 5);
+            try std.testing.expectEqual(b, w.procBiomeAt(cx, cz));
+        }
+    }
+    // The biome at a chunk's center is the same field the surface fill used
+    // (chunk (0,0) center is world (8,8) for a 16-wide chunk), translated to
+    // the real sparse id.
+    try std.testing.expectEqual(
+        w.biome_layers_table.biomeIdAt(w.worldgen.?.biomeAt(8, 8)),
+        w.procBiomeAt(0, 0),
+    );
 }

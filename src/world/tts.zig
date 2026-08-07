@@ -71,6 +71,10 @@ pub const TtsBlocks = struct {
     /// Per-cell textureFull (paint); low 48 bits meaningful. 0 = unpainted.
     /// Length types.len when the sparse texture channel was decoded, else empty.
     textures: []u64 = &.{},
+    /// Per-cell water mass (sparse WaterValue u16, v>=17). 0 = dry. Length
+    /// types.len when the channel was decoded, else empty. Cells with mass > 0
+    /// are authored water (POI pools, flooded basements, water towers).
+    water: []u16 = &.{},
     /// Prefab TE list (local coords). Payloads owned by same allocator.
     tile_entities: []TeEntry = &.{},
     allocator: std.mem.Allocator,
@@ -84,6 +88,7 @@ pub const TtsBlocks = struct {
         if (self.density.len != 0) self.allocator.free(self.density);
         if (self.damage.len != 0) self.allocator.free(self.damage);
         if (self.textures.len != 0) self.allocator.free(self.textures);
+        if (self.water.len != 0) self.allocator.free(self.water);
         self.* = undefined;
     }
 
@@ -144,12 +149,14 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
     var density: []u8 = &.{};
     var damage: []u16 = &.{};
     var textures: []u64 = &.{};
+    var water: []u16 = &.{};
     var tile_entities: []TeEntry = &.{};
     // Free planes allocated mid-parse if a later step fails (OOM / TE list error).
     errdefer {
         if (density.len != 0) allocator.free(density);
         if (damage.len != 0) allocator.free(damage);
         if (textures.len != 0) allocator.free(textures);
+        if (water.len != 0) allocator.free(water);
     }
 
     // Density: sbyte[count]: always present for our supported versions after blocks.
@@ -211,17 +218,23 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
             if (pos > bit_start_pos + 4) {
                 const n = std.mem.readInt(i32, data[bit_start_pos..][0..4], .little);
                 const bits = data[bit_start_pos + 4 ..][0..@intCast(n)];
-                var set_bits: usize = 0;
+                const wt = try allocator.alloc(u16, count);
+                errdefer allocator.free(wt);
+                @memset(wt, 0);
+                var wpos = pos;
                 var bit_i: usize = 0;
                 const total_bits = bits.len * 8;
                 while (bit_i < total_bits and bit_i < count) : (bit_i += 1) {
                     const byte = bits[bit_i / 8];
                     const bit: u3 = @intCast(bit_i % 8);
-                    if ((byte >> bit) & 1 != 0) set_bits += 1;
+                    if ((byte >> bit) & 1 == 0) continue;
+                    // WaterValue.Read = u16 mass
+                    if (wpos + 2 > data.len) break;
+                    wt[bit_i] = std.mem.readInt(u16, data[wpos..][0..2], .little);
+                    wpos += 2;
                 }
-                // WaterValue.Read = u16 mass
-                const need_w = set_bits * 2;
-                if (pos + need_w <= data.len) pos += need_w;
+                pos = wpos;
+                water = wt;
             }
         }
     }
@@ -376,6 +389,7 @@ pub fn paintDecoration(
     origin_y: i32,
     origin_z: i32,
     rot: u8,
+    water_id: u16,
     set_block: SetBlockFn,
     ctx: ?*anyopaque,
 ) void {
@@ -383,16 +397,24 @@ pub fn paintDecoration(
     const count: i32 = @intCast(tts.blockCount());
     var i: i32 = 0;
     while (i < count) : (i += 1) {
-        const raw = tts.types[@intCast(i)];
-        if (raw == 0) continue;
-        const typ: u16 = @truncate(raw & type_mask);
-        if (typ == assignids.terrain_filler or typ == assignids.terrain_filler_adaptive) continue;
         const c = tts.offsetToCoord(i);
         const r = rotateLocalXZ(c.x, c.z, tts.sx, tts.sz, rot);
         const wx = origin_x + r.x;
         const wy = origin_y + c.y;
         const wz = origin_z + r.z;
         if (wy < 0 or wy >= 256) continue;
+        // Authored POI water (v>=17 sparse channel): the cell's block plane is
+        // air but the water channel marks mass. Paint the resolved water block
+        // so the chunk wire's water-mass channel derives the cell (stock pools,
+        // flooded basements, water towers) at full static mass.
+        if (water_id != 0 and tts.water.len > @as(usize, @intCast(i)) and tts.water[@intCast(i)] > 0) {
+            set_block(ctx, wx, wy, wz, water_id, 0, null);
+            continue;
+        }
+        const raw = tts.types[@intCast(i)];
+        if (raw == 0) continue;
+        const typ: u16 = @truncate(raw & type_mask);
+        if (typ == assignids.terrain_filler or typ == assignids.terrain_filler_adaptive) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
         // Stock rotates a block by CalcRotation(rot, 4 - r): BlockShapeNew::RotateY
@@ -524,4 +546,71 @@ test "convert BlockValueV3 raw data to the current layout" {
     // Child cells keep only the child bit; parseBlocks drops them.
     try std.testing.expectEqual(child_bit, convertOldRawData(0x2222 | child_bit));
     try std.testing.expectEqual(@as(u32, 0), convertOldRawData(0));
+}
+
+test "prefab water channel decodes and paints water blocks" {
+    // Synthetic v19 .tts: 3x2x2 all-air prefab with one water cell (bit 7)
+    // carrying full mass. Layout: magic, version, dims, blocks, density,
+    // damage, texture bitstream (empty), water bitstream + WaterValue u16s.
+    var buf: [160]u8 = undefined;
+    var pos: usize = 0;
+    @memcpy(buf[0..4], "tts\x00");
+    pos = 4;
+    std.mem.writeInt(u32, buf[pos..][0..4], 19, .little);
+    pos += 4;
+    std.mem.writeInt(i16, buf[pos..][0..2], 3, .little);
+    std.mem.writeInt(i16, buf[pos + 2 ..][0..2], 2, .little);
+    std.mem.writeInt(i16, buf[pos + 4 ..][0..2], 2, .little);
+    pos += 6;
+    const count: usize = 12;
+    @memset(buf[pos .. pos + count * 4], 0); // blocks: all air
+    pos += count * 4;
+    @memset(buf[pos .. pos + count], 0); // density plane
+    pos += count;
+    @memset(buf[pos .. pos + count * 2], 0); // damage plane
+    pos += count * 2;
+    std.mem.writeInt(i32, buf[pos..][0..4], 0, .little); // texture bitstream: empty
+    pos += 4;
+    std.mem.writeInt(i32, buf[pos..][0..4], 1, .little); // water bitstream: 1 byte
+    pos += 4;
+    buf[pos] = 0x80; // bit 7 set -> cell 7 has water
+    pos += 1;
+    std.mem.writeInt(u16, buf[pos..][0..2], 19500, .little); // WaterValue mass
+    pos += 2;
+
+    var t = try parseBlocks(std.testing.allocator, buf[0..pos]);
+    defer t.deinit();
+    try std.testing.expectEqual(t.types.len, t.water.len);
+    try std.testing.expectEqual(@as(u16, 19500), t.water[7]);
+    try std.testing.expectEqual(@as(u16, 0), t.water[0]);
+    const c7 = t.offsetToCoord(7);
+    try std.testing.expectEqual(@as(i32, 1), c7.x);
+    try std.testing.expectEqual(@as(i32, 0), c7.y);
+    try std.testing.expectEqual(@as(i32, 1), c7.z);
+
+    // Paint: the water cell becomes a water block, air cells stay unpainted.
+    const Paint = struct {
+        water: ?struct { wx: i32, wy: i32, wz: i32 } = null,
+        blocks: usize = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+            _ = tex;
+            _ = dens;
+            const p: *@This() = @ptrCast(@alignCast(ctx.?));
+            if (raw == 0) return;
+            p.blocks += 1;
+            if (raw == 240) p.water = .{ .wx = wx, .wy = wy, .wz = wz };
+        }
+    };
+    var p: Paint = .{};
+    paintDecoration(&t, 100, 60, 100, 0, 240, Paint.put, &p);
+    try std.testing.expectEqual(@as(usize, 1), p.blocks);
+    const wcell = p.water.?;
+    try std.testing.expectEqual(@as(i32, 101), wcell.wx);
+    try std.testing.expectEqual(@as(i32, 60), wcell.wy);
+    try std.testing.expectEqual(@as(i32, 101), wcell.wz);
+
+    // water_id 0 fails closed: no water painted.
+    var p0: Paint = .{};
+    paintDecoration(&t, 100, 60, 100, 0, 0, Paint.put, &p0);
+    try std.testing.expectEqual(@as(usize, 0), p0.blocks);
 }

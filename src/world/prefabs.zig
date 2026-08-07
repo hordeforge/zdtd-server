@@ -441,10 +441,12 @@ pub const Index = struct {
     /// Policy: paint full POIs always; paint `part_*` only when volume <= 24^3
     /// (skip huge RWG clutter parts). Ids come out of `getTtsBlocks` already
     /// remapped from prefab-local to runtime AssignIds (see remapToRuntimeIds).
+    /// `water_id` is the resolved runtime water block id (0 = skip water paint).
     pub fn applyTtsPaintToChunk(
         self: *Index,
         cx: i32,
         cz: i32,
+        water_id: u16,
         set_block: tts.SetBlockFn,
         ctx: ?*anyopaque,
     ) void {
@@ -458,7 +460,7 @@ pub const Index = struct {
             // only the huge RWG clutter parts are skipped.
             if (!isPaintablePart(d)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
-            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, set_block, ctx);
+            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, water_id, set_block, ctx);
         }
     }
 
@@ -853,13 +855,13 @@ test "stock cave_07 stamps its body below the declared ground" {
         }
     };
     var with_offset: Rec = .{};
-    idx.applyTtsPaintToChunk(0, 0, Rec.onBlock, &with_offset);
+    idx.applyTtsPaintToChunk(0, 0, 0, Rec.onBlock, &with_offset);
     try std.testing.expect(with_offset.min_wy < 60);
 
     // Same POI with the offset dropped: the delta is exactly the YOffset.
     var without: Rec = .{};
     idx.items[0].y_offset = 0;
-    idx.applyTtsPaintToChunk(0, 0, Rec.onBlock, &without);
+    idx.applyTtsPaintToChunk(0, 0, 0, Rec.onBlock, &without);
     try std.testing.expectEqual(without.min_wy - 33, with_offset.min_wy);
 }
 
@@ -889,7 +891,7 @@ test "navezgane paints a real POI into its chunk" {
     };
     var c: Count = .{};
     // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
-    idx.applyTtsPaintToChunk(-17, 28, Count.put, &c);
+    idx.applyTtsPaintToChunk(-17, 28, 0, Count.put, &c);
     try std.testing.expect(c.n > 0);
 }
 
@@ -1047,7 +1049,7 @@ test "part decoration paints its blocks into the chunk" {
         }
     };
     var c: Count = .{};
-    idx.applyTtsPaintToChunk(6, 6, Count.put, &c); // chunk x96..112 overlaps the part
+    idx.applyTtsPaintToChunk(6, 6, 0, Count.put, &c); // chunk x96..112 overlaps the part
     try std.testing.expect(c.n > 0);
 }
 

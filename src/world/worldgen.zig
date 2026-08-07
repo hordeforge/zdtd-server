@@ -167,12 +167,30 @@ const Sampler = struct {
 pub const WorldGen = struct {
     seed: u64,
     noise: noise_mod.Noise,
+    /// Loaded biome count for the W3 biome field; < 2 keeps single-biome fill
+    /// (the W2 behaviour). Set by the store from biome_layers_table.
+    biome_n: u8 = 0,
+    /// Resolved surface stacks by biomemap id; null keeps `fillColumn`'s
+    /// default stack (single biome).
+    biome_table: ?*const biome_layers.Table = null,
 
     pub fn init(seed: u64) WorldGen {
         return .{
             .seed = seed,
             .noise = noise_mod.Noise.init(seed),
         };
+    }
+
+    /// Continuous biome field (W3): a low-frequency fBm mapped onto the loaded
+    /// biome count. Deterministic per seed; regions stay contiguous instead of
+    /// per-column noise, so a biome is a landmass, not static.
+    pub fn biomeAt(self: *const WorldGen, fx: f32, fz: f32) u8 {
+        if (self.biome_n <= 1) return 0;
+        const bm_p: noise_mod.FbmParams = .{ .octaves = 3, .frequency = 0.003, .gain = 0.5 };
+        const v = noise_mod.fbm2(&self.noise, fx + 5000, fz + 3000, bm_p); // ~[-1,1]
+        const t = (v + 1.0) * 0.5; // [0,1]
+        const n: f32 = @floatFromInt(self.biome_n);
+        return @intFromFloat(@min(n - 1.0, t * n));
     }
 
     /// 2D shaping stack (`cache_2d`): the Y around which the density gradient
@@ -340,12 +358,25 @@ pub const WorldGen = struct {
 
         // Second pass: a column's height is only final after all its cells, and
         // the layer stack is anchored at that height. Solid cells take the
-        // stack material; air stays air (holes the stack cannot express).
+        // stack material; air stays air (holes the stack cannot express). With
+        // a loaded biome table each column fills with its biome's surface
+        // stack (W3); otherwise the single-biome default.
         var col_ids: [256]u16 = undefined;
         var col: usize = 0;
         while (col < 256) : (col += 1) {
             const h = heights[col];
-            fillColumn(h, &col_ids);
+            if (self.biome_table) |bl| {
+                const lx: i32 = @intCast(col % @as(usize, @intCast(chunk_size)));
+                const lz: i32 = @intCast(@divTrunc(col, @as(usize, @intCast(chunk_size))));
+                const wx = cx * chunk_size + lx;
+                const wz = cz * chunk_size + lz;
+                // biomeAt yields an index into the resolved biome list; the
+                // real biomemap ids are sparse (1, 3, 5, …), so translate.
+                const real_id = bl.biomeIdAt(self.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
+                biome_layers.Table.fillColumn(bl.stackFor(real_id), h, &col_ids);
+            } else {
+                fillColumn(h, &col_ids);
+            }
             var y: usize = 0;
             while (y <= h) : (y += 1) {
                 const bi = col + y * 256;
@@ -540,5 +571,85 @@ test "worldgen heightAt agrees with fillHeights" {
     for (pts) |p| {
         const h = g.heightAt(-2 * 16 + p[0], 5 * 16 + p[1]);
         try std.testing.expectEqual(@as(u16, heights[@intCast(p[0] + p[1] * 16)]), h);
+    }
+}
+
+test "biome field is deterministic, in range and region-contiguous" {
+    var g = WorldGen.init(42);
+    g.biome_n = 7;
+    // Same seed + coordinate → same biome.
+    try std.testing.expectEqual(g.biomeAt(100, 200), g.biomeAt(100, 200));
+    // In range.
+    for ([_]f32{ -5000, -1, 0, 1, 5000 }) |x| {
+        for ([_]f32{ -5000, 0, 5000 }) |z| {
+            const b = g.biomeAt(x, z);
+            try std.testing.expect(b < 7);
+        }
+    }
+    // Contiguous: adjacent samples within a landmass rarely jump the whole
+    // range; the field must not be per-column static.
+    var min_gap: u8 = 7;
+    var i: i32 = 0;
+    while (i < 64) : (i += 1) {
+        const a = g.biomeAt(@floatFromInt(i * 16), 0);
+        const b = g.biomeAt(@floatFromInt(i * 16 + 16), 0);
+        min_gap = @min(min_gap, @abs(@as(i32, a) - @as(i32, b)));
+    }
+    try std.testing.expect(min_gap <= 1);
+    // biome_n <= 1 keeps single-biome fill.
+    var single = WorldGen.init(42);
+    single.biome_n = 1;
+    try std.testing.expectEqual(@as(u8, 0), single.biomeAt(0, 0));
+}
+
+test "generateChunkBlocks fills each biome's surface stack" {
+    var g = WorldGen.init(9);
+    var bl: biome_layers.Table = .{};
+    // Two biomes with distinct surface blocks: pine_forest grass vs desert sand.
+    const pine_stack = biome_layers.Stack{
+        .n = 3,
+        .layers = .{
+            .{ .depth = 1, .block_id = 700 },
+            .{ .depth = 3, .block_id = 701 },
+            .{ .depth = 0, .block_id = 702 },
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+        },
+    };
+    const desert_stack = biome_layers.Stack{
+        .n = 3,
+        .layers = .{
+            .{ .depth = 1, .block_id = 800 },
+            .{ .depth = 3, .block_id = 801 },
+            .{ .depth = 0, .block_id = 802 },
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+        },
+    };
+    bl.stacks[0] = pine_stack;
+    bl.stacks[1] = desert_stack;
+    bl.names[0] = "pine_forest";
+    bl.names[1] = "desert";
+    g.biome_n = 2;
+    g.biome_table = &bl;
+    var heights: [256]u8 = undefined;
+    var blocks: [256 * 256]u32 = undefined;
+    g.generateChunkBlocks(0, 0, &heights, &blocks);
+    // Every solid surface cell is one of the two biome stacks' blocks, never
+    // the single-biome default.
+    var col: usize = 0;
+    while (col < 256) : (col += 1) {
+        const h = heights[col];
+        const top = blocks[col + @as(usize, @intCast(h)) * 256];
+        // The surface comes from one of the two biome stacks, never the
+        // single-biome default. The biome field itself is contiguous per
+        // region, so one chunk usually sits in a single biome (checked above).
+        try std.testing.expect(top == 700 or top == 800);
     }
 }

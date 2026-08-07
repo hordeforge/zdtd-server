@@ -186,6 +186,30 @@ pub const Table = struct {
         return self.names[id];
     }
 
+    /// Number of biomes that resolved names (biomes.xml `<biomemap>` rows).
+    /// Feeds the procedural biome field (W3): < 2 keeps single-biome fill.
+    pub fn biomeCount(self: *const Table) u8 {
+        var n: u8 = 0;
+        for (self.names) |nm| {
+            if (nm != null) n += 1;
+        }
+        return n;
+    }
+
+    /// The idx-th resolved biome's real biomemap id. ids are sparse in stock
+    /// biomes.xml (1, 3, 5, 6, 7, 8, 9, 13, …), so an index into the resolved
+    /// list must be translated before `stackFor`.
+    pub fn biomeIdAt(self: *const Table, idx: u8) u8 {
+        var seen: u8 = 0;
+        for (self.names, 0..) |nm, id| {
+            if (nm != null) {
+                if (seen == idx) return @intCast(id);
+                seen += 1;
+            }
+        }
+        return 0;
+    }
+
     pub fn stackFor(self: *const Table, biome_id: u8) Stack {
         if (biome_id < max_biomemap_id and self.stacks[biome_id].n > 0)
             return self.stacks[biome_id];
@@ -904,6 +928,13 @@ test "load stock biomes.xml when present" {
     // biomemap id → name for the per-biome spawn-group resolver.
     try std.testing.expectEqualStrings("pine_forest", t.nameById(3).?);
     try std.testing.expectEqualStrings("desert", t.nameById(5).?);
+    // The procedural biome field (W3) resolves sparse ids in order: the first
+    // named biome in stock biomes.xml is snow (id 1), pine_forest (3) second,
+    // desert (5) third.
+    try std.testing.expect(t.biomeCount() >= 7);
+    try std.testing.expectEqual(@as(u8, 1), t.biomeIdAt(0));
+    try std.testing.expectEqual(@as(u8, 3), t.biomeIdAt(1));
+    try std.testing.expectEqual(@as(u8, 5), t.biomeIdAt(2));
     try std.testing.expectEqualStrings("snow", t.nameById(1).?);
     try std.testing.expectEqualStrings("wasteland", t.nameById(8).?);
     try std.testing.expectEqualStrings("burnt_forest", t.nameById(9).?);
