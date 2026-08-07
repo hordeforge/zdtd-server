@@ -20,6 +20,7 @@ const systems = @import("../ecs/systems.zig");
 const parallel_util = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 const protocol = @import("../protocol.zig");
+const replicate_te = @import("replicate_te.zig");
 const assets_quests = @import("../assets/quests.zig");
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
@@ -1117,6 +1118,9 @@ pub const Game = struct {
         self.sim.poi_fn = &poiRectAtWorld;
         self.sim.nearest_poi_ctx = self;
         self.sim.nearest_poi_fn = &nearestPoiAtWorld;
+        // Quest POI lockout exempts party members (stock CheckForPOILockouts).
+        self.sim.party_same_ctx = self;
+        self.sim.party_same_fn = &partySame;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -1789,7 +1793,7 @@ pub const Game = struct {
             const cx: i32 = sp.x + 2;
             const cy: i32 = sp.y;
             const cz: i32 = sp.z + 2;
-            const chest_block: u16 = self.seedChestBlockId();
+            const chest_block: u16 = replicate_te.seedChestBlockId(self);
             if (self.world.setBlockWorld(cx, cy, cz, chest_block)) |_| {
                 if (self.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, chest_block)) |cont| {
                     cont.setSlot(0, .{ .item_id = 7, .count = 10, .quality = 1 }); // wood
@@ -1989,6 +1993,15 @@ pub const Game = struct {
             };
         }
         return null;
+    }
+
+    /// Party membership test for the sim hook: two entity ids are "the same
+    /// party" when both belong to one live Party. Out-of-party players (both
+    /// null) are not a party, so each still blocks the other's rally.
+    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const pa = g.parties.partyByMember(a) orelse return false;
+        return pa == g.parties.partyByMember(b);
     }
 
     /// Nearest quest-eligible POI to (x,z) over the whole prefab index. Quest
@@ -4304,7 +4317,7 @@ pub const Game = struct {
         return false;
     }
 
-    fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
+    pub fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
         // Count encode failures here: many callers swallow the error (`catch {}`),
         // so this is the only place they stay visible in apm. Rate-limit the log
         // so a bad package does not flood stdout while still showing first/100th.
@@ -4425,6 +4438,61 @@ pub const Game = struct {
             if (c.xp < next_threshold) break;
             c.level += 1;
             next_threshold += self.progression.expForLevel(c.level);
+        }
+    }
+
+    /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
+    /// serverconfig key, so it rides the GameStats blob default).
+    const party_shared_kill_range_sq: f32 = 100.0 * 100.0;
+
+    /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md
+    /// §2.3): the killer's XP is `base * (1 - 0.1 * MemberCountInRange)` where
+    /// MemberCountInRange counts the other members within GameStats[54]
+    /// (party_shared_kill_range, stock default 100); every other in-range
+    /// member gets the same split XP through NetPackageSharedPartyKill so the
+    /// client shows the shared-kill tooltip. Out of party the award is full.
+    fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
+        const killer = &self.clients[killer_slot];
+        const party = self.parties.partyByMember(killer.entity_id);
+        var in_range: u8 = 0;
+        if (party) |p| {
+            if (self.sim.playerByPeer(killer_slot)) |ks| {
+                const kt = self.sim.transform[ks];
+                for (p.members[0..p.n]) |m| {
+                    if (m == killer.entity_id) continue;
+                    const ms = self.sim.slotOfNetId(m) orelse continue;
+                    if (!self.sim.mask[ms].transform) continue;
+                    const dx = self.sim.transform[ms].x - kt.x;
+                    const dz = self.sim.transform[ms].z - kt.z;
+                    if (dx * dx + dz * dz <= party_shared_kill_range_sq) in_range += 1;
+                }
+            }
+        }
+        const split: u64 = if (party != null)
+            base * (100 - 10 * @as(u64, in_range)) / 100
+        else
+            base;
+        self.awardXp(killer_slot, split);
+        if (party) |p| {
+            for (p.members[0..p.n]) |m| {
+                if (m == killer.entity_id) continue;
+                if (self.clientByEntityId(m)) |mate| {
+                    self.awardXp(mate.slot, split);
+                    if (mate.peer) |peer| {
+                        if (packages.stock_party.buildSharedKillBody(&self.body_buf, .{
+                            .entity_type = 3, // zombieEntity (class hash name in stock; ECD carries the class)
+                            .xp = @intCast(@min(split, std.math.maxInt(i32))),
+                            .entity_id = killer.entity_id,
+                            .killer_id = killer.entity_id,
+                        })) |skb| {
+                            self.sendGame(peer, "NetPackageSharedPartyKill", skb) catch |err| {
+                                self.harness.counters.inc(.net_send_errors);
+                                std.debug.print("zdtd: send SharedPartyKill failed: {s}\n", .{@errorName(err)});
+                            };
+                        } else |_| {}
+                    }
+                }
+            }
         }
     }
 
@@ -4884,7 +4952,7 @@ pub const Game = struct {
         }
     }
 
-    fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
+    pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
         const key = packBlockKey(x, y, z);
         var i: usize = 0;
         while (i < self.block_raw_n) : (i += 1) {
@@ -4908,7 +4976,7 @@ pub const Game = struct {
 
     /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
     /// without meta (the sparse store only holds cells that carry it).
-    fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
+    pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
         const key = packBlockKey(x, y, z);
         var i: usize = 0;
         while (i < self.block_raw_n) : (i += 1) {
@@ -6109,7 +6177,7 @@ pub const Game = struct {
                             break;
                         };
                     }
-                    try self.sendVendingTe(peer, ve.world_x, ve.world_y, ve.world_z);
+                    try replicate_te.sendVendingTe(self, peer, ve.world_x, ve.world_y, ve.world_z);
                     return;
                 }
             }
@@ -6135,7 +6203,7 @@ pub const Game = struct {
                 const cont = self.containers.getOrCreate(pos, sc, parsed.block_id) orelse return;
                 stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
                 // Echo stock TE to nearby clients.
-                try self.broadcastStorageTe(cont);
+                try replicate_te.broadcastStorageTe(self, cont);
                 return;
             } else |_| {}
             // Workstation TE (type 12 classic): apply arrays + queue into the
@@ -6153,10 +6221,10 @@ pub const Game = struct {
                     return;
                 }
                 if (self.workstations.getOrCreate(ws.world_x, ws.world_y, ws.world_z)) |st| {
-                    applyWsGroup(self, st.fuel[0..], ws.fuel[0..ws.fuel_n]);
-                    applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
-                    applyWsGroup(self, st.tools[0..], ws.tools[0..ws.tools_n]);
-                    applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
+                    replicate_te.applyWsGroup(self, st.fuel[0..], ws.fuel[0..ws.fuel_n]);
+                    replicate_te.applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
+                    replicate_te.applyWsGroup(self, st.tools[0..], ws.tools[0..ws.tools_n]);
+                    replicate_te.applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
                     @memcpy(st.last_input[0..ws.last_input_blob_len], ws.last_input[0..ws.last_input_blob_len]);
                     st.last_input_blob_len = ws.last_input_blob_len;
                     // Trust boundary (GAP: workstation recipe validation): the
@@ -6252,7 +6320,7 @@ pub const Game = struct {
                     if (trig.reset_trigger) _ = self.sim.power.resetTriggerAt(trig.world_x, trig.world_y, trig.world_z);
                 }
                 self.sim.power.resolve();
-                try self.broadcastPoweredTriggerTe(trig.world_x, trig.world_y, trig.world_z);
+                try replicate_te.broadcastPoweredTriggerTe(self, trig.world_x, trig.world_y, trig.world_z);
                 return;
             } else |_| {}
             // Unparsed TE payload: drop (stock formats only).
@@ -6821,8 +6889,9 @@ pub const Game = struct {
                 if (was_zombie) {
                     systems.questOnZombieKilled(&self.sim, c.slot);
                     systems.questOnFetchItem(&self.sim, c.slot, 1);
-                    // XPMultiplier: award scaled server-side XP for the kill.
-                    self.awardXp(c.slot, 100);
+                    // XPMultiplier + party split: award scaled server-side XP for
+                    // the kill, sharing it with in-range party mates (§2.3).
+                    self.killXpAward(c.slot, 100);
                 }
                 // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
                 if (dmg.loot_bag_id > 0) {
@@ -6933,16 +7002,16 @@ pub const Game = struct {
                         // TraderData under the request's VendingMachineLockContext
                         // type name; the client opens the trader window from it.
                         const v = self.vending.get(vp) orelse return;
-                        if (v.stock_n == 0) self.fillVendingStore(v);
+                        if (v.stock_n == 0) replicate_te.fillVendingStore(self, v);
                         var vent_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
-                        const vn = self.vendingEntries(v, &vent_buf);
+                        const vn = replicate_te.vendingEntries(self, v, &vent_buf);
                         const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
                             .trader_id = v.trader_id,
                             .available_money = v.available_money,
                             .entries = vent_buf[0..vn],
                         });
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
-                        try self.sendVendingTe(peer, vp.x, vp.y, vp.z);
+                        try replicate_te.sendVendingTe(self, peer, vp.x, vp.y, vp.z);
                     } else {
                         const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
@@ -6962,9 +7031,9 @@ pub const Game = struct {
                                 const y = tr.readI32() catch break;
                                 const z = tr.readI32() catch break;
                                 if (ty == 1) tr.skipString() catch {};
-                                try self.sendStorageTe(peer, x, y, z);
-                                try self.sendWorkstationTe(peer, x, y, z);
-                                try self.sendVendingTe(peer, x, y, z);
+                                try replicate_te.sendStorageTe(self, peer, x, y, z);
+                                try replicate_te.sendWorkstationTe(self, peer, x, y, z);
+                                try replicate_te.sendVendingTe(self, peer, x, y, z);
                             } else if (ty == 2) {
                                 _ = tr.readI32() catch break;
                             } else if (ty == 3) {
@@ -7187,9 +7256,9 @@ pub const Game = struct {
                 if (self.isStorageBlockId(place_id)) {
                     if (self.containers.get(.{ .x = b.x, .y = b.y, .z = b.z })) |cont| {
                         cont.block_id = place_id;
-                        try self.broadcastStorageTe(cont);
+                        try replicate_te.broadcastStorageTe(self, cont);
                     } else if (self.containers.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, 8, @intCast(place_id))) |cont| {
-                        try self.broadcastStorageTe(cont);
+                        try replicate_te.broadcastStorageTe(self, cont);
                     }
                 } else if (self.storagePairId(place_id) == null) {
                     self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
@@ -7449,7 +7518,7 @@ pub const Game = struct {
                 // own per-player list: only the owner may clear the machine.
                 if (!vm.owner.matches(acc.user)) return;
                 vm.clear();
-                try self.sendVendingTe(peer, acc.x, acc.y, acc.z);
+                try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);
                 return;
             }
             const info = self.traders.traderInfo(@intCast(vm.trader_id)) orelse return;
@@ -7490,7 +7559,7 @@ pub const Game = struct {
             vm.rental_end_day = if (vm.rental_end_day > 0) vm.rental_end_day + term else day_i + term;
             vm.rentable = info.rentable;
             // The owning player sees its machine's stock; re-send the TE.
-            try self.sendVendingTe(peer, acc.x, acc.y, acc.z);
+            try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);
             return;
         }
         if (std.mem.eql(u8, name, "NetPackageVehicleDataSync")) {
@@ -7738,7 +7807,7 @@ pub const Game = struct {
         }
         while (i < vending_mod.max_vending_stock) : (i += 1) vm.stock[i] = .{};
         if (read.money >= 0) vm.available_money = read.money;
-        try self.sendVendingTe(c.peer.?, td.te_x, td.te_y, td.te_z);
+        try replicate_te.sendVendingTe(self, c.peer.?, td.te_x, td.te_y, td.te_z);
     }
 
     /// Write the P4 evidence ring as JSONL to `path` (admin `evidence dump`).
@@ -9060,12 +9129,12 @@ pub const Game = struct {
         return n;
     }
 
-    fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {
+    pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.items.stockTypeFor(item_id);
     }
 
-    fn reverseItemType(ctx: ?*anyopaque, stock_type: i32) u16 {
+    pub fn reverseItemType(ctx: ?*anyopaque, stock_type: i32) u16 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.items.ecsIdFromStockType(stock_type);
     }
@@ -9682,44 +9751,7 @@ pub const Game = struct {
         return 0;
     }
 
-    fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
-        for (dst, src) |*d, s| {
-            d.* = if (s.count > 0 and s.item_id != 0) .{
-                .type_id = resolveItemType(@ptrCast(self), s.item_id),
-                .count = s.count,
-                .quality = s.quality,
-                .meta = s.meta,
-            } else .{};
-        }
-    }
 
-    /// Encode one workstation's authoritative state at its client-declared array
-    /// lengths. `te_block_id` comes from the client's own write: ProcessPackage
-    /// drops the package when it disagrees with the block it finds (asm.il ~842882).
-    fn buildWorkstationBody(self: *Game, w: *const workstations_mod.Workstation, buf: []u8) ![]u8 {
-        var fuel: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-        var input: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-        var tools: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-        var output: [workstations_mod.slots_per_group]packages.stock_inv.StockSlot = undefined;
-        self.wsGroupToStock(fuel[0..w.fuel_len], w.fuel[0..w.fuel_len]);
-        self.wsGroupToStock(input[0..w.input_len], w.input[0..w.input_len]);
-        self.wsGroupToStock(tools[0..w.tools_len], w.tools[0..w.tools_len]);
-        self.wsGroupToStock(output[0..w.output_len], w.output[0..w.output_len]);
-        return stock_te.buildWorkstationTeBody(buf, 255, w.x, w.y, w.z, w.block_id, .{
-            .fuel = fuel[0..w.fuel_len],
-            .input = input[0..w.input_len],
-            .tools = tools[0..w.tools_len],
-            .output = output[0..w.output_len],
-            .last_input_count = w.last_input_len,
-            .last_input = w.last_input[0..w.last_input_blob_len],
-            .queue = w.queue[0..w.queue_len],
-            .craft_complete = w.craft_complete[0..w.craft_complete_n],
-            .melt = w.melt[0..w.melt_len],
-            .is_burning = w.is_burning,
-            .burn_time_left = w.burn_time_left,
-            .is_player_placed = w.is_player_placed,
-        });
-    }
 
     /// One workstation step: burn/craft, then re-broadcast the stations it changed.
     pub fn tickWorkstations(self: *Game, dt: f32) !void {
@@ -9734,69 +9766,13 @@ pub const Game = struct {
                 self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, 720.0);
             }
         }
-        try self.broadcastDirtyWorkstations();
+        try replicate_te.broadcastDirtyWorkstations(self);
     }
 
-    fn broadcastDirtyWorkstations(self: *Game) !void {
-        for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
-            if (!u or !w.dirty) continue;
-            // Nothing is sent before a client write has told us the real array
-            // lengths: a guessed count resizes the client's grids.
-            if (!w.geometry_known) {
-                w.dirty = false;
-                continue;
-            }
-            // Keep dirty until encode+broadcast succeed so a failed send retries next tick.
-            const body = self.buildWorkstationBody(w, self.body_buf[8192..16384]) catch |err| {
-                self.harness.counters.inc(.encode_errors);
-                std.debug.print(
-                    "zdtd: workstation TE encode failed at ({d},{d},{d}): {s}\n",
-                    .{ w.x, w.y, w.z, @errorName(err) },
-                );
-                continue;
-            };
-            self.broadcastNear(
-                "NetPackageTileEntity",
-                body,
-                @floatFromInt(w.x),
-                @floatFromInt(w.z),
-                self.interest_range,
-            ) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print(
-                    "zdtd: workstation TE broadcast failed at ({d},{d},{d}): {s}\n",
-                    .{ w.x, w.y, w.z, @errorName(err) },
-                );
-                continue;
-            };
-            w.dirty = false;
-        }
-    }
 
-    /// Push a workstation's authoritative state to one peer (lock/open path).
-    pub fn sendWorkstationTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
-        const w = self.workstations.get(x, y, z) orelse return;
-        if (!w.geometry_known) return;
-        const body = try self.buildWorkstationBody(w, self.body_buf[8192..16384]);
-        try self.sendGame(peer, "NetPackageTileEntity", body);
-    }
 
-    fn applyWsGroup(self: *Game, dst: []ecs.components.InvSlot, src: []const packages.stock_inv.StockSlot) void {
-        for (dst, 0..) |*d, i| {
-            if (i < src.len and src[i].count > 0 and src[i].type_id != 0) {
-                d.* = .{
-                    .item_id = reverseItemType(self, src[i].type_id),
-                    .count = src[i].count,
-                    .quality = @min(src[i].quality, 255),
-                    .meta = src[i].meta,
-                };
-            } else {
-                d.* = .{};
-            }
-        }
-    }
 
-    fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
+    pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         const id = self.items.ecsIdByName(name);
         if (id != 0) return id;
         if (self.items.byStockName(name)) |st| {
@@ -10029,234 +10005,14 @@ pub const Game = struct {
     /// GameStageDefinition::CalcGameStageAround radius (asm.il ~1093363).
     const sleeper_party_radius: f32 = 100.0;
 
-    /// Runtime AssignIds id for seed chest. Preference order: AssignIds dump
-    /// (id_by_name), then optional world-dir override file, then V3.1.4 pin.
-    fn seedChestBlockId(self: *Game) u16 {
-        const captured: u16 = self.maxdamage.idByName("cntWoodenChestClosed") orelse
-            @intCast(packages.stock_deco.cnt_wooden_chest_closed);
-        var path_buf: [512]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "{s}/seed_chest_block_id", .{self.world.world_dir}) catch return captured;
-        var buf: [32]u8 = undefined;
-        // Optional override file: missing is fine; other I/O must not look like
-        // "no override" when the operator left a broken/unreadable file.
-        const slice = io_fs.readFileInto(self.allocator, path, &buf) catch |err| {
-            if (err != error.FileNotFound) {
-                std.debug.print(
-                    "zdtd: seed_chest_block_id read failed: {s}; using AssignIds/default\n",
-                    .{@errorName(err)},
-                );
-            }
-            return captured;
-        };
-        const trimmed = std.mem.trim(u8, slice, " \t\r\n");
-        const v = std.fmt.parseInt(u16, trimmed, 10) catch {
-            std.debug.print("zdtd: seed_chest_block_id not a u16; using AssignIds/default\n", .{});
-            return captured;
-        };
-        return if (v >= 20) v else captured;
-    }
 
-    fn broadcastStorageTe(self: *Game, cont: *const containers_mod.Container) !void {
-        // Encode failure must surface: callers use try after mutating container
-        // state, and a silent return would leave remotes on a stale TE.
-        const body = try stock_te.buildStorageTeBody(
-            &self.body_buf,
-            255,
-            cont.pos.x,
-            cont.pos.y,
-            cont.pos.z,
-            cont.block_id,
-            cont,
-            resolveItemType,
-            self,
-        );
-        try self.broadcast("NetPackageTileEntity", body);
-    }
 
-    /// zdtd's Block::ActivateBlock (asm.il:127088 / 137044): rewrite meta bit 0x1
-    /// (isPowered) and bit 0x2 (isOn) into the stored BlockValue and SetBlockRPC it,
-    /// so lights, traps and switches visibly react to the grid. Strictly edge
-    /// triggered: a node that did not flip costs one comparison and no packet.
-    fn broadcastPowerVisuals(self: *Game) void {
-        var i: usize = 0;
-        while (i < self.sim.power.node_n) : (i += 1) {
-            const n = &self.sim.power.nodes[i];
-            const on = ecs.electric.nodeIsOn(n.*);
-            if (n.net_synced and n.net_on == on and n.net_powered == n.powered) continue;
-            n.net_synced = true;
-            n.net_on = on;
-            n.net_powered = n.powered;
-            const block_id = self.world.blockWorld(n.x, n.y, n.z) catch continue;
-            if (block_id == 0) continue;
-            const stored = self.blockRawAt(n.x, n.y, n.z);
-            const base: u32 = if ((stored & 0xffff) == block_id) stored else @as(u32, block_id);
-            var meta = packages.blockMeta(base) &
-                ~(packages.block_meta_on | packages.block_meta_powered);
-            if (on) meta |= packages.block_meta_on;
-            if (n.powered) meta |= packages.block_meta_powered;
-            const raw = packages.withBlockMeta(base, meta);
-            self.setBlockRaw(n.x, n.y, n.z, raw);
-            const dmg = self.getBlockHp(n.x, n.y, n.z);
-            const sb = packages.buildSetBlockBodyRaw(self.body_buf[0..96], n.x, n.y, n.z, raw, dmg, -1, -1) catch continue;
-            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(n.x), @floatFromInt(n.z), self.interest_range) catch {
-                self.harness.counters.inc(.net_send_errors);
-            };
-        }
-    }
 
-    /// Echo a powered trigger's authoritative state to nearby clients
-    /// (StreamModeWrite.ToClient). Silently does nothing when the cell holds no
-    /// registered trigger: nothing to describe, and the stock client drops a TE
-    /// update for a position where it holds no TileEntity anyway.
-    fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
-        const ni = self.sim.power.indexOfPosition(x, y, z) orelse return;
-        const node = self.sim.power.nodes[ni];
-        const block_id = self.world.blockWorld(x, y, z) catch return;
-        const props = self.power_registry.lookup(block_id) orelse return;
-        const tt = props.trigger_type orelse return;
-        // Wire list is the child edges zdtd tracks; the parent link is undirected
-        // here, so parentPos stays zero rather than inventing a direction.
-        var wires: [stock_te.max_te_wires]stock_te.Vec3i = undefined;
-        var wire_n: usize = 0;
-        var w: usize = 0;
-        while (w < self.sim.power.wire_n and wire_n < wires.len) : (w += 1) {
-            const wire = self.sim.power.wires[w];
-            const other: u16 = if (wire.a == node.id) wire.b else if (wire.b == node.id) wire.a else continue;
-            const oi = self.sim.power.indexOfId(other) orelse continue;
-            const on = self.sim.power.nodes[oi];
-            wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
-            wire_n += 1;
-        }
-        // Propagate encode failure: a silent return left power switches/traps
-        // looking unpowered on remotes after the sim already flipped the node.
-        const body = try stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{
-            .power_item_type = ecs.powerblocks.powerItemTypeOf(tt),
-            .wires = wires[0..wire_n],
-            .is_powered = node.powered,
-            .trigger_type = @intFromEnum(tt),
-            .property1 = node.delay_idx,
-            .property2 = node.duration_idx,
-        });
-        try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
-    }
 
-    /// Open/sync a world container to one peer (stock TE body).
-    pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
-        const cont = self.containers.get(.{ .x = x, .y = y, .z = z }) orelse return;
-        const body = try stock_te.buildStorageTeBody(
-            &self.body_buf,
-            255,
-            cont.pos.x,
-            cont.pos.y,
-            cont.pos.z,
-            cont.block_id,
-            cont,
-            resolveItemType,
-            self,
-        );
-        try self.sendGame(peer, "NetPackageTileEntity", body);
-    }
 
-    /// Store stock rows as wire TraderStockEntry (ItemStack + markup).
-    fn vendingEntries(self: *Game, v: *const vending_mod.Vending, out: []packages.TraderStockEntry) usize {
-        _ = self;
-        var n: usize = 0;
-        var e: usize = 0;
-        while (e < v.stock_n and n < out.len) : (e += 1) {
-            const ent = v.stock[e];
-            if (ent.type_id == 0) continue;
-            out[n] = .{
-                .item = .{
-                    .type_id = ent.type_id,
-                    .count = @intCast(@min(ent.count, 65535)),
-                    .quality = ent.quality,
-                },
-                .markup = ent.markup,
-            };
-            n += 1;
-        }
-        return n;
-    }
 
-    /// Seed a vending TE's TraderData from trader_info: TraderData.TraderID is
-    /// the block's blocks.xml TraderID (stock BlockVendingMachine.OnBlockAdded
-    /// sets exactly that). Vending is owner-priced, so rows start at markup 0
-    /// (base EconomicValue); trader_info markups do not apply here.
-    fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
-        const tt = self.traders;
-        var n: usize = 0;
-        var fill: []const assets_traders.Entry = &.{};
-        var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
-        if (v.trader_id > 0 and v.trader_id <= 65535) {
-            if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
-                if (ti.refs.len > 0) {
-                    const en = tt.expandTraderRefs(ti, &per_trader);
-                    fill = per_trader[0..en];
-                }
-            }
-        }
-        if (fill.len == 0) {
-            if (tt.entries.len == 0) return;
-            fill = tt.entries; // traderAlways fallback (GAP: traderAlways sells vending stock)
-        }
-        // Vending is owner-priced: the renter sets each entry's markup, so the
-        // trader_info buy/sell multipliers do not apply here (loot-economy.md
-        // 6). Rows start at markup 0 = base EconomicValue, which the client
-        // prices from; the purchase delta runs server-side.
-        for (fill) |e| {
-            if (n >= vending_mod.max_vending_stock) break;
-            const iid = self.ecsIdFromItemName(e.name);
-            if (iid == 0) continue;
-            const type_id = resolveItemType(@ptrCast(self), iid);
-            if (type_id == 0) continue;
-            v.stock[n] = .{
-                .type_id = type_id,
-                .count = @intCast(e.count),
-                .quality = 1,
-                .markup = 0,
-            };
-            n += 1;
-        }
-        v.stock_n = @intCast(n);
-    }
 
-    /// Push a vending machine's TE to one peer (LockRequest open path and chunk
-    /// stream). Missing store = no TE (fail closed).
-    pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
-        const v = self.vending.get(.{ .x = x, .y = y, .z = z }) orelse return;
-        var entries_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
-        const n = self.vendingEntries(v, &entries_buf);
-        const body = try stock_te.buildVendingTeBody(
-            self.body_buf[0..4096],
-            255,
-            v.pos.x,
-            v.pos.y,
-            v.pos.z,
-            .{
-                .block_id = v.block_id,
-                .is_locked = v.is_locked,
-                .owner = self.vendingOwnerId(v),
-                .password_hash = v.password_hash[0..v.password_len],
-                .rental_end_day = v.rental_end_day,
-                .trader_id = v.trader_id,
-                .entries = entries_buf[0..n],
-                .available_money = v.available_money,
-                .rentable = v.rentable,
-                .next_auto_buy = v.next_auto_buy,
-            },
-        );
-        try self.sendGame(peer, "NetPackageTileEntity", body);
-    }
 
-    /// Convert a stored UserRef to a platform id slice (empty when absent).
-    fn vendingOwnerId(self: *Game, v: *const vending_mod.Vending) ?packages.platform_user.Id {
-        _ = self;
-        if (v.owner.platform_len == 0) return null;
-        return .{
-            .platform = v.owner.platform[0..v.owner.platform_len],
-            .id = v.owner.id[0..v.owner.id_len],
-        };
-    }
 
     fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         const bi = self.sim.slotOfNetId(net_id) orelse return;
@@ -10508,7 +10264,7 @@ pub const Game = struct {
                     const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                     if (tc.g.containers.get(pos) != null) return;
                     const block_id: u16 = tc.g.world.blockWorld(wx, wy, wz) catch 0;
-                    const id: u16 = if (block_id != 0) block_id else tc.g.seedChestBlockId();
+                    const id: u16 = if (block_id != 0) block_id else replicate_te.seedChestBlockId(tc.g);
                     const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
                     // World container (prefab TE, not player-placed).
                     cont.player_storage = false;
@@ -10593,14 +10349,14 @@ pub const Game = struct {
             if (!self.containers.used[i]) continue;
             const cont = &self.containers.items[i];
             if (cont.pos.x < x0 or cont.pos.x >= x1 or cont.pos.z < z0 or cont.pos.z >= z1) continue;
-            try self.sendStorageTe(peer, cont.pos.x, cont.pos.y, cont.pos.z);
+            try replicate_te.sendStorageTe(self, peer, cont.pos.x, cont.pos.y, cont.pos.z);
         }
         var vi: usize = 0;
         while (vi < vending_mod.max_vending) : (vi += 1) {
             if (!self.vending.used[vi]) continue;
             const v = &self.vending.items[vi];
             if (v.pos.x < x0 or v.pos.x >= x1 or v.pos.z < z0 or v.pos.z >= z1) continue;
-            try self.sendVendingTe(peer, v.pos.x, v.pos.y, v.pos.z);
+            try replicate_te.sendVendingTe(self, peer, v.pos.x, v.pos.y, v.pos.z);
         }
     }
 
@@ -10835,13 +10591,13 @@ pub const Game = struct {
         }
     }
 
-    fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
+    pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
         try self.broadcastExcept(name, body, null);
     }
 
     /// World-position broadcast: only clients whose player is within
     /// `range_blocks` of (wx,wz). Chat/time stay global via broadcast().
-    fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
+    pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
         // Encode failures were counter-only (no log). Match sendGame: counter +
         // rate-limited log. Successful fan-out must also tick net_packets/bytes
         // so apm RED rates reflect broadcast traffic (chat, setblock, time, …).
@@ -11551,7 +11307,7 @@ pub const Game = struct {
             // Power fuel/SoC/timers every tick (props from blocks.xml via registry).
             const daylight = !self.sim.director.clock.isNight();
             _ = self.sim.power.tick(dt, daylight);
-            self.broadcastPowerVisuals();
+            replicate_te.broadcastPowerVisuals(self);
             self.reapStaleLocks();
             // Corpse dwell sweep (TimeStayAfterDeath): expired bodies get the
             // EntityRemove broadcast, so the client's ragdoll lasts its dwell.
@@ -12928,7 +12684,7 @@ test "power visuals rewrite block meta once per state change" {
     const ni = g.sim.power.indexOfId(id).?;
     g.sim.power.nodes[ni].powered = true;
 
-    g.broadcastPowerVisuals();
+    replicate_te.broadcastPowerVisuals(g);
     const raw = g.blockRawAt(8, 70, 8);
     try std.testing.expectEqual(world_store.block_stone, @as(u16, @truncate(raw & 0xffff)));
     try std.testing.expectEqual(
@@ -12938,12 +12694,12 @@ test "power visuals rewrite block meta once per state change" {
 
     // Nothing flipped: the second pass must not touch the block or emit a packet.
     g.clearBlockRaw(8, 70, 8);
-    g.broadcastPowerVisuals();
+    replicate_te.broadcastPowerVisuals(g);
     try std.testing.expectEqual(@as(u32, 0), g.blockRawAt(8, 70, 8));
 
     // Losing power is an edge, so it writes meta 0 again.
     g.sim.power.nodes[ni].powered = false;
-    g.broadcastPowerVisuals();
+    replicate_te.broadcastPowerVisuals(g);
     try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
 }
 

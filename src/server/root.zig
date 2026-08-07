@@ -21,6 +21,7 @@ pub const c2s_text = @import("c2s_text.zig");
 pub const evidence = @import("evidence.zig");
 pub const guard_policy = @import("guard_policy.zig");
 pub const ally = @import("ally.zig");
+pub const replicate_te = @import("replicate_te.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -42,4 +43,5 @@ test {
     _ = evidence;
     _ = guard_policy;
     _ = ally;
+    _ = replicate_te;
 }
