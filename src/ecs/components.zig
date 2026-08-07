@@ -115,6 +115,9 @@ pub const ZombieAi = struct {
     home_z: f32 = 0,
     has_home: bool = false,
     alert: bool = false,
+    /// Blood-moon horde zombie (stock EntityAlive.IsHordeZombie): teleported
+    /// back to the party focus when it drifts past cTeleportDist, cleared at dawn.
+    is_horde: bool = false,
     active_scale: f32 = 1,
     path_goal_x: f32 = 0,
     path_goal_z: f32 = 0,

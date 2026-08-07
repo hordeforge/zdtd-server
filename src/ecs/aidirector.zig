@@ -132,6 +132,23 @@ pub fn scoutSpawnerName(party_stage: i32) []const u8 {
     return "ScoutsRadiated";
 }
 
+/// AIDirectorBloodMoonParty constants (asm.il 413090-413140): players within
+/// 80 m join one party; horde zombies beyond 150 m teleport back; waves spawn
+/// ~40 m from the focus; the per-party alive ceiling is cPartyEnemyMax 30.
+pub const party_join_dist: f32 = 80.0;
+pub const party_teleport_dist: f32 = 150.0;
+pub const party_spawn_dist: f32 = 40.0;
+pub const party_enemy_max: u32 = 30;
+pub const max_bm_parties: usize = 8;
+
+pub const BmParty = struct {
+    focus_x: f32 = 0,
+    focus_z: f32 = 0,
+    members: u32 = 0,
+    /// Horde zombies currently alive for this party (recounted each BM tick).
+    alive: u32 = 0,
+};
+
 pub const Director = struct {
     /// Spawn-group kind for per-biome resolution (spawning.xml rule kind).
     pub const SpawnKind = enum(u8) { night = 0, day = 1, animal = 2 };
@@ -167,6 +184,14 @@ pub const Director = struct {
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
     bloodmoon_active: bool = false,
+    /// Blood-moon party state (AIDirectorBloodMoonParty, 413090-413140):
+    /// players within cPartyJoinDistance 80 m share one focus and one
+    /// per-party wave; the party gamestage is frozen for the night; horde
+    /// zombies beyond cTeleportDist 150 m are teleported back.
+    bm_parties: [max_bm_parties]BmParty = [_]BmParty{.{}} ** max_bm_parties,
+    bm_party_n: u8 = 0,
+    /// Party gamestage snapshot at dusk (stock InitParty freezes it).
+    bm_stage_frozen: i32 = 0,
     /// Alive-zombie ceiling (MaxSpawnedZombies). Defaults to the dev cap; the
     /// operator's serverconfig raises it. See default_max_alive_zombies.
     max_alive: u32 = default_max_alive_zombies,
@@ -247,9 +272,11 @@ pub const Director = struct {
             self.horde_cd = if (self.bloodmoon_active) 8.0 else 45.0;
         }
         if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
-            // BloodMoonHorde's gamestage ladder names the group and caps how
-            // many may be alive per player; BloodMoonEnemyCount is the floor
-            // when gamestages.xml is absent.
+            // Freeze the party gamestage at dusk (InitParty): the ladder and
+            // the horde size stay fixed for the whole night.
+            if (self.bm_stage_frozen == 0) self.bm_stage_frozen = self.party_stage;
+            self.buildBloodMoonParties(w);
+            self.recountAndTeleportHorde(w);
             const bm = self.stageGroup(bloodmoon_spawner);
             var wave: u32 = @max(1, self.bloodmoon_enemy_count / 2);
             var bm_group: []const u8 = "";
@@ -257,8 +284,19 @@ pub const Director = struct {
                 wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
                 bm_group = sg.group;
             }
-            spawned += self.spawnNearPlayers(w, wave, 12.0, 22.0, bm_group);
+            spawned += self.spawnBloodMoonParties(w, wave, bm_group);
             self.bloodmoon_cd = 6.0;
+        } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
+            // EndBloodMoon (412618): clear horde marks and the frozen stage at
+            // dawn; nothing is despawned.
+            self.bm_stage_frozen = 0;
+            clearHordeMarks(w);
+        }
+        // Horde zombies keep to their party focus every tick (teleport back
+        // past cTeleportDist) so a 2+ player horde cannot split.
+        if (self.bloodmoon_active) {
+            self.buildBloodMoonParties(w);
+            self.recountAndTeleportHorde(w);
         }
         if (!self.clock.isNight() and self.scouts_cd <= 0) {
             spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0, self.scoutGroup());
@@ -331,10 +369,12 @@ pub const Director = struct {
     /// gamestages.xml spawner name the blood moon draws from.
     pub const bloodmoon_spawner = "BloodMoonHorde";
 
-    /// Resolve a gamestages.xml spawner at the current party stage.
+    /// Resolve a gamestages.xml spawner at the current party stage (the
+    /// blood-moon ladder reads the night-frozen stage once set).
     fn stageGroup(self: *const Director, spawner: []const u8) ?StageGroup {
         const f = self.stage_group_fn orelse return null;
-        const sg = f(self.stage_group_ctx, spawner, self.party_stage) orelse return null;
+        const stage = if (self.bm_stage_frozen != 0) self.bm_stage_frozen else self.party_stage;
+        const sg = f(self.stage_group_ctx, spawner, stage) orelse return null;
         if (sg.group.len == 0) return null;
         return sg;
     }
@@ -360,49 +400,177 @@ pub const Director = struct {
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
                 const y = w.transform[p].y;
-                // Prefer spawning.xml entity group → entityclasses; else class_table rotation.
-                var ct = w.class_table[1];
-                const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
-                const grp = if (group_override.len > 0)
-                    group_override
-                else if (self.biome_group_fn) |bf|
-                    bf(self.biome_group_ctx, x, z, if (self.clock.isNight()) .night else .day, fallback)
-                else
-                    fallback;
-                if (grp.len > 0) {
-                    if (self.group_pick_fn) |pick| {
-                        if (pick(self.group_pick_ctx, grp, self.total_spawned +% n)) |cname| {
-                            for (w.class_table) |slot_ct| {
-                                if (slot_ct.kind == .zombie and std.mem.eql(u8, slot_ct.name, cname)) {
-                                    ct = slot_ct;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    const zombie_slots = [_]usize{ 1, 8, 9, 10, 11 };
-                    const csel = zombie_slots[(self.total_spawned +% n) % zombie_slots.len];
-                    if (w.class_table[csel].hash != 0 and w.class_table[csel].kind == .zombie) {
-                        ct = w.class_table[csel];
-                    }
-                }
-                const bm_mul: f32 = if (self.bloodmoon_active) 1.5 else 1.0;
-                const hp: f32 = ct.max_hp * bm_mul * self.hpScale();
-                const id = if (ct.hash != 0)
-                    w.spawnZombieClass(x, y, z, hp, ct.hash, ct.loot_list)
-                else
-                    w.spawnZombie(x, y, z, hp);
-                const nid = id orelse break;
-                if (w.slotOfNetId(nid)) |slot| {
-                    w.zombie_ai[slot].state = .chase;
-                    w.zombie_ai[slot].target_id = w.network_id[p].id;
-                    w.zombie_ai[slot].alert = true;
-                    n += 1;
-                }
+                const slot = self.spawnOneZombie(w, x, y, z, group_override, self.total_spawned +% n, false) orelse break;
+                w.zombie_ai[slot].state = .chase;
+                w.zombie_ai[slot].target_id = w.network_id[p].id;
+                w.zombie_ai[slot].alert = true;
+                n += 1;
             }
         }
         return n;
+    }
+
+    /// Cluster online players into blood-moon parties: anyone within
+    /// cPartyJoinDistance (80 m) of an existing party focus joins it (focus =
+    /// running average); stragglers open new parties (cap max_bm_parties).
+    fn buildBloodMoonParties(self: *Director, w: *ecs_world.World) void {
+        self.bm_parties = [_]BmParty{.{}} ** max_bm_parties;
+        self.bm_party_n = 0;
+        var p: ecs_world.Slot = 0;
+        while (p < ecs_world.max_entities) : (p += 1) {
+            if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            const x = w.transform[p].x;
+            const z = w.transform[p].z;
+            var joined = false;
+            for (self.bm_parties[0..self.bm_party_n]) |*party| {
+                const dx = party.focus_x - x;
+                const dz = party.focus_z - z;
+                if (dx * dx + dz * dz > party_join_dist * party_join_dist) continue;
+                const m: f32 = @floatFromInt(party.members);
+                party.focus_x = (party.focus_x * m + x) / (m + 1.0);
+                party.focus_z = (party.focus_z * m + z) / (m + 1.0);
+                party.members += 1;
+                joined = true;
+                break;
+            }
+            if (joined or self.bm_party_n >= max_bm_parties) continue;
+            const np = &self.bm_parties[self.bm_party_n];
+            np.* = .{ .focus_x = x, .focus_z = z, .members = 1 };
+            self.bm_party_n += 1;
+        }
+    }
+
+    /// One pass over horde zombies per blood-moon tick: recount each party's
+    /// alive set (stock OnEntityUnloaded accounting) and teleport a drifter
+    /// back to its party focus once it passes cTeleportDist (150 m).
+    fn recountAndTeleportHorde(self: *Director, w: *ecs_world.World) void {
+        for (self.bm_parties[0..self.bm_party_n]) |*party| party.alive = 0;
+        if (self.bm_party_n == 0) return;
+        const tel2 = party_teleport_dist * party_teleport_dist;
+        var s: ecs_world.Slot = 0;
+        while (s < ecs_world.max_entities) : (s += 1) {
+            if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
+            const x = w.transform[s].x;
+            const z = w.transform[s].z;
+            var best_d2: f32 = std.math.floatMax(f32);
+            var best_i: usize = 0;
+            for (self.bm_parties[0..self.bm_party_n], 0..) |*party, i| {
+                const dx = party.focus_x - x;
+                const dz = party.focus_z - z;
+                const d2 = dx * dx + dz * dz;
+                if (d2 < best_d2) {
+                    best_d2 = d2;
+                    best_i = i;
+                }
+            }
+            self.bm_parties[best_i].alive += 1;
+            if (best_d2 <= tel2) continue;
+            const focus = &self.bm_parties[best_i];
+            const ang = @as(f32, @floatFromInt(s)) * 2.399963; // ~120 degree steps
+            const nx = focus.focus_x + @cos(ang) * party_spawn_dist;
+            const nz = focus.focus_z + @sin(ang) * party_spawn_dist;
+            w.setPos(w.network_id[s].id, nx, w.transform[s].y, nz, 0);
+        }
+    }
+
+    /// EndBloodMoon: clear IsHordeZombie on every living zombie (412618).
+    fn clearHordeMarks(w: *ecs_world.World) void {
+        var s: ecs_world.Slot = 0;
+        while (s < ecs_world.max_entities) : (s += 1) {
+            if (w.alive[s]) w.zombie_ai[s].is_horde = false;
+        }
+    }
+
+    /// Spawn one wave per party around its focus (cSpawnDistance 40 + up to
+    /// 10 jitter), marked horde, capped per party at
+    /// min(cPartyEnemyMax 30, BloodMoonEnemyCount x members). One shared wave
+    /// per party instead of one per player: 2 players in range get one horde.
+    fn spawnBloodMoonParties(self: *Director, w: *ecs_world.World, wave: u32, group: []const u8) u32 {
+        var n: u32 = 0;
+        for (self.bm_parties[0..self.bm_party_n]) |*party| {
+            const cap = @min(party_enemy_max, @as(u32, self.bloodmoon_enemy_count) * party.members);
+            var k: u32 = 0;
+            while (k < wave and party.alive < cap and n < wave * self.bm_party_n) : (k += 1) {
+                const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
+                const r = party_spawn_dist + @mod(ang, 1.0) * 10.0;
+                const x = party.focus_x + @cos(ang) * r;
+                const z = party.focus_z + @sin(ang) * r;
+                const y = nearestPlayerY(w, x, z) orelse continue;
+                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
+                if (nearestPlayerSlot(w, x, z)) |ps| {
+                    w.zombie_ai[slot].state = .chase;
+                    w.zombie_ai[slot].target_id = w.network_id[ps].id;
+                    w.zombie_ai[slot].alert = true;
+                }
+                party.alive += 1;
+                n += 1;
+            }
+        }
+        return n;
+    }
+
+    /// Pick the group class at (x,z) and spawn one zombie; mark horde when
+    /// requested. Shared by the per-player ring and the party spawner.
+    fn spawnOneZombie(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool) ?ecs_world.Slot {
+        var ct = w.class_table[1];
+        const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
+        const grp = if (group_override.len > 0)
+            group_override
+        else if (self.biome_group_fn) |bf|
+            bf(self.biome_group_ctx, x, z, if (self.clock.isNight()) .night else .day, fallback)
+        else
+            fallback;
+        if (grp.len > 0) {
+            if (self.group_pick_fn) |pick| {
+                if (pick(self.group_pick_ctx, grp, seed)) |cname| {
+                    for (w.class_table) |slot_ct| {
+                        if (slot_ct.kind == .zombie and std.mem.eql(u8, slot_ct.name, cname)) {
+                            ct = slot_ct;
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            const zombie_slots = [_]usize{ 1, 8, 9, 10, 11 };
+            const csel = zombie_slots[seed % zombie_slots.len];
+            if (w.class_table[csel].hash != 0 and w.class_table[csel].kind == .zombie) {
+                ct = w.class_table[csel];
+            }
+        }
+        const bm_mul: f32 = if (self.bloodmoon_active) 1.5 else 1.0;
+        const hp: f32 = ct.max_hp * bm_mul * self.hpScale();
+        const id = if (ct.hash != 0)
+            w.spawnZombieClass(x, y, z, hp, ct.hash, ct.loot_list)
+        else
+            w.spawnZombie(x, y, z, hp);
+        const nid = id orelse return null;
+        const slot = w.slotOfNetId(nid) orelse return null;
+        if (mark_horde) w.zombie_ai[slot].is_horde = true;
+        return slot;
+    }
+
+    /// Y of the nearest online player to (x,z), or null with no players.
+    fn nearestPlayerY(w: *ecs_world.World, x: f32, z: f32) ?f32 {
+        const s = nearestPlayerSlot(w, x, z) orelse return null;
+        return w.transform[s].y;
+    }
+
+    fn nearestPlayerSlot(w: *ecs_world.World, x: f32, z: f32) ?ecs_world.Slot {
+        var best: ?ecs_world.Slot = null;
+        var best_d2: f32 = std.math.floatMax(f32);
+        var p: ecs_world.Slot = 0;
+        while (p < ecs_world.max_entities) : (p += 1) {
+            if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            const dx = w.transform[p].x - x;
+            const dz = w.transform[p].z - z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = p;
+            }
+        }
+        return best;
     }
 };
 
