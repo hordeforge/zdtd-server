@@ -76,6 +76,55 @@ pub fn buildDataBody(buf: []u8, args: PartyDataArgs) ![]u8 {
     return w.written();
 }
 
+/// NetPackageSharedPartyKill (parties-factions.md §3): carries a shared kill
+/// to party mates. Setup order: entityTypeID i32, xp i32, entityID i32
+/// (killed), killerID i32.
+pub const SharedKillArgs = struct {
+    entity_type: i32,
+    xp: i32,
+    entity_id: i32,
+    killer_id: i32,
+};
+
+pub fn buildSharedKillBody(buf: []u8, args: SharedKillArgs) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeI32(args.entity_type);
+    try w.writeI32(args.xp);
+    try w.writeI32(args.entity_id);
+    try w.writeI32(args.killer_id);
+    return w.written();
+}
+
+pub const SharedKillParsed = struct {
+    entity_type: i32,
+    xp: i32,
+    entity_id: i32,
+    killer_id: i32,
+};
+
+/// Parse the NetPackageSharedPartyKill body (server ProcessPackage resolves
+/// entityID/killerID; caller validates against live entities).
+pub fn readSharedKillBody(body: []const u8) binary.ReadError!SharedKillParsed {
+    var r = binary.Reader{ .data = body };
+    return .{
+        .entity_type = try r.readI32(),
+        .xp = try r.readI32(),
+        .entity_id = try r.readI32(),
+        .killer_id = try r.readI32(),
+    };
+}
+
+test "shared kill body round-trips the four stock fields" {
+    var buf: [32]u8 = undefined;
+    const body = try buildSharedKillBody(&buf, .{ .entity_type = 3, .xp = 90, .entity_id = 42, .killer_id = 7 });
+    try std.testing.expectEqual(@as(usize, 16), body.len);
+    const p = try readSharedKillBody(body);
+    try std.testing.expectEqual(@as(i32, 3), p.entity_type);
+    try std.testing.expectEqual(@as(i32, 90), p.xp);
+    try std.testing.expectEqual(@as(i32, 42), p.entity_id);
+    try std.testing.expectEqual(@as(i32, 7), p.killer_id);
+}
+
 test "party data body layout matches NetPackagePartyData.write" {
     var buf: [128]u8 = undefined;
     const members = [_]i32{ 10, 20, 30 };
@@ -88,8 +137,8 @@ test "party data body layout matches NetPackagePartyData.write" {
         .party_action = 2,
     });
     // PartyID 4 + LeaderIndex 1 + voice "v1" (1 + 2) + count 4 + 3x4 + changed
-    // 4 + action 1 + disband 1 = 24.
-    try std.testing.expectEqual(@as(usize, 24), body.len);
+    // 4 + action 1 + disband 1 = 30.
+    try std.testing.expectEqual(@as(usize, 30), body.len);
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());

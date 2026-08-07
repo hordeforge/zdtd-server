@@ -236,8 +236,9 @@ test "party caps at 8 members" {
     m.init();
     defer m.deinit();
     const p = m.acceptInvite(10, 20).?;
-    var id: i32 = 30;
-    while (id < 10 + @as(i32, max_party_members) + 1) : (id += 1) {
+    // 2 members already; add until the 8-cap refuses.
+    var id: i32 = 21;
+    while (id < 21 + @as(i32, max_party_members)) : (id += 1) {
         _ = m.addPlayer(p.id, id);
     }
     try std.testing.expect(p.isFull());
