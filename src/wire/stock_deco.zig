@@ -31,6 +31,11 @@ pub const deco_state_active: u8 = 0;
 /// declared and never referenced anywhere in the assembly, so it is a stale
 /// estimate, not the record size.
 pub const deco_size: usize = 17;
+
+/// BlockValue rawData rotation band (bits 16..20, block-shapes.md). Same shift
+/// deco_mirror uses for its multiblock child packing, so the mirror and the
+/// client read the same rotation.
+pub const deco_rot_shift: u5 = 16;
 /// NetPackageDecoUpdate.decosPerPackage (asm.il 808291); Setup caps each package
 /// at this many objects (`ldc.i4 0x8000` at Setup IL_000b).
 pub const decos_per_package: usize = 0x8000;
@@ -284,11 +289,12 @@ pub fn worldToDecoChunk(w: i32) i32 {
 /// `RandomFloat <= prob * 0.125f * 16f` (IL_00f4-IL_010d). The accepted block
 /// lands at `y = terrainHeight + 1` with `realY` equal to it (IL_0211-IL_021a).
 ///
-/// Deviations, both deliberate: no `GameUtils::CheckOreNoiseAt` gate (zdtd has no
+/// Deviations, deliberate: no `GameUtils::CheckOreNoiseAt` gate (zdtd has no
 /// server-side resource Perlin, and every `checkresource` row in stock biomes.xml
-/// is a `type="prefab"` row we do not send anyway), and rotation is always 0
-/// (stock rolls `BiomeBlockDecoration::GetRandomRotation`, but a rotated
-/// multiblock changes the child-cell offsets the world mirror has to write).
+/// is a `type="prefab"` row we do not send anyway). Rotation follows stock
+/// (`BiomeBlockDecoration::GetRandomRotation`, 0..3 in rawData bits 16..20), keyed
+/// to the placement cell so every clipping window and the world mirror agree on
+/// the rawData for a given cell.
 pub fn generateForDecoChunk(
     out: []DecoObj,
     dcx: i32,
@@ -344,12 +350,22 @@ pub fn generateForDecoChunk(
         // Full output buffer must not change what the earlier objects were: a
         // later join with a bigger buffer decorates the chunk identically.
         if (n >= out.len) continue;
+        // Stock rolls BiomeBlockDecoration::GetRandomRotation (0..3, 90 degree
+        // steps) and packs it into BlockValue rawData bits 16..20
+        // (block-shapes.md). The roll is keyed to the placement cell, not the
+        // shared placement stream: a stream draw would shift with the number of
+        // previously accepted cells, giving the same placement different
+        // rotations in different clipping windows (the window-clipping test).
+        // Position-keyed keeps every window and the world mirror in agreement on
+        // the rawData for a given cell; the mirror reads the same bits, so a
+        // rotated multiblock keeps its child-cell offsets consistent.
+        var rot_rng: Rng = .init(seed, wx, wz);
         out[n] = .{
             .x = wx,
             .y = by,
             .z = wz,
             .real_y = @floatFromInt(by),
-            .block_raw = sp.block_id,
+            .block_raw = sp.block_id | (@as(u32, @intCast(rot_rng.range(0, 3))) << deco_rot_shift),
         };
         n += 1;
     }
@@ -503,9 +519,12 @@ test "deco chunk sampling is deterministic and only emits supplied ids" {
     var saw_a = false;
     var saw_b = false;
     for (a[0..na]) |o| {
-        try std.testing.expect(o.block_raw == 100 or o.block_raw == 200);
-        saw_a = saw_a or o.block_raw == 100;
-        saw_b = saw_b or o.block_raw == 200;
+        // Low 16 bits are the supplied species id; bits 16..20 carry the stock
+        // 0..3 rotation roll (deco_rot_shift), so the raw is never just the id.
+        try std.testing.expect(o.block_raw & 0xFFFF == 100 or o.block_raw & 0xFFFF == 200);
+        try std.testing.expect((o.block_raw >> deco_rot_shift) & 0x1F <= 3);
+        saw_a = saw_a or o.block_raw & 0xFFFF == 100;
+        saw_b = saw_b or o.block_raw & 0xFFFF == 200;
         try std.testing.expectEqual(deco_state_active, o.state);
         // One above the surface, realYPos == block Y (stock: (int)(y + 1 + 0.5)).
         try std.testing.expectEqual(@as(i32, w.height + 1), o.y);

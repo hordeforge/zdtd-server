@@ -2703,12 +2703,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   `src/wire/stock_deco.zig:292-357`, `asm.il:1266039`, `asm.il:1303341`,
   `Data/Config/biomes.xml:489-507`, `:261-267`, `server-orch.log:41`
 
-- **Deco rotation** `PARTIAL`
-  Every DecoObject is emitted with rotation 0; stock rolls
-  `BiomeBlockDecoration::GetRandomRotation`. All trees and rocks face the same way.
-  Deliberate: a rotated multiblock changes the child-cell offsets the world mirror
-  writes.
-  *Anchors:* `src/wire/stock_deco.zig:287-291`, `:347-353`
+- **Deco rotation** `WORKS`
+  Every DecoObject carries a `BiomeBlockDecoration::GetRandomRotation` roll
+  (0..3, 90 degree steps) in rawData bits 16..20, keyed to the placement cell so
+  every clipping window and the world mirror agree on the rawData. Trees and
+  rocks no longer all face north; the mirror reads the same rotation bits, so a
+  rotated multiblock keeps its child-cell offsets consistent.
+  *Anchors:* `src/wire/stock_deco.zig:352-372`, `:32-37`
 
 - **Deco ore-noise gate (CheckOreNoiseAt)** `MISSING`
   Not implemented; documented as deliberate because every `checkresource` row in
