@@ -1013,6 +1013,14 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Vending machines survive restart (vending.zvn); a placed machine that
+        // lost its store would silently stop opening.
+        self.vending.load(self.world.world_dir) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load vending", e);
+                return e;
+            }
+        };
         // Land claims survive restart (claims.zlc); restored owners re-map on login.
         self.loadClaims() catch |e| {
             if (e != error.OpenFailed) {
@@ -2259,6 +2267,7 @@ pub const Game = struct {
         }
         self.sampleFlushCounters();
         self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+        self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
         self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
@@ -3533,6 +3542,10 @@ pub const Game = struct {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
                 };
+                self.vending.save(self.world.world_dir) catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save vending", e);
+                };
                 self.saveClaims() catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save claims", e);
@@ -3920,6 +3933,10 @@ pub const Game = struct {
                 self.containers.save(self.world.world_dir) catch |e| {
                     save_failed = true;
                     logPersistErr(self, "save containers", e);
+                };
+                self.vending.save(self.world.world_dir) catch |e| {
+                    save_failed = true;
+                    logPersistErr(self, "save vending", e);
                 };
                 self.saveClaims() catch |e| {
                     save_failed = true;
@@ -11051,6 +11068,7 @@ pub const Game = struct {
                 self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
             }
             self.containers.save(self.world.world_dir) catch |e| logPersistErr(self, "save containers", e);
+            self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
             self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
             self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
             self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
