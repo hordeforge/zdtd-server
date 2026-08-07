@@ -100,7 +100,7 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `mode` | C2S range / interest / mode |
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE_ARCHITECTURE.md` |
-| `[sim]` | `trader_wallet_dukes` | Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly |
+| `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. Defaults match the previous code constants |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
 | `[plugin]` | `modules` | Comma-separated `.wasm` paths for the Wasm plugin runtime (ADR 0020, [PLUGIN_DEV.md](PLUGIN_DEV.md)); empty default = no Wasm plugins |
 
@@ -112,9 +112,28 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 
 | Key | Effect on `InitOptions` |
 |---|---|
-| `max_spawned_zombies` | Director alive-zombie cap |
+| `max_spawned_zombies` | Director alive-zombie cap (1..2048) |
 | `blood_moon_frequency` (alias `bloodmoon_frequency`) | Blood moon every N days |
+| `game_difficulty` | 0..5 zombie hp scale |
+| `blood_moon_enemy_count` | zombies per blood-moon burst (0..60) |
+| `blood_moon_range` | ±day jitter (0..15) |
+| `player_killing_mode` | 0..3 PvP gate |
+| `day_night_length` / `day_light_length` | real minutes per day (10..1200) / daylight hours (1..23) |
+| `zombie_move` / `zombie_move_night` / `zombie_feral_move` / `zombie_bm_move` | 0..4 speed band per state |
+| `enemy_difficulty` | 0 normal, 1 feral |
+| `loot_abundance` / `xp_multiplier` | percent (1..1000) |
+| `block_damage_player` / `block_damage_ai` / `block_damage_ai_bm` | percent (1..1000) |
+| `max_spawned_animals` | daytime wildlife cap (0..2048) |
+| `air_drop_frequency` | hours (0..168) |
+| `drop_on_death` | 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete |
+| `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
+| `loot_respawn_days` | container re-roll interval (0..365) |
 | `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
+
+Only the keys you set override; everything else falls through to
+`serverconfig.xml`, `zdtd.toml` and code defaults. A mode is a complete
+behavior pack — `hardcore.toml` = `player_killing_mode = 0`,
+`drop_on_death = 1`, `game_difficulty = 4`, and so on — no code involved.
 
 Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
 be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.

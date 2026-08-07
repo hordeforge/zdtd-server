@@ -59,6 +59,14 @@ block_id_mapping = true
 # (AvailableMoney is engine-managed per-day); zdtd has no trader economy, so
 # trade() credits the player wallet directly and this is a display value.
 # trader_wallet_dukes = 5000
+# Anti-abuse per-peer gates (mono-ns values; defaults match the code constants).
+# min_chat_gap_ns = 200000000
+# inv_bucket_cap = 40
+# inv_refill_ns = 50000000
+# block_bucket_cap = 30
+# block_refill_ns = 33000000
+# min_damage_gap_ns = 80000000
+# damage_burst_max = 4
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]
