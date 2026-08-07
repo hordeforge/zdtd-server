@@ -142,10 +142,25 @@ pub const Table = struct {
     /// biomemap id → distant-decoration set (empty when the biome declares none,
     /// or when nothing in it resolved: no fabricated species).
     decos: [max_biomemap_id]DecoSet = [_]DecoSet{.{}} ** max_biomemap_id,
+    /// biomemap id → biome name ("pine_forest", "wasteland", …), for the spawn
+    /// system's per-biome entitygroup resolution.
+    names: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id,
+    arena_ptr: ?*std.heap.ArenaAllocator = null,
     loaded: bool = false,
 
     pub fn deinit(self: *Table) void {
+        if (self.arena_ptr) |ap| {
+            const child = ap.child_allocator;
+            ap.deinit();
+            child.destroy(ap);
+        }
         self.* = .{};
+    }
+
+    /// Biome name for a biomemap id (from `<biomemap id="NN" name="X"/>`).
+    pub fn nameById(self: *const Table, id: u8) ?[]const u8 {
+        if (id >= max_biomemap_id) return null;
+        return self.names[id];
     }
 
     pub fn stackFor(self: *const Table, biome_id: u8) Stack {
@@ -493,8 +508,16 @@ pub fn loadFromPath(
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
 
-    var table: Table = .{};
-    // biomemap id → name (arena-free: copy into fixed buffers on stack via hashmap of slices into clean)
+    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer {
+        arena_holder.deinit();
+        allocator.destroy(arena_holder);
+    }
+    const arena = arena_holder.allocator();
+
+    var table: Table = .{ .arena_ptr = arena_holder };
+    // biomemap id → name (duped into the table arena so the names outlive `clean`).
     var name_by_id: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id;
     var i: usize = 0;
     while (i < clean.len) {
@@ -573,6 +596,9 @@ pub fn loadFromPath(
         table.weather_n += 1;
     }
     // water / underwater: keep default (no land layers); surface gen still uses heights.
+    for (name_by_id, 0..) |nm, idx| {
+        table.names[idx] = if (nm) |n| try arena.dupe(u8, n) else null;
+    }
     table.loaded = true;
     return table;
 }
@@ -706,6 +732,11 @@ test "decorations parse keeps distant deco in XML order" {
     defer t.deinit();
     try std.testing.expect(t.hasDecos());
 
+    // biomemap id → biome name for the spawn-group resolver.
+    try std.testing.expectEqualStrings("pine_forest", t.nameById(3).?);
+    try std.testing.expectEqualStrings("desert", t.nameById(5).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), t.nameById(9));
+
     // Biome-level group wins over the subbiome group (GetBiomeOrSubAt default).
     const pine = t.decosFor(3);
     try std.testing.expectEqual(@as(u8, 2), pine.n);
@@ -744,13 +775,21 @@ test "decorations parse without a distant-deco filter yields nothing" {
 
 test "load stock biomes.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/biomes.xml";
-    const t = loadFromPath(std.testing.allocator, p, testId, null, null) catch return error.SkipZigTest;
+    var t = loadFromPath(std.testing.allocator, p, testId, null, null) catch return error.SkipZigTest;
+    defer t.deinit();
     try std.testing.expect(t.loaded);
     const burnt = t.stackFor(9);
     try std.testing.expect(burnt.n >= 3);
     try std.testing.expectEqual(assignids.terr_burnt_forest_ground, burnt.layers[0].block_id);
     const pine = t.stackFor(3);
     try std.testing.expectEqual(assignids.terr_forest_ground, pine.layers[0].block_id);
+    // biomemap id → name for the per-biome spawn-group resolver.
+    try std.testing.expectEqualStrings("pine_forest", t.nameById(3).?);
+    try std.testing.expectEqualStrings("desert", t.nameById(5).?);
+    try std.testing.expectEqualStrings("snow", t.nameById(1).?);
+    try std.testing.expectEqualStrings("wasteland", t.nameById(8).?);
+    try std.testing.expectEqualStrings("burnt_forest", t.nameById(9).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), t.nameById(max_biomemap_id));
     // Stock ships weather groups for exactly 5 biomes: snow 1, pine_forest 3,
     // desert 5, wasteland 8, burnt_forest 9 (ascending biomemap id here).
     try std.testing.expectEqual(@as(u8, 5), t.weather_n);

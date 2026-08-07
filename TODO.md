@@ -152,6 +152,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 - [x] Deco trees: **live-validated** 2026-08-05 (V3.0.1 b4 client): join burst `DecoUpdate objs=1488 pkgs=1`, client logs `[DECO] read 1488`, **0 exceptions**, world load completes (Chunks 226, CGO 90/39). DecoManager.Read NRE resolved; see [docs/DECO_NRE.md](docs/archive/DECO_NRE.md). Residual: one-shot join window (client nulls `loadedDecos` after world load) and no client id negotiation (A22)
 - [x] Weather biome array S2C from `biomes.xml` default weather groups (join + WorldTime throttle); no hardcoded param table
+- [ ] **Storm gameplay effects** (open; storm SM itself SHIPPED — state machine, blood-moon override, `NetPackageWeather`, `weather.zwt` persistence all WORKS): server reads none of the five weather params (no core temp, no wet/cold buffs, no stamina/food/water modifiers) and `weathersurvival.xml` is not loaded; `StormFrequency` is a compile-time GameStats default with no serverconfig/zdtd.toml knob. GAP rows: Weather gameplay effects (MISSING, §5.9), StormFrequency configurability (PARTIAL), Health regen/core temp (MISSING, §5.6.1).
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
 - [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)

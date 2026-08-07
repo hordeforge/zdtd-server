@@ -163,11 +163,12 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
-| Player persist v2 | **PASS** | players.zsv v2 (quality/meta + journal); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
+| Player persist v3 | **PASS** | players.zsv **ZPV3** (quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read and upgraded on merge); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
 | Director class variety | **PASS** | zombie slots 1+8..11 from entitygroups weighted picks; rotation per spawn |
+| Biome spawn groups | **PASS** | night/day/animal group per spawn-point biome via spawning.xml rules (biome map id → biomes.xml name → rule); wasteland at midnight gets `ZombiesWastelandNight`, not pine_forest's `ZombiesNight`; fallback on unknown biome |
 | Zombie population bound | **PASS** | alive-cap 24 + far-despawn (>200 blocks, reason=Despawned); pw27 Ent stable 3-4 vs prior 7→34 creep |
 | ItemValue/Explosion wire | **PASS** | ReadData + ExplosionData positional per IL (no remaining() or scan heuristics); unit tests |
 | Loot bag wire direction | **PASS** | NetPackageBag dir=ToServer(1); S2C sends removed; loot rides ECD `bag` field in EntitySpawn; pw15 kill 100/101/102 → Items:3, zero WRN/NRE in client log |
@@ -332,9 +333,11 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | Multi-ms | Worldgen W3–W7 | W0/W1/W2 shipped (3D density field); climate/caves/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
-maxdamage merge), stock Chunk.write + upper24, players.zsv v2, TE/blockmeta persist,
-workstation TE sim, trader TraderData v2, electrical place+WireActions, sleeper
-volumes, quest multi-phase graphs, EAI task table (2 tasks), land claim options.
+maxdamage merge), stock Chunk.write + upper24, players.zsv **ZPV3** (ZPV2 still
+read; progression tail + inv/journal), TE/blockmeta persist, claims.zlc,
+clock.zcl, weather.zwt, workstation TE sim, trader TraderData v2, electrical
+place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
+(2 tasks), land claim options.
 
 ---
 

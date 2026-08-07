@@ -1323,6 +1323,10 @@ pub const Game = struct {
             self.sim.director.night_group = night_g;
             self.sim.director.day_group = day_g;
             self.sim.director.animal_group = animal_g;
+            // Biome-aware group override: resolve per spawn-point biome so e.g.
+            // wasteland at midnight spawns wasteland walkers, not pine_forest's.
+            self.sim.director.biome_group_ctx = self;
+            self.sim.director.biome_group_fn = &Game.biomeGroupName;
             self.sim.director.group_pick_ctx = self;
             self.sim.director.group_pick_fn = &Game.pickEntityGroup;
             self.sim.director.stage_group_ctx = self;
@@ -8520,6 +8524,30 @@ pub const Game = struct {
         return g.entitygroups.pick(group, seed);
     }
 
+    /// Per-player biome spawn group (spawning.xml rule for the biome under the
+    /// spawn point): night/day zombie or animal group NAME, or the fallback
+    /// when the biome map, the biome name, or the biome's rule is unknown.
+    /// Fixes the wasteland-at-midnight-getting-forest-walkers gap: stock
+    /// resolves per ChunkAreaBiomeSpawnData from the actual biome.
+    fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
+        const self: *Game = @ptrCast(@alignCast(ctx.?));
+        const bm = self.world.biomes orelse return fallback;
+        const biome_id = bm.atWorld(@intFromFloat(@floor(x)), @intFromFloat(@floor(z))) orelse return fallback;
+        const bname = self.world.biome_layers_table.nameById(biome_id) orelse return fallback;
+        var buf: [16]assets_spawning.Rule = undefined;
+        const n = self.spawning.rulesForBiome(bname, &buf);
+        var ri: usize = 0;
+        while (ri < n) : (ri += 1) {
+            const r = buf[ri];
+            switch (kind) {
+                .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
+                .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
+                .animal => if (r.kind == .animal) return r.entitygroup,
+            }
+        }
+        return fallback;
+    }
+
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.
     fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -8723,6 +8751,50 @@ pub const Game = struct {
         }
         try std.testing.expect(n >= 6);
         try std.testing.expect(saw_bob);
+    }
+
+    test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
+        const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+        const map = game_dir ++ "/Data/Worlds/Navezgane";
+        if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
+        io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+        const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/biome_spawn_groups", 0, .{
+            .map_dir = map,
+            .game_dir = game_dir,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        const bm = g.world.biomes orelse return error.TestUnexpectedResult;
+        try std.testing.expect(g.world.biome_layers_table.loaded);
+        // Scan the map for one wasteland cell (biomemap id 8) and one pine_forest
+        // cell (id 3) instead of pinning fragile world coords.
+        var wasteland: ?[2]i32 = null;
+        var pine: ?[2]i32 = null;
+        var wx: i32 = -1600;
+        while (wx <= 1600 and (wasteland == null or pine == null)) : (wx += 32) {
+            var wz: i32 = -1600;
+            while (wz <= 1600) : (wz += 32) {
+                const bid = bm.atWorld(wx, wz) orelse continue;
+                if (bid == 8 and wasteland == null) wasteland = .{ wx, wz };
+                if (bid == 3 and pine == null) pine = .{ wx, wz };
+            }
+        }
+        const w = wasteland orelse return error.TestUnexpectedResult;
+        const p = pine orelse return error.TestUnexpectedResult;
+        const fx = @as(f32, @floatFromInt(w[0]));
+        const fz = @as(f32, @floatFromInt(w[1]));
+        // The fn takes a callback-style ctx first (director binding uses the
+        // same shape): pass the game as ctx; null would panic on the deref.
+        const w_night = Game.biomeGroupName(g, fx, fz, .night, "fallback");
+        const w_day = Game.biomeGroupName(g, fx, fz, .day, "fallback");
+        const p_night = Game.biomeGroupName(g, @floatFromInt(p[0]), @floatFromInt(p[1]), .night, "fallback");
+        try std.testing.expectEqualStrings("ZombiesWastelandNight", w_night);
+        try std.testing.expectEqualStrings("ZombiesWasteland", w_day);
+        try std.testing.expectEqualStrings("ZombiesNight", p_night);
+        // Unknown biome ids / missing biome map fall back instead of guessing.
+        try std.testing.expectEqualStrings("fallback", Game.biomeGroupName(g, 99999, 99999, .night, "fallback"));
     }
 
     test "per-trader stock and hours come from trader_info + npc.xml" {

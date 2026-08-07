@@ -1089,7 +1089,7 @@ encoding is one day high.
   *Anchors:* `src/wire/packages.zig:896`, `src/server/game.zig:8114`, `:8119`,
   `asm.il:807834`, `asm.il:2593714`, `asm.il:807889`
 
-- **NetPackageHordeEvent** `MISSING`
+- **NetPackageHordeEvent** `N/A (parity)`
   Builder and enum exist and are byte-correct but nothing calls
   `buildHordeEventBody`. This is deliberate and correct for parity: there is no
   `GetPackage<NetPackageHordeEvent>()` anywhere in the stock assembly, so stock
@@ -1538,10 +1538,12 @@ can walk into every POI but none of them is the building TFP authored.
   `src/server/game.zig` (`sendWorldAreas`), `asm.il:902420-902440`,
   `asm.il:903590-903616`
 
-- **Prefab entity list** `MISSING`
+- **Prefab entity list** `BLOCKED (2026-08-07, data-absent)`
   The `.tts` entity block only exists for file versions 4..11 and V3 prefabs are
-  v19, so nothing is lost from the file itself, but zdtd also has no equivalent of
-  `CopyEntitiesIntoWorld`. Not player-visible on stock Navezgane data.
+  v19, so nothing is lost from the file itself; zdtd has no equivalent of
+  `CopyEntitiesIntoWorld`, but the block it would copy does not exist in the V3
+  data. Not player-visible on stock Navezgane data; would need a pre-12 prefab
+  sample or a new stock data source to implement.
   *Anchors:* `src/world/tts.zig:9`, `asm.il:925420-925478`
 
 - **Prefab terrainFiller / terrainFillerAdaptive handling** `PARTIAL`
@@ -1604,14 +1606,19 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/assets/spawning.zig:14-22`, `:104-127`,
   `Data/Config/spawning.xml:22-33`
 
-- **Biome-aware spawn group selection at runtime** `MISSING`
-  The director's night/day/animal group names are resolved **once** at world load
-  by scanning a hardcoded biome-name list and taking the first match. The live log
-  proves the result: `director groups night=ZombiesNight day=ZombiesAll
-  animal=WildGameForest`, i.e. pine_forest's rules. A player standing in the
-  wasteland at midnight gets forest walkers. Stock resolves per
+- **Biome-aware spawn group selection at runtime** `WORKS`
+  The director's night/day/animal group names are resolved per spawn point: the
+  biome map under the position yields the biomemap id, `biomes.xml` maps that id
+  to a biome name, and the biome's `spawning.xml` rules pick the night/day/animal
+  group (falling back to the load-time group when the biome or rule is unknown).
+  A player in the wasteland at midnight now gets `ZombiesWastelandNight` instead
+  of pine_forest's `ZombiesNight`. Stock resolves per
   `ChunkAreaBiomeSpawnData` from the actual biome under the chunk.
-  *Anchors:* `src/server/game.zig:871-900`, `server-orch.log`, `asm.il:1093888`
+  *Anchors:* `src/server/game.zig:1332` (callback wiring), `:8595-8611`
+  (`biomeGroupName`), `src/assets/biome_layers.zig:159-163` (`nameById`),
+  `src/ecs/aidirector.zig:362-371` (per-spawn lookup), `asm.il:1093888`;
+  test `server.game.test.biome spawn groups resolve per-biome spawning.xml rules
+  on a stock map` + `assets.biome_layers.test.load stock biomes.xml`
 
 - **POI-tag spawn filtering** `MISSING`
   Stock ORs every `PrefabInstance.Prefab.Tags` over the chunk area into a

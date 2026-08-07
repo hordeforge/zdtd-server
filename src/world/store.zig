@@ -566,6 +566,7 @@ pub const World = struct {
         if (self.prefabs) |*p| p.deinit();
         if (self.water) |*w| w.deinit();
         if (self.biomes) |*b| b.deinit();
+        self.biome_layers_table.deinit();
         if (self.map_dir) |d| self.allocator.free(d);
         self.chunks.deinit();
         self.allocator.free(self.world_dir);

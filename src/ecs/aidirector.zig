@@ -133,6 +133,9 @@ pub fn scoutSpawnerName(party_stage: i32) []const u8 {
 }
 
 pub const Director = struct {
+    /// Spawn-group kind for per-biome resolution (spawning.xml rule kind).
+    pub const SpawnKind = enum(u8) { night = 0, day = 1, animal = 2 };
+
     clock: WorldClock = .{},
     horde_cd: f32 = 0,
     /// Entity group names from spawning.xml (empty → class_table rotation).
@@ -142,6 +145,12 @@ pub const Director = struct {
     /// Optional pick: (ctx, group_name, seed) → class name; Game wires entitygroups.
     group_pick_ctx: ?*anyopaque = null,
     group_pick_fn: ?*const fn (?*anyopaque, []const u8, u32) ?[]const u8 = null,
+    /// Per-player biome spawn-group resolver: (ctx, x, z, kind, fallback) →
+    /// the group NAME for the biome under the spawn point (night/day/animal),
+    /// or the fallback when the biome/rule is unknown. Game wires spawning.xml.
+    biome_group_ctx: ?*anyopaque = null,
+    biome_group_fn: ?*const fn (?*anyopaque, f32, f32, SpawnKind, []const u8) []const u8 = null,
+
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
     party_stage: i32 = 0,
@@ -272,27 +281,6 @@ pub const Director = struct {
     }
 
     fn spawnAnimalsNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
-        var animal_ct: ?ecs_world.EntityClass = null;
-        if (self.animal_group.len > 0) {
-            if (self.group_pick_fn) |pick| {
-                if (pick(self.group_pick_ctx, self.animal_group, self.total_spawned)) |cname| {
-                    for (w.class_table) |ct| {
-                        if (ct.kind == .animal and std.mem.eql(u8, ct.name, cname)) {
-                            animal_ct = ct;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (animal_ct == null) {
-            for (w.class_table) |ct| {
-                if (ct.kind == .animal and ct.hash != 0) {
-                    animal_ct = ct;
-                    break;
-                }
-            }
-        }
         var n: u32 = 0;
         var p: ecs_world.Slot = 0;
         while (p < ecs_world.max_entities and n < count) : (p += 1) {
@@ -302,6 +290,30 @@ pub const Director = struct {
             const x = w.transform[p].x + @cos(ang) * r;
             const z = w.transform[p].z + @sin(ang) * r;
             const y = w.transform[p].y;
+            // Wildlife group per player biome (fallback = the single group).
+            var animal_ct: ?ecs_world.EntityClass = null;
+            var agroup = self.animal_group;
+            if (self.biome_group_fn) |bf| agroup = bf(self.biome_group_ctx, x, z, .animal, self.animal_group);
+            if (agroup.len > 0) {
+                if (self.group_pick_fn) |pick| {
+                    if (pick(self.group_pick_ctx, agroup, self.total_spawned)) |cname| {
+                        for (w.class_table) |ct| {
+                            if (ct.kind == .animal and std.mem.eql(u8, ct.name, cname)) {
+                                animal_ct = ct;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (animal_ct == null) {
+                for (w.class_table) |ct| {
+                    if (ct.kind == .animal and ct.hash != 0) {
+                        animal_ct = ct;
+                        break;
+                    }
+                }
+            }
             const hp: f32 = if (animal_ct) |ct| ct.max_hp else 30;
             const id = if (animal_ct) |ct|
                 w.spawnAnimal(x, y, z, hp, ct.hash, ct.loot_list)
@@ -350,9 +362,13 @@ pub const Director = struct {
                 const y = w.transform[p].y;
                 // Prefer spawning.xml entity group → entityclasses; else class_table rotation.
                 var ct = w.class_table[1];
+                const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
                 const grp = if (group_override.len > 0)
                     group_override
-                else if (self.clock.isNight()) self.night_group else self.day_group;
+                else if (self.biome_group_fn) |bf|
+                    bf(self.biome_group_ctx, x, z, if (self.clock.isNight()) .night else .day, fallback)
+                else
+                    fallback;
                 if (grp.len > 0) {
                     if (self.group_pick_fn) |pick| {
                         if (pick(self.group_pick_ctx, grp, self.total_spawned +% n)) |cname| {
