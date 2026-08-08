@@ -1,9 +1,9 @@
 # Handoff - zdtd refactor + parity push
 
-**Date:** 2026-08-08 (updated after flake root-cause fix)
+**Date:** 2026-08-08 (final session update)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `127a913`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **974/974** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `f05bca8`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **975/975** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -138,3 +138,51 @@ Architecture rule: every new `src/server/game/*.zig` shard must be imported via 
 - [ ] Pick one more `game.zig` shard (keep <200 lines) - avoid chunk_stream until its pub cycle is fixed
 - [ ] If adding a new `Rules` field, update `docs/GAME_OPTIONS.md` + `modes/*.toml` example in the same commit (coverage test `GAME_OPTIONS.md documents every Rules field`)
 - [ ] Run `make check` before pushing (catches the 4 flakes as known)
+
+
+## Full review + docs overhaul + harnesses (same day)
+
+### Reviews (all four subagents, findings in docs/reviews/)
+- **Wasm seam** (WASM_REVIEW_2026-08-08.md): 11 hooks inventoried; top-3
+  plugin candidates (loot roll override, spawn rules, quest/craft gates);
+  host findings (fuel is per-instance lifetime not per-call, budget not
+  configurable, worst-case one tick > 50 ms, on_player_login untested).
+- **State machines** (STATE_MACHINES_AUDIT_2026-08-08.md + f711725):
+  join/quest/weather/trader/sleeper/blood-moon/power/vehicle/ally verified;
+  trader + vehicle SMs added to STATE_MACHINES.md. Four code findings:
+  join gate pre-login permissiveness (FIXED 09342d9), dead quest_systems.zig
+  duplicate (REMOVED), RequestToSpawnPlayer revive guard (flagged),
+  questOnTraderOpen open-path coupling (FIXED 2e14a9a).
+- **Hardcode externalization** (HARDCODE_AUDIT_2026-08-08.md): A34 entity HP
+  from entityclasses.xml passive_effect (FIXED f41849b), A36 spawn pad
+  terrain id (FIXED ed2f28f); no P0/P1 open; Bucket B closed.
+- **Docs audit** (DOCS_AUDIT_2026-08-08.md + e3094ab): 19 doc files fixed
+  (counts, config keys, ADR status, em dashes removed repo-wide).
+
+### Doc structure + diagrams
+- **Restructure** (7196299): ZIG_CLONE.md rename; ECS+SYSTEMS merged into
+  ECS_SYSTEMS.md; SCALE_ARCHITECTURE+PLANET_SCALE merged into SCALE.md;
+  docs/wire/ subdir (PACKAGES, WIRE_CHUNK, WIRE_WORKSTATION, INVENTORY);
+  INDEX rebuilt; 296 links verified resolving.
+- **Diagrams** (799410a): STATE_MACHINES.md +6 sections (party, vending
+  rental, loot respawn, guard policy, chunk stream backpressure, buff
+  lifecycle); new GAMEPLAY.md with 8 behavior flows (craft, workstation
+  queue, trade, trader roll, loot roll, survival/stamina, blood moon,
+  movement authority).
+- **Consistency + stale** (f05bca8): GAP scorecard recounted 329
+  (134/142/53), STATUS/TODO counts, dedup, WORK_PLAN refresh,
+  DOC_CONSISTENCY_AUDIT.md.
+
+### Harnesses
+- **loadgen** (7dtd-loadgen b8a98dd): --profile probe|join-burst|
+  steady-wander|death-soak|mixed (named workload profiles, TODO item).
+- **playtest**: scripts/playtest_repeat.sh + Makefile playtest-repeat
+  (run a suite LAPS times, aggregate reports for flake detection). Note:
+  7dtd-playtest is not a git repo.
+
+### Ops
+- **SonarQube Cloud** (f5ab3e9): .github/workflows/build.yml (gate + scan on
+  main/PRs) + sonar-project.properties (maci0_zdtd). Zig has no official
+  SonarQube analyzer; the CI gate is the real correctness gate.
+- **Product rename** (e181b89): Zig Days To Die -> Zeven Days to Die
+  (display name only; zdtd acronym unchanged).
