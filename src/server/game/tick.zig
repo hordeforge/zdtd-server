@@ -38,28 +38,30 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         const water_was = h.water;
         h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
         h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
-        // Well-fed regen and starvation: when buffs.xml is present the thresholds
-        // are fractions of max (StatComparePercCurrentToMax); otherwise fall back
-        // to Rules. The Rules well_fed_threshold is an absolute 0..100 that we
-        // compare against food/water; the buff path compares fractions. Both are
-        // documented; T16 wires the buff starvation rates and documents the regen
-        // gap (see docs/reviews/HARDCODE_AUDIT.md A31).
+        // Well-fed regen and starvation: when buffs.xml is present the
+        // thresholds are fractions of max (StatComparePercCurrentToMax); otherwise
+        // fall back to Rules. The Rules well_fed_threshold is an absolute that
+        // is still parsed for offline worlds, but with stock data the regen gate
+        // uses sv.hungry_frac[0] / thirsty_frac[0] (T16).
         var hp_delta: f32 = 0;
         if (use_buff) {
-            // Stock damage sources: ModifyStats Health .25 per buff update.
-            if (h.food <= 0 or h.water <= 0) {
-                const per_s = if (h.food <= 0 and h.water <= 0)
+            const starving = (sv.hungry_frac[2] > 0 and h.food <= sv.hungry_frac[2] * h.food_max) or h.food <= 0;
+            const dehydrated = (sv.thirsty_frac[2] > 0 and h.water <= sv.thirsty_frac[2] * h.water_max) or h.water <= 0;
+            if (starving or dehydrated) {
+                const per_s = if (starving and dehydrated)
                     @max(sv.starve_hp_per_s, sv.dehydrate_hp_per_s)
-                else if (h.food <= 0)
+                else if (starving)
                     sv.starve_hp_per_s
                 else
                     sv.dehydrate_hp_per_s;
                 hp_delta -= per_s * secs;
+            } else if (sv.hungry_frac[0] > 0 and sv.thirsty_frac[0] > 0) {
+                if (h.food >= sv.hungry_frac[0] * h.food_max and h.water >= sv.thirsty_frac[0] * h.water_max) {
+                    hp_delta += prog.well_fed_regen_per_hour * game_hours;
+                }
+            } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
+                hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
-            // Stock regen while well-fed is the buffUpdate gap: the above damage
-            // simply does not apply when fed. Keep a small invented regen only
-            // for offline/no-buff runs (fallback below). When buffs are loaded,
-            // regen is the absence of damage, not an extra heal.
         } else {
             if (h.food <= 0 or h.water <= 0) {
                 hp_delta -= prog.starvation_damage_per_hour * game_hours;
@@ -151,8 +153,7 @@ pub fn tickAirDrop(self: *Game) void {
 pub fn tickZombieBlockDamage(self: *Game) void {
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
-    // Damage per bite before scaling (2Hz cadence).
-    const base_bite: u32 = 10;
+    const base_bite: u32 = @intFromFloat(@max(0, self.sim.rules.progression.block_bite_damage));
     // Cached zombie group: this pass only damages blocks, never spawns or
     // destroys entities, so the slice stays valid for the whole loop.
     for (ecs.groupSlice(&self.sim, .zombie)) |s| {
@@ -164,7 +165,8 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         var dx = tt.x - zt.x;
         var dz = tt.z - zt.z;
         const len = @sqrt(dx * dx + dz * dz);
-        if (len < 0.1 or len > 3.0) continue; // only when pressed against cover
+        const block_range = @max(0.1, self.sim.rules.progression.block_damage_range);
+        if (len < 0.1 or len > block_range) continue; // only when pressed against cover
         dx /= len;
         dz /= len;
         const bx: i32 = @intFromFloat(@floor(zt.x + dx));

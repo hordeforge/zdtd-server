@@ -181,6 +181,12 @@ pub const Progression = struct {
     /// Seconds between survival S2C refreshes per player (EntityStats
     /// netSyncWaitTicks is 10 ticks; 2 s keeps a visible but not chatty feed).
     survival_sync_seconds: f32 = 2.0,
+    /// Zombie block-bite damage before BlockDamageAI/BM scaling (every 0.5 s pass).
+    /// Mirrors the prior `base_bite: u32 = 10` constant in game/tick.zig.
+    block_bite_damage: f32 = 10.0,
+    /// Pressed-against-cover range gate for block chew (m). Anti-kite: only when
+    /// the zombie is within this range of its target and facing it.
+    block_damage_range: f32 = 3.0,
 };
 
 /// Placeholder group: added as constants move; no fields invented.
@@ -257,6 +263,8 @@ pub const ProgressionOverlay = struct {
     stamina_regen_per_second: ?f32 = null,
     sprint_stale_seconds: ?f32 = null,
     survival_sync_seconds: ?f32 = null,
+    block_bite_damage: ?f32 = null,
+    block_damage_range: ?f32 = null,
 };
 
 pub const WorldGroupOverlay = struct {};
