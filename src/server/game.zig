@@ -1046,11 +1046,11 @@ pub const Game = struct {
                 .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
             );
         }
-        if (assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
+        if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
             self.traders.deinit();
             self.traders = tt;
         }
-        if (assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
+        if (try assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
             self.npc.deinit();
             self.npc = nt;
         }

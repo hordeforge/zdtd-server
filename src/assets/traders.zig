@@ -470,8 +470,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     };
 }
 
-pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) ?TraderTable {
-    return paths.tryLoadConfig("traders.xml", TraderTable, loadFromPath, allocator, game_dir, config_dir) catch null;
+pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?TraderTable {
+    return paths.tryLoadConfig("traders.xml", TraderTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
 test "trader table parses stock traderAlways and group refs with attrs" {
