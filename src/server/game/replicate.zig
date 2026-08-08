@@ -1,0 +1,227 @@
+//! Serialize-once replicate fan-out extracted from game.zig.
+//! Verbatim move — called via forwarder in game.zig.
+
+const std = @import("std");
+const game_mod = @import("../game.zig");
+const Game = game_mod.Game;
+const packages = @import("../../wire/packages.zig");
+const apm = @import("../../apm/root.zig");
+const ecs = @import("../../ecs/root.zig");
+const interest = @import("../../ecs/interest.zig");
+
+pub fn replicate(self: *Game) !void {
+    const sc = apm.profiler.scope(&self.harness.prof, .replicate);
+    defer sc.end();
+    for (&self.clients) |*c| {
+        if (c.peer) |p| p.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
+    }
+    if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
+        for (&self.clients) |*cl| {
+            if (cl.peer == null or !(cl.entered or cl.world_ready)) continue;
+            self.streamChunksForClient(cl) catch |err| {
+                self.harness.counters.inc(.stream_errors);
+                const n = self.harness.counters.get(.stream_errors);
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: chunk stream failed slot={d} entity={d} n={d}: {s}\n",
+                        .{ cl.slot, cl.entity_id, n, @errorName(err) },
+                    );
+                }
+            };
+        }
+    }
+    self.replicatePlayerHealth();
+    if (self.tick_n % self.motion_replicate_period_ticks != 0) {
+        self.clearDeadKnownEntities();
+        return;
+    }
+    if (self.sim.entity_count == 0) {
+        self.clearDeadKnownEntities();
+        return;
+    }
+
+    var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    var speeds_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    var flags_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+
+    var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
+    var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
+    var obs_ok: [game_mod.max_clients]bool = .{false} ** game_mod.max_clients;
+    var obs_r: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
+    var active: game_mod.ObsMask = 0;
+    for (&self.clients, 0..) |*cl, ci| {
+        obs_r[ci] = cl.view_radius;
+        if (cl.joined and cl.entered and cl.peer != null) active |= game_mod.bitOf(ci);
+        if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
+        if (self.sim.slotOfNetId(cl.entity_id)) |si| {
+            const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
+            obs_cx[ci] = oc.cx;
+            obs_cz[ci] = oc.cz;
+            obs_ok[ci] = true;
+        }
+    }
+
+    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    var candidates = self.sim.alive_bits;
+    if (!heartbeat) {
+        candidates = self.sim.dirty_bits;
+        for (self.sim.kind_groups.slice(.zombie)) |s| candidates.set(s);
+        for (self.sim.kind_groups.slice(.animal)) |s| candidates.set(s);
+        for (self.sim.kind_groups.slice(.trader)) |s| candidates.set(s);
+        candidates.setIntersection(self.sim.alive_bits);
+    }
+
+    var cand_it = candidates.iterator(.{});
+    while (cand_it.next()) |cand| {
+        const i: ecs.Slot = @intCast(cand);
+        if (!self.sim.alive[i] or !self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
+        self.harness.counters.inc(.replicate_candidates);
+        const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
+        const in_range = interest.observerMask(game_mod.max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
+
+        const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or
+            self.sim.kind[i] == .animal or
+            self.sim.kind[i] == .trader);
+        var spawn_mask: game_mod.ObsMask = 0;
+        if (is_mob) {
+            var m = in_range;
+            while (m != 0) : (m &= m - 1) {
+                const ci = @ctz(m);
+                if (!self.clients[ci].known_entities.isSet(i)) spawn_mask |= game_mod.bitOf(ci);
+            }
+        }
+        if (spawn_mask != 0) {
+            const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
+                self.sim.class_id[i].hash
+            else
+                packages.stock_entity.class_zombie_default;
+            const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
+            if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
+                .entity_id = self.sim.network_id[i].id,
+                .entity_class = eclass,
+                .x = self.sim.transform[i].x,
+                .y = self.sim.transform[i].y,
+                .z = self.sim.transform[i].z,
+                .yaw = self.sim.transform[i].yaw,
+                .is_sleeper = sleeper,
+                .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
+                    var ent_buf: [16]packages.TraderStockEntry = undefined;
+                    const n = self.stockEntries(i, &ent_buf);
+                    break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
+                } else null,
+            })) |spb| {
+                var m = spawn_mask;
+                while (m != 0) : (m &= m - 1) {
+                    const ci = @ctz(m);
+                    const cl = &self.clients[ci];
+                    const peer = cl.peer orelse continue;
+                    try self.sendGame(peer, "NetPackageEntitySpawn", spb);
+                    cl.known_entities.set(i);
+                    self.harness.counters.inc(.replicate_fanouts);
+                }
+                self.harness.counters.inc(.packages_encoded);
+            } else |_| {
+                self.harness.counters.inc(.encode_errors);
+            }
+        }
+
+        if (is_mob) {
+            for (&self.clients, 0..) |*cl, ci| {
+                if (!cl.known_entities.isSet(i)) continue;
+                if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
+                const peer = cl.peer orelse continue;
+                if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
+                const rb = packages.buildRemoveBodyReason(
+                    &self.body_buf,
+                    self.sim.network_id[i].id,
+                    .unloaded,
+                ) catch {
+                    self.harness.counters.inc(.encode_errors);
+                    continue;
+                };
+                try self.sendGame(peer, "NetPackageEntityRemove", rb);
+                cl.known_entities.unset(i);
+                self.harness.counters.inc(.packages_encoded);
+            }
+        }
+
+        const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
+        if (!interest.needsPosSend(d, self.tick_n)) continue;
+
+        const viewers = if (self.sim.mask[i].player)
+            in_range & ~game_mod.bitOfPeerSlot(self.sim.player[i].peer_slot)
+        else
+            in_range;
+        if (viewers == 0) {
+            self.harness.counters.inc(.replicate_encodes_skipped);
+            continue;
+        }
+
+        const nid = self.sim.network_id[i].id;
+        const body = packages.buildPosAndRotBody(
+            self.body_buf[0..game_mod.speeds_body_off],
+            nid,
+            self.sim.transform[i].x,
+            self.sim.transform[i].y,
+            self.sim.transform[i].z,
+            0,
+            self.sim.transform[i].yaw,
+            0,
+            true,
+        ) catch continue;
+        const pos_framed = packages.framed(&pos_frame_buf, "NetPackageEntityPosAndRot", body) catch continue;
+        self.harness.counters.inc(.packages_encoded);
+
+        var speeds_framed: ?[]const u8 = null;
+        var flags_framed: ?[]const u8 = null;
+        if (self.sim.mask[i].kind and self.sim.kind[i] == .zombie) {
+            var fwd: f32 = 0.2;
+            var state: u8 = 1;
+            var flags: u16 = packages.cF_spawned;
+            if (self.sim.mask[i].zombie_ai) {
+                const st = self.sim.zombie_ai[i].state;
+                if (st == .chase or st == .attack) {
+                    fwd = 1.0;
+                    state = 2;
+                    flags |= packages.cF_is_alert | packages.cF_approaching_player;
+                } else if (st == .sleep) {
+                    fwd = 0;
+                    state = 0;
+                }
+            }
+            if (packages.buildEntitySpeedsBody(self.body_buf[game_mod.speeds_body_off..game_mod.flags_body_off], nid, state, fwd, 0)) |sb| {
+                if (packages.framed(&speeds_frame_buf, "NetPackageEntitySpeeds", sb)) |sf| {
+                    speeds_framed = sf;
+                    self.harness.counters.inc(.packages_encoded);
+                } else |_| {}
+            } else |_| {}
+            if (packages.buildAliveFlagsBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 16], nid, flags)) |fb| {
+                if (packages.framed(&flags_frame_buf, "NetPackageEntityAliveFlags", fb)) |ff| {
+                    flags_framed = ff;
+                    self.harness.counters.inc(.packages_encoded);
+                } else |_| {}
+            } else |_| {}
+        }
+
+        const per_viewer: u64 = 1 +
+            @as(u64, @intFromBool(speeds_framed != null)) +
+            @as(u64, @intFromBool(flags_framed != null));
+        var m = viewers;
+        while (m != 0) : (m &= m - 1) {
+            const ci = @ctz(m);
+            const peer = self.clients[ci].peer orelse continue;
+            self.sendFramedUnreliable(peer, pos_framed);
+            if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
+            if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
+            self.harness.counters.add(.replicate_fanouts, per_viewer);
+        }
+    }
+
+    var dirty_now = self.sim.dirty_bits;
+    var dirty_it = dirty_now.iterator(.{});
+    while (dirty_it.next()) |j| {
+        interest.clearAfterReplicate(&self.sim.dirty[j]);
+        self.sim.syncDirtyBit(@intCast(j));
+    }
+    self.clearDeadKnownEntities();
+}

@@ -30,6 +30,7 @@ const game_quest = @import("game/quest.zig");
 const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
+const game_replicate = @import("game/replicate.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
 const c2s_quest = @import("c2s/quest.zig");
@@ -5509,7 +5510,7 @@ pub const Game = struct {
     /// Stream chunks around player and remove far ones (stock ChunkRemove key).
     /// Caps: `self.max_streamed_chunks`, `chunk_stream_radius_{min,max}`,
     /// `self.chunk_adds_per_stream_tick` (named; no magic pacing numbers).
-    fn streamChunksForClient(self: *Game, c: *Client) !void {
+    pub fn streamChunksForClient(self: *Game, c: *Client) !void {
         const cs = apm.profiler.scope(&self.harness.prof, .chunk_stream);
         defer cs.end();
         const peer = c.peer orelse return;
@@ -5638,7 +5639,7 @@ pub const Game = struct {
     /// SendStatChangePacket (asm.il:199650) uses instigator -1 on a dedicated
     /// server and passes `_inRangeOnly = enumStat != 0`, so Health goes to every
     /// player tracking the entity **and** to the entity itself, range regardless.
-    fn replicatePlayerHealth(self: *Game) void {
+    pub fn replicatePlayerHealth(self: *Game) void {
         var i: ecs.Slot = 0;
         while (i < ecs.max_entities) : (i += 1) {
             if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
@@ -5686,7 +5687,7 @@ pub const Game = struct {
     }
 
     /// True when (wx,wz) is inside this client's interest box.
-    fn clientObserves(self: *const Game, cl: *const Client, wx: f32, wz: f32) bool {
+    pub fn clientObserves(self: *const Game, cl: *const Client, wx: f32, wz: f32) bool {
         if (cl.entity_id <= 0) return false;
         const oi = self.sim.slotOfNetId(cl.entity_id) orelse return false;
         if (!self.sim.mask[oi].transform) return false;
@@ -5719,275 +5720,11 @@ pub const Game = struct {
         return game_social.broadcastBuffExpiries(self, r);
     }
 
-    /// M11 serialize-once interest: for each entity that needs a motion send,
-    /// encode PosAndRot (and zombie Speeds/AliveFlags) once, frame once, then
-    /// fan-out framed bytes to interested peers. Cost ~ O(dirty × interest), not
-    /// O(players × entities × encode). Dirty pos/rot/spawn/flags clear after pass.
-    ///
-    /// The candidate set comes from the sim's bitsets, not a slot walk: off
-    /// heartbeat only dirty entities plus mobs (which still drive
-    /// spawn-on-approach) are visited. Interest itself is one `observerMask`
-    /// word per entity, the same shape as stock's per-entity trackedPlayers set
-    /// (NetEntityDistributionEntry::SendToPlayers, asm.il:800867), so the three
-    /// per-entity client sweeps collapse into bit walks over interested peers.
-    /// Send cadence and byte order are unchanged: candidates stay slot-ascending
-    /// and EntitySpawn still precedes PosAndRot for the same entity.
     fn replicate(self: *Game) !void {
-        const sc = apm.profiler.scope(&self.harness.prof, .replicate);
-        defer sc.end();
-        for (&self.clients) |*c| {
-            // Persistent socket failure here is the "player times out silently"
-            // path; keep it visible via the send-error counter.
-            if (c.peer) |p| p.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
-        }
-        // Continuous stock chunk stream around each player (ChunkRemove far keys).
-        if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
-            for (&self.clients) |*cl| {
-                if (cl.peer == null or !(cl.entered or cl.world_ready)) continue;
-                self.streamChunksForClient(cl) catch |err| {
-                    self.harness.counters.inc(.stream_errors);
-                    const n = self.harness.counters.get(.stream_errors);
-                    if (n == 1 or n % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: chunk stream failed slot={d} entity={d} n={d}: {s}\n",
-                            .{ cl.slot, cl.entity_id, n, @errorName(err) },
-                        );
-                    }
-                };
-            }
-        }
-        // Health before the motion gate: a hit must reach the victim on the tick
-        // it lands, and the gate's early returns would swallow it every other tick.
-        self.replicatePlayerHealth();
-        // Motion every other tick so join/control packages keep window room.
-        if (self.tick_n % self.motion_replicate_period_ticks != 0) {
-            self.clearDeadKnownEntities();
-            return;
-        }
-        // Empty world: still reconcile known bits if anything died this tick.
-        if (self.sim.entity_count == 0) {
-            self.clearDeadKnownEntities();
-            return;
-        }
-
-        var pos_frame_buf: [replicate_frame_cap]u8 = undefined;
-        var speeds_frame_buf: [replicate_frame_cap]u8 = undefined;
-        var flags_frame_buf: [replicate_frame_cap]u8 = undefined;
-
-        // Observer interest cells resolved once per pass (sim is not mutated
-        // below), not per entity × client in each interest loop.
-        var obs_cx: [max_clients]i32 = .{0} ** max_clients;
-        var obs_cz: [max_clients]i32 = .{0} ** max_clients;
-        // Whether the cell above is real. An unresolved observer keeps (0,0),
-        // which the unload pass below must not read as "everything is far away":
-        // that would evict the client's whole known set from the origin cell.
-        var obs_ok: [max_clients]bool = .{false} ** max_clients;
-        var obs_r: [max_clients]i32 = .{0} ** max_clients;
-        // Client slots that take fan-out at all. Empty/joining slots keep cell
-        // (0,0) as before, but never reach observerMask because their bit is 0.
-        var active: ObsMask = 0;
-        for (&self.clients, 0..) |*cl, ci| {
-            obs_r[ci] = cl.view_radius;
-            if (cl.joined and cl.entered and cl.peer != null) active |= bitOf(ci);
-            // Empty/joining slots have no entity; skip before the net-id lookup.
-            if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
-            if (self.sim.slotOfNetId(cl.entity_id)) |si| {
-                const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
-                obs_cx[ci] = oc.cx;
-                obs_cz[ci] = oc.cz;
-                obs_ok[ci] = true;
-            }
-        }
-
-        // Dirty gate. On a heartbeat pass every live entity emits PosAndRot, so
-        // the candidate set is all of alive_bits. Otherwise only entities whose
-        // pos/rot changed need a motion send, plus mobs, which are the only
-        // kinds with spawn-on-approach. Iterating the union keeps slot-ascending
-        // order (a kind-group walk would not) and is taken as a snapshot: a
-        // send below can poll the socket and spawn or destroy entities.
-        const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
-        var candidates = self.sim.alive_bits;
-        if (!heartbeat) {
-            candidates = self.sim.dirty_bits;
-            for (self.sim.kind_groups.slice(.zombie)) |s| candidates.set(s);
-            for (self.sim.kind_groups.slice(.animal)) |s| candidates.set(s);
-            for (self.sim.kind_groups.slice(.trader)) |s| candidates.set(s);
-            candidates.setIntersection(self.sim.alive_bits);
-        }
-
-        var cand_it = candidates.iterator(.{});
-        while (cand_it.next()) |cand| {
-            const i: ecs.Slot = @intCast(cand);
-            if (!self.sim.alive[i] or !self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
-            self.harness.counters.inc(.replicate_candidates);
-            const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
-            const in_range = interest.observerMask(max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
-
-            // Spawn-on-approach is per-observer (known_entities); still entity-outer
-            // so we only build EntitySpawn once when multiple clients need it.
-            const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or
-                self.sim.kind[i] == .animal or
-                self.sim.kind[i] == .trader);
-            var spawn_mask: ObsMask = 0;
-            if (is_mob) {
-                var m = in_range;
-                while (m != 0) : (m &= m - 1) {
-                    const ci = @ctz(m);
-                    if (!self.clients[ci].known_entities.isSet(i)) spawn_mask |= bitOf(ci);
-                }
-            }
-            if (spawn_mask != 0) {
-                const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
-                    self.sim.class_id[i].hash
-                else
-                    packages.stock_entity.class_zombie_default;
-                const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
-                if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
-                    .entity_id = self.sim.network_id[i].id,
-                    .entity_class = eclass,
-                    .x = self.sim.transform[i].x,
-                    .y = self.sim.transform[i].y,
-                    .z = self.sim.transform[i].z,
-                    .yaw = self.sim.transform[i].yaw,
-                    .is_sleeper = sleeper,
-                    .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
-                        var ent_buf: [16]packages.TraderStockEntry = undefined;
-                        const n = self.stockEntries(i, &ent_buf);
-                        break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
-                    } else null,
-                })) |spb| {
-                    // EntitySpawn is join-critical for first sight; use sendGame.
-                    var m = spawn_mask;
-                    while (m != 0) : (m &= m - 1) {
-                        const ci = @ctz(m);
-                        const cl = &self.clients[ci];
-                        const peer = cl.peer orelse continue;
-                        try self.sendGame(peer, "NetPackageEntitySpawn", spb);
-                        cl.known_entities.set(i);
-                        self.harness.counters.inc(.replicate_fanouts);
-                    }
-                    self.harness.counters.inc(.packages_encoded);
-                } else |_| {
-                    self.harness.counters.inc(.encode_errors);
-                }
-            }
-
-            // Mirror of spawn-on-approach. Stock NetEntityDistributionEntry::
-            // updatePlayerEntity drops a player that has left the tracking box
-            // from trackedPlayers and sends that one player
-            // NetPackageEntityRemove(entityId, Unloaded) (asm.il:801228-801276;
-            // EnumRemoveEntityReason.Unloaded = 1 at asm.il:1227761). Without it
-            // the mob keeps a client-side ghost that never gets another
-            // PosAndRot and stands frozen in the world forever.
-            if (is_mob) {
-                for (&self.clients, 0..) |*cl, ci| {
-                    if (!cl.known_entities.isSet(i)) continue;
-                    if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
-                    const peer = cl.peer orelse continue;
-                    if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
-                    const rb = packages.buildRemoveBodyReason(
-                        &self.body_buf,
-                        self.sim.network_id[i].id,
-                        .unloaded,
-                    ) catch {
-                        self.harness.counters.inc(.encode_errors);
-                        continue;
-                    };
-                    // Reliable: a dropped removal is a permanent ghost, and the
-                    // bit only clears once the peer has actually been told.
-                    try self.sendGame(peer, "NetPackageEntityRemove", rb);
-                    cl.known_entities.unset(i);
-                    self.harness.counters.inc(.packages_encoded);
-                }
-            }
-
-            const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
-            if (!interest.needsPosSend(d, self.tick_n)) continue;
-
-            // Owner skip is per-peer; still encode once if any other peer wants it.
-            const viewers = if (self.sim.mask[i].player)
-                in_range & ~bitOfPeerSlot(self.sim.player[i].peer_slot)
-            else
-                in_range;
-            if (viewers == 0) {
-                self.harness.counters.inc(.replicate_encodes_skipped);
-                continue;
-            }
-
-            const nid = self.sim.network_id[i].id;
-            const body = packages.buildPosAndRotBody(
-                self.body_buf[0..speeds_body_off],
-                nid,
-                self.sim.transform[i].x,
-                self.sim.transform[i].y,
-                self.sim.transform[i].z,
-                0,
-                self.sim.transform[i].yaw,
-                0,
-                true,
-            ) catch continue;
-            const pos_framed = packages.framed(&pos_frame_buf, "NetPackageEntityPosAndRot", body) catch continue;
-            self.harness.counters.inc(.packages_encoded);
-
-            var speeds_framed: ?[]const u8 = null;
-            var flags_framed: ?[]const u8 = null;
-            if (self.sim.mask[i].kind and self.sim.kind[i] == .zombie) {
-                var fwd: f32 = 0.2;
-                var state: u8 = 1; // walking-ish
-                var flags: u16 = packages.cF_spawned;
-                if (self.sim.mask[i].zombie_ai) {
-                    const st = self.sim.zombie_ai[i].state;
-                    if (st == .chase or st == .attack) {
-                        fwd = 1.0;
-                        state = 2;
-                        flags |= packages.cF_is_alert | packages.cF_approaching_player;
-                    } else if (st == .sleep) {
-                        fwd = 0;
-                        state = 0;
-                    }
-                }
-                if (packages.buildEntitySpeedsBody(self.body_buf[speeds_body_off..flags_body_off], nid, state, fwd, 0)) |sb| {
-                    if (packages.framed(&speeds_frame_buf, "NetPackageEntitySpeeds", sb)) |sf| {
-                        speeds_framed = sf;
-                        self.harness.counters.inc(.packages_encoded);
-                    } else |_| {}
-                } else |_| {}
-                if (packages.buildAliveFlagsBody(self.body_buf[flags_body_off .. flags_body_off + 16], nid, flags)) |fb| {
-                    if (packages.framed(&flags_frame_buf, "NetPackageEntityAliveFlags", fb)) |ff| {
-                        flags_framed = ff;
-                        self.harness.counters.inc(.packages_encoded);
-                    } else |_| {}
-                } else |_| {}
-            }
-
-            // Packages per viewer, so the counter measures framed sends and the
-            // encode/fan-out ratio stays readable when zombies add two extras.
-            const per_viewer: u64 = 1 +
-                @as(u64, @intFromBool(speeds_framed != null)) +
-                @as(u64, @intFromBool(flags_framed != null));
-            var m = viewers;
-            while (m != 0) : (m &= m - 1) {
-                const ci = @ctz(m);
-                const peer = self.clients[ci].peer orelse continue;
-                self.sendFramedUnreliable(peer, pos_framed);
-                if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
-                if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
-                self.harness.counters.add(.replicate_fanouts, per_viewer);
-            }
-        }
-
-        // Clear motion dirty after full fan-out (even if no observers this tick).
-        // Snapshot first: clearing lowers bits in the live set as we walk it.
-        var dirty_now = self.sim.dirty_bits;
-        var dirty_it = dirty_now.iterator(.{});
-        while (dirty_it.next()) |j| {
-            interest.clearAfterReplicate(&self.sim.dirty[j]);
-            self.sim.syncDirtyBit(@intCast(j));
-        }
-        self.clearDeadKnownEntities();
+        return game_replicate.replicate(self);
     }
 
-    fn clearDeadKnownEntities(self: *Game) void {
+    pub fn clearDeadKnownEntities(self: *Game) void {
         return game_tick.clearDeadKnownEntities(self);
     }
 
