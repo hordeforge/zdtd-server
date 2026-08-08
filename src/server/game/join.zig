@@ -556,4 +556,3 @@ pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stac
     }
     try self.sendGame(peer, "NetPackageHoldingItem", hb);
 }
-

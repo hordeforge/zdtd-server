@@ -140,4 +140,3 @@ pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     if (g.items.byId(item_id)) |_| return g.items.stackFor(item_id);
     return invsys.maxStackBuiltin(item_id);
 }
-

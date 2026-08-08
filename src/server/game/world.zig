@@ -228,4 +228,3 @@ pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
         return;
     }
 }
-
