@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `afdbb59`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **963/963** (three consecutive runs; the 4 flakes are fixed, see below)
+**Branch:** `main` at `4776b80`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **966/966** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -25,15 +25,15 @@
 ## Working tree right now
 
 ```
-working tree clean at afdbb59
-game.zig 5099 lines (was 5310 at handoff): loot, weather and vehicle shards
-  committed (67f2a88, 6db0ed9, 82b9e24) with thin forwarders
+working tree clean at 4776b80
+game.zig 5115 lines (was 5310 at handoff): loot/weather/vehicle shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
-  (87a54bb, fc9f69e, afdbb59)
+parity: trader inventory roll + party highest game stage landed
+966/966 tests, lint + fmt clean
 ```
 
-All work is committed through `afdbb59`; nothing staged, nothing untracked
-except this handoff note.
+All work is committed through `4776b80`; nothing staged or untracked except
+this handoff note.
 
 ## What is still open (bounded next slices)
 
@@ -49,17 +49,34 @@ except this handoff note.
 ### Done since this handoff was written
 
 - `loot.zig` committed (67f2a88), then `weather.zig` (6db0ed9) and
-  `vehicle.zig` (82b9e24) extracted; `game.zig` 5310 → 5099.
+  `vehicle.zig` (82b9e24) extracted; `game.zig` 5310 → 5115.
 - **All 4 flakes root-caused and fixed.** Scenario worlds and
   `.zdtd_cfg_cache` dirs retained a previous run's `entities.zen`, and every
   boot re-seeded the demo minibike + turret on top of the restored ones, so
   vehicle/turret records grew ~2 per suite run until entity slots (512) or the
   8 KiB console reply sink ran out (multi-seat join failure, console listents
   truncation, blood-moon timing). Fix: `had_saved_entities` gates the
-  persistable demo seeds (real restart bug), `freshScenarioDir` wipes each
-  scenario world before its test, and the console test wipes its own dir
-  (`io_fs.removeDirTreeSimple`). `zig build test` → **963/963** across three
-  consecutive runs; counts provably stable.
+  persistable demo seeds (a real restart bug: duplicates on every boot),
+  `freshScenarioDir` wipes each scenario world before its test, and the
+  console test wipes its own dir (`io_fs.removeDirTreeSimple`). `zig build
+  test` is now 966/966 with provably stable counts across consecutive runs.
+- **Trader inventory roll** (c1c3d39, GAP "Inventory roll" closed): the
+  parser keeps `count="lo,hi"`, `prob`, `unique_only`, `quality="lo,hi"` on
+  refs and groups, and the fill runs the ported `TraderInfo` spawn
+  (asm.il 862758-863520): top-level refs always spawn, group members pick
+  prob-weighted with unique dedupe, counts roll uniform in [min,max]
+  (`RandomSpawnCount`), quality rolls uniform and rides the TraderData wire
+  (was hardcoded 1). Seeded per (world seed, trader, day) so restock rolls
+  fresh but replays. Restock full-rebuild, TraderMaxTier clamp and
+  mods/modChance stay open.
+- **Party highest game stage** (01fa28d, GAP closed): `partyHighestGameStage`
+  (max member stage of the largest party, or max over joined when ungrouped)
+  feeds `director.party_stage` for blood-moon horde difficulty, replacing the
+  weighted CalcPartyLevel approximation. Sleeper volumes keep the stock
+  radius-based CalcGameStageAround.
+- **Trader root attrs RE'd** (4776b80): `quality_mod` is a client-side price
+  quality lerp (zdtd's trade is client-mirrored, so informational only);
+  `quest_tier_mod` is quest-reward tier scaling, open with the quest economy.
 - `make check` fmt gate: `zig fmt` drift from the extraction commits fixed
   (tests.zig indentation, wasm.zig/misc.zig).
 
