@@ -41,6 +41,7 @@ pub const game_sleeper = @import("game/sleeper.zig");
 pub const game_hooks = @import("game/hooks.zig");
 pub const game_deco = @import("game/deco.zig");
 pub const game_loot = @import("game/loot.zig");
+pub const game_weather = @import("game/weather.zig");
 pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
@@ -88,6 +89,7 @@ test {
     _ = game_hooks;
     _ = game_deco;
     _ = game_loot;
+    _ = game_weather;
     _ = game_tests;
     _ = c2s_inv;
     _ = c2s_move;
