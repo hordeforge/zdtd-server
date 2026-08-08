@@ -1472,9 +1472,12 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
         ai.state = .attack;
         ai.clearPath();
         if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
-            // A11: HandItem DamageEntity on class_table; Rules floor if 0
-            // (ADR 0021 decision 5: entityclasses/items XML still wins).
-            const adm: f32 = if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
+            // A35: the per-entity class stats carried by spawnZombieDef / the
+            // animal resolver win first; the class_table row is the fallback,
+            // then the Rules floor (ADR 0021 decision 5: entityclasses/items
+            // XML still wins). Matches the chase/wander chain above.
+            const pad: f32 = ctx.w.class_id[s].attack_damage;
+            const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
             const add: u32 = @intFromFloat(adm * @as(f32, @floatFromInt(dmg_scale)));
             _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
             _ = ctx.hits.fetchAdd(1, .monotonic);
@@ -2808,6 +2811,34 @@ test "class_table attack/chase floors only when field is zero" {
 // for per-entity stock data (ADR 0021 decision 5). These three tests set a
 // Rules value and a conflicting entityclasses value and assert the loaded
 // class table wins, exactly as the production resolve order does.
+
+test "per-entity attack_damage beats the class_table row and the Rules floor" {
+    var w: World = .{ .rules = .{ .combat = .{ .attack_damage = 100.0 } } };
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20; // items.xml DamageEntity (via HandItem)
+    // spawnZombieDef carries the full resolved row (A35): the per-entity 5
+    // must win over the class_table 20 and the Rules 100 floor.
+    const z = w.spawnZombieDef(0, 70, 0, 40, .{
+        .name = "zombieFeral",
+        .max_hp = 60,
+        .kind = .zombie,
+        .hash = 123,
+        .attack_damage = 5,
+    }).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const lost = hp0 - w.health[ps].hp;
+    // Per-entity 5 x ~2 bites ~= 10. A class_table-only read would have dealt
+    // 20 (40+), and a Rules-only read 100 (death at 100).
+    try std.testing.expect(lost >= 5);
+    try std.testing.expect(lost < 25);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
 test "configured attack floor never beats the entityclasses value" {
     var w: World = .{ .rules = .{ .combat = .{ .attack_damage = 100.0 } } };
     defer w.deinit();
