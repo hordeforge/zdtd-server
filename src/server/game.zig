@@ -210,6 +210,8 @@ pub const default_trader_restock_refill = game_types.default_trader_restock_refi
 pub const default_storm_frequency = game_types.default_storm_frequency;
 pub const default_peer_stale_ms = game_types.default_peer_stale_ms;
 pub const default_lock_stale_ns = game_types.default_lock_stale_ns;
+pub const default_join_rate_limit_ms = game_types.default_join_rate_limit_ms;
+pub const default_craft_max_times = game_types.default_craft_max_times;
 pub const default_deco_objects_per_join = game_types.default_deco_objects_per_join;
 pub const window_fast_attempts = game_types.window_fast_attempts;
 pub const window_retry_sleep_ns = game_types.window_retry_sleep_ns;
@@ -561,6 +563,8 @@ pub const Game = struct {
     interest_range: f32 = default_interest_range,
     peer_stale_ms: u64 = default_peer_stale_ms,
     lock_stale_ns: u64 = default_lock_stale_ns,
+    join_rate_limit_ms: u64 = default_join_rate_limit_ms,
+    craft_max_times: u16 = default_craft_max_times,
     min_chat_gap_ns: u64 = default_min_chat_gap_ns,
     inv_bucket_cap: u8 = default_inv_bucket_cap,
     inv_refill_ns: u64 = default_inv_refill_ns,
@@ -651,6 +655,8 @@ pub const Game = struct {
             .interest_range = opts.interest_range,
             .peer_stale_ms = opts.peer_stale_ms,
             .lock_stale_ns = opts.lock_stale_ns,
+            .join_rate_limit_ms = opts.join_rate_limit_ms,
+            .craft_max_times = opts.craft_max_times,
             .min_chat_gap_ns = opts.min_chat_gap_ns,
             .inv_bucket_cap = opts.inv_bucket_cap,
             .inv_refill_ns = opts.inv_refill_ns,
@@ -2376,7 +2382,7 @@ pub const Game = struct {
         // Loopback multi-bot / unit tests share 127.0.0.1: do not throttle.
         if (ip == 0x7f000001) return false;
         const now_ms: u64 = clock.monoNs() / 1_000_000;
-        const gap_ms: u64 = 500;
+        const gap_ms: u64 = self.join_rate_limit_ms;
         var i: usize = 0;
         while (i < self.join_ip_n) : (i += 1) {
             if (self.join_ip[i] != ip) continue;
@@ -3776,7 +3782,7 @@ pub const Game = struct {
     fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
         const ps = self.sim.playerByPeer(peer_slot) orelse return false;
         if (!self.sim.mask[ps].inventory) return false;
-        const n: u16 = if (times == 0) 1 else @min(times, 20);
+        const n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
         // Aggregate by ECS id so duplicate ingredient lines (or aliases that
         // resolve to the same id) do not double-count inventory room.
         var need: [assets_recipes.max_ingredients]struct { id: u16, count: u32 } = undefined;

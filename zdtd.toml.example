@@ -26,6 +26,8 @@ interest_range_blocks = 160.0
 max_edit_range_blocks = 96.0
 max_claimed_damage = 200
 peer_stale_ms = 3000
+# Join rate-limit gap per IP (stock paces ~500 ms/IP; loopback is exempt).
+# join_rate_limit_ms = 500
 # mode = "correct"   # observe | permissive | correct
 
 # P4 guard policy (docs/AUTHORITY.md). Defaults are log-only: a tripped gate
@@ -70,6 +72,8 @@ block_id_mapping = true
 # Trader restock refill policy (stackables grow toward the cap each restock).
 # trader_restock_cap = 50
 # trader_restock_refill = 10
+# Max craft batch a client can request in one InvTx craft.
+# craft_max_times = 20
 # Storm frequency percent (World::StormFrequency; default 100 = 1.0x, 0 disables
 # storms). No stock V3.1.0 serverconfig key; feeds the weather scheduler and
 # the GameStats wire value.

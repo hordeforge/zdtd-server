@@ -71,6 +71,16 @@ pub const default_trader_restock_refill: u16 = 10;
 pub const default_storm_frequency: i32 = 100;
 pub const default_peer_stale_ms: u64 = 3000;
 
+/// Join rate-limit gap per IP (zdtd.toml [authority] join_rate_limit_ms).
+/// Stock paces connection attempts at ~500 ms/IP (asm.il ConnectionManager
+/// flood gate); loopback is exempt so bots/tests share 127.0.0.1.
+pub const default_join_rate_limit_ms: u64 = 500;
+
+/// Max craft batch a client can request in one InvTx craft (zdtd.toml
+/// [sim] craft_max_times). Stock RecipeQueueItem multipliers are server
+/// governed; 20 bounds a single burst.
+pub const default_craft_max_times: u16 = 20;
+
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
 pub const default_deco_objects_per_join: usize = 8192;
@@ -215,6 +225,10 @@ pub const InitOptions = struct {
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
     lock_stale_ns: u64 = default_lock_stale_ns,
+    /// Join rate-limit gap per IP (zdtd.toml [authority] join_rate_limit_ms).
+    join_rate_limit_ms: u64 = default_join_rate_limit_ms,
+    /// Max craft batch per InvTx request (zdtd.toml [sim] craft_max_times).
+    craft_max_times: u16 = default_craft_max_times,
     /// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
     /// bucket shape, plus the damage-accept gap and burst cap.
     min_chat_gap_ns: u64 = default_min_chat_gap_ns,

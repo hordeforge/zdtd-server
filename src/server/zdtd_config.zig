@@ -38,6 +38,7 @@ pub const Authority = struct {
     max_claimed_damage: ?i32 = null,
     peer_stale_ms: ?u64 = null,
     lock_stale_ms: ?u64 = null,
+    join_rate_limit_ms: ?u64 = null,
     mode: ?[]const u8 = null,
     /// P4 guard policy (src/server/guard_policy.zig). Defaults are log-only:
     /// enforce/quarantine off, dry_run on. See docs/AUTHORITY.md.
@@ -94,6 +95,8 @@ pub const Sim = struct {
     /// at most the refill each restock.
     trader_restock_cap: ?u16 = null,
     trader_restock_refill: ?u16 = null,
+    /// Max craft batch per InvTx request.
+    craft_max_times: ?u16 = null,
     /// Storm frequency percent (World::StormFrequency, stock GamePrefs default
     /// 100 = 1.0x; 0 disables storms). No V3.1.0 serverconfig key (world state,
     /// GameStats blob); this is the zdtd.toml surface.
@@ -207,6 +210,12 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
     if (f.authority.lock_stale_ms) |v| {
         if (@hasField(@TypeOf(opts.*), "lock_stale_ns")) opts.lock_stale_ns = v *% 1_000_000;
+    }
+    if (f.authority.join_rate_limit_ms) |v| {
+        if (@hasField(@TypeOf(opts.*), "join_rate_limit_ms")) opts.join_rate_limit_ms = v;
+    }
+    if (f.sim.craft_max_times) |v| {
+        if (@hasField(@TypeOf(opts.*), "craft_max_times")) opts.craft_max_times = v;
     }
     if (f.authority.guard_enforce) |v| opts.guard.enforce = v;
     if (f.authority.guard_dry_run) |v| opts.guard.dry_run = v;
