@@ -2237,164 +2237,19 @@ pub const Game = struct {
     /// load (spawnTurret re-adds its node); riders are session state and not
     /// persisted (a parked-but-mounted vehicle saves empty).
     pub fn saveEntities(self: *Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
-        var buf: [ecs.max_entities * 32 + 8]u8 = undefined;
-        var w = wire_binary.Writer{ .buf = &buf };
-        w.writeBytes("ZENT") catch return;
-        w.writeU16(0) catch return; // count patched below
-        var count: u16 = 0;
-        var i: usize = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!self.sim.alive[i] or !self.sim.mask[i].transform) continue;
-            if (self.sim.kind[i] == .vehicle) {
-                const v = self.sim.vehicle[i];
-                w.writeByte(1) catch return;
-                w.writeByte(@intFromEnum(v.kind)) catch return;
-                w.writeF32(self.sim.transform[i].x) catch return;
-                w.writeF32(self.sim.transform[i].y) catch return;
-                w.writeF32(self.sim.transform[i].z) catch return;
-                w.writeF32(self.sim.transform[i].yaw) catch return;
-                w.writeF32(v.fuel) catch return;
-                w.writeByte(v.seat_count) catch return;
-                w.writeF32(v.max_speed) catch return;
-                count += 1;
-            } else if (self.sim.kind[i] == .turret) {
-                const t = self.sim.turret[i];
-                w.writeByte(2) catch return;
-                w.writeF32(self.sim.transform[i].x) catch return;
-                w.writeF32(self.sim.transform[i].y) catch return;
-                w.writeF32(self.sim.transform[i].z) catch return;
-                w.writeF32(t.range) catch return;
-                w.writeF32(t.damage) catch return;
-                w.writeU16(t.ammo) catch return;
-                count += 1;
-            }
-        }
-        const written = w.written();
-        std.mem.writeInt(u16, written[4..6], count, .little);
-        try io_fs.writeFileSimple(p, written);
+        return persist.saveEntities(self);
     }
 
-    /// Restore vehicles/turrets from entities.zen. A missing file is a fresh
-    /// world (OpenFailed); a corrupt record fails the load loudly. Turrets
-    /// whose block was removed no longer resolve a power node and are skipped.
     fn loadEntities(self: *Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
-        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
-            error.FileNotFound => return error.OpenFailed,
-            else => return error.ReadFailed,
-        };
-        defer self.allocator.free(data);
-        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZENT")) return error.BadMagic;
-        const count = std.mem.readInt(u16, data[4..6], .little);
-        var r = wire_binary.Reader{ .data = data, .pos = 6 };
-        var i: usize = 0;
-        while (i < count) : (i += 1) {
-            const rec_type = r.readByte() catch return error.Truncated;
-            switch (rec_type) {
-                1 => {
-                    const kind: ecs.components.VehicleKind = @enumFromInt(r.readByte() catch return error.Truncated);
-                    const x = r.readF32() catch return error.Truncated;
-                    const y = r.readF32() catch return error.Truncated;
-                    const z = r.readF32() catch return error.Truncated;
-                    const yaw = r.readF32() catch return error.Truncated;
-                    const fuel = r.readF32() catch return error.Truncated;
-                    const seats = r.readByte() catch return error.Truncated;
-                    const max_speed = r.readF32() catch return error.Truncated;
-                    if (self.sim.spawnVehicleEx(kind, x, y, z, 200, max_speed, seats)) |nid| {
-                        if (self.sim.slotOfNetId(nid)) |vs| {
-                            self.sim.vehicle[vs].fuel = fuel;
-                            self.sim.transform[vs].yaw = yaw;
-                        }
-                    }
-                },
-                2 => {
-                    const x = r.readF32() catch return error.Truncated;
-                    const y = r.readF32() catch return error.Truncated;
-                    const z = r.readF32() catch return error.Truncated;
-                    const range = r.readF32() catch return error.Truncated;
-                    const damage = r.readF32() catch return error.Truncated;
-                    const ammo = r.readU16() catch return error.Truncated;
-                    if (self.sim.spawnTurret(x, y, z)) |nid| {
-                        if (self.sim.slotOfNetId(nid)) |ts| {
-                            self.sim.turret[ts].range = range;
-                            self.sim.turret[ts].damage = damage;
-                            self.sim.turret[ts].ammo = ammo;
-                        }
-                    }
-                },
-                else => return error.BadRecord,
-            }
-        }
+        return persist.loadEntities(self);
     }
 
     pub fn saveClaims(self: *Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
-        var buf: [max_land_claims * (4 + 4 + 4 + 1 + 32 + 4) + 8]u8 = undefined;
-        var o: usize = 0;
-        @memcpy(buf[0..4], "ZCLC");
-        o = 6; // count patched below
-        var count: u16 = 0;
-        var i: usize = 0;
-        while (i < self.land_claims_n) : (i += 1) {
-            const c = &self.land_claims[i];
-            if (o + 49 > buf.len) break;
-            std.mem.writeInt(i32, buf[o..][0..4], c.x, .little);
-            std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.y, .little);
-            std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.z, .little);
-            buf[o + 12] = c.owner_name_len;
-            @memcpy(buf[o + 13 ..][0..32], &c.owner_name);
-            std.mem.writeInt(u32, buf[o + 45 ..][0..4], c.owner_seen_day, .little);
-            o += 49;
-            count += 1;
-        }
-        std.mem.writeInt(u16, buf[4..6], count, .little);
-        try io_fs.writeFileSimple(p, buf[0..o]);
+        return persist.saveClaims(self);
     }
 
-    /// Restore land claims from claims.zlc. Restored claims have no live owner
-    /// until their player logs in (reclaimForName re-maps owner_entity); the
-    /// preserved seen_day keeps the offline expiry math honest. A missing file
-    /// means fresh world (OpenFailed, like containers.load); any other read
-    /// failure surfaces so the caller can log before the next save clobbers.
     fn loadClaims(self: *Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/claims.zlc", .{self.world.world_dir});
-        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
-            error.FileNotFound => return error.OpenFailed,
-            else => return error.ReadFailed,
-        };
-        defer self.allocator.free(data);
-        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZCLC")) return error.BadMagic;
-        const count = std.mem.readInt(u16, data[4..6], .little);
-        var o: usize = 6;
-        var i: usize = 0;
-        while (i < count and self.land_claims_n < max_land_claims) : (i += 1) {
-            if (o + 49 > data.len) return error.Truncated;
-            const x = std.mem.readInt(i32, data[o..][0..4], .little);
-            const y = std.mem.readInt(i32, data[o + 4 ..][0..4], .little);
-            const z = std.mem.readInt(i32, data[o + 8 ..][0..4], .little);
-            const name_len = data[o + 12];
-            if (name_len > 32) return error.BadRecord;
-            var name: [32]u8 = .{0} ** 32;
-            @memcpy(name[0..name_len], data[o + 13 ..][0..name_len]);
-            const seen = std.mem.readInt(u32, data[o + 45 ..][0..4], .little);
-            o += 49;
-            self.land_claims[self.land_claims_n] = .{
-                .x = x,
-                .y = y,
-                .z = z,
-                .owner_entity = -1, // re-mapped on login
-                .owner_online = false,
-                .owner_seen_day = seen,
-                .owner_name = name,
-                .owner_name_len = name_len,
-            };
-            self.land_claims_n += 1;
-        }
+        return persist.loadClaims(self);
     }
 
     /// Re-map restored claims to the entity id a player got at login, and mark
