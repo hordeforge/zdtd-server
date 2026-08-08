@@ -691,7 +691,9 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
 test "wasm plugin admin command hook handles ping/echo and falls through" {
     const Cap = struct {
         fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
-        fn tickFn(_: *HostCtx) u64 { return 1; }
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
         fn queueFn(_: *HostCtx, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
@@ -726,7 +728,9 @@ test "wasm plugin admin command hook handles ping/echo and falls through" {
 test "wasm chat filter hook deny/rewrite/keep" {
     const Cap = struct {
         fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
-        fn tickFn(_: *HostCtx) u64 { return 1; }
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
         fn queueFn(_: *HostCtx, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };

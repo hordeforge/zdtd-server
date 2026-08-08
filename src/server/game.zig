@@ -776,12 +776,18 @@ pub const Game = struct {
             }
         };
         // Spawned vehicles / turrets survive restart (entities.zen).
-        self.loadEntities() catch |e| {
+        // Track whether any were restored: the demo pad below must not
+        // re-seed persistable kinds (minibike, turret) on top of them, or
+        // every restart adds duplicates until the entity table fills.
+        var had_saved_entities = false;
+        if (self.loadEntities()) |_| {
+            had_saved_entities = true;
+        } else |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load entities", e);
                 return e;
             }
-        };
+        }
         // Ally relationships survive restart (allies.zal).
         self.allies.load(self.world.world_dir, self.allocator) catch |e| {
             if (e != error.OpenFailed) {
@@ -1419,7 +1425,9 @@ pub const Game = struct {
         if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"), self.trader_wallet_dukes)) |trader_id| {
             self.fillTraderFromXml(trader_id);
         }
-        {
+        // Persistable kinds seed only on a fresh world; entities.zen owns
+        // them across restarts (see had_saved_entities above).
+        if (!had_saved_entities) {
             const vk: ecs.components.VehicleKind = .minibike;
             if (self.vehicles.byKind(vk)) |vd| {
                 _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max, vd.seat_count);
@@ -1448,11 +1456,16 @@ pub const Game = struct {
         });
 
         // Demo power grid off the spawn pad (do not auto-wire a live turret onto seed zombies).
+        // The turret is persistable and only seeds fresh; the generator is a
+        // virtual node (no block) and re-seeds every boot so a restored turret
+        // still finds a source after a restart.
         const gen = self.sim.power.addNode(.generator, @intFromFloat(sx + 50), @intFromFloat(sy), @intFromFloat(sz + 50), 100);
-        if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
-            if (gen) |gid| {
-                if (self.sim.slotOfNetId(tid)) |ts| {
-                    _ = self.sim.power.connect(gid, self.sim.turret[ts].power_node);
+        if (!had_saved_entities) {
+            if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
+                if (gen) |gid| {
+                    if (self.sim.slotOfNetId(tid)) |ts| {
+                        _ = self.sim.power.connect(gid, self.sim.turret[ts].power_node);
+                    }
                 }
             }
         }
@@ -3835,7 +3848,6 @@ pub const Game = struct {
     pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         return game_trader.fillTraderFromXml(self, trader_net_id);
     }
-
 
     fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
         if (hand_item.len == 0) return 0;

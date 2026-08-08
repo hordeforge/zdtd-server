@@ -207,6 +207,19 @@ pub fn deleteFileSimple(path: []const u8) void {
     deleteFile(std.heap.page_allocator, path);
 }
 
+/// Best-effort recursive removal of a directory tree (files, subdirs,
+/// symlinks). A missing path is a no-op. Used by tests so each scenario world
+/// starts fresh instead of inheriting persisted state from a previous run.
+pub fn removeDirTreeSimple(rel: []const u8) void {
+    var threaded = ioThreaded();
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().deleteTree(io, rel) catch |err| switch (err) {
+        error.PathNotFound => {},
+        else => std.debug.print("zdtd: remove tree '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
+    };
+}
+
 /// Read symlink target into `buf`. Returns slice of `buf` or error.
 pub fn readLinkAbsolute(allocator: std.mem.Allocator, absolute_path: []const u8, buf: []u8) ![]u8 {
     _ = allocator;

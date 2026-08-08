@@ -889,6 +889,9 @@ test "sleeper volume groups resolve through the gamestage ladder" {
 
 test "console replies use the stock error and listing shapes" {
     io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    // Start from a fresh world: a previous run's persisted vehicles would
+    // bloat listents rows past the 8 KiB reply sink and drop the total line.
+    io_fs.removeDirTreeSimple(".zdtd_cfg_cache/admin_stock_shapes");
     const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/admin_stock_shapes", 0);
     defer {
         g.deinit();
