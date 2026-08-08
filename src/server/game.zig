@@ -4216,7 +4216,15 @@ pub const Game = struct {
         while (i < n and si < cont.slot_count) : (i += 1) {
             const eid = self.ecsIdFromItemName(stacks[i].item_name);
             if (eid == 0) continue;
-            cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = 1 });
+            // The template rolls quality for every stack; only quality items
+            // (stock ItemClass.HasQuality = tiered effect controller, which
+            // zdtd approximates as stack==1; quality items never stack) carry
+            // it, so stackables keep quality 1 and merge normally.
+            const q = if (self.items.byId(eid)) |d|
+                (if (d.stack == 1) stacks[i].quality else 1)
+            else
+                stacks[i].quality;
+            cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q });
             si += 1;
         }
         // LootRespawnDays base: the day this loot was generated.

@@ -44,6 +44,8 @@ pub const LootGroup = struct {
     /// How many entries to pick (min,max).
     pick_min: u8 = 1,
     pick_max: u8 = 1,
+    /// loot_quality_template name; empty = inherit the container's.
+    quality_template: []const u8 = "",
     /// count="all": every entry spawns once (stock -1 sentinel →
     /// SpawnAllItemsFromList; regular prob is ignored, force_prob gates).
     pick_all: bool = false,
@@ -55,6 +57,8 @@ pub const LootContainer = struct {
     name: []const u8 = "",
     size_x: u8 = 8,
     size_y: u8 = 6,
+    /// loot_quality_template name (stock every container carries one).
+    quality_template: []const u8 = "",
     entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
     entry_n: u8 = 0,
 };
@@ -62,12 +66,30 @@ pub const LootContainer = struct {
 pub const Stack = struct {
     item_name: []const u8 = "",
     count: u16 = 0,
+    /// Rolled ItemValue quality (loot_quality_template by loot stage); 1 for
+    /// stackables without a quality tier.
+    quality: u8 = 1,
+};
+
+/// One quality-template level band: the loot stage window, the fallback
+/// quality when no pick passes, and the prob-weighted quality picks.
+pub const QualityPick = struct { quality: u8, prob: f32 };
+pub const QualityBand = struct {
+    min_level: i32 = 0,
+    max_level: i32 = 999999,
+    default_quality: u8 = 1,
+    picks: []const QualityPick = &.{},
+};
+pub const QualityTemplate = struct {
+    name: []const u8 = "",
+    bands: []const QualityBand = &.{},
 };
 
 pub const LootTable = struct {
     groups: []const LootGroup = &.{},
     containers: []const LootContainer = &.{},
     prob_templates: []const ProbTemplate = &.{},
+    quality_templates: []const QualityTemplate = &.{},
     /// `<loot_settings poi_tier_mod= poi_tier_bonus=>`: LootManager::POITierMod /
     /// POITierBonus, indexed by Prefab.DifficultyTier-1 (asm.il GetLootStage
     /// ~504240). Empty until a caller knows the POI it is standing in.
@@ -94,6 +116,29 @@ pub const LootTable = struct {
 
     /// Fixed-point milli-prob gate so the roll stays integer-only (DST replay).
     /// `s` is the caller's already-advanced LCG state.
+    /// Resolve the looted item quality from a loot_quality_template by loot
+    /// stage (stock SpawnItem quality-template branch, asm.il 698080): the
+    /// first band whose level window contains the stage, then the first pick
+    /// whose prob the roll beats, else the band default.
+    pub fn resolveQuality(self: *const LootTable, template_name: []const u8, loot_stage: i32, s: u32) u8 {
+        if (template_name.len == 0) return 1;
+        for (self.quality_templates) |qt| {
+            if (!std.mem.eql(u8, qt.name, template_name)) continue;
+            for (qt.bands) |band| {
+                if (loot_stage < band.min_level or loot_stage > band.max_level) continue;
+                const roll: u32 = (s >> 16) % 1000;
+                for (band.picks) |p| {
+                    if (p.prob <= 0) continue;
+                    const thresh: u32 = @intFromFloat(@round(p.prob * 1000.0));
+                    if (roll <= thresh) return p.quality;
+                }
+                return band.default_quality;
+            }
+            return 1;
+        }
+        return 1;
+    }
+
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
         const p = self.entryProb(e, loot_stage);
         // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
@@ -151,7 +196,7 @@ pub const LootTable = struct {
     pub fn rollContainer(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack) usize {
         const cont = self.containerByName(name) orelse {
             // Unknown: try as group name.
-            return self.rollGroup(name, loot_stage, seed, out, 0);
+            return self.rollGroup(name, loot_stage, seed, out, 0, "");
         };
         var n: usize = 0;
         var s = seed ^ 0x9e3779b9;
@@ -169,7 +214,7 @@ pub const LootTable = struct {
                 (i > 0 or e.prob_template != 0) and !self.probGate(e, loot_stage, s);
             if (gate) continue;
             if (e.is_group) {
-                n += self.rollGroup(e.name, loot_stage, s, out[n..], 0);
+                n += self.rollGroup(e.name, loot_stage, s, out[n..], 0, cont.quality_template);
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
@@ -177,7 +222,11 @@ pub const LootTable = struct {
                 // overflow; widen so the modulo never sees a wrapped zero.
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
+                out[n] = .{
+                    .item_name = e.name,
+                    .count = self.scaleCount(cnt),
+                    .quality = self.resolveQuality(cont.quality_template, loot_stage, s),
+                };
                 n += 1;
             }
         }
@@ -189,10 +238,11 @@ pub const LootTable = struct {
         return n;
     }
 
-    fn rollGroup(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, depth: u8) usize {
+    fn rollGroup(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, depth: u8, inherit_template: []const u8) usize {
         if (depth > 6 or out.len == 0) return 0;
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0) return 0;
+        const qt = if (g.quality_template.len > 0) g.quality_template else inherit_template;
         var s = seed;
         // count="all" (stock -1): every entry spawns once; regular prob is
         // ignored, force_prob entries gate independently (SpawnAllItemsFromList,
@@ -205,13 +255,13 @@ pub const LootTable = struct {
                 s = s *% 1103515245 +% 12345;
                 if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
                 if (e.is_group) {
-                    an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1);
+                    an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1, qt);
                 } else {
                     const cmin = e.count_min;
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                     const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                     const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
+                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
                     an += 1;
                 }
             }
@@ -238,14 +288,14 @@ pub const LootTable = struct {
                 if (!self.probGate(e, loot_stage, s)) continue;
             } else if (e.prob_template != 0 and !self.probGate(e, loot_stage, s)) continue;
             if (e.is_group) {
-                n += self.rollGroup(e.name, loot_stage, s, out[n..], depth + 1);
+                n += self.rollGroup(e.name, loot_stage, s, out[n..], depth + 1, qt);
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
+                out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
             }
         }
@@ -446,6 +496,61 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     }
     const tpl = try arena.dupe(ProbTemplate, templates.items);
 
+    // lootqualitytemplate: level bands with prob-weighted quality picks.
+    var q_templates: std.ArrayList(QualityTemplate) = .empty;
+    defer q_templates.deinit(allocator);
+    var qti: usize = 0;
+    while (std.mem.indexOfPos(u8, clean, qti, "<lootqualitytemplate")) |qt_tag| {
+        const qt_name = xml.attr(clean, qt_tag, "name") orelse {
+            qti = qt_tag + 21;
+            continue;
+        };
+        const qt_gt = std.mem.indexOfPos(u8, clean, qt_tag, ">") orelse break;
+        var qt_body: []const u8 = "";
+        qti = qt_gt + 1;
+        if (!(qt_gt > qt_tag and clean[qt_gt - 1] == '/')) {
+            const qt_close = std.mem.indexOfPos(u8, clean, qt_gt, "</lootqualitytemplate>") orelse break;
+            qt_body = clean[qt_gt + 1 .. qt_close];
+            qti = qt_close + 22;
+        }
+        var q_bands: std.ArrayList(QualityBand) = .empty;
+        defer q_bands.deinit(allocator);
+        var bi: usize = 0;
+        while (std.mem.indexOfPos(u8, qt_body, bi, "<qualitytemplate")) |b_tag| {
+            bi = b_tag + 16;
+            const lvl = xml.attr(qt_body, b_tag, "level") orelse continue;
+            const lr = parseLevelRange(lvl);
+            const dflt = xml.parseU16(std.mem.trim(u8, xml.attr(qt_body, b_tag, "default_quality") orelse "1", " \t")) orelse 1;
+            const b_gt = std.mem.indexOfPos(u8, qt_body, b_tag, ">") orelse break;
+            var b_body: []const u8 = "";
+            if (!(b_gt > b_tag and qt_body[b_gt - 1] == '/')) {
+                const b_close = std.mem.indexOfPos(u8, qt_body, b_gt, "</qualitytemplate>") orelse break;
+                b_body = qt_body[b_gt + 1 .. b_close];
+            }
+            var picks: std.ArrayList(QualityPick) = .empty;
+            defer picks.deinit(allocator);
+            var pi: usize = 0;
+            while (std.mem.indexOfPos(u8, b_body, pi, "<loot ")) |p_tag| {
+                pi = p_tag + 6;
+                const q = xml.parseU16(std.mem.trim(u8, xml.attr(b_body, p_tag, "quality") orelse "1", " \t")) orelse 1;
+                const p = xml.parseF32(std.mem.trim(u8, xml.attr(b_body, p_tag, "prob") orelse "0", " \t")) orelse 0;
+                try picks.append(allocator, .{ .quality = @intCast(@min(q, 255)), .prob = p });
+            }
+            try q_bands.append(allocator, .{
+                .min_level = lr.min,
+                .max_level = lr.max,
+                .default_quality = @intCast(@min(dflt, 255)),
+                .picks = try arena.dupe(QualityPick, picks.items),
+            });
+        }
+        if (q_bands.items.len == 0) continue;
+        try q_templates.append(allocator, .{
+            .name = try arena.dupe(u8, qt_name),
+            .bands = try arena.dupe(QualityBand, q_bands.items),
+        });
+    }
+    const q_tpl = try arena.dupe(QualityTemplate, q_templates.items);
+
     // lootgroup
     var i: usize = 0;
     while (i < clean.len and groups.items.len < max_groups) {
@@ -465,6 +570,9 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         var g: LootGroup = .{
             .name = try arena.dupe(u8, name),
         };
+        if (xml.attr(clean, tag, "loot_quality_template")) |lqt| {
+            g.quality_template = try arena.dupe(u8, lqt);
+        }
         if (xml.attr(clean, tag, "count")) |cv| {
             if (std.mem.eql(u8, cv, "all")) {
                 g.pick_all = true;
@@ -508,6 +616,9 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         var c: LootContainer = .{
             .name = try arena.dupe(u8, name),
         };
+        if (xml.attr(clean, tag, "loot_quality_template")) |lqt| {
+            c.quality_template = try arena.dupe(u8, lqt);
+        }
         if (xml.attr(clean, tag, "size")) |sz| {
             if (std.mem.indexOfScalar(u8, sz, ',')) |comma| {
                 c.size_x = @intCast(xml.parseU16(std.mem.trim(u8, sz[0..comma], " \t")) orelse 8);
@@ -533,6 +644,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         .groups = try arena.dupe(LootGroup, groups.items),
         .containers = try arena.dupe(LootContainer, containers.items),
         .prob_templates = tpl,
+        .quality_templates = q_tpl,
         .poi_tier_mod = poi_mod,
         .poi_tier_bonus = poi_bonus,
         .arena_ptr = arena_holder,
@@ -632,6 +744,57 @@ test "loot prob templates gate entries by loot stage" {
     try std.testing.expect(seen_high >= 1);
 }
 
+test "loot quality template rolls quality by loot stage" {
+    const src =
+        \\<lootcontainers>
+        \\<lootqualitytemplate name="qualTest">
+        \\  <qualitytemplate level="0,9" default_quality="1">
+        \\    <loot quality="1" prob="0.5"/>
+        \\    <loot quality="2" prob="1"/>
+        \\  </qualitytemplate>
+        \\  <qualitytemplate level="10,999999" default_quality="6">
+        \\    <loot quality="4" prob="0.1"/>
+        \\    <loot quality="6" prob="1"/>
+        \\  </qualitytemplate>
+        \\</lootqualitytemplate>
+        \\<lootgroup name="g">
+        \\  <item name="weaponA"/>
+        \\</lootgroup>
+        \\<lootcontainer name="c" size="6,2" loot_quality_template="qualTest">
+        \\  <item name="weaponA"/>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var t = try loadFromSlice(std.testing.allocator, src);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(usize, 1), t.quality_templates.len);
+    try std.testing.expectEqualStrings("qualTest", t.containerByName("c").?.quality_template);
+    // Stage 1: band 0-9, picks 1 (p.5) then 2 (p1) - quality in {1,2}.
+    var stacks: [16]Stack = undefined;
+    var saw_hi = false;
+    var i: u32 = 0;
+    while (i < 200) : (i += 1) {
+        const n = t.rollContainer("c", 1, 9000 + i, &stacks);
+        for (stacks[0..n]) |s| {
+            try std.testing.expect(s.quality == 1 or s.quality == 2);
+            if (s.quality == 2) saw_hi = true;
+        }
+    }
+    try std.testing.expect(saw_hi);
+    // Stage 15: band 10+, picks 4 (p.1) then 6 (p1) - quality in {4,6}.
+    var saw_6 = false;
+    i = 0;
+    while (i < 200) : (i += 1) {
+        const n = t.rollContainer("c", 15, 7000 + i, &stacks);
+        for (stacks[0..n]) |s| {
+            try std.testing.expect(s.quality == 4 or s.quality == 6);
+            if (s.quality == 6) saw_6 = true;
+        }
+    }
+    try std.testing.expect(saw_6);
+    std.debug.print("PASS loot quality: template rolls quality by loot stage\n", .{});
+}
+
 test "count=all groups spawn every entry; force_prob gates independently" {
     const src =
         \\<lootcontainers>
@@ -656,7 +819,7 @@ test "count=all groups spawn every entry; force_prob gates independently" {
     // count="all": every entry spawns once regardless of prob; the force_prob
     // entry gates on its own prob (1 here so it stays).
     var stacks: [16]Stack = undefined;
-    const n = t.rollGroup("allGroup", 1, 7, &stacks, 0);
+    const n = t.rollGroup("allGroup", 1, 7, &stacks, 0, "");
     try std.testing.expectEqual(@as(usize, 4), n);
     var saw_all = true;
     for ([_][]const u8{ "a", "b", "c", "gated" }) |want| {
@@ -672,7 +835,7 @@ test "count=all groups spawn every entry; force_prob gates independently" {
     var i: u32 = 0;
     var saw_x = false;
     while (i < 200) : (i += 1) {
-        const n2 = t.rollGroup("pickGroup", 1, 1000 + i, &s2, 0);
+        const n2 = t.rollGroup("pickGroup", 1, 1000 + i, &s2, 0, "");
         for (s2[0..n2]) |s| {
             if (std.mem.eql(u8, s.item_name, "x")) saw_x = true;
         }
