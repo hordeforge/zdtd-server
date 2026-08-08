@@ -1975,6 +1975,10 @@ pub const Game = struct {
         return game_player.partyStageAround(self, wx, wz, radius);
     }
 
+    pub fn partyHighestGameStage(self: *Game) i32 {
+        return game_player.partyHighestGameStage(self);
+    }
+
     pub fn partyLootStage(self: *const Game) i32 {
         return game_player.partyLootStage(self);
     }
@@ -4637,7 +4641,7 @@ pub const Game = struct {
             // The director's spawn branches read the party stage; stock
             // recomputes it when the event fires (CalcGameStageAround), and the
             // director's own cooldowns are what gate the events here.
-            self.sim.director.party_stage = self.partyStageAround(0, 0, -1);
+            self.sim.director.party_stage = self.partyHighestGameStage();
             const r = systems.tickAll(&self.sim, dt);
             self.harness.counters.add(.path_replans, r.path_replans);
             self.harness.counters.add(.path_replans_denied, r.path_replans_denied);

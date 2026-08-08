@@ -1161,6 +1161,39 @@ test "scenario blood moon parties pool nearby players into one horde" {
     std.debug.print("PASS scenario: blood moon parties pool 2 players -> 1 horde (n={d}) teleport+dawn clear\n", .{horde});
 }
 
+test "party highest game stage feeds the director (max, not party level)" {
+    io_fs.mkdirPathSimple("worlds");
+    freshScenarioDir("worlds/zdtd_sc_gsmax");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_gsmax", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    // Level 1 vs level 10: game stages differ.
+    g.clients[ca.slot].level = 1;
+    g.clients[cb.slot].level = 10;
+    const gs_lo = g.gameStageOf(ca.slot);
+    const gs_hi = g.gameStageOf(cb.slot);
+    try std.testing.expect(gs_hi > gs_lo);
+    // Ungrouped: the highest stage is the max over all joined players.
+    try std.testing.expectEqual(gs_hi, g.partyHighestGameStage());
+    // In one party: still the max member stage.
+    const p = g.parties.acceptInvite(ca.entity_id, cb.entity_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), p.n);
+    try std.testing.expectEqual(gs_hi, g.partyHighestGameStage());
+    // The director reads it (party_stage is the blood-moon difficulty input).
+    try g.step();
+    try std.testing.expectEqual(gs_hi, g.sim.director.party_stage);
+    std.debug.print("PASS scenario: party highest game stage feeds the director (max={d} > solo={d})\n", .{ gs_hi, gs_lo });
+}
+
 test "scenario trader RemoveQuest accepts and drops the quest from offers" {
     io_fs.mkdirPathSimple("worlds");
     freshScenarioDir("worlds/zdtd_sc_qaccept");

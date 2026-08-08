@@ -11,6 +11,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
+const ecs_party = @import("../../ecs/party.zig");
 
 const max_clients = game_mod.max_clients;
 
@@ -143,6 +144,38 @@ pub fn partyLootStage(self: *const Game) i32 {
         best = @max(best, lootStageOf(self, i));
     }
     return best;
+}
+
+/// Party.get_HighestGameStage (parties-factions.md "Group gamestage /
+/// loot"): the max member game stage of the largest party, or of all joined
+/// players when nobody is grouped. Stock feeds this to the blood-moon
+/// director and horde difficulty, which scale to the group high water mark
+/// rather than the weighted CalcPartyLevel. Sleeper volumes keep
+/// partyStageAround (CalcGameStageAround) below.
+pub fn partyHighestGameStage(self: *Game) i32 {
+    var best: i32 = 0;
+    var best_party: ?*const ecs_party.Party = null;
+    var best_n: usize = 0;
+    for (&self.parties.parties, &self.parties.used) |*p, *u| {
+        if (!u.*) continue;
+        if (p.n > best_n) {
+            best_n = p.n;
+            best_party = p;
+        }
+    }
+    if (best_party) |p| {
+        for (p.members[0..p.n]) |m| {
+            if (self.clientByEntityId(m)) |mc| {
+                best = @max(best, gameStageOf(self, mc.slot));
+            }
+        }
+        return @max(1, best);
+    }
+    for (&self.clients, 0..) |*c, i| {
+        if (!c.joined) continue;
+        best = @max(best, gameStageOf(self, i));
+    }
+    return @max(1, best);
 }
 
 /// Party.GetHighestLootStage for one player: the max loot stage across the
