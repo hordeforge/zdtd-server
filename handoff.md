@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `6ec286b`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **973/973** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `127a913`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **974/974** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -25,16 +25,18 @@
 ## Working tree right now
 
 ```
-working tree clean at 6ec286b
+working tree clean at 127a913
 game.zig 5115 lines (was 5310 at handoff): loot/weather/vehicle shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
-parity landed: trader roll + 50-entry window, party stage, loot container
-  size, loot count=all / force_prob / quality templates, non-burning
-  workstation queues, workstation persistence (ZWS1)
-973/973 tests, lint + fmt clean
+parity landed: trader roll + 50-entry window + lazy restock, party stage,
+  loot container size, loot count=all / force_prob / quality templates,
+  non-burning workstation queues, workstation persistence (ZWS1)
+hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
+  gap + craft batch cap now zdtd.toml); all other reviews re-audited clean
+974/974 tests, lint + fmt clean
 ```
 
-All work is committed through `6ec286b`; nothing staged or untracked except
+All work is committed through `127a913`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
@@ -97,6 +99,14 @@ this handoff note.
 - **Loot quality templates** (cbb3bdf): <lootqualitytemplate> level bands
   roll looted item quality by loot stage (asm.il 698080); containers carry
   quality on the wire (quality items only; stackables keep 1).
+- **Lazy trader restock on open** (253787f/c75d580): the LockRequest open
+  rebuilds the window with fresh rolls when the ResetInterval elapsed.
+- **Bucket B closure** (2245424): join rate-limit gap and craft batch cap
+  moved from bare consts to zdtd.toml ([authority] join_rate_limit_ms,
+  [sim] craft_max_times).
+- **Reviews re-run** (127a913): HARDCODE_AUDIT 2026-08-08 pass (A29 trader
+  pricing + A30 restock marked fixed; parity landings checked A/B/OK; no P0/
+  P1 open); ZIG/ZIG_0_16/SIMD/ABSTRACTION/ECS reviews re-audited clean.
 - `make check` fmt gate: `zig fmt` drift from the extraction commits fixed
   (tests.zig indentation, wasm.zig/misc.zig).
 
