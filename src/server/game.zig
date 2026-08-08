@@ -94,15 +94,15 @@ const platform_user = packages.platform_user;
 pub const max_clients = ln_server.max_peers;
 /// Per-entity observer set: one bit per client slot, so replication interest is
 /// a single word instead of a sweep over the whole client table.
-const ObsMask = interest.ObserverMask(max_clients);
+pub const ObsMask = interest.ObserverMask(max_clients);
 
-fn bitOf(ci: usize) ObsMask {
+pub fn bitOf(ci: usize) ObsMask {
     return @as(ObsMask, 1) << @intCast(ci);
 }
 
 /// Owner bit for a sim player's peer slot; 0 when the entity has no live peer
 /// (`Client.slot` equals its index, so peer slot and bit index are the same).
-fn bitOfPeerSlot(peer_slot: i32) ObsMask {
+pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
     if (peer_slot < 0 or peer_slot >= max_clients) return 0;
     return bitOf(@intCast(peer_slot));
 }
