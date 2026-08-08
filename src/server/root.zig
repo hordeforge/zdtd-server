@@ -25,7 +25,6 @@ pub const ally = @import("ally.zig");
 pub const replicate_te = @import("replicate_te.zig");
 pub const chunk_stream = @import("chunk_stream.zig");
 pub const persist = @import("persist.zig");
-pub const trade = @import("trade.zig");
 pub const game_net = @import("game/net.zig");
 pub const game_tick = @import("game/tick.zig");
 pub const game_world = @import("game/world.zig");
@@ -74,7 +73,6 @@ test {
     _ = replicate_te;
     _ = chunk_stream;
     _ = persist;
-    _ = trade;
     _ = game_net;
     _ = game_tick;
     _ = game_world;
