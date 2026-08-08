@@ -103,6 +103,8 @@ block_id_mapping = true
 # unloadable module is logged and skipped; on_tick runs late in every tick.
 # [plugin]
 # modules = "mods/my_plugin.wasm, mods/stats.wasm"
+# fuel = 100000000      # per-instance fuel budget (never re-armed; lower bounds a hostile guest)
+# max_pages = 1024      # max linear-memory pages per instance
 
 # Sim rule overlay (ADR 0021, docs/GAME_OPTIONS.md "[rules] sim rules"). Both
 # this file and a mode pack can set [rules.*]; the operator's zdtd.toml wins

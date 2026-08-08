@@ -38,7 +38,11 @@ pub const Hook = enum(u8) {
 pub const verdict_deny: i32 = -1;
 pub const verdict_keep: i32 = 0;
 
-/// Per-call budget (PLUGIN_API.md). zwasm enforces both itself.
+/// Per-instance budget: fuel is armed once at instantiate and decremented
+/// per instruction, never re-armed (zwasm source; verified by the looper
+/// fixture). A module spending ~10k fuel per tick silently disables after
+/// minutes at the default. zwasm enforces both itself; an exhausted or
+/// trapping module is disabled, other modules keep running.
 pub const Budget = struct {
     fuel: u64 = 100_000_000,
     max_memory_pages: u64 = 1024,

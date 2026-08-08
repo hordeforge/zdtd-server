@@ -112,6 +112,13 @@ pub const Mode = struct {
 /// .wasm file paths; main.zig splits it into InitOptions.plugin_modules.
 pub const Plugin = struct {
     modules: ?[]const u8 = null,
+    /// Wasm fuel budget per module instance (default 100_000_000). The fuel
+    /// is armed once at instantiate and never re-armed, so a module that
+    /// spends ~10k fuel per tick silently disables after minutes; raise this
+    /// for heavier hooks or lower it to bound a hostile guest.
+    fuel: ?u64 = null,
+    /// Max linear-memory pages per module instance (default 1024).
+    max_pages: ?u64 = null,
 };
 
 /// Authority.mode is a constrained string: observe | permissive | correct.

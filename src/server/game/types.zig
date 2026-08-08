@@ -256,7 +256,8 @@ pub const InitOptions = struct {
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
     /// modules; ADR 0020). Empty = no Wasm plugins.
     plugin_modules: []const []const u8 = &.{},
-    /// Per-call budget for Wasm plugins (fuel + max linear-memory pages).
+    /// Per-instance budget for Wasm plugins (fuel + max linear-memory pages;
+    /// fuel is lifetime, never re-armed).
     plugin_budget: plugin_mod.wasm.Budget = .{},
 
     deco_objects_per_join: usize = default_deco_objects_per_join,

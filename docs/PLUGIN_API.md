@@ -61,10 +61,14 @@ crosses.
 Sim hooks run on the main tick thread in documented order, so two servers with
 the same plugins and the same inputs step the same way.
 
-Every guest call runs under a fuel or instruction budget and a linear-memory cap.
-Exhausting either ends the call, disables that plugin, and logs which hook and
-which module. A plugin that loops forever costs one tick's budget, not the
-server. Budgets are per hook and configurable, with a documented default.
+Every guest call runs under a fuel budget and a linear-memory cap. The fuel
+is a per-instance lifetime budget: armed once at instantiate and decremented
+per instruction, never re-armed per call (zwasm source; verified by the
+looper fixture). Exhausting either ends the call, disables that plugin, and
+logs which hook and which module, so a plugin that loops forever costs one
+tick's budget, not the server. Budgets are configurable
+(zdtd.toml `[plugin] fuel` / `max_pages`) with the documented defaults
+(100 000 000 fuel, 1024 pages).
 
 ## Runtime: zwasm v2 (decided 2026-08-06)
 

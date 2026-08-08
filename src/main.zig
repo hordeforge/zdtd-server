@@ -637,6 +637,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         // allocate, so split it here and free the list after the Game is created
         // (paths point into the toml arena; Game dupes the names it keeps).
         if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
+        if (tf.plugin.fuel) |fuel| init_opts.plugin_budget.fuel = fuel;
+        if (tf.plugin.max_pages) |pages| init_opts.plugin_budget.max_memory_pages = pages;
         // authority.mode is validated + canonicalised at parse (binder
         // enum_by_name), so this is a straight apply.
         if (tf.authority.mode) |mode_s| {
