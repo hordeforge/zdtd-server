@@ -367,7 +367,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     for (ws.queue[0..ws.queue_n]) |q| {
                         if (q.output_type == 0 or q.output_count <= 0) continue;
                         const iname = self.items.nameByStockType(q.output_type) orelse continue;
-                        if (self.recipes.byName(iname) == null) continue;
+                        const rd = self.recipes.byName(iname) orelse continue;
+                        // The recipe must also be craftable on THIS station:
+                        // its craft_area has to be in the block's
+                        // CraftingAreaRecipes (or the block name when no list
+                        // is declared), so a modified client cannot queue a
+                        // forge output on a campfire.
+                        if (rd.craft_area.len > 0 and !self.blocks.allowsCraftArea(@intCast(ws.block_id), rd.craft_area)) continue;
                         q_ok[qn] = q;
                         qn += 1;
                     }

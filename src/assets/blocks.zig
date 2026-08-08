@@ -28,6 +28,11 @@ pub const BlockDef = struct {
     /// table saw have no fuel module and advance regardless (stock
     /// TileEntityWorkstation.HandleRecipeQueue gate, asm.il 1331687).
     has_fuel_module: bool = false,
+    /// Workstation CraftingAreaRecipes comma list ("player,workbench",
+    /// "forge", "tablesaw"). Empty = the block name is the area (campfire,
+    /// chemistryStation, cementMixer carry no list). Gates which recipes a
+    /// workstation may queue (server authority, rule 17).
+    crafting_areas: []const u8 = "",
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -103,6 +108,27 @@ pub const BlockTable = struct {
         if (self.byId(id)) |d| return d.has_fuel_module;
         return false;
     }
+
+    /// True when the workstation may craft recipes of `area` (the recipe's
+    /// craft_area; empty = player/backpack recipe). The explicit
+    /// CraftingAreaRecipes comma list wins ("player,workbench"); without a
+    /// list the block name is the area (campfire -> "campfire"). Unknown
+    /// blocks fail open so an unparsed station does not reject its queue.
+    pub fn allowsCraftArea(self: *const BlockTable, id: u16, area: []const u8) bool {
+        const d = self.byId(id) orelse return true;
+        const want = if (area.len == 0) "player" else area;
+        if (d.crafting_areas.len > 0) {
+            var it = std.mem.splitScalar(u8, d.crafting_areas, ',');
+            while (it.next()) |a| {
+                const t = std.mem.trim(u8, a, " \t");
+                if (t.len == 0) continue;
+                if (std.mem.eql(u8, t, want)) return true;
+            }
+            return false;
+        }
+        if (d.name.len == 0) return true;
+        return std.mem.eql(u8, d.name, want);
+    }
 };
 
 // Offline / no-dump slice: dump-validated pins only (assignids_comptime).
@@ -164,6 +190,7 @@ pub fn loadFromPath(
         trader_onoff: bool = false,
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
+        crafting_areas: ?[]const u8 = null,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -195,6 +222,7 @@ pub fn loadFromPath(
         var trader_onoff = false;
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
+        var crafting_areas: ?[]const u8 = null;
         const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -220,6 +248,8 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.indexOf(u8, v, "fuel") != null) has_fuel_module = true;
                 }
+            } else if (std.mem.eql(u8, pname, "CraftingAreaRecipes")) {
+                crafting_areas = xml.attr(clean, pi, "value");
             }
             p = pi + 10;
         }
@@ -234,6 +264,7 @@ pub fn loadFromPath(
             .trader_onoff = trader_onoff,
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
+            .crafting_areas = if (crafting_areas) |ca| try arena.dupe(u8, ca) else "",
         });
         i = bi + 7;
     }
@@ -287,6 +318,7 @@ pub fn loadFromPath(
             .trader_onoff = pb.trader_onoff,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
+            .crafting_areas = if (pb.crafting_areas) |ca| try arena.dupe(u8, ca) else "",
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -374,6 +406,13 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\<block name="workbench">
         \\  <property class="Workstation">
         \\    <property name="Modules" value="output"/>
+        \\    <property name="CraftingAreaRecipes" value="player,workbench"/>
+        \\  </property>
+        \\</block>
+        \\<block name="forge">
+        \\  <property class="Workstation">
+        \\    <property name="Modules" value="tools,output,fuel,material_input"/>
+        \\    <property name="CraftingAreaRecipes" value="forge"/>
         \\  </property>
         \\</block>
         \\</blocks>
@@ -414,6 +453,17 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const bench = t.byName("workbench").?;
     try std.testing.expect(!t.hasFuelModule(bench.id));
     try std.testing.expect(!t.hasFuelModule(crate.id));
+    // CraftingAreaRecipes gate: workbench allows player + workbench recipes
+    // only; forge only forge; campfire (no list) only its own name.
+    try std.testing.expect(t.allowsCraftArea(bench.id, "workbench"));
+    try std.testing.expect(t.allowsCraftArea(bench.id, "player"));
+    try std.testing.expect(!t.allowsCraftArea(bench.id, "forge"));
+    const forge = t.byName("forge").?;
+    try std.testing.expect(t.allowsCraftArea(forge.id, "forge"));
+    try std.testing.expect(!t.allowsCraftArea(forge.id, "campfire"));
+    try std.testing.expect(t.allowsCraftArea(fire.id, "campfire"));
+    try std.testing.expect(!t.allowsCraftArea(fire.id, "forge"));
+    try std.testing.expect(!t.allowsCraftArea(fire.id, "player"));
 }
 
 fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -427,6 +477,7 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "doorWoodLargeGate", 105 },
         .{ "campfire", 106 },
         .{ "workbench", 107 },
+        .{ "forge", 108 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
