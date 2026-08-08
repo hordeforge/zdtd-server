@@ -3753,6 +3753,7 @@ pub const Game = struct {
             .attack_damage = self.handItemDamage(d.hand_item),
             .time_stay = d.time_stay,
             .sight_range = d.sight_range,
+            .is_enemy = d.is_enemy,
         };
     }
 
@@ -3779,7 +3780,17 @@ pub const Game = struct {
             switch (kind) {
                 .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
                 .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
-                .animal => if (r.kind == .animal) return r.entitygroup,
+                .animal => if (r.kind == .animal) {
+                    // Stock per biome: Any (day wildlife) plus Night (night
+                    // wildlife incl. EnemyAnimals). Prefer the Night rule when
+                    // it is dark so predators actually spawn.
+                    const night = self.sim.director.clock.isNight();
+                    if (r.time == .night) {
+                        if (night) return r.entitygroup;
+                    } else if (r.time == .any or r.time == .day) {
+                        if (!night) return r.entitygroup;
+                    }
+                },
             }
         }
         return fallback;

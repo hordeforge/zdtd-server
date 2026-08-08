@@ -49,6 +49,9 @@ pub const EntityClass = struct {
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
     sight_range: f32 = 0,
+    /// IsEnemyEntity (wolf/bear/coyote hunt; stag/rabbit flee). Defaults true
+    /// for zombies; passive animals carry false.
+    is_enemy: bool = true,
 };
 
 pub const World = struct {
@@ -566,6 +569,7 @@ pub const World = struct {
             self.class_id[s].chase_speed = def.chase_speed;
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].is_enemy = def.is_enemy;
         }
         return id;
     }

@@ -392,7 +392,10 @@ pub const Director = struct {
     fn tickAnimals(self: *Director, w: *ecs_world.World) u32 {
         var n: u32 = 0;
         if (!w.rules.systems.animals) return 0;
-        if (self.max_alive_animals <= 0 or self.clock.isNight() or self.animals_cd > 0) return 0;
+        // Stock spawns wildlife day (WildGameForest) and night (WildGameForest
+        // Night + EnemyAnimals: snake, boar, coyote, wolf, bear), all under
+        // MaxSpawnedAnimals, so the day-only gate is dropped.
+        if (self.max_alive_animals <= 0 or self.animals_cd > 0) return 0;
         if (w.countKind(.animal) < self.max_alive_animals) {
             n += self.spawnAnimalsNearPlayers(w, 1, 20.0, 45.0);
         }
@@ -451,6 +454,7 @@ pub const Director = struct {
                     w.class_id[slot].chase_speed = ct.chase_speed;
                     w.class_id[slot].wander_speed = ct.wander_speed;
                     w.class_id[slot].attack_damage = ct.attack_damage;
+                    w.class_id[slot].is_enemy = ct.is_enemy;
                 }
                 break :blk nid;
             } else w.spawnAnimal(x, y, z, hp, 0, "");

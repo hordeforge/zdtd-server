@@ -1299,6 +1299,9 @@ fn refreshFearSource(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
 /// stock XML (the animal templates' AITask-1/2), so kind gates the task.
 fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
     if (!w.mask[s].kind or w.kind[s] != .animal) return false;
+    // Predators (wolf, bear, coyote, snake, boar) hunt; only passive wildlife
+    // carries the flee tasks (stock animal templates' AITask-1/2).
+    if (w.class_id[s].is_enemy) return false;
     if (ai.revenge_target >= 0 and ai.revenge_time > 0 and w.slotOfNetId(ai.revenge_target) != null) return true;
     return ai.fear_target >= 0 and w.slotOfNetId(ai.fear_target) != null;
 }
@@ -2593,6 +2596,7 @@ test "hurt animal runs away from its attacker" {
     defer w.deinit();
     const a = w.spawnAnimal(0, 70, 0, 30, 0, "").?;
     const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = false; // passive wildlife flees; predators hunt
     const p = w.spawnPlayer(2, 70, 0, 0).?;
     _ = w.damageFrom(a, 5, p);
     var t: f32 = 0;
@@ -2610,6 +2614,7 @@ test "passive animal flees a feared entity within fleeDistance (RunawayFromEntit
     defer w.deinit();
     const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
     const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = false; // passive wildlife flees; predators hunt
     const z = w.spawnZombie(10, 70, 0, 40).?;
     const zs = w.slotOfNetId(z).?;
     var t: f32 = 0;
@@ -2630,6 +2635,7 @@ test "passive animal does not flee an entity beyond fleeDistance" {
     defer w.deinit();
     const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
     const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = false; // passive wildlife flees; predators hunt
     _ = w.spawnZombie(30, 70, 0, 40).?; // beyond 20 -> no fear
     var t: f32 = 0;
     while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);

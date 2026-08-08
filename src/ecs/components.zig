@@ -68,6 +68,8 @@ pub const ClassId = struct {
     chase_speed: f32 = 0,
     wander_speed: f32 = 0,
     attack_damage: f32 = 0,
+    /// IsEnemyEntity: false on passive wildlife, so only predators chase.
+    is_enemy: bool = true,
 };
 
 pub const AiState = enum(u8) {
