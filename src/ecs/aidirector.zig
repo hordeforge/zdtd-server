@@ -649,7 +649,9 @@ pub const Director = struct {
         const id = if (resolved) |d|
             w.spawnZombieDef(x, y, z, hp, d)
         else if (ct.hash != 0)
-            w.spawnZombieClass(x, y, z, hp, ct.hash, ct.loot_list)
+            // Class_table rotation pick: carry the row so its speeds/damage
+            // reach the AI even when class_id[s].id stays the kind default.
+            w.spawnZombieDef(x, y, z, hp, ct)
         else
             w.spawnZombie(x, y, z, hp);
         const nid = id orelse return null;
