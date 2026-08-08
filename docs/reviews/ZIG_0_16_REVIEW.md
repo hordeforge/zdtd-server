@@ -1,4 +1,4 @@
-# ZIG_0_16_REVIEW.md - Zig 0.16 changelog conformance findings
+# Zig 0.16 changelog conformance review findings (zdtd)
 
 Audit of zdtd against the
 [Zig 0.16.0 release notes](https://ziglang.org/download/0.16.0/release-notes.html)

@@ -1,4 +1,4 @@
-# 0020. Wasm-only plugin API
+# ADR 0020: Wasm-only plugin API
 
 - **Status:** accepted (supersedes [0005](0005-native-plugin-api.md))
 - **Date:** 2026-08-06
