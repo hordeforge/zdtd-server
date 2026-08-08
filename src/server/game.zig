@@ -3727,9 +3727,10 @@ pub const Game = struct {
     /// Resolve a spawn-picked class name to its full entityclasses stats
     /// (HP/speeds/damage/hash/loot). Game-level because it needs the entities
     /// table and the items table for HandItem DamageEntity.
-    fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {
-        const self: *Game = @ptrCast(@alignCast(ctx.?));
-        const d = self.entities.byName(class_name) orelse return null;
+    /// EntityDef → full EntityClass (A35): the resolved stats the sim carries
+    /// per entity so a class not preloaded into the fixed class_table still
+    /// spawns as itself (HP/speeds/damage/hash/loot/is_enemy).
+    pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.EntityClass {
         return .{
             .name = d.name,
             .max_hp = d.max_hp,
@@ -3744,6 +3745,12 @@ pub const Game = struct {
             .sight_range = d.sight_range,
             .is_enemy = d.is_enemy,
         };
+    }
+
+    fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {
+        const self: *Game = @ptrCast(@alignCast(ctx.?));
+        const d = self.entities.byName(class_name) orelse return null;
+        return self.entityClassOf(d);
     }
 
     fn pickEntityGroup(ctx: ?*anyopaque, group: []const u8, seed: u32) ?[]const u8 {

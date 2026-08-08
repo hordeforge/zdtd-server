@@ -444,20 +444,12 @@ pub const Director = struct {
                 }
             }
             const hp: f32 = if (animal_ct) |ct| ct.max_hp else 30;
-            const id = if (animal_ct) |ct| blk: {
-                // Carry the resolved stats so animals get their per-class
-                // speeds/damage too; spawnAnimal keeps the hash/loot contract.
-                const nid = w.spawnAnimal(x, y, z, hp, ct.hash, ct.loot_list) orelse break;
-                if (w.slotOfNetId(nid)) |slot| {
-                    w.class_id[slot].drop_prob = ct.drop_prob;
-                    w.class_id[slot].time_stay = ct.time_stay;
-                    w.class_id[slot].chase_speed = ct.chase_speed;
-                    w.class_id[slot].wander_speed = ct.wander_speed;
-                    w.class_id[slot].attack_damage = ct.attack_damage;
-                    w.class_id[slot].is_enemy = ct.is_enemy;
-                }
-                break :blk nid;
-            } else w.spawnAnimal(x, y, z, hp, 0, "");
+            // spawnAnimalDef carries the resolved per-class speeds/damage onto
+            // the entity (A35), same contract as spawnZombieDef.
+            const id = if (animal_ct) |ct|
+                w.spawnAnimalDef(x, y, z, ct)
+            else
+                w.spawnAnimal(x, y, z, hp, 0, "");
             const nid = id orelse break;
             if (w.slotOfNetId(nid)) |slot| {
                 w.zombie_ai[slot].state = .wander; // wildlife roams, does not hunt

@@ -377,10 +377,12 @@ pub fn consoleSpawnEntity(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIter
     };
     const t = self.sim.transform[ps];
     const sy = self.spawnYNearPlayer(t.x, t.y, t.z);
+    // A35: spawn the full resolved class so speeds/damage/is_enemy reach the
+    // sim even for classes outside the fixed class_table.
     const nid = if (def.kind == .animal)
-        self.sim.spawnAnimal(t.x + 3, sy, t.z + 3, def.max_hp, def.hash, def.loot_list)
+        self.sim.spawnAnimalDef(t.x + 3, sy, t.z + 3, self.entityClassOf(def))
     else
-        self.sim.spawnZombieClass(t.x + 3, sy, t.z + 3, def.max_hp, def.hash, def.loot_list);
+        self.sim.spawnZombieDef(t.x + 3, sy, t.z + 3, def.max_hp, self.entityClassOf(def));
     if (nid) |eid| {
         if (self.sim.slotOfNetId(eid)) |es| {
             for (&self.clients) |*cl| {

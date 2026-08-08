@@ -108,13 +108,11 @@ pub fn tickSleeperVolumes(self: *Game) void {
             var n: usize = 0;
             while (n < cap) : (n += 1) {
                 const sp = vol.spawns[n];
-                _ = self.sim.spawnSleeperClass(
+                _ = self.sim.spawnSleeperDef(
                     @floatFromInt(sp.x),
                     @floatFromInt(sp.y),
                     @floatFromInt(sp.z),
-                    def.max_hp,
-                    def.hash,
-                    def.loot_list,
+                    self.entityClassOf(def),
                 );
             }
             continue;
@@ -128,7 +126,7 @@ pub fn tickSleeperVolumes(self: *Game) void {
         while (n < count and n < alive_cap and n < 8) : (n += 1) {
             const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
             const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
-            _ = self.sim.spawnSleeperClass(ox, cy, oz, def.max_hp, def.hash, def.loot_list);
+            _ = self.sim.spawnSleeperDef(ox, cy, oz, self.entityClassOf(def));
         }
     }
 }

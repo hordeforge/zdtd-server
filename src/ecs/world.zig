@@ -621,8 +621,37 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
+    /// Animal spawn carrying the full resolved class stats (A35), so a class
+    /// not preloaded into the fixed class_table still wanders/flees/chases as
+    /// itself. Prefer this over spawnAnimal + a manual post-spawn copy.
+    pub fn spawnAnimalDef(self: *World, x: f32, y: f32, z: f32, def: EntityClass) ?NetId {
+        const id = self.spawnAnimal(x, y, z, def.max_hp, def.hash, def.loot_list) orelse return null;
+        if (self.slotOfNetId(id)) |s| {
+            self.class_id[s].drop_prob = def.drop_prob;
+            self.class_id[s].time_stay = def.time_stay;
+            self.class_id[s].chase_speed = def.chase_speed;
+            self.class_id[s].wander_speed = def.wander_speed;
+            self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].is_enemy = def.is_enemy;
+        }
+        return id;
+    }
+
     pub fn spawnSleeperClass(self: *World, x: f32, y: f32, z: f32, hp: f32, class_hash: i32, loot_list: []const u8) ?NetId {
         const id = self.spawnZombieClass(x, y, z, hp, class_hash, loot_list) orelse return null;
+        if (self.slotOfNetId(id)) |s| {
+            self.mask[s].sleeper = true;
+            self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
+            self.zombie_ai[s].state = .sleep;
+        }
+        return id;
+    }
+
+    /// Sleeper spawn carrying the full resolved class stats on the entity (the
+    /// same A35 path as spawnZombieDef): a sleeper class not preloaded into the
+    /// fixed class_table still chases/bites as itself instead of the zombie row.
+    pub fn spawnSleeperDef(self: *World, x: f32, y: f32, z: f32, def: EntityClass) ?NetId {
+        const id = self.spawnZombieDef(x, y, z, def.max_hp, def) orelse return null;
         if (self.slotOfNetId(id)) |s| {
             self.mask[s].sleeper = true;
             self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
@@ -1091,6 +1120,34 @@ test "spawnZombieFromClass fills from class_table" {
     try std.testing.expectEqual(@as(i32, 12345), w.class_id[s].hash);
     try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[s].loot_list);
     try std.testing.expect(w.spawnZombieFromClass("nope", 0, 0, 0) == null);
+}
+
+test "spawnSleeperDef carries per-entity class stats" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const id = w.spawnSleeperDef(3, 70, 4, .{
+        .name = "zombieFeral",
+        .max_hp = 60,
+        .kind = .zombie,
+        .hash = 12345,
+        .loot_list = "EntityLootContainerStrong",
+        .chase_speed = 1.1,
+        .wander_speed = 0.3,
+        .attack_damage = 25,
+    }).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expect(w.mask[s].sleeper);
+    try std.testing.expect(w.sleeper[s].volume_r > 0);
+    try std.testing.expectEqual(c.AiState.sleep, w.zombie_ai[s].state);
+    // The A35 per-entity layer: speeds/damage/hash/loot survive on the entity
+    // so the AI reads them even though class_table has no feral row.
+    try std.testing.expectEqual(@as(f32, 1.1), w.class_id[s].chase_speed);
+    try std.testing.expectEqual(@as(f32, 0.3), w.class_id[s].wander_speed);
+    try std.testing.expectEqual(@as(f32, 25), w.class_id[s].attack_damage);
+    try std.testing.expectEqual(@as(f32, 60), w.health[s].max_hp);
+    try std.testing.expectEqual(@as(i32, 12345), w.class_id[s].hash);
+    try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[s].loot_list);
 }
 
 test "beginTick clears locals" {
