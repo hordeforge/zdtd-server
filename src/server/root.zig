@@ -31,11 +31,16 @@ pub const game_tick = @import("game/tick.zig");
 pub const game_world = @import("game/world.zig");
 pub const game_player = @import("game/player.zig");
 pub const game_join = @import("game/join.zig");
+pub const game_types = @import("game/types.zig");
+pub const game_quest = @import("game/quest.zig");
+pub const game_social = @import("game/social.zig");
+pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
 pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
 pub const c2s_misc = @import("c2s/misc.zig");
+pub const c2s_join = @import("c2s/join.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -66,8 +71,13 @@ test {
     _ = game_world;
     _ = game_player;
     _ = game_join;
+    _ = game_types;
+    _ = game_quest;
+    _ = game_social;
+    _ = game_tests;
     _ = c2s_inv;
     _ = c2s_move;
     _ = c2s_quest;
     _ = c2s_misc;
+    _ = c2s_join;
 }

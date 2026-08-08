@@ -26,7 +26,15 @@ const game_tick = @import("game/tick.zig");
 const game_world = @import("game/world.zig");
 const game_player = @import("game/player.zig");
 const game_join = @import("game/join.zig");
+const game_quest = @import("game/quest.zig");
+const game_social = @import("game/social.zig");
+const c2s_move = @import("c2s/move.zig");
+const c2s_inv = @import("c2s/inv.zig");
+const c2s_quest = @import("c2s/quest.zig");
+const c2s_misc = @import("c2s/misc.zig");
+const c2s_join = @import("c2s/join.zig");
 const admin_console = @import("admin_console.zig");
+const game_types = @import("game/types.zig");
 const ConsoleOut = admin_console.ConsoleOut;
 const TargetResult = admin_console.TargetResult;
 const assets_quests = @import("../assets/quests.zig");
@@ -101,7 +109,7 @@ fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 /// (GAP 12: 256 silently dropped the 257th claim on register).
 pub const max_land_claims: usize = 1024;
 /// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
-const max_quest_position_data: usize = 3;
+pub const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 
 /// `help` index. Stock names and descriptions where the verb exists in stock
@@ -198,7 +206,7 @@ fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile
 /// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Builds a
 /// rewrite buffer and frees it again when no record is dropped; the early
 /// invalid-input paths do not allocate. Caller owns `blob` when non-null.
-fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
+pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
         return error.CorruptPlayersFile;
@@ -240,313 +248,57 @@ pub const AuthorityMode = server_config.AuthorityMode;
 /// no trader economy, so trade() credits the player wallet directly. Bucket B:
 /// overridable via zdtd.toml [sim] trader_wallet_dukes (default matches the
 /// prior fixed value).
-pub const default_trader_wallet_dukes: i32 = 5000;
+pub const default_trader_wallet_dukes = game_types.default_trader_wallet_dukes;
 
-pub const InitOptions = struct {
-    map_dir: ?[]const u8 = null,
-    game_dir: ?[]const u8 = null,
-    config_dir: ?[]const u8 = null,
-    /// Xpath patch dirs (filename order). Applied after base Data/Config load.
-    config_overrides: []const []const u8 = &.{},
-    quests_path: ?[]const u8 = null,
-    view_radius: i32 = default_view_radius,
-    admin_port: u16 = 0,
-    /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
-    /// non-empty enables the stock login and the INADDR_ANY bind.
-    telnet_password: []const u8 = "",
-    telnet_failed_login_limit: u8 = 10,
-    /// TelnetFailedLoginsBlocktime (minutes). 0 = close session only, no lockout window.
-    telnet_failed_logins_blocktime: u16 = 10,
-    /// GameWorld, shown in the telnet greeting block.
-    game_world: []const u8 = "Navezgane",
-    /// Stock sandbox code echoed into GameStats(71) so clients decode the
-    /// server's sandbox gates (TemperatureSurvival, StormFreq, ...) instead of
-    /// their own defaults (RE sandbox-options §8). Empty = client default.
-    sandbox_code: []const u8 = "",
-    sandbox_preset: []const u8 = "",
-    /// Operator web UI (docs/WEBUI.md). 0 = disabled. Requires webui_secret.
-    webui_port: u16 = 0,
-    webui_bind: []const u8 = "127.0.0.1",
-    webui_secret: []const u8 = "",
-    world_name: ?[]const u8 = null,
-    /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
-    max_players: u16 = default_max_players,
-    /// ServerPassword from serverconfig. Used as the LiteNet Connect key: non-empty
-    /// rejects Connect requests whose key does not match.
-    password: []const u8 = "",
-    /// Stream NetPackageChunk on join/tick. Default on: stock clients need server chunks
-    /// (no client-side generation workarounds). Loadgen can still parse stock bodies.
-    wire_chunks: bool = true,
-    /// Send deco tree objects in the join DecoUpdate burst. Off = stock-safe empty
-    /// firstPackage (bald world). Kill switch for a modded / other-version client
-    /// whose AssignIds ids differ from our bundled dump: a mismatched block id
-    /// throws inside the client world-load coroutine, not just missing trees.
-    deco_trees: bool = true,
-    /// Mirror the join deco burst into the server block store, so collision and
-    /// harvest agree with what the client renders. Off = deco is render-only.
-    deco_mirror: bool = true,
-    /// Negotiate block ids with the client by sending a "blocks" NameIdMapping
-    /// before the config files, instead of trusting the client's local
-    /// blocks.xml to assign the same ids as our bundled AssignIds dump.
-    /// Off = today's behaviour (client assigns locally, server hopes it matches).
-    block_id_mapping: bool = true,
+pub const InitOptions = game_types.InitOptions;
 
-    // Gameplay options (stock serverconfig.xml defaults). Applied to the sim below.
-    game_difficulty: u8 = 2,
-    blood_moon_frequency: u8 = 7,
-    blood_moon_enemy_count: u8 = 8,
-    blood_moon_range: u8 = 0,
-    player_killing_mode: u8 = 3,
-    day_night_length: u16 = 60,
-    day_light_length: u8 = 18,
-    max_spawned_zombies: u16 = 64,
-    zombie_move: u8 = 0,
-    zombie_move_night: u8 = 3,
-    zombie_feral_move: u8 = 3,
-    zombie_bm_move: u8 = 3,
-    enemy_difficulty: u8 = 0,
-    loot_abundance: u16 = 100,
-    xp_multiplier: u16 = 100,
-    block_damage_player: u16 = 100,
-    block_damage_ai: u16 = 100,
-    block_damage_ai_bm: u16 = 100,
-    max_spawned_animals: u16 = 50,
-    air_drop_frequency: u16 = 72,
-    drop_on_death: u8 = 1,
-    land_claim_size: u16 = 41,
-    land_claim_online_durability_modifier: u16 = 4,
-    land_claim_offline_durability_modifier: u16 = 4,
-    land_claim_expiry_days: u16 = 3,
-    loot_respawn_days: u16 = 7,
-    /// When set, enables procedural terrain (terrain_source=proc). Ignored if map_dir loads.
-    worldgen_seed: ?u64 = null,
-    /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
-    authority_mode: AuthorityMode = .correct,
-    /// P4 guard policy switches (zdtd.toml [authority] guard_*). Log-only default.
-    guard: guard_policy.Policy = .{},
+pub const max_streamed_chunks_cap = game_types.max_streamed_chunks_cap;
+pub const default_max_streamed_chunks = game_types.default_max_streamed_chunks;
+pub const default_chunk_stream_radius_min = game_types.default_chunk_stream_radius_min;
+pub const default_chunk_stream_radius_max = game_types.default_chunk_stream_radius_max;
+pub const default_chunk_adds_per_stream_tick = game_types.default_chunk_adds_per_stream_tick;
+pub const default_chunk_stream_period_ticks = game_types.default_chunk_stream_period_ticks;
+pub const default_motion_replicate_period_ticks = game_types.default_motion_replicate_period_ticks;
+pub const default_world_time_send_ticks = game_types.default_world_time_send_ticks;
+pub const default_vehicle_pos_send_ticks = game_types.default_vehicle_pos_send_ticks;
+pub const default_sleeper_tick_ticks = game_types.default_sleeper_tick_ticks;
+pub const default_turret_sync_ticks = game_types.default_turret_sync_ticks;
+pub const default_save_interval_ticks = game_types.default_save_interval_ticks;
+pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_max;
+pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
+pub const default_max_edit_range = game_types.default_max_edit_range;
+pub const default_interest_range = game_types.default_interest_range;
+pub const max_chat_msg_len = game_types.max_chat_msg_len;
+pub const default_min_chat_gap_ns = game_types.default_min_chat_gap_ns;
+pub const default_inv_bucket_cap = game_types.default_inv_bucket_cap;
+pub const default_inv_refill_ns = game_types.default_inv_refill_ns;
+pub const default_block_bucket_cap = game_types.default_block_bucket_cap;
+pub const default_block_refill_ns = game_types.default_block_refill_ns;
+pub const default_min_damage_gap_ns = game_types.default_min_damage_gap_ns;
+pub const default_damage_burst_max = game_types.default_damage_burst_max;
+pub const default_trader_restock_cap = game_types.default_trader_restock_cap;
+pub const default_trader_restock_refill = game_types.default_trader_restock_refill;
+pub const default_storm_frequency = game_types.default_storm_frequency;
+pub const default_peer_stale_ms = game_types.default_peer_stale_ms;
+pub const default_lock_stale_ns = game_types.default_lock_stale_ns;
+pub const default_deco_objects_per_join = game_types.default_deco_objects_per_join;
+pub const window_fast_attempts = game_types.window_fast_attempts;
+pub const window_retry_sleep_ns = game_types.window_retry_sleep_ns;
+pub const window_retry_budget_ns = game_types.window_retry_budget_ns;
+pub const critical_retry_budget_ns = game_types.critical_retry_budget_ns;
+pub const default_view_radius = game_types.default_view_radius;
+pub const default_max_players = game_types.default_max_players;
+pub const replicate_frame_cap = game_types.replicate_frame_cap;
+pub const speeds_body_off = game_types.speeds_body_off;
+pub const flags_body_off = game_types.flags_body_off;
 
-    // zdtd stream/authority tunables (Bucket B). Single source: default_* below.
-    // Full file surface (zdtd.toml) still open; fields are the single source for hot path.
-    max_streamed_chunks: usize = default_max_streamed_chunks,
-    chunk_stream_radius_min: i32 = default_chunk_stream_radius_min,
-    chunk_stream_radius_max: i32 = default_chunk_stream_radius_max,
-    chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
-    chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
-    motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
-    world_time_send_ticks: u64 = default_world_time_send_ticks,
-    vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
-    /// 2 Hz class of sim side-work (zdtd.toml [stream] sleeper_tick_ticks):
-    /// prefab sleeper volumes, airdrops + zombie block damage, workstations.
-    sleeper_tick_ticks: u64 = default_sleeper_tick_ticks,
-    /// Turret state broadcast cadence (zdtd.toml [stream] turret_sync_ticks).
-    turret_sync_ticks: u64 = default_turret_sync_ticks,
-    /// Periodic world flush so dig/build survives a crash (zdtd.toml
-    /// [stream] save_interval_ticks).
-    save_interval_ticks: u64 = default_save_interval_ticks,
-    spawn_area_radius_max: i32 = default_spawn_area_radius_max,
-    max_claimed_damage: i32 = default_max_claimed_damage,
-    max_edit_range: f32 = default_max_edit_range,
-    interest_range: f32 = default_interest_range,
-    peer_stale_ms: u64 = default_peer_stale_ms,
-    /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
-    lock_stale_ns: u64 = default_lock_stale_ns,
-    /// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
-    /// bucket shape, plus the damage-accept gap and burst cap.
-    min_chat_gap_ns: u64 = default_min_chat_gap_ns,
-    inv_bucket_cap: u8 = default_inv_bucket_cap,
-    inv_refill_ns: u64 = default_inv_refill_ns,
-    block_bucket_cap: u8 = default_block_bucket_cap,
-    block_refill_ns: u64 = default_block_refill_ns,
-    min_damage_gap_ns: u64 = default_min_damage_gap_ns,
-    damage_burst_max: u8 = default_damage_burst_max,
-    /// Trader restock refill policy (zdtd.toml [sim] trader_restock_*).
-    trader_restock_cap: u16 = default_trader_restock_cap,
-    trader_restock_refill: u16 = default_trader_restock_refill,
-    /// Storm frequency percent (zdtd.toml [sim] storm_frequency): the
-    /// GameStats wire value and the weather scheduler divisor. Stock default
-    /// 100 (GamePrefs.StormFreq); 0 disables storms.
-    storm_frequency: i32 = default_storm_frequency,
-    /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
-    trader_wallet_dukes: i32 = default_trader_wallet_dukes,
-    /// Sim rule parameters (ADR 0021): the effective Rules after the
-    /// mode pack and zdtd.toml overlays (main.zig builds it). Installed on
-    /// World.rules at init; the sim reads w.rules.<group>.<field>.
-    rules: ecs.rules.Rules = .{},
-    /// Register in-tree sample_hello static plugin (logs once on enable).
-    enable_sample_plugin: bool = true,
-    /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
-    /// modules; ADR 0020). Empty = no Wasm plugins.
-    plugin_modules: []const []const u8 = &.{},
-    /// Per-call budget for Wasm plugins (fuel + max linear-memory pages).
-    plugin_budget: plugin_mod.wasm.Budget = .{},
-
-    deco_objects_per_join: usize = default_deco_objects_per_join,
-
-    // [perf] switches (zdtd.toml). All default off; each is gated on apm
-    // evidence from the always-on sections/counters that ship with them.
-    /// Write chunk saves from a background thread (encode stays on the tick).
-    async_chunk_flush: bool = false,
-    /// Per-tick read-only terrain blocked snapshot for the A* inner loop.
-    terrain_snapshot: bool = false,
-    /// Run the sleeper-volume player test as a parallel job batch.
-    job_batches: bool = false,
-};
-
-// Compile-time array bound for Client.streamed (must cover max config).
-const max_streamed_chunks_cap: usize = 169;
-/// Default stream/authority values (also InitOptions / Game field defaults).
-pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
-pub const default_chunk_stream_radius_min: i32 = 7;
-pub const default_chunk_stream_radius_max: i32 = 9;
-pub const default_chunk_adds_per_stream_tick: u32 = 8;
-pub const default_chunk_stream_period_ticks: u64 = 5;
-pub const default_motion_replicate_period_ticks: u64 = 2;
-/// WorldTime (and weather) broadcast cadence, and vehicle position cadence
-/// (zdtd.toml [stream] world_time_send_ticks / vehicle_pos_send_ticks).
-pub const default_world_time_send_ticks: u64 = 20;
-pub const default_vehicle_pos_send_ticks: u64 = 5;
-pub const default_sleeper_tick_ticks: u64 = 10;
-pub const default_turret_sync_ticks: u64 = 10;
-pub const default_save_interval_ticks: u64 = 100;
-pub const default_spawn_area_radius_max: i32 = 8;
-pub const default_max_claimed_damage: i32 = 200;
-pub const default_max_edit_range: f32 = 96;
-pub const default_interest_range: f32 = 160;
-/// Max UTF-8 bytes in a player Global chat message (canonical: c2s_text).
-pub const max_chat_msg_len: usize = c2s_text.max_chat_msg_len;
-/// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
-/// bucket shape, plus the damage-accept gap and burst cap.
-pub const default_min_chat_gap_ns: u64 = 200_000_000;
-pub const default_inv_bucket_cap: u8 = 40;
-pub const default_inv_refill_ns: u64 = 50_000_000; // +1 token / 50 ms
-pub const default_block_bucket_cap: u8 = 30;
-pub const default_block_refill_ns: u64 = 33_000_000; // +1 / ~33 ms
-pub const default_min_damage_gap_ns: u64 = 80_000_000;
-pub const default_damage_burst_max: u8 = 4;
-/// Trader restock refill policy (zdtd.toml [sim] trader_restock_*): stackable
-/// entries grow toward the cap by at most the refill per restock.
-pub const default_trader_restock_cap: u16 = 50;
-pub const default_trader_restock_refill: u16 = 10;
-/// World::StormFrequency percent (stock GamePrefs.StormFreq default 100;
-/// packages.GameStatsValues.storm_freq). 0 disables storms.
-pub const default_storm_frequency: i32 = 100;
-pub const default_peer_stale_ms: u64 = 3000;
-/// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
-pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
-pub const default_deco_objects_per_join: usize = 8192;
-/// Reliable-window retry pacing — see game_net.zig for the policy comment.
-/// Kept here so InitOptions / Game defaults and the tuning docs cite one place.
-pub const window_fast_attempts: u32 = 16;
-pub const window_retry_sleep_ns: u64 = 1_000_000;
-pub const window_retry_budget_ns: u64 = 16_000_000;
-pub const critical_retry_budget_ns: u64 = 3_000_000_000;
-pub const default_view_radius: i32 = 7;
-pub const default_max_players: u16 = 8;
-/// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
-const replicate_frame_cap: usize = 256;
-/// Speeds body offset inside body_buf during zombie motion encode.
-const speeds_body_off: usize = 64;
-/// AliveFlags body offset (after speeds).
-const flags_body_off: usize = 96;
+pub const LandClaim = game_types.LandClaim;
+pub const Client = game_types.Client;
 
 const eqAny = c2s_text.eqAny;
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 const chatMsgOk = c2s_text.chatMsgOk;
 const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
-
-/// A placed land-claim block: protects blocks within land_claim_size around the
-/// keystone for its owner. Owner is the player entity id that placed it.
-const LandClaim = struct {
-    x: i32,
-    y: i32,
-    z: i32,
-    owner_entity: i32,
-    owner_online: bool = true,
-    /// In-game day the owner was last seen online (expiry base when offline).
-    owner_seen_day: u32 = 0,
-    /// Stable owner key for persistence: the login name (entity ids are
-    /// reassigned across restarts). Empty when the claim predates the field.
-    owner_name: [32]u8 = .{0} ** 32,
-    owner_name_len: u8 = 0,
-};
-
-pub const Client = struct {
-    peer: ?*ln_peer.Peer = null,
-    entity_id: i32 = -1,
-    /// Server-side XP ledger (XPMultiplier applied on award).
-    xp: u64 = 0,
-    /// Player level derived from progression curve (1-based).
-    level: u16 = 1,
-    /// EntityPlayer::gameStageBornAtWorldTime: world time the current survival
-    /// streak started. Seeded to "now" on join and pushed forward on death
-    /// (asm.il SetAlive ~503838). Client state is per-session, so days survived
-    /// restarts at zero on reconnect until player persistence lands.
-    game_stage_born_world_time: u64 = 0,
-    authed_challenge: bool = false,
-    joined: bool = false,
-    /// True after sendJoinBundle (WorldInfo/PlayerId). Gate tick broadcasts until then.
-    entered: bool = false,
-    /// Client's ChunkCache exists (it sent WorldInitInfoRequest, which
-    /// worldInfoCo only does after createWorld). Chunks sent from here on
-    /// are kept, so the tick streamer can start well before the spawn.
-    world_ready: bool = false,
-    challenge: [16]u8 = .{0} ** 16,
-    slot: usize = 0,
-    view_radius: i32 = default_view_radius,
-    name: [32]u8 = .{0} ** 32,
-    name_len: usize = 0,
-    /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
-    streamed: [max_streamed_chunks_cap]i64 = undefined,
-    streamed_n: usize = 0,
-    /// Entity slots this client has received an ECD EntitySpawn for
-    /// (spawn-on-approach; cleared when the entity dies or slot recycles).
-    known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),
-    /// Game payload arrived before challenge echo (stock/loadgen can race). Replay after auth.
-    preauth_buf: [512]u8 = undefined,
-    preauth_len: usize = 0,
-    /// Last movement-envelope sample (horizontal speed gate).
-    move_valid: bool = false,
-    move_x: f32 = 0,
-    move_y: f32 = 0,
-    move_z: f32 = 0,
-    move_tick: u64 = 0,
-    /// Running total of eatable units last seen (cross-package stack-loss).
-    last_eatable_units: u32 = 0,
-    /// Once: soft warn when streamed_n crosses ~80% of max_streamed_chunks.
-    stream_cap_warned: bool = false,
-    /// Last accepted chat broadcast (mono ns); flood throttle for Global chat.
-    last_chat_ns: u64 = 0,
-    /// Survival S2C throttle (tickSurvival): seconds until the next
-    /// sendSurvivalStats for this client.
-    survival_sync_cd: f32 = 0,
-    /// Last reported sprint speed (NetPackageEntitySpeeds MovementState 3);
-    /// lapses after sprint_stale_seconds without an update. Drives stamina
-    /// drain (UpdatePlayerStaminaOT).
-    sprint_speed: f32 = 0,
-    sprint_stale_cd: f32 = 0,
-    /// Cost-class token buckets (refill on accept path).
-    inv_tokens: u8 = 0,
-    inv_refill_ns: u64 = 0,
-    block_tokens: u8 = 0,
-    block_refill_ns: u64 = 0,
-    /// Combat ledger: last DamageEntity mono ns + short burst count.
-    last_damage_ns: u64 = 0,
-    damage_burst: u8 = 0,
-    /// P4 guard policy state (windowed detector counts, quarantine bits, kick
-    /// arm tick). Cleared for free by `clients[slot] = .{}` on kick/disconnect.
-    guard: guard_policy.PeerState = .{},
-    /// Weak block-destroy-rate signal: window start tick + destroys in window.
-    farm_window_tick: u64 = 0,
-    farm_breaks: u16 = 0,
-    /// Platform identities from NetPackagePlayerLogin. `primary` is stock's
-    /// ClientInfo.InternalId (crossplatform when present, else native, asm.il
-    /// 783909) and is what PersistentPlayerData and the ally store key on.
-    /// Absent on both is a legitimate state, not an error: a client with no
-    /// platform session, and zdtd's own loadgen bots, send null identifiers.
-    /// Cleared for free by `clients[slot] = .{}` on kick/disconnect.
-    puid_primary: platform_user.Stored = .{},
-    puid_native: platform_user.Stored = .{},
-};
 
 // --- Wasm plugin host callbacks (ADR 0020) ---------------------------------
 // The plugin layer hands these back the HostCtx; `data` is this Game. All run
@@ -671,7 +423,7 @@ fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
 /// may fell neighbours; a placed block (new != air) takes its stability from
 /// the supported neighbours and re-spreads. Both run for a replace. The fallen
 /// positions are removed and broadcast here.
-fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
+pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
     var n: usize = 0;
     if (old_id != 0) {
         var fallen: [stability_mod.max_fallen]stability_mod.Pos = undefined;
@@ -1848,7 +1600,7 @@ pub const Game = struct {
         return self.authority_mode == .correct;
     }
 
-    fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+    pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
         c.move_valid = true;
         c.move_x = x;
         c.move_y = y;
@@ -1881,7 +1633,7 @@ pub const Game = struct {
 
     /// Horizontal speed envelope. Observe: count only, still apply client pos.
     /// Correct: clamp to last good + max delta; soft snap S2C when clamped.
-    fn applyMovementEnvelope(
+    pub fn applyMovementEnvelope(
         self: *Game,
         c: *Client,
         peer: *ln_peer.Peer,
@@ -2059,7 +1811,7 @@ pub const Game = struct {
     /// column by construction: `heights` is maintained as the topmost non-air
     /// block, so the cell above it is always air and the pathfinder saw an open
     /// world everywhere.
-    fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
+    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         // Snapshot hit: same answer the locked path below would compute, without
         // taking the process-global terrain lock from an AI worker. A miss
@@ -2107,7 +1859,7 @@ pub const Game = struct {
     }
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
-    fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
+    pub fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
         for (&inv.slots) |*s| {
             if (s.count == 0 or s.item_id == 0) continue;
             const max = itemStackFor(self, s.item_id);
@@ -2128,7 +1880,7 @@ pub const Game = struct {
     }
 
     /// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
-    fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+    pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
         if (amount <= 0) return false;
         if (c.entity_id <= 0) return false;
         const ps = self.sim.slotOfNetId(c.entity_id) orelse return false;
@@ -2142,7 +1894,7 @@ pub const Game = struct {
     }
 
     /// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).
-    fn eatProps(ctx: ?*anyopaque, item_id: u16) invsys.EatProps {
+    pub fn eatProps(ctx: ?*anyopaque, item_id: u16) invsys.EatProps {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return .{
             .is_eat = g.items.isEat(item_id),
@@ -2152,19 +1904,22 @@ pub const Game = struct {
         };
     }
 
-    pub fn sendSurvivalStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, hp: f32, max_hp: f32, food: f32, food_max: f32, water: f32, water_max: f32) !void { return game_join.sendSurvivalStats(self, peer, entity_id, hp, max_hp, food, food_max, water, water_max); }
+    pub fn sendSurvivalStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, hp: f32, max_hp: f32, food: f32, food_max: f32, water: f32, water_max: f32) !void {
+        return game_join.sendSurvivalStats(self, peer, entity_id, hp, max_hp, food, food_max, water, water_max);
+    }
 
     /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
     /// survival/stamina loop calls it on a throttle like the vitals.
-    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void { return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max); }
-
+    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
+        return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max);
+    }
 
     fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
         const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
         return g.world.heightWorld(wx, wz) catch 0;
     }
 
-    fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
+    pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
         const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
         const bm = g.world.biomes orelse return .{};
         const biome_id = bm.atWorld(wx, wz) orelse return .{};
@@ -2256,7 +2011,9 @@ pub const Game = struct {
     ///
     /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
     /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-    fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void { return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz); }
+    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+        return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz);
+    }
 
     /// Seed the deco sampler keys off, so a chunk decorates identically across
     /// joins and restarts. The worldgen seed when there is one, else the world
@@ -2277,7 +2034,9 @@ pub const Game = struct {
         return r;
     }
 
-    fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendSignDataBatches(self, peer); }
+    pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendSignDataBatches(self, peer);
+    }
 
     pub fn deinit(self: *Game) void {
         // Offline harness left sim mode on; restore wall clock before return so
@@ -2529,7 +2288,7 @@ pub const Game = struct {
         return filtered.removed;
     }
 
-    fn tryRestorePlayer(self: *Game, c: *Client) void {
+    pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         if (c.name_len == 0) return;
         var path_buf: [512]u8 = undefined;
         const path = self.playersPath(&path_buf) catch |err| {
@@ -2721,7 +2480,7 @@ pub const Game = struct {
         admin_console.fillWebuiSnap(self);
     }
 
-    fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
+    pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
         return admin_console.handleConsoleCmd(self, peer, c, body);
     }
 
@@ -2891,7 +2650,7 @@ pub const Game = struct {
     /// well-fed ones regen (UpdatePlayerHealthOT branches), and the changed
     /// totals sync to the owner on a throttle. Runs after tickAll so the
     /// world clock already advanced.
-    fn tickSurvival(self: *Game, dt: f32) void {
+    pub fn tickSurvival(self: *Game, dt: f32) void {
         return game_tick.tickSurvival(self, dt);
     }
 
@@ -2915,12 +2674,12 @@ pub const Game = struct {
     }
 
     /// Runtime id of the land-claim keystone block (AssignIds "keystoneBlock").
-    fn landClaimBlockId(self: *const Game) ?u16 {
+    pub fn landClaimBlockId(self: *const Game) ?u16 {
         return self.maxdamage.idByName("keystoneBlock");
     }
 
     /// The land claim whose protection area covers (x,z), if any.
-    fn claimCovering(self: *Game, x: i32, z: i32) ?*LandClaim {
+    pub fn claimCovering(self: *Game, x: i32, z: i32) ?*LandClaim {
         const half: i32 = @intCast(self.land_claim_size / 2);
         for (self.land_claims[0..self.land_claims_n]) |*claim| {
             if (@abs(x - claim.x) <= half and @abs(z - claim.z) <= half) return claim;
@@ -2928,19 +2687,19 @@ pub const Game = struct {
         return null;
     }
 
-    fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
+    pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
         return game_world.registerClaim(self, x, y, z, owner_entity);
     }
 
-    fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
+    pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.removeClaimAt(self, x, y, z);
     }
 
-    fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {
+    pub fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {
         return game_world.markClaimsForEntity(self, entity, online);
     }
 
-    fn expireClaims(self: *Game) void {
+    pub fn expireClaims(self: *Game) void {
         return game_world.expireClaims(self);
     }
 
@@ -2953,7 +2712,7 @@ pub const Game = struct {
     /// zdtd-owned like claims.zlc). Power is re-derived from the block grid on
     /// load (spawnTurret re-adds its node); riders are session state and not
     /// persisted (a parked-but-mounted vehicle saves empty).
-    fn saveEntities(self: *Game) !void {
+    pub fn saveEntities(self: *Game) !void {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
         var buf: [ecs.max_entities * 32 + 8]u8 = undefined;
@@ -3116,7 +2875,7 @@ pub const Game = struct {
 
     /// Re-map restored claims to the entity id a player got at login, and mark
     /// the owner online. Called once per login; no-op for unknown names.
-    fn reclaimForName(self: *Game, name: []const u8, entity_id: i32) void {
+    pub fn reclaimForName(self: *Game, name: []const u8, entity_id: i32) void {
         if (entity_id <= 0) return;
         for (self.land_claims[0..self.land_claims_n]) |*claim| {
             if (claim.owner_name_len != name.len) continue;
@@ -3344,7 +3103,7 @@ pub const Game = struct {
 
     /// Lock stale after this many ns without unlock (holder disconnect still clears
     /// immediately). Tuned via zdtd.toml [authority] lock_stale_ms; default 120s.
-    fn packLockPos(x: i32, y: i32, z: i32) u64 {
+    pub fn packLockPos(x: i32, y: i32, z: i32) u64 {
         // 21 bits each axis signed into 63 bits (enough for world coords).
         const ux: u64 = @as(u32, @bitCast(x));
         const uy: u64 = @as(u32, @bitCast(y));
@@ -3352,7 +3111,7 @@ pub const Game = struct {
         return (ux & 0x1fffff) | ((uy & 0x1fffff) << 21) | ((uz & 0x1fffff) << 42);
     }
 
-    fn firstLockTargetPos(targets_blob: []const u8) ?struct { x: i32, y: i32, z: i32 } {
+    pub fn firstLockTargetPos(targets_blob: []const u8) ?struct { x: i32, y: i32, z: i32 } {
         if (targets_blob.len < 4) return null;
         var tr: wire_binary.Reader = .{ .data = targets_blob };
         const n = tr.readI32() catch return null;
@@ -3596,7 +3355,7 @@ pub const Game = struct {
     }
 
     /// Stock GameServerInfo.ToString(true) body used as NetPackagePlayerLoginAnswer.data.
-    fn buildLoginGsiText(self: *Game, buf: []u8) ![]const u8 {
+    pub fn buildLoginGsiText(self: *Game, buf: []u8) ![]const u8 {
         const info = serverinfo_tcp.ServerInfo{
             .game_name = "zdtd",
             .game_host = "zdtd",
@@ -3621,7 +3380,6 @@ pub const Game = struct {
             return;
         }
         const name = packages.default_mappings[id];
-        const sp = self.world.primarySpawn();
 
         // Phase gate: connecting/joined (pre-enter) only join-SM packages.
         // Playing (entered) allows all names; typed handlers still validate.
@@ -3643,2202 +3401,11 @@ pub const Game = struct {
             }
         }
 
-        if (std.mem.eql(u8, name, "NetPackagePlayerLogin")) {
-            // ServerPassword already enforced at LiteNet ConnectRequest (net.server_password).
-            // Stock PlayerAllowed replaces LastGameServerInfo with GameServerInfo(loginAnswer.data).
-            // data must be full GSI ToString text (not "ok") so worldInfoCo can parse ServerVersion.
-            const gsi = try self.buildLoginGsiText(self.body_buf[4096..8192]);
-            if (c.joined and c.entity_id > 0) {
-                const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
-                try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
-                const spawned = try packages.buildSpawnedBody(
-                    self.body_buf[256..384],
-                    @intFromEnum(packages.RespawnType.join_multiplayer),
-                    sp.x,
-                    sp.y,
-                    sp.z,
-                    c.entity_id,
-                );
-                try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
-                return;
-            }
-            // Name (save key) plus both platform identities, per asm.il 832140.
-            if (body.len > 1) {
-                if (packages.parsePlayerLogin(body, c.name[0..])) |login| {
-                    // Strip C0/DEL so login names cannot inject CR/LF into admin
-                    // replies, audit lines, or GSI-adjacent operator surfaces.
-                    c.name_len = sanitizePlayerName(c.name[0..], login.name);
-                    c.puid_primary = login.internalId();
-                    c.puid_native = login.native;
-                } else |_| {
-                    // A login body zdtd cannot fully decode still gets its name
-                    // read, because refusing the join would lock the player out
-                    // over a field the server never trusts anyway. The identity
-                    // stays null and the deterministic fallback below applies.
-                    self.harness.counters.inc(.c2s_malformed);
-                    var r: wire_binary.Reader = .{ .data = body };
-                    if (r.readString(c.name[0..])) |nm| {
-                        c.name_len = sanitizePlayerName(c.name[0..], nm);
-                    } else |_| {}
-                }
-            }
-            // Identity ban (`ban add`) outlives the connection an IP ban catches,
-            // so it is checked once the login name is known.
-            if (c.name_len != 0 and self.ban_list.banned(c.name[0..c.name_len], clock.wallSeconds())) {
-                self.harness.counters.inc(.join_fail);
-                self.dropClientSlot(c.slot, "identity-ban");
-                return;
-            }
-            const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
-            try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
-            const surf0 = self.spawnSurface(sp.x, sp.z);
-            const was_joined = c.joined;
-            const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return;
-            c.entity_id = eid;
-            // Restored claims keyed by this login name get their live owner
-            // entity re-mapped here (entity ids are reassigned per session).
-            self.reclaimForName(c.name[0..c.name_len], eid);
-            c.joined = true;
-            c.view_radius = self.view_radius;
-            // PlayerDataFile::CopyTo clamps a not-yet-set bornAt down to the
-            // current world time (asm.il ~1975949), so a fresh session starts
-            // at zero days survived rather than at the -1 sentinel.
-            if (!was_joined) c.game_stage_born_world_time = self.sim.director.clock.worldTimeBits();
-            self.tryRestorePlayer(c);
-            // Stock: LoginAnswer only. Configs must arrive after StartAsClient starts
-            // WaitForConfigsFromServer (which resets WasReceivedFromServer). That is
-            // after RequestToEnterGame is sent from the client.
-            self.refreshInfoPlayers();
-            self.harness.counters.inc(.join_ok);
-            if (was_joined) {
-                self.harness.counters.inc(.reconnects);
-                self.noteEvidence(c, peer.local_id, eid, .flood, .info, .none, 1, 0);
-            }
-            // Name length only in logs (name stays on admin listplayers / webui).
-            std.debug.print("zdtd: PlayerLogin name_len={d} entity={d} body={d}\n", .{ c.name_len, eid, body.len });
-            return;
-        }
-        // Stock: StartAsClient starts config-wait coroutine, then RequestToEnterGame.
-        // Send local ConfigFiles now so the wait can finish; then WorldInfo.
-        if (std.mem.eql(u8, name, "NetPackageRequestToEnterGame")) {
-            std.debug.print("zdtd: RequestToEnterGame entity={d}\n", .{c.entity_id});
-            if (c.entity_id <= 0) {
-                const surf_e = self.spawnSurface(sp.x, sp.z);
-                c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf_e.x), @floatFromInt(surf_e.y), @floatFromInt(surf_e.z), @intCast(c.slot)) orelse return;
-                c.joined = true;
-                self.tryRestorePlayer(c);
-            }
-            // Before the configs: the client only runs Block::AssignIds after the
-            // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
-            // 2014542), and stock sends the mapping at this same point.
-            try self.sendBlockIdMapping(peer);
-            try self.sendLocalConfigFiles(peer);
-            const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
-            try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
-            try self.sendWorldSpawnPoints(peer);
-            // Stock sends World.TraderAreas right after SpawnPoints and before
-            // GameStats (GameManager/<RequestToEnterGame>d__195 MoveNext,
-            // protocol.md step 12); the client builds the safe zones and the
-            // closing-time teleports from it.
-            try self.sendWorldAreas(peer);
-            const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
-            try self.sendGame(peer, "NetPackageWorldTime", wt);
-            try self.sendGameStats(peer);
-            // NetPackageWeather: only after client WeatherManager.InitPackages (post-enter).
-            // Early send → NCSimple "parsed 2 vs expected 117" and disconnect.
-            // Fixed-size clients only apply trees from S2C deco (no local random gen),
-            // and this is the client's only deco window (see sendDecoAroundSpawn).
-            try self.sendDecoAroundSpawn(c, peer, sp.x, sp.z);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageAuthConfirmation")) {
-            // Client echoes empty AuthConfirmation; stock AuthFinalizer expects the round-trip.
-            // Nothing to apply; acknowledge by no-op so the session stays live.
-            std.debug.print("zdtd: AuthConfirmation body={d}\n", .{body.len});
-            return;
-        }
-        // worldInfoCo: after configs, client RequestWorldSignDataFromServer and blocks until
-        // SignDataResponse(isLastBatch=true). Send prefab library shells (guid+name, 0 layers).
-        if (std.mem.eql(u8, name, "NetPackageSignDataRequest")) {
-            try self.sendSignDataBatches(peer);
-            return;
-        }
-        // worldInfoCo: after createWorld, client sends WorldInitInfoRequest and waits for
-        // worldInitInfoReceived (set by ProcessPackage of WorldInitInfo).
-        if (std.mem.eql(u8, name, "NetPackageWorldInitInfoRequest")) {
-            // Same hang class as DynamicClientArrive: WorldInitInfo after enter can
-            // restart createWorld and leave the client on Creating player.
-            if (c.entered) return;
-            const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
-            try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
-            std.debug.print("zdtd: WorldInitInfoRequest -> empty entity={d}\n", .{c.entity_id});
-            // Stream from here, not at spawn. The client needs collision meshes
-            // for the spawn chunk and its 8 neighbours before
-            // World.IsPositionAvailable succeeds; until then updateRespawn parks
-            // in ClampingToValidWorldPos. OnAddedToWorld meanwhile sets
-            // EntityAlive.bSpawned, and updateRespawn short-circuits to Done on
-            // that, abandoning the sequence before it closes the loading screen.
-            c.world_ready = true;
-            return;
-        }
-        // createWorld posts DynamicClientArrive. Prefer RequestToSpawnPlayer for the
-        // join bundle. Re-sending WorldInitInfo after PlayerId restarts createWorld
-        // mid-session and leaves the stock client on "Creating player".
-        if (std.mem.eql(u8, name, "NetPackageDynamicClientArrive")) {
-            if (c.entered) {
-                // Already in-world. Stock DynamicClientArrive is dynamic-mesh
-                // inventory reconcile (not implemented); join SM must not re-answer.
-                return;
-            }
-            // Fallback spawn path when RequestToSpawnPlayer never arrives / fails parse.
-            if (c.entity_id > 0) {
-                c.view_radius = if (c.view_radius < 1) self.view_radius else c.view_radius;
-                try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
-                std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
-            } else {
-                const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
-                try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
-                std.debug.print("zdtd: DynamicClientArrive -> WorldInitInfo empty (pre-spawn) entity={d}\n", .{c.entity_id});
-                // Head start on the spawn area. createWorld posts this package, so
-                // the client's ChunkCache exists and will keep these. The client
-                // needs collision meshes (Chunk.GetAvailable == IsCollisionMeshGenerated)
-                // for the spawn chunk and its 8 neighbours before
-                // World.IsPositionAvailable succeeds; until then updateRespawn parks
-                // in ClampingToValidWorldPos. Meanwhile OnAddedToWorld sets
-                // EntityAlive.bSpawned, and updateRespawn's first line short-circuits
-                // to Done on that, abandoning the sequence before it closes the
-                // loading screen. Streaming only at spawn time loses that race by
-                // ~40s; stock has the area meshed well before the player appears.
-                if (self.wire_chunks) {
-                    const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-                    try self.sendSpawnArea(peer, sp.x, sp.z, r0);
-                }
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageRequestToSpawnPlayer")) {
-            if (packages.parseRequestToSpawnPlayer(body)) |req| {
-                // chunkViewDim is in chunks; clamp for reliable window (join uses ≤2).
-                var dim: i32 = req.chunk_view_dim;
-                if (dim < 1) dim = self.view_radius;
-                if (dim > 8) dim = 8;
-                c.view_radius = dim;
-            } else |_| {
-                c.view_radius = self.view_radius;
-            }
-            const surf = self.spawnSurface(sp.x, sp.z);
-            if (c.entity_id <= 0) {
-                c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return;
-            } else if (self.sim.slotOfNetId(c.entity_id)) |si| {
-                // Respawn heal/teleport only when actually dead; a live player
-                // resending RequestToSpawn must not get a free heal + escape.
-                if (!self.sim.alive[si] or self.sim.health[si].hp <= 0) {
-                    // Only sanctioned un-kill: a raw alive[] write would leave
-                    // the cached kind group out of sync.
-                    // EntityPlayer::SetAlive (asm.il ~503838): a death costs
-                    // daysAliveChangeWhenKilled days off the survival streak.
-                    c.game_stage_born_world_time = assets_gamestages.bornAtAfterDeath(
-                        self.gamestages.config,
-                        self.sim.director.clock.worldTimeBits(),
-                        c.game_stage_born_world_time,
-                    );
-                    self.sim.reviveSlot(si);
-                    // The client drops its own remove_on_death buffs when it
-                    // dies (BuffClass::RemoveOnDeath, asm.il 1371585), so drop
-                    // ours silently rather than broadcasting removals it made.
-                    if (self.sim.mask[si].buffs) _ = ecs.buff.clearOnDeath(&self.sim.buffs[si]);
-                    self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
-                    // Respawn clears IsBloodMoonDead (stock get_unModifiedGameStage).
-                    if (self.sim.mask[si].player) self.sim.player[si].is_blood_moon_dead = false;
-                    self.sim.transform[si] = .{
-                        .x = @as(f32, @floatFromInt(surf.x)),
-                        .y = @as(f32, @floatFromInt(surf.y)) + 0.08,
-                        .z = @as(f32, @floatFromInt(surf.z)),
-                        .yaw = 0,
-                    };
-                    // Raw column writes bypass the markDirty funnel; raise the
-                    // bits so hp/pos relays reach in-range peers instead of
-                    // waiting for the 5-tick heartbeat.
-                    self.sim.markDirty(si, .{ .pos = true, .hp = true });
-                    if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
-                        try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
-                    } else |_| {}
-                    if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @floatFromInt(sp.x), @floatFromInt(sp.y), @floatFromInt(sp.z), 0, 0, 0, true)) |tb| {
-                        try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-                    } else |_| {}
-                    if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(surf.x)), @as(f32, @floatFromInt(surf.y)) + 0.08, @as(f32, @floatFromInt(surf.z)), 0, 0, 0, true)) |tb| {
-                        try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-                    } else |_| {}
-                    const spawned = try packages.buildSpawnedBody(
-                        self.body_buf[256..384],
-                        @intFromEnum(packages.RespawnType.died),
-                        surf.x,
-                        surf.y,
-                        surf.z,
-                        c.entity_id,
-                    );
-                    try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
-                    std.debug.print("zdtd: respawn heal entity={d}\n", .{c.entity_id});
-                }
-            } else {
-                c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return;
-            }
-            c.joined = true;
-            // Stream the spawn area before the bundle, while the client is still
-            // waiting on its spawn request. NetPackagePlayerId creates the local
-            // player, which opens the spawn-selection window; that window's
-            // updateLoadState returns on `cgo >= viewDist^2 - 10` and stops being
-            // ticked once the loading screen covers it, so a client that spawns
-            // with no displayed chunks stays in WaitingForSpawnWindowToClose
-            // behind the loading screen. Sending here (not inside sendJoinBundle)
-            // keeps the pre-world DynamicClientArrive fallback untouched: chunks
-            // sent before the client's world exists are dropped and wedge the join.
-            if (self.wire_chunks and !c.entered) {
-                const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-                try self.sendSpawnArea(peer, surf.x, surf.z, r0);
-            }
-            // Death-respawn already sent Spawned+stats; still re-send join bundle so the
-            // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
-            try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
-            const p = packages.parsePosAndRotBody(body) catch {
-                self.harness.counters.inc(.decode_rejects);
-                return;
-            };
-            if (p.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
-            if (!env.applied) return;
-            // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
-            if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
-                self.noteAcceptedMove(c, env.x, ny, env.z);
-                systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
-                systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
-                return;
-            }
-            // Keep the stored facing: the absolute package's rotation is not
-            // parsed into the column, so passing 0 would fabricate a north
-            // facing on every move (RelPos preserves it). setPos marks dirty.
-            var yaw: f32 = 0;
-            if (self.sim.slotOfNetId(p.entity_id)) |si| yaw = self.sim.transform[si].yaw;
-            self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
-            self.noteAcceptedMove(c, env.x, env.y, env.z);
-            systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
-            systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
-            return;
-        }
-        // Client animation spam is noisy and fills the reliable window if we log/reply.
-        if (std.mem.eql(u8, name, "NetPackageEntityAnimationData")) {
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageEntityCollect")) {
-            const bag = packages.parseCollectBody(body) catch return;
-            // Transfer contents into server inv, then destroy. Wire order matches
-            // stock: Collect (client OnCollect) then EntityRemove(Despawned).
-            if (self.sim.slotOfNetId(bag)) |bs| {
-                const is_loot = self.sim.kind[bs] == .loot_bag or self.sim.mask[bs].loot_bag;
-                if (is_loot) {
-                    if (self.sim.playerByPeer(c.slot)) |ps| {
-                        const pp = self.sim.transform[ps];
-                        const bp = self.sim.transform[bs];
-                        const dx = bp.x - pp.x;
-                        const dy = bp.y - pp.y;
-                        const dz = bp.z - pp.z;
-                        if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
-                            self.harness.counters.inc(.bounds_rejects);
-                            return;
-                        }
-                        if (self.sim.mask[ps].inventory and self.sim.mask[bs].inventory) {
-                            // Same transfer rule as systems.collectLootNear: only a
-                            // full deposit destroys the bag; a partial one restores
-                            // the player inventory and keeps the bag alive so the
-                            // rest is not silently deleted.
-                            const inventory_before = self.sim.inventory[ps];
-                            var transferred = true;
-                            for (self.sim.inventory[bs].slots) |slot| {
-                                if (slot.count == 0 or slot.item_id == 0) continue;
-                                if (!self.sim.depositItem(ps, slot.item_id, slot.count)) {
-                                    transferred = false;
-                                    break;
-                                }
-                            }
-                            if (!transferred) {
-                                self.sim.inventory[ps] = inventory_before;
-                                return;
-                            }
-                            for (self.sim.inventory[bs].slots) |slot| {
-                                if (slot.count == 0 or slot.item_id == 0) continue;
-                                const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
-                                const p: u16 = if (c.slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(c.slot);
-                                self.sim.inv_ledger.record(p, slot.item_id, d, .loot);
-                            }
-                            self.sim.markDirty(ps, .{ .inv = true });
-                        }
-                    }
-                    if (self.sim.alive[bs]) self.sim.destroy(bs);
-                    if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {
-                        try self.broadcast("NetPackageEntityCollect", cb);
-                    } else |_| {}
-                    if (packages.buildRemoveBodyReason(&self.body_buf, bag, .despawned)) |rm| {
-                        try self.broadcast("NetPackageEntityRemove", rm);
-                    } else |_| {}
-                }
-            }
-            return;
-        }
-        // Stock chat: rebroadcast Global messages to all peers.
-        if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
-            if (!self.acceptChatRate(c)) return;
-            if (std.mem.eql(u8, name, "NetPackageChat")) {
-                // Re-encode with the authenticated sender: echoing the client body
-                // lets any peer put words in another player's name (clients render
-                // the name from the sender entity id).
-                const ch = packages.parseStockChat(body) catch return;
-                if (!chatMsgOk(ch.msg)) return;
-                const stock = packages.buildStockChat(
-                    self.body_buf[0..512],
-                    ch.chat_type, // carry the channel (Party/Friends/Whisper) for the client UI
-                    c.entity_id,
-                    ch.msg,
-                    ch.recipients[0..ch.recipient_count],
-                ) catch return;
-                // Stock ChatMessageServer (chat.md §2): routing is recipient-list
-                // based, not channel based — a non-empty recipientEntityIds sends
-                // only to those clients, else broadcast to everyone.
-                if (ch.recipient_count > 0) {
-                    for (ch.recipients[0..ch.recipient_count]) |rid| {
-                        if (rid == c.entity_id) continue; // no self-echo
-                        if (self.clientByEntityId(rid)) |rc| {
-                            if (rc.peer) |rpeer| {
-                                self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
-                                    self.harness.counters.inc(.net_send_errors);
-                                    std.debug.print("zdtd: send chat failed: {s}\n", .{@errorName(err)});
-                                };
-                            }
-                        }
-                    }
-                } else {
-                    try self.broadcastExcept("NetPackageChat", stock, c.slot);
-                }
-            } else {
-                // Upgrade simple chat to stock Chat when possible
-                var r: wire_binary.Reader = .{ .data = body };
-                var from_buf: [64]u8 = undefined;
-                var msg_buf: [max_chat_msg_len]u8 = undefined;
-                const from = r.readString(&from_buf) catch "";
-                const msg = r.readString(&msg_buf) catch return;
-                _ = from;
-                if (!chatMsgOk(msg)) return;
-                const stock = try packages.buildStockChat(self.body_buf[0..512], 0, c.entity_id, msg, &.{});
-                try self.broadcast("NetPackageChat", stock);
-            }
-            return;
-        }
-        // Stock vanilla C→S: client pushes inventory sections (toolbelt/bag/equip).
-        // Interim client-trust (ADR 0007): overwrite local player ECS; no S2C echo.
-        // ItemActionEat: stock clients DecHoldingItem locally then push PlayerInventory;
-        // detect eatable stack loss and apply Food/Water/HP (same as InvTx use).
-        if (std.mem.eql(u8, name, "NetPackagePlayerInventory")) {
-            if (!self.takeInvToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            if (!self.sim.mask[ps].inventory) return;
-            var before: [64]struct { id: u16, n: u32 } = undefined;
-            var bn: usize = 0;
-            var before_total: u32 = 0;
-            for (self.sim.inventory[ps].slots) |sl| {
-                if (sl.count == 0 or sl.item_id == 0) continue;
-                if (!self.items.isEat(sl.item_id)) continue;
-                before_total += sl.count;
-                var found = false;
-                for (before[0..bn]) |*e| {
-                    if (e.id == sl.item_id) {
-                        e.n += sl.count;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found and bn < before.len) {
-                    before[bn] = .{ .id = sl.item_id, .n = sl.count };
-                    bn += 1;
-                }
-            }
-            const baseline_total = if (before_total > 0) before_total else c.last_eatable_units;
-            // Apply may partially mutate toolbelt then fail on bag/equip/prefs.
-            // Keep stack-loss detect even on error (toolbelt is first on the wire).
-            packages.stock_inv.applyPlayerInventoryBody(body, &self.sim.inventory[ps], reverseItemType, self) catch |err| {
-                std.debug.print("zdtd: PlayerInventory apply err={s} body={d} peer={d}\n", .{ @errorName(err), body.len, c.slot });
-            };
-            self.clampInventoryStacks(&self.sim.inventory[ps]);
-            var after_total: u32 = 0;
-            var first_eat_id: u16 = 0;
-            for (self.sim.inventory[ps].slots) |sl| {
-                if (sl.count == 0 or sl.item_id == 0) continue;
-                if (!self.items.isEat(sl.item_id)) continue;
-                after_total += sl.count;
-                if (first_eat_id == 0) first_eat_id = sl.item_id;
-            }
-            // Body-side eatable count by stock type (reverse-independent).
-            const body_eat = packages.stock_inv.countEatableInPlayerInventoryBody(
-                body,
-                reverseItemType,
-                self,
-                struct {
-                    fn isEatStock(ctx: ?*anyopaque, stock_type: i32) bool {
-                        const g: *Game = @ptrCast(@alignCast(ctx.?));
-                        return g.items.isEatStockType(stock_type);
-                    }
-                }.isEatStock,
-            );
-            if (first_eat_id == 0 and body_eat.first_ecs != 0) first_eat_id = body_eat.first_ecs;
-
-            if (self.sim.mask[ps].health and c.entity_id > 0) {
-                var ate_any = false;
-                var units_left: u32 = 4;
-                // Path A: per-id loss within this package (ECS before → after).
-                for (before[0..bn]) |e| {
-                    if (units_left == 0) break;
-                    var after_n: u32 = 0;
-                    for (self.sim.inventory[ps].slots) |sl| {
-                        if (sl.item_id == e.id) after_n += sl.count;
-                    }
-                    if (after_n >= e.n) continue;
-                    var lost = e.n - after_n;
-                    if (lost > units_left) lost = units_left;
-                    var u: u32 = 0;
-                    while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), e.id);
-                        const r = invsys.applyEatProps(&self.sim, ps, props);
-                        if (!r.ate) break;
-                        ate_any = true;
-                        units_left -= 1;
-                    }
-                }
-                // Path B: ECS aggregate drop vs baseline (only with known eat id).
-                if (!ate_any and baseline_total > after_total and units_left > 0) {
-                    var lost = baseline_total - after_total;
-                    if (lost > units_left) lost = units_left;
-                    var eid: u16 = first_eat_id;
-                    if (eid == 0 and bn > 0) eid = before[0].id;
-                    if (eid == 0 and body_eat.first_ecs != 0) eid = body_eat.first_ecs;
-                    if (eid != 0 and self.items.isEat(eid)) {
-                        var u: u32 = 0;
-                        while (u < lost) : (u += 1) {
-                            const props = eatProps(@ptrCast(self), eid);
-                            const r = invsys.applyEatProps(&self.sim, ps, props);
-                            if (!r.ate) break;
-                            ate_any = true;
-                            units_left -= 1;
-                        }
-                    }
-                }
-                // Path C: body stock-type count dropped vs last_eatable (primary live path).
-                // Require a resolved eatable ecs id. Do not invent chili/beef/id=2 props
-                // for unknown multi-unit losses (drop/trade false-eat under ADR 0007).
-                if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
-                    var lost = c.last_eatable_units - body_eat.total;
-                    if (lost > units_left) lost = units_left;
-                    var eid: u16 = body_eat.first_ecs;
-                    if (eid == 0 and first_eat_id != 0) eid = first_eat_id;
-                    if (eid == 0 and bn > 0) eid = before[0].id;
-                    if (eid != 0 and self.items.isEat(eid)) {
-                        var u: u32 = 0;
-                        while (u < lost) : (u += 1) {
-                            const props = eatProps(@ptrCast(self), eid);
-                            const r = invsys.applyEatProps(&self.sim, ps, props);
-                            if (!r.ate) break;
-                            ate_any = true;
-                            units_left -= 1;
-                        }
-                    } else if (lost > 0) {
-                        std.debug.print("zdtd: PI eatable drop skipped (no eat eid) lost={d} last={d} body_eat={d} stock0={d}\n", .{
-                            lost, c.last_eatable_units, body_eat.total, body_eat.first_stock,
-                        });
-                    }
-                }
-                if (ate_any) {
-                    const h = self.sim.health[ps];
-                    std.debug.print("zdtd: ItemActionEat stack-loss food={d:.1} before={d} after={d} last={d} body_eat={d} stock0={d}\n", .{
-                        h.food, before_total, after_total, c.last_eatable_units, body_eat.total, body_eat.first_stock,
-                    });
-                    try self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max);
-                } else if (body_eat.total != c.last_eatable_units or before_total != after_total) {
-                    std.debug.print("zdtd: PI eatable before={d} after={d} last={d} body={d} body_eat={d} stock0={d}\n", .{
-                        before_total, after_total, c.last_eatable_units, body.len, body_eat.total, body_eat.first_stock,
-                    });
-                }
-            }
-            // Body-driven baseline so seed→eat works even when reverse leaves ECS empty.
-            c.last_eatable_units = body_eat.total;
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageHoldingItem")) {
-            const h = packages.stock_inv.readHoldingItem(body) catch return;
-            if (h.entity_id != 0 and h.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            if (!self.sim.mask[ps].inventory) return;
-            if (h.holding_index < ecs.components.inv_toolbelt) {
-                _ = self.sim.inventory[ps].setHolding(h.holding_index);
-            }
-            // Rebroadcast to other peers (stock server behavior).
-            const hb = try packages.buildHoldingBodyResolved(
-                &self.body_buf,
-                c.entity_id,
-                &self.sim.inventory[ps],
-                resolveItemType,
-                self,
-            );
-            try self.broadcastExcept("NetPackageHoldingItem", hb, c.slot);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageItemDrop")) {
-            const d = packages.stock_inv.readItemDrop(body) catch return;
-            const item_id = reverseItemType(self, d.stack.type_id);
-            if (item_id == 0 or d.stack.count == 0) return;
-            // Prefer drop from matching player stack; else spawn at drop pos.
-            var dropped: i32 = -1;
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            if (self.sim.mask[ps].inventory) {
-                var slot_i: u16 = 0;
-                while (slot_i < ecs.components.max_inv_slots) : (slot_i += 1) {
-                    const s = self.sim.inventory[ps].slots[slot_i];
-                    if (s.item_id == item_id and s.count > 0) {
-                        const qty = @min(s.count, d.stack.count);
-                        const r = invsys.applyTransaction(&self.sim, c.slot, .drop, slot_i, 0, qty, -1);
-                        dropped = r.dropped_entity;
-                        break;
-                    }
-                }
-            }
-            // The server inventory is authoritative. A claimed stack that was
-            // not actually present must not materialize a new item entity.
-            if (dropped > 0) {
-                // Stock ItemDropServer → EntityItem (class "item"), not death bag.
-                try self.broadcastItemDropSpawn(dropped, d.stack, c.entity_id, d.client_instance_id);
-                try self.sendHoldingEcho(peer, c);
-                // Rebaseline eatable units so Path C does not treat drop as eat.
-                if (self.sim.mask[ps].inventory) {
-                    var eat_n: u32 = 0;
-                    for (self.sim.inventory[ps].slots) |sl| {
-                        if (sl.count == 0 or sl.item_id == 0) continue;
-                        if (self.items.isEat(sl.item_id)) eat_n += sl.count;
-                    }
-                    c.last_eatable_units = eat_n;
-                }
-            }
-            return;
-        }
-        // Stock bag push (player backpack or entity bag).
-        if (std.mem.eql(u8, name, "NetPackageBag")) {
-            const entity_id = packages.stock_inv.peekBagEntityId(body) catch return;
-            if (entity_id == c.entity_id or entity_id == 0) {
-                const ps = self.sim.playerByPeer(c.slot) orelse return;
-                if (!self.sim.mask[ps].inventory) return;
-                _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[ps], reverseItemType, self, true) catch return;
-                self.clampInventoryStacks(&self.sim.inventory[ps]);
-            } else if (self.sim.slotOfNetId(entity_id)) |si| {
-                // Ownership: never let a peer write another player's inventory.
-                if (self.sim.mask[si].player) {
-                    self.harness.counters.inc(.ownership_rejects);
-                    return;
-                }
-                // Reach: same as Collect/TE. Without this, any peer can rewrite
-                // distant loot-bag (or other non-player inv) contents by id.
-                const ps = self.sim.playerByPeer(c.slot) orelse return;
-                const pp = self.sim.transform[ps];
-                const bp = self.sim.transform[si];
-                if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    return;
-                }
-                if (self.sim.mask[si].inventory) {
-                    _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return;
-                    self.clampInventoryStacks(&self.sim.inventory[si]);
-                }
-            } else return;
-            try self.sendHoldingEcho(peer, c);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageDropItemsContainer")) {
-            // Death/drop containers are created from server-owned inventory by
-            // the death path. Never accept a client-supplied item list.
-            return;
-        }
-        // Stock composite storage TE and/or zdtd ZTE1 bridge.
-        if (std.mem.eql(u8, name, "NetPackageTileEntity")) {
-            if (self.quarantineDenies(c, .container)) return;
-            // Vending TE (type 7) first: its payload version i32 (3) cleanly
-            // discriminates it from the storage size-marker and the
-            // workstation version byte, so no other parse can misroute it.
-            {
-                var v_plat: [packages.platform_user.max_platform_len]u8 = undefined;
-                var v_id: [packages.platform_user.max_id_len]u8 = undefined;
-                var v_pw: [vending_mod.max_password_hash]u8 = undefined;
-                var v_allowed_plat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
-                var v_allowed_id: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
-                if (stock_te.parseVendingTeBody(body, &v_plat, &v_id, &v_pw, &v_allowed_plat, &v_allowed_id) catch |err| blk: {
-                    std.debug.print("DBG vend parse err: {s}\n", .{@errorName(err)});
-                    break :blk null;
-                }) |ve| {
-                    const owner = self.sim.playerByPeer(c.slot) orelse return;
-                    const op = self.sim.transform[owner];
-                    const tdx = @as(f32, @floatFromInt(ve.world_x)) - op.x;
-                    const tdy = @as(f32, @floatFromInt(ve.world_y)) - op.y;
-                    const tdz = @as(f32, @floatFromInt(ve.world_z)) - op.z;
-                    const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
-                    if (te_d2 > self.max_edit_range * self.max_edit_range) {
-                        self.harness.counters.inc(.bounds_rejects);
-                        return;
-                    }
-                    const vm = self.vending.get(.{ .x = ve.world_x, .y = ve.world_y, .z = ve.world_z }) orelse return;
-                    // Owner-editable surface (lock / password / allowed users).
-                    // Only the machine's owner may edit; ownership and the
-                    // rental term stay server-applied (the rent SM owns them).
-                    const mine = c.puid_primary.get() orelse c.puid_native.get() orelse return;
-                    if (!vm.owner.matches(mine)) return;
-                    vm.is_locked = ve.is_locked;
-                    if (ve.password.len <= vending_mod.max_password_hash) {
-                        @memcpy(vm.password_hash[0..ve.password.len], ve.password);
-                        vm.password_len = @intCast(ve.password.len);
-                    }
-                    vm.allowed_n = @intCast(@min(ve.allowed_n, vending_mod.max_allowed_users));
-                    var ai: usize = 0;
-                    while (ai < vm.allowed_n) : (ai += 1) {
-                        vm.allowed[ai].set(ve.allowed[ai]) catch {
-                            vm.allowed_n = @intCast(ai);
-                            break;
-                        };
-                    }
-                    try replicate_te.sendVendingTe(self, peer, ve.world_x, ve.world_y, ve.world_z);
-                    return;
-                }
-            }
-            if (stock_te.parseStorageTeBody(body)) |parsed| {
-                // Reach: TE writes must be near the acting player (cross-map chest
-                // overwrite + container-store fill guard).
-                const owner = self.sim.playerByPeer(c.slot) orelse return;
-                const op = self.sim.transform[owner];
-                const tdx = @as(f32, @floatFromInt(parsed.world_x)) - op.x;
-                const tdy = @as(f32, @floatFromInt(parsed.world_y)) - op.y;
-                const tdz = @as(f32, @floatFromInt(parsed.world_z)) - op.z;
-                const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
-                if (te_d2 > self.max_edit_range * self.max_edit_range) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(te_d2), self.max_edit_range);
-                    return;
-                }
-                const pos: containers_mod.PosKey = .{ .x = parsed.world_x, .y = parsed.world_y, .z = parsed.world_z };
-                const sc: u16 = if (parsed.size_x > 0 and parsed.size_y > 0)
-                    @intCast(@min(@as(usize, parsed.size_x) * @as(usize, parsed.size_y), containers_mod.max_container_slots))
-                else
-                    @intCast(@min(@max(parsed.item_count, 8), containers_mod.max_container_slots));
-                const cont = self.containers.getOrCreate(pos, sc, parsed.block_id) orelse return;
-                stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
-                // Echo stock TE to nearby clients.
-                try replicate_te.broadcastStorageTe(self, cont);
-                return;
-            } else |_| {}
-            // Workstation TE (type 12 classic): apply arrays + queue into the
-            // workstation store (craft tick advances it) and echo to nearby peers.
-            if (stock_te.parseWorkstationTeBody(body)) |ws| {
-                const wsp = self.sim.playerByPeer(c.slot) orelse return;
-                const wp = self.sim.transform[wsp];
-                const wdx = @as(f32, @floatFromInt(ws.world_x)) - wp.x;
-                const wdy = @as(f32, @floatFromInt(ws.world_y)) - wp.y;
-                const wdz = @as(f32, @floatFromInt(ws.world_z)) - wp.z;
-                const ws_d2 = wdx * wdx + wdy * wdy + wdz * wdz;
-                if (ws_d2 > self.max_edit_range * self.max_edit_range) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(ws_d2), self.max_edit_range);
-                    return;
-                }
-                if (self.workstations.getOrCreate(ws.world_x, ws.world_y, ws.world_z)) |st| {
-                    replicate_te.applyWsGroup(self, st.fuel[0..], ws.fuel[0..ws.fuel_n]);
-                    replicate_te.applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
-                    replicate_te.applyWsGroup(self, st.tools[0..], ws.tools[0..ws.tools_n]);
-                    replicate_te.applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
-                    @memcpy(st.last_input[0..ws.last_input_blob_len], ws.last_input[0..ws.last_input_blob_len]);
-                    st.last_input_blob_len = ws.last_input_blob_len;
-                    // Trust boundary (GAP: workstation recipe validation): the
-                    // queued output type/count come from the client blob verbatim,
-                    // so a modified client could queue any output at any rate.
-                    // With stock recipes.xml loaded, only queue items whose output
-                    // type resolves to a recipe output survive; unresolvable
-                    // types and non-recipe outputs are dropped. Builtin recipes
-                    // (offline/test) carry no stock types, so validation is off.
-                    if (self.recipes.source == .xml) {
-                        var q_ok: [workstations_mod.max_ws_queue]workstations_mod.QueueItem = undefined;
-                        var qn: usize = 0;
-                        for (ws.queue[0..ws.queue_n]) |q| {
-                            if (q.output_type == 0 or q.output_count <= 0) continue;
-                            const iname = self.items.nameByStockType(q.output_type) orelse continue;
-                            if (self.recipes.byName(iname) == null) continue;
-                            q_ok[qn] = q;
-                            qn += 1;
-                        }
-                        @memcpy(st.queue[0..qn], q_ok[0..qn]);
-                        // Clear the slots the validation dropped so a previous
-                        // tick's queue cannot linger as a live craft.
-                        for (st.queue[qn..]) |*q| q.* = .{};
-                    } else {
-                        @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
-                    }
-                    @memcpy(st.melt[0..ws.melt_n], ws.melt[0..ws.melt_n]);
-                    // The client returns the craft-complete entries its
-                    // CheckForCraftComplete has not consumed: that list is the
-                    // acknowledgement, so it replaces ours wholesale.
-                    st.setCraftComplete(ws.craft_complete[0..ws.craft_complete_n]);
-                    // Array lengths are the client's, never a used prefix: the
-                    // echo must send them back unchanged or its grids resize.
-                    st.fuel_len = ws.fuel_n;
-                    st.input_len = ws.input_n;
-                    st.tools_len = ws.tools_n;
-                    st.output_len = ws.output_n;
-                    st.last_input_len = ws.last_input_n;
-                    st.queue_len = ws.queue_n;
-                    st.melt_len = ws.melt_n;
-                    st.is_burning = ws.is_burning;
-                    st.burn_time_left = ws.burn_time_left;
-                    st.is_player_placed = ws.is_player_placed;
-                    st.block_id = ws.block_id;
-                    st.geometry_known = true;
-                    st.dirty = false;
-                }
-                try self.broadcastNear(
-                    "NetPackageTileEntity",
-                    body,
-                    @floatFromInt(ws.world_x),
-                    @floatFromInt(ws.world_z),
-                    self.interest_range,
-                );
-                return;
-            } else |_| {}
-            // TileEntityPoweredTrigger (TileEntityType.Trigger = 19): delay /
-            // duration / reset from the trigger's own UI. Tried last and gated on
-            // the outer teBlockId resolving to a registered power block, so this
-            // reader can never swallow a storage or workstation payload.
-            if (stock_te.parsePoweredTriggerTeBody(body)) |trig| {
-                const bid: u16 = if (trig.block_id > 0 and trig.block_id <= 65535)
-                    @intCast(trig.block_id)
-                else
-                    return;
-                const props = self.power_registry.lookup(bid) orelse return;
-                if (props.trigger_type == null) return;
-                // Stock only ever writes TriggerTypes 0..4 (asm.il:900244).
-                if (trig.trigger_type > stock_te.trigger_type_trip_wire) return;
-                const tp = self.sim.playerByPeer(c.slot) orelse return;
-                const tpos = self.sim.transform[tp];
-                const gdx = @as(f32, @floatFromInt(trig.world_x)) - tpos.x;
-                const gdy = @as(f32, @floatFromInt(trig.world_y)) - tpos.y;
-                const gdz = @as(f32, @floatFromInt(trig.world_z)) - tpos.z;
-                const g_d2 = gdx * gdx + gdy * gdy + gdz * gdz;
-                if (g_d2 > self.max_edit_range * self.max_edit_range) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(g_d2), self.max_edit_range);
-                    return;
-                }
-                // A Switch carries no delay/duration on the wire; its state is the
-                // block meta, which arrives on the SetBlock path instead.
-                if (trig.trigger_type != stock_te.trigger_type_switch and
-                    trig.trigger_type != stock_te.trigger_type_timer_relay)
-                {
-                    _ = self.sim.power.setTriggerConfigAt(
-                        trig.world_x,
-                        trig.world_y,
-                        trig.world_z,
-                        trig.property1,
-                        trig.property2,
-                    );
-                    if (trig.reset_trigger) _ = self.sim.power.resetTriggerAt(trig.world_x, trig.world_y, trig.world_z);
-                }
-                self.sim.power.resolve();
-                try replicate_te.broadcastPoweredTriggerTe(self, trig.world_x, trig.world_y, trig.world_z);
-                return;
-            } else |_| {}
-            // Unparsed TE payload: drop (stock formats only).
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageInventoryTransactionRequest")) {
-            if (!self.takeInvToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            const tx = packages.parseInvTxRequest(body) catch return;
-            var r: invsys.Result = .{};
-            // Captured before apply: a rejected place must refund what it consumed.
-            const place_item_id: u16 = blk: {
-                if (tx.op != @intFromEnum(invsys.Op.place) or tx.a >= ecs.components.max_inv_slots) break :blk 0;
-                const ps = self.sim.playerByPeer(c.slot) orelse break :blk 0;
-                if (!self.sim.mask[ps].inventory) break :blk 0;
-                break :blk self.sim.inventory[ps].slots[tx.a].item_id;
-            };
-            const ledger_before = self.sim.inv_ledger.total;
-            if (tx.op == @intFromEnum(invsys.Op.craft)) {
-                r = .{ .ok = self.tryCraft(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
-            } else {
-                const op: invsys.Op = if (tx.op <= @intFromEnum(invsys.Op.equip))
-                    @enumFromInt(tx.op)
-                else
-                    .list;
-                // ItemActionEat: resolve food/water/hp from items.xml via eatProps.
-                r = invsys.applyTransactionEx(&self.sim, c.slot, op, tx.a, tx.b, tx.qty, tx.entity_id, eatProps, self);
-            }
-            if (r.ok and r.place_block != 0) {
-                // Land claim is authoritative on every apply path (ADR 0004); the
-                // InvTx place route must not be a way around it. Refund the unit the
-                // transaction already consumed (mirrors the refuel path).
-                if (self.claimCovering(r.place_x, r.place_z)) |claim| {
-                    if (claim.owner_entity != c.entity_id) {
-                        if (place_item_id != 0) _ = invsys.give(&self.sim, c.slot, place_item_id, 1);
-                        r.ok = false;
-                    }
-                }
-            }
-            if (r.ok and r.place_block != 0) {
-                try self.world.setBlockWorld(r.place_x, r.place_y, r.place_z, r.place_block);
-                const sb = try packages.buildSetBlockBody(&self.body_buf, r.place_x, r.place_y, r.place_z, r.place_block);
-                try self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(r.place_x), @floatFromInt(r.place_z), self.interest_range);
-                // Power nodes from placeable generators (same path as SetBlock).
-                if (self.power_registry.lookup(r.place_block)) |pn| {
-                    if (self.sim.power.addNodeAt(pn.kind, r.place_x, r.place_y, r.place_z, pn.watts)) |nid| {
-                        if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
-                    }
-                    self.sim.power.resolve();
-                }
-            } else if (r.ok and r.refuel_amount > 0) {
-                // Gas can / FuelValue item used at generator coords (InvTx place).
-                if (!self.tryRefuelGenerator(c, r.place_x, r.place_y, r.place_z, r.refuel_amount)) {
-                    // Refund the consumed fuel unit (inventory already took one).
-                    if (r.refuel_item_id != 0) _ = invsys.give(&self.sim, c.slot, r.refuel_item_id, 1);
-                    r.ok = false;
-                }
-            }
-            // Refunds via give() also append; count all ledger appends for this C2S.
-            const ledger_delta = self.sim.inv_ledger.total -% ledger_before;
-            if (ledger_delta != 0) self.harness.counters.add(.inv_ledger_events, ledger_delta);
-            var head_buf: [16]u8 = undefined;
-            const head = try packages.buildInvTxResponseHead(&head_buf, r.ok, r.dropped_entity);
-            // Stock inventory (toolbelt 10 + bag 45 + equip) needs ~0.5–3 KiB.
-            var snap: [4096]u8 = undefined;
-            const inv_body = try self.buildInventorySnap(c, &snap);
-            if (head.len + inv_body.len <= self.body_buf.len) {
-                @memcpy(self.body_buf[0..head.len], head);
-                @memcpy(self.body_buf[head.len..][0..inv_body.len], inv_body);
-                try self.sendGame(peer, "NetPackageInventoryTransactionResponse", self.body_buf[0 .. head.len + inv_body.len]);
-            }
-            if (r.dropped_entity > 0) {
-                try self.broadcastLootSpawn(r.dropped_entity);
-            }
-            // ItemActionEat.consume → EntityStatChanged food/water/health (stock path).
-            if (r.ok and r.ate and c.entity_id > 0) {
-                try self.sendSurvivalStats(peer, c.entity_id, r.hp, r.max_hp, r.food, r.food_max, r.water, r.water_max);
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageInventoryDataRequest")) {
-            // Stock: KeyHashPair (Guid+hash) + managerToken Guid.
-            // Serve TE container slots when Guid matches our deterministic pos-key.
-            if (packages.parseInvDataRequestStock(body)) |req| {
-                if (self.containers.getByGuid(&req.inventory_key)) |cont| {
-                    // LootRespawnDays: a looted world container re-rolls here
-                    // when its interval has elapsed (before the slots serve).
-                    self.maybeRespawnContainer(cont);
-                    var slots: [containers_mod.max_container_slots]packages.stock_inv.StockSlot =
-                        [_]packages.stock_inv.StockSlot{.{}} ** containers_mod.max_container_slots;
-                    var si: usize = 0;
-                    const n: usize = cont.slot_count;
-                    while (si < n) : (si += 1) {
-                        const s = cont.slots[si];
-                        if (s.count > 0 and s.item_id != 0) {
-                            slots[si] = .{
-                                .type_id = self.items.stockTypeFor(s.item_id),
-                                .count = s.count,
-                                .quality = s.quality,
-                                .meta = s.meta,
-                            };
-                        }
-                    }
-                    const resp = try packages.buildInvDataResponseItems(
-                        &self.body_buf,
-                        req.inventory_key,
-                        req.manager_token,
-                        slots[0..n],
-                    );
-                    try self.sendGame(peer, "NetPackageInventoryDataResponse", resp);
-                } else {
-                    const resp = try packages.buildInvDataResponseNotFound(
-                        &self.body_buf,
-                        req.inventory_key,
-                        req.manager_token,
-                    );
-                    try self.sendGame(peer, "NetPackageInventoryDataResponse", resp);
-                }
-            } else |_| if (packages.parseInvDataRequest(body)) |eid| {
-                if (self.sim.slotOfNetId(eid)) |si| {
-                    // Loot containers only: another player's slots are not a
-                    // lootable inventory, and echoing them leaks their bag.
-                    if (self.sim.mask[si].inventory and !self.sim.mask[si].player) {
-                        const body_out = try packages.buildInventoryBodyStockResolved(
-                            &self.body_buf,
-                            &self.sim.inventory[si],
-                            resolveItemType,
-                            self,
-                        );
-                        try self.sendGame(peer, "NetPackageInventoryDataResponse", body_out);
-                        _ = invsys.openContainer(&self.sim, c.slot, eid);
-                    }
-                }
-            } else |_| {}
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageEntityRelPosAndRot")) {
-            if (body.len < 20 or c.entity_id <= 0) {
-                if (body.len < 20) self.harness.counters.inc(.decode_rejects);
-                return;
-            }
-            const eid = std.mem.readInt(i32, body[0..4], .little);
-            if (eid != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            const dx = std.mem.readInt(i16, body[11..13], .little);
-            const dy = std.mem.readInt(i16, body[13..15], .little);
-            const dz = std.mem.readInt(i16, body[15..17], .little);
-            if (self.sim.slotOfNetId(eid)) |idx| {
-                const scale: f32 = 0.03125;
-                const nx = self.sim.transform[idx].x + @as(f32, @floatFromInt(dx)) * scale;
-                const ny = self.sim.transform[idx].y + @as(f32, @floatFromInt(dy)) * scale;
-                const nz = self.sim.transform[idx].z + @as(f32, @floatFromInt(dz)) * scale;
-                if (!std.math.isFinite(nx) or !std.math.isFinite(ny) or !std.math.isFinite(nz)) {
-                    self.harness.counters.inc(.decode_rejects);
-                    return;
-                }
-                const env = self.applyMovementEnvelope(c, peer, eid, nx, ny, nz);
-                if (!env.applied) return;
-                self.sim.transform[idx].x = env.x;
-                self.sim.transform[idx].y = env.y;
-                self.sim.transform[idx].z = env.z;
-                // RelPos bypasses setPos, so raise the dirty bit through the
-                // markDirty funnel or the replicate pass (dirty-bits candidate
-                // set) would relay this mover only on the 5-tick heartbeat.
-                self.sim.markDirty(idx, .{ .pos = true });
-                // RelPos can walk Y into void without absolute PosAndRot; re-snap.
-                if (try self.rescueDeepVoid(peer, eid, env.x, env.y, env.z, true)) |ry| {
-                    self.noteAcceptedMove(c, env.x, ry, env.z);
-                } else {
-                    self.noteAcceptedMove(c, env.x, env.y, env.z);
-                }
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageEntityAliveFlags")) {
-            const f = packages.parseAliveFlagsBody(body) catch {
-                self.harness.counters.inc(.decode_rejects);
-                return;
-            };
-            if (f.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            if (self.sim.slotOfNetId(f.entity_id)) |idx| self.sim.flags[idx].bits = f.flags;
-            // Fan-out to other peers (stock tracked-players path).
-            try self.broadcastExcept("NetPackageEntityAliveFlags", body, c.slot);
-            return;
-        }
-        // Stock C2S player motion speeds; rebroadcast to other clients.
-        if (std.mem.eql(u8, name, "NetPackageEntitySpeeds")) {
-            const s = packages.parseEntitySpeedsBody(body) catch {
-                self.harness.counters.inc(.decode_rejects);
-                return;
-            };
-            if (s.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
-            // entity-ai.md SetMovementState); lapses on a stale timer.
-            c.sprint_speed = if (s.movement_state == 3) s.speed_forward else 0;
-            c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
-            try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
-            return;
-        }
-        // Stock hard teleport (same wire as PosAndRot). Apply + fan-out.
-        if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
-            const p = packages.parsePosAndRotBody(body) catch {
-                self.harness.counters.inc(.decode_rejects);
-                return;
-            };
-            if (p.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            // Same speed envelope as PosAndRot: without it a client teleports
-            // anywhere and noteAcceptedMove rebaselines the gate to that spot.
-            const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
-            if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, false)) |ny| {
-                // Snapped; do not fan-out void coords.
-                self.noteAcceptedMove(c, env.x, ny, env.z);
-                return;
-            }
-            var yaw: f32 = 0;
-            if (self.sim.slotOfNetId(p.entity_id)) |si| yaw = self.sim.transform[si].yaw;
-            self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
-            self.noteAcceptedMove(c, env.x, env.y, env.z);
-            // Clamped: the owner already got a correction; peers pick the true
-            // position up on the next motion pass rather than the raw claim.
-            if (env.x == p.x and env.z == p.z) {
-                try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
-            }
-            return;
-        }
-        // Land claim repair ping: acknowledge by echo (client drives repair FX).
-        if (std.mem.eql(u8, name, "NetPackageLandClaimRepair")) {
-            _ = packages.parseLandClaimRepair(body) catch return;
-            try self.broadcast("NetPackageLandClaimRepair", body);
-            return;
-        }
-        // Party / force-add quest on client via SharedQuest echo.
-        if (std.mem.eql(u8, name, "NetPackageSharedQuest")) {
-            const head = packages.stock_quest.parseSharedQuestHead(body) catch return;
-            // Stock GameManager.QuestShareServer: if sharedWith is local, handle; else
-            // forward package to sharedWithEntityID. We forward the body unchanged and
-            // update server journal only when quest_id maps to a known catalog def.
-            if (head.event == .share_quest) {
-                if (head.quest_id_len > 0) {
-                    if (self.sim.catalog.byName(head.questId())) |d| {
-                        _ = systems.questAccept(&self.sim, c.slot, d.id);
-                    }
-                }
-                const with = if (head.shared_with_entity_id > 0) head.shared_with_entity_id else c.entity_id;
-                if (with == c.entity_id) {
-                    try self.sendGame(peer, "NetPackageSharedQuest", body);
-                } else {
-                    // Forward to target peer if present; otherwise broadcast (party).
-                    var sent = false;
-                    for (&self.clients) |*cl| {
-                        if (!cl.joined or cl.entity_id != with) continue;
-                        if (cl.peer) |tp| {
-                            try self.sendGame(tp, "NetPackageSharedQuest", body);
-                            sent = true;
-                        }
-                        break;
-                    }
-                    if (!sent) try self.broadcast("NetPackageSharedQuest", body);
-                }
-            } else if (head.event == .remove_quest) {
-                // Prefer stock Quest.QuestCode; fall back to catalog def_id for old clients.
-                if (head.quest_code != 0) {
-                    if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |s| {
-                        s.active = false;
-                        s.completed = false;
-                    } else if (head.quest_code > 0 and head.quest_code <= 65535) {
-                        if (systems.questFindActive(&self.sim, c.slot, @intCast(head.quest_code))) |s| {
-                            s.active = false;
-                            s.completed = false;
-                        }
-                    }
-                }
-                try self.sendGame(peer, "NetPackageSharedQuest", body);
-            } else {
-                try self.broadcast("NetPackageSharedQuest", body);
-            }
-            return;
-        }
-        // Party quest delta: the sender (a shared-quest member) reports an
-        // objective change; the server fans it to the other party members so
-        // their mirrors advance (parties-factions.md §2.3).
-        if (std.mem.eql(u8, name, "NetPackagePartyQuestChange")) {
-            const q = packages.parsePartyQuestChange(body) catch {
-                self.harness.counters.inc(.c2s_malformed);
-                return;
-            };
-            if (q.sender_entity != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return;
-            }
-            const p = self.parties.partyByMember(c.entity_id) orelse return;
-            for (p.members[0..p.n]) |m| {
-                if (m == c.entity_id) continue;
-                if (self.clientByEntityId(m)) |member| {
-                    if (member.peer) |mp| {
-                        self.sendGame(mp, "NetPackagePartyQuestChange", body) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send PartyQuestChange failed: {s}\n", .{@errorName(err)});
-                        };
-                    }
-                }
-            }
-            return;
-        }
-        // Party: NetPackagePartyActions (asm.il 829049) carries no platform
-        // identity (entity-id keyed); the server owns the Party state and fans
-        // NetPackagePartyData snapshots out (parties-factions.md §2.2).
-        if (std.mem.eql(u8, name, "NetPackagePartyActions")) {
-            try self.handlePartyActions(c, body);
-            return;
-        }
-        // NetPackagePartyData is ToClient (parties-factions.md §3): the server
-        // constructs every snapshot, so a client sending one is claiming state
-        // it does not own.
-        if (std.mem.eql(u8, name, "NetPackagePartyData")) {
-            self.harness.counters.inc(.ownership_rejects);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {
-            try self.handleAllyRequest(c, body);
-            return;
-        }
-        // NetPackageAllyResponse is ToClient (asm.il 886358): the server decides
-        // relationships, so a client sending one is claiming state it does not own.
-        if (std.mem.eql(u8, name, "NetPackageAllyResponse")) {
-            self.harness.counters.inc(.ownership_rejects);
-            return;
-        }
-        // Stock SavePlayerData: PDF WriteNetwork (ECD + toolbelt/bag + meta tail).
-        if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
-            const ps = self.sim.playerByPeer(c.slot);
-            if (ps) |slot| {
-                if (self.sim.mask[slot].inventory) {
-                    if (packages.stock_inv.applyPlayerDataNetwork(body, &self.sim.inventory[slot], reverseItemType, self)) |h| {
-                        self.clampInventoryStacks(&self.sim.inventory[slot]);
-                        // Entity ids are minted by sim.spawnPlayer; a mismatch is
-                        // a client claiming someone else's body, never adoption.
-                        // Do NOT apply ECD pos either: client PDF pos is
-                        // Unity-origin relative after Origin Reposition (y=0
-                        // artifacts); PosAndRot is the world-space source of truth.
-                        // Success path is silent (periodic PDF is normal). Mismatch
-                        // is the operator-visible signal: counter + rate-limited log.
-                        if (h.entity_id != c.entity_id) {
-                            self.harness.counters.inc(.ownership_rejects);
-                            const n = self.harness.counters.get(.ownership_rejects);
-                            if (n == 1 or n % 100 == 0) {
-                                std.debug.print(
-                                    "zdtd: PlayerData ownership reject n={d} claimed={d} expected={d} local_id={d}\n",
-                                    .{ n, h.entity_id, c.entity_id, peer.local_id },
-                                );
-                            }
-                        }
-                    } else |_| {
-                        // Fall back to ECD head only. Parse-skip is rare; log once per 100
-                        // decode rejects so a broken client is visible without per-packet noise.
-                        if (packages.parsePlayerDataEcdHead(body)) |h| {
-                            _ = h; // pos unreliable (origin-relative); ignore
-                        } else |_| {
-                            self.harness.counters.inc(.decode_rejects);
-                            const n = self.harness.counters.get(.decode_rejects);
-                            if (n == 1 or n % 100 == 0) {
-                                std.debug.print(
-                                    "zdtd: PlayerData parse skip n={d} body_len={d} local_id={d}\n",
-                                    .{ n, body.len, peer.local_id },
-                                );
-                            }
-                        }
-                    }
-                }
-            } else if (packages.parsePlayerDataEcdHead(body)) |h| {
-                _ = h; // pos unreliable (origin-relative); ignore
-            } else |_| {}
-            // Defer file write to the periodic save tick (no open/rewrite per packet).
-            self.players_dirty = true;
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect")) {
-            // Stock quit signal (extends PlayerData: entity id, netpackages.md).
-            // Take the same removal path as the transport peer-death poll, but
-            // immediately and after saving, so a quit is never lost to the
-            // autosave interval. Accept only the sender's own entity.
-            if (body.len >= 4) {
-                const eid = std.mem.readInt(i32, body[0..4], .little);
-                if (eid != c.entity_id) return;
-            }
-            self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-            self.dropClientSlot(c.slot, "quit");
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
-            try self.handleAddRemoveBuff(c, body);
-            return;
-        }
-        // Client audio noise / client-side stat mirrors: accept, no sim state.
-        if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
-            return;
-        }
-        // C2S that need no server state change but must not warn/drop as
-        // unmapped (parity: real clients send these during normal play).
-        if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerEquipment") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackageMapPosition") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
-            return;
-        }
-        // Kill/score credit to the acting player (challenges + XP).
-        if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer") or std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {
-            // No server-side skill sim yet; the client tracks its own progress.
-            // Ack silently (dir=1, client-authoritative XP under EAC-off).
-            return;
-        }
-        // Client physics push (fall, explosion knockback): apply to the entity
-        // if it is ours, so far-clients see the resulting motion.
-        if (std.mem.eql(u8, name, "NetPackageEntityAddVelocity")) {
-            if (body.len >= 4) {
-                const eid = std.mem.readInt(i32, body[0..4], .little);
-                if (eid != c.entity_id) return;
-                if (self.sim.slotOfNetId(eid)) |si| {
-                    self.sim.markDirty(si, .{ .pos = true });
-                }
-            }
-            return;
-        }
-        // Server-side game events (challenge/quest actions): stock replies with
-        // NetPackageGameEventResponse. We ack with an empty response so the
-        // client's action completes instead of hanging.
-        if (std.mem.eql(u8, name, "NetPackageGameEventRequest")) {
-            if (packages.buildGameEventResponse(&self.body_buf, body)) |resp| {
-                self.sendGame(peer, "NetPackageGameEventResponse", resp) catch |err| {
-                    self.harness.counters.inc(.net_send_errors);
-                    std.debug.print(
-                        "zdtd: GameEventResponse send failed slot={d}: {s}\n",
-                        .{ c.slot, @errorName(err) },
-                    );
-                };
-            } else |err| {
-                self.harness.counters.inc(.encode_errors);
-                std.debug.print(
-                    "zdtd: GameEventResponse encode failed slot={d}: {s}\n",
-                    .{ c.slot, @errorName(err) },
-                );
-            }
-            return;
-        }
-        // Quest-spawned enemy: client asks server to spawn from a quest group.
-        // Body: playerEntityId i32 | groupName str | count i32. Stock only
-        // honors this while the player runs a quest whose def names the group;
-        // the group catalog is not modeled yet, so the gate is: an active quest
-        // of any def (fail closed), the shared block token, and the entity cap.
-        if (std.mem.eql(u8, name, "NetPackageQuestEntitySpawn")) {
-            if (!self.takeBlockToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            var r: wire_binary.Reader = .{ .data = body };
-            _ = r.readI32() catch return; // player entity id
-            var gname: [64]u8 = undefined;
-            _ = r.readString(&gname) catch return;
-            const cnt = r.readI32() catch 1;
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
-                self.harness.counters.inc(.c2s_rejects);
-                return;
-            }
-            const t = self.sim.transform[ps];
-            const zdef = self.entities.defaultZombie();
-            var k: i32 = 0;
-            while (k < cnt and k < 8) : (k += 1) {
-                const ang = @as(f32, @floatFromInt(k)) * 1.4;
-                // Stop at the entity cap instead of spinning on null spawns.
-                if (self.sim.spawnZombieClass(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zdef.hash, zdef.loot_list) == null) break;
-            }
-            return;
-        }
-        // Block trigger (pressure plate, tripwire, switch): acknowledge; no
-        // trap sim yet. Rebroadcast so nearby clients see the triggered state.
-        if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            try self.broadcastNear("NetPackageBlockTrigger", body, self.sim.transform[ps].x, self.sim.transform[ps].z, self.interest_range);
-            return;
-        }
-        // Generic client-requested entity spawn is not authoritative enough to
-        // create an entity. Typed item paths handle legal drops separately.
-        if (std.mem.eql(u8, name, "NetPackageRequestToSpawnEntity")) {
-            // The generic ECD request does not prove item ownership or a legal
-            // spawn class. Typed drop/throw paths must validate and consume the
-            // corresponding server-side inventory first.
-            return;
-        }
-        // In-game console (F1): execute a set of server commands for the sender.
-        if (std.mem.eql(u8, name, "NetPackageConsoleCmdServer")) {
-            self.handleConsoleCmd(peer, c, body) catch |err| {
-                std.debug.print(
-                    "zdtd: console cmd failed slot={d}: {s}\n",
-                    .{ c.slot, @errorName(err) },
-                );
-            };
-            return;
-        }
-        // Prefab editor volume: not part of the play path under EAC-off; drop.
-        if (std.mem.eql(u8, name, "NetPackageEditorAddVolumeFromClient")) {
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageDamageEntity")) {
-            const d = packages.parseDamageHead(body) catch return;
-            if (self.quarantineDenies(c, .damage)) return;
-            if (!self.takeDamageToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            // Damage is a client claim, so require both actor and target to be
-            // in the server's current interest range. This blocks forged net
-            // ids from damaging players or AI elsewhere in the world.
-            const actor_slot = self.sim.playerByPeer(c.slot) orelse return;
-            if (!self.sim.alive[actor_slot] or self.sim.health[actor_slot].hp <= 0) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
-                return;
-            }
-            const target_slot = self.sim.slotOfNetId(d.entity_id) orelse return;
-            if (!self.sim.alive[target_slot]) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
-                return;
-            }
-            if (!self.sim.mask[actor_slot].transform or !self.sim.mask[target_slot].transform) return;
-            const actor_pos = self.sim.transform[actor_slot];
-            const target_pos = self.sim.transform[target_slot];
-            const damage_dx = target_pos.x - actor_pos.x;
-            const damage_dy = target_pos.y - actor_pos.y;
-            const damage_dz = target_pos.z - actor_pos.z;
-            const damage_d2 = damage_dx * damage_dx + damage_dy * damage_dy + damage_dz * damage_dz;
-            if (damage_d2 > self.interest_range * self.interest_range) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, @sqrt(damage_d2), self.interest_range);
-                return;
-            }
-            const was_zombie = blk: {
-                break :blk self.sim.kind[target_slot] == .zombie or self.sim.kind[target_slot] == .animal;
-            };
-            // Client strength is a claim: cap it, and honor `fatal` only against
-            // NPC kinds (a spoofed fatal must not one-shot another player).
-            var amount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
-            if (d.fatal and was_zombie) amount = 9999;
-            // PvP gate + armor mitigation when damaging a player.
-            if (self.sim.slotOfNetId(d.entity_id)) |ei| {
-                if (self.sim.mask[ei].player and self.sim.player[ei].peer_slot >= 0) {
-                    // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
-                    if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
-                        return;
-                    const mit = invsys.armorMitigation(&self.sim, @intCast(self.sim.player[ei].peer_slot));
-                    amount *= (1.0 - mit);
-                }
-            }
-            // Attribute the hit: stock's NetPackageDamageEntity carries
-            // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt
-            // turns it into the victim's attack target. The actor is already
-            // validated above, so use its net id rather than the claimed field.
-            const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
-            if (dmg.killed) {
-                // Dead players keep the entity (client runs its own death →
-                // respawn flow); EntityRemove would delete the local player.
-                const target_is_player = blk: {
-                    if (self.sim.slotOfNetId(d.entity_id)) |ti|
-                        break :blk self.sim.mask[ti].player;
-                    break :blk false;
-                };
-                if (!target_is_player) {
-                    // Corpse dwell (EntityAlive::OnDeathUpdate): the body stays
-                    // in world for TimeStayAfterDeath (30 s zombies, 300 s
-                    // animals) so the client's ragdoll is not yanked mid
-                    // animation; the tick sweep broadcasts EntityRemove when
-                    // the dwell expires. The loot bag below still spawns now.
-                } else {
-                    // DropOnDeath: 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete.
-                    // Modes 1..3 drop a loot bag at the death position; 0/4 drop nothing.
-                    if (self.drop_on_death >= 1 and self.drop_on_death <= 3) {
-                        if (self.sim.slotOfNetId(d.entity_id)) |ti| {
-                            const t = self.sim.transform[ti];
-                            if (self.sim.spawnLootBag(t.x, t.y, t.z, 1, 1)) |bag_nid| {
-                                self.broadcastLootSpawn(bag_nid) catch {};
-                            }
-                        }
-                    }
-                }
-                if (was_zombie) {
-                    systems.questOnZombieKilled(&self.sim, c.slot);
-                    systems.questOnFetchItem(&self.sim, c.slot, 1);
-                    // XPMultiplier + party split: award scaled server-side XP for
-                    // the kill, sharing it with in-range party mates (§2.3).
-                    self.killXpAward(c.slot, 100);
-                }
-                // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
-                if (dmg.loot_bag_id > 0) {
-                    self.fillLootBagFromTable(dmg.loot_bag_id, dmg.loot_list, @intCast(d.entity_id), self.lootStageForPlayer(c.slot));
-                    try self.broadcastLootSpawn(dmg.loot_bag_id);
-                }
-            }
-            return;
-        }
-        // Stock loot UI lock: channel + optional TE pos; stale auto-release.
-        if (std.mem.eql(u8, name, "NetPackageLockRequest")) {
-            if (packages.parseLockRequest(body)) |req| {
-                // Deny acquiring a container lock while quarantined; always let
-                // an unlock through so a quarantined peer cannot pin a channel.
-                if (req.locking and self.quarantineDenies(c, .container)) return;
-                const ch: usize = @min(@as(usize, req.channel), self.lock_channel.len - 1);
-                // Stale holder on this channel before grant check.
-                if (self.lock_channel[ch] >= 0 and self.lock_granted_ns[ch] != 0) {
-                    const now = clock.monoNs();
-                    if (now -% self.lock_granted_ns[ch] >= self.lock_stale_ns) self.clearLockSlot(ch);
-                }
-                const pos_key: u64 = if (firstLockTargetPos(req.targets_blob)) |p|
-                    packLockPos(p.x, p.y, p.z)
-                else
-                    0;
-                // Same TE already locked on another channel by someone else → deny.
-                if (req.locking and pos_key != 0) {
-                    for (self.lock_pos_key, 0..) |pk, oi| {
-                        if (oi == ch) continue;
-                        if (pk != pos_key) continue;
-                        const oh = self.lock_channel[oi];
-                        if (oh >= 0 and oh != @as(i32, @intCast(c.slot))) {
-                            const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                            try self.sendGame(peer, "NetPackageLockResponse", resp);
-                            return;
-                        }
-                    }
-                }
-                if (req.locking) {
-                    const holder = self.lock_channel[ch];
-                    if (holder >= 0 and holder != @as(i32, @intCast(c.slot))) {
-                        const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                        return;
-                    }
-                    self.lock_channel[ch] = @intCast(c.slot);
-                    self.lock_holder_entity[ch] = c.entity_id;
-                    self.lock_granted_ns[ch] = clock.monoNs();
-                    self.lock_pos_key[ch] = pos_key;
-                    // Trader open: the LockResponse context carries server TraderData
-                    // (stock serializes EntityTraderLockContext into the response;
-                    // NetPackageTraderData is ToServer-only). Detect an entity target
-                    // whose slot is a trader and build that context.
-                    var trader_slot: ?ecs.Slot = null;
-                    var vending_pos: ?vending_mod.PosKey = null;
-                    if (req.targets_blob.len >= 4) {
-                        var tr: wire_binary.Reader = .{ .data = req.targets_blob };
-                        const n = tr.readI32() catch 0;
-                        var ti: i32 = 0;
-                        while (ti < n) : (ti += 1) {
-                            const present = tr.readByte() catch break;
-                            if (present == 0) continue;
-                            const ty = tr.readByte() catch break;
-                            if (ty == 2) {
-                                const eid = tr.readI32() catch break;
-                                if (self.sim.slotOfNetId(eid)) |ts| {
-                                    if (self.sim.mask[ts].kind and self.sim.kind[ts] == .trader) {
-                                        trader_slot = ts;
-                                        break;
-                                    }
-                                }
-                            } else if (ty == 0 or ty == 1) {
-                                const tx = tr.readI32() catch break;
-                                const tty = tr.readI32() catch break;
-                                const tz = tr.readI32() catch break;
-                                if (ty == 1) tr.skipString() catch {};
-                                // TileEntity lock target (type 0): a vending block
-                                // under the position opens as a vending machine.
-                                if (self.vending.get(.{ .x = tx, .y = tty, .z = tz }) != null) {
-                                    vending_pos = .{ .x = tx, .y = tty, .z = tz };
-                                }
-                            } else if (ty == 3) {
-                                if (tr.remaining() < 16) break;
-                                tr.pos += 16;
-                            } else break;
-                        }
-                    }
-                    if (trader_slot) |ts| {
-                        // Stock EntityTrader opens the window only inside the
-                        // trader_info open hours (vending machines and traders
-                        // without hours are always open). Deny outside them.
-                        if (!self.traderIsOpen(ts)) {
-                            const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "closed");
-                            try self.sendGame(peer, "NetPackageLockResponse", resp);
-                            return;
-                        }
-                        var ent_buf: [16]packages.TraderStockEntry = undefined;
-                        const n = self.stockEntries(ts, &ent_buf);
-                        const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
-                            .trader_id = self.sim.network_id[ts].id,
-                            .available_money = self.traderMoney(ts),
-                            .entries = ent_buf[0..n],
-                        });
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                    } else if (vending_pos) |vp| {
-                        // Vending machines are always open (trader_info has no
-                        // hours). The LockResponse carries the machine's
-                        // TraderData under the request's VendingMachineLockContext
-                        // type name; the client opens the trader window from it.
-                        const v = self.vending.get(vp) orelse return;
-                        if (v.stock_n == 0) replicate_te.fillVendingStore(self, v);
-                        var vent_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
-                        const vn = replicate_te.vendingEntries(self, v, &vent_buf);
-                        const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
-                            .trader_id = v.trader_id,
-                            .available_money = v.available_money,
-                            .entries = vent_buf[0..vn],
-                        });
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                        try replicate_te.sendVendingTe(self, peer, vp.x, vp.y, vp.z);
-                    } else {
-                        const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                    }
-                    // Re-push TE for any storage container near the first TEFeature target.
-                    // Target blob: i32 count | (present, type, …)*
-                    if (req.targets_blob.len >= 4) {
-                        var tr: wire_binary.Reader = .{ .data = req.targets_blob };
-                        const n = tr.readI32() catch 0;
-                        var ti: i32 = 0;
-                        while (ti < n) : (ti += 1) {
-                            const present = tr.readByte() catch break;
-                            if (present == 0) continue;
-                            const ty = tr.readByte() catch break;
-                            if (ty == 0 or ty == 1) {
-                                const x = tr.readI32() catch break;
-                                const y = tr.readI32() catch break;
-                                const z = tr.readI32() catch break;
-                                if (ty == 1) tr.skipString() catch {};
-                                try replicate_te.sendStorageTe(self, peer, x, y, z);
-                                try replicate_te.sendWorkstationTe(self, peer, x, y, z);
-                                try replicate_te.sendVendingTe(self, peer, x, y, z);
-                            } else if (ty == 2) {
-                                _ = tr.readI32() catch break;
-                            } else if (ty == 3) {
-                                if (tr.remaining() < 16) break;
-                                tr.pos += 16;
-                            } else break;
-                        }
-                    }
-                } else {
-                    // Unlock only if we hold the channel (or free).
-                    if (self.lock_channel[ch] == @as(i32, @intCast(c.slot)) or self.lock_channel[ch] < 0) {
-                        self.clearLockSlot(ch);
-                        const resp = try packages.buildLockResponseUnlock(&self.body_buf, true);
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                    } else {
-                        const resp = try packages.buildLockResponseUnlock(&self.body_buf, false);
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                    }
-                }
-            } else |_| {
-                std.debug.print("zdtd: LockRequest parse fail body={d}\n", .{body.len});
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageSetBlock")) {
-            // Stock: C2S is a request. Apply, then S2C authoritative result bodies
-            // (absolute BlockValue.damage or air). Never rely on raw C2S echo alone
-            // when the server mutates damage/break (RE blocks.md §4-5).
-            if (self.quarantineDenies(c, .block)) return;
-            if (!self.takeBlockToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            var changes: [32]packages.BlockChange = undefined;
-            const n = packages.parseSetBlockChanges(body, changes[0..]) catch {
-                std.debug.print("zdtd: SetBlock parse fail body={d}\n", .{body.len});
-                return;
-            };
-            if (n == 0) return;
-            const editor = self.sim.playerByPeer(c.slot) orelse return;
-            const editor_ent = self.sim.network_id[editor].id;
-            // If RelPos walked us into void, snap before reach so seed places work.
-            {
-                const tr0 = self.sim.transform[editor];
-                _ = try self.rescueDeepVoid(peer, editor_ent, tr0.x, tr0.y, tr0.z, true);
-            }
-            const ep = self.sim.transform[editor];
-            var i: usize = 0;
-            while (i < n) : (i += 1) {
-                const b = changes[i];
-                // Reach is always Hard (reject in both Correct and Observe).
-                // Vertical clamp: mesh float must not fail power/dig suite (type=0).
-                if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    self.noteEvidence(c, peer.local_id, editor_ent, .bounds, .strong, .block, 0, self.max_edit_range);
-                    // Observe and Correct both count; rate-limit log so reach spam
-                    // (float mesh, lag) does not flood, first/100th stay actionable.
-                    const rejects = self.harness.counters.get(.bounds_rejects);
-                    if (rejects == 1 or rejects % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n",
-                            .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z },
-                        );
-                    }
-                    continue;
-                }
-                if (self.claimCovering(b.x, b.z)) |claim| {
-                    if (claim.owner_entity != editor_ent) continue;
-                }
-                const cur_id = self.world.blockWorld(b.x, b.y, b.z) catch 0;
-                const cur_dmg = self.getBlockHp(b.x, b.y, b.z);
-                const cur_raw = self.blockRawAt(b.x, b.y, b.z);
-                // Meta-only edit: same block, same damage, different BlockValue meta.
-                // BlockSwitch::updateState flips meta bit 0x2 and SetBlockRPCs the
-                // whole value (asm.il:136663), so this must not run through the
-                // place/dig chain that clears HP, re-registers claims and rebuilds
-                // containers. Apply the raw, drive the power gate, echo it back.
-                if (cur_id != 0 and b.block_id == cur_id and b.damage == cur_dmg and b.raw != 0 and b.raw != cur_raw) {
-                    self.setBlockRaw(b.x, b.y, b.z, b.raw);
-                    // GAP 13: the switch meta must survive in the chunk plane too
-                    // (persisted ZCH3), not only in the sparse in-memory cache.
-                    self.world.setBlockRawWorld(b.x, b.y, b.z, b.raw) catch {};
-                    const on = (packages.blockMeta(b.raw) & packages.block_meta_on) != 0;
-                    if (self.sim.power.setSwitchAt(b.x, b.y, b.z, on)) {
-                        self.sim.power.resolve();
-                    }
-                    if (packages.buildSetBlockBodyRaw(
-                        self.body_buf[0..96],
-                        b.x,
-                        b.y,
-                        b.z,
-                        b.raw,
-                        cur_dmg,
-                        editor_ent,
-                        editor_ent,
-                    )) |sb| {
-                        try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
-                    } else |_| {}
-                    continue;
-                }
-                var place_id: u16 = b.block_id;
-                var out_dmg: u16 = 0;
-                var mutated = false;
-
-                if (b.block_id == 0) {
-                    place_id = 0;
-                    out_dmg = 0;
-                    self.clearBlockHp(b.x, b.y, b.z);
-                    mutated = true;
-                    if (cur_id != 0) {
-                        self.noteBlockBreak(c);
-                        self.removeClaimAt(b.x, b.y, b.z);
-                    }
-                } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
-                    // Stock DamageBlock: wire damage is absolute BlockValue.damage
-                    // (d = old + points). Client may send absolute after local apply
-                    // or a progressive value; take max(wire, cur) then scale delta.
-                    const wire_abs = b.damage;
-                    const base_cur = if (cur_id != 0) cur_id else b.block_id;
-                    var abs: u16 = cur_dmg;
-                    if (wire_abs > cur_dmg) {
-                        // Damage advance: scale the delta by block_damage_player.
-                        if (self.block_damage_player != 100) {
-                            const delta: u32 = @as(u32, wire_abs - cur_dmg) * self.block_damage_player / 100;
-                            abs = @intCast(@min(@as(u32, cur_dmg) + delta, 65535));
-                        } else {
-                            abs = wire_abs;
-                        }
-                    } else if (wire_abs < cur_dmg) {
-                        // Repair (ItemActionRepair negates the repair amount,
-                        // IL_056f): the wire carries the new LOWER absolute
-                        // damage. Never treat a lower value as a delta to add
-                        // (world-chunks.md, 2026-08-06).
-                        abs = wire_abs;
-                    }
-                    var max_hp = self.maxDamageForBlock(base_cur);
-                    if (self.claimCovering(b.x, b.z)) |claim| {
-                        if (claim.owner_entity == editor_ent) {
-                            const dur = if (claim.owner_online) self.land_claim_online_dur else self.land_claim_offline_dur;
-                            if (dur > 0) max_hp = @intCast(@min(@as(u32, max_hp) * dur, 65535));
-                        }
-                    }
-                    if (abs >= max_hp) {
-                        self.noteBlockBreak(c);
-                        self.removeClaimAt(b.x, b.y, b.z);
-                        place_id = 0;
-                        out_dmg = 0;
-                        self.clearBlockHp(b.x, b.y, b.z);
-                    } else {
-                        place_id = if (cur_id != 0) cur_id else b.block_id;
-                        out_dmg = abs;
-                        self.setBlockHp(b.x, b.y, b.z, abs);
-                    }
-                    mutated = true;
-                } else {
-                    // Fresh place.
-                    place_id = b.block_id;
-                    out_dmg = 0;
-                    // Hammer upgrade (stock ItemActionUpgrade): the client sends
-                    // the upgrade target block id directly. Trust boundary: only
-                    // accept a target that is the current block's
-                    // UpgradeBlock.ToBlock (resolved by name), so a forged
-                    // SetBlock cannot swap in arbitrary block ids. A change on a
-                    // block with no upgrade path (or to the wrong target) is
-                    // rejected; placing onto air stays open.
-                    if (cur_id != 0 and b.block_id != cur_id) {
-                        const cur_name = self.maxdamage.idName(cur_id) orelse continue;
-                        const target_name = self.maxdamage.upgradeTarget(cur_name) orelse continue;
-                        const target_id = self.maxdamage.idByName(target_name) orelse continue;
-                        if (target_id != b.block_id) continue;
-                    }
-                    self.clearBlockHp(b.x, b.y, b.z);
-                    mutated = true;
-                }
-
-                if (place_id != 0 and self.landClaimBlockId() == place_id) {
-                    self.registerClaim(b.x, b.y, b.z, editor_ent);
-                }
-                // GAP 13: carry the client's full BlockValue (rotation/meta in
-                // the upper bits) into the chunk plane so doors/wedges render
-                // rotated for a second client and after a relog. Fall back to
-                // the bare id when the wire raw is absent or disagrees (legacy
-                // 14-byte bodies, forged ids).
-                const place_raw: u32 = if (b.raw != 0 and (b.raw & 0xffff) == place_id)
-                    b.raw
-                else
-                    place_id;
-                try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
-                // Vending TE lifecycle (stock BlockVendingMachine.OnBlockAdded /
-                // OnBlockRemoved): placing a vending block seeds its TraderData
-                // store from the blocks.xml TraderID; removal drops the store.
-                if (place_id != 0 and self.blocks.isVending(place_id)) {
-                    _ = self.vending.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, place_id, self.blocks.traderId(place_id));
-                } else if (place_id == 0) {
-                    self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
-                }
-                if (place_id != 0) {
-                    if (self.power_registry.lookup(place_id)) |pn| {
-                        if (self.sim.power.addNodeAt(pn.kind, b.x, b.y, b.z, pn.watts)) |nid| {
-                            if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
-                        }
-                        self.sim.power.resolve();
-                    }
-                } else if (self.sim.power.removeAt(b.x, b.y, b.z)) {
-                    self.sim.power.resolve();
-                }
-                if (place_id != 0 and b.raw != 0) {
-                    self.setBlockRaw(b.x, b.y, b.z, b.raw);
-                } else if (place_id == 0) {
-                    self.clearBlockRaw(b.x, b.y, b.z);
-                }
-                // Stock stability: a SetBlock that changes the block TYPE relaxes
-                // the plane (removal) or takes support (placement) and fells
-                // every now-unsupported block; a damage-only or repair change
-                // (same id) leaves support untouched. Fallen blocks are removed
-                // and broadcast here (the client runs the same collapse locally).
-                if (cur_id != place_id) {
-                    _ = stabilityAfterSetBlock(self, b.x, b.y, b.z, cur_id, place_id);
-                }
-                if (self.isStorageBlockId(place_id)) {
-                    if (self.containers.get(.{ .x = b.x, .y = b.y, .z = b.z })) |cont| {
-                        cont.block_id = place_id;
-                        try replicate_te.broadcastStorageTe(self, cont);
-                    } else if (self.containers.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, 8, @intCast(place_id))) |cont| {
-                        try replicate_te.broadcastStorageTe(self, cont);
-                    }
-                } else if (self.storagePairId(place_id) == null) {
-                    self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
-                }
-
-                if (mutated) {
-                    // Echo the stored rawData when it still describes this block, so
-                    // rotation and meta survive the authoritative reply instead of
-                    // being rebuilt from the bare id.
-                    const stored_raw = self.blockRawAt(b.x, b.y, b.z);
-                    const echo_raw: u32 = if (place_id != 0 and (stored_raw & 0xffff) == place_id)
-                        stored_raw
-                    else
-                        @as(u32, place_id);
-                    if (packages.buildSetBlockBodyRaw(
-                        self.body_buf[0..96],
-                        b.x,
-                        b.y,
-                        b.z,
-                        echo_raw,
-                        out_dmg,
-                        editor_ent,
-                        editor_ent,
-                    )) |sb| {
-                        try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
-                    } else |_| {}
-                }
-            }
-            // SetBlockResponse Success so client request path completes.
-            if (packages.idOf("NetPackageSetBlockResponse") != null) {
-                var rb: [4]u8 = undefined;
-                std.mem.writeInt(u16, rb[0..2], 0, .little); // Success
-                try self.sendGame(peer, "NetPackageSetBlockResponse", rb[0..2]);
-            }
-            return;
-        }
-        // C2S explosion: apply sphere dig + ExplosionClient to peers.
-        if (std.mem.eql(u8, name, "NetPackageExplosionInitiate")) {
-            const ex = packages.parseExplosionInitiate(body) catch return;
-            if (self.quarantineDenies(c, .block)) return;
-            // Only accept from joined players; ignore entity_id spoof if mismatch.
-            if (ex.entity_id > 0 and c.entity_id > 0 and ex.entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                self.noteEvidence(c, peer.local_id, ex.entity_id, .ownership, .strong, .block, @floatFromInt(ex.entity_id), @floatFromInt(c.entity_id));
-                return;
-            }
-            if (!self.takeBlockToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, 6)));
-            // Reach: explosion center must be near the acting player.
-            if (self.sim.playerByPeer(c.slot)) |bi| {
-                if (!self.sim.alive[bi] or self.sim.health[bi].hp <= 0) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    return;
-                }
-                const bp = self.sim.transform[bi];
-                const dx = ex.wx - bp.x;
-                const dy = ex.wy - bp.y;
-                const dz = ex.wz - bp.z;
-                const ex_d2 = dx * dx + dy * dy + dz * dz;
-                if (ex_d2 > self.max_edit_range * self.max_edit_range) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    self.noteEvidence(c, peer.local_id, ex.entity_id, .bounds, .strong, .block, @sqrt(ex_d2), self.max_edit_range);
-                    return;
-                }
-            } else return;
-            const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @intFromFloat(@floor(ex.wx)));
-            const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @intFromFloat(@floor(ex.wy)));
-            const cz = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bz else @as(i32, @intFromFloat(@floor(ex.wz)));
-            var dy: i32 = -rad;
-            while (dy <= rad) : (dy += 1) {
-                var dz: i32 = -rad;
-                while (dz <= rad) : (dz += 1) {
-                    var dx: i32 = -rad;
-                    while (dx <= rad) : (dx += 1) {
-                        if (dx * dx + dy * dy + dz * dz > rad * rad) continue;
-                        const wx = cx + dx;
-                        const wy = cy + dy;
-                        const wz = cz + dz;
-                        if (wy <= 0) continue; // keep bedrock plane
-                        const cur = self.world.blockWorld(wx, wy, wz) catch continue;
-                        if (cur == 0 or cur == world_store.block_bedrock) continue;
-                        self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                        const sb = packages.buildSetBlockBody(self.body_buf[0..64], wx, wy, wz, 0) catch continue;
-                        self.broadcastNear("NetPackageSetBlock", sb, ex.wx, ex.wz, self.interest_range) catch {};
-                    }
-                }
-            }
-            const client_body = try packages.buildExplosionClient(
-                self.body_buf[64..256],
-                ex.wx,
-                ex.wy,
-                ex.wz,
-                0,
-                ex.block_damage,
-                @intCast(@max(1, rad)),
-                ex.block_damage,
-                if (c.entity_id > 0) c.entity_id else ex.entity_id,
-            );
-            try self.broadcastNear("NetPackageExplosionClient", client_body, ex.wx, ex.wz, self.interest_range);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageQuestEvent")) {
-            try self.handleQuestEvent(peer, c, body);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageQuestObjectiveUpdate")) {
-            // Stock wire: treasure/block objective events mirror the client's
-            // own quest progress into the server journal (so it persists and
-            // can coordinate). The block_activated event advances the quest's
-            // block_activate phase; the treasure events are recorded (the
-            // treasure phase completes through the fetch path). Also accept
-            // legacy zdtd-native {def_id u16, op u8} for unit fixtures.
-            if (packages.parseQuestObjectiveUpdate(body)) |u| {
-                if (u.event_type == .block_activated) {
-                    _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .block_activate);
-                }
-            } else |_| {
-                if (packages.parseQuestOp(body)) |op| {
-                    if (op.op == 1) _ = self.acceptQuestFor(c, op.def_id);
-                } else |_| {}
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageNPCQuestList")) {
-            // Stock trader quest-list exchange: FetchList with QuestPacketEntry offers.
-            const head = packages.parseNpcQuestList(body) catch packages.NpcQuestListHead{
-                .npc_entity_id = 0,
-                .player_entity_id = c.entity_id,
-                .event_type = .fetch_list,
-            };
-            var tx: f32 = 0;
-            var ty: f32 = 70;
-            var tz: f32 = 0;
-            if (self.sim.slotOfNetId(head.npc_entity_id)) |ni| {
-                if (self.sim.mask[ni].transform) {
-                    tx = self.sim.transform[ni].x;
-                    ty = self.sim.transform[ni].y;
-                    tz = self.sim.transform[ni].z;
-                }
-            }
-            if (head.event_type == .remove_quest) {
-                // Stock accept marker (asm.il 827746-827975): the client took
-                // the removeIndex'th offer, filtered by DifficultyTier and
-                // non-active quests. Accept it into the journal and re-send the
-                // list without it, so the client stops offering it.
-                if (self.sim.catalog.listById(self.traderQuestList(head.npc_entity_id))) |list| {
-                    var idx: u32 = 0;
-                    for (list.entries) |qid| {
-                        const d = self.sim.catalog.byId(qid) orelse continue;
-                        if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-                        if (d.difficulty_tier != head.tier_level) continue;
-                        const ps = self.sim.playerByPeer(c.slot) orelse break;
-                        if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
-                        if (idx == head.remove_index) {
-                            _ = self.acceptQuestFor(c, qid);
-                            break;
-                        }
-                        idx += 1;
-                    }
-                }
-                var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
-                const body_out = try packages.buildNpcQuestListFetch(
-                    self.body_buf[0..2048],
-                    head.npc_entity_id,
-                    if (head.player_entity_id != 0) head.player_entity_id else c.entity_id,
-                    head.tier_level,
-                    offers[0..on],
-                );
-                try self.sendGame(peer, "NetPackageNPCQuestList", body_out);
-                return;
-            }
-            if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
-                var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-                const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
-                const body_out = try packages.buildNpcQuestListFetch(
-                    self.body_buf[0..2048],
-                    head.npc_entity_id,
-                    if (head.player_entity_id != 0) head.player_entity_id else c.entity_id,
-                    head.tier_level,
-                    offers[0..on],
-                );
-                try self.sendGame(peer, "NetPackageNPCQuestList", body_out);
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageTraderData")) {
-            // Stock ToServer body (asm.il 843046): isEntity | entityId /
-            // tePosition | hasTraderData | TraderData::Write. A real client's
-            // post-trade copy is length-distinguishable from the loadgen/sim
-            // 9-byte trade body (which is exactly 9 bytes).
-            if (body.len > 9 and body[0] <= 1) {
-                if (packages.parseTraderDataToServer(body) catch null) |td| {
-                    if (td.has_trader_data) {
-                        try self.applyTraderDataCopyFrom(c, td);
-                        return;
-                    }
-                }
-            }
-            if (body.len >= 9 and (body[8] == 0 or body[8] == 1)) {
-                try self.handleTrade(c, body);
-                return;
-            }
-            systems.questOnTraderOpen(&self.sim, c.slot);
-            // Stock trader quest offers (npc from open body when present).
-            const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
-            // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
-            if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
-                for (list.entries) |qid| {
-                    if (self.acceptQuestFor(c, qid)) break;
-                }
-            }
-            try self.sendTraderSnapshot(peer, null);
-            var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-            var tx: f32 = 0;
-            var ty: f32 = 70;
-            var tz: f32 = 0;
-            if (self.sim.slotOfNetId(npc_id)) |ni| {
-                if (self.sim.mask[ni].transform) {
-                    tx = self.sim.transform[ni].x;
-                    ty = self.sim.transform[ni].y;
-                    tz = self.sim.transform[ni].z;
-                }
-            }
-            const on = self.buildTraderQuestOffers(self.traderQuestList(npc_id), c.slot, tx, ty, tz, 0, &offers);
-            const qbody = try packages.buildNpcQuestListFetch(
-                self.body_buf[512..2560],
-                npc_id,
-                c.entity_id,
-                0,
-                offers[0..on],
-            );
-            try self.sendGame(peer, "NetPackageNPCQuestList", qbody);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackagePlayerVendingMachine")) {
-            // Vending rent / clear (loot-economy.md §6, asm.il 833593):
-            // removing=false rents (or extends) the machine for the sender;
-            // removing=true clears ownership. Server-authoritative: only the
-            // sender's own identity may act, rent costs TraderInfo.RentCost
-            // currency, and the rental term is 30 in-game days.
-            var plat_buf: [packages.platform_user.max_platform_len]u8 = undefined;
-            var id_buf: [packages.platform_user.max_id_len]u8 = undefined;
-            const acc = packages.parseVendingMachineAccess(body, &plat_buf, &id_buf) catch return;
-            const mine = c.puid_primary.get() orelse c.puid_native.get() orelse return;
-            if (!acc.user.eql(mine)) return;
-            const key: vending_mod.PosKey = .{ .x = acc.x, .y = acc.y, .z = acc.z };
-            const vm = self.vending.get(key) orelse return;
-            const day = self.sim.director.clock.day;
-            // Expired rentals clear first (currentDay > rental_end_day).
-            if (vm.rental_end_day > 0 and day > vm.rental_end_day) vm.clear();
-            if (acc.removing) {
-                // Stock TryRemoveVendingMachinePosition acts on the sender's
-                // own per-player list: only the owner may clear the machine.
-                if (!vm.owner.matches(acc.user)) return;
-                vm.clear();
-                try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);
-                return;
-            }
-            const info = self.traders.traderInfo(@intCast(vm.trader_id)) orelse return;
-            if (!info.rentable) return;
-            if (vm.rental_end_day > 0 and !vm.owner.matches(acc.user)) return; // other owner (CanRent 1)
-            const coins = self.coinItemId();
-            if (coins == 0) return;
-            const ps = self.sim.playerByPeer(c.slot) orelse return;
-            if (!self.sim.mask[ps].wallet) return;
-            // One machine per player (CanRent 2, checkAlreadyRentingVM).
-            if (vm.rental_end_day == 0) {
-                for (self.vending.items[0..], self.vending.used[0..]) |*other, u| {
-                    if (!u) continue;
-                    if (&other.* == vm) continue;
-                    if (other.rental_end_day > 0 and other.owner.matches(acc.user)) return;
-                }
-            }
-            // Sync wallet from inventory coins (same rule as trade).
-            if (self.sim.mask[ps].inventory) {
-                const inv_coins = self.sim.inventory[ps].countItem(coins);
-                if (inv_coins > self.sim.wallet[ps].coins) self.sim.wallet[ps].coins = inv_coins;
-            }
-            const cost: u32 = @intCast(@max(0, info.rent_cost));
-            if (self.sim.wallet[ps].coins < cost) return; // insufficient currency (CanRent 3)
-            if (self.sim.mask[ps].inventory) {
-                const have = self.sim.inventory[ps].countItem(coins);
-                const from_inv: u32 = @min(have, cost);
-                if (from_inv > 0) {
-                    if (!self.sim.inventory[ps].removeItem(coins, @intCast(from_inv))) return;
-                    self.sim.markDirty(ps, .{ .inv = true });
-                }
-            }
-            self.sim.wallet[ps].coins -= cost;
-            vm.owner.set(acc.user) catch return;
-            // Stock term: RentTimeInDays (trader_info rent_time, default 30).
-            const term: i32 = if (info.rent_time > 0) info.rent_time else 30;
-            const day_i: i32 = @intCast(day);
-            vm.rental_end_day = if (vm.rental_end_day > 0) vm.rental_end_day + term else day_i + term;
-            vm.rentable = info.rentable;
-            // The owning player sees its machine's stock; re-send the TE.
-            try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageVehicleDataSync")) {
-            // Real stock body (asm.il:844254); the opaque ReadSyncData payload
-            // stays undecoded and is only relayed, as the stock server does.
-            const s = packages.parseVehicleDataSync(body) catch return;
-            if (s.sender_id != c.entity_id) return;
-            const vi = self.sim.slotOfNetId(s.vehicle_id) orelse return;
-            if (!self.sim.mask[vi].vehicle) return;
-            if (self.sim.vehicle[vi].driverNetId() != c.entity_id) return;
-            try self.broadcastExcept("NetPackageVehicleDataSync", body, c.slot);
-            return;
-        }
-        // Native zdtd control channel. Length-gated to the exact native body so
-        // a stock NetPackageVehicleSpawn (entityType + 2 Vector3 + ItemValue +
-        // entityThatPlaced, asm.il:845051) can never be read as a drive op.
-        if (std.mem.eql(u8, name, "NetPackageVehicleSpawn") and body.len == packages.vehicle_control_len) {
-            const vc = packages.parseVehicleControl(body) catch return;
-            const vi = self.sim.slotOfNetId(vc.entity_id) orelse return;
-            if (!self.sim.mask[vi].vehicle) return;
-            switch (vc.op) {
-                0 => try self.seatRider(c.entity_id, vi, systems.seat_any),
-                1 => try self.unseatRider(c.entity_id),
-                2 => {
-                    // Passengers do not steer: only seat 0 drives (asm.il:542176).
-                    if (self.sim.vehicle[vi].driverNetId() != c.entity_id) return;
-                    systems.vehicleControl(&self.sim, vi, vc.throttle, vc.steer, 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second)));
-                },
-                else => {},
-            }
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageEntityAttach")) {
-            const a = packages.parseEntityAttach(body) catch return;
-            if (a.rider_id != c.entity_id) return;
-            // Types 0/2 are the server branch of NetPackageEntityAttach::
-            // ProcessPackage (asm.il:844722); the server answers with 1/3 and
-            // never echoes the client's own body, which would put every peer on
-            // the server branch.
-            if (packages.attachTypeIsDetach(a.attach_type)) {
-                // Detach carries vehicleId = -1 (asm.il:406816): resolve the hull
-                // from server state, never from the packet.
-                try self.unseatRider(c.entity_id);
-            } else {
-                const vi = self.sim.slotOfNetId(a.vehicle_id) orelse return;
-                if (!self.sim.mask[vi].vehicle) return;
-                try self.seatRider(c.entity_id, vi, a.slot);
-            }
-            return;
-        }
-        // Gun/tool FX: rebroadcast so other clients see muzzle/swing.
-        if (std.mem.eql(u8, name, "NetPackageItemActionEffects")) {
-            try self.broadcastExcept("NetPackageItemActionEffects", body, c.slot);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageCloseAllWindows")) {
-            // Echo to other peers for multiplayer UI close.
-            try self.broadcastExcept("NetPackageCloseAllWindows", body, c.slot);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageWireActions")) {
-            // Stock parent/child wiring (SetParent/RemoveParent) drives powered state.
-            _ = self.sim.power.applyWireActionsStock(body);
-            // Rebroadcast raw package so peers get the client-side wire visual.
-            try self.broadcastExcept("NetPackageWireActions", body, c.slot);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageWireToolActions")) {
-            // Tool handshake carries one endpoint + player: visual only, no graph
-            // mutation (mirrors stock ProcessPackage re-Setup+SendPackage to peers).
-            try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
-            return;
-        }
-        if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {
-            if (body.len < 12) return;
-            const x = std.mem.readInt(i32, body[0..4], .little);
-            const y = std.mem.readInt(i32, body[4..8], .little);
-            const z = std.mem.readInt(i32, body[8..12], .little);
-            // Same rate gate as SetBlock: a spam loop must not plant turrets
-            // faster than the bucket refills and drain the entity table.
-            if (!self.takeBlockToken(c)) {
-                self.harness.counters.inc(.c2s_throttle);
-                return;
-            }
-            // Client-chosen coordinates: same reach + claim gate as SetBlock, so a
-            // spam loop cannot plant turrets map-wide and drain the entity table.
-            if (!self.placeAllowed(c, x, y, z)) return;
-            if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
-                var gi: ?u16 = null;
-                var i: usize = 0;
-                while (i < self.sim.power.node_n) : (i += 1) {
-                    if (self.sim.power.nodes[i].kind == .generator) {
-                        gi = self.sim.power.nodes[i].id;
-                        break;
-                    }
-                }
-                if (gi) |gid| {
-                    if (self.sim.slotOfNetId(tid)) |ts| {
-                        _ = self.sim.power.connect(gid, self.sim.turret[ts].power_node);
-                        self.sim.power.resolve();
-                    }
-                }
-            }
-            return;
-        }
-        // Named C2S package with no handler arm: count + rate-limited log so a
-        // new stock client package surfaces instead of vanishing silently
-        // (GAP "Unhandled C2S packages are dropped with no trace").
+        if (try c2s_join.handle(self, c, peer, name, body)) return;
+        if (try c2s_move.handle(self, c, peer, name, body)) return;
+        if (try c2s_inv.handle(self, c, peer, name, body)) return;
+        if (try c2s_quest.handle(self, c, peer, name, body)) return;
+        if (try c2s_misc.handle(self, c, peer, name, body)) return;
         self.harness.counters.inc(.c2s_unhandled);
         const un = self.harness.counters.get(.c2s_unhandled);
         if (un == 1 or un % 100 == 0) {
@@ -5877,7 +3444,9 @@ pub const Game = struct {
         return n;
     }
 
-    fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void { return game_join.sendTraderSnapshot(self, peer, prefer_slot); }
+    pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
+        return game_join.sendTraderSnapshot(self, peer, prefer_slot);
+    }
 
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         const t = packages.parseTraderTrade(body) catch return;
@@ -5908,7 +3477,7 @@ pub const Game = struct {
     /// the now-authoritative copy to observers. Price/sell stay server-owned
     /// (the wire TraderData carries no price; the client derives it from econ x
     /// markup).
-    fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
+    pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
         var entries_buf: [ecs.components.max_stock]packages.stock_entity.TraderDataReadEntry = undefined;
         var tr: wire_binary.Reader = .{ .data = td.trader_data };
         const read = packages.stock_entity.readTraderDataBody(&tr, &entries_buf) catch return;
@@ -5962,14 +3531,18 @@ pub const Game = struct {
     pub fn dumpEvidenceFile(self: *Game, path: []const u8) !usize {
         return admin_console.dumpEvidenceFile(self, path);
     }
-    fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendWorldSpawnPoints(self, peer); }
+    pub fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendWorldSpawnPoints(self, peer);
+    }
 
     /// Build and send NetPackageWorldAreas from the trader POIs on the loaded
     /// map (stock: World.TraderAreas, one TraderArea per TraderArea=True
     /// prefab). Position = the decoration origin, size = the prefab size,
     /// protect padding = TraderAreaProtect - 2 (GetProtectPadding), and the
     /// teleport volumes from TeleportVolumeStart/Size (local cells).
-    fn sendWorldAreas(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendWorldAreas(self, peer); }
+    pub fn sendWorldAreas(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendWorldAreas(self, peer);
+    }
 
     /// PrefabInstance.ResetBlocksAndRebuild (asm.il 945360-945387): re-paint a
     /// POI's baked .tts blocks over the area, overwriting player edits, so a
@@ -6024,7 +3597,7 @@ pub const Game = struct {
     /// renumber every block the blob failed to name. So any validation failure,
     /// an empty dump, or a compressed size that does not fit `send_buf` all skip
     /// the package entirely and leave today's LoadLocal behaviour in place.
-    fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         if (!self.block_id_mapping) return;
         const nameid = packages.stock_nameid;
         if (self.maxdamage.idNameCount() == 0) {
@@ -6142,7 +3715,7 @@ pub const Game = struct {
         return error.WindowFull;
     }
 
-    fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
         // Exact SendToClients=true names from stock WorldStaticData .cctor (49 total, 42 sent).
         const names = [_][]const u8{
             "events",               "materials",          "physicsbodies",   "painting",          "shapes",               "blocks",
@@ -6167,7 +3740,7 @@ pub const Game = struct {
     /// optionally teleport the peer. Returns new Y when snapped, else null.
     /// Threshold surface-8 (was -24): late-suite mesh float still placeable after
     /// SetBlock pre-snap; deeper than -8 without snap caused type=0 power fails.
-    fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32, do_teleport: bool) !?f32 {
+    pub fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32, do_teleport: bool) !?f32 {
         // lossyCast: transforms accumulate client RelPos deltas, so a drifted
         // (or non-finite) value must not trap the checked @intFromFloat.
         const gx: i32 = std.math.lossyCast(i32, @floor(x));
@@ -6194,7 +3767,7 @@ pub const Game = struct {
 
     /// SetBlock/edit reach: full 3D, but clamp vertical delta so client mesh float
     /// (player Y vs block Y) does not reject valid horizontal places.
-    fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
+    pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
         const dx = bx - px;
         const dz = bz - pz;
         var dy = by - py;
@@ -6208,7 +3781,7 @@ pub const Game = struct {
     /// Single choke point for detector evidence: records into the ring and runs
     /// the P4 guard policy (docs/AUTHORITY.md). `surf` attributes the signal to a
     /// C2S surface so quarantine can deny only what was abused.
-    fn noteEvidence(
+    pub fn noteEvidence(
         self: *Game,
         c: *Client,
         peer_local: i32,
@@ -6388,7 +3961,7 @@ pub const Game = struct {
 
     /// Quarantine check at a C2S trust boundary. Observe mode records the flag
     /// but never denies (docs/AUTHORITY.md mode table).
-    fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) bool {
+    pub fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) bool {
         if (!self.authorityCorrects()) return false;
         const q = c.guard.quarantine;
         const denied = switch (surf) {
@@ -6411,7 +3984,7 @@ pub const Game = struct {
 
     /// Weak (record-only) block-destroy rate. Soft by construction, so
     /// `guard_policy.evaluate` can never turn it into a quarantine or a kick.
-    fn noteBlockBreak(self: *Game, c: *Client) void {
+    pub fn noteBlockBreak(self: *Game, c: *Client) void {
         if (c.farm_window_tick == 0 or self.tick_n -% c.farm_window_tick >= self.guard.window_ticks) {
             c.farm_window_tick = self.tick_n;
             c.farm_breaks = 0;
@@ -6432,7 +4005,7 @@ pub const Game = struct {
     }
 
     /// Refill + spend one inv token. False → caller should drop and count throttle.
-    fn takeInvToken(self: *Game, c: *Client) bool {
+    pub fn takeInvToken(self: *Game, c: *Client) bool {
         const now = clock.monoNs();
         // A fresh bucket starts full (tokens default 0 on the struct so the
         // cap stays a config value; the first call seeds the configured cap).
@@ -6449,7 +4022,7 @@ pub const Game = struct {
         return true;
     }
 
-    fn takeBlockToken(self: *Game, c: *Client) bool {
+    pub fn takeBlockToken(self: *Game, c: *Client) bool {
         const now = clock.monoNs();
         if (c.block_refill_ns == 0) {
             c.block_refill_ns = now;
@@ -6465,7 +4038,7 @@ pub const Game = struct {
     }
 
     /// Combat rate gate: allow burst of damage_burst_max within min_damage_gap.
-    fn takeDamageToken(self: *Game, c: *Client) bool {
+    pub fn takeDamageToken(self: *Game, c: *Client) bool {
         const now = clock.monoNs();
         if (c.last_damage_ns != 0 and now -% c.last_damage_ns < self.min_damage_gap_ns) {
             if (c.damage_burst >= self.damage_burst_max) return false;
@@ -6487,7 +4060,7 @@ pub const Game = struct {
 
     /// Reach + land-claim gate for a block edit requested by `c` (ADR 0004).
     /// Shared by every C2S path that mutates world blocks or plants entities.
-    fn placeAllowed(self: *Game, c: *const Client, x: i32, y: i32, z: i32) bool {
+    pub fn placeAllowed(self: *Game, c: *const Client, x: i32, y: i32, z: i32) bool {
         const ps = self.sim.playerByPeer(c.slot) orelse return false;
         const p = self.sim.transform[ps];
         if (!self.withinEditReach(p.x, p.y, p.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
@@ -6512,7 +4085,7 @@ pub const Game = struct {
 
     /// Align spawn to DTM height and ensure a solid under the feet block so
     /// dig/place sample rings (BlockUnderFeet) see terrain, not air.
-    fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
+    pub fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
         const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
         const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
         const h: i32 = @intCast(h_u16);
@@ -6549,7 +4122,7 @@ pub const Game = struct {
         return .{ .x = sx, .y = feet_y, .z = sz };
     }
 
-    fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
+    pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
         // Snap to solid surface (callers may pass raw primarySpawn Y that floats above DTM).
         // sy is intentionally ignored: DTM surface is authoritative for join/respawn.
         _ = sy;
@@ -6734,7 +4307,9 @@ pub const Game = struct {
 
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).
     /// HUD day still comes from WorldTime; BloodMoonDay is the scheduled BM day.
-    fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendGameStats(self, peer); }
+    pub fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendGameStats(self, peer);
+    }
 
     /// The bPersistent GameStats values (stock defaults otherwise).
     /// Effective GameStats blob values (wire NetPackageGameStats). pub so
@@ -6768,10 +4343,14 @@ pub const Game = struct {
     /// Re-send the GameStats blob to every entered peer when the scheduled
     /// blood-moon day rolls (a client that joined mid-cycle and sat past its
     /// first horde would otherwise keep the stale red-moon HUD day forever).
-    pub fn broadcastGameStats(self: *Game) !void { return game_join.broadcastGameStats(self); }
+    pub fn broadcastGameStats(self: *Game) !void {
+        return game_join.broadcastGameStats(self);
+    }
 
     /// Map markers for active journal quests (stock class names only).
-    fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void { return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid); }
+    fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
+        return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid);
+    }
 
     /// True when quest id is likely present in stock client QuestClass.
     pub fn isStockClientQuestName(self: *Game, name: []const u8) bool {
@@ -6793,59 +4372,10 @@ pub const Game = struct {
         return false;
     }
 
-    /// Fill stock Quest.Write snapshots for active journal slots (client-known ids only).
-    /// `reward_store` holds RewardWire arrays for each quest (Item/LootItem need ItemStack).
-    /// C2S NetPackageQuestEvent. Only the rally marker and the POI lock/unlock
-    /// events have a server side (NetPackageQuestEvent.ProcessPackage,
-    /// asm.il 835696-835943); the rest are client-local and are dropped.
-    fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
-        const head = packages.stock_quest.parseQuestEventHead(body) catch return;
-        // Trust boundary: a peer may only raise quest events for its own entity.
-        if (head.entity_id != c.entity_id) return;
-        switch (head.event) {
-            .try_rally_marker => {
-                const lockout = systems.questCheckPoiLockout(&self.sim, c.entity_id, head.px, head.pz);
-                var reply = head;
-                reply.extra_data = lockout.extra_data;
-                // Reason → reply event, from the switch at asm.il 835696 IL_009d.
-                reply.event = switch (lockout.reason) {
-                    .none => .rally_marker_activated,
-                    .player_inside => .rally_marker_player_locked,
-                    .bedroll => .rally_marker_bedroll_locked,
-                    .land_claim => .rally_marker_land_claim_locked,
-                    .quest_lock => .rally_marker_locked,
-                };
-                if (lockout.reason == .none) {
-                    // An unknown or already spent quest code gets no reply: the
-                    // marker must not report activated for a quest we cannot track.
-                    if (!systems.questOnRallyActivated(&self.sim, c.slot, head.quest_code)) return;
-                    systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
-                    // The quest now dedicates this POI: restore its baked blocks
-                    // (PrefabInstance.ResetBlocksAndRebuild on quest dedication).
-                    self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
-                }
-                const out = try packages.stock_quest.buildQuestEvent(self.body_buf[0..64], reply);
-                if (lockout.reason == .none) {
-                    // Activation is shared state (shared-quest party members see
-                    // the same marker); a refusal only concerns the requester.
-                    try self.broadcast("NetPackageQuestEvent", out);
-                } else {
-                    try self.sendGame(peer, "NetPackageQuestEvent", out);
-                }
-            },
-            .lock_poi => {
-                systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
-                // Lock acquisition = quest dedication: restore the POI blocks.
-                self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
-            },
-            .unlock_poi => systems.questPoiUnlock(&self.sim, c.entity_id, head.px, head.pz),
-            else => return,
-        }
+    pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
+        return game_quest.handleQuestEvent(self, peer, c, body);
     }
 
-    /// Fill stock Quest.Write snapshots for active journal slots. pub so the
-    /// GAP 12 scenario can assert the full journal (not just the old 2) rides
-    /// the join PDF.
     pub fn fillStockJournalWrites(
         self: *Game,
         peer_slot: usize,
@@ -6855,136 +4385,10 @@ pub const Game = struct {
         kind_store: *[ecs.components.max_journal][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind,
         pos_store: *[ecs.components.max_journal][max_quest_position_data]packages.stock_quest.PositionEntry,
     ) usize {
-        const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
-        if (!self.sim.mask[ps].journal) return 0;
-        var n: usize = 0;
-        for (self.sim.journal[ps].slots) |s| {
-            if (!s.active and !s.completed) continue;
-            if (n >= out.len or n >= reward_store.len) break;
-            const d = self.sim.catalog.byId(s.def_id) orelse continue;
-            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-            const state: packages.stock_quest.QuestState = if (s.completed)
-                .completed
-            else if (s.ready_turn_in)
-                .ready_turn_in
-            else
-                .in_progress;
-            var prog: u8 = 0;
-            if (s.progress > 0) prog = @intCast(@min(s.progress, 255));
-            const rc: usize = @min(@as(usize, d.reward_count), ecs.quest.max_reward_flags);
-            var ri: usize = 0;
-            while (ri < rc) : (ri += 1) {
-                var wire: packages.stock_quest.RewardWire = .{ .has_item_stack = false };
-                const spec = if (ri < d.reward_n) d.rewards[ri] else ecs.quest.RewardSpec{};
-                if (spec.kind == .item or spec.kind == .loot_item) {
-                    wire.has_item_stack = true;
-                    // The client resolves the ItemStack through its own items
-                    // catalog; resolve the stock name to the negotiated type id.
-                    // An unknown name keeps the stock Empty stack (fail closed).
-                    if (self.items.byStockName(spec.item_name)) |st| {
-                        wire.item = .{
-                            .type_id = st,
-                            .count = @intCast(@min(spec.value, 65535)),
-                            .quality = 1,
-                        };
-                    }
-                }
-                reward_store[n][ri] = wire;
-            }
-            const phase: u8 = if (s.completed)
-                255
-            else if (s.phase > 0)
-                s.phase
-            else if (s.ready_turn_in)
-                2
-            else
-                1;
-            const qcode: i32 = if (s.quest_code != 0) s.quest_code else @intCast(d.id);
-            // Per-objective CurrentValue from the phase graph: completed phases
-            // report 255 (>= client required), the active phase reports clamped
-            // progress, future phases 0. Legacy defs fall back to first_objective_value.
-            var obj_vals: []const u8 = &.{};
-            if (d.objective_phases.len > 0) {
-                const req: u16 = if (s.phase > 0 and s.phase <= d.phases.len)
-                    d.phases[s.phase - 1].required
-                else
-                    s.progress;
-                var oi: usize = 0;
-                const lim = @min(d.objective_phases.len, obj_val_store[n].len);
-                while (oi < lim) : (oi += 1) {
-                    const op = d.objective_phases[oi];
-                    obj_val_store[n][oi] = if (s.completed or op < s.phase)
-                        255
-                    else if (op == s.phase)
-                        @intCast(@min(@min(s.progress, req), @as(u16, 255)))
-                    else
-                        0;
-                }
-                obj_vals = obj_val_store[n][0..lim];
-            }
-            // PositionData: the Location marker plus, when the quest was placed
-            // in a POI, the rect ObjectiveRallyPoint scans for its rally block.
-            var pn: usize = 0;
-            if (d.kind == .goto_point or d.kind == .kill_zombies or d.kind == .fetch_item) {
-                // Goto target: the bound POI center (audit B26) or the def
-                // marker when no POI data exists.
-                const gx: f32 = if (d.kind == .goto_point and s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
-                const gz: f32 = if (d.kind == .goto_point and s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
-                pos_store[n][pn] = .{
-                    .kind = packages.stock_quest.position_data_location,
-                    .x = if (d.kind == .goto_point) gx else self.sim.transform[ps].x,
-                    .y = if (d.kind == .goto_point) d.ty else self.sim.transform[ps].y,
-                    .z = if (d.kind == .goto_point) gz else self.sim.transform[ps].z,
-                };
-                pn += 1;
-            }
-            if (s.poi.valid()) {
-                pos_store[n][pn] = .{
-                    .kind = packages.stock_quest.position_data_poi_position,
-                    .x = s.poi.x,
-                    .y = s.poi.y,
-                    .z = s.poi.z,
-                };
-                pos_store[n][pn + 1] = .{
-                    .kind = packages.stock_quest.position_data_poi_size,
-                    .x = s.poi.size_x,
-                    .y = s.poi.size_y,
-                    .z = s.poi.size_z,
-                };
-                pn += 2;
-            }
-            // Per-objective Write subclass from the catalog (TreasureChest and
-            // POIStayWithin use non-base shapes; everything else is Base).
-            var kinds: []const packages.stock_quest.ObjectiveWriteKind = &.{};
-            if (d.objective_kinds.len > 0) {
-                const klim = @min(d.objective_kinds.len, kind_store.len);
-                var ki: usize = 0;
-                while (ki < klim) : (ki += 1) {
-                    kind_store[n][ki] = switch (d.objective_kinds[ki]) {
-                        .base => .base,
-                        .treasure_chest => .treasure_chest,
-                        .empty => .empty,
-                    };
-                }
-                kinds = kind_store[n][0..klim];
-            }
-            out[n] = .{
-                .id = d.name,
-                .state = state,
-                .quest_code = qcode,
-                .current_phase = phase,
-                .objective_count = d.objective_count,
-                .first_objective_value = prog,
-                .objective_values = obj_vals,
-                .objective_kinds = kinds,
-                .rewards = reward_store[n][0..rc],
-                .position_data = pos_store[n][0..pn],
-                .rally_marker_activated = s.rally_activated,
-            };
-            n += 1;
-        }
-        return n;
+        return game_quest.fillStockJournalWrites(self, peer_slot, out, reward_store, obj_val_store, kind_store, pos_store);
     }
+
+    // _fillStockJournalWritesImpl removed — body lives in game/quest.zig
 
     /// Build trader FetchList offers from a quest_list id (stock quest names
     /// only). A quest already active in the player's journal is not re-offered:
@@ -6993,25 +4397,11 @@ pub const Game = struct {
     /// trader_info id; the entity class picked the id at spawn). When npc.xml
     /// is absent (fixtures) the stock class-hash map below is the fallback so
     /// a modded trader still gets offers.
-    fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
-        const hash = if (self.sim.slotOfNetId(npc_entity_id)) |ts|
-            self.sim.class_id[ts].hash
-        else
-            0;
-        if (self.sim.slotOfNetId(npc_entity_id)) |ts| {
-            const info_id = self.sim.trader_stock[ts].trader_info_id;
-            if (info_id != 0) {
-                if (self.npc.questListForTrader(info_id)) |ql| return ql;
-            }
-        }
-        if (hash == packages.stock_entity.class_npc_trader_rekt) return "trader_rekt_quests";
-        if (hash == packages.stock_entity.class_npc_trader_bob) return "trader_bob_quests";
-        if (hash == packages.stock_entity.class_npc_trader_hugh) return "trader_hugh_quests";
-        if (hash == packages.stock_entity.class_npc_trader_joel) return "trader_joel_quests";
-        return "trader_jen_quests";
+    pub fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
+        return game_quest.traderQuestList(self, npc_entity_id);
     }
 
-    fn buildTraderQuestOffers(
+    pub fn buildTraderQuestOffers(
         self: *Game,
         list_id: []const u8,
         peer_slot: usize,
@@ -7021,38 +4411,19 @@ pub const Game = struct {
         tier: u8,
         out: []packages.stock_quest.QuestPacketEntry,
     ) usize {
-        const list = self.sim.catalog.listById(list_id) orelse return 0;
-        const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
-        var n: usize = 0;
-        for (list.entries) |qid| {
-            if (n >= out.len) break;
-            const d = self.sim.catalog.byId(qid) orelse continue;
-            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-            // Stock filters the trader's quest list by DifficultyTier == the
-            // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
-            if (tier != 0 and d.difficulty_tier != tier) continue;
-            if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
-            out[n] = .{
-                .quest_id = d.name,
-                .loc_x = d.tx,
-                .loc_y = d.ty,
-                .loc_z = d.tz,
-                .poi_name = d.name,
-                .trader_x = trader_x,
-                .trader_y = trader_y,
-                .trader_z = trader_z,
-            };
-            n += 1;
-        }
-        return n;
+        return game_quest.buildTraderQuestOffers(self, list_id, peer_slot, trader_x, trader_y, trader_z, tier, out);
     }
 
     /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
     /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
-    fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void { return game_join.sendStockEntitySpawns(self, peer, c, px, pz); }
+    fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
+        return game_join.sendStockEntitySpawns(self, peer, c, px, pz);
+    }
 
     /// Stock EntityStatChanged for core vitals (Health/Stamina/Food/Water).
-    fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void { return game_join.sendPlayerVitals(self, peer, c); }
+    fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+        return game_join.sendPlayerVitals(self, peer, c);
+    }
 
     pub fn countJoined(self: *const Game) u16 {
         var n: u16 = 0;
@@ -7090,30 +4461,36 @@ pub const Game = struct {
         return out;
     }
 
-    fn buildInventorySnap(self: *Game, c: *Client, buf: []u8) ![]u8 {
+    pub fn buildInventorySnap(self: *Game, c: *Client, buf: []u8) ![]u8 {
         const ps = self.sim.playerByPeer(c.slot) orelse return error.NoPlayer;
         if (!self.sim.mask[ps].inventory) return error.NoInv;
         // Stock body with ItemTable stock types when items.xml is loaded.
         return packages.buildInventoryBodyStockResolved(buf, &self.sim.inventory[ps], resolveItemType, self);
     }
 
-    fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendItemIdMapping(self, peer); }
+    fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendItemIdMapping(self, peer);
+    }
 
     /// Holding-only S2C (valid direction for stock clients).
     /// Join: send empty held stack (entityId + count=0 + index). Full ItemValue held
     /// stacks have underrun'd stock HoldingItem.read mid-join when framing/window is tight;
     /// PDF already carries toolbelt. Echo path after InvTx still sends resolved hold.
-    fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void { return game_join.sendHoldingOnly(self, peer, c); }
+    fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+        return game_join.sendHoldingOnly(self, peer, c);
+    }
 
-    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void { return game_join.sendHoldingOnlyEx(self, peer, c, full_stack); }
+    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void {
+        return game_join.sendHoldingOnlyEx(self, peer, c, full_stack);
+    }
 
     /// Post-change inv echo. PlayerInventory/Bag are ToServer-only for stock
     /// clients; only HoldingItem is a valid S2C echo.
-    fn sendHoldingEcho(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+    pub fn sendHoldingEcho(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
         try self.sendHoldingOnlyEx(peer, c, true);
     }
 
-    fn isStorageBlockId(self: *const Game, block_id: u16) bool {
+    pub fn isStorageBlockId(self: *const Game, block_id: u16) bool {
         // Prefer blocks.xml LootList/CompositeTileEntity ∩ AssignIds dump.
         if (self.maxdamage.isStorageId(block_id)) return true;
         // stock_deco pins always (dump may be absent offline).
@@ -7127,7 +4504,7 @@ pub const Game = struct {
     }
 
     /// Closed↔open pair from blocks.xml DowngradeBlock (AssignIds-resolved).
-    fn storagePairId(self: *const Game, block_id: u16) ?u16 {
+    pub fn storagePairId(self: *const Game, block_id: u16) ?u16 {
         if (self.storage_pairs.toggleId(block_id)) |id| return id;
         // Offline fallback: wooden chest pins.
         const d = packages.stock_deco;
@@ -7184,7 +4561,7 @@ pub const Game = struct {
     }
 
     /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
-    fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
+    pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
         if (recipe_index >= self.recipes.defs.len) return false;
         return self.tryCraftRecipe(peer_slot, self.recipes.defs[recipe_index], times);
     }
@@ -7253,7 +4630,7 @@ pub const Game = struct {
     /// The item traders pay/charge in: traders.xml root `currency_item`
     /// (stock: casinoCoin), falling back to the stock name when unset or
     /// unresolvable.
-    fn coinItemId(self: *const Game) u16 {
+    pub fn coinItemId(self: *const Game) u16 {
         const name = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
         return self.items.ecsIdByName(name);
     }
@@ -7741,14 +5118,14 @@ pub const Game = struct {
     /// Writes one byte per volume so worker ranges never share a byte, and only
     /// reads `*const Store` plus the const player arrays. Serial and parallel
     /// passes produce the identical `hit` array.
-    const SleeperScanCtx = struct {
+    pub const SleeperScanCtx = struct {
         sl: *const sleepers_mod.Store,
         px: []const f32,
         py: []const f32,
         pz: []const f32,
         hit: []u8,
 
-        fn work(ctx: SleeperScanCtx, begin: usize, end: usize) void {
+        pub fn work(ctx: SleeperScanCtx, begin: usize, end: usize) void {
             var vi = begin;
             while (vi < end) : (vi += 1) {
                 if (ctx.sl.volumes[vi].triggered) continue;
@@ -7869,7 +5246,7 @@ pub const Game = struct {
     /// contain, so without this the fallbacks below hit defaultZombie for
     /// nearly every POI. The entityclass / entitygroup fallbacks stay for
     /// prefabs that do name one directly.
-    fn resolveSleeperClass(
+    pub fn resolveSleeperClass(
         self: *Game,
         name: []const u8,
         stage_spawn: ?assets_gamestages.SpawnGroup,
@@ -7923,7 +5300,7 @@ pub const Game = struct {
     }
 
     /// Stock ItemDropServer path: EntityItem (class "item") with itemClass ECD.
-    fn broadcastItemDropSpawn(
+    pub fn broadcastItemDropSpawn(
         self: *Game,
         net_id: i32,
         stack: packages.stock_inv.StockSlot,
@@ -8084,7 +5461,7 @@ pub const Game = struct {
     /// each chunk re-derives its generators/consumers/wires from the block
     /// plane on first touch. `applyToNode` carries the per-block fuel/capacity
     /// properties; wires are re-added from the block plane the same way.
-    fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
+    pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
         if (ch.power_scanned) return;
         const blocks = ch.blocks orelse return;
         ch.power_scanned = true;
@@ -8226,7 +5603,7 @@ pub const Game = struct {
     /// regenerates fresh loot; the cycle-varying seed makes each respawn
     /// differ while staying deterministic per (pos, cycle). A block without a
     /// LootList stays empty (fail closed, audit A31), never woodenChest.
-    fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
+    pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
         if (self.loot_respawn_days == 0) return;
         if (cont.player_storage) return;
         if (!cont.touched) return;
@@ -8317,7 +5694,7 @@ pub const Game = struct {
         }
     }
 
-    fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
+    pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
         const t = world_store.World.worldToChunk(wx, wz);
         // Honor radius 0 (single spawn chunk). Cap 17×17 for viewDist 8 mesh core.
         var r: i32 = if (radius < 0) 0 else radius;
@@ -8544,129 +5921,24 @@ pub const Game = struct {
     /// (ProcessPackage, asm.il 202531); we validate first, because the body is
     /// entirely client-chosen: a peer may only drive its own player entity, and
     /// only with a buff name the catalog resolves.
-    fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
-        var name_buf: [packages.stock_buff.max_buff_name]u8 = undefined;
-        const req = packages.stock_buff.parseAddRemoveBuff(body, &name_buf) catch {
-            self.harness.counters.inc(.buff_rejects);
-            self.harness.counters.inc(.c2s_malformed);
-            return;
-        };
-        if (req.entity_id != c.entity_id) {
-            self.harness.counters.inc(.buff_rejects);
-            self.harness.counters.inc(.ownership_rejects);
-            return;
-        }
-        const def_id = self.buffs.indexOfName(req.name) orelse {
-            // Unknown names are the loud case: a client-side mod, a catalog
-            // mismatch, or probing. Rate-limit so it cannot flood the log.
-            self.harness.counters.inc(.buff_rejects);
-            const n = self.harness.counters.get(.buff_rejects);
-            if (n == 1 or n % 100 == 0) {
-                std.debug.print("zdtd: buff name not in catalog slot={d} n={d}\n", .{ c.slot, n });
-            }
-            return;
-        };
-        const ps = self.sim.playerByPeer(c.slot) orelse return;
-        const set = self.sim.buffsMut(ps);
-        if (!req.adding) {
-            // Flag only: the tick removes and broadcasts, so client-requested and
-            // expiry removals leave the world through one path.
-            _ = ecs.buff.remove(set, def_id);
-            return;
-        }
-        const def = self.buffs.byId(def_id) orelse return;
-        const res = ecs.buff.add(set, .{
-            .def_id = def_id,
-            .duration = def.duration,
-            .stack_type = def.stack_type,
-            .update_rate_ticks = def.update_rate_ticks,
-            .remove_on_death = def.remove_on_death,
-            // The client's requested duration is deliberately dropped: any value
-            // >= 0 on the wire calls BuffClass::set_DurationMax on every receiving
-            // client and retunes that buff class for the whole session
-            // (asm.il 736259 IL_00cf, set_DurationMax asm.il 732658).
-        }, ecs.buff.duration_from_class, req.instigator_id, req.instigator_x, req.instigator_y, req.instigator_z);
-        if (res == .no_slot) {
-            self.harness.counters.inc(.buff_rejects);
-            return;
-        }
-        try self.relayBuff(c.entity_id, def.name, true, req.instigator_id, c.slot);
+    pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
+        return game_social.handleAddRemoveBuff(self, c, body);
     }
 
-    /// Full buff list of every OTHER joined player, as NetPackageEntityStatsBuff.
-    /// A relayed AddRemoveBuff only reaches the peers connected at the time, so a
-    /// late joiner needs the whole list once. The client applies this package to
-    /// remote entities only (asm.il 202268), which is exactly the set we send.
     fn sendBuffSync(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
-        var blob_buf: [1024]u8 = undefined;
-        for (&self.clients) |*other| {
-            if (!other.joined or other.slot == c.slot) continue;
-            const blob = self.playerBuffBlob(other.slot, &blob_buf);
-            if (blob.len == 0) continue;
-            const body = packages.stock_buff.buildEntityStatsBuffBody(&self.body_buf, other.entity_id, blob) catch {
-                self.harness.counters.inc(.encode_errors);
-                continue;
-            };
-            try self.sendGame(peer, "NetPackageEntityStatsBuff", body);
-        }
+        return game_social.sendBuffSync(self, peer, c);
     }
 
-    /// EntityBuffs blob for a peer's player. Empty (not even a header) when the
-    /// player carries no buffs, so callers can skip the send entirely.
     fn playerBuffBlob(self: *Game, peer_slot: usize, buf: []u8) []const u8 {
-        const ps = self.sim.playerByPeer(peer_slot) orelse return &.{};
-        if (!self.sim.mask[ps].buffs) return &.{};
-        var values: [ecs.components.max_buffs_per_entity]packages.stock_buff.BuffValueWire = undefined;
-        var n: usize = 0;
-        for (self.sim.buffs[ps].slots) |b| {
-            if (!b.active) continue;
-            const def = self.buffs.byId(b.def_id) orelse continue;
-            values[n] = .{
-                .name = def.name,
-                .stack_mult = b.stack_mult,
-                .duration_ticks = b.duration_ticks,
-                .instigator_id = b.instigator_id,
-                .flags = @bitCast(b.flags),
-                .update_ticks = b.update_ticks,
-                .instigator_x = b.instigator_x,
-                .instigator_y = b.instigator_y,
-                .instigator_z = b.instigator_z,
-            };
-            n += 1;
-        }
-        if (n == 0) return &.{};
-        return packages.stock_buff.writeEntityBuffs(buf, values[0..n]) catch &.{};
+        return game_social.playerBuffBlob(self, peer_slot, buf);
     }
 
-    /// Fan an add/remove out to the observers of `entity_id`. duration is always
-    /// -1 so the receiving client uses its own buffs.xml BuffClass duration.
     fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
-        const b = packages.stock_buff.buildAddRemoveBuffBody(&self.body_buf, .{
-            .entity_id = entity_id,
-            .name = buff_name,
-            .duration = ecs.buff.duration_from_class,
-            .adding = adding,
-            .instigator_id = instigator_id,
-            .instigator_x = 0,
-            .instigator_y = 0,
-            .instigator_z = 0,
-        }) catch {
-            self.harness.counters.inc(.encode_errors);
-            return;
-        };
-        try self.broadcastExcept("NetPackageAddRemoveBuff", b, except_slot);
+        return game_social.relayBuff(self, entity_id, buff_name, adding, instigator_id, except_slot);
     }
 
-    /// Drain the tick's buff removals. Everyone gets them, the owner included:
-    /// ProcessPackage applies to any EntityAlive, so this is what clears the
-    /// local HUD icon as well as the observers' (asm.il 202531).
     fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
-        var i: u8 = 0;
-        while (i < r.buff_expired_n) : (i += 1) {
-            const ex = r.buff_expired[i];
-            const def = self.buffs.byId(ex.def_id) orelse continue;
-            try self.relayBuff(ex.entity_id, def.name, false, -1, null);
-        }
+        return game_social.broadcastBuffExpiries(self, r);
     }
 
     /// M11 serialize-once interest: for each entity that needs a motion send,
@@ -9364,7 +6636,7 @@ pub const Game = struct {
     /// slot (NetPackageEntityAttach::ProcessPackage, asm.il:844722 IL_008d) and
     /// the client applies that index verbatim, so this number is the whole of
     /// "passengers render in the right seat".
-    fn seatRider(self: *Game, rider_id: i32, vslot: ecs.Slot, requested: i16) !void {
+    pub fn seatRider(self: *Game, rider_id: i32, vslot: ecs.Slot, requested: i16) !void {
         const seat = systems.vehicleAttach(&self.sim, vslot, rider_id, requested) orelse return;
         const body = packages.buildEntityAttach(
             self.body_buf[0..11],
@@ -9380,7 +6652,7 @@ pub const Game = struct {
     /// -1, matching the server branch of Entity::SendDetach (asm.il:406816).
     /// Sim seat is freed even if the wire body cannot be built; encode failure
     /// is logged so a silent ghost seat on remotes is not invisible.
-    fn unseatRider(self: *Game, rider_id: i32) !void {
+    pub fn unseatRider(self: *Game, rider_id: i32) !void {
         _ = systems.vehicleDetach(&self.sim, rider_id) orelse return;
         const body = packages.buildEntityAttach(
             self.body_buf[0..11],
@@ -9571,95 +6843,10 @@ pub const Game = struct {
     /// `currentOperation` selects a server handler, and every mutation fans a
     /// `NetPackagePartyData` snapshot out to the party-relevant peers. Entity
     /// ids are validated against live joined clients at the trust boundary.
-    fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
-        var voice_buf: [64]u8 = undefined;
-        const a = packages.stock_party.readActions(body, &voice_buf) catch {
-            self.harness.counters.inc(.c2s_malformed);
-            return;
-        };
-        const me = c.entity_id;
-        // 2 ChangeLead targets a party member; 4 KickFromParty targets another
-        // player. Both must reference a live joined entity.
-        const target_ok = a.invited_entity >= 0 and self.clientByEntityId(a.invited_entity) != null;
-        switch (a.action) {
-            1 => { // AcceptInvite
-                if (a.invited_by_entity < 0 or !target_ok) return;
-                const p = self.parties.acceptInvite(a.invited_by_entity, a.invited_entity) orelse return;
-                try self.broadcastPartySnapshot(
-                    p.id,
-                    p.leader_index,
-                    p.voice_lobby[0..p.voice_len],
-                    p.members[0..p.n],
-                    a.invited_entity,
-                    a.action,
-                    false,
-                );
-            },
-            2 => { // ChangeLead
-                if (!target_ok) return;
-                const p = self.parties.partyByMember(me) orelse return;
-                if (!self.parties.setLeader(p.id, a.invited_entity)) return;
-                try self.broadcastPartySnapshot(
-                    p.id,
-                    p.leader_index,
-                    p.voice_lobby[0..p.voice_len],
-                    p.members[0..p.n],
-                    a.invited_entity,
-                    a.action,
-                    false,
-                );
-            },
-            3 => { // LeaveParty
-                if (self.parties.removePlayer(me)) |r| {
-                    try self.broadcastPartyRemoval(r, a.action);
-                }
-            },
-            4 => { // KickFromParty
-                if (!target_ok) return;
-                if (self.parties.removePlayer(a.invited_entity)) |r| {
-                    try self.broadcastPartyRemoval(r, a.action);
-                }
-            },
-            5 => { // Disconnected
-                if (self.parties.removePlayer(me)) |r| {
-                    try self.broadcastPartyRemoval(r, a.action);
-                }
-            },
-            6 => { // JoinAutoParty (AutoParty world stat is read by Game)
-                const p = self.parties.autoJoin(me) orelse return;
-                try self.broadcastPartySnapshot(
-                    p.id,
-                    p.leader_index,
-                    p.voice_lobby[0..p.voice_len],
-                    p.members[0..p.n],
-                    me,
-                    a.action,
-                    false,
-                );
-            },
-            7 => { // SetVoiceLobby
-                const p = self.parties.partyByMember(me) orelse return;
-                if (!self.parties.setVoiceLobby(p.id, a.voice_lobby)) return;
-                try self.broadcastPartySnapshot(
-                    p.id,
-                    p.leader_index,
-                    p.voice_lobby[0..p.voice_len],
-                    p.members[0..p.n],
-                    me,
-                    a.action,
-                    false,
-                );
-            },
-            // 0 SendInvite is invite bookkeeping only (AddPartyInvite +
-            // tooltip); no party mutation, so no snapshot.
-            else => {},
-        }
+    pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
+        return game_social.handlePartyActions(self, c, body);
     }
 
-    /// NetPackagePartyData fan-out (parties-factions.md §3): recipients are the
-    /// current members plus the changed entity (a kicked player must see the
-    /// party leave too); on disband only the last member gets the
-    /// `disbandParty=true` snapshot, matching stock's one-member auto-leave.
     fn broadcastPartySnapshot(
         self: *Game,
         party_id: i32,
@@ -9670,1330 +6857,26 @@ pub const Game = struct {
         action: u8,
         disband: bool,
     ) !void {
-        var pbuf: [256]u8 = undefined;
-        const body = try packages.stock_party.buildDataBody(&pbuf, .{
-            .party_id = party_id,
-            .leader_index = leader_index,
-            .voice_lobby = voice,
-            .members = members,
-            .changed_entity = changed,
-            .party_action = action,
-            .disband = disband,
-        });
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.peer == null) continue;
-            const is_member = !disband and blk: {
-                for (members) |m| {
-                    if (m == cl.entity_id) break :blk true;
-                }
-                break :blk false;
-            };
-            if (!is_member and cl.entity_id != changed) continue;
-            const peer = cl.peer.?;
-            self.sendGame(peer, "NetPackagePartyData", body) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send PartyData failed: {s}\n", .{@errorName(err)});
-            };
-        }
+        return game_social.broadcastPartySnapshot(self, party_id, leader_index, voice, members, changed, action, disband);
     }
 
-    /// Snapshot after a removal: on disband the party is already freed, so the
-    /// Removal carries the surviving member ids + leader index.
     fn broadcastPartyRemoval(self: *Game, r: ecs.party.Removal, action: u8) !void {
-        try self.broadcastPartySnapshot(
-            r.party_id,
-            r.leader_index,
-            "",
-            r.members[0..r.n],
-            r.changed_entity,
-            action,
-            r.disband,
-        );
+        return game_social.broadcastPartyRemoval(self, r, action);
     }
 
-    /// Entity id → joined Client (max_clients is small; linear scan is fine).
     pub fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
-        for (&self.clients) |*cl| {
-            if (cl.joined and cl.entity_id == entity_id) return cl;
-        }
-        return null;
+        return game_social.clientByEntityId(self, entity_id);
     }
 
-    /// QuestEventManager.ShareAllQuestsWithParty (parties-factions.md §2.3): a
-    /// newly accepted quest is shared with the owner's party. Accepts, then
-    /// fans a NetPackageSharedQuest share_quest body to the other members.
-    fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
-        if (!systems.questAccept(&self.sim, c.slot, def_id)) return false;
-        self.shareQuestWithParty(c, def_id);
-        return true;
+    pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
+        return game_social.acceptQuestFor(self, c, def_id);
     }
 
-    /// Fan a share_quest body to the other party members (stock
-    /// ShareAllQuestsWithParty; the client mirrors it into its journal).
     fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
-        const p = self.parties.partyByMember(c.entity_id) orelse return;
-        const d = self.sim.catalog.byId(def_id) orelse return;
-        var qp: ?*ecs.components.QuestProgress = null;
-        if (self.sim.playerByPeer(c.slot)) |ps| {
-            if (self.sim.mask[ps].journal) {
-                for (&self.sim.journal[ps].slots) |*s| {
-                    if (s.active and s.def_id == def_id) qp = s;
-                }
-            }
-        }
-        const q = qp orelse return;
-        if (q.is_shared) return;
-        q.is_shared = true;
-        for (p.members[0..p.n]) |m| {
-            if (m == c.entity_id) continue;
-            if (self.clientByEntityId(m)) |member| {
-                if (member.peer) |mp| {
-                    var qb: [256]u8 = undefined;
-                    const body = packages.stock_quest.buildSharedQuestShare(&qb, .{
-                        .shared_by_entity_id = c.entity_id,
-                        .quest_code = q.quest_code,
-                        .quest_id = d.name,
-                        .shared_with_entity_id = m,
-                    }) catch continue;
-                    self.sendGame(mp, "NetPackageSharedQuest", body) catch |err| {
-                        self.harness.counters.inc(.net_send_errors);
-                        std.debug.print("zdtd: send SharedQuest failed: {s}\n", .{@errorName(err)});
-                    };
-                }
-            }
-        }
+        return game_social.shareQuestWithParty(self, c, def_id);
     }
 
-    /// Stock `AllyStore::ProcessAllyRequest` (asm.il 885024): take the pair's
-    /// current status, compute the transition, apply it, and tell the clients
-    /// with `NetPackageAllyResponse` (asm.il 886390). Stock sends that to every
-    /// client, so both sides of the pair see the change wherever they are.
-    fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
-        const req = packages.parseAllyRequest(body) catch {
-            self.harness.counters.inc(.c2s_malformed);
-            return;
-        };
-        // Stock returns before touching the store when either identity is null,
-        // and a client with no identity of its own never sends one at all
-        // (AllyStore::AllyUpdateRequest, asm.il 884977).
-        const source = req.source.get() orelse return;
-        const target = req.target.get() orelse return;
-        const own = c.puid_primary.get() orelse return;
-        if (!own.eql(source)) {
-            // Speaking for another account would let anyone accept, decline or
-            // cancel invites they were never part of.
-            self.harness.counters.inc(.ownership_rejects);
-            return;
-        }
-        const t = self.allies.processRequest(source, target, req.add_ally) catch {
-            // Relationship table full: refuse the new pair rather than evict
-            // someone else's. Existing pairs keep updating.
-            self.harness.counters.inc(.c2s_throttle);
-            return;
-        };
-        if (t.isNoop()) return;
-        const resp = try packages.buildAllyResponseBody(
-            self.body_buf[9216..9728],
-            source,
-            target,
-            @intFromEnum(t.new_status),
-            @intFromEnum(t.event_source),
-            @intFromEnum(t.event_target),
-        );
-        try self.broadcast("NetPackageAllyResponse", resp);
+    pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
+        return game_social.handleAllyRequest(self, c, body);
     }
 };
-
-test "peerIpKey covers ipv4 mapped ipv6 and pure ipv6" {
-    var p: ln_peer.Peer = .{};
-    p.addr = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 1 } };
-    try std.testing.expectEqual(@as(u32, 0x7f000001), Game.peerIpKey(&p));
-
-    p.addr = .{ .ip6 = .{
-        .bytes = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 1, 2 },
-        .port = 1,
-    } };
-    try std.testing.expectEqual(@as(u32, 0xc0a80102), Game.peerIpKey(&p));
-
-    p.addr = .{ .ip6 = .{
-        .bytes = .{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        .port = 1,
-    } };
-    const k = Game.peerIpKey(&p);
-    try std.testing.expect(k != 0);
-    try std.testing.expect(k != 0x7f000001);
-}
-
-test "zpv2DropName removes matching player record only" {
-    // Two minimal records: Alice (inv=0,j=0), Bob (inv=0,j=0).
-    // each: name_len|name|x,y,z,coins (16 bytes)|inv_n|jn
-    var buf: [128]u8 = undefined;
-    var o: usize = 0;
-    @memcpy(buf[0..4], "ZPV2");
-    o = 8;
-    // Alice
-    buf[o] = 5;
-    o += 1;
-    @memcpy(buf[o..][0..5], "Alice");
-    o += 5;
-    @memset(buf[o..][0..16], 0);
-    o += 16;
-    buf[o] = 0; // inv_n
-    o += 1;
-    buf[o] = 0; // jn
-    o += 1;
-    // Bob
-    buf[o] = 3;
-    o += 1;
-    @memcpy(buf[o..][0..3], "Bob");
-    o += 3;
-    @memset(buf[o..][0..16], 0);
-    o += 16;
-    buf[o] = 0;
-    o += 1;
-    buf[o] = 0;
-    o += 1;
-    std.mem.writeInt(u32, buf[4..8], 2, .little);
-
-    const dropped = try zpv2DropName(std.testing.allocator, buf[0..o], "Alice");
-    defer if (dropped.blob) |b| std.testing.allocator.free(b);
-    try std.testing.expectEqual(@as(u32, 1), dropped.removed);
-    try std.testing.expect(dropped.blob != null);
-    const out = dropped.blob.?;
-    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, out[4..8], .little));
-    try std.testing.expect(std.mem.indexOf(u8, out, "Alice") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Bob") != null);
-
-    const none = try zpv2DropName(std.testing.allocator, buf[0..o], "Carol");
-    try std.testing.expectEqual(@as(u32, 0), none.removed);
-    try std.testing.expect(none.blob == null);
-}
-
-test "players zpv2 preserves inventory slot gaps across restart" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-
-    {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        g.sim.inventory[ps] = .{};
-        g.sim.inventory[ps].slots[7] = .{ .item_id = 2, .count = 3, .quality = 4, .meta = 5 };
-        try g.savePlayers();
-    }
-
-    {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[0].count);
-        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[7].item_id);
-        try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps].slots[7].count);
-        try std.testing.expectEqual(@as(u8, 4), g.sim.inventory[ps].slots[7].quality);
-        try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[7].meta);
-    }
-}
-
-test "players zpv3 round-trips level xp stats and buffs across restart" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-
-    // Two full save/restart cycles: the second proves the round-trip is not
-    // order dependent (the restored record is re-saved and re-read).
-    var round: u32 = 0;
-    while (round < 2) : (round += 1) {
-        {
-            const g = try Game.create(std.testing.allocator, world_dir, 0);
-            defer {
-                g.deinit();
-                std.testing.allocator.destroy(g);
-            }
-            var capture: ln_peer.Capture = .{};
-            const cl = try g.attachJoinedClient(&capture);
-            const ps = g.sim.playerByPeer(cl.slot).?;
-            g.clients[cl.slot].level = 7;
-            g.clients[cl.slot].xp = 12345;
-            g.sim.health[ps].food = 42;
-            g.sim.health[ps].food_max = 100;
-            g.sim.health[ps].water = 33;
-            g.sim.health[ps].water_max = 100;
-            const bs = g.sim.buffsMut(ps);
-            bs.slots[0] = .{
-                .active = true,
-                .def_id = 5,
-                .stack_mult = 2,
-                .duration_ticks = 400,
-                .update_ticks = 7,
-                .update_rate_ticks = 20,
-                .duration_max = 20,
-                .remove_on_death = false,
-            };
-            try g.savePlayers();
-        }
-        {
-            const g = try Game.create(std.testing.allocator, world_dir, 0);
-            defer {
-                g.deinit();
-                std.testing.allocator.destroy(g);
-            }
-            var capture: ln_peer.Capture = .{};
-            const cl = try g.attachJoinedClient(&capture);
-            const ps = g.sim.playerByPeer(cl.slot).?;
-            try std.testing.expectEqual(@as(u16, 7), g.clients[cl.slot].level);
-            try std.testing.expectEqual(@as(u64, 12345), g.clients[cl.slot].xp);
-            try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].food);
-            try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food_max);
-            try std.testing.expectEqual(@as(f32, 33), g.sim.health[ps].water);
-            try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].water_max);
-            const bs = g.sim.buffsMut(ps);
-            try std.testing.expect(bs.slots[0].active);
-            try std.testing.expectEqual(@as(u16, 5), bs.slots[0].def_id);
-            try std.testing.expectEqual(@as(u8, 2), bs.slots[0].stack_mult);
-            try std.testing.expectEqual(@as(u32, 400), bs.slots[0].duration_ticks);
-            try std.testing.expectEqual(@as(f32, 20), bs.slots[0].duration_max);
-            try std.testing.expect(!bs.slots[0].remove_on_death);
-        }
-    }
-}
-
-test "players zpv3 restore skips a preceding record's progression tail" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-
-    // Hand-built ZPV3 file: Alice first WITH a progression tail, then Bot with
-    // one too. The restore scan must consume Alice's tail to reach Bot; before
-    // the fix it misread Alice's tail bytes as a record and bailed corrupt.
-    var buf: [512]u8 = undefined;
-    var o: usize = 0;
-    @memcpy(buf[o..][0..4], "ZPV3");
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], 2, .little);
-    o += 4;
-    const writeRec = struct {
-        fn call(b: []u8, pos: *usize, name: []const u8, level: u16, xp: u64, food: f32) void {
-            const oo = pos.*;
-            b[oo] = @intCast(name.len);
-            pos.* += 1;
-            @memcpy(b[pos.*..][0..name.len], name);
-            pos.* += name.len;
-            @memset(b[pos.*..][0..16], 0); // xyz + coins
-            pos.* += 16;
-            b[pos.*] = 0; // inv_n
-            pos.* += 1;
-            b[pos.*] = 0; // jn
-            pos.* += 1;
-            b[pos.*] = 1; // prog: tail present
-            pos.* += 1;
-            std.mem.writeInt(u16, b[pos.*..][0..2], level, .little);
-            pos.* += 2;
-            std.mem.writeInt(u64, b[pos.*..][0..8], xp, .little);
-            pos.* += 8;
-            inline for ([_]f32{ food, 100, 50, 100 }) |f| {
-                std.mem.writeInt(u32, b[pos.*..][0..4], @as(u32, @bitCast(f)), .little);
-                pos.* += 4;
-            }
-            b[pos.*] = 0; // buff_n
-            pos.* += 1;
-        }
-    }.call;
-    writeRec(&buf, &o, "Alice", 3, 100, 50);
-    writeRec(&buf, &o, "Bot", 9, 555, 42);
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
-    try io_fs.writeFile(std.testing.allocator, zsv, buf[0..o]);
-
-    const g = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var capture: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&capture);
-    try std.testing.expectEqual(@as(u16, 9), g.clients[cl.slot].level);
-    try std.testing.expectEqual(@as(u64, 555), g.clients[cl.slot].xp);
-    const ps = g.sim.playerByPeer(cl.slot).?;
-    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].food);
-    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food_max);
-}
-
-test "land claim removed when keystone breaks and expires offline" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&cap);
-    g.sim.director.clock.day = 30;
-    g.registerClaim(250, 70, 250, cl.entity_id);
-    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking a non-keystone block does not remove the claim.
-    g.removeClaimAt(249, 70, 250);
-    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking the keystone removes it (claim disappears with its block).
-    g.removeClaimAt(250, 70, 250);
-    try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
-    // Expiry: an offline claim past the window is released on the day roll.
-    g.registerClaim(250, 70, 250, cl.entity_id);
-    g.markClaimsForEntity(cl.entity_id, false);
-    g.land_claims[0].owner_seen_day = g.sim.director.clock.day - 10;
-    g.expireClaims();
-    try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
-    // Expiry disabled (0) keeps even a very old offline claim.
-    g.registerClaim(250, 70, 250, cl.entity_id);
-    g.land_claim_expiry_days = 0;
-    g.markClaimsForEntity(cl.entity_id, false);
-    g.land_claims[0].owner_seen_day = 1;
-    g.expireClaims();
-    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // An online claim never expires.
-    g.land_claim_expiry_days = 3;
-    g.markClaimsForEntity(cl.entity_id, true);
-    g.land_claims[0].owner_seen_day = 1;
-    g.expireClaims();
-    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-}
-
-test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
-    // The claim table was 256: the 257th register silently vanished. Now 1024;
-    // register 300 and prove the save/restart round trip keeps every claim.
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&cap);
-    var i: usize = 0;
-    while (i < 300) : (i += 1) {
-        g.registerClaim(@intCast(1000 + i * 2), 70, @intCast(i), cl.entity_id);
-    }
-    try std.testing.expectEqual(@as(usize, 300), g.land_claims_n);
-    try g.saveClaims();
-
-    const g2 = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g2.deinit();
-        std.testing.allocator.destroy(g2);
-    }
-    try std.testing.expectEqual(@as(usize, 300), g2.land_claims_n);
-    std.debug.print("PASS claims-cap: 300 claims round-trip (cap was 256)\n", .{});
-}
-
-test "block durability holds past the old 64 cap (GAP 12)" {
-    // The sparse damage table was 64: the 65th damaged block silently lost its
-    // damage (FIFO eviction). Now 256; damage 100 distinct blocks and verify
-    // every one keeps its absolute value.
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        _ = g.addBlockDamage(@intCast(200 + i), 70, 300, 5);
-    }
-    try std.testing.expectEqual(@as(usize, 100), g.block_hp_n);
-    var ok = true;
-    i = 0;
-    while (i < 100) : (i += 1) {
-        if (g.getBlockHp(@intCast(200 + i), 70, 300) != 5) ok = false;
-    }
-    try std.testing.expect(ok);
-    std.debug.print("PASS blockhp-cap: 100 damaged blocks retain damage (cap was 64)\n", .{});
-}
-
-test "evidence JSONL flush writes the ring to a file (P4)" {
-    // admin `evidence dump` persists the ring; the file must round-trip the
-    // formatted JSONL lines (no secrets, no packets).
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, world_dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    g.evidence.record(.{ .tick = 7, .peer_local = 2, .entity_id = 103, .detector = .bounds, .severity = .strong, .surface = .block, .observed = 100, .bound = 96 });
-    g.evidence.record(.{ .tick = 9, .detector = .phase, .severity = .hard });
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{world_dir});
-    const n = try g.dumpEvidenceFile(path);
-    try std.testing.expectEqual(@as(usize, 2), n);
-    const read = try io_fs.readFileAll(std.testing.allocator, path);
-    defer std.testing.allocator.free(read);
-    try std.testing.expect(std.mem.indexOf(u8, read, "\"det\":\"bounds\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, read, "\"sev\":\"hard\"") != null);
-}
-
-test "offline init failure restores deterministic sim globals" {
-    util_sim.disable();
-    try std.testing.expectError(error.SecretRequired, Game.createWithOptions(
-        std.testing.allocator,
-        ".zdtd_cfg_cache/dst_init_failure",
-        0,
-        .{ .webui_port = 1, .enable_sample_plugin = false },
-    ));
-    try std.testing.expect(!util_sim.isEnabled());
-}
-
-test "offline successful step advances exactly one virtual tick" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_step_clock", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-
-    const before = clock.monoNs();
-    try g.step();
-    try std.testing.expectEqual(before + util_sim.tick_ns, clock.monoNs());
-}
-
-test "offline init records default DST run seed" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_run_seed", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    try std.testing.expectEqual(util_sim.default_seed, util_sim.getSeed());
-}
-
-test "offline steps replay same world_time for same seed" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    // Unique per invocation: concurrent test processes share .zdtd_cfg_cache,
-    // so fixed dir names would race on each other's saved clock state.
-    const ts = clock.monoNs();
-    var dir_a_buf: [128]u8 = undefined;
-    var dir_b_buf: [128]u8 = undefined;
-    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_replay_a_{d}", .{ts}) catch ".";
-    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_replay_b_{d}", .{ts}) catch ".";
-    var t_a: u64 = 0;
-    var t_b: u64 = 0;
-    {
-        const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
-            .worldgen_seed = 99,
-            .enable_sample_plugin = false,
-        });
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        try std.testing.expectEqual(@as(u64, 99), util_sim.getSeed());
-        var i: u32 = 0;
-        while (i < 20) : (i += 1) try g.step();
-        t_a = g.sim.director.clock.worldTimeBits();
-    }
-    {
-        const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
-            .worldgen_seed = 99,
-            .enable_sample_plugin = false,
-        });
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var i: u32 = 0;
-        while (i < 20) : (i += 1) try g.step();
-        t_b = g.sim.director.clock.worldTimeBits();
-    }
-    try std.testing.expectEqual(t_a, t_b);
-}
-
-test "ban expiry under virtual wall is seed-stable" {
-    // Offline Game enables the virtual clock: wallSeconds must not sample host
-    // REALTIME or ban add/expire cannot replay from a seed.
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_ban_wall", 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    try std.testing.expect(util_sim.isEnabled());
-    // default_start_ns = 1s → wall epoch second 1.
-    try std.testing.expectEqual(@as(i64, 1), clock.wallSeconds());
-    try std.testing.expect(g.ban_list.add("Eve", clock.wallSeconds() + 2, "tmp"));
-    try std.testing.expect(g.ban_list.banned("Eve", clock.wallSeconds()));
-    clock.advanceNs(3_000_000_000);
-    try std.testing.expectEqual(@as(i64, 4), clock.wallSeconds());
-    try std.testing.expect(!g.ban_list.banned("Eve", clock.wallSeconds()));
-}
-
-test "world clock persists across a restart (BM calendar survives)" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const dir = ".zdtd_cfg_cache/clock_persist";
-    {
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        // Day 5, 12:30 — deinit saves clock.zcl.
-        g.sim.director.clock.day = 5;
-        g.sim.director.clock.hours = 12.5;
-    }
-    {
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        try std.testing.expectEqual(@as(u32, 5), g.sim.director.clock.day);
-        try std.testing.expectApproxEqAbs(@as(f32, 12.5), g.sim.director.clock.hours, 0.001);
-    }
-}
-
-test "setgamepref applies runtime GameStats prefs and broadcasts" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const dir = ".zdtd_cfg_cache/pref_set_test";
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    _ = try g.attachJoinedClient(&cap);
-    const gs_id = packages.idOf("NetPackageGameStats").?;
-    try std.testing.expectEqual(@as(u8, 2), g.sim.director.difficulty);
-
-    // A writable pref applies to the sim and reaches the client as a fresh
-    // GameStats blob (HUD difficulty / blood-moon day follow the server).
-    cap.clear();
-    g.runAdminLine("setgamepref GameDifficulty 3", "test");
-    try std.testing.expectEqual(@as(u8, 3), g.sim.director.difficulty);
-    try std.testing.expect(cap.findPkgId(gs_id) != null);
-
-    // Values clamp to the config loader's range.
-    g.runAdminLine("setgamepref GameDifficulty 99", "test");
-    try std.testing.expectEqual(@as(u8, 5), g.sim.director.difficulty);
-
-    // Another writable key.
-    g.runAdminLine("setgamepref BloodMoonFrequency 14", "test");
-    try std.testing.expectEqual(@as(u32, 14), g.sim.director.clock.bloodmoon_frequency);
-
-    // Unknown / startup-only prefs keep the read-only reply and touch nothing.
-    const info_port_before = g.info_port;
-    g.runAdminLine("setgamepref ServerPort 9999", "test");
-    try std.testing.expectEqual(info_port_before, g.info_port);
-}
-
-test "sleeper scan job batch matches the serial pass" {
-    var vols: [64]sleepers_mod.Volume = undefined;
-    for (&vols, 0..) |*v, i| {
-        const x: i32 = @intCast(i * 10);
-        v.* = .{ .x0 = x, .y0 = 0, .z0 = 0, .x1 = x + 4, .y1 = 8, .z1 = 4 };
-    }
-    vols[3].triggered = true;
-    var st: sleepers_mod.Store = .{ .volumes = vols[0..] };
-    const px = [_]f32{ 1, 31, 101 };
-    const py = [_]f32{ 1, 1, 1 };
-    const pz = [_]f32{ 1, 1, 1 };
-    var serial: [vols.len]u8 = .{0} ** vols.len;
-    var batched: [vols.len]u8 = .{0} ** vols.len;
-
-    const base = Game.SleeperScanCtx{ .sl = &st, .px = &px, .py = &py, .pz = &pz, .hit = serial[0..] };
-    Game.SleeperScanCtx.work(base, 0, vols.len);
-    var par = base;
-    par.hit = batched[0..];
-    // 64 >= parallel.min_parallel_items, so this really fans out.
-    jobs.forSlotRange(vols.len, par, Game.SleeperScanCtx.work);
-
-    try std.testing.expectEqualSlices(u8, serial[0..], batched[0..]);
-    try std.testing.expectEqual(@as(u8, 1), serial[0]);
-    // Already triggered: never re-tested, never re-spawned.
-    try std.testing.expectEqual(@as(u8, 0), serial[3]);
-    try std.testing.expectEqual(@as(u8, 1), serial[10]);
-}
-
-test "path step hook sees walls and terrain, and the snapshot agrees" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_snap", 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
-    const surface: i32 = ch.heightAt(2, 3);
-    const from_y: i32 = surface + 1;
-    // Two-course wall built through the public API: too tall to step onto and
-    // no headroom on the first course.
-    try g.world.setBlockWorld(2, surface + 1, 3, world_store.block_stone);
-    try g.world.setBlockWorld(2, surface + 2, 3, world_store.block_stone);
-
-    // Baseline: snapshot off, the locked hook answers.
-    g.terrain_snapshot_on = false;
-    const open_y: i32 = @as(i32, ch.heightAt(5, 5)) + 1;
-    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
-    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
-
-    const px = [_]f32{0};
-    const pz = [_]f32{0};
-    try std.testing.expectEqual(@as(usize, 1), g.terrain_snap.rebuild(&g.world, &px, &pz));
-    g.terrain_snapshot_on = true;
-    // The wall column is out of the step band: the snapshot misses and the
-    // locked hook still reports it blocked.
-    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
-    try std.testing.expect(g.terrain_snap.misses.load(.monotonic) > 0);
-    // Open terrain is answered lock-free.
-    const before_misses = g.terrain_snap.misses.load(.monotonic);
-    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
-    try std.testing.expectEqual(before_misses, g.terrain_snap.misses.load(.monotonic));
-
-    // Outside the window: falls through to the locked hook, which still
-    // generates the chunk on demand exactly as before.
-    const before = g.world.chunks.count();
-    _ = Game.pathStepAt(g, 4000, 4000, from_y, 4001, 4000);
-    try std.testing.expectEqual(before + 1, g.world.chunks.count());
-}
-
-test "deco burst is biome driven and mirrors into the block store" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    // Without a biome map there is nothing to drive density: fail closed.
-    try std.testing.expect(g.world.biomes == null);
-    try std.testing.expectEqual(@as(usize, 0), Game.decoSpeciesAt(g, 0, 0).n);
-
-    // One-biome map covering the join window, and one distant-deco species that
-    // always passes the roll so the placement path is actually exercised.
-    const biome_id: u8 = 3;
-    const side: i32 = 64;
-    const cells = try std.testing.allocator.alloc(u8, @intCast(side * side));
-    @memset(cells, biome_id);
-    g.world.biomes = .{
-        .width = side,
-        .height = side,
-        .r = cells,
-        .allocator = std.testing.allocator,
-        .half_w = @divTrunc(side, 2),
-        .half_h = @divTrunc(side, 2),
-        .scale = 16,
-    };
-    const tree_id: u16 = 24629; // treeOakSml01 in the bundled dump
-    var set: assets_biome_layers.DecoSet = .{};
-    set.blocks[0] = .{ .block_id = tree_id, .prob = 1.0 };
-    set.n = 1;
-    g.world.biome_layers_table.decos[biome_id] = set;
-    try std.testing.expect(g.world.biome_layers_table.hasDecos());
-    try std.testing.expectEqual(@as(usize, 1), Game.decoSpeciesAt(g, 0, 0).n);
-    try std.testing.expectEqual(tree_id, Game.decoSpeciesAt(g, 0, 0).items[0].block_id);
-
-    // The mirror needs the dump to resolve the id back to a MultiBlockDim.
-    g.maxdamage.tryMergeBundledAssignIds(std.testing.allocator);
-    if (g.maxdamage.idNameCount() == 0) return error.SkipZigTest;
-
-    var cache: Game.DecoDimCache = .{};
-    const h = try g.world.heightWorld(3, 5);
-    const o: packages.stock_deco.DecoObj = .{
-        .x = 3,
-        .y = @intCast(h + 1),
-        .z = 5,
-        .real_y = @floatFromInt(h + 1),
-        .block_raw = tree_id,
-    };
-    // The world dir survives between runs (deinit saves chunks), so clear the
-    // target cell rather than assume a pristine column.
-    try g.world.setBlockDecoWorld(3, @intCast(h + 1), 5, g.world.terrain_ids.air);
-    try std.testing.expect(g.mirrorDeco(&cache, o));
-    try std.testing.expectEqual(tree_id, try g.world.blockWorld(3, @intCast(h + 1), 5));
-    // Terrain surface must not follow the tree up.
-    try std.testing.expectEqual(h, try g.world.heightWorld(3, 5));
-    // Cached: a second object of the same species must not rescan the dump, and
-    // must still be skipped because the anchor is now a decoration.
-    try std.testing.expectEqual(@as(usize, 1), cache.n);
-    try std.testing.expect(!g.mirrorDeco(&cache, o));
-
-    // An id with no name in the dump places nothing rather than a bare parent.
-    const unknown: packages.stock_deco.DecoObj = .{ .x = 9, .y = 60, .z = 9, .real_y = 60, .block_raw = 0xfffe };
-    try std.testing.expect(!g.mirrorDeco(&cache, unknown));
-    try std.testing.expect(try g.world.blockWorld(9, 60, 9) != 0xfffe);
-}
-
-test "zombie chases over real terrain and stays on the surface" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/path_terrain", 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    const sp = g.world.primarySpawn();
-    const sx: f32 = @floatFromInt(sp.x);
-    const sy: f32 = @floatFromInt(sp.y);
-    const sz: f32 = @floatFromInt(sp.z);
-    const zid = g.sim.spawnZombie(sx + 8, sy, sz, 40).?;
-    const zs = g.sim.slotOfNetId(zid).?;
-    _ = g.sim.spawnPlayer(sx, sy, sz, 0).?;
-    const x0 = g.sim.transform[zs].x;
-    var i: usize = 0;
-    while (i < 40) : (i += 1) try g.step();
-    // Closed on the player: the real step predicate must not read as a sealed
-    // world (the old height+1 probe made every column open, this one must make
-    // open ground passable).
-    try std.testing.expect(g.sim.transform[zs].x < x0 - 1.0);
-    // Feet sit on the column the body is standing over, not at spawn height.
-    const wx: i32 = @intFromFloat(@floor(g.sim.transform[zs].x));
-    const wz: i32 = @intFromFloat(@floor(g.sim.transform[zs].z));
-    const h: i32 = try g.world.heightWorld(wx, wz);
-    try std.testing.expectEqual(@as(f32, @floatFromInt(h + 1)), g.sim.transform[zs].y);
-}
-
-test "[perf] switches run on the live step path" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/perf_switches", 0, .{
-        .enable_sample_plugin = false,
-        .async_chunk_flush = true,
-        .terrain_snapshot = true,
-        .job_batches = true,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    try std.testing.expect(g.terrain_snapshot_on);
-    try std.testing.expect(g.job_batches);
-    try std.testing.expect(g.world.async_flush);
-    // Offline Game runs force-serial, so the flush must stay inline there.
-    try std.testing.expect(!g.world.asyncEnabled());
-
-    try g.world.setBlockWorld(4, 70, 4, world_store.block_stone);
-    var i: u32 = 0;
-    while (i < 3) : (i += 1) try g.step();
-    // Snapshot rebuild is on the live path, not dead code.
-    try std.testing.expect(g.harness.prof.histOf(.terrain_snap).count >= 3);
-}
-
-test "power visuals rewrite block meta once per state change" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/power_visuals", 0, .{
-        .enable_sample_plugin = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    try g.world.setBlockWorld(8, 70, 8, world_store.block_stone);
-    const id = g.sim.power.addNodeAt(.consumer, 8, 70, 8, 10).?;
-    const ni = g.sim.power.indexOfId(id).?;
-    g.sim.power.nodes[ni].powered = true;
-
-    replicate_te.broadcastPowerVisuals(g);
-    const raw = g.blockRawAt(8, 70, 8);
-    try std.testing.expectEqual(world_store.block_stone, @as(u16, @truncate(raw & 0xffff)));
-    try std.testing.expectEqual(
-        packages.block_meta_on | packages.block_meta_powered,
-        packages.blockMeta(raw),
-    );
-
-    // Nothing flipped: the second pass must not touch the block or emit a packet.
-    g.clearBlockRaw(8, 70, 8);
-    replicate_te.broadcastPowerVisuals(g);
-    try std.testing.expectEqual(@as(u32, 0), g.blockRawAt(8, 70, 8));
-
-    // Losing power is an edge, so it writes meta 0 again.
-    g.sim.power.nodes[ni].powered = false;
-    replicate_te.broadcastPowerVisuals(g);
-    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
-}
-
-test "player game stage tracks level, days survived and deaths" {
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/gamestage", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    // Stock config defaults when gamestages.xml is absent (asm.il .cctor ~1093405).
-    g.gamestages.config = .{ .difficulty_bonus = 1.2, .days_alive_change_when_killed = 2 };
-    const c = &g.clients[0];
-    c.joined = true;
-    c.level = 10;
-    g.sim.director.clock.day = 0;
-    g.sim.director.clock.hours = 0;
-    c.game_stage_born_world_time = g.sim.director.clock.worldTimeBits();
-    // Day zero: level only, floored after the difficulty bonus (10 * 1.2 = 12).
-    try std.testing.expectEqual(@as(i32, 12), g.gameStageOf(0));
-    // Four days survived: (10 + 4) * 1.2 = 16.8 → 16, the header's example.
-    // Stock days are 1-based: day 5 is four days after the day-0 birth.
-    g.sim.director.clock.day = 5;
-    try std.testing.expectEqual(@as(i32, 16), g.gameStageOf(0));
-    // Days alive caps at the player level: 25 days at level 10 is 10.
-    g.sim.director.clock.day = 26;
-    try std.testing.expectEqual(@as(i32, 24), g.gameStageOf(0));
-    // A death costs daysAliveChangeWhenKilled days off the streak.
-    const before = c.game_stage_born_world_time;
-    c.game_stage_born_world_time = assets_gamestages.bornAtAfterDeath(
-        g.gamestages.config,
-        g.sim.director.clock.worldTimeBits(),
-        before,
-    );
-    try std.testing.expectEqual(before + 2 * assets_gamestages.ticks_per_day, c.game_stage_born_world_time);
-    // Still capped to level, so the stage is unchanged at 25 days.
-    try std.testing.expectEqual(@as(i32, 24), g.gameStageOf(0));
-    // Loot stage is level driven and independent of days survived.
-    try std.testing.expectEqual(@as(i32, 10), g.lootStageOf(0));
-    try std.testing.expectEqual(@as(i32, 10), g.partyLootStage());
-    // A single player's party stage is just their own stage.
-    try std.testing.expectEqual(@as(i32, 24), g.partyStageAround(0, 0, -1));
-}
-
-test "party stage weights the second player by diminishing returns" {
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/partystage", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    g.gamestages.config = .{ .difficulty_bonus = 1, .starting_weight = 1, .diminishing_returns = 0.5 };
-    g.sim.director.clock.day = 0;
-    g.sim.director.clock.hours = 0;
-    const now = g.sim.director.clock.worldTimeBits();
-    for ([_]struct { slot: usize, level: u16 }{ .{ .slot = 0, .level = 40 }, .{ .slot = 1, .level = 20 } }) |p| {
-        const c = &g.clients[p.slot];
-        c.joined = true;
-        c.level = p.level;
-        c.game_stage_born_world_time = now;
-    }
-    try std.testing.expectEqual(@as(i32, 40), g.gameStageOf(0));
-    try std.testing.expectEqual(@as(i32, 20), g.gameStageOf(1));
-    // 40 * 1 + 20 * 0.5 = 50 (CalcPartyLevel, asm.il ~1093305).
-    try std.testing.expectEqual(@as(i32, 50), g.partyStageAround(0, 0, -1));
-    // Highest party loot stage, not the sum.
-    try std.testing.expectEqual(@as(i32, 40), g.partyLootStage());
-    // Per-player party loot stage: ungrouped players use their own stage;
-    // grouped, the party high water mark (Party.GetHighestLootStage).
-    g.clients[0].entity_id = 100;
-    g.clients[1].entity_id = 101;
-    try std.testing.expectEqual(@as(i32, 40), g.lootStageForPlayer(0));
-    try std.testing.expectEqual(@as(i32, 20), g.lootStageForPlayer(1));
-    try std.testing.expect(g.parties.acceptInvite(100, 101) != null);
-    try std.testing.expectEqual(@as(i32, 40), g.lootStageForPlayer(1));
-    // No joined players is stage 0, and the loot floor stays at 1.
-    g.clients[0].joined = false;
-    g.clients[1].joined = false;
-    try std.testing.expectEqual(@as(i32, 0), g.partyStageAround(0, 0, -1));
-    try std.testing.expectEqual(@as(i32, 1), g.partyLootStage());
-}
-
-test "sleeper volume groups resolve through the gamestage ladder" {
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/sleepergs", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    // Synthetic tables: the stock POI group name is a gamestage group, never an
-    // entitygroup, so the pre-gamestage lookup could only reach defaultZombie.
-    var gs = try assets_gamestages.loadFromSlice(std.testing.allocator,
-        \\<gamestages>
-        \\  <group name="1GroupGenericZombie" spawner="SleeperGSList"/>
-        \\  <spawner name="SleeperGSList">
-        \\    <gamestage stage="0"><spawn group="ZombiesAll" num="3" maxAlive="2"/></gamestage>
-        \\  </spawner>
-        \\</gamestages>
-    );
-    g.gamestages.deinit();
-    g.gamestages = gs;
-    gs = undefined;
-
-    // A one-entry entity group so the pick is deterministic and distinguishable
-    // from defaultZombie (which is zombieBoe in the builtin table).
-    const stag_entries = [_]assets_entitygroups.Entry{.{ .name = "animalStag", .weight = 1 }};
-    const stage_groups = [_]assets_entitygroups.Group{
-        .{ .name = "ZombiesAll", .entries = &stag_entries, .weight_sum = 1 },
-    };
-    g.entitygroups.deinit();
-    g.entitygroups = .{ .groups = &stage_groups };
-
-    const walker = g.entities.defaultZombie();
-    // Both stock spellings clean to the same key and reach a real class.
-    for ([_][]const u8{ "GroupGenericZombie", "S_-Group_Generic_Zombie" }) |name| {
-        const sg = g.gamestages.sleeperEntityGroup(name, 0) orelse return error.GroupUnresolved;
-        try std.testing.expectEqualStrings("ZombiesAll", sg.group);
-        try std.testing.expectEqual(@as(u16, 3), sg.num);
-        try std.testing.expectEqual(@as(u16, 2), sg.max_alive);
-        // The class comes from the stage's entitygroup, not the default walker.
-        const def = g.resolveSleeperClass(name, sg, 11);
-        try std.testing.expectEqualStrings("animalStag", def.name);
-        try std.testing.expect(!std.mem.eql(u8, walker.name, def.name));
-    }
-    // A stage below the ladder's first entry resolves to nothing (stock returns
-    // null from GetStage), so the old entityclass/entitygroup path still runs.
-    try std.testing.expect(g.gamestages.sleeperEntityGroup("GroupGenericZombie", -1) == null);
-    try std.testing.expectEqualStrings(walker.name, g.resolveSleeperClass("NoSuchThing", null, 3).name);
-}
-
-test "console replies use the stock error and listing shapes" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/admin_stock_shapes", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var sink: [8192]u8 = undefined;
-
-    try std.testing.expectEqualStrings(
-        "*** ERROR: unknown command 'frobnicate'\n",
-        adminRun(g, &sink, "frobnicate 1"),
-    );
-    try std.testing.expectEqualStrings(
-        "Wrong number of arguments, expected 1 or 3, found 2.\n",
-        adminRun(g, &sink, "settime 1 2"),
-    );
-    try std.testing.expectEqualStrings("Day must be >= 1\n", adminRun(g, &sink, "settime 0 1 1"));
-    try std.testing.expectEqualStrings(
-        "\"noon\" is not a valid integer.\n",
-        adminRun(g, &sink, "settime 1 noon 0"),
-    );
-    // No players joined: both listings are just the stock total line.
-    try std.testing.expectEqualStrings("Total of 0 in the game\n", adminRun(g, &sink, "listplayers"));
-    try std.testing.expectEqualStrings("Total of 0 in the game\n", adminRun(g, &sink, "listplayerids"));
-    // A miss on a player target reports the stock resolution error.
-    try std.testing.expectEqualStrings(
-        "\"Alice\" is not a valid entity id, player name or user id.\n",
-        adminRun(g, &sink, "kick Alice"),
-    );
-
-    const help = adminRun(g, &sink, "help");
-    try std.testing.expect(std.mem.startsWith(u8, help, "*** Generic Console Help ***\n"));
-    try std.testing.expect(std.mem.indexOf(u8, help, "*** List of Commands ***\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, help, " => lists all players\n") != null);
-
-    // `help <topic>` resolves the usage line; an unknown topic gets the same
-    // unknown-command reply a bare miss gets.
-    try std.testing.expectEqualStrings("usage: kick <name/entity id/user id> [reason]\n", adminRun(g, &sink, "help kick"));
-    try std.testing.expectEqualStrings("usage: gettime\n", adminRun(g, &sink, "help gt"));
-    try std.testing.expectEqualStrings("*** ERROR: unknown command 'frobnicate'\n", adminRun(g, &sink, "help frobnicate"));
-
-    // settime takes stock world time and reports it back verbatim.
-    try std.testing.expectEqualStrings("Set time to 12000\n", adminRun(g, &sink, "settime day"));
-    try std.testing.expectEqual(@as(u32, 1), g.sim.director.clock.day);
-    try std.testing.expectEqual(@as(f32, 12), g.sim.director.clock.hours);
-    try std.testing.expectEqualStrings("Set time to 24000\n", adminRun(g, &sink, "settime night"));
-    try std.testing.expectEqual(@as(u32, 2), g.sim.director.clock.day);
-    try std.testing.expectEqual(@as(f32, 0), g.sim.director.clock.hours);
-
-    // listents rows carry the stock field order for the seeded zombies.
-    const ents = adminRun(g, &sink, "listents");
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", pos=(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", rot=(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", lifetime=float.Max, remote=False, dead=False, health=") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, "in the game\n") != null);
-
-    try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "chunkcache"), "Chunks: "));
-    try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "mem"), "Time: "));
-    try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "gg ServerPort"), "GamePref.ServerPort = ") != null);
-}
-
-test "admin, whitelist and ban lists persist across a restart" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
-    const dir = ".zdtd_cfg_cache/admin_lists_persist";
-    var sink: [8192]u8 = undefined;
-    {
-        const g = try Game.create(std.testing.allocator, dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        try std.testing.expectEqualStrings(
-            "Alice added with permission level of 0.\n",
-            adminRun(g, &sink, "admin add Alice 0"),
-        );
-        try std.testing.expectEqualStrings(
-            "Bob added to whitelist.\n",
-            adminRun(g, &sink, "whitelist add Bob"),
-        );
-        try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "ban add Carol 1 day rude"), "Carol banned until "));
-        // An expired ban must not survive the round-trip.
-        _ = g.ban_list.add("Dave", clock.wallSeconds() - 1, "old");
-        g.saveAdminLists();
-    }
-    {
-        const g = try Game.create(std.testing.allocator, dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        const admins = adminRun(g, &sink, "admin list");
-        try std.testing.expect(std.mem.indexOf(u8, admins, "0: Alice (stored name: Alice)\n") != null);
-        try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "whitelist list"), "  Bob (stored name: Bob)\n") != null);
-        const bans = adminRun(g, &sink, "ban list");
-        try std.testing.expect(std.mem.indexOf(u8, bans, "Carol) - rude\n") != null);
-        try std.testing.expect(std.mem.indexOf(u8, bans, "Dave") == null);
-
-        try std.testing.expectEqualStrings(
-            "Carol removed from ban list.\n",
-            adminRun(g, &sink, "ban remove Carol"),
-        );
-        try std.testing.expectEqualStrings(
-            "Alice removed from permissions list.\n",
-            adminRun(g, &sink, "admin remove Alice"),
-        );
-        try std.testing.expectEqualStrings(
-            "Alice was not on permissions list.\n",
-            adminRun(g, &sink, "admin remove Alice"),
-        );
-        try std.testing.expectEqualStrings(
-            "Bob removed from the whitelist.\n",
-            adminRun(g, &sink, "whitelist remove Bob"),
-        );
-    }
-}
-
-/// Run one console line against a Game and capture the reply the way the webui
-/// path does, so a test asserts the exact bytes an operator tool would read.
-fn adminRun(g: *Game, sink: []u8, line: []const u8) []const u8 {
-    g.admin_reply_len = 0;
-    g.admin_reply_sink = sink;
-    g.runAdminLine(line, "test");
-    g.admin_reply_sink = null;
-    return sink[0..g.admin_reply_len];
-}
-
-test "survival: food/water deplete, starvation damages, well-fed regens, S2C syncs" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&cap);
-    const ps = g.sim.playerByPeer(cl.slot).?;
-    // Pin the game-hour length so one tickSurvival(30.0) call is exactly one
-    // in-game hour regardless of the default day-length config.
-    g.sim.director.clock.seconds_per_hour = 30;
-    g.sim.health[ps].food = 100;
-    g.sim.health[ps].water = 100;
-    g.sim.health[ps].hp = 100;
-    const st_id = packages.idOf("NetPackageEntityStatChanged").?;
-
-    // One in-game hour (default seconds_per_hour = 30): food -2, water -2.5.
-    cap.clear();
-    g.tickSurvival(30.0);
-    try std.testing.expect(g.sim.health[ps].food < 100);
-    try std.testing.expect(g.sim.health[ps].water < 100);
-    try std.testing.expect(cap.findPkgId(st_id) != null); // S2C sync fired
-
-    // Starvation: exhausted food drains hp (12/game-hour).
-    g.sim.health[ps].food = 0;
-    g.sim.health[ps].water = 100;
-    const hp_before = g.sim.health[ps].hp;
-    g.tickSurvival(30.0);
-    try std.testing.expect(g.sim.health[ps].hp < hp_before);
-
-    // Well-fed regen: fed + hydrated restores hp (10/game-hour), capped.
-    g.sim.health[ps].hp = 50;
-    g.sim.health[ps].food = 90;
-    g.sim.health[ps].water = 90;
-    g.tickSurvival(30.0);
-    try std.testing.expect(g.sim.health[ps].hp > 50);
-    try std.testing.expect(g.sim.health[ps].hp <= g.sim.health[ps].max_hp);
-
-    // Clamp at zero: depletion never goes negative.
-    g.sim.health[ps].food = 0.5;
-    g.sim.health[ps].water = 0.5;
-    g.tickSurvival(30.0);
-    try std.testing.expect(g.sim.health[ps].food == 0);
-    try std.testing.expect(g.sim.health[ps].water == 0);
-
-    // Stamina: sprinting drains (MovementState 3), idle regenerates, and the
-    // stale timer lapses the sprint latch without further speed updates.
-    g.sim.health[ps].stamina = 50;
-    cl.sprint_speed = 5;
-    cl.sprint_stale_cd = 5.0; // outlives the 0.2 s tick below
-    g.tickSurvival(0.2);
-    try std.testing.expect(g.sim.health[ps].stamina < 50);
-    // Stale expiry clears the latch even if no EntitySpeeds arrives.
-    cl.sprint_stale_cd = 0.1;
-    g.tickSurvival(0.2);
-    try std.testing.expectEqual(@as(f32, 0), cl.sprint_speed);
-    const st_before = g.sim.health[ps].stamina;
-    g.tickSurvival(0.2);
-    try std.testing.expect(g.sim.health[ps].stamina > st_before);
-    try std.testing.expect(g.sim.health[ps].stamina <= g.sim.health[ps].stamina_max);
-}
-
-test "compressible packages send deflated frames the parser can read back" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&cap);
-    // A byte-diverse payload (stock chunk data is far from compressible
-    // trivially; 251-period bytes still exercise the deflate window).
-    var payload: [4096]u8 = undefined;
-    for (&payload, 0..) |*b, i| b.* = @intCast(i % 251);
-    const pkgs_under_test = [_][]const u8{ "NetPackageChunk", "NetPackageSignDataResponse" };
-    for (pkgs_under_test) |pkg_name| {
-        cap.clear();
-        try std.testing.expect(g.trySendCompressed(cl.peer.?, pkg_name, &payload));
-        const pkg_id = packages.idOf(pkg_name).?;
-        var pkgs: [8]wire_frame.Package = undefined;
-        var found = false;
-        for (cap.slots[0..cap.n]) |s| {
-            const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
-            for (pkgs[0..pn]) |p| {
-                if (p.id == pkg_id and std.mem.eql(u8, p.body, &payload)) found = true;
-            }
-        }
-        try std.testing.expect(found);
-    }
-}
-
-test "stock client quest name gate accepts every stock family" {
-    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/questname", 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    // The builtin catalog (no stock_xml) exercises the prefix gate directly.
-    try std.testing.expect(g.isStockClientQuestName("quest_whiteRiverCitizen1"));
-    try std.testing.expect(g.isStockClientQuestName("tier1_clear"));
-    try std.testing.expect(g.isStockClientQuestName("intro_buried_supplies"));
-    try std.testing.expect(g.isStockClientQuestName("test_fixture"));
-    try std.testing.expect(g.isStockClientQuestName("challengegroup_reward_homesteading"));
-    try std.testing.expect(g.isStockClientQuestName("treasure_01"));
-    try std.testing.expect(!g.isStockClientQuestName("invented_quest"));
-    try std.testing.expect(!g.isStockClientQuestName(""));
-}
-
-test "vehicles and turrets persist across restart (entities.zen)" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    {
-        const g = try Game.create(std.testing.allocator, dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        const v = g.sim.spawnVehicleEx(.minibike, 10, 70, 20, 200, 12, 1).?;
-        const vs = g.sim.slotOfNetId(v).?;
-        g.sim.vehicle[vs].fuel = 55;
-        g.sim.transform[vs].yaw = 90;
-        const t = g.sim.spawnTurret(30, 70, 40).?;
-        const ts = g.sim.slotOfNetId(t).?;
-        g.sim.turret[ts].ammo = 42;
-        try g.saveEntities();
-    }
-    {
-        // Game.create restores entities.zen automatically.
-        const g2 = try Game.create(std.testing.allocator, dir, 0);
-        defer {
-            g2.deinit();
-            std.testing.allocator.destroy(g2);
-        }
-        // Game.create also spawns its demo world vehicle/turret, so match the
-        // persisted ones by their saved values rather than first-match.
-        var found_v = false;
-        var found_t = false;
-        var i: usize = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!g2.sim.alive[i] or !g2.sim.mask[i].transform) continue;
-            if (g2.sim.kind[i] == .vehicle and g2.sim.vehicle[i].fuel == 55) {
-                found_v = true;
-                try std.testing.expectEqual(@as(f32, 90), g2.sim.transform[i].yaw);
-                try std.testing.expectEqual(ecs.components.VehicleKind.minibike, g2.sim.vehicle[i].kind);
-            }
-            if (g2.sim.kind[i] == .turret and g2.sim.turret[i].ammo == 42) {
-                found_t = true;
-            }
-        }
-        try std.testing.expect(found_v and found_t);
-    }
-}
-
-test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.create(std.testing.allocator, dir, 0);
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    // The registry is built from game data (blocks.xml) at load; a test world
-    // has none, so seed two synthetic power block ids through the same build
-    // path a stock install would use.
-    const PowerStub = struct {
-        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
-        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
-            if (std.mem.eql(u8, name, "generatorbank")) return 20001;
-            if (std.mem.eql(u8, name, "batterybank")) return 20002;
-            return null;
-        }
-        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
-            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
-            if (std.mem.eql(u8, name, "batterybank")) return 50;
-            return null;
-        }
-    };
-    var stub: PowerStub = .{};
-    try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
-    try stub.power_class_by_name.put(std.testing.allocator, "batterybank", "BatteryBank");
-    defer stub.power_class_by_name.deinit(std.testing.allocator);
-    g.power_registry = ecs.powerblocks.Registry.build(&stub);
-    const gen_id: u16 = 20001;
-    const cons_id: u16 = 20002;
-    _ = g.sim.power.removeAt(8, 70, 8);
-    _ = g.sim.power.removeAt(10, 70, 8);
-    // Rebuild the plane with the power blocks at fixed cells.
-    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
-    const blocks = ch.blocks.?;
-    blocks[8 + 8 * 16 + 70 * 256] = gen_id;
-    blocks[10 + 8 * 16 + 70 * 256] = cons_id;
-    g.scanChunkPower(ch, 0, 0);
-    try std.testing.expect(g.sim.power.indexOfPosition(8, 70, 8) != null);
-    try std.testing.expect(g.sim.power.indexOfPosition(10, 70, 8) != null);
-}
