@@ -293,6 +293,10 @@ Core loop and parity landings. Do not re-open without new evidence.
       feeds `director.party_stage`; blood-moon horde difficulty scales to the
       group high water mark instead of the weighted CalcPartyLevel. Sleeper
       volumes keep radius-based CalcGameStageAround.
+- [x] **Loot container size** (a578230): world containers size from the
+      `lootcontainer` size attr (woodenChest 6x2=12, smallSafes 8x5=40, gun
+      safe capped at 54) and roll up to their capacity; the client shows the
+      block's real cell count instead of a flat 8.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

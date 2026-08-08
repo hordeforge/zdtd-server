@@ -94,9 +94,8 @@ channel, so they render too. Still open: the flowing-water sim.
 LootList (a gun safe rolls `smallSafes`, a chest rolls `woodenChest`), and
 zombie bags resolve the stock chain (`LootDropEntityClass` → the bag class's
 `LootList=zPackReg`) and only drop on `LootDropProb` (.04), so most kills drop
-nothing like stock. Still open: container slot counts ignore the `lootcontainer`
-size attribute (everything is 8 slots), and crafting is instant and
-unvalidated.
+nothing like stock. Still open: crafting is instant and unvalidated (loot container slot
+counts now come from the `lootcontainer` size attribute).
 
 **What you are is mostly saved now.** Level, XP, survival stats (food/water)
 and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
@@ -217,8 +216,8 @@ area and the concrete work.
    `LootDropProb` (.04 regular zombie) is parsed and gates the bag, so most
    kills drop nothing like stock. Tests: per-block `lootListFor` against the
    stock blocks.xml, the zPackReg chain assertion, and a drop-prob gate test;
-   761 tests green. Still open: container slot counts (size attribute) and
-   crafting validation.
+   761 tests green. Container slot counts now come from the size attribute
+   (2026-08-08); crafting validation remains open.
 
 6. **DONE 2026-08-06.** Entities / net: `EntityRemove(Unloaded)` when a mob leaves interest.
    `DONE`. The replicate pass now mirrors spawn-on-approach: a mob outside a
@@ -1595,10 +1594,16 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/server/game.zig` fill sites, `src/assets/maxdamage.zig`
   `lootListFor`, `Data/Config/blocks.xml`, `Data/Config/loot.xml`
 
-- **Loot container size** `PARTIAL`
-  Every container is created with `slot_count 8`. Stock takes it from the
-  `lootcontainer` size attribute: woodenChest 6,2 = 12; playerGunSafe 8,10 = 80.
-  *Anchors:* `src/server/game.zig:7404`, `:7428`, `src/world/containers.zig:31`
+- **Loot container size** `SIZED (2026-08-08)`
+  `fillContainerFromLoot` derives the storage grid from the `lootcontainer`
+  size attribute (woodenChest 6,2 = 12; gunSafe 8,9 capped at 54;
+  smallSafes 8,5 = 40) and rolls up to the container's own capacity, so the
+  client shows the block's real cell count instead of a flat 8. The save
+  round-trips slot_count; the respawn re-roll re-derives it. The wire still
+  shapes the grid 2xN (cell COUNT is correct; the exact x/y column layout is
+  cosmetic).
+  *Anchors:* `src/server/game.zig` fillContainerFromLoot,
+  `src/world/containers.zig:31`, `Data/Config/loot.xml`
 
 - **Loot respawn (LootRespawnDays / LootTimer)** `WORKS` `(2026-08-07)`
   `serverconfig.xml LootRespawnDays` (default 7, 0 disables) drives a lazy
