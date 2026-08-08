@@ -68,6 +68,22 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
     else
         base;
     awardXp(self, killer_slot, split);
+    // Stock sends NetPackageEntityAddExpClient (xpType 0 = Kill) so the
+    // killer's client shows the XP icon and applies the gain locally; the
+    // party split is server-computed, so the killer cannot derive it alone.
+    // Mates get NetPackageSharedPartyKill instead (below), matching stock.
+    if (killer.peer) |peer| {
+        if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
+            .entity_id = killer.entity_id,
+            .xp = @intCast(@min(split, std.math.maxInt(i32))),
+            .xp_type = packages.stock_xp.xp_type_kill,
+        })) |xb| {
+            self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send AddExpClient failed: {s}\n", .{@errorName(err)});
+            };
+        } else |_| {}
+    }
     if (party) |p| {
         for (p.members[0..p.n]) |m| {
             if (m == killer.entity_id) continue;
