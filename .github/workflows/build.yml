@@ -1,0 +1,70 @@
+name: Build
+
+# SonarQube Cloud analysis on the main branch and pull requests. Runs the
+# project validation gate first so the scanner only ever sees a tree that
+# builds and passes its tests; then SonarQube analyzes what its analyzers
+# support (the repo is Zig 0.16, which SonarQube has no official language
+# plugin for, so the analysis covers shell scripts, XML and repo-level
+# quality gates rather than Zig source diagnostics).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Shallow clones should be disabled for a better relevancy of analysis.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install lint tools
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v rg >/dev/null 2>&1 || missing+=(ripgrep)
+          command -v shellcheck >/dev/null 2>&1 || missing+=(shellcheck)
+          if ((${#missing[@]})); then
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends "${missing[@]}"
+          fi
+
+      - name: Read toolchain pin
+        id: pin
+        run: |
+          set -euo pipefail
+          zig="$(bash scripts/zig-pin.sh)"
+          echo "zig=$zig" >> "$GITHUB_OUTPUT"
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          # Single source of truth: .zigversion (also enforced by make release-check).
+          version: ${{ steps.pin.outputs.zig }}
+
+      - name: Run validation gate
+        run: make check
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
