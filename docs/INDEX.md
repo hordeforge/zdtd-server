@@ -66,6 +66,7 @@ Where the world and its data come from.
 |---|---|
 | [ZIG_CLONE.md](ZIG_CLONE.md) | M0-M6 architecture derived from the RE |
 | [STATE_MACHINES.md](STATE_MACHINES.md) | All stateful lifecycles with diagrams (join, AI, quests, weather, plugins, peer) |
+| [GAMEPLAY.md](GAMEPLAY.md) | Gameplay behavior flows (craft, trade, loot, survival, movement) |
 | [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA simulation architecture and systems overview |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |

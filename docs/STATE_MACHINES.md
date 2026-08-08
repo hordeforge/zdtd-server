@@ -20,6 +20,12 @@ a diagram and a comment disagree.
 | 12 | Plugin lifecycle | `plugin/host.zig`, `plugin/wasm.zig` | [plugins](#12-plugin-lifecycle) |
 | 13 | LiteNet peer | `litenet/peer.zig` | [peer](#13-litenet-peer) |
 | 14 | Land claims | `server/game.zig` land claims | [claims](#14-land-claims) |
+| 15 | Party membership | `ecs/party.zig` Manager, `server/game/social.zig` handlePartyActions | [party](#15-party-membership) |
+| 16 | Vending rental | `world/vending.zig`, `server/c2s/quest.zig` NetPackagePlayerVendingMachine | [vending](#16-vending-rental) |
+| 17 | Loot respawn | `server/chunk_stream.zig` maybeRespawnContainer, `world/containers.zig` | [loot-respawn](#17-loot-respawn) |
+| 18 | Guard policy | `server/guard_policy.zig` | [guard](#18-guard-policy) |
+| 19 | Chunk stream backpressure | `server/chunk_stream.zig`, `server/game/net.zig` sendReliablePumped | [chunk-stream](#19-chunk-stream-backpressure) |
+| 20 | Buff lifecycle | `ecs/buff.zig`, `ecs/systems.zig` systemBuffs | [buff](#20-buff-lifecycle) |
 
 ## 1. Join / client session SM
 
@@ -54,7 +60,7 @@ while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
 instead of a second PlayerId.
 
 Owners: `src/server/c2s/join.zig` (7-package join SM), `src/server/game.zig:2600`
-(phase gate dispatch), `:3338` (sendJoinBundle, sets `Client.entered`),
+(phase gate dispatch), `:3340` (sendJoinBundle, sets `Client.entered`),
 `src/server/phase_gate.zig:7`.
 
 ## 2. Sim tick pipeline
@@ -78,7 +84,7 @@ stateDiagram-v2
 ```
 
 Owners: `src/ecs/schedule.zig:9` (`Phase`, `Rules.systems` per-phase gate),
-`src/server/game.zig:4596` (the `step()` body), `src/server/game/tick.zig`
+`src/server/game.zig:4598` (the `step()` body), `src/server/game/tick.zig`
 (player survival / stamina; `buffs.xml` thresholds when the table is loaded,
 otherwise `Rules.progression`), `src/server/game/deco.zig` (deco mirror,
 `[feature] deco_mirror`).
@@ -202,7 +208,7 @@ Owners: `src/ecs/aidirector.zig:61` (`isBloodMoonNight`), `:68`
 broadcast).
 
 Notes: `Director.bm_stage_frozen` latches the party gamestage at dusk and
-clears at dawn with the horde marks (`aidirector.zig:330` / `clearHordeMarks`);
+clears at dawn with the horde marks (`aidirector.zig:333` / `clearHordeMarks`);
 parties cluster players within 80 m and horde zombies teleport back to their
 party focus past 150 m; one wave spawns per party every 6 s.
 
@@ -286,7 +292,7 @@ a sell) and resets on restock.
 
 ## 10. Vehicle multi-seat
 
-`Vehicle` (`ecs/components.zig:209`) keeps one seat per rider
+`Vehicle` (`ecs/components.zig:225`) keeps one seat per rider
 (`seats[max_seats=6]`, -1 = free; `driver_seat = 0`). Seats flip between free
 and occupied; only losing the driver stops the hull.
 
@@ -379,14 +385,211 @@ based and re-checked on the in-game day roll.
 ```mermaid
 stateDiagram-v2
     [*] --> Active: keystone placed (registerClaim)
+    Active --> Active: owner login / new keystone at same pos (seen day refresh)
     Active --> Expired: owner offline past LandClaimExpiryDays (day roll)
-    Active --> [*]: keystone removed / broken
+    Active --> [*]: keystone removed / broken (removeClaimAt)
     Expired --> [*]: claim cleared
 ```
 
-Owners: `src/server/game.zig` / `src/server/game/world.zig`
-(`registerClaim`, `expireClaims`, `removeClaimAt`; claims persist as
-`claims.zlc` and re-map to the owner's new entity id on login).
+Owners: `src/server/game/world.zig:26` (`registerClaim`), `:65`
+(`removeClaimAt`), `:89` (`expireClaims`), `src/server/persist.zig:517`
+(`saveClaims`), `:547` (`loadClaims`), `:586` (`reclaimForName`, re-maps the
+restored claim to the entity id a player got at login and refreshes the seen
+day). Expiry counts offline days only (`day - owner_seen_day >
+land_claim_expiry_days`, 0 disables); a re-placement at the same keystone
+replaces the owner instead of appending.
+
+
+## 15. Party membership
+
+Per-session grouping keyed on runtime entity id (stock `PartyManager`;
+parties-factions.md §2). A party is thrown away on disband: the client only
+sees entity ids, no platform identity. Membership is server-mutated from
+`NetPackagePartyActions` and every mutation fans a `NetPackagePartyData`
+snapshot to the party-relevant peers.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ungrouped: not in a party
+    Ungrouped --> Party: acceptInvite (fresh party; inviter is leader)
+    Party --> Party: acceptInvite (joins inviter's existing party)
+    Party --> Party: change_lead (leader index moves to the new host)
+    Party --> Party: join_auto_party (party id 1, created when missing)
+    Party --> Party: leave / kick / disconnect (2+ members remain)
+    Party --> Ungrouped: removal leaves <= 1 (disband, survivor leaves too)
+    Ungrouped --> [*]: session ends
+```
+
+Owners: `src/ecs/party.zig:64` (`Manager`, `next_party_id` starts at 1),
+`:132` (`acceptInvite`), `:148` (`setLeader`), `:160` (`removePlayer`),
+`:190` (`autoJoin`), `src/server/game/social.zig:118` (`handlePartyActions`,
+validates member/leader identity before each mutation),
+`src/server/game.zig:3142` (disconnect removal + shared-quest cleanup).
+
+Notes: `max_party_members = 8` (stock `IsFull` refuses), and a party of one
+is not kept (the last member's removal disbands it). `setVoiceLobby` is a
+wire round-trip only; zdtd owns no voice lobby. A shared quest latches
+`QuestProgress.is_shared` (`server/game/social.zig:266`) and the party gets
+`remove_quest` events when the owner disconnects (`game.zig:3150`).
+
+## 16. Vending rental
+
+Per-block `TileEntityVendingMachine` ownership. `rental_end_day = 0` is
+unowned; a rent request pays `TraderInfo.RentCost` coins and sets the owner
+plus a 30-day term (or `rent_time` when set). Expiry is checked on the C2S
+path and on the in-game day roll.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unowned: machine placed / restored
+    Unowned --> Rented: rent (removing=false, pay RentCost, term rent_time or 30)
+    Rented --> Rented: owner rents again (extends by term)
+    Rented --> Unowned: owner clears (removing=true)
+    Rented --> Unowned: day roll with day > rental_end_day
+    Unowned --> [*]: block removed
+```
+
+Owners: `src/world/vending.zig:64` (`Vending.rental_end_day`), `:88`
+(`clear`, keeps pos / block_id / trader_id / stock),
+`src/server/c2s/quest.zig:252` (`NetPackagePlayerVendingMachine`: rent and
+clear, `CanRent` gates), `src/server/game.zig:4709` (day-roll expiry loop).
+
+Notes: rentability comes from `trader_info rentable`; the request acts only
+on the sender's own identity and the owner may only clear their own machine;
+one machine per player (CanRent 2); the wallet is synced from inventory
+coins first, then the rent cost is drawn from it (CanRent 3 when short).
+An expired rental clears before any new request is evaluated.
+
+## 17. Loot respawn
+
+World container lifecycle (`LootRespawnDays`, stock `TEFeatureStorage
+.UpdateTick`). A world chest rolls once on first chunk scan; the fill itself
+marks `touched` (and stamps `touched_day`). After the player empties it, the
+next open re-rolls once `LootRespawnDays` have elapsed since the touch day.
+Player-placed storage never respawns.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Touched: fill on chunk scan (setSlot marks touched, touched_day = day)
+    Touched --> Looted: player removes all stacks
+    Looted --> Touched: open after LootRespawnDays (re-roll, cycle seed)
+    Touched --> [*]: block removed / destroyed
+```
+
+Owners: `src/server/chunk_stream.zig:247` (`fillContainerFromLoot`, stamps
+`touched_day`), `:268` (`maybeRespawnContainer`), `src/server/game.zig:4252`
+(delegation), `src/server/c2s/inv.zig:549` (re-roll before serving
+`NetPackageInventoryDataRequest`), `src/world/containers.zig:33`
+(`touched` / `touched_day`), `:44` (`setSlot`).
+
+Notes: `loot_respawn_days = 0` disables the re-roll; the guard order is
+`player_storage` → `!touched` → not empty → `day <= touched_day` →
+`elapsed < loot_respawn_days`. The re-roll seed is
+`lootSeedAt(pos) + cycle * 2654435761` with `cycle = day / loot_respawn_days`,
+deterministic per (pos, cycle). A block with no LootList stays empty (fail
+closed, audit A31).
+
+## 18. Guard policy
+
+P4 policy ladder over detector evidence: log-only (default) → quarantine
+(opt-in) → kick (opt-in AND `dry_run=false` AND Correct authority mode).
+Weak signals (`.info` / `.soft`) return before any counter moves, so they can
+never open a gate no matter how often they fire.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Monitoring: first evidence opens a counting window
+    Monitoring --> Monitoring: info / soft (record only, no counters)
+    Monitoring --> Gated: strong distinct or hard repeat threshold (once per window)
+    Gated --> Quarantined: quarantine rung (Correct + [authority] quarantine)
+    Gated --> KickArmed: kick rung (enforce + !dry_run + Correct)
+    Gated --> Monitoring: would_kick (log + count; window rolls)
+    Quarantined --> Monitoring: guardclear (bits cleared)
+    KickArmed --> [*]: drop after 10 ticks (PlayerDenied first)
+    Quarantined --> [*]: session end
+```
+
+Owners: `src/server/guard_policy.zig:71` (`Policy` rungs and thresholds),
+`:114` (`PeerState`: strong_mask, hard_n, tripped, quarantine, kick_at_tick),
+`:152` (`evaluate`), `src/server/game.zig:2997` (`noteEvidence`), `:3065`
+(`applyQuarantine`), `:3094` (`armPolicyKick`), `src/server/game/tick.zig:240`
+(`reapPolicyKicks`), `src/server/game.zig:3177` (`quarantineDenies` at the C2S
+trust boundaries: damage / container / block).
+
+Notes: the window roll clears counters and the trip latch but deliberately
+keeps the quarantine bits (cleared by admin `guardclear` or the session
+ending). `bitsFor(surf)` sets only the abused surface (`.none` sets all
+three). Observe mode records and logs but never denies or drops (`would_kick`
+only). While load-shedding after a tick overrun, weak records are dropped
+before the policy runs (`game.zig:3013`).
+
+## 19. Chunk stream backpressure
+
+The per-client stream pass and the reliable-window soft-drop. Chunks are
+delivered in paced passes under named caps; when the LiteNet reliable window
+is full the sender pumps ACKs with a retry deadline and drops the frame only
+after the attempt cap, so one slow peer cannot wedge the tick.
+
+```mermaid
+stateDiagram-v2
+    [*] --> StreamPass: period gate (chunk_stream_period_ticks)
+    StreamPass --> Remove: keys outside radius (ChunkRemove, deco reset)
+    Remove --> Add: raster scan inside budget square
+    Add --> Add: delivered (clientAddStreamed; at cap, drop oldest)
+    Add --> PacedRetry: WindowFull (resendPending + pollNetOnce)
+    PacedRetry --> Add: retry ok (fast window, then 1 ms pacing, <= 64 attempts)
+    PacedRetry --> SoftDrop: attempts exhausted (reliable_window_drops)
+    Add --> StreamPass: chunk_adds_per_stream_tick reached
+    SoftDrop --> StreamPass: unstreamed chunk retried next pass
+    StreamPass --> [*]: peer disconnect
+```
+
+Owners: `src/server/chunk_stream.zig:396` (`streamChunksForClient`), `:328`
+(`clientAddStreamed`), `src/server/game/net.zig:119` (`sendReliablePumped`),
+`:160` (`sendFramedDroppable` soft-drop), `:147` (`sendFramedUnreliable`
+motion frames).
+
+Notes: the radius is clamped to `[chunk_stream_radius_min, max]` and shrunk to
+a square that fits `max_streamed_chunks`; each pass adds at most
+`chunk_adds_per_stream_tick` chunks so the reliable window can drain.
+`clientAddStreamed` drops the oldest key at `max_streamed_chunks_cap` and
+warns once at 80% of the configured budget. A chunk whose send failed or was
+soft-dropped is not marked streamed and is retried on the next pass. Motion
+frames use the unreliable path (fire and forget); oversized frames fall back
+to the droppable reliable path.
+
+## 20. Buff lifecycle
+
+Per entity `BuffSet` (stock `EntityBuffs`, asm.il 735832). The client ticks
+its own copy of the same buff, so the server runs the identical rule on every
+entity it owns or the HUD icon and timer drift.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Absent
+    Absent --> Active: add (new instance, class or requested duration)
+    Active --> Active: add again (stack rule: ignore revive / duration extend / effect +1 / replace restart)
+    Active --> PendingRemove: remove() or duration elapsed (finished)
+    PendingRemove --> Absent: next tick (expiry reported to observers)
+    Active --> Absent: clearOnDeath (remove_on_death only, silent)
+    Active --> Absent: invalid flag (tick drops)
+    Active --> Active: paused or dead (tick skips the timer)
+    Absent --> [*]: entity destroyed
+```
+
+Owners: `src/ecs/buff.zig:40` (`add`, stacking rules), `:95` (`remove` flags
+for the next tick), `:123` (`tick`), `:166` (`clearOnDeath`),
+`src/ecs/systems.zig:2134` (`systemBuffs`, per entity per tick),
+`src/ecs/schedule.zig:64` (buffs phase; `TickResult.buff_expired`),
+`src/server/game/social.zig:109` (`broadcastBuffExpiries` → relayBuff remove),
+`src/server/c2s/join.zig:249` (death respawn silently clears
+`remove_on_death` buffs, stock BuffClass::RemoveOnDeath).
+
+Notes: `duration <= 0` never expires; the update flag fires and clears within
+the same tick (no triggered-effect VM); the effect stack saturates at 255;
+a dead entity skips the started/duration half of the tick; expiry removals
+ride `TickResult.buff_expired` to the net layer, which relays the removal to
+observers (the owner already dropped its own copy on death).
 
 ## Keeping this document honest
 
