@@ -266,6 +266,10 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         self.consoleSpawnEntity(player, &it, &out);
     } else if (eqAny(verb, &.{"spawnairdrop"})) {
         if (self.forceAirDrop()) out.line("air drop spawned") else out.line("no player to drop near");
+    } else if (eqAny(verb, &.{"storm"})) {
+        if (self.forceStorm()) out.line("storm forced") else out.line("no weather biomes");
+    } else if (eqAny(verb, &.{ "clearweather", "stormoff" })) {
+        if (self.clearStorm()) out.line("storm cleared") else out.line("no weather biomes");
     } else if (eqAny(verb, &.{ "killall", "ka" })) {
         out.linef("killed {d} zombies", .{self.consoleKillAll()});
     } else if (eqAny(verb, &.{ "giveself", "give", "gi" })) {
@@ -455,6 +459,24 @@ pub fn consoleKillAll(self: *Game) u32 {
         }
     }
     return n;
+}
+
+/// Force every storm-capable biome into an active storm (console `storm`)
+/// and broadcast the new weather state. Returns false when no biomes have
+/// weather groups (weather table empty).
+pub fn forceStorm(self: *Game) bool {
+    if (self.world.biome_layers_table.weather_n == 0) return false;
+    self.world.weather.setStormNow(&self.world.biome_layers_table, @intCast(self.sim.director.clock.worldTimeBits()));
+    self.broadcastWeather() catch {};
+    return true;
+}
+
+/// End any active storm and push the next one a day out (console `clearweather`).
+pub fn clearStorm(self: *Game) bool {
+    if (self.world.biome_layers_table.weather_n == 0) return false;
+    self.world.weather.clearStorm(&self.world.biome_layers_table, @intCast(self.sim.director.clock.worldTimeBits()));
+    self.broadcastWeather() catch {};
+    return true;
 }
 
 /// Trigger an air drop immediately (console spawnairdrop). Returns false if

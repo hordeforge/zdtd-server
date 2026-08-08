@@ -1842,6 +1842,14 @@ pub const Game = struct {
         return admin_console.forceAirDrop(self);
     }
 
+    pub fn forceStorm(self: *Game) bool {
+        return admin_console.forceStorm(self);
+    }
+
+    pub fn clearStorm(self: *Game) bool {
+        return admin_console.clearStorm(self);
+    }
+
     pub fn daysToBloodMoon(self: *const Game) u32 {
         return admin_console.daysToBloodMoon(self);
     }
@@ -4471,7 +4479,7 @@ pub const Game = struct {
     }
 
     /// Stock: same throttle as WorldTime → NetPackageWeather from biomes.xml defaults.
-    fn broadcastWeather(self: *Game) !void {
+    pub fn broadcastWeather(self: *Game) !void {
         try game_weather.broadcastWeather(self);
     }
 

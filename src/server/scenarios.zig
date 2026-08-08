@@ -1755,6 +1755,56 @@ test "scenario weather storm cycle and blood moon override" {
     );
 }
 
+test "scenario console storm commands force and clear the storm" {
+    io_fs.mkdirPathSimple("worlds");
+    freshScenarioDir("worlds/zdtd_sc_stormcmd");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stormcmd", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    var table: biome_layers.Table = .{};
+    table.weather_ids[0] = 3;
+    table.weather_groups[0] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="83" duration="6"><CloudThickness range="0,20"/></weather>
+        \\<weather name="stormbuild" prob="0" duration=".2"><Wind range="25,25"/></weather>
+        \\<weather name="storm" prob="0" duration="1.1" delay="26,36"><Wind range="40,40"/></weather>
+    );
+    table.weather_n = 1;
+    table.loaded = true;
+    g.world.biome_layers_table = table;
+    g.world.weather.initFrom(&g.world.biome_layers_table, .{ .seed = 99 });
+    const pine = &g.world.biome_layers_table.weather_groups[0];
+    const storm_idx = pine.findIndex("storm").?;
+
+    const wt0 = @as(i64, @intCast(g.sim.director.clock.worldTimeBits()));
+    try std.testing.expect(g.forceStorm());
+    var st = g.world.weather.states[0];
+    try std.testing.expectEqual(@as(u8, 2), st.storm_state);
+    // The force also pushes the storm group onto the wire and broadcasts it.
+    const body = g.buildWeatherBodyFromBiomes() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(storm_idx, body[1]); // storm group at the biome slot
+    const wid = packages.idOf("NetPackageWeather").?;
+    try std.testing.expect(cap.findPkgId(wid) != null);
+
+    try std.testing.expect(g.clearStorm());
+    st = g.world.weather.states[0];
+    try std.testing.expectEqual(@as(u8, 0), st.storm_state);
+    // The next storm is pushed a full in-game day out.
+    try std.testing.expect(st.storm_world_time.? > wt0 + 70_000);
+
+    std.debug.print(
+        "PASS storm-commands: forced storm_state=2 group={d}, cleared to 0, next > day out\n",
+        .{st.group_index},
+    );
+}
+
 test "scenario craft invtx + explosion dig + lock deny" {
     io_fs.mkdirPathSimple("worlds");
     freshScenarioDir("worlds/zdtd_sc_craft");

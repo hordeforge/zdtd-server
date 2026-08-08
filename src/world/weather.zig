@@ -93,6 +93,43 @@ pub const Manager = struct {
         }
     }
 
+    /// Console `storm`: force every storm-capable biome into an active storm
+    /// now. Mirrors the schedule math in serverTimeUpdate: storm_world_time is
+    /// back-dated past the build so the next pass keeps state 2, and the storm
+    /// holds for the group's storm duration before the normal cycle resumes.
+    pub fn setStormNow(self: *Manager, table: *const biome_layers.Table, world_time: i64) void {
+        const time_scale: f32 = 60.0 / @as(f32, @floatFromInt(self.day_night_length));
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const st = &self.states[i];
+            const set = groupsFor(table, st);
+            if (self.stormsDisabledFor(set)) continue;
+            const build_ticks = scaleTicks(durationOf(set, "stormbuild"), time_scale);
+            const dur = durationOf(set, "storm");
+            st.storm_world_time = world_time -| build_ticks -| 1;
+            st.storm_duration = build_ticks + scaleTicks(dur, time_scale);
+            st.storm_state = 2;
+            st.remaining_seconds = 0;
+            self.setWeatherNamed(st, set, "storm");
+        }
+    }
+
+    /// Console `clearweather`: end any active storm and push the next one a
+    /// full in-game day out (the state machine resumes its own schedule after).
+    pub fn clearStorm(self: *Manager, table: *const biome_layers.Table, world_time: i64) void {
+        _ = table; // every seeded state is storm-capable by construction here
+        const day_ticks: i64 = @as(i64, self.day_night_length) * 60 * self.time_of_day_inc_per_sec;
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const st = &self.states[i];
+            if (st.storm_world_time == null) continue;
+            st.storm_state = 0;
+            st.remaining_seconds = 0;
+            st.storm_world_time = world_time +| day_ticks;
+            st.storm_duration = 0;
+        }
+    }
+
     /// The group set a state cycles through. Valid for the table it was seeded from.
     pub fn groupsFor(
         table: *const biome_layers.Table,
