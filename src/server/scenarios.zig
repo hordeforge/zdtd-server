@@ -4095,6 +4095,15 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expectEqual(@as(u64, 90), cb.xp);
     // The killer's client gets NetPackageEntityAddExpClient (xpType 0 = Kill)
     // with the split XP; the mate gets NetPackageSharedPartyKill (below).
+    // Kill counter: the killer's character sheet gets AddScoreClient(1 kill).
+    const score_id = packages.idOf("NetPackageEntityAddScoreClient").?;
+    const scb = cap_a.findPkgIdEntity(score_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    var sr = binary.Reader{ .data = scb };
+    try std.testing.expectEqual(ca.entity_id, try sr.readI32());
+    try std.testing.expectEqual(@as(i16, 1), try sr.readI16()); // zombieKills
+    try std.testing.expectEqual(@as(i16, 0), try sr.readI16()); // playerKills
+    try std.testing.expectEqual(@as(i16, 0), try sr.readI16()); // otherTeamNumber
+    try std.testing.expectEqual(@as(i32, 0), try sr.readI32()); // conditions
     const xp_id = packages.idOf("NetPackageEntityAddExpClient").?;
     const xpb = cap_a.findPkgId(xp_id) orelse return error.TestUnexpectedResult;
     var xr = binary.Reader{ .data = xpb };

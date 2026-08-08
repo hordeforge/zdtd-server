@@ -149,3 +149,39 @@ test "player stats body is the stock EntityNetworkStats shape" {
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // ExpDeficit
     try std.testing.expect(r.remaining() == 0);
 }
+
+/// NetPackageEntityAddScoreClient body: entityId i32, zombieKills i16,
+/// playerKills i16, otherTeamNumber i16, conditions i32 (RE
+/// ../7dtd-research/il/netpackages-v3.1.0/NetPackageEntityAddScoreClient_il.txt
+/// write IL=27; the struct fields are Int32 narrowed to i16 on the wire).
+/// Stock sends it on every kill so the client's character sheet shows the
+/// running zombie/player kill counters.
+pub const AddScoreArgs = struct {
+    entity_id: i32,
+    zombie_kills: u16,
+    player_kills: u16 = 0,
+    other_team_number: u16 = 0,
+    conditions: i32 = 0,
+};
+
+pub fn buildAddScoreBody(buf: []u8, args: AddScoreArgs) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeI32(args.entity_id);
+    try w.writeI16(@intCast(args.zombie_kills));
+    try w.writeI16(@intCast(args.player_kills));
+    try w.writeI16(@intCast(args.other_team_number));
+    try w.writeI32(args.conditions);
+    return w.written();
+}
+
+test "add score body is the 14-byte stock shape" {
+    var buf: [16]u8 = undefined;
+    const body = try buildAddScoreBody(&buf, .{ .entity_id = 42, .zombie_kills = 7 });
+    try std.testing.expectEqual(@as(usize, 14), body.len);
+    var r = binary.Reader{ .data = body };
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32());
+    try std.testing.expectEqual(@as(i16, 7), try r.readI16());
+    try std.testing.expectEqual(@as(i16, 0), try r.readI16());
+    try std.testing.expectEqual(@as(i16, 0), try r.readI16());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32());
+}

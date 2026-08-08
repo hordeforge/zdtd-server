@@ -324,6 +324,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
                 self.killXpAward(c.slot, 100);
+                // AddScoreClient: the character-sheet zombie-kill counter.
+                // Stock EntityAlive.AddScore fires on every zombie kill.
+                if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
+                if (c.peer) |kpeer| {
+                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
+                        .entity_id = c.entity_id,
+                        .zombie_kills = c.zombie_kills,
+                    })) |ab| {
+                        self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send AddScoreClient failed: {s}\n", .{@errorName(err)});
+                        };
+                    } else |_| {}
+                }
             }
             // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
             if (dmg.loot_bag_id > 0) {
