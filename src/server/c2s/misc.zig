@@ -420,6 +420,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // Stock restock is lazy, triggered by the open: rebuild the
                     // window with fresh rolls when the ResetInterval elapsed.
                     self.maybeRestockTrader(ts);
+                    // trader_interact / turn-in quests advance on the open
+                    // (stock QuestEventManager fires for the window open, not
+                    // for a trade body); some clients signal the open with a
+                    // minimal TraderData package, but the LockResponse path is
+                    // the reliable one, so fire here too.
+                    systems.questOnTraderOpen(&self.sim, c.slot);
                     var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
