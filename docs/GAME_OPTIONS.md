@@ -182,6 +182,8 @@ test, so a retune cannot land silently).
 | `stamina_regen_per_second` | 8.0 | Policy (GAP 22): Stamina regenerated per real second while not sprinting |
 | `sprint_stale_seconds` | 0.5 | Policy (GAP 22): seconds without an EntitySpeeds update before the sprint latch lapses |
 | `survival_sync_seconds` | 2.0 | Policy: per-player survival S2C refresh throttle |
+| `block_bite_damage` | 10.0 | Policy: zombie block-bite damage before the `BlockDamageAI/BM` percent (tick every 0.5 s) |
+| `block_damage_range` | 3.0 | Policy: anti-kite gate — only when the zombie is within this range of its target |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
