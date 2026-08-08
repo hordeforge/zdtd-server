@@ -409,6 +409,8 @@ test "parse stream and authority" {
         \\name = "default"
         \\[plugin]
         \\modules = "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm"
+        \\fuel = 25000000
+        \\max_pages = 128
     ;
     var f = try parse(std.testing.allocator, src);
     defer f.deinit();
@@ -434,6 +436,8 @@ test "parse stream and authority" {
         "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm",
         f.plugin.modules.?,
     );
+    try std.testing.expectEqual(@as(u64, 25_000_000), f.plugin.fuel.?);
+    try std.testing.expectEqual(@as(u64, 128), f.plugin.max_pages.?);
 }
 
 test "parse rules overlay sections" {
