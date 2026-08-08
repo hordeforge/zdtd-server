@@ -213,7 +213,7 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 | `loot_abundance` / `xp_multiplier` | percent (1..1000) |
 | `block_damage_player` / `block_damage_ai` / `block_damage_ai_bm` | percent (1..1000) |
 | `max_spawned_animals` | daytime wildlife cap (0..2048) |
-| `air_drop_frequency` | hours (0..168) |
+| `air_drop_frequency` | hours (0..8760, stock serverconfig range; default 72 = every 3 days) |
 | `drop_on_death` | 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete |
 | `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
 | `loot_respawn_days` | container re-roll interval (0..365) |
