@@ -31,6 +31,7 @@ const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
+const game_sleeper = @import("game/sleeper.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -4304,149 +4305,19 @@ pub const Game = struct {
         self.flush_seen = .{ .queued = q, .written = w, .errors = e, .sync = s, .waits = wt };
     }
 
-    /// Joined players with a transform, in client-slot order. Returns the count.
     fn gatherPlayerPositions(
         self: *Game,
         px: *[max_clients]f32,
         py: *[max_clients]f32,
         pz: *[max_clients]f32,
     ) usize {
-        var pn: usize = 0;
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.entity_id <= 0) continue;
-            const si = self.sim.slotOfNetId(cl.entity_id) orelse continue;
-            if (!self.sim.mask[si].transform) continue;
-            if (pn >= px.len) break;
-            px[pn] = self.sim.transform[si].x;
-            py[pn] = self.sim.transform[si].y;
-            pz[pn] = self.sim.transform[si].z;
-            pn += 1;
-        }
-        return pn;
+        return game_sleeper.gatherPlayerPositions(self, px, py, pz);
     }
 
-    /// Pure AABB test of every untriggered volume against every player.
-    /// Writes one byte per volume so worker ranges never share a byte, and only
-    /// reads `*const Store` plus the const player arrays. Serial and parallel
-    /// passes produce the identical `hit` array.
-    pub const SleeperScanCtx = struct {
-        sl: *const sleepers_mod.Store,
-        px: []const f32,
-        py: []const f32,
-        pz: []const f32,
-        hit: []u8,
-
-        pub fn work(ctx: SleeperScanCtx, begin: usize, end: usize) void {
-            var vi = begin;
-            while (vi < end) : (vi += 1) {
-                if (ctx.sl.volumes[vi].triggered) continue;
-                var p: usize = 0;
-                while (p < ctx.px.len) : (p += 1) {
-                    if (ctx.sl.contains(vi, ctx.px[p], ctx.py[p], ctx.pz[p])) {
-                        ctx.hit[vi] = 1;
-                        break;
-                    }
-                }
-            }
-        }
-    };
+    pub const SleeperScanCtx = game_sleeper.SleeperScanCtx;
 
     fn tickSleeperVolumes(self: *Game) void {
-        if (self.sleepers.volumes.len == 0) return;
-        var px: [max_clients]f32 = undefined;
-        var py: [max_clients]f32 = undefined;
-        var pz: [max_clients]f32 = undefined;
-        const pn = self.gatherPlayerPositions(&px, &py, &pz);
-        if (pn == 0) return;
-
-        // Parallel test, serial apply in volume-index order: the spawn seed is
-        // derived from `vi`, so the apply loop must stay serial and ascending.
-        var hit: [sleepers_mod.max_volumes]u8 = undefined;
-        const vn = @min(self.sleepers.volumes.len, hit.len);
-        @memset(hit[0..vn], 0);
-        {
-            const sc = apm.profiler.scope(&self.harness.prof, .sleeper_scan);
-            defer sc.end();
-            const ctx = SleeperScanCtx{
-                .sl = &self.sleepers,
-                .px = px[0..pn],
-                .py = py[0..pn],
-                .pz = pz[0..pn],
-                .hit = hit[0..vn],
-            };
-            if (self.job_batches and vn >= parallel_util.min_parallel_items) {
-                jobs.forSlotRange(vn, ctx, SleeperScanCtx.work);
-            } else {
-                SleeperScanCtx.work(ctx, 0, vn);
-            }
-        }
-        self.harness.counters.add(.sleeper_volumes_scanned, vn);
-
-        var vi: usize = 0;
-        while (vi < vn) : (vi += 1) {
-            if (hit[vi] == 0) continue;
-            var vol = &self.sleepers.volumes[vi];
-            vol.triggered = true;
-            self.sleepers.trigger_count += 1;
-
-            const grp = vol.groups[0];
-            const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);
-            // SleeperVolume::Spawn (asm.il ~1197380): gameStage = Max(0, party
-            // stage of the players around the volume). Stock adds a per-volume
-            // adjust byte that zdtd's .tts reader does not carry yet.
-            const cx: f32 = @floatFromInt(@divTrunc(vol.x0 + vol.x1, 2));
-            const cz: f32 = @floatFromInt(@divTrunc(vol.z0 + vol.z1, 2));
-            const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, sleeper_party_radius));
-            const stage_spawn = self.gamestages.sleeperEntityGroup(grp.class_name, vol_stage);
-            const def = self.resolveSleeperClass(grp.class_name, stage_spawn, seed);
-            // Stock draws the per-stage <spawn num=…> for the wave size; the
-            // prefab's own min/max is the fallback when no ladder resolved.
-            const count: u8 = if (stage_spawn) |sg|
-                @intCast(@max(1, @min(sg.num, @as(u16, 255))))
-            else if (grp.max_count <= grp.min_count) grp.min_count else blk: {
-                const span = grp.max_count - grp.min_count + 1;
-                break :blk grp.min_count + @as(u8, @intCast((vi) % span));
-            };
-            // maxAlive is a per-player ceiling on the wave; without a live
-            // sleeper population counter it only caps this burst.
-            const alive_cap: u8 = if (stage_spawn) |sg|
-                @intCast(@max(1, @min(sg.max_alive, @as(u16, 255))))
-            else
-                255;
-
-            if (vol.spawns.len > 0) {
-                // Stock spawns at authored Class=Sleeper marker cells. Spawn one
-                // zombie per marker, capped at the requested count, the marker
-                // count and the stage's maxAlive.
-                const cap: usize = @min(@as(usize, @min(count, alive_cap)), vol.spawns.len);
-                var n: usize = 0;
-                while (n < cap) : (n += 1) {
-                    const sp = vol.spawns[n];
-                    _ = self.sim.spawnSleeperClass(
-                        @floatFromInt(sp.x),
-                        @floatFromInt(sp.y),
-                        @floatFromInt(sp.z),
-                        def.max_hp,
-                        def.hash,
-                        def.loot_list,
-                    );
-                }
-                continue;
-            }
-
-            // Fallback (no .tts / no sleeper marker blocks): deterministic scatter
-            // across the AABB, better than a center clump. Honest degrade path.
-            const spanx: i32 = @max(1, vol.x1 - vol.x0);
-            const spanz: i32 = @max(1, vol.z1 - vol.z0);
-            const cy: f32 = @floatFromInt(vol.y0 + 1);
-            var prng = rng_util.XorShift32.init(seed);
-            var n: u8 = 0;
-            while (n < count and n < alive_cap and n < 8) : (n += 1) {
-                const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
-                const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
-                _ = self.sim.spawnSleeperClass(ox, cy, oz, def.max_hp, def.hash, def.loot_list);
-            }
-        }
+        return game_sleeper.tickSleeperVolumes(self);
     }
 
     /// Resolve a SleeperVolumeGroup name to an entity def, stock order first

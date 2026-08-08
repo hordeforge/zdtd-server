@@ -37,6 +37,7 @@ pub const game_social = @import("game/social.zig");
 pub const game_trader = @import("game/trader.zig");
 pub const game_stability = @import("game/stability.zig");
 pub const game_replicate = @import("game/replicate.zig");
+pub const game_sleeper = @import("game/sleeper.zig");
 pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
@@ -80,6 +81,7 @@ test {
     _ = game_trader;
     _ = game_stability;
     _ = game_replicate;
+    _ = game_sleeper;
     _ = game_tests;
     _ = c2s_inv;
     _ = c2s_move;
