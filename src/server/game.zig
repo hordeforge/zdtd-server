@@ -33,6 +33,7 @@ const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
 const game_sleeper = @import("game/sleeper.zig");
 const game_hooks = @import("game/hooks.zig");
+const game_deco = @import("game/deco.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -1649,85 +1650,15 @@ pub const Game = struct {
         return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max);
     }
 
-    fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-        const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
-        return g.world.heightWorld(wx, wz) catch 0;
-    }
-
+    pub const DecoDimCache = game_deco.DecoDimCache;
     pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
-        const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
-        const bm = g.world.biomes orelse return .{};
-        const biome_id = bm.atWorld(wx, wz) orelse return .{};
-        const subs = g.world.biome_layers_table.subBiomes(biome_id);
-        var set = g.world.biome_layers_table.decosFor(biome_id);
-        if (subs.len > 0) {
-            const si = subbiome_noise.subBiomeIdx(&g.sub_noise, subs, wx, wz);
-            if (si >= 0) set = subs[@intCast(si)].decos;
-        }
-        var out: packages.stock_deco.SpeciesList = .{};
-        for (set.slice()) |d| {
-            if (out.n >= packages.stock_deco.max_species) break;
-            out.items[out.n] = .{ .block_id = d.block_id, .prob = d.prob };
-            out.n += 1;
-        }
-        return out;
+        return game_deco.decoSpeciesAt(ctx, wx, wz);
     }
-
-    pub const DecoDimCache = struct {
-        const cap: usize = 32;
-        ids: [cap]u16 = @splat(0),
-        offsets: [cap]deco_mirror.Offsets = undefined,
-        n: usize = 0,
-
-        fn offsetsFor(self: *DecoDimCache, g: *const Game, id: u16) deco_mirror.Offsets {
-            for (self.ids[0..self.n], self.offsets[0..self.n]) |cached_id, offs| {
-                if (cached_id == id) return offs;
-            }
-            const offs = g.decoOffsetsFor(id);
-            if (self.n < cap) {
-                self.ids[self.n] = id;
-                self.offsets[self.n] = offs;
-                self.n += 1;
-            }
-            return offs;
-        }
-    };
-
-    /// Cell offsets a decoration block occupies, from its blocks.xml
-    /// `MultiBlockDim`. An id with no name in the dump places nothing: without the
-    /// name there is no way to know whether it is a multiblock, and writing a
-    /// bare parent where the client expects children leaves orphan cells.
     pub fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
-        var it = self.maxdamage.idNameIterator();
-        while (it.next()) |e| {
-            if (e.id != id) continue;
-            const dim = self.maxdamage.multiBlockDim(e.name);
-            return deco_mirror.offsetsFor(dim.x, dim.y, dim.z);
-        }
-        return .{};
+        return game_deco.decoOffsetsFor(self, id);
     }
-
-    /// Write one placed decoration into the block store so collision, harvest and
-    /// the streamed chunk payload agree with what the client renders. The client
-    /// runs the same write itself (`ChunkCluster::addDistantDecorationBlocks`,
-    /// asm.il 1126815) and skips any position that is already a multiblock, so
-    /// doing it first is convergent, not conflicting.
     pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
-        const offsets = cache.offsetsFor(self, @truncate(o.block_raw));
-        if (offsets.n == 0) return false;
-        const written = deco_mirror.apply(&self.world, .{
-            .x = o.x,
-            .y = o.y,
-            .z = o.z,
-            .raw = o.block_raw,
-            .offsets = offsets,
-        }) catch |err| {
-            // A failed mirror is cosmetic drift, never a reason to drop the join.
-            self.harness.counters.inc(.encode_errors);
-            std.debug.print("zdtd: deco mirror failed at {d},{d},{d}: {s}\n", .{ o.x, o.y, o.z, @errorName(err) });
-            return false;
-        };
-        return written > 0;
+        return game_deco.mirrorDeco(self, cache, o);
     }
 
     /// Join-time deco burst, mirroring stock `DecoManager.SendDecosToClient`
