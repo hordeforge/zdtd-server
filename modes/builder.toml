@@ -10,9 +10,12 @@ max_spawned_zombies = 0
 drop_on_death = 0
 
 [rules.systems]
-# No spawning. The director still owns the world clock, the blood-moon flag and
-# the daily trader restock, so day and night keep running and traders restock.
+# No zombie spawning. The director still owns the world clock, the blood-moon
+# flag and the daily trader restock, so day and night keep running and traders
+# restock. Wildlife keeps wandering (stock SpawnManagerBiomes is a separate
+# system from the AIDirector); set animals = false for a fully empty world.
 director = false
+# animals = false
 # Nothing left to path or attack, so skip the AI pass entirely.
 ai = false
 # Nothing spawns, so there is nothing to despawn. Off saves the scan.

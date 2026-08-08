@@ -300,15 +300,18 @@ pub const Director = struct {
         self.bloodmoon_active = self.clock.isBloodMoonNight();
         w.zombie_speed_scale = self.zombieSpeedScale();
 
-        // `[systems] director = false` means "stop spawning", not "stop time".
-        // The world clock, blood-moon flag and daily trader restock live on this
-        // path, so gating the whole system in schedule.run would freeze day and
-        // night for the mode that disabled it.
+        // `[systems] director = false` means "stop zombie spawning", not "stop
+        // time". The world clock, blood-moon flag and daily trader restock live
+        // on this path, so gating the whole system in schedule.run would freeze
+        // day and night for the mode that disabled it. Wildlife keeps wandering
+        // under its own `[systems] animals` flag (stock SpawnManagerBiomes is a
+        // system separate from the AIDirector, spawning.md section 2).
         if (!w.rules.systems.director) {
+            spawned += self.tickAnimals(w);
             if (self.clock.day != day_before) {
                 @import("systems.zig").traderRestock(w);
             }
-            return .{ .spawned = 0, .world_time = self.clock.worldTimeBits() };
+            return .{ .spawned = spawned, .world_time = self.clock.worldTimeBits() };
         }
 
         const alive_z = w.countKind(.zombie);
@@ -367,12 +370,7 @@ pub const Director = struct {
             self.scouts_cd = 120.0;
         }
         // Daytime wildlife up to MaxSpawnedAnimals (wander, not chase).
-        if (self.max_alive_animals > 0 and !self.clock.isNight() and self.animals_cd <= 0) {
-            if (w.countKind(.animal) < self.max_alive_animals) {
-                spawned += self.spawnAnimalsNearPlayers(w, 1, 20.0, 45.0);
-            }
-            self.animals_cd = 60.0;
-        }
+        spawned += self.tickAnimals(w);
         // Daily trader restock when day rolls.
         if (self.clock.day != day_before) {
             @import("systems.zig").traderRestock(w);
@@ -380,6 +378,20 @@ pub const Director = struct {
 
         self.total_spawned +%= spawned;
         return .{ .spawned = spawned, .world_time = self.clock.worldTimeBits() };
+    }
+
+    /// Daytime wildlife up to MaxSpawnedAnimals (wander, not chase). Runs under
+    /// `[systems] animals` independent of `director`, mirroring stock where
+    /// SpawnManagerBiomes (animals) is separate from the AIDirector (zombies).
+    fn tickAnimals(self: *Director, w: *ecs_world.World) u32 {
+        var n: u32 = 0;
+        if (!w.rules.systems.animals) return 0;
+        if (self.max_alive_animals <= 0 or self.clock.isNight() or self.animals_cd > 0) return 0;
+        if (w.countKind(.animal) < self.max_alive_animals) {
+            n += self.spawnAnimalsNearPlayers(w, 1, 20.0, 45.0);
+        }
+        self.animals_cd = 60.0;
+        return n;
     }
 
     fn spawnAnimalsNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
@@ -878,6 +890,35 @@ test "director spawns daytime animals up to cap" {
     const animals = w.countKind(.animal);
     try std.testing.expect(animals >= 1);
     try std.testing.expect(animals <= 3); // never exceeds MaxSpawnedAnimals
+}
+test "director=false stops zombies but wildlife follows its own flag" {
+    var w: ecs_world.World = .{};
+    w.rules.systems.director = false;
+    w.rules.systems.animals = true;
+    var dir: Director = .{
+        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .max_alive_animals = 3,
+    };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        dir.animals_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    // Animals still spawn with the director off (stock SpawnManagerBiomes is
+    // separate from the AIDirector); no zombies come from the director.
+    try std.testing.expect(w.countKind(.animal) >= 1);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
+    // animals = false stops NEW spawns (existing wildlife is not despawned,
+    // the same way director=false leaves live zombies alone).
+    const before = w.countKind(.animal);
+    w.rules.systems.animals = false;
+    i = 0;
+    while (i < 5) : (i += 1) {
+        dir.animals_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expectEqual(before, w.countKind(.animal));
 }
 
 test "bloodmoon frequency and range" {

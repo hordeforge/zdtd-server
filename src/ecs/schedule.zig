@@ -47,7 +47,7 @@ pub const TickResult = struct {
 /// real dependency (buffs before ai so movement and damage read this tick's
 /// buff state), so reordering would break determinism rather than customise it.
 pub const order = [_][]const u8{
-    "buffs", "director", "ai", "vehicles", "turrets", "despawn", "commands",
+    "buffs", "director", "animals", "ai", "vehicles", "turrets", "despawn", "commands",
 };
 
 /// Run full sim tick: beginTick → buffs → director → ai → vehicles → turrets →
@@ -120,8 +120,8 @@ test "schedule.run drains commands and clears locals" {
 test "default pipeline order is pinned" {
     // The order encodes a dependency (buffs before ai). A reorder is a
     // behaviour change and must fail here rather than pass silently.
-    try std.testing.expectEqual(@as(usize, 7), order.len);
-    const want = [_][]const u8{ "buffs", "director", "ai", "vehicles", "turrets", "despawn", "commands" };
+    try std.testing.expectEqual(@as(usize, 8), order.len);
+    const want = [_][]const u8{ "buffs", "director", "animals", "ai", "vehicles", "turrets", "despawn", "commands" };
     for (order, want) |got, exp| try std.testing.expectEqualStrings(exp, got);
     // Every entry has a toggle, and every toggle defaults on.
     const Systems = @import("rules.zig").Systems;

@@ -23,8 +23,13 @@ const toml_bind = @import("../util/toml_bind.zig");
 pub const Systems = struct {
     /// Buff expiry and stacking. Off means no buff ever ticks down.
     buffs: bool = true,
-    /// Spawn director, including the blood-moon horde.
+    /// Spawn director: zombie hordes, blood moon, scouts. Off stops zombie
+    /// spawning but keeps the clock, blood-moon flag and trader restock.
     director: bool = true,
+    /// Daytime wildlife (stock SpawnManagerBiomes, a system separate from the
+    /// AIDirector, spawning.md section 2): off stops animals; independent of
+    /// `director` so a no-zombie mode can keep wandering wildlife.
+    animals: bool = true,
     /// Zombie AI task selection and movement.
     ai: bool = true,
     vehicles: bool = true,
@@ -272,6 +277,7 @@ pub const WorldGroupOverlay = struct {};
 pub const SystemsOverlay = struct {
     buffs: ?bool = null,
     director: ?bool = null,
+    animals: ?bool = null,
     ai: ?bool = null,
     vehicles: ?bool = null,
     turrets: ?bool = null,
