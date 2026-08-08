@@ -1829,20 +1829,24 @@ gamestage, no wandering hordes, and no screamers.
   the gamestage-keyed horde/sleeper/scout lists.
   *Anchors:* `src/assets/entitygroups.zig:7`, `:112`, `server-orch.log`
 
-- **Entity class variety actually reachable at spawn** `PARTIAL`
-  `class_table` is 16 fixed slots; the loader fills exactly 5 zombie slots plus one
-  animal. `spawnNearPlayers` picks a class name from the group then scans
-  `class_table` for a name match, and any pick outside those 5 names silently falls
-  back to `zombieBoe`. 293 entityclasses load; at most 6 can ever spawn.
-  *Anchors:* `src/ecs/world.zig:171-180`, `src/server/game.zig:794-813`,
+- **Entity class variety actually reachable at spawn** `RESOLVED (2026-08-08)`
+  The class_table is still the fixed 16-slot offline cache, but a spawn-picked
+  class that is not preloaded resolves through `resolveSpawnClass`
+  (entityclasses.xml by name) and spawns with its own stats, so all 293
+  loaded classes are reachable with per-class behaviour instead of silently
+  falling back to zombieBoe.
+  *Anchors:* `src/server/game.zig` resolveSpawnClass, `src/ecs/aidirector.zig`
+  spawnOneZombie + class_resolve_fn,
   `src/ecs/aidirector.zig:246-265`
 
-- **Per-class movement speed and attack damage on spawned zombies** `PARTIAL`
-  `spawnZombieClass` overrides only `class_id.hash` and `loot_list`;
-  `class_id.id` stays 1. The AI reads speed and attack damage from
-  `class_table[class_id.id]`, so a spawned zombieSpider or zombieFeral walks and
-  hits exactly like zombieBoe. Only `max_hp` differs.
-  *Anchors:* `src/ecs/world.zig:467-474`, `src/ecs/systems.zig:951-954`, `:1285`
+- **Per-class movement speed and attack damage on spawned zombies** `PER-CLASS (2026-08-08)`
+  The spawn carries the resolved entityclasses stats (chase/wander speeds,
+  HandItem damage, HP, hash, loot) on the entity's class_id, and the AI reads
+  the per-entity values first, then the class_table, then the Rules floor, so
+  a spawned zombieSpider or zombieFeral moves and hits like its class instead
+  of zombieBoe.
+  *Anchors:* `src/ecs/world.zig` spawnZombieDef, `src/ecs/systems.zig`
+  per-entity speed/damage reads, `src/ecs/aidirector.zig` spawnOneZombie
 
 - **Gamestage** `PARTIAL` (2026-08-06, refreshed 2026-08-08)
   `src/assets/gamestages.zig` parses gamestages.xml (config / group / spawner

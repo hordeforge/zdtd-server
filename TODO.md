@@ -308,6 +308,10 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **Trader window 50 entries** (fe30501): TraderStock.max_stock 12 → 50
       (stock TraderInfo.MaxItems); snapshot buffers and the TraderData wire
       carry the full window.
+- [x] **Per-entity class stats** (da14212): every entityclasses.xml class a
+      spawn group picks resolves by name and spawns with its own HP/speeds/
+      damage/hash/loot (A35), instead of the ~12 preloaded classes only;
+      animals too (bear 2500 HP). AI reads per-entity stats first.
 - [x] **Loot count=all / force_prob / entry cap** (8e6daa9): count="all"
       groups spawn every entry (was pick-1), force_prob entries gate
       independently (stock asm.il 698452/698816), group entries cap 32 → 192
