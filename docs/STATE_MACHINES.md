@@ -14,10 +14,12 @@ a diagram and a comment disagree.
 | 6 | Blood moon window | `ecs/aidirector.zig` `WorldClock` | [blood-moon](#6-blood-moon-window) |
 | 7 | Power grid | `ecs/powerblocks.zig` | [power](#7-power-grid) |
 | 8 | Sleeper volumes | `world/sleepers.zig` | [sleepers](#8-sleeper-volumes) |
-| 9 | Ally status | `server/ally.zig` | [allies](#9-ally-status) |
-| 10 | Plugin lifecycle | `plugin/host.zig`, `plugin/wasm.zig` | [plugins](#10-plugin-lifecycle) |
-| 11 | LiteNet peer | `litenet/peer.zig` | [peer](#11-litenet-peer) |
-| 12 | Land claims | `server/game.zig` land claims | [claims](#12-land-claims) |
+| 9 | Trader open / restock / wallet | `server/game/trader.zig`, `server/trade.zig`, `ecs/systems.zig` traderRestock | [trader](#9-trader-sm) |
+| 10 | Vehicle multi-seat | `ecs/systems.zig` vehicleAttach/Detach | [vehicle](#10-vehicle-multi-seat) |
+| 11 | Ally status | `server/ally.zig` | [allies](#11-ally-status) |
+| 12 | Plugin lifecycle | `plugin/host.zig`, `plugin/wasm.zig` | [plugins](#12-plugin-lifecycle) |
+| 13 | LiteNet peer | `litenet/peer.zig` | [peer](#13-litenet-peer) |
+| 14 | Land claims | `server/game.zig` land claims | [claims](#14-land-claims) |
 
 ## 1. Join / client session SM
 
@@ -31,17 +33,29 @@ which is buffered and replayed after auth (`Client.preauth_buf`).
 stateDiagram-v2
     [*] --> Connecting: LiteNet Connect
     Connecting --> Challenged: challenge sent (ServerChallenge)
-    Challenged --> Joined: PlayerLogin accepted (auth + ids map)
-    Joined --> Entering: RequestToEnterGame
-    Entering --> Spawning: PlayerId bundle (WorldInfo, id map, chunks)
-    Spawning --> Playing: RequestToSpawnPlayer
+    Challenged --> Joined: challenge echo + PackageIds, PlayerLogin accepted
+    Joined --> Entering: RequestToEnterGame (configs, WorldInfo, areas, stats)
+    Entering --> Spawning: RequestToSpawnPlayer
+    Spawning --> Playing: PlayerId bundle (id map, chunks, Spawned, time, stats)
     Playing --> Playing: net poll + tick (movement, C2S apply, replicate)
     Playing --> [*]: PlayerDisconnect / stale peer reap
     Entering --> [*]: illegal phase C2S (gate drop / disconnect)
+    Playing --> Spawning: death -> RequestToSpawnPlayer (revive + Spawned(died) re-bundle)
+    Joined --> Joined: re-login while joined (LoginAnswer + SpawnedInWorld, no re-enter)
+    Entering --> Spawning: DynamicClientArrive fallback (spawn bundle when RequestToSpawnPlayer never arrives)
 ```
 
-Owners: `src/server/game.zig:4816` (phase gate dispatch), `:7050`
-(sendJoinBundle), `src/server/phase_gate.zig:7`.
+Notes: `WorldInfo` goes out at Entering, never in the spawn bundle (a second
+WorldInfo restarts the client's createWorld, `game.zig:3346`). The chunk
+streamer starts earlier, at WorldInitInfoRequest (`Client.world_ready`,
+`c2s/join.zig:181`); the spawn area is also streamed before the bundle while
+the client still waits on its spawn request. Death respawn re-enters Spawning
+while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
+instead of a second PlayerId.
+
+Owners: `src/server/c2s/join.zig` (7-package join SM), `src/server/game.zig:2600`
+(phase gate dispatch), `:3338` (sendJoinBundle, sets `Client.entered`),
+`src/server/phase_gate.zig:7`.
 
 ## 2. Sim tick pipeline
 
@@ -64,7 +78,7 @@ stateDiagram-v2
 ```
 
 Owners: `src/ecs/schedule.zig:9` (`Phase`, `Rules.systems` per-phase gate),
-`src/server/game.zig:9600+` (the `step()` body), `src/server/game/tick.zig`
+`src/server/game.zig:4596` (the `step()` body), `src/server/game/tick.zig`
 (player survival / stamina; `buffs.xml` thresholds when the table is loaded,
 otherwise `Rules.progression`), `src/server/game/deco.zig` (deco mirror,
 `[feature] deco_mirror`).
@@ -89,12 +103,12 @@ stateDiagram-v2
     Chase --> Wander: target lost (mutex release)
     Chase --> BreakBlock: path blocked
     BreakBlock --> Chase: block cleared
-    Wander --> Sleep: sleeper volume (alert wakes)
-    Sleep --> Chase: alert / damage
+    Wander --> Sleep: sleeper volume
+    Sleep --> Chase: player enters volume radius (proximity wake, one-way)
     Chase --> [*]: death / despawn
 ```
 
-Owners: `src/ecs/components.zig:53` (`AiState`), `:68` (`TaskId`),
+Owners: `src/ecs/components.zig:66` (`AiState`), `:79` (`TaskId`),
 `src/ecs/systems.zig` AiCtx (`zombie_tasks` table).
 
 ## 4. Quest lifecycle
@@ -116,9 +130,35 @@ stateDiagram-v2
     Completed --> [*]: journal entry, rewards
 ```
 
-Owners: `src/ecs/quest.zig` (`QuestProgress`, `PhaseSpec`, `RewardSpec`),
-`src/ecs/systems.zig:192` (`completeQuest`), `:340` (`questOnTraderOpen`),
-`src/server/game.zig` (tick-end payout drain).
+Owners: `src/ecs/quest.zig` (`QuestDef`, `PhaseSpec`, `RewardSpec`),
+`src/ecs/components.zig:319` (`QuestProgress`, `Journal`), `src/ecs/systems.zig:198`
+(`completeQuest`), `:390` (`questOnTraderOpen`), `:314` (`questAccept`),
+`src/server/game.zig:4832` (tick-end payout drain).
+
+Shared quests: `QuestProgress.is_shared` latches when the owner's party is
+handed the quest (`server/game/social.zig:266` `shareQuestWithParty`); when the
+owner disconnects, the party gets `remove_quest` events so their mirrors clear
+(`game.zig:3152`). Rally markers: `rally_activated` latches per quest; a rally
+phase without a POI rect is scaffolding and auto-skips.
+
+POI lockout sub-machine (`src/ecs/poi_lock.zig`, the server half of
+QuestLockInstance): a quest that activates a POI locks it to its questers; when
+the last quester leaves the POI stays locked out for a 2000-tick grace, then
+expires and is replaced.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free: no lock at this rect
+    Free --> Locked: questPoiLock (questers list)
+    Locked --> Locked: quester joins / leaves (still questers inside)
+    Locked --> LockedOut: last quester leaves (grace = worldTime + 2000)
+    LockedOut --> Free: grace elapsed (entry dropped / replaced)
+    LockedOut --> Locked: new quester relocks before expiry
+```
+
+The lock is checked at the rally marker (`questCheckPoiLockout`:
+`quest_lock` with LockedOutUntil as extra data, or `player_inside` when a
+non-party player stands in the POI).
 
 ## 5. Weather storm SM
 
@@ -139,8 +179,8 @@ stateDiagram-v2
     BloodMoon --> Clear: dawn (release global override)
 ```
 
-Owners: `src/world/weather.zig:29` (`BiomeState.storm_state` 0/1/2),
-`:106` (`tick`), `:125` (`forceBloodMoon`), `:292` (persistence).
+Owners: `src/world/weather.zig:36` (`BiomeState.storm_state` 0/1/2),
+`:106` (`tick`), `:125` (`forceBloodMoon`), `:302` (persistence).
 
 ## 6. Blood moon window
 
@@ -157,9 +197,14 @@ stateDiagram-v2
     NormalDay --> NormalDay: day rolls (BloodMoonDay re-sent)
 ```
 
-Owners: `src/ecs/aidirector.zig:62` (`isBloodMoonNight`), `:68`
+Owners: `src/ecs/aidirector.zig:61` (`isBloodMoonNight`), `:68`
 (`isBloodMoonDay`), `src/server/game.zig` (`bloodMoonDayFor` + day-roll
 broadcast).
+
+Notes: `Director.bm_stage_frozen` latches the party gamestage at dusk and
+clears at dawn with the horde marks (`aidirector.zig:330` / `clearHordeMarks`);
+parties cluster players within 80 m and horde zombies teleport back to their
+party focus past 150 m; one wave spawns per party every 6 s.
 
 ## 7. Power grid
 
@@ -177,8 +222,17 @@ stateDiagram-v2
     Triggered --> Powered: activation released
 ```
 
-Owners: `src/ecs/powerblocks.zig` (`PowerGrid`, `resolve`, `tick`),
+Owners: `src/ecs/electric.zig` (`PowerGrid`, `resolveDay`, `tick`,
+`activateTriggerAt`, `setSwitchAt`, `resetTriggerAt`, `armTimer`),
+`src/ecs/powerblocks.zig` (blocks.xml registry + `Resolved` node props),
 `src/server/game.zig` (broadcast visuals on change).
+
+Notes: a switch node stays powered while latched off but passes nothing
+(`nodeIsOn` = the latch for switches); a trigger node is powered while idle
+(gate closed) and opens for `pulse_left` after `delay_left`, or latches until
+`resetTriggerAt` for duration Always; a timer relay toggles a wired consumer
+on its period; generators burn fuel to empty (auto off), solar is daylight
+gated, and overload drops the highest-id consumers (load shed).
 
 ## 8. Sleeper volumes
 
@@ -193,10 +247,69 @@ stateDiagram-v2
     Triggered --> [*]: volume spent
 ```
 
-Owners: `src/world/sleepers.zig:36` (`triggered`), `src/server/game.zig`
-(`tickSleeperVolumes`).
+Owners: `src/world/sleepers.zig:38` (`triggered`),
+`src/server/game/sleeper.zig` (`tickSleeperVolumes`), `src/ecs/systems.zig:987`
+(per-entity `Sleeper.awake` wake: a player inside `volume_r` of the home cell;
+sleepers are exempt from distraction targeting and far-despawn).
 
-## 9. Ally status
+## 9. Trader SM
+
+The trader surface (`TraderStock`, `ecs/components.zig:597`) owns the open
+hours latch, the restock cadence and the money pool. Open/close is an
+edge-latched cycle driven by the world clock; restock is lazy (triggered by the
+window open) plus a daily timer; the wallet is server-owned.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: trader spawned (open hours default)
+    Open --> Closed: hours edge (tickTraderAreas, gates lock + force-unlock trade channel)
+    Closed --> Open: hours edge (gates reopen)
+    Open --> Restock: window open (LockRequest) and reset_interval elapsed
+    Restock --> Open: fresh XML rolls, markup reset, wallet regrown
+    Open --> Open: daily timer restock (traderRestock on day roll)
+```
+
+Owners: `src/server/game/trader.zig:34` (`traderIsOpen`), `:46`
+(`tickTraderAreas`), `:204` (`maybeRestockTrader`), `:127` (`traderRollSeed`),
+`src/ecs/systems.zig:751` (`traderRestock`), `src/server/c2s/misc.zig:411`
+(trader open via LockRequest, denied outside hours), `src/server/trade.zig`
+(`handleTrade`, `applyTraderDataCopyFrom`).
+
+Restock cadence (`TraderStock.reset_interval` from traders.xml ResetInterval):
+-1 never, 0 daily (spawn default), N > 0 every N days. The roll is
+deterministic (world seed x trader id x day). Wallet: the trader `wallet` is
+credited when players buy and debited when the trader buys from players (a
+sell is refused once the pool runs out); it regrows toward `wallet_default` at
+each restock. The C2S CopyFrom mirrors the client's post-trade stock deltas
+and money back. Markup demand delta rides the wire (+100 after a buy, -4 after
+a sell) and resets on restock.
+
+## 10. Vehicle multi-seat
+
+`Vehicle` (`ecs/components.zig:209`) keeps one seat per rider
+(`seats[max_seats=6]`, -1 = free; `driver_seat = 0`). Seats flip between free
+and occupied; only losing the driver stops the hull.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free: vehicle spawned (all seats -1)
+    Free --> Occupied: vehicleAttach (proximity gate, vacates other vehicles)
+    Occupied --> Occupied: seat change on the same hull
+    Occupied --> Free: vehicleDetach (driver exit stops the hull)
+    Free --> [*]: vehicle destroyed / despawned
+```
+
+Owners: `src/ecs/systems.zig:1890` (`vehicleAttach`), `:1934`
+(`vehicleDetach`), `:1862` (`vehicleFindSeat`), `:1872` (`vehicleOfRider`),
+`src/server/c2s/misc.zig:520` (NetPackageEntityAttach, rider identity check),
+`:504` (NetPackageVehicleSpawn op 0/1/2; only the seat-0 driver may steer).
+
+An explicit request for an occupied seat is refused (the request comes off the
+wire and must not evict another rider); re-requesting the held seat is a
+no-op. The stock detach carries vehicleId = -1, so the hull is resolved from
+server occupancy, never from the packet.
+
+## 11. Ally status
 
 Per directed relationship, mirrored across the two directions (SetStatus writes
 the reverse). Client-side UI events ride alongside.
@@ -213,9 +326,9 @@ stateDiagram-v2
     Allies --> NotAllied: unfriend
 ```
 
-Owners: `src/server/ally.zig:25` (`Status` + `mirror`).
+Owners: `src/server/ally.zig:31` (`Status`), `:39` (`mirror`).
 
-## 10. Plugin lifecycle
+## 12. Plugin lifecycle
 
 Two hosts share the hook order (enable, tick, playerJoin, shutdown) plus the
 T15 event hooks (playerDeath, entityKilled, blockDamage, questComplete), which
@@ -237,9 +350,9 @@ stateDiagram-v2
 Owners: `src/plugin/host.zig:10`, `src/plugin/wasm.zig:49`.
 Now also `on_admin_command` (first >0 reply wins; traps = allow), `on_chat`
 (deny/rewrite; bad UTF-8 treated as deny), and `on_player_login`
-(sanitized name; first deny wins) — same isolation and fuel+memory budget.
+(sanitized name; first deny wins); same isolation and fuel+memory budget.
 
-## 11. LiteNet peer
+## 13. LiteNet peer
 
 Transport-level peer lifecycle plus the reliable-window send path. A peer is
 reaped when silent past `peer_stale_ms`; the reliable window retry pumps ACKs
@@ -258,7 +371,7 @@ stateDiagram-v2
 Owners: `src/litenet/peer.zig:129` (`Peer`), `src/server/game.zig`
 (`reapStalePeers`, WindowFull retry pacing).
 
-## 12. Land claims
+## 14. Land claims
 
 Placed keystone claims protect a region for the owner; expiry is offline-days
 based and re-checked on the in-game day roll.
