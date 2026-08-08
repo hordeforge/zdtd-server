@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `4776b80`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **966/966** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `ef7ee21`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **969/969** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -25,14 +25,15 @@
 ## Working tree right now
 
 ```
-working tree clean at 4776b80
+working tree clean at ef7ee21
 game.zig 5115 lines (was 5310 at handoff): loot/weather/vehicle shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
-parity: trader inventory roll + party highest game stage landed
-966/966 tests, lint + fmt clean
+parity landed: trader roll, party stage, loot container size, non-burning
+  workstation queues, workstation persistence (ZWS1)
+969/969 tests, lint + fmt clean
 ```
 
-All work is committed through `4776b80`; nothing staged or untracked except
+All work is committed through `ef7ee21`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
@@ -77,6 +78,16 @@ this handoff note.
 - **Trader root attrs RE'd** (4776b80): `quality_mod` is a client-side price
   quality lerp (zdtd's trade is client-mirrored, so informational only);
   `quest_tier_mod` is quest-reward tier scaling, open with the quest economy.
+- **Loot container size** (a578230): world containers size from the
+  `lootcontainer` size attr (woodenChest 6x2=12, smallSafes 8x5=40, gun safe
+  capped 54) and roll up to capacity; the client shows the real cell count.
+- **Non-burning workstation queues** (586d59b): the craft gate mirrors stock
+  (asm.il 1331687) — only fuel-module stations wait for isBurning; the fuel
+  module is block-derived (blocks.xml Workstation Modules: campfire/forge/
+  chemistry have fuel, workbench/cementMixer/tableSaw do not).
+- **Workstation persistence** (44a4056): `workstations.zws` (ZWS1) round-trips
+  fuel/input/output, the smelting queue (recipe blobs), craft-complete and
+  melt across restart; a forge's progress survives a reboot (rule 21).
 - `make check` fmt gate: `zig fmt` drift from the extraction commits fixed
   (tests.zig indentation, wasm.zig/misc.zig).
 
