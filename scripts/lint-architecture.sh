@@ -17,7 +17,9 @@ check_edges() {
   local package="$1"
   local forbidden="$2"
   local hits
-  hits="$(rg -n --glob '*.zig' "@import\\(\"\\.\\./(${forbidden})/" "src/${package}" 2>/dev/null || true)"
+  # Match any ../ depth (src/pkg -> ../forbidden/, src/pkg/sub -> ../../forbidden/)
+  # so a subfolder import cannot evade the check by adding one more ../.
+  hits="$(rg -n --glob '*.zig' "@import\\(\"(\\.\\./)+(${forbidden})/" "src/${package}" 2>/dev/null || true)"
   if [[ -n "$hits" ]]; then
     printf '%s\n' "$hits"
     fail=1
