@@ -288,6 +288,11 @@ Core loop and parity landings. Do not re-open without new evidence.
       rolls, seeded per world+trader+day) and quality rides the TraderData
       wire. GAP "Inventory roll" closed; restock full-rebuild, TraderMaxTier
       and mods stay open.
+- [x] **Party highest game stage** (01fa28d): `partyHighestGameStage` (max
+      member stage of the largest party, or max over joined when ungrouped)
+      feeds `director.party_stage`; blood-moon horde difficulty scales to the
+      group high water mark instead of the weighted CalcPartyLevel. Sleeper
+      volumes keep radius-based CalcGameStageAround.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

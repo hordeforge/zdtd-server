@@ -4912,9 +4912,13 @@ HONEST GAPS:
   (Party.GetHighestLootStage) feeds the death-bag and air-drop rolls at the
   player-facing call sites, so a grouped player's bag rolls the party high
   water mark instead of the global one; world-gen fills with no player
-  context keep the global `partyLootStage`. Still open: the party
-  gamestage max for director/sleeper difficulty (`Party.get_HighestGameStage`,
-  approximated by the radius-based `partyStageAround`).
+  context keep the global `partyLootStage`. **Party highest game stage
+  SHIPPED 2026-08-08**: `partyHighestGameStage` (Party.get_HighestGameStage,
+  the max member stage of the largest party, or the max over joined players
+  when ungrouped) feeds `director.party_stage`, so blood-moon horde
+  difficulty scales to the group high water mark instead of the weighted
+  CalcPartyLevel. Sleeper volumes keep `partyStageAround` (stock
+  CalcGameStageAround, radius + same-POI).
 - **Ally persistence.** Relationships now persist to `{world_dir}/allies.zal`
   (magic ZAL1) on the periodic and shutdown saves and are restored at init;
   stock keeps them in `PersistentPlayerList`. The saved file is zdtd-owned like
