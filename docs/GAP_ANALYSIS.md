@@ -2055,7 +2055,7 @@ gamestage, no wandering hordes, and no screamers.
   `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
   `asm.il:416218`, `Data/Config/blocks.xml:28086` (forge 6)
 
-- **NetPackageHordeEvent** `N/A (parity)` — see [§6 blood-moon
+- **NetPackageHordeEvent** `N/A (parity)`: see [§6 blood-moon
   NetPackageHordeEvent row](#6-blood-moon): the same verdict applies; this row
   exists only because the package also appears in the entity/AI catalog.
   *Anchors:* `src/wire/packages.zig:896`
