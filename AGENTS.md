@@ -174,6 +174,8 @@ The operating principles behind every rule below. When in doubt, these decide.
     in-process API exists (workspace Native APIs rule). Follow
     [Zig Zen](https://ziglang.org/documentation/master/#Zen) when choosing among
     correct options.
+27. **Wire is the contract, not our internals. Do not repeat stock dedis perf mistakes.** What matters to the client is the binary wire, not how we iterate. Prefer SoA + pools + serialize-once over per-entity heap/AoS/Unity shapes; avoid GC pressure; keep the 20 TPS budget with measured `apm` dumps, not visual similarity to stock Mono.
+28. **Prefer typed tools over shell.** Use `ast-grep` for structural edits, `ripgrep` (`rg`) for fast text search, and `semcode` for semantic/cross-file search instead of bare `sed`/`grep` where one fits. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware searches.
 
 ## Commands
 
