@@ -1583,6 +1583,8 @@ pub const Game = struct {
             0,
             true,
         )) |sb| {
+            // Best-effort snap: the client already moved the entity; a failed
+            // send leaves it to the next motion relay, no state is lost.
             self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};
         } else |_| {}
         return .{ .x = clamp.x, .y = y, .z = clamp.z, .applied = true };
@@ -2772,6 +2774,8 @@ pub const Game = struct {
                 g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
                 g.clearBlockHp(bx, by, bz);
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
+                    // Best-effort visual broadcast: the world store is already
+                    // authoritative; a dropped SetBlock only delays the paint.
                     g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), g.interest_range) catch {};
                 } else |_| {}
             }
