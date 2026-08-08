@@ -327,17 +327,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // AddScoreClient: the character-sheet zombie-kill counter.
                 // Stock EntityAlive.AddScore fires on every zombie kill.
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
-                if (c.peer) |kpeer| {
-                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
-                        .entity_id = c.entity_id,
-                        .zombie_kills = c.zombie_kills,
-                    })) |ab| {
-                        self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send AddScoreClient failed: {s}\n", .{@errorName(err)});
-                        };
-                    } else |_| {}
-                }
+                sendScoreUpdate(self, c);
+            } else if (target_is_player) {
+                // PvP kill (PlayerKillingMode != 0): the killer's playerKills
+                // counter, stock EntityAlive.AddScore.
+                if (c.player_kills < std.math.maxInt(u16)) c.player_kills += 1;
+                sendScoreUpdate(self, c);
             }
             // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
             if (dmg.loot_bag_id > 0) {
@@ -603,4 +598,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     return false;
+}
+
+/// Push the killer's AddScoreClient (zombie + player kill counters).
+fn sendScoreUpdate(self: *Game, c: *Client) void {
+    const kpeer = c.peer orelse return;
+    if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
+        .entity_id = c.entity_id,
+        .zombie_kills = c.zombie_kills,
+        .player_kills = c.player_kills,
+    })) |ab| {
+        self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            std.debug.print("zdtd: send AddScoreClient failed: {s}\n", .{@errorName(err)});
+        };
+    } else |_| {}
 }

@@ -282,6 +282,8 @@ pub const Client = struct {
     /// Zombie kills this session, for the AddScoreClient character-sheet
     /// counter (stock EntityAlive.AddScore on kill).
     zombie_kills: u16 = 0,
+    /// Player kills this session (PvP, PlayerKillingMode != 0).
+    player_kills: u16 = 0,
     /// EntityPlayer::gameStageBornAtWorldTime: world time the current survival
     /// streak started. Seeded to "now" on join and pushed forward on death
     /// (asm.il SetAlive ~503838). Client state is per-session, so days survived

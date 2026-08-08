@@ -4133,6 +4133,19 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expectEqual(ca.entity_id, try xr2.readI32());
     try std.testing.expectEqual(@as(i32, 100), try xr2.readI32());
     try std.testing.expectEqual(@as(i16, 0), try xr2.readI16());
+
+    // PvP kill (PlayerKillingMode 3 default): A kills B; AddScoreClient
+    // carries playerKills=1 while zombieKills stays at the earlier count.
+    cap_a.clear();
+    const pdmg = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 100, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", pdmg));
+    const pscb = cap_a.findPkgIdEntity(score_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    var psr = binary.Reader{ .data = pscb };
+    try std.testing.expectEqual(ca.entity_id, try psr.readI32());
+    try std.testing.expectEqual(@as(i16, 2), try psr.readI16()); // zombieKills (2 total)
+    try std.testing.expectEqual(@as(i16, 1), try psr.readI16()); // playerKills
+    try std.testing.expectEqual(@as(i16, 0), try psr.readI16()); // otherTeamNumber
+    try std.testing.expectEqual(@as(i32, 0), try psr.readI32()); // conditions
 }
 
 test "scenario chat routes by recipient list and preserves the channel" {
