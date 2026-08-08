@@ -286,7 +286,10 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   (`base * (1 - 0.1 * MemberCountInRange)`, range GameStats[54] = 100) splits
   the killer's award and every in-range mate gets the same split via
   `NetPackageSharedPartyKill` (scenario covers the 90/90 split and the solo
-  full award). **POI lockout exemption**: a party member inside a quest POI no
+  full award). The killer's client also gets `NetPackageEntityAddExpClient`
+  (xpType 0 = Kill, per the AddExpClient IL) so the XP icon and local
+  progression gain fire; mates get the SharedPartyKill tooltip instead
+  (stock split). **POI lockout exemption**: a party member inside a quest POI no
   longer blocks the rally (`World.party_same_fn` hook → `Game.parties`, stock
   CheckForPOILockouts). Wire layout + parse tests, a 7-case state-machine test,
   and two-peer scenarios cover accept → leave → disconnect → shared kill →
