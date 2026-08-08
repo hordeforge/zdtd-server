@@ -417,6 +417,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
                         return true;
                     }
+                    // Stock restock is lazy, triggered by the open: rebuild the
+                    // window with fresh rolls when the ResetInterval elapsed.
+                    self.maybeRestockTrader(ts);
                     var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{

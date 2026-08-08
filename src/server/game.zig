@@ -3862,6 +3862,10 @@ pub const Game = struct {
         return game_trader.fillTraderFromXml(self, trader_net_id);
     }
 
+    pub fn maybeRestockTrader(self: *Game, ts: ecs.Slot) void {
+        game_trader.maybeRestockTrader(self, ts);
+    }
+
     fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
         if (hand_item.len == 0) return 0;
         if (self.items.byName(hand_item)) |d| return d.entity_damage;

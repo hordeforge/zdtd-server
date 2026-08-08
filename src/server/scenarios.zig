@@ -4183,3 +4183,48 @@ test "scenario party quest change fans objective deltas to the other members" {
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyQuestChange", w2.written()));
     try std.testing.expect(cap_b.findPkgId(pq_id) == null);
 }
+
+test "scenario trader restock rebuilds the window lazily on open" {
+    io_fs.mkdirPathSimple("worlds");
+    freshScenarioDir("worlds/zdtd_sc_restock");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_restock", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    // Joel's trader_info (1) has reset_interval 3 in stock traders.xml.
+    const trader_id = g.sim.spawnTrader("npcTraderJoel", 100, 70, 100, 1, 5000).?;
+    const ts = g.sim.slotOfNetId(trader_id).?;
+    // Builtin traders table has no trader_info: pin the interval like the
+    // stock traders.xml row for Joel (reset_interval 3) and a day-1 fill.
+    g.sim.trader_stock[ts].reset_interval = 3;
+    g.sim.trader_stock[ts].last_restock_day = 1;
+    // Interval not elapsed (day 2 vs fill day 1): the open leaves the window.
+    g.sim.director.clock.day = 2;
+    const n_before = g.sim.trader_stock[ts].n;
+    g.maybeRestockTrader(ts);
+    try std.testing.expectEqual(@as(u32, 1), g.sim.trader_stock[ts].last_restock_day);
+    try std.testing.expectEqual(n_before, g.sim.trader_stock[ts].n);
+    // Elapsed (day 4): lazy rebuild re-rolls the window, advances the day and
+    // regenerates the drained money pool (stock HandleFullReset on open).
+    g.sim.director.clock.day = 4;
+    g.sim.trader_stock[ts].wallet = 0;
+    g.maybeRestockTrader(ts);
+    try std.testing.expectEqual(@as(u32, 4), g.sim.trader_stock[ts].last_restock_day);
+    try std.testing.expect(g.sim.trader_stock[ts].wallet >= 5000);
+    // -1 (never) stays untouched even far past the interval.
+    const never_id = g.sim.spawnTrader("npcTraderNever", 120, 70, 120, 0, 5000).?;
+    const nts = g.sim.slotOfNetId(never_id).?;
+    g.fillTraderFromXml(never_id);
+    g.sim.trader_stock[nts].reset_interval = -1;
+    g.sim.director.clock.day = 60;
+    g.maybeRestockTrader(nts);
+    try std.testing.expectEqual(@as(u32, 1), g.sim.trader_stock[nts].last_restock_day);
+    std.debug.print("PASS trader-restock: lazy window rebuild on open after reset_interval\n", .{});
+}
+

@@ -194,3 +194,24 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     }
     if (n > 0) self.sim.trader_stock[s].n = @intCast(n);
 }
+
+
+/// Stock TraderManager.TraderInventoryRequested / HandleFullReset
+/// (loot-economy.md §3): restock is lazy, triggered by the trader open, not a
+/// background timer. When the trader_info ResetInterval has elapsed since the
+/// last fill, rebuild the window with fresh rolls (fillTraderFromXml re-runs
+/// the seeded roll, which also advances last_restock_day) and regenerate the
+/// money pool toward its spawn default.
+pub fn maybeRestockTrader(self: *Game, ts: ecs.Slot) void {
+    if (!self.sim.mask[ts].trader_stock) return;
+    const stock = &self.sim.trader_stock[ts];
+    if (stock.reset_interval < 0) return; // never restocks
+    const day = self.sim.director.clock.day;
+    if (stock.reset_interval > 0) {
+        if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) return;
+    }
+    self.fillTraderFromXml(self.sim.network_id[ts].id);
+    if (self.sim.trader_stock[ts].wallet < self.sim.trader_stock[ts].wallet_default) {
+        self.sim.trader_stock[ts].wallet = self.sim.trader_stock[ts].wallet_default;
+    }
+}
