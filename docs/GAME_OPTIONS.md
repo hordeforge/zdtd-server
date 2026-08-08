@@ -125,6 +125,7 @@ test, so a retune cannot land silently).
 | `[rules.systems]` | | Which sim systems run. All default `true`, so the default pipeline is the stock one. A disabled system is skipped, not stubbed: its slice of `TickResult` stays zero. Order is not configurable (it encodes a real dependency: buffs before ai) |
 | `buffs` | true | Off means no buff ever ticks down |
 | `director` | true | Off stops **spawning only**. The director owns the world clock, the blood-moon flag and the daily trader restock, so time still advances |
+| `animals` | true | Off stops daytime wildlife (stock SpawnManagerBiomes is a system separate from the AIDirector, spawning.md §2); independent of `director` so a no-zombie mode can keep animals |
 | `ai` | true | Off means zombies never select or run a task |
 | `vehicles` | true | |
 | `turrets` | true | |

@@ -64,8 +64,8 @@ server stock on open. **Per-trader stock landed 2026-08-06:** npc.xml is parsed
 window from that trader's own `<trader_items>` list (traderAlways fallback),
 the lock-open path denies outside the trader's open hours (vending always
 open), and `allow_sell=false` blocks selling to that trader. Remaining for full
-"done when": POI placement, restock rolls, and the live stock-client visual
-check.
+"done when": POI placement and the live stock-client visual check (restock
+rolls shipped 2026-08-08: stock inventory roll and lazy restock on open).
 
 **Why first:** the gap analysis scores traders 3 WORKS / 9 PARTIAL / 14 MISSING,
 and the headline is "no trader NPC exists on the client". Most of the trader
@@ -105,7 +105,8 @@ per-block `LootList` (Extends-resolved) drives the container fill, the
 death-bag chain resolves to `zPackReg` at load, and `LootDropProb` gates the
 bag. Verified against the stock XML (per-block `lootListFor` test, zPackReg
 chain, drop-prob gate) plus a Navezgane loadgen smoke. Remaining from "done
-when": container slot counts still ignore the size attribute (separate gap).
+when": none. Container slot counts now size from the `lootcontainer` size
+attribute (2026-08-08) and roll up to the container's own capacity.
 
 **Why:** every chest in the world currently rolls the wrong list, and every
 zombie drops the same bag.
@@ -222,8 +223,8 @@ into `StockQuestWrite` (TreasureChest 8 bytes, POIStayWithin/StayWithin
 zero-byte, else Base), so the join PDF no longer trips `ValidateSizeMarker`;
 and the stock accept marker is wired: `NPCQuestList eventType=RemoveQuest(1)`
 with tier + index accepts the matching offer into the journal, and the offer
-list excludes active quests. Remaining: the `<variable>` display-param
-substitution (cosmetic name/subtitle/description keys).
+list excludes active quests. Remaining: none. `<variable>` display-param substitution landed 2026-08-07
+(last occurrence wins, so difficulty tier flows through `param1="difficulty"`).
 
 **Why:** 53 client-known quest defs parse empty because `template=` is not
 resolved, and the accept path is missing, so quests cannot start.
@@ -258,7 +259,8 @@ HUD day / BloodMoonDay / red moon align, `setDayLightLength` implements
 `CalcDuskDawnHours`, and the CalcNextDay jitter is non-negative like stock.
 Unit tests cover the window (dusk, rollover, dawn) and the wire day. Remaining
 for full "done when": the live stock-client observation of the red moon night
-(visual round) and the BloodMoonDay re-send on day roll.
+(visual round). The BloodMoonDay re-send on day roll shipped 2026-08-06
+(`bloodMoonDayFor` re-broadcasts NetPackageGameStats to entered peers).
 
 **Why:** the blood moon fires but ends at midnight and the red moon shows on the
 wrong night, so the signature event of the game reads as broken.

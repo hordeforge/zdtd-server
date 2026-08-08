@@ -127,29 +127,34 @@ The per-area tables and the scorecard **have** been rescored against the code at
 head `2768e30` (2026-08-06): rows verified as landed carry a `(2026-08-06)` tag
 next to their state. Totals moved from 74/160/111 to 100/150/95 (current
 scorecard; the per-area headers match the row counts). On 2026-08-07 the
-scorecard was recounted from the per-feature markers (338 features; the
-per-area headers and the scorecard rows both match the markers), and two more
-gaps closed: power grid nodes rebuild from the chunk block grid
+scorecard was recounted from the per-feature markers, and two more gaps
+closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
+Recount 2026-08-08 from the same markers: **329 features** carry a
+canonical WORKS/PARTIAL/MISSING tag (134/142/53) and the scorecard rows below
+are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
+(`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
+`CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
+are not counted; see [reviews/DOC_CONSISTENCY_AUDIT.md](reviews/DOC_CONSISTENCY_AUDIT.md).
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-338 features catalogued across nine areas. Counts recounted 2026-08-07 (the
-per-feature markers are the source of truth; STATUS wins on conflict).
+329 features scored across nine areas (recounted 2026-08-08 from the
+per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 17 | 17 | 1 | 35 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
-| [Traders](#5-traders) | 12 | 10 | 3 | 25 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
+| [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` open |
+| [Traders](#5-traders) | 12 | 8 | 3 | 23 | Per-trader stock, hours, wallet, POI placement and the WorldAreas compound package land; closed-state sync and vending open |
 | [Blood moon](#6-blood-moon) | 9 | 14 | 3 | 26 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
-| [POIs and prefabs](#7-pois-and-prefabs) | 16 | 15 | 0 | 31 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
+| [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 20 | 21 | 7 | 48 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 16 | 8 | 35 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 7 | 33 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 16 | 28 | 9 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **134** | **150** | **54** | **338** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 16 | 27 | 9 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **134** | **142** | **53** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1839,14 +1844,16 @@ gamestage, no wandering hordes, and no screamers.
   hits exactly like zombieBoe. Only `max_hp` differs.
   *Anchors:* `src/ecs/world.zig:467-474`, `src/ecs/systems.zig:951-954`, `:1285`
 
-- **Gamestage** `PARTIAL` (2026-08-06)
-  `gamestages.xml` is not parsed anywhere (only in the xml_patch name table).
-  Stock resolves SleeperVolumeGroup, horde and quest spawn names through
-  `GameStageDefinition::GetGameStage(name)` to `GetStage(PartyGameStage)` to
-  `SpawnGroup.groupName` to `EntityGroups::GetRandomFromGroup`. zdtd short-circuits
-  to a fixed class and says so in a comment. Day 1 and day 70 spawn identical
-  enemies at identical counts.
-  *Anchors:* `src/assets/xml_patch.zig:99`, `src/server/game.zig:7044`,
+- **Gamestage** `PARTIAL` (2026-08-06, refreshed 2026-08-08)
+  `src/assets/gamestages.zig` parses gamestages.xml (config / group / spawner
+  ladders) and resolves sleeper volume groups, the blood-moon spawner stage,
+  daytime scout tiers and the `gamestage [slot]` admin command against the party
+  stage; `gameStageBornAtWorldTime` rides the PlayerId PDF so the client's own
+  `gamestage` readout agrees with the server. Still missing: biomes.xml /
+  quests.xml stage modifiers, prefab DifficultyTier (loot poi_tier_mod / bonus),
+  EffectManager passive modifiers, and cross-session days-alive persistence.
+  Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
+  *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,
   `asm.il:955240-955270`, `asm.il:416434`
 
 - **POI sleeper volumes: parse, trigger, spawn at authored markers** `PARTIAL`
@@ -2210,12 +2217,16 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
   `src/ecs/inventory.zig:243-257`, `src/server/game.zig:1910-1913`
 
-- **Item quality tier** `PARTIAL`
+- **Item quality tier** `PARTIAL` (2026-08-08 refresh)
   quality rides the wire, the TE and players.zsv, and stack merges refuse to blend
-  different qualities. But nothing ever produces a quality other than 1: loot fill
-  hardcodes it and `qualityinfo.xml` is only forwarded as a client config name.
-  *Anchors:* `src/server/game.zig:7453`, `src/ecs/components.zig:363-395`,
-  `:444-466`, `src/server/game.zig:5669`
+  different qualities. Looted items now roll quality from the
+  `loot_quality_template` by loot stage (2026-08-08) and trader inventory rolls
+  quality per entry; stackables without a quality tier keep 1 so they merge.
+  Still open: `qualityinfo.xml` is only forwarded as a client config name,
+  UseTimes / durability degradation is not wired to the attack / dig call sites,
+  and mods have no quality effect.
+  *Anchors:* `src/assets/loot.zig` `resolveQuality` / `rollContainer`,
+  `src/ecs/components.zig:363-395`, `:444-466`
 
 - **Repair (item repair queue / RepairItem)** `MISSING`
   `RecipeQueueItem` carries a RepairItem ItemValue plus u16 in stock; zdtd always
@@ -4741,8 +4752,9 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
 - quests.xml `GameStageMod` / `GameStageBonus` (active-quest terms).
 - Prefab `DifficultyTier`, so loot.xml `loot_settings poi_tier_mod` /
   `poi_tier_bonus` load but are never applied.
-- loot.xml `<lootqualitytemplates>`: item quality by loot stage. zdtd's loot
-  `Stack` carries no quality, so this needs a container/wire change first.
+- loot.xml `<lootqualitytemplates>`: item quality by loot stage. **SHIPPED
+  2026-08-08** (`Stack.quality` rides the container fill and the wire); the
+  remaining gap is quality display data (`qualityinfo.xml` forwarded only).
 - EffectManager passive modifiers on both stages (`GlobalGameStageModifier`,
   `BiomeGameStageModifier`, `GlobalLootStageModifier`, … all pinned at 1).
 - Blood-moon and wandering-horde loot drop bonus counters (`LootBonusEvery`,

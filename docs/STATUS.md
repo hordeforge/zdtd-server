@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **975/975** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5153, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
+**Unit tests:** `zig build test` → **975/975** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5155, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -106,7 +106,7 @@ observable, on the live stock client:
   restores on partial deposit and records ledger causes, QuestEntitySpawn and
   TurretSpawn gained rate/quest gates, PosAndRot preserves the stored yaw, and
   turret kills roll `LootDropProb` like player kills. 788 total.
-- **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 338 features with anchors;
+- **Docs:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) scores 329 features with anchors;
   [WORK_PLAN.md](WORK_PLAN.md) turns the top gaps into handoff-ready tasks.
 - **Visual round (stock client, 2026-08-06):** the automated playtest
   (`7dtd-playtest`, Steam + Proton, EAC off) ran the demo suite against zdtd on
@@ -585,7 +585,6 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
 | P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
-| P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks; workstation RecipeQueue C2S optional) |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P3 | Party membership + ally persistence | Both SHIPPED: allies.zal round-trip; real `Party` state machine + `PartyData` snapshots (entity-id keyed, no PUID). Shared party scope SHIPPED: kill-XP split, shared quests, party loot stage + highest game stage feed the director |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
@@ -598,7 +597,7 @@ maxdamage merge), stock Chunk.write + upper24, players.zsv **ZPV3** (ZPV2 still
 read; progression tail + inv/journal), TE/blockmeta persist, claims.zlc,
 clock.zcl, weather.zwt, workstation TE sim + workstations.zws persistence, trader TraderData v2, electrical
 place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
-(2 tasks), land claim options.
+(9 tasks), land claim options.
 
 ---
 

@@ -8,7 +8,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
 | [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 338 features scored WORKS/PARTIAL/MISSING with anchors |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 329 features scored WORKS/PARTIAL/MISSING with anchors |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
@@ -329,7 +329,7 @@ Core loop and parity landings. Do not re-open without new evidence.
       reply sink ran out. Fix: `had_saved_entities` gates the persistable demo
       seeds (a real restart bug: duplicates on every boot), and
       `freshScenarioDir` wipes each scenario world before its test
-      (`io_fs.removeDirTreeSimple`). `zig build test` → **963/963** on three
+      (`io_fs.removeDirTreeSimple`). `zig build test` → **975/975** on consecutive
       consecutive runs; counts provably stable across runs.
 
 ### Recent (2026-08-04)
