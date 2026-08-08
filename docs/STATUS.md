@@ -475,6 +475,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Challenge 0xCA, PackageIds map | `wire/`, `litenet/` | Dynamic package names |
 | C2S deflate + LiteNet Merged | `wire/frame.zig`, `litenet/` | Post-join C2S parse |
 | PlayerLogin / LoginAnswer / enter / spawn | `server/game.zig` | EnterMultiplayer respawn type |
+| Player bodies to peers (`NetPackageEntitySpawn`, player class + name) | `server/game/join.zig` | join burst: joiner sees every in-view player; the joiner spawns to every client that sees it; `dropClientSlot` broadcasts `EntityRemove(Despawned)` so no ghost body |
 | PlayerId PDF (ECD + inv/equip/empty journal) | `wire/packages.zig`, `stock_inv.zig` | Spawn at real coords |
 | ConfigFile LoadLocal list | `game.zig` | Stock xmlsToLoad names |
 | WorldTime, deco first package | `stock_deco.zig` | DistantDecoTree via `idByName` (skip if dump miss) |
