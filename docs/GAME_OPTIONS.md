@@ -139,6 +139,33 @@ test, so a retune cannot land silently).
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
 | `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |
+| `path_replan_interval_s` | 0.35 | Policy: A* replan throttle (s) |
+| `path_max_expand` | 96 | Policy: A* node budget per replan |
+| `path_wp_arrive` | 0.55 | Policy: waypoint snap radius (blocks) |
+| `path_goal_slack` | 2 | Policy: goal drift cells before replan |
+| `spot_arrive` | 0.75 | Policy (asm.il:424093) |
+| `territorial_radius` | 32.0 | Policy (EAITerritorial leash, m) |
+| `execute_delay_scale` | 0.85 | Policy (asm.il:437541) |
+| `look_turn_interval_s` | 0.70 | Policy (EAILook 14 ticks at 20 Hz) |
+| `look_yaw_range_deg` | 120.0 | Policy (SeekYaw sweep) |
+| `look_yaw_slow_at_deg` | 35.0 | Policy (SeekYaw slow-at) |
+| `look_turn_speed_deg` | 250.0 | Policy (zombieTemplateMale MaxTurnSpeed) |
+| `look_turn_speed_min_deg` | 20.0 | Policy (SeekYaw floor) |
+| `wander_look_min_s` | 0.5 | Policy (EAIWander look window) |
+| `wander_look_max_s` | 5.0 | Policy |
+| `spot_look_base_s` | 5.0 | Policy |
+| `spot_look_rand_s` | 3.0 | Policy |
+| `distraction_look_s` | 2.0 | Policy |
+| `distraction_close_sq` | 2.25 | Policy (1.5 m squared) |
+| `distraction_broadcast_ticks` | 20 | Policy (EntityItem.tickDistraction) |
+| `distraction_replan_min` | 20 | Policy |
+| `distraction_replan_rand` | 20 | Policy |
+| `wander_time_max_s` | 30.0 | Policy (EAIWander 30 s cap) |
+| `wander_arrive` | 0.2 | Policy (wander no-op radius) |
+| `flee_distance` | 20.0 | Policy (EAIRunAway flee distance, m) |
+| `mount_range_sq` | 64.0 | Policy (vehicle mount 8 m squared) |
+| `destroy_area_rng_mod` | 16 | Policy (DestroyArea gate) |
+| `revenge_window_s` | 20.0 | Policy (EAISetAsTargetIfHurt 400 ticks) |
 | `[rules.bloodmoon]` | | |
 | `party_join_dist` | 80.0 | Policy (AIDirectorBloodMoonParty constant) |
 | `party_teleport_dist` | 150.0 | Policy (AIDirectorBloodMoonParty constant) |

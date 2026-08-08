@@ -70,6 +70,63 @@ pub const Ai = struct {
     /// non-zero (systems.zig `if (ct.wander_speed > 0) ct.wander_speed * 10.0
     /// else <this>`).
     wander_speed: f32 = 0.8,
+    // -------------------------------------------------------------------------
+    // AI timing / radii — extracted from systems.zig file-scope consts so
+    // a mode pack or zdtd.toml [rules.ai] controls them without forking.
+    // -------------------------------------------------------------------------
+    /// How often (s) a chasing zombie re-solves A* toward the player (20 TPS
+    /// budget: one search per 0.35 s caps total A* churn).
+    path_replan_interval_s: f32 = 0.35,
+    /// Max A* node expansions per replan (coarse local grid).
+    path_max_expand: u32 = 96,
+    /// Snap to next waypoint within this distance (blocks).
+    path_wp_arrive: f32 = 0.55,
+    /// Manhattan cells the goal may drift before forcing a replan.
+    path_goal_slack: u32 = 2,
+    /// Arrive radius for EAIApproachSpot (m).
+    spot_arrive: f32 = 0.75,
+    /// EAITerritorial leash radius (m). Beyond this, walk back to home.
+    territorial_radius: f32 = 32.0,
+    /// EAITaskList.executeDelayScale base (asm.il:437541).
+    execute_delay_scale: f32 = 0.85,
+    /// EAILook::Continue re-pick interval (s = 14 ticks at 20 Hz).
+    look_turn_interval_s: f32 = 14.0 / 20.0,
+    /// SeekYaw sweep range (deg).
+    look_yaw_range_deg: f32 = 120.0,
+    /// Entity::SeekYaw yawSlowAt (deg).
+    look_yaw_slow_at_deg: f32 = 35.0,
+    /// Per-class MaxTurnSpeed for zombieTemplateMale (deg/s).
+    look_turn_speed_deg: f32 = 250.0,
+    /// Utils::FastMax floor inside SeekYaw's slowdown branch (deg/s).
+    look_turn_speed_min_deg: f32 = 20.0,
+    /// EAIWander look window [min, max] (s).
+    wander_look_min_s: f32 = 0.5,
+    wander_look_max_s: f32 = 5.0,
+    /// EAIApproachSpot look time base + random (s).
+    spot_look_base_s: f32 = 5.0,
+    spot_look_rand_s: f32 = 3.0,
+    /// EAIApproachDistraction look time (s).
+    distraction_look_s: f32 = 2.0,
+    /// cCloseDist squared (1.5 m) for EAIApproachDistraction.
+    distraction_close_sq: f32 = 2.25,
+    /// EntityItem.tickDistraction cadence (ticks).
+    distraction_broadcast_ticks: i32 = 20,
+    /// EAIApproachDistraction replan [base, +rand] (ticks).
+    distraction_replan_min: i32 = 20,
+    distraction_replan_rand: i32 = 20,
+    /// EAIWander max duration (s).
+    wander_time_max_s: f32 = 30.0,
+    /// Step toward no-op radius (m).
+    wander_arrive: f32 = 0.2,
+    /// EAIRunawayWhenHurt / EAIApproachDistraction approach distance (m)
+    /// and EAIApproachDistraction cFarDist (approach spiral radius).
+    flee_distance: f32 = 20.0,
+    /// Vehicle mount range squared (8 m).
+    mount_range_sq: f32 = 64.0,
+    /// DestroyArea random gate modulus (wander_rng % N == 1).
+    destroy_area_rng_mod: u32 = 16,
+    /// Revenge target window (s = 400 ticks at 20 Hz).
+    revenge_window_s: f32 = 20.0,
 };
 
 /// AIDirectorBloodMoonParty tuning (asm.il 413090-413140): players within
@@ -153,6 +210,33 @@ pub const AiOverlay = struct {
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,
+    path_replan_interval_s: ?f32 = null,
+    path_max_expand: ?u32 = null,
+    path_wp_arrive: ?f32 = null,
+    path_goal_slack: ?u32 = null,
+    spot_arrive: ?f32 = null,
+    territorial_radius: ?f32 = null,
+    execute_delay_scale: ?f32 = null,
+    look_turn_interval_s: ?f32 = null,
+    look_yaw_range_deg: ?f32 = null,
+    look_yaw_slow_at_deg: ?f32 = null,
+    look_turn_speed_deg: ?f32 = null,
+    look_turn_speed_min_deg: ?f32 = null,
+    wander_look_min_s: ?f32 = null,
+    wander_look_max_s: ?f32 = null,
+    spot_look_base_s: ?f32 = null,
+    spot_look_rand_s: ?f32 = null,
+    distraction_look_s: ?f32 = null,
+    distraction_close_sq: ?f32 = null,
+    distraction_broadcast_ticks: ?i32 = null,
+    distraction_replan_min: ?i32 = null,
+    distraction_replan_rand: ?i32 = null,
+    wander_time_max_s: ?f32 = null,
+    wander_arrive: ?f32 = null,
+    flee_distance: ?f32 = null,
+    mount_range_sq: ?f32 = null,
+    destroy_area_rng_mod: ?u32 = null,
+    revenge_window_s: ?f32 = null,
 };
 
 pub const BloodmoonOverlay = struct {
@@ -274,6 +358,33 @@ test "Rules defaults pin pre-move constants" {
     try std.testing.expectEqual(@as(f32, 200.0 * 200.0), r.ai.despawn_dist_sq);
     try std.testing.expectEqual(@as(f32, 2.2), r.ai.chase_speed);
     try std.testing.expectEqual(@as(f32, 0.8), r.ai.wander_speed);
+    try std.testing.expectEqual(@as(f32, 0.35), r.ai.path_replan_interval_s);
+    try std.testing.expectEqual(@as(u32, 96), r.ai.path_max_expand);
+    try std.testing.expectEqual(@as(f32, 0.55), r.ai.path_wp_arrive);
+    try std.testing.expectEqual(@as(u32, 2), r.ai.path_goal_slack);
+    try std.testing.expectEqual(@as(f32, 0.75), r.ai.spot_arrive);
+    try std.testing.expectEqual(@as(f32, 32.0), r.ai.territorial_radius);
+    try std.testing.expectEqual(@as(f32, 0.85), r.ai.execute_delay_scale);
+    try std.testing.expectEqual(@as(f32, 14.0 / 20.0), r.ai.look_turn_interval_s);
+    try std.testing.expectEqual(@as(f32, 120.0), r.ai.look_yaw_range_deg);
+    try std.testing.expectEqual(@as(f32, 35.0), r.ai.look_yaw_slow_at_deg);
+    try std.testing.expectEqual(@as(f32, 250.0), r.ai.look_turn_speed_deg);
+    try std.testing.expectEqual(@as(f32, 20.0), r.ai.look_turn_speed_min_deg);
+    try std.testing.expectEqual(@as(f32, 0.5), r.ai.wander_look_min_s);
+    try std.testing.expectEqual(@as(f32, 5.0), r.ai.wander_look_max_s);
+    try std.testing.expectEqual(@as(f32, 5.0), r.ai.spot_look_base_s);
+    try std.testing.expectEqual(@as(f32, 3.0), r.ai.spot_look_rand_s);
+    try std.testing.expectEqual(@as(f32, 2.0), r.ai.distraction_look_s);
+    try std.testing.expectEqual(@as(f32, 2.25), r.ai.distraction_close_sq);
+    try std.testing.expectEqual(@as(i32, 20), r.ai.distraction_broadcast_ticks);
+    try std.testing.expectEqual(@as(i32, 20), r.ai.distraction_replan_min);
+    try std.testing.expectEqual(@as(i32, 20), r.ai.distraction_replan_rand);
+    try std.testing.expectEqual(@as(f32, 30.0), r.ai.wander_time_max_s);
+    try std.testing.expectEqual(@as(f32, 0.2), r.ai.wander_arrive);
+    try std.testing.expectEqual(@as(f32, 20.0), r.ai.flee_distance);
+    try std.testing.expectEqual(@as(f32, 64.0), r.ai.mount_range_sq);
+    try std.testing.expectEqual(@as(u32, 16), r.ai.destroy_area_rng_mod);
+    try std.testing.expectEqual(@as(f32, 20.0), r.ai.revenge_window_s);
     try std.testing.expectEqual(@as(f32, 80.0), r.bloodmoon.party_join_dist);
     try std.testing.expectEqual(@as(f32, 150.0), r.bloodmoon.party_teleport_dist);
     try std.testing.expectEqual(@as(f32, 40.0), r.bloodmoon.party_spawn_dist);
