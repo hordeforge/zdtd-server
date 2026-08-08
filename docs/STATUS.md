@@ -572,6 +572,33 @@ high ids, incomplete quest PDF blobs, reward wire that ignores ItemStack.
 
 ---
 
+## Wave 2026-08-08 (parity + extraction + docs overhaul)
+
+- **Refactor**: `game/loot|weather|vehicle` shards (game.zig 5310 -> 5155);
+  `c2s/*` owns all join + 4 C2S domains. Test-suite flakes root-caused and
+  fixed (demo-pad re-seed on restored entities.zen + scenario world hygiene):
+  `zig build test` 975/975 on consecutive runs.
+- **Traders**: stock inventory roll (count ranges, prob, unique_only, quality
+  from traders.xml, seeded per world+trader+day), 50-entry window
+  (`TraderInfo.MaxItems`), lazy rebuild on open after ResetInterval,
+  per-block CraftingAreaRecipes queue gate.
+- **Loot**: containers sized from `lootcontainer size`; `count="all"` spawns
+  every entry; `force_prob` independent gate; `loot_quality_template` rolls
+  item quality by loot stage; group entry cap 192 (perkBooks).
+- **Workstations**: non-burning stations (workbench/cement mixer/table saw)
+  advance (fuel-module from blocks.xml Modules); state persists
+  (`workstations.zws`, ZWS1).
+- **World**: wildlife spawner split from the director gate
+  (`[systems] animals`); entity HP loads from entityclasses.xml
+  `passive_effect HealthMax` with `^` variable resolution; spawn pad uses
+  the resolved terrain id; join SM gated by login (pre-login peers cannot
+  reach enter/spawn); trader-interact quests advance on the LockRequest open.
+- **Docs**: full review pass (wasm seams, state machines, hardcode
+  externalization, docs audit), doc tree restructure (ZIG_CLONE.md,
+  ECS_SYSTEMS.md, SCALE.md, docs/wire/), STATE_MACHINES.md +6 sections and
+  GAMEPLAY.md with behavior flows, consistency + stale pass (GAP recount
+  329). SonarQube Cloud workflow added; product renamed to Zeven Days to Die.
+
 ## Residual for full play (priority)
 
 Open work only. See [TODO.md](../TODO.md) for the actionable list.
@@ -580,11 +607,9 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 |---|---|---|
 | P1 | Deco trees | Blocked on DecoManager.Read NRE RE; empty firstPackage only until object wire matches V3.1.0 |
 | P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
-| P2 | Weather storm SM | Shipped (`world/weather.zig`): stormbuild → storm → reschedule per biome, random group rolls, blood-moon override; state persisted (`weather.zwt`) and restored across restart |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
-| P2 | PlatformUserIdentifierAbs party | Full ally/party user wire |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
 | P3 | Party membership + ally persistence | Both SHIPPED: allies.zal round-trip; real `Party` state machine + `PartyData` snapshots (entity-id keyed, no PUID). Shared party scope SHIPPED: kill-XP split, shared quests, party loot stage + highest game stage feed the director |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |

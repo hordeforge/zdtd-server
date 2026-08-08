@@ -24,7 +24,7 @@ roughly 3500 lines in the NetPackage region.
 New to the project, or picking up work:
 
 1. [STATUS.md](STATUS.md) what works now, with the current gates.
-2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 338 features scored
+2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 329 features scored
    WORKS / PARTIAL / MISSING with anchors.
 3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
@@ -103,3 +103,4 @@ is the point of the directory. When a review contradicts
 | [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md) |
 | [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](reviews/ZIG_0_16_REVIEW.md) |
 | [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
+| [prompts/net-send-review.md](prompts/net-send-review.md) | not yet run |
