@@ -4,13 +4,13 @@
 //! forwarding wrappers will be added by the main swarm step.
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const packages = @import("../wire/packages.zig");
-const world_store = @import("../world/store.zig");
-const ecs = @import("../ecs/root.zig");
-const clock = @import("../util/clock.zig");
+const packages = @import("../../wire/packages.zig");
+const world_store = @import("../../world/store.zig");
+const ecs = @import("../../ecs/root.zig");
+const clock = @import("../../util/clock.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time (rates from `[sim] rules.progression`,

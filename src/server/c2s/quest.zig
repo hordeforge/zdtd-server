@@ -15,7 +15,7 @@ const packages = @import("../../wire/packages.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
-const c2s_text = @import("c2s_text.zig");
+const c2s_text = @import("../c2s_text.zig");
 const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 

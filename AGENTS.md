@@ -215,8 +215,10 @@ stock client (EAC off) when practical. Unit green alone is not enough.
 ```text
 src/main.zig           CLI, DebugAllocator, construct Game, run loop
 src/protocol.zig       wire constants (challenge, tick rate; package ids live in wire/)
-src/server/game.zig    join SM, tick orchestration, interest, send path
-src/server/*           admin TCP, GSI, config, multi-system scenarios
+src/server/game.zig    join SM; delegating façade — most paths live in game/*, c2s/*
+src/server/game/*      per-domain Game helpers (net, tick, world, player, join) — each takes *Game
+src/server/c2s/*       C2S handlers by domain (move, inv, quest, misc) — each exposes handle(*Game,*Client,*Peer,name,body) bool
+src/server/*           admin TCP, GSI, config, persist (players.zsv), chunk_stream, trade, scenarios, webui
 src/ecs/*              SoA world, systems, inventory, quests, interest
 src/world/*            chunks, TTS, prefabs, sleepers, containers, DTM, biomes
 src/wire/*             package bodies (stock_*), binary LE, frames
@@ -239,6 +241,8 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 | Concern | Lives in | Does not live in |
 |---|---|---|
 | Stock package body layout | `wire/stock_*.zig`, `packages.zig` | `game.zig` open-coded writes |
+| C2S handlers | `server/c2s/*` (`handle` per domain, phase-gated) | `game.zig` large if/else chain |
+| Game helpers | `server/game/*` (`net`, `tick`, `world`, `player`, `join`), `server/persist.zig`, `server/chunk_stream.zig`, `server/trade.zig` | `game.zig` inline bodies |
 | Block/world mutation | `world/*`, `ecs` | LiteNet / package id tables |
 | Syscalls / sockets | `litenet/udp_socket.zig`, `util/tcp_listen.zig` (Io.net + thin posix) | package builders, ECS systems |
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
@@ -248,6 +252,9 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
   `litenet`, `wire`, `assets`, `ecs`, `world`, `server`) and `wire/packages.zig`
   for stock body modules. Leaf files stay importable. Avoid cycles; world must
   not import wire (TE domain types live in world, wire re-exports as needed).
+- `src/server/c2s/` and `src/server/game/` are subfolders of `server`; every
+  file there is aggregated via `src/server/root.zig` (the lint recurses one level,
+  so new helpers must be added there or their tests silently drop out).
 - `pub` only for intended API. Helpers stay file-private by default.
 - Package dependency edges are **enforced**, not conventional:
   `scripts/lint-architecture.sh` (part of `make check`) fails the build on a

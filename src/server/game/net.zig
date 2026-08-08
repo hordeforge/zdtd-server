@@ -7,14 +7,14 @@
 //! so existing callers/tests stay unchanged.
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const ln_peer = @import("../litenet/peer.zig");
-const ln_packet = @import("../litenet/packet.zig");
-const wire_frame = @import("../wire/frame.zig");
-const packages = @import("../wire/packages.zig");
-const clock = @import("../util/clock.zig");
+const ln_peer = @import("../../litenet/peer.zig");
+const ln_packet = @import("../../litenet/packet.zig");
+const wire_frame = @import("../../wire/frame.zig");
+const packages = @import("../../wire/packages.zig");
+const clock = @import("../../util/clock.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -291,7 +291,7 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
             if (!p.alive) {
                 self.harness.counters.inc(.stale_peers_reaped);
                 std.debug.print("zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n", .{ p.local_id, c.slot, c.entity_id });
-                _ = @import("../ecs/systems.zig").vehicleDetach(&self.sim, c.entity_id);
+                _ = @import("../../ecs/systems.zig").vehicleDetach(&self.sim, c.entity_id);
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
                 self.refreshInfoPlayers();

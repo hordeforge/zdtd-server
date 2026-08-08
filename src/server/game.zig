@@ -21,7 +21,11 @@ const parallel_util = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 const protocol = @import("../protocol.zig");
 const replicate_te = @import("replicate_te.zig");
-const game_net = @import("game_net.zig");
+const game_net = @import("game/net.zig");
+const game_tick = @import("game/tick.zig");
+const game_world = @import("game/world.zig");
+const game_player = @import("game/player.zig");
+const game_join = @import("game/join.zig");
 const admin_console = @import("admin_console.zig");
 const ConsoleOut = admin_console.ConsoleOut;
 const TargetResult = admin_console.TargetResult;
@@ -95,7 +99,7 @@ fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 
 /// Game embeds the claim table on the heap; 1024 covers a long-lived server
 /// (GAP 12: 256 silently dropped the 257th claim on register).
-const max_land_claims: usize = 1024;
+pub const max_land_claims: usize = 1024;
 /// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
 const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
@@ -2148,7 +2152,7 @@ pub const Game = struct {
         };
     }
 
-    fn sendSurvivalStats(
+    pub fn sendSurvivalStats(
         self: *Game,
         peer: *ln_peer.Peer,
         entity_id: i32,
@@ -2181,7 +2185,7 @@ pub const Game = struct {
 
     /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
     /// survival/stamina loop calls it on a throttle like the vitals.
-    fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
+    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
         if (packages.buildEntityStatChangedBody(
             self.body_buf[0..32],
             entity_id,
@@ -3017,80 +3021,12 @@ pub const Game = struct {
         return game_net.sendGameBudget(self, peer, pkg_name, body, budget_ns, critical);
     }
 
-    /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
-    /// Levels up using progression.xml exp curve when loaded.
-    fn awardXp(self: *Game, slot: usize, base: u64) void {
-        if (slot >= self.clients.len) return;
-        const c = &self.clients[slot];
-        c.xp += base * self.xp_multiplier / 100;
-        // Compute the current cumulative threshold once, then advance it as
-        // levels are crossed. Re-summing from level one on every iteration is
-        // quadratic for large XP awards.
-        var next_threshold: u64 = 0;
-        var level: u16 = 1;
-        while (level <= c.level) : (level += 1) {
-            next_threshold += self.progression.expForLevel(level);
-        }
-        while (c.level < self.progression.max_level) {
-            if (c.xp < next_threshold) break;
-            c.level += 1;
-            next_threshold += self.progression.expForLevel(c.level);
-        }
+    pub fn awardXp(self: *Game, slot: usize, base: u64) void {
+        return game_player.awardXp(self, slot, base);
     }
 
-    /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
-    /// serverconfig key, so it rides the GameStats blob default).
-    const party_shared_kill_range_sq: f32 = 100.0 * 100.0;
-
-    /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md
-    /// §2.3): the killer's XP is `base * (1 - 0.1 * MemberCountInRange)` where
-    /// MemberCountInRange counts the other members within GameStats[54]
-    /// (party_shared_kill_range, stock default 100); every other in-range
-    /// member gets the same split XP through NetPackageSharedPartyKill so the
-    /// client shows the shared-kill tooltip. Out of party the award is full.
-    fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
-        const killer = &self.clients[killer_slot];
-        const party = self.parties.partyByMember(killer.entity_id);
-        var in_range: u8 = 0;
-        if (party) |p| {
-            if (self.sim.playerByPeer(killer_slot)) |ks| {
-                const kt = self.sim.transform[ks];
-                for (p.members[0..p.n]) |m| {
-                    if (m == killer.entity_id) continue;
-                    const ms = self.sim.slotOfNetId(m) orelse continue;
-                    if (!self.sim.mask[ms].transform) continue;
-                    const dx = self.sim.transform[ms].x - kt.x;
-                    const dz = self.sim.transform[ms].z - kt.z;
-                    if (dx * dx + dz * dz <= party_shared_kill_range_sq) in_range += 1;
-                }
-            }
-        }
-        const split: u64 = if (party != null)
-            base * (100 - 10 * @as(u64, in_range)) / 100
-        else
-            base;
-        self.awardXp(killer_slot, split);
-        if (party) |p| {
-            for (p.members[0..p.n]) |m| {
-                if (m == killer.entity_id) continue;
-                if (self.clientByEntityId(m)) |mate| {
-                    self.awardXp(mate.slot, split);
-                    if (mate.peer) |peer| {
-                        if (packages.stock_party.buildSharedKillBody(&self.body_buf, .{
-                            .entity_type = 3, // zombieEntity (class hash name in stock; ECD carries the class)
-                            .xp = @intCast(@min(split, std.math.maxInt(i32))),
-                            .entity_id = killer.entity_id,
-                            .killer_id = killer.entity_id,
-                        })) |skb| {
-                            self.sendGame(peer, "NetPackageSharedPartyKill", skb) catch |err| {
-                                self.harness.counters.inc(.net_send_errors);
-                                std.debug.print("zdtd: send SharedPartyKill failed: {s}\n", .{@errorName(err)});
-                            };
-                        } else |_| {}
-                    }
-                }
-            }
-        }
+    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
+        return game_player.killXpAward(self, killer_slot, base);
     }
 
     /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
@@ -3102,77 +3038,24 @@ pub const Game = struct {
         return game_net.sendReliablePumped(self, peer, tag, framed, budget_ns, max_attempts, count_broadcast);
     }
 
-    /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
-    /// quest modifiers are zero: biomes.xml GameStageMod/Bonus and quests.xml
-    /// GameStageMod/Bonus are not parsed yet (docs/GAP_ANALYSIS.md).
     pub fn gameStageOf(self: *const Game, slot: usize) i32 {
-        if (slot >= self.clients.len) return 1;
-        const c = &self.clients[slot];
-        const now = self.sim.director.clock.worldTimeBits();
-        return assets_gamestages.playerStage(self.gamestages.config, .{
-            .level = c.level,
-            .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
-        });
+        return game_player.gameStageOf(self, slot);
     }
 
-    /// EntityPlayer::GetLootStage for one client (asm.il ~504215): level driven,
-    /// with no POI tier or biome terms until those tables are parsed.
     pub fn lootStageOf(self: *const Game, slot: usize) i32 {
-        if (slot >= self.clients.len) return 1;
-        return assets_gamestages.lootStage(.{ .level = self.clients[slot].level });
+        return game_player.lootStageOf(self, slot);
     }
 
-    /// GameStageDefinition::CalcGameStageAround (asm.il ~1093351): party stage
-    /// over joined players within `radius` of (wx,wz). Stock also requires the
-    /// same PrefabInstance; zdtd has no per-player POI tracking, so distance
-    /// alone decides. Pass a negative radius for "every joined player".
     pub fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
-        var stages: [max_clients]i32 = undefined;
-        var n: usize = 0;
-        for (&self.clients, 0..) |*c, i| {
-            if (!c.joined) continue;
-            if (radius >= 0) {
-                const ps = self.sim.playerByPeer(c.slot) orelse continue;
-                const dx = self.sim.transform[ps].x - wx;
-                const dz = self.sim.transform[ps].z - wz;
-                if (dx * dx + dz * dz > radius * radius) continue;
-            }
-            stages[n] = self.gameStageOf(i);
-            n += 1;
-        }
-        if (n == 0) return 0;
-        return assets_gamestages.partyLevel(self.gamestages.config, stages[0..n]);
+        return game_player.partyStageAround(self, wx, wz, radius);
     }
 
-    /// EntityPlayer::GetHighestPartyLootStage (asm.il ~504467) over all joined
-    /// clients. Container contents are shared world state, so a per-viewer
-    /// stage would make the same chest differ between clients; the party high
-    /// water mark is both stock-shaped and viewer independent.
     pub fn partyLootStage(self: *const Game) i32 {
-        var best: i32 = 1;
-        for (&self.clients, 0..) |*c, i| {
-            if (!c.joined) continue;
-            best = @max(best, self.lootStageOf(i));
-        }
-        return best;
+        return game_player.partyLootStage(self);
     }
 
-    /// Party.GetHighestLootStage for one player: the max loot stage across the
-    /// player's party members, or the player alone when ungrouped. World-gen
-    /// fills with no player context keep the global partyLootStage.
     pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
-        if (peer_slot >= self.clients.len or !self.clients[peer_slot].joined) return self.partyLootStage();
-        const me = self.clients[peer_slot].entity_id;
-        var best: i32 = 1;
-        if (self.parties.partyByMember(me)) |p| {
-            for (p.members[0..p.n]) |m| {
-                if (self.clientByEntityId(m)) |mc| {
-                    best = @max(best, self.lootStageOf(mc.slot));
-                }
-            }
-            return best;
-        }
-        return @max(1, self.lootStageOf(peer_slot));
+        return game_player.lootStageForPlayer(self, peer_slot);
     }
 
     /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
@@ -3182,145 +3065,23 @@ pub const Game = struct {
     /// totals sync to the owner on a throttle. Runs after tickAll so the
     /// world clock already advanced.
     fn tickSurvival(self: *Game, dt: f32) void {
-        const prog = self.sim.rules.progression;
-        if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
-        if (self.sim.director.clock.seconds_per_hour <= 0) return;
-        const game_hours = dt / self.sim.director.clock.seconds_per_hour;
-        for (&self.clients) |*c| {
-            if (!c.joined) continue;
-            const ps = self.sim.playerByPeer(c.slot) orelse continue;
-            if (!self.sim.mask[ps].health or !self.sim.mask[ps].transform) continue;
-            var h = &self.sim.health[ps];
-            if (h.max_hp <= 0) continue;
-            const food_was = h.food;
-            const water_was = h.water;
-            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
-            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
-            var hp_delta: f32 = 0;
-            if (h.food <= 0 or h.water <= 0) {
-                hp_delta -= prog.starvation_damage_per_hour * game_hours;
-            } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
-                hp_delta += prog.well_fed_regen_per_hour * game_hours;
-            }
-            if (hp_delta != 0 and h.hp > 0) {
-                h.hp = @min(h.max_hp, @max(0, h.hp + hp_delta));
-                self.sim.markDirty(ps, .{ .hp = true });
-            }
-            if (h.food != food_was or h.water != water_was or hp_delta != 0) {
-                if (c.survival_sync_cd <= 0) {
-                    c.survival_sync_cd = prog.survival_sync_seconds;
-                    if (c.peer) |peer| {
-                        self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send survival stats failed: {s}\n", .{@errorName(err)});
-                        };
-                    }
-                } else {
-                    c.survival_sync_cd -= dt;
-                }
-            }
-            // UpdatePlayerStaminaOT: sprinting drains, idle regens; the stale
-            // timer clears the sprint latch when the client stops reporting.
-            if (c.sprint_stale_cd > 0) {
-                c.sprint_stale_cd -= dt;
-                if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
-            }
-            const stamina_was = h.stamina;
-            if (c.sprint_speed > 0) {
-                h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
-            } else {
-                h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
-            }
-            if (h.stamina != stamina_was) {
-                if (c.survival_sync_cd <= 0) {
-                    c.survival_sync_cd = prog.survival_sync_seconds;
-                    if (c.peer) |peer| {
-                        self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send stamina stats failed: {s}\n", .{@errorName(err)});
-                        };
-                    }
-                } else {
-                    c.survival_sync_cd -= dt;
-                }
-            }
-        }
+        return game_tick.tickSurvival(self, dt);
     }
 
-    /// Current whole world-hour (day*24 + hour), for time-based scheduling.
-    fn worldHour(self: *const Game) u64 {
-        const clk = self.sim.director.clock;
-        return @as(u64, clk.day) * 24 + @as(u64, @intFromFloat(clk.hours));
+    pub fn worldHour(self: *const Game) u64 {
+        return game_tick.worldHour(self);
     }
 
-    /// AirDropFrequency: spawn a supply crate near a player every N game-hours.
     fn tickAirDrop(self: *Game) void {
-        if (self.air_drop_interval_hours == 0) return;
-        const now = self.worldHour();
-        if (self.next_air_drop_hour == 0) {
-            self.next_air_drop_hour = now + self.air_drop_interval_hours;
-            return;
-        }
-        if (now < self.next_air_drop_hour) return;
-        self.next_air_drop_hour = now + self.air_drop_interval_hours;
-        // Drop above the first joined player.
-        for (&self.clients) |*cl| {
-            if (!cl.joined) continue;
-            const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-            const t = self.sim.transform[ps];
-            if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag_nid| {
-                self.fillLootBagFromTable(bag_nid, "supplyCrate", @intCast(bag_nid), self.lootStageForPlayer(cl.slot));
-                self.broadcastLootSpawn(bag_nid) catch {};
-                std.debug.print("zdtd: air drop supply crate at ({d:.0},{d:.0}) hour={d}\n", .{ t.x, t.z, now });
-            }
-            return;
-        }
+        return game_tick.tickAirDrop(self);
     }
 
-    /// BlockDamageAI / AIBM: attacking zombies chew through a solid block between
-    /// them and their target. Scaled by BlockDamageAI (BlockDamageAIBM on blood moon).
     fn tickZombieBlockDamage(self: *Game) void {
-        const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
-        if (mult == 0) return;
-        // Damage per bite before scaling (2Hz cadence).
-        const base_bite: u32 = 10;
-        // Cached zombie group: this pass only damages blocks, never spawns or
-        // destroys entities, so the slice stays valid for the whole loop.
-        for (ecs.groupSlice(&self.sim, .zombie)) |s| {
-            const ai = self.sim.zombie_ai[s];
-            if (ai.state != .attack and ai.state != .chase) continue;
-            const tgt = self.sim.slotOfNetId(ai.target_id) orelse continue;
-            const zt = self.sim.transform[s];
-            const tt = self.sim.transform[tgt];
-            var dx = tt.x - zt.x;
-            var dz = tt.z - zt.z;
-            const len = @sqrt(dx * dx + dz * dz);
-            if (len < 0.1 or len > 3.0) continue; // only when pressed against cover
-            dx /= len;
-            dz /= len;
-            const bx: i32 = @intFromFloat(@floor(zt.x + dx));
-            const bz: i32 = @intFromFloat(@floor(zt.z + dz));
-            const by: i32 = @intFromFloat(@floor(zt.y + 1)); // head height
-            const solid = self.world.isSolidWorld(bx, by, bz) catch continue;
-            if (!solid) continue;
-            const id = self.blockIdAtWorld(bx, by, bz);
-            if (id == 0) continue;
-            const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
-            const max_hp = self.maxDamageForBlock(id);
-            const total = self.addBlockDamage(bx, by, bz, dmg);
-            if (total >= max_hp) {
-                self.world.setBlockWorld(bx, by, bz, 0) catch continue;
-                self.clearBlockHp(bx, by, bz);
-                self.clearBlockRaw(bx, by, bz);
-                if (packages.buildSetBlockBody(&self.body_buf, bx, by, bz, 0)) |sb| {
-                    self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
-                } else |_| {}
-            }
-        }
+        return game_tick.tickZombieBlockDamage(self);
     }
 
     /// Block id at world coords (0 = air / unloaded).
-    fn blockIdAtWorld(self: *Game, x: i32, y: i32, z: i32) u16 {
+    pub fn blockIdAtWorld(self: *Game, x: i32, y: i32, z: i32) u16 {
         const t = world_store.World.worldToChunk(x, z);
         const ch = self.world.getOrCreate(t.pos) catch return 0;
         return ch.blockAt(t.lx, y, t.lz);
@@ -3340,83 +3101,20 @@ pub const Game = struct {
         return null;
     }
 
-    /// Register (or replace) a land claim owned by `owner_entity` at a keystone.
     fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
-        // Capture the stable owner key (login name) so the claim survives a
-        // restart; entity ids are reassigned and cannot be persisted.
-        var owner_name: [32]u8 = .{0} ** 32;
-        var owner_name_len: u8 = 0;
-        for (&self.clients) |*c| {
-            if (c.entity_id != owner_entity) continue;
-            const n = @min(c.name_len, owner_name.len);
-            @memcpy(owner_name[0..n], c.name[0..n]);
-            owner_name_len = @intCast(n);
-            break;
-        }
-        for (self.land_claims[0..self.land_claims_n]) |*claim| {
-            if (claim.x == x and claim.y == y and claim.z == z) {
-                claim.owner_entity = owner_entity;
-                claim.owner_online = true;
-                claim.owner_seen_day = self.sim.director.clock.day;
-                claim.owner_name = owner_name;
-                claim.owner_name_len = owner_name_len;
-                return;
-            }
-        }
-        // Cap: drop new claim rather than grow heap on place path.
-        if (self.land_claims_n >= max_land_claims) return;
-        self.land_claims[self.land_claims_n] = .{
-            .x = x,
-            .y = y,
-            .z = z,
-            .owner_entity = owner_entity,
-            .owner_seen_day = self.sim.director.clock.day,
-            .owner_name = owner_name,
-            .owner_name_len = owner_name_len,
-        };
-        self.land_claims_n += 1;
+        return game_world.registerClaim(self, x, y, z, owner_entity);
     }
 
-    /// A destroyed keystone no longer protects: drop the claim entirely. The
-    /// in-memory-only table is a known gap (claims do not persist across a
-    /// restart); removal still matters for the running session.
     fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
-        var i: usize = 0;
-        while (i < self.land_claims_n) : (i += 1) {
-            if (self.land_claims[i].x == x and self.land_claims[i].y == y and self.land_claims[i].z == z) {
-                self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-                self.land_claims_n -= 1;
-                return;
-            }
-        }
+        return game_world.removeClaimAt(self, x, y, z);
     }
 
-    /// Mark every claim owned by `entity` online/offline and refresh the seen
-    /// day when coming online (expiry base).
     fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {
-        const day = self.sim.director.clock.day;
-        for (self.land_claims[0..self.land_claims_n]) |*claim| {
-            if (claim.owner_entity != entity) continue;
-            claim.owner_online = online;
-            if (online) claim.owner_seen_day = day;
-        }
+        return game_world.markClaimsForEntity(self, entity, online);
     }
 
-    /// Day-roll expiry: a claim whose owner has been offline for more than
-    /// land_claim_expiry_days is released (0 disables).
     fn expireClaims(self: *Game) void {
-        if (self.land_claim_expiry_days == 0) return;
-        const day = self.sim.director.clock.day;
-        var i: usize = 0;
-        while (i < self.land_claims_n) {
-            const claim = &self.land_claims[i];
-            if (!claim.owner_online and (day - claim.owner_seen_day) > self.land_claim_expiry_days) {
-                self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-                self.land_claims_n -= 1;
-            } else {
-                i += 1;
-            }
-        }
+        return game_world.expireClaims(self);
     }
 
     /// Persist land claims to {world_dir}/claims.zlc (magic ZCLC | u16 count |
@@ -3618,132 +3316,40 @@ pub const Game = struct {
         return game_net.pollNetOnce(self);
     }
 
-    /// MaxDamage from blocks.xml+materials via maxdamage table. Generic floor when unknown.
-    fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
-        if (block_id == 0) return 1;
-        if (self.maxdamage.maxDamage(block_id)) |hp| return hp;
-        // Table loaded (by_id or name map): fail closed to soft generic, no pin id HP table.
-        if (self.maxdamage.by_id.count() > 0 or self.maxdamage.id_by_name.count() > 0) return 100;
-        // Offline / empty catalog only: soft defaults by id band (not stock truth).
-        if (block_id < 256) return 100;
-        if (block_id >= 18000 and block_id < 20000) return 500;
-        if (block_id >= 24000) return 50;
-        return 500;
+    pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
+        return game_world.maxDamageForBlock(self, block_id);
     }
 
-    fn packBlockKey(x: i32, y: i32, z: i32) u64 {
-        const xu: u64 = @as(u32, @bitCast(x));
-        const yu: u64 = @as(u16, @truncate(@as(u32, @bitCast(y))));
-        const zu: u64 = @as(u32, @bitCast(z));
-        return (xu << 32) | (yu << 16) | (zu & 0xffff);
+    pub fn packBlockKey(x: i32, y: i32, z: i32) u64 {
+        return game_world.packBlockKey(x, y, z);
     }
 
     pub fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_hp_n) : (i += 1) {
-            if (self.block_hp_key[i] == key) return self.block_hp[i];
-        }
-        return 0;
+        return game_world.getBlockHp(self, x, y, z);
     }
 
-    /// Store absolute BlockValue.damage (stock DamageBlock number line).
-    fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_hp_n) : (i += 1) {
-            if (self.block_hp_key[i] != key) continue;
-            self.block_hp[i] = abs;
-            return;
-        }
-        if (self.block_hp_n >= self.block_hp_key.len) {
-            var j: usize = 1;
-            while (j < self.block_hp_n) : (j += 1) {
-                self.block_hp_key[j - 1] = self.block_hp_key[j];
-                self.block_hp[j - 1] = self.block_hp[j];
-            }
-            self.block_hp_n -= 1;
-        }
-        self.block_hp_key[self.block_hp_n] = key;
-        self.block_hp[self.block_hp_n] = abs;
-        self.block_hp_n += 1;
+    pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
+        return game_world.setBlockHp(self, x, y, z, abs);
     }
 
-    /// Apply damage to a block (the single choke point for player dig, zombie
-    /// chew and admin edits). pub so scenarios can drive the on_block_damage
-    /// plugin verdict through the real path.
     pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
-        // on_block_damage verdict (T15): <0 denies the damage, >0 applies that
-        // percent. No plugin exports the hook -> 0 -> today's behaviour.
-        var applied = dmg;
-        const v = blockDamageVerdict(self, x, y, z, @intCast(dmg));
-        if (v < 0) return self.getBlockHp(x, y, z);
-        if (v > 0) {
-            const scaled: u32 = @as(u32, dmg) * @as(u32, @intCast(v)) / 100;
-            applied = @intCast(@min(scaled, 65535));
-        }
-        const cur = self.getBlockHp(x, y, z);
-        const sum: u32 = @as(u32, cur) + applied;
-        const abs: u16 = @intCast(@min(sum, 65535));
-        self.setBlockHp(x, y, z, abs);
-        return abs;
+        return game_world.addBlockDamage(self, x, y, z, dmg);
     }
 
-    fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_hp_n) : (i += 1) {
-            if (self.block_hp_key[i] != key) continue;
-            self.block_hp_n -= 1;
-            self.block_hp_key[i] = self.block_hp_key[self.block_hp_n];
-            self.block_hp[i] = self.block_hp[self.block_hp_n];
-            return;
-        }
+    pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
+        return game_world.clearBlockHp(self, x, y, z);
     }
 
     pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_raw_n) : (i += 1) {
-            if (self.block_raw_key[i] == key) {
-                self.block_raw[i] = raw;
-                return;
-            }
-        }
-        if (self.block_raw_n >= self.block_raw_key.len) {
-            var j: usize = 1;
-            while (j < self.block_raw_n) : (j += 1) {
-                self.block_raw_key[j - 1] = self.block_raw_key[j];
-                self.block_raw[j - 1] = self.block_raw[j];
-            }
-            self.block_raw_n -= 1;
-        }
-        self.block_raw_key[self.block_raw_n] = key;
-        self.block_raw[self.block_raw_n] = raw;
-        self.block_raw_n += 1;
+        return game_world.setBlockRaw(self, x, y, z, raw);
     }
 
-    /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
-    /// without meta (the sparse store only holds cells that carry it).
     pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_raw_n) : (i += 1) {
-            if (self.block_raw_key[i] == key) return self.block_raw[i];
-        }
-        return 0;
+        return game_world.blockRawAt(self, x, y, z);
     }
 
-    fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
-        const key = packBlockKey(x, y, z);
-        var i: usize = 0;
-        while (i < self.block_raw_n) : (i += 1) {
-            if (self.block_raw_key[i] != key) continue;
-            self.block_raw_n -= 1;
-            self.block_raw_key[i] = self.block_raw_key[self.block_raw_n];
-            self.block_raw[i] = self.block_raw[self.block_raw_n];
-            return;
-        }
+    pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
+        return game_world.clearBlockRaw(self, x, y, z);
     }
 
     /// Persist the world clock (day + hours as stock worldTime) so a restart
@@ -10584,7 +10190,7 @@ pub const Game = struct {
     }
 
     /// Entity id → joined Client (max_clients is small; linear scan is fine).
-    fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
+    pub fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
         for (&self.clients) |*cl| {
             if (cl.joined and cl.entity_id == entity_id) return cl;
         }

@@ -26,11 +26,16 @@ pub const replicate_te = @import("replicate_te.zig");
 pub const chunk_stream = @import("chunk_stream.zig");
 pub const persist = @import("persist.zig");
 pub const trade = @import("trade.zig");
-pub const game_net = @import("game_net.zig");
-pub const game_tick = @import("game_tick.zig");
-pub const game_world = @import("game_world.zig");
-pub const game_player = @import("game_player.zig");
-pub const game_join = @import("game_join.zig");
+pub const game_net = @import("game/net.zig");
+pub const game_tick = @import("game/tick.zig");
+pub const game_world = @import("game/world.zig");
+pub const game_player = @import("game/player.zig");
+pub const game_join = @import("game/join.zig");
+// C2S handlers (server/c2s/)
+pub const c2s_inv = @import("c2s/inv.zig");
+pub const c2s_move = @import("c2s/move.zig");
+pub const c2s_quest = @import("c2s/quest.zig");
+pub const c2s_misc = @import("c2s/misc.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -61,4 +66,8 @@ test {
     _ = game_world;
     _ = game_player;
     _ = game_join;
+    _ = c2s_inv;
+    _ = c2s_move;
+    _ = c2s_quest;
+    _ = c2s_misc;
 }

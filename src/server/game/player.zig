@@ -6,11 +6,11 @@
 //! existing callers/tests stay unchanged.
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const packages = @import("../wire/packages.zig");
-const assets_gamestages = @import("../assets/gamestages.zig");
+const packages = @import("../../wire/packages.zig");
+const assets_gamestages = @import("../../assets/gamestages.zig");
 
 const max_clients = game_mod.max_clients;
 

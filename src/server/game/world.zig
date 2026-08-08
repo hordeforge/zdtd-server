@@ -8,10 +8,10 @@
 //! Call as `game_world.registerClaim(g, ...)`.
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const wire_binary = @import("../wire/binary.zig");
+const wire_binary = @import("../../wire/binary.zig");
 
 const max_land_claims = game_mod.max_land_claims;
 

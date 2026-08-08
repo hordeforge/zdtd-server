@@ -11,18 +11,18 @@
 //! Documented here so the swarm does not re-extract them.
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const ln_peer = @import("../litenet/peer.zig");
-const wire_binary = @import("../wire/binary.zig");
-const packages = @import("../wire/packages.zig");
-const world_store = @import("../world/store.zig");
-const subbiome_noise = @import("../world/subbiome_noise.zig");
-const deco_mirror = @import("../world/deco_mirror.zig");
-const ecs = @import("../ecs/root.zig");
-const interest = @import("../ecs/interest.zig");
-const assets_items = @import("../assets/items.zig");
+const ln_peer = @import("../../litenet/peer.zig");
+const wire_binary = @import("../../wire/binary.zig");
+const packages = @import("../../wire/packages.zig");
+const world_store = @import("../../world/store.zig");
+const subbiome_noise = @import("../../world/subbiome_noise.zig");
+const deco_mirror = @import("../../world/deco_mirror.zig");
+const ecs = @import("../../ecs/root.zig");
+const interest = @import("../../ecs/interest.zig");
+const assets_items = @import("../../assets/items.zig");
 
 const stock_sign = packages.stock_sign;
 

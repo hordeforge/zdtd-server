@@ -57,6 +57,19 @@ for dir in src/*/; do
       fail=1
     fi
   done
+  # Recurse into one level of subfolders (e.g. src/server/c2s/, src/server/game/).
+  for sub in "$dir"*/; do
+    [[ -d "$sub" ]] || continue
+    for f in "$sub"*.zig; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f")"
+      # Subfolder imports appear as "c2s/inv.zig" / "game/net.zig"; basename still inside that string.
+      if ! grep -Fq "$base\"" "$pkg_root"; then
+        echo "lint-architecture: $f not referenced in $pkg_root (tests not aggregated)" >&2
+        fail=1
+      fi
+    done
+  done
 done
 
 # packages.zig is the stock body facade: every wire/stock_*.zig must be re-exported
