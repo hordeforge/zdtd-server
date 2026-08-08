@@ -305,6 +305,9 @@ Core loop and parity landings. Do not re-open without new evidence.
       round-trips fuel/input/output, the smelting queue (recipe blobs),
       craft-complete and melt across restart, so a forge's progress is not
       lost on reboot (rule 21).
+- [x] **Trader window 50 entries** (fe30501): TraderStock.max_stock 12 → 50
+      (stock TraderInfo.MaxItems); snapshot buffers and the TraderData wire
+      carry the full window.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

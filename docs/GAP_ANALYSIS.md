@@ -937,11 +937,12 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/assets/traders.zig` rollAllRefs/spawnLootItemsFromList,
   `src/server/game/trader.zig` rollStockRefs, `asm.il:862758-863520`
 
-- **Inventory depth and ordering** `PARTIAL`
-  `TraderStock` holds 12 entries and `sendTraderSnapshot` caps at 16, so only
-  the first 12 resolvable names survive. Stock `traderAlways` plus a
-  trader_info's two `<trader_items>` blocks is well over a hundred stacks
-  (`TraderInfo.MaxItems` is 50).
+- **Inventory depth and ordering** `50-ENTRY (2026-08-08)`
+  `TraderStock` now holds stock `TraderInfo.MaxItems` = 50 entries and every
+  snapshot path sizes from it (was 12, capped at 16), so a trader window
+  shows the full stock the XML refs roll. Stock `traderAlways` plus a
+  trader_info's two `<trader_items>` blocks is still more than 50 stacks,
+  so the window keeps the first 50 like stock.
   *Anchors:* `src/ecs/components.zig:271`, `src/assets/traders.zig`,
   `src/server/game.zig:2616`, `:6762`
 
