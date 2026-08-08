@@ -23,7 +23,6 @@ pub const evidence = @import("evidence.zig");
 pub const guard_policy = @import("guard_policy.zig");
 pub const ally = @import("ally.zig");
 pub const replicate_te = @import("replicate_te.zig");
-pub const chunk_stream = @import("chunk_stream.zig");
 pub const persist = @import("persist.zig");
 pub const game_net = @import("game/net.zig");
 pub const game_tick = @import("game/tick.zig");
@@ -71,7 +70,6 @@ test {
     _ = guard_policy;
     _ = ally;
     _ = replicate_te;
-    _ = chunk_stream;
     _ = persist;
     _ = game_net;
     _ = game_tick;

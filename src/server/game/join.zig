@@ -1,14 +1,14 @@
 //! Join bundle helpers — extracted from game.zig; helpers take *Game
 //!
-//! Extracted from game.zig following the chunk_stream / replicate_te / persist /
-//! game_net precedent: helpers take `*Game` as first param and are called as
+//! Extracted from game.zig following the replicate_te / persist / game_net
+//! precedent: helpers take `*Game` as first param and are called as
 //! `game_join.sendTraderSnapshot(g, peer, slot)`. game.zig keeps its own methods
 //! as forwarding wrappers (this swarm does not edit game.zig).
 //!
 //! Bodies are verbatim copies from src/server/game.zig (stock asm.il comments
-//! kept). Functions already extracted elsewhere are not duplicated:
-//!   sendSpawnChunk / sendSpawnArea / sendContainersInChunk → chunk_stream.zig
-//! Documented here so the swarm does not re-extract them.
+//! kept). Chunk-stream senders (sendSpawnChunk / sendSpawnArea /
+//! sendContainersInChunk) still live in game.zig; the old chunk_stream.zig
+//! copies were stale dead duplicates and were removed (ARCH_API_REVIEW).
 
 const std = @import("std");
 const game_mod = @import("../game.zig");

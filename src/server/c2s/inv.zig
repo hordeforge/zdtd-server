@@ -17,7 +17,6 @@ const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const replicate_te = @import("../replicate_te.zig");
-const chunk_stream = @import("../chunk_stream.zig");
 const vending_mod = @import("../../world/vending.zig");
 const stock_te = packages.stock_te;
 const containers_mod = @import("../../world/containers.zig");
