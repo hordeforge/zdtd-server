@@ -297,6 +297,10 @@ Core loop and parity landings. Do not re-open without new evidence.
       `lootcontainer` size attr (woodenChest 6x2=12, smallSafes 8x5=40, gun
       safe capped at 54) and roll up to their capacity; the client shows the
       block's real cell count instead of a flat 8.
+- [x] **Non-burning workstation queues** (586d59b): the craft gate mirrors
+      stock (asm.il 1331687) — only fuel-module stations wait for isBurning;
+      workbench / cement mixer / table saw advance. Fuel-module presence is
+      block-derived (blocks.xml Workstation Modules).
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

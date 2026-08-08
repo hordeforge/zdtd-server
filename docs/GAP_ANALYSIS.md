@@ -2310,12 +2310,17 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/wire/stock_te.zig:509-523`, `src/world/workstations.zig:257-269`,
   `docs/WIRE_WORKSTATION.md:167-169`
 
-- **Non-fuel workstations (workbench, chemistry station)** `PARTIAL`
-  `handleRecipeQueue` returns immediately when `is_burning` is false, and
-  `isModuleUsed` is not on the wire, so a workbench never advances a craft
-  server-side.
-  *Anchors:* `src/world/workstations.zig:221-222`,
-  `docs/WIRE_WORKSTATION.md:170-171`
+- **Non-fuel workstations (workbench, cement mixer, table saw)** `FIXED (2026-08-08)`
+  The craft gate now mirrors stock TileEntityWorkstation.HandleRecipeQueue
+  (asm.il 1331687): it waits for `is_burning` only when the station has a fuel
+  module. The fuel-module presence is block-derived (blocks.xml Workstation
+  Modules list parsed into `BlockDef.has_fuel_module`: campfire / forge /
+  chemistry have fuel, workbench / cement mixer / table saw do not), copied
+  onto the Workstation at TE apply, so workbench crafts advance server-side
+  without fuel. Chemistry station is a fuel station in stock blocks.xml
+  (Modules "output,fuel,input") and already advanced when burning.
+  *Anchors:* `src/assets/blocks.zig` hasFuelModule,
+  `src/world/workstations.zig` handleRecipeQueue, `asm.il:1331687`
 
 - **Workstation persistence and capacity** `MISSING`
   `WorkstationStore` has no save/load (unlike ContainerStore) and caps at 64
@@ -4686,9 +4691,9 @@ is on main and gated; what follows "Open:" is the honest remainder.
    array lengths, trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the
    craft tick follows `HandleRecipeQueue` / `cycleRecipeQueue`. Open: the server
    trusts the client's `Recipe` blob for output type, count and time instead of
-   validating against recipes.xml; non-burning stations (workbench) do not advance
-   server side because the Module gate is not on the wire; no live-client playtest
-   of the forge UI.
+   validating against recipes.xml; the Module gate is now block-derived
+   (non-burning workbench / cement mixer advance, 2026-08-08); no live-client
+   playtest of the forge UI.
 
 ### P2: Multiplayer CPU (M11)
 
