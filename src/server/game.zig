@@ -3928,9 +3928,6 @@ pub const Game = struct {
         return game_chunk_fill.sendSpawnChunk(self, peer, cx, cz);
     }
 
-    /// Deterministic loot seed from world block position (game/chunk_fill.zig).
-    const lootSeedAt = game_chunk_fill.lootSeedAt;
-
     /// Rebuild power nodes from a chunk's blocks (game/chunk_fill.zig).
     pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
         game_chunk_fill.scanChunkPower(self, ch, cx, cz);
@@ -3953,18 +3950,6 @@ pub const Game = struct {
 
     pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
         return game_chunk_stream.sendContainersInChunk(self, peer, cx, cz);
-    }
-
-    fn clientHasStreamed(c: *const Client, key: i64) bool {
-        return game_chunk_stream.clientHasStreamed(c, key);
-    }
-
-    fn clientAddStreamed(self: *Game, c: *Client, key: i64) void {
-        game_chunk_stream.clientAddStreamed(self, c, key);
-    }
-
-    fn clientRemoveStreamed(c: *Client, key: i64) void {
-        game_chunk_stream.clientRemoveStreamed(c, key);
     }
 
     pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
