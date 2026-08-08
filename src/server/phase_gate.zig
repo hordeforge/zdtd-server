@@ -20,9 +20,17 @@ pub fn phaseOf(joined: bool, entered: bool) Phase {
     return .playing;
 }
 
-/// Handshake / join-SM packages legal before `playing`.
-const pre_play_allow: []const []const u8 = &.{
+/// Packages legal before PlayerLogin is accepted (connecting). A peer that
+/// never logs in must not be able to reach the enter/spawn handlers and get a
+/// join bundle without an identity (AGENTS rule 18: gate matches the SM state).
+const connecting_allow: []const []const u8 = &.{
     "NetPackagePlayerLogin",
+    "NetPackagePlayerDisconnect",
+};
+
+/// Packages legal after login but before the join bundle (joined).
+const joined_allow: []const []const u8 = &.{
+    "NetPackagePlayerLogin", // re-login mid-session
     "NetPackageRequestToEnterGame",
     "NetPackageRequestToSpawnPlayer",
     "NetPackageAuthConfirmation",
@@ -41,10 +49,11 @@ fn nameIn(list: []const []const u8, name: []const u8) bool {
 
 /// True when `name` may be handled in `phase`. Playing allows all C2S names
 /// (typed handlers still validate ownership/bounds). Earlier phases only the
-/// join-SM allowlist.
+/// handshake packages legal for that join-SM state.
 pub fn allowed(phase: Phase, name: []const u8) bool {
     return switch (phase) {
-        .connecting, .joined => nameIn(pre_play_allow, name),
+        .connecting => nameIn(connecting_allow, name),
+        .joined => nameIn(joined_allow, name),
         .playing => true,
     };
 }
@@ -58,7 +67,11 @@ test "phaseOf mapping" {
 
 test "phase allow deny" {
     try std.testing.expect(allowed(.connecting, "NetPackagePlayerLogin"));
-    try std.testing.expect(allowed(.connecting, "NetPackageRequestToEnterGame"));
+    // Pre-login peers cannot reach the enter/spawn handlers.
+    try std.testing.expect(!allowed(.connecting, "NetPackageRequestToEnterGame"));
+    try std.testing.expect(!allowed(.connecting, "NetPackageRequestToSpawnPlayer"));
+    try std.testing.expect(!allowed(.connecting, "NetPackageDynamicClientArrive"));
+    try std.testing.expect(allowed(.joined, "NetPackageRequestToEnterGame"));
     try std.testing.expect(allowed(.joined, "NetPackageRequestToSpawnPlayer"));
     try std.testing.expect(allowed(.joined, "NetPackageDynamicClientArrive"));
     try std.testing.expect(!allowed(.connecting, "NetPackageEntityPosAndRot"));
