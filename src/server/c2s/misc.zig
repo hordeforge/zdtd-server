@@ -208,11 +208,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const t = self.sim.transform[ps];
         const zdef = self.entities.defaultZombie();
+        const zclass = self.entityClassOf(zdef);
         var k: i32 = 0;
         while (k < cnt and k < 8) : (k += 1) {
             const ang = @as(f32, @floatFromInt(k)) * 1.4;
             // Stop at the entity cap instead of spinning on null spawns.
-            if (self.sim.spawnZombieClass(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zdef.hash, zdef.loot_list) == null) break;
+            // A35: spawn the full resolved class so the quest summons carry stats.
+            if (self.sim.spawnZombieDef(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zclass) == null) break;
         }
         return true;
     }

@@ -1283,9 +1283,9 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                     break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm), self.trader_wallet_dukes);
                 }
                 if (def.kind == .animal) {
-                    break :blk self.sim.spawnAnimal(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
+                    break :blk self.sim.spawnAnimalDef(sx, sy, sz, self.entityClassOf(def));
                 }
-                break :blk self.sim.spawnZombieClass(sx, sy, sz, def.max_hp, def.hash, def.loot_list);
+                break :blk self.sim.spawnZombieDef(sx, sy, sz, def.max_hp, self.entityClassOf(def));
             };
             if (nid) |eid| {
                 // Force clients to treat entity as unknown so next interest pass
