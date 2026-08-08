@@ -375,6 +375,8 @@ pub const InitOptions = struct {
     /// Per-call budget for Wasm plugins (fuel + max linear-memory pages).
     plugin_budget: plugin_mod.wasm.Budget = .{},
 
+    deco_objects_per_join: usize = default_deco_objects_per_join,
+
     // [perf] switches (zdtd.toml). All default off; each is gated on apm
     // evidence from the always-on sections/counters that ship with them.
     /// Write chunk saves from a background thread (encode stays on the tick).
@@ -426,6 +428,7 @@ pub const default_storm_frequency: i32 = 100;
 pub const default_peer_stale_ms: u64 = 3000;
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
+pub const default_deco_objects_per_join: usize = 8192;
 /// Reliable-window retry pacing: the first `window_fast_attempts` retries pump
 /// ACKs with no sleep (LAN round trips are sub-ms, so a live peer usually
 /// drains in a few passes), then a 1 ms sleep every 4th attempt paces the
@@ -462,11 +465,6 @@ const eqAny = c2s_text.eqAny;
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 const chatMsgOk = c2s_text.chatMsgOk;
 const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
-
-/// Ceiling on DecoObjects one join burst may place. The count is data driven now
-/// (biomes.xml probabilities), so a modded biome file with dense distant-deco
-/// entries must not turn the join into hundreds of packages.
-const deco_objects_per_join: usize = 8192;
 
 /// A placed land-claim block: protects blocks within land_claim_size around the
 /// keystone for its owner. Owner is the player entity id that placed it.
@@ -925,6 +923,7 @@ pub const Game = struct {
     deco_mirror: bool = true,
     /// See InitOptions.block_id_mapping.
     block_id_mapping: bool = true,
+    deco_objects_per_join: usize = default_deco_objects_per_join,
     /// Set on PlayerData receipt; flushed on the periodic save tick (not per packet).
     players_dirty: bool = false,
     /// Last blood-moon-music state broadcast (edge-triggered).
@@ -1050,6 +1049,7 @@ pub const Game = struct {
             .trader_restock_refill = opts.trader_restock_refill,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .storm_frequency = opts.storm_frequency,
+            .deco_objects_per_join = opts.deco_objects_per_join,
             .sandbox_code = opts.sandbox_code,
             .sandbox_preset = opts.sandbox_preset,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
@@ -2379,7 +2379,7 @@ pub const Game = struct {
             while (dcx <= dcx_end and !capped) : (dcx += 1) {
                 const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, seed, window, sampler);
                 for (chunk_objs[0..n]) |o| {
-                    if (total >= deco_objects_per_join) {
+                    if (total >= self.deco_objects_per_join) {
                         capped = true;
                         break;
                     }
@@ -2427,7 +2427,7 @@ pub const Game = struct {
     fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
         if (self.signs.entries.len == 0) {
             const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
-            try self.sendGame(peer, "NetPackageSignDataResponse", resp);
+            try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
             std.debug.print("zdtd: SignDataRequest -> empty last batch entity peer\n", .{});
             return;
         }
@@ -2449,12 +2449,14 @@ pub const Game = struct {
                 start,
                 is_last,
             );
-            try self.sendGame(peer, "NetPackageSignDataResponse", batch.body);
+            // SignDataResponse blocks worldInfoCo until isLastBatch=true; dropping
+            // the final batch wedges the client on "Starting Game".
+            if (is_last) try self.sendGameCritical(peer, "NetPackageSignDataResponse", batch.body) else try self.sendGame(peer, "NetPackageSignDataResponse", batch.body);
             batches += 1;
             start = batch.next;
             if (start == last_chance) {
                 const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
-                try self.sendGame(peer, "NetPackageSignDataResponse", resp);
+                try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
                 break;
             }
             self.pollNetOnce();
@@ -2900,7 +2902,7 @@ pub const Game = struct {
         admin_console.pollWebui(self);
     }
 
-    fn fillWebuiSnap(self: *Game) void {
+    pub fn fillWebuiSnap(self: *Game) void {
         admin_console.fillWebuiSnap(self);
     }
 
@@ -3180,65 +3182,17 @@ pub const Game = struct {
             if (peer.critical_budget_deadline_ns < now) peer.critical_budget_deadline_ns = now + budget_ns;
             retry_budget = @min(budget_ns, peer.critical_budget_deadline_ns -% now);
         }
-        const retry_deadline = clock.monoNs() + retry_budget;
-        var attempts: u32 = 0;
-        while (attempts < max_attempts) : (attempts += 1) {
-            peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
-                error.WindowFull => {
-                    // Counter alone hid the resend error name; rate-limit a log
-                    // so a peer that cannot drain is visible in the server log.
-                    peer.resendPending(&self.net.sock) catch |re| {
-                        self.harness.counters.inc(.net_send_errors);
-                        const n = self.harness.counters.get(.net_send_errors);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: resendPending failed pkg={s} local_id={d} n={d}: {s}\n",
-                                .{ pkg_name, peer.local_id, n, @errorName(re) },
-                            );
-                        }
-                    };
-                    self.pollNetOnce();
-                    if (attempts >= window_fast_attempts) {
-                        // Paced phase: a live peer opens its window inside one
-                        // ACK batch cycle; past the deadline the window is stuck,
-                        // so fall through to the drop path instead of stalling
-                        // the 50 ms tick (~1 s per chunk × up to 8 per stream
-                        // pass before this cap: 9.86 s observed overrun).
-                        if (clock.monoNs() >= retry_deadline) break;
-                        if (attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
-                    }
-                    continue;
-                },
-                else => {
-                    self.harness.counters.inc(.net_send_errors);
-                    const n = self.harness.counters.get(.net_send_errors);
-                    if (n == 1 or n % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: send failed pkg={s} local_id={d} n={d}: {s}\n",
-                            .{ pkg_name, peer.local_id, n, @errorName(err) },
-                        );
-                    }
-                    return err;
-                },
-            };
-            self.harness.counters.add(.net_packets_out, 1);
-            self.harness.counters.add(.net_bytes_out, framed.len);
-            // Drain a few ACKs so the next package does not immediately fill the window.
-            self.pollNetAfterSend();
-            return;
-        }
-        // Drop rather than fail the tick: WindowFull must not kill the dedi.
-        self.harness.counters.inc(.reliable_window_drops);
-        const drops = self.harness.counters.get(.reliable_window_drops);
-        if (drops == 1 or drops % 100 == 0) {
-            std.debug.print(
-                "zdtd: reliable window drop pkg={s} droppable={} n={d}\n",
-                .{ pkg_name, droppable, drops },
-            );
-        }
-        // Critical (join) sends surface the failure so the enter bundle stops
-        // instead of silently continuing a bundle the client can never complete.
-        if (critical) return error.WindowFull;
+        self.sendReliablePumped(peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
+            error.WindowFull => {
+                self.harness.counters.inc(.reliable_window_drops);
+                const drops = self.harness.counters.get(.reliable_window_drops);
+                if (drops == 1 or drops % 100 == 0) {
+                    std.debug.print("zdtd: reliable window drop pkg={s} droppable={} n={d}\n", .{ pkg_name, droppable, drops });
+                }
+                if (critical) return error.WindowFull;
+            },
+            else => return err,
+        };
     }
 
     /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
@@ -3315,6 +3269,39 @@ pub const Game = struct {
                 }
             }
         }
+    }
+
+    /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
+    /// rules so broadcast and sendGameBudget share the same behaviour.
+    /// `budget_ns==null` means no deadline (stream/broadcast). Returns
+    /// error.WindowFull on exhaustion; callers own drop counters/logs and the
+    /// packages_broadcast count (via count_broadcast).
+    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
+        const retry_deadline: u64 = if (budget_ns) |b| clock.monoNs() + b else 0;
+        var attempts: u32 = 0;
+        while (attempts < max_attempts) : (attempts += 1) {
+            peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
+                error.WindowFull => {
+                    peer.resendPending(&self.net.sock) catch {
+                        self.harness.counters.inc(.net_send_errors);
+                    };
+                    self.pollNetOnce();
+                    if (budget_ns != null and clock.monoNs() >= retry_deadline) break;
+                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
+                    continue;
+                },
+                else => {
+                    self.harness.counters.inc(.net_send_errors);
+                    return err;
+                },
+            };
+            self.harness.counters.add(.net_packets_out, 1);
+            self.harness.counters.add(.net_bytes_out, framed.len);
+            if (count_broadcast) self.harness.counters.inc(.packages_broadcast);
+            self.pollNetAfterSend();
+            return;
+        }
+        return error.WindowFull;
     }
 
     /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
@@ -4623,7 +4610,7 @@ pub const Game = struct {
             // Before the configs: the client only runs Block::AssignIds after the
             // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
             // 2014542), and stock sends the mapping at this same point.
-            self.sendBlockIdMapping(peer);
+            try self.sendBlockIdMapping(peer);
             try self.sendLocalConfigFiles(peer);
             const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
             try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
@@ -6997,7 +6984,7 @@ pub const Game = struct {
     /// renumber every block the blob failed to name. So any validation failure,
     /// an empty dump, or a compressed size that does not fit `send_buf` all skip
     /// the package entirely and leave today's LoadLocal behaviour in place.
-    fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) void {
+    fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         if (!self.block_id_mapping) return;
         const nameid = packages.stock_nameid;
         if (self.maxdamage.idNameCount() == 0) {
@@ -7044,7 +7031,7 @@ pub const Game = struct {
         };
         self.sendFramedReliable(peer, "NetPackageIdMapping", framed, critical_retry_budget_ns, true) catch |err| {
             std.debug.print("zdtd: blocks IdMapping send failed: {s}\n", .{@errorName(err)});
-            return;
+            return err;
         };
         std.debug.print(
             "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
@@ -7621,7 +7608,7 @@ pub const Game = struct {
                 true,
                 c.game_stage_born_world_time,
             );
-            try self.sendGame(peer, "NetPackagePlayerId", pid);
+            try self.sendGameCritical(peer, "NetPackagePlayerId", pid);
             // PersistentPlayerState(Login): entityId → name mapping. Without it the
             // client shows GMSG "Player '' joined" and party UI has no names.
             {
@@ -9695,20 +9682,18 @@ pub const Game = struct {
                 const dz = self.sim.transform[ps].z - wz;
                 if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
             }
-            p.sendReliable(&self.net.sock, framed) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                const n = self.harness.counters.get(.net_send_errors);
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
-                        .{ name, p.local_id, n, @errorName(err) },
-                    );
-                }
-                continue;
+            self.sendReliablePumped(p, name, framed, null, 64, true) catch |err| switch (err) {
+                error.WindowFull => {
+                    self.harness.counters.inc(.reliable_window_drops);
+                    const d = self.harness.counters.get(.reliable_window_drops);
+                    if (d == 1 or d % 100 == 0) std.debug.print("zdtd: reliable window drop pkg={s} broadcastNear local_id={d} n={d}\n", .{ name, p.local_id, d });
+                },
+                else => {
+                    self.harness.counters.inc(.net_send_errors);
+                    const n2 = self.harness.counters.get(.net_send_errors);
+                    if (n2 == 1 or n2 % 100 == 0) std.debug.print("zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
+                },
             };
-            self.harness.counters.add(.net_packets_out, 1);
-            self.harness.counters.add(.net_bytes_out, framed.len);
-            self.harness.counters.inc(.packages_broadcast);
         }
     }
 
@@ -9735,21 +9720,23 @@ pub const Game = struct {
                     self.harness.counters.inc(.net_send_errors);
                     continue;
                 };
+                self.harness.counters.add(.net_packets_out, 1);
+                self.harness.counters.add(.net_bytes_out, framed.len);
+                self.harness.counters.inc(.packages_broadcast);
             } else {
-                p.sendReliable(&self.net.sock, framed) catch |err| {
-                    self.harness.counters.inc(.net_send_errors);
-                    const n = self.harness.counters.get(.net_send_errors);
-                    if (n == 1 or n % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n",
-                            .{ name, p.local_id, n, @errorName(err) },
-                        );
-                    }
-                    continue;
+                self.sendReliablePumped(p, name, framed, null, 64, true) catch |err| switch (err) {
+                    error.WindowFull => {
+                        self.harness.counters.inc(.reliable_window_drops);
+                        const d = self.harness.counters.get(.reliable_window_drops);
+                        if (d == 1 or d % 100 == 0) std.debug.print("zdtd: reliable window drop pkg={s} broadcast local_id={d} n={d}\n", .{ name, p.local_id, d });
+                    },
+                    else => {
+                        self.harness.counters.inc(.net_send_errors);
+                        const n2 = self.harness.counters.get(.net_send_errors);
+                        if (n2 == 1 or n2 % 100 == 0) std.debug.print("zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
+                    },
                 };
             }
-            self.harness.counters.add(.net_packets_out, 1);
-            self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         }
     }
