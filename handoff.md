@@ -1,9 +1,9 @@
 # Handoff — zdtd refactor + parity push
 
-**Date:** 2026-08-08
+**Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `a05888f` (docs) + staged `loot.zig` extraction not yet committed
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` ~960/963 (4 flakes)
+**Branch:** `main` at `afdbb59`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **963/963** (three consecutive runs; the 4 flakes are fixed, see below)
 
 ## What landed in this series
 
@@ -25,33 +25,43 @@
 ## Working tree right now
 
 ```
-src/server/root.zig        — staged: adds game_loot (2 lines)
-src/server/game/loot.zig   — untracked (??), 108 lines, ready to commit
-src/server/game/deco.zig   — committed at 52b0b19
-zig build                  — green (with staged loot.zig)
-lint-arch                  — clean (only if loot.zig is added to root.zig)
+working tree clean at afdbb59
+game.zig 5099 lines (was 5310 at handoff): loot, weather and vehicle shards
+  committed (67f2a88, 6db0ed9, 82b9e24) with thin forwarders
+flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
+  (87a54bb, fc9f69e, afdbb59)
 ```
 
-Staged `loot.zig` extraction is the only uncommitted code change. Everything else is committed through `a05888f`.
+All work is committed through `afdbb59`; nothing staged, nothing untracked
+except this handoff note.
 
 ## What is still open (bounded next slices)
 
-1. **Finish the staged `loot.zig` commit.** `game.zig` still contains duplicated `ecsIdFromItemName`/`fillLootBagFromTable`/`broadcastLootSpawn`/`broadcastItemDropSpawn` until the staged diff is committed. Commit: `git add src/server/game/loot.zig src/server/root.zig src/server/game.zig` (the last already reflects the forwarding shims locally but shows no diff because the working copy was reverted — re-apply the 4 forwarder bodies if committing).
-
-2. **`game.zig` still 5310 lines** — next clean shards (do NOT re-attempt the chunk_stream delegation that failed on `fillContainerFromLoot` visibility/self-call):
-   - `game/loot.zig` already done; next candidates that are self-contained: `game/sleeper` group helpers already partly done, `game/stability` stubs, or carving `game/world.zig` storage helpers. Keep each shard < ~200 lines, verbatim bodies, forwarded via `game_*.` thin wrappers.
+1. **`game.zig` 5099 lines** — next clean shards (do NOT re-attempt the chunk_stream delegation that failed on `fillContainerFromLoot` visibility/self-call):
+   - Candidates that are self-contained: `game/sleeper` group helpers already partly done, `game/stability` stubs, the join-rate-limit / ban helpers (`joinRateLimited`, `isBanned`) into `game/net.zig`, or carving `game/world.zig` storage helpers. Keep each shard < ~200 lines, verbatim bodies, forwarded via `game_*.` thin wrappers.
    - **Do not** delegate `chunk_stream.zig` chunk helpers until its internal `ensurePrefabStorageInChunk`/`fillContainerFromLoot` pub visibility + self-call cycle is fixed (prior attempt reverted at `git checkout -- src/server/game.zig src/server/chunk_stream.zig`).
 
-3. **Hardcode audit residuals** (see `docs/reviews/HARDCODE_AUDIT.md`):
+2. **Hardcode audit residuals** (see `docs/reviews/HARDCODE_AUDIT.md`):
    - A07 biome defaults, A13 recipe unlock extras, A21 gamestage biome/quest/POI terms still zero, A33 subbiome `_perm` literal (owned by 7dtd-research). None blocks the doc refresh but each is a future `Rules`/loader slice.
 
-4. **Test flakes (4, pre-existing, not introduced here):**
-   - `server.game.tests.test.console replies use the stock error and listing shapes` (`tests.zig:945` expects `in the game\n`)
-   - `server.scenarios.test.scenario blood moon day re-send fires on the day roll`
-   - `server.mode.test.GAME_OPTIONS.md documents every Rules field` (wording drift on the two new progression keys — now fixed in docs but test expectation may need the doc phrase match)
-   - Multi-seat / vending-edit scenario flakes seen intermittently.
+3. **Parity gaps (see `docs/GAP_ANALYSIS.md` + `STATUS` residual table):** deco tree density (GAP 18 subbiome shipped, but full deco still `PARTIAL`), EAI tasks 3/5 blocked on subsystems, party gamestage/loot max, trader quality_mod, work redo.
 
-5. **Parity gaps (see `docs/GAP_ANALYSIS.md` + `STATUS` residual table):** deco tree density (GAP 18 subbiome shipped, but full deco still `PARTIAL`), EAI tasks 3/5 blocked on subsystems, party gamestage/loot max, trader quality_mod, work redo.
+### Done since this handoff was written
+
+- `loot.zig` committed (67f2a88), then `weather.zig` (6db0ed9) and
+  `vehicle.zig` (82b9e24) extracted; `game.zig` 5310 → 5099.
+- **All 4 flakes root-caused and fixed.** Scenario worlds and
+  `.zdtd_cfg_cache` dirs retained a previous run's `entities.zen`, and every
+  boot re-seeded the demo minibike + turret on top of the restored ones, so
+  vehicle/turret records grew ~2 per suite run until entity slots (512) or the
+  8 KiB console reply sink ran out (multi-seat join failure, console listents
+  truncation, blood-moon timing). Fix: `had_saved_entities` gates the
+  persistable demo seeds (real restart bug), `freshScenarioDir` wipes each
+  scenario world before its test, and the console test wipes its own dir
+  (`io_fs.removeDirTreeSimple`). `zig build test` → **963/963** across three
+  consecutive runs; counts provably stable.
+- `make check` fmt gate: `zig fmt` drift from the extraction commits fixed
+  (tests.zig indentation, wasm.zig/misc.zig).
 
 ## How to verify a slice
 

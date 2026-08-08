@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **~960/963** (4 flakes pre-existing — GAME_OPTIONS doc + 7-bot hang — same root as before; lint clean; `game.zig` 5310, down from 6397 via persist + `game/deco|join|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
+**Unit tests:** `zig build test` → **963/963** (three consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5111, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -610,7 +610,7 @@ place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
 | `src/world/tts.zig` | Prefab TTS type paint |
 | `src/world/prefabs.zig` | prefabs.xml + TTS cache + paint hook |
 | `src/server/game.zig` | Orchestration + Game struct (thin façade over `src/server/game/*`) |
-| `src/server/game/*` | Per-domain game logic (join, tick, world, quest, social, trader, stability, replicate, net, player, types) |
+| `src/server/game/*` | Per-domain game logic (join, tick, world, player, quest, social, trader, stability, replicate, net, loot, deco, weather, vehicle, sleeper, hooks, types) |
 | `src/server/c2s/*` | All 5 C2S domains (join, move, inv, quest, misc) |
 | `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV3, entities.zen, claims.zlc) |
 
