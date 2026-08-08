@@ -10,19 +10,24 @@ const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
 const clock = @import("../../util/clock.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
-/// Food/Water deplete with in-game time (rates from `[sim] rules.progression`,
-/// ADR 0021), starving/dehydrated players take over-time damage and
-/// well-fed ones regen (UpdatePlayerHealthOT branches), and the changed
-/// totals sync to the owner on a throttle. Runs after tickAll so the
-/// world clock already advanced.
+/// Food/Water deplete with in-game time. Base drain is engine-driven
+/// (`Rules.progression` — no XML row carries the rate, see buffs.Survival),
+/// but the damage, regen and thresholds come from `buffs.xml` when `Game.buffs`
+/// carries them: `buffs.survival()` resolves the stage thresholds, the
+/// starvation HP loss and the stamina penalty. Runs after tickAll so the world
+/// clock already advanced.
 pub fn tickSurvival(self: *Game, dt: f32) void {
     const prog = self.sim.rules.progression;
+    const sv = assets_buffs.survival(&self.buffs);
+    const use_buff = sv.ok();
     if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
     if (self.sim.director.clock.seconds_per_hour <= 0) return;
     const game_hours = dt / self.sim.director.clock.seconds_per_hour;
+    const secs = dt;
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -33,11 +38,28 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         const water_was = h.water;
         h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
         h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+        // Stage thresholds are a fraction of max (stock StatComparePercCurrentToMax),
+        // not an absolute 0..100. Use the buff-resolved fractions when available;
+        // the Rules floor is the 80-count threshold converted to a fraction of 100.
+        const thirst_frac: [3]f32 = if (use_buff) sv.thirsty_frac else .{ 0.8, 0.8, 0.8 };
+        _ = thirst_frac;
         var hp_delta: f32 = 0;
-        if (h.food <= 0 or h.water <= 0) {
-            hp_delta -= prog.starvation_damage_per_hour * game_hours;
-        } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
-            hp_delta += prog.well_fed_regen_per_hour * game_hours;
+        if (use_buff) {
+            if (h.food <= 0 or h.water <= 0) {
+                const per_s = if (h.food <= 0 and h.water <= 0)
+                    @max(sv.starve_hp_per_s, sv.dehydrate_hp_per_s)
+                else if (h.food <= 0)
+                    sv.starve_hp_per_s
+                else
+                    sv.dehydrate_hp_per_s;
+                hp_delta -= per_s * secs;
+            }
+        } else {
+            if (h.food <= 0 or h.water <= 0) {
+                hp_delta -= prog.starvation_damage_per_hour * game_hours;
+            } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
+                hp_delta += prog.well_fed_regen_per_hour * game_hours;
+            }
         }
         if (hp_delta != 0 and h.hp > 0) {
             h.hp = @min(h.max_hp, @max(0, h.hp + hp_delta));
@@ -56,15 +78,19 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.survival_sync_cd -= dt;
             }
         }
-        // UpdatePlayerStaminaOT: sprinting drains, idle regens; the stale
-        // timer clears the sprint latch when the client stops reporting.
         if (c.sprint_stale_cd > 0) {
             c.sprint_stale_cd -= dt;
             if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
         }
         const stamina_was = h.stamina;
         if (c.sprint_speed > 0) {
-            h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
+            if (use_buff and sv.starve_stamina_perc != 0 and (h.food <= 0 or h.water <= 0)) {
+                // Stock StaminaChangeOT perc_subtract is on the buff; apply as a
+                // fraction of max per second while the relevant stage holds.
+                h.stamina = @max(0, h.stamina - @abs(sv.starve_stamina_perc) * h.stamina_max / 100.0 * secs);
+            } else {
+                h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
+            }
         } else {
             h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
         }

@@ -2152,75 +2152,22 @@ pub const Game = struct {
         };
     }
 
-    pub fn sendSurvivalStats(
-        self: *Game,
-        peer: *ln_peer.Peer,
-        entity_id: i32,
-        hp: f32,
-        max_hp: f32,
-        food: f32,
-        food_max: f32,
-        water: f32,
-        water_max: f32,
-    ) !void {
-        const stats = [_]struct { packages.EntityStatKind, f32, f32 }{
-            .{ .health, hp, max_hp },
-            .{ .food, food, food_max },
-            .{ .water, water, water_max },
-        };
-        for (stats) |s| {
-            if (packages.buildEntityStatChangedBody(
-                self.body_buf[0..32],
-                entity_id,
-                -1,
-                s[0],
-                s[1],
-                s[2],
-                0,
-            )) |body| {
-                try self.sendGame(peer, "NetPackageEntityStatChanged", body);
-            } else |_| {}
-        }
-    }
+    pub fn sendSurvivalStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, hp: f32, max_hp: f32, food: f32, food_max: f32, water: f32, water_max: f32) !void { return game_join.sendSurvivalStats(self, peer, entity_id, hp, max_hp, food, food_max, water, water_max); }
 
     /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
     /// survival/stamina loop calls it on a throttle like the vitals.
-    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
-        if (packages.buildEntityStatChangedBody(
-            self.body_buf[0..32],
-            entity_id,
-            -1,
-            .stamina,
-            stamina,
-            stamina_max,
-            0,
-        )) |body| {
-            try self.sendGame(peer, "NetPackageEntityStatChanged", body);
-        } else |_| {}
-    }
+    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void { return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max); }
 
-    /// `stock_deco` height callback over the live chunk store. Unreadable columns
-    /// return 0, which the sampler skips (fail closed, no fabricated deco).
+
     fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
         const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
         return g.world.heightWorld(wx, wz) catch 0;
     }
 
-    /// `stock_deco` species callback: the biome under (wx,wz), then that biome's
-    /// distant-decoration list from biomes.xml. Fail closed at every step, since
-    /// a block id the client cannot resolve does not degrade, it throws inside the
-    /// client world-load coroutine: `DecoManager.addLoadedDecoration` →
-    /// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
-    /// (asm.il 1262497), and `DecoChunk.UpdateModels` looks the model up by name,
-    /// which is null for a null Block. Both leave the player stuck loading, which
-    /// is worse than no trees.
     fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
         const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
         const bm = g.world.biomes orelse return .{};
         const biome_id = bm.atWorld(wx, wz) orelse return .{};
-        // GAP 18: resolve the subbiome per cell (stock decorateChunkRandom ->
-        // GetBiomeOrSubAt). A subbiome hit samples its own list, where the
-        // tree probability mass lives; otherwise the biome's own list applies.
         const subs = g.world.biome_layers_table.subBiomes(biome_id);
         var set = g.world.biome_layers_table.decosFor(biome_id);
         if (subs.len > 0) {
@@ -2236,12 +2183,7 @@ pub const Game = struct {
         return out;
     }
 
-    /// Cell offsets per deco block id for one join burst. The AssignIds map is
-    /// name-keyed, so resolving a block id back to its `MultiBlockDim` costs a
-    /// scan of the whole dump; a burst places thousands of objects but draws them
-    /// from a handful of species, so one scan per distinct id is enough.
-    const DecoDimCache = struct {
-        /// Distinct deco species a burst can encounter across the covered biomes.
+    pub const DecoDimCache = struct {
         const cap: usize = 32;
         ids: [cap]u16 = @splat(0),
         offsets: [cap]deco_mirror.Offsets = undefined,
@@ -2265,7 +2207,7 @@ pub const Game = struct {
     /// `MultiBlockDim`. An id with no name in the dump places nothing: without the
     /// name there is no way to know whether it is a multiblock, and writing a
     /// bare parent where the client expects children leaves orphan cells.
-    fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
+    pub fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
         var it = self.maxdamage.idNameIterator();
         while (it.next()) |e| {
             if (e.id != id) continue;
@@ -2280,7 +2222,7 @@ pub const Game = struct {
     /// runs the same write itself (`ChunkCluster::addDistantDecorationBlocks`,
     /// asm.il 1126815) and skips any position that is already a multiblock, so
     /// doing it first is convergent, not conflicting.
-    fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
+    pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
         const offsets = cache.offsetsFor(self, @truncate(o.block_raw));
         if (offsets.n == 0) return false;
         const written = deco_mirror.apply(&self.world, .{
@@ -2314,89 +2256,12 @@ pub const Game = struct {
     ///
     /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
     /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-    fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-        const deco = packages.stock_deco;
-        const has_species = self.deco_trees and
-            self.world.biomes != null and
-            self.world.biome_layers_table.hasDecos();
-        if (!has_species) {
-            // Empty firstPackage is still required: the `isDecorated` marking loop
-            // sits inside the `loadedDecos != null` branch, so without it the
-            // client keeps retrying local generation it cannot do.
-            const body = try deco.buildDecoUpdate(&self.body_buf, true, &.{});
-            try self.sendGame(peer, "NetPackageDecoUpdate", body);
-            std.debug.print(
-                "zdtd: DecoUpdate first=true objs=0 (deco_trees={s} biomemap={s} biome_decos={s})\n",
-                .{
-                    if (self.deco_trees) "on" else "off",
-                    if (self.world.biomes != null) "yes" else "no",
-                    if (self.world.biome_layers_table.hasDecos()) "yes" else "no",
-                },
-            );
-            return;
-        }
-
-        const t = world_store.World.worldToChunk(wx, wz);
-        const r = self.decoRadiusFor(c);
-        // Same window `streamChunksForClient` covers: heightWorld getOrCreate must
-        // not become an unbounded world-gen burst outside the streamed chunks.
-        const window: deco.Window = .{
-            .x0 = (t.pos.x - r) * deco.chunk_side,
-            .z0 = (t.pos.z - r) * deco.chunk_side,
-            .x1 = (t.pos.x + r + 1) * deco.chunk_side,
-            .z1 = (t.pos.z + r + 1) * deco.chunk_side,
-        };
-        const sampler: deco.Sampler = .{
-            .height_at = decoHeightAt,
-            .species_at = decoSpeciesAt,
-            .ctx = self,
-        };
-
-        const seed = self.worldSeed();
-        var chunk_objs: [deco.attempts_per_deco_chunk]deco.DecoObj = undefined;
-        var pw = try deco.PackageWriter.init(&self.body_buf, deco.zdtd_decos_per_package);
-        var dim_cache: DecoDimCache = .{};
-        var total: usize = 0;
-        var mirrored: usize = 0;
-        var capped = false;
-        var dcz = deco.worldToDecoChunk(window.z0);
-        const dcz_end = deco.worldToDecoChunk(window.z1 - 1);
-        const dcx_end = deco.worldToDecoChunk(window.x1 - 1);
-        while (dcz <= dcz_end and !capped) : (dcz += 1) {
-            var dcx = deco.worldToDecoChunk(window.x0);
-            while (dcx <= dcx_end and !capped) : (dcx += 1) {
-                const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, seed, window, sampler);
-                for (chunk_objs[0..n]) |o| {
-                    if (total >= self.deco_objects_per_join) {
-                        capped = true;
-                        break;
-                    }
-                    // Mirror before streaming: the chunk payload the client gets
-                    // must already contain the blocks it is about to be told to
-                    // render, or the two disagree until the next edit.
-                    if (self.deco_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
-                    if (pw.full()) {
-                        try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
-                        self.pollNetOnce();
-                    }
-                    try pw.push(o);
-                    total += 1;
-                }
-            }
-        }
-        // Always send a final package, even with 0 objects: the client needs at
-        // least one firstPackage=true to allocate + drain + mark decorated.
-        try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
-        std.debug.print(
-            "zdtd: DecoUpdate objs={d} pkgs={d} r={d} mirrored={d} capped={}\n",
-            .{ total, pw.sent, r, mirrored, capped },
-        );
-    }
+    fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void { return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz); }
 
     /// Seed the deco sampler keys off, so a chunk decorates identically across
     /// joins and restarts. The worldgen seed when there is one, else the world
     /// name hash: either way it is stable for the life of the save.
-    fn worldSeed(self: *const Game) u64 {
+    pub fn worldSeed(self: *const Game) u64 {
         if (self.world.worldgen) |wg| return wg.seed;
         return std.hash.Wyhash.hash(0, self.world_name);
     }
@@ -2404,7 +2269,7 @@ pub const Game = struct {
     /// Chunk radius covered by the join deco burst. Same clamp as
     /// `streamChunksForClient` so we only touch chunks the join streams anyway
     /// (heightWorld getOrCreate must not become an unbounded world-gen burst).
-    fn decoRadiusFor(self: *const Game, c: *const Client) i32 {
+    pub fn decoRadiusFor(self: *const Game, c: *const Client) i32 {
         var r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else c.view_radius;
         if (r < self.chunk_stream_radius_min) r = self.chunk_stream_radius_min;
         if (r > self.chunk_stream_radius_max) r = self.chunk_stream_radius_max;
@@ -2412,45 +2277,7 @@ pub const Game = struct {
         return r;
     }
 
-    fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
-        if (self.signs.entries.len == 0) {
-            const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
-            try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
-            std.debug.print("zdtd: SignDataRequest -> empty last batch entity peer\n", .{});
-            return;
-        }
-        var start: usize = 0;
-        var batches: usize = 0;
-        while (start < self.signs.entries.len) {
-            const last_chance = start;
-            // Probe how many fit, then send with correct is_last.
-            const probe = try stock_sign.buildSignDataResponseBatch(
-                &self.body_buf,
-                self.signs.entries,
-                start,
-                false,
-            );
-            const is_last = probe.next >= self.signs.entries.len;
-            const batch = try stock_sign.buildSignDataResponseBatch(
-                &self.body_buf,
-                self.signs.entries,
-                start,
-                is_last,
-            );
-            // SignDataResponse blocks worldInfoCo until isLastBatch=true; dropping
-            // the final batch wedges the client on "Starting Game".
-            if (is_last) try self.sendGameCritical(peer, "NetPackageSignDataResponse", batch.body) else try self.sendGame(peer, "NetPackageSignDataResponse", batch.body);
-            batches += 1;
-            start = batch.next;
-            if (start == last_chance) {
-                const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
-                try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
-                break;
-            }
-            self.pollNetOnce();
-        }
-        std.debug.print("zdtd: SignDataRequest -> batches={d} signs={d}\n", .{ batches, self.signs.entries.len });
-    }
+    fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendSignDataBatches(self, peer); }
 
     pub fn deinit(self: *Game) void {
         // Offline harness left sim mode on; restore wall clock before return so
@@ -3549,7 +3376,7 @@ pub const Game = struct {
         return null;
     }
 
-    fn clearLockSlot(self: *Game, ch: usize) void {
+    pub fn clearLockSlot(self: *Game, ch: usize) void {
         if (ch >= self.lock_channel.len) return;
         self.lock_channel[ch] = -1;
         self.lock_holder_entity[ch] = -1;
@@ -3566,47 +3393,11 @@ pub const Game = struct {
 
     /// Drop locks held longer than the lock stale window (tick path).
     fn reapStaleLocks(self: *Game) void {
-        const now = clock.monoNs();
-        for (&self.lock_channel, 0..) |h, i| {
-            if (h < 0) continue;
-            const g = self.lock_granted_ns[i];
-            if (g == 0) continue;
-            if (now -% g >= self.lock_stale_ns) self.clearLockSlot(i);
-        }
+        return game_tick.reapStaleLocks(self);
     }
 
     fn reapStalePeers(self: *Game) void {
-        const now = clock.monoNs();
-        const stale_ns: u64 = self.peer_stale_ms *% 1_000_000;
-        for (&self.clients) |*c| {
-            const p = c.peer orelse continue;
-            if (!p.alive) {
-                self.harness.counters.inc(.stale_peers_reaped);
-                std.debug.print(
-                    "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
-                    .{ p.local_id, c.slot, c.entity_id },
-                );
-                self.clearLocksForPeer(c.slot);
-                c.* = .{};
-                self.refreshInfoPlayers();
-                continue;
-            }
-            if (p.last_recv_ns == 0) continue;
-            if (now -% p.last_recv_ns > stale_ns) {
-                self.harness.counters.inc(.stale_peers_reaped);
-                std.debug.print(
-                    "zdtd: peer reaped stale local_id={d} slot={d} entity={d} idle_ms={d}\n",
-                    .{ p.local_id, c.slot, c.entity_id, (now -% p.last_recv_ns) / 1_000_000 },
-                );
-                p.alive = false;
-                p.authenticated = false;
-                for (&p.pending) |*slot| slot.used = false;
-                p.local_window_start = p.local_seq;
-                self.clearLocksForPeer(c.slot);
-                c.* = .{};
-                self.refreshInfoPlayers();
-            }
-        }
+        return game_tick.reapStalePeers(self);
     }
 
     pub fn peerIpKey(peer: *const ln_peer.Peer) u32 {
@@ -6061,7 +5852,7 @@ pub const Game = struct {
     /// Convert sim trader_stock into wire TraderStockEntry list (shared by the
     /// spawn ECD and the trader snapshot). Resolves ecs item ids to stock type
     /// ids via the negotiated items IdMapping; zero-count rows are skipped.
-    fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
+    pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
         const stock = self.sim.trader_stock[s];
         var n: usize = 0;
         var e: usize = 0;
@@ -6086,32 +5877,7 @@ pub const Game = struct {
         return n;
     }
 
-    fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
-        var ti: ?ecs.Slot = prefer_slot;
-        if (ti == null) {
-            var i: ecs.Slot = 0;
-            while (i < ecs.max_entities) : (i += 1) {
-                if (self.sim.alive[i] and self.sim.mask[i].trader and self.sim.mask[i].trader_stock) {
-                    ti = i;
-                    break;
-                }
-            }
-        }
-        const s = ti orelse return;
-        if (!self.sim.mask[s].trader_stock) return;
-        const eid = self.sim.network_id[s].id;
-        // Stock TraderData with primary inventory from SoA stock table.
-        var entries: [16]packages.TraderStockEntry = undefined;
-        const n = self.stockEntries(s, &entries);
-        const body = try packages.buildTraderDataStock(
-            self.body_buf[0..4096],
-            eid,
-            eid, // trader id (stock TraderID is a traders.xml index; entity id is a safe placeholder)
-            self.traderMoney(s),
-            entries[0..n],
-        );
-        try self.sendGame(peer, "NetPackageTraderData", body);
-    }
+    fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void { return game_join.sendTraderSnapshot(self, peer, prefer_slot); }
 
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         const t = packages.parseTraderTrade(body) catch return;
@@ -6196,70 +5962,14 @@ pub const Game = struct {
     pub fn dumpEvidenceFile(self: *Game, path: []const u8) !usize {
         return admin_console.dumpEvidenceFile(self, path);
     }
-    fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
-        var pts: [32]packages.SpawnPointXYZ = undefined;
-        var n: usize = 0;
-        if (self.world.spawn_count > 0) {
-            while (n < self.world.spawn_count and n < pts.len) : (n += 1) {
-                pts[n] = .{
-                    .x = self.world.spawns[n].x,
-                    .y = self.world.spawns[n].y,
-                    .z = self.world.spawns[n].z,
-                };
-            }
-        } else {
-            const sp = self.world.primarySpawn();
-            pts[0] = .{ .x = sp.x, .y = sp.y, .z = sp.z };
-            n = 1;
-        }
-        const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);
-        try self.sendGameCritical(peer, "NetPackageWorldSpawnPoints", body);
-    }
+    fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendWorldSpawnPoints(self, peer); }
 
     /// Build and send NetPackageWorldAreas from the trader POIs on the loaded
     /// map (stock: World.TraderAreas, one TraderArea per TraderArea=True
     /// prefab). Position = the decoration origin, size = the prefab size,
     /// protect padding = TraderAreaProtect - 2 (GetProtectPadding), and the
     /// teleport volumes from TeleportVolumeStart/Size (local cells).
-    fn sendWorldAreas(self: *Game, peer: *ln_peer.Peer) !void {
-        const pf = if (self.world.prefabs) |*p| p else return;
-        var areas: [8]packages.TraderAreaEntry = undefined;
-        var vols: [8][8]packages.TraderTeleport = undefined;
-        var n: usize = 0;
-        for (pf.items) |d| {
-            if (n >= areas.len) break;
-            if (world_store.prefabs.isPart(d.name)) continue;
-            const qd = pf.questData(d.name) orelse continue;
-            if (!qd.is_trader_area) continue;
-            var vn: usize = 0;
-            while (vn < qd.teleport_n and vn < vols[n].len) : (vn += 1) {
-                vols[n][vn] = .{
-                    .start_x = qd.teleport_start[vn][0],
-                    .start_y = qd.teleport_start[vn][1],
-                    .start_z = qd.teleport_start[vn][2],
-                    .size_x = qd.teleport_size[vn][0],
-                    .size_y = qd.teleport_size[vn][1],
-                    .size_z = qd.teleport_size[vn][2],
-                };
-            }
-            areas[n] = .{
-                .pos_x = d.x,
-                .pos_y = d.stampY(),
-                .pos_z = d.z,
-                .size_x = @intCast(d.size_x),
-                .size_y = @intCast(d.size_y),
-                .size_z = @intCast(d.size_z),
-                .pad_x = @intCast(qd.protect_padding[0] - 2),
-                .pad_y = qd.protect_padding[1],
-                .pad_z = @intCast(qd.protect_padding[2] - 2),
-                .teleports = vols[n][0..vn],
-            };
-            n += 1;
-        }
-        if (n == 0) return;
-        const body = try packages.buildWorldAreasBody(self.body_buf[0..2048], areas[0..n]);
-        try self.sendGameCritical(peer, "NetPackageWorldAreas", body);
-    }
+    fn sendWorldAreas(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendWorldAreas(self, peer); }
 
     /// PrefabInstance.ResetBlocksAndRebuild (asm.il 945360-945387): re-paint a
     /// POI's baked .tts blocks over the area, overwriting player edits, so a
@@ -6616,15 +6326,7 @@ pub const Game = struct {
     /// Drop armed policy kicks once the stock 0.5 s grace has elapsed.
     /// Bounded by max_clients per tick.
     fn reapPolicyKicks(self: *Game) void {
-        for (&self.clients, 0..) |*cl, i| {
-            if (cl.guard.kick_at_tick == 0) continue;
-            if (self.tick_n < cl.guard.kick_at_tick) continue;
-            if (cl.peer == null) {
-                cl.guard.kick_at_tick = 0;
-                continue;
-            }
-            self.dropClientSlot(i, "guard");
-        }
+        return game_tick.reapPolicyKicks(self);
     }
 
     /// Shared peer teardown for admin kick/ban/wipeplayer and the guard policy.
@@ -7032,11 +6734,7 @@ pub const Game = struct {
 
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).
     /// HUD day still comes from WorldTime; BloodMoonDay is the scheduled BM day.
-    fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void {
-        const vals = self.gameStatsValues();
-        const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], vals);
-        try self.sendGameCritical(peer, "NetPackageGameStats", gs);
-    }
+    fn sendGameStats(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendGameStats(self, peer); }
 
     /// The bPersistent GameStats values (stock defaults otherwise).
     /// Effective GameStats blob values (wire NetPackageGameStats). pub so
@@ -7070,48 +6768,13 @@ pub const Game = struct {
     /// Re-send the GameStats blob to every entered peer when the scheduled
     /// blood-moon day rolls (a client that joined mid-cycle and sat past its
     /// first horde would otherwise keep the stale red-moon HUD day forever).
-    pub fn broadcastGameStats(self: *Game) !void {
-        const gs = try packages.buildGameStatsBodyValues(self.body_buf[1040..2048], self.gameStatsValues());
-        try self.broadcast("NetPackageGameStats", gs);
-    }
+    pub fn broadcastGameStats(self: *Game) !void { return game_join.broadcastGameStats(self); }
 
     /// Map markers for active journal quests (stock class names only).
-    fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
-        const ps = self.sim.playerByPeer(peer_slot) orelse return;
-        if (!self.sim.mask[ps].journal) return;
-        for (self.sim.journal[ps].slots) |s| {
-            if (!s.active or s.completed) continue;
-            const d = self.sim.catalog.byId(s.def_id) orelse continue;
-            if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-            // nav_objects.xml: quest | go_to_trader | return_to_trader
-            const nav_class: []const u8 = switch (d.kind) {
-                .fetch_trader => if (s.ready_turn_in) "return_to_trader" else "go_to_trader",
-                .goto_point, .kill_zombies, .fetch_item, .craft, .stay_within, .block_activate => "quest",
-            };
-            const use_def_pos = d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft;
-            // A POI-bound quest (audit B26) marks the placed POI center; defs
-            // without one keep the def marker position.
-            const gx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
-            const gz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
-            const lx: f32 = if (use_def_pos) gx else @floatFromInt(self.world.primarySpawn().x);
-            const ly: f32 = if (use_def_pos) d.ty else @floatFromInt(self.world.primarySpawn().y);
-            const lz: f32 = if (use_def_pos) gz else @floatFromInt(self.world.primarySpawn().z);
-            // entityId tags marker to player for client cleanup.
-            const body = try packages.buildNavObjectAdd(
-                self.body_buf[8192..8704],
-                nav_class,
-                d.name,
-                lx,
-                ly,
-                lz,
-                player_eid,
-            );
-            try self.sendGame(peer, "NetPackageNavObject", body);
-        }
-    }
+    fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void { return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid); }
 
     /// True when quest id is likely present in stock client QuestClass.
-    fn isStockClientQuestName(self: *Game, name: []const u8) bool {
+    pub fn isStockClientQuestName(self: *Game, name: []const u8) bool {
         if (name.len == 0) return false;
         // A stock quests.xml catalog is client-known by construction: both the
         // server and the stock client load the same Data/Config/quests.xml, so
@@ -7386,95 +7049,10 @@ pub const Game = struct {
 
     /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
     /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
-    fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
-        const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
-        const pfx: f32 = @floatFromInt(px);
-        const pfz: f32 = @floatFromInt(pz);
-        var i: ecs.Slot = 0;
-        var sent: u32 = 0;
-        var alive_z: u32 = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!self.sim.alive[i]) continue;
-            if (!self.sim.mask[i].kind) continue;
-            const k = self.sim.kind[i];
-            if (k != .zombie and k != .animal and k != .trader) continue;
-            if (k == .zombie) alive_z += 1;
-            if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
-            if (self.sim.mask[i].player) continue;
-            const nid = self.sim.network_id[i].id;
-            if (nid == c.entity_id or nid <= 0) continue;
-            if (!interest.inRange(pfx, pfz, self.sim.transform[i].x, self.sim.transform[i].z, radius)) continue;
-            const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
-            const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
-                self.sim.class_id[i].hash
-            else
-                packages.stock_entity.class_zombie_default;
-            const body = try packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
-                .entity_id = nid,
-                .entity_class = eclass,
-                .x = self.sim.transform[i].x,
-                .y = self.sim.transform[i].y,
-                .z = self.sim.transform[i].z,
-                .yaw = self.sim.transform[i].yaw,
-                .is_sleeper = sleeper,
-                .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
-                    var ent_buf: [16]packages.TraderStockEntry = undefined;
-                    const n = self.stockEntries(i, &ent_buf);
-                    break :blk .{ .trader_id = nid, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
-                } else null,
-            });
-            try self.sendGame(peer, "NetPackageEntitySpawn", body);
-            c.known_entities.set(i);
-            sent += 1;
-            self.pollNetOnce();
-            if (sent >= 16) break;
-        }
-        std.debug.print("zdtd: stock EntitySpawn mobs sent={d} alive_z={d} around=({d},{d})\n", .{ sent, alive_z, px, pz });
-    }
+    fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void { return game_join.sendStockEntitySpawns(self, peer, c, px, pz); }
 
     /// Stock EntityStatChanged for core vitals (Health/Stamina/Food/Water).
-    fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
-        const eid = c.entity_id;
-        if (eid <= 0) return;
-        var hp: f32 = 100;
-        var max_hp: f32 = 100;
-        var food: f32 = 100;
-        var food_max: f32 = 100;
-        var water: f32 = 100;
-        var water_max: f32 = 100;
-        var stamina: f32 = 100;
-        var stamina_max: f32 = 100;
-        if (self.sim.slotOfNetId(eid)) |si| {
-            if (self.sim.mask[si].health) {
-                hp = self.sim.health[si].hp;
-                max_hp = self.sim.health[si].max_hp;
-                food = self.sim.health[si].food;
-                food_max = self.sim.health[si].food_max;
-                water = self.sim.health[si].water;
-                water_max = self.sim.health[si].water_max;
-                stamina = self.sim.health[si].stamina;
-                stamina_max = self.sim.health[si].stamina_max;
-            }
-        }
-        const stats = [_]struct { packages.EntityStatKind, f32, f32 }{
-            .{ .health, hp, max_hp },
-            .{ .stamina, stamina, stamina_max },
-            .{ .food, food, food_max },
-            .{ .water, water, water_max },
-        };
-        for (stats) |s| {
-            const body = try packages.buildEntityStatChangedBody(
-                self.body_buf[0..32],
-                eid,
-                -1,
-                s[0],
-                s[1],
-                s[2],
-                0,
-            );
-            try self.sendGame(peer, "NetPackageEntityStatChanged", body);
-        }
-    }
+    fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void { return game_join.sendPlayerVitals(self, peer, c); }
 
     pub fn countJoined(self: *const Game) u16 {
         var n: u16 = 0;
@@ -7519,66 +7097,15 @@ pub const Game = struct {
         return packages.buildInventoryBodyStockResolved(buf, &self.sim.inventory[ps], resolveItemType, self);
     }
 
-    fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
-        // Compact NameIdMapping: only ECS builtins that resolved to stock types (fits 8 KiB body).
-        // Full items.xml map is ~30–50 KiB uncompressed; stock client already has matching AssignIds
-        // from the same Config when game-dir is shared.
-        var map_buf: [2048]u8 = undefined;
-        var w: wire_binary.Writer = .{ .buf = &map_buf };
-        try w.writeI32(1);
-        const count_pos = w.pos;
-        try w.writeI32(0);
-        var n: i32 = 0;
-        var id: u16 = 1;
-        while (id <= 12) : (id += 1) {
-            const st = self.items.stockTypeFor(id);
-            if (st == 0) continue;
-            const name = assets_items.builtinStockName(id) orelse continue;
-            try w.writeI32(st);
-            try w.writeString(name);
-            n += 1;
-        }
-        std.mem.writeInt(i32, map_buf[count_pos..][0..4], n, .little);
-        if (n == 0) return;
-        const body = packages.buildIdMappingBody(&self.body_buf, "items", w.written()) catch return;
-        try self.sendGame(peer, "NetPackageIdMapping", body);
-    }
+    fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendItemIdMapping(self, peer); }
 
     /// Holding-only S2C (valid direction for stock clients).
     /// Join: send empty held stack (entityId + count=0 + index). Full ItemValue held
     /// stacks have underrun'd stock HoldingItem.read mid-join when framing/window is tight;
     /// PDF already carries toolbelt. Echo path after InvTx still sends resolved hold.
-    fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
-        try self.sendHoldingOnlyEx(peer, c, false);
-    }
+    fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void { return game_join.sendHoldingOnly(self, peer, c); }
 
-    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void {
-        const ps = self.sim.playerByPeer(c.slot) orelse return;
-        if (!self.sim.mask[ps].inventory) return;
-        // Dedicated slice after PlayerId region; keep short fixed body.
-        var hb: []const u8 = undefined;
-        if (full_stack) {
-            hb = try packages.buildHoldingBodyResolved(
-                self.body_buf[6144..6400],
-                c.entity_id,
-                &self.sim.inventory[ps],
-                resolveItemType,
-                self,
-            );
-        } else {
-            // Empty ItemStack: entityId + u16 count=0 + holding index.
-            var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
-            try w.writeI32(c.entity_id);
-            try w.writeU16(0);
-            const idx: u8 = if (self.sim.inventory[ps].holding < ecs.components.inv_toolbelt)
-                @intCast(self.sim.inventory[ps].holding)
-            else
-                0;
-            try w.writeByte(idx);
-            hb = w.written();
-        }
-        try self.sendGame(peer, "NetPackageHoldingItem", hb);
-    }
+    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void { return game_join.sendHoldingOnlyEx(self, peer, c, full_stack); }
 
     /// Post-change inv echo. PlayerInventory/Bag are ToServer-only for stock
     /// clients; only HoldingItem is a valid S2C echo.
@@ -7734,7 +7261,7 @@ pub const Game = struct {
     /// Live trader AvailableMoney for the wire: stock debits it when buying
     /// from the player and credits it when selling to them. Uninitialized
     /// traders (wallet_default 0) fall back to the config default.
-    fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
+    pub fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
         if (self.sim.mask[s].trader_stock) {
             const m = self.sim.trader_stock[s];
             if (m.wallet_default != 0) return m.wallet;
@@ -9411,12 +8938,7 @@ pub const Game = struct {
     }
 
     fn clearDeadKnownEntities(self: *Game) void {
-        // Most ticks free no slots; skip the reconcile entirely.
-        if (!self.sim.any_freed_this_tick) return;
-        // Word-wise AND per client against the sim's live set, instead of a
-        // per-slot × per-client unset sweep (512×64 every tick).
-        for (&self.clients) |*kc| kc.known_entities.setIntersection(self.sim.alive_bits);
-        self.sim.any_freed_this_tick = false;
+        return game_tick.clearDeadKnownEntities(self);
     }
 
     pub fn step(self: *Game) !void {

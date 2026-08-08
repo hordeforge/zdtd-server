@@ -74,26 +74,7 @@ fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.Species
 /// name-keyed, so resolving a block id back to its `MultiBlockDim` costs a
 /// scan of the whole dump; a burst places thousands of objects but draws them
 /// from a handful of species, so one scan per distinct id is enough.
-const DecoDimCache = struct {
-    /// Distinct deco species a burst can encounter across the covered biomes.
-    const cap: usize = 32;
-    ids: [cap]u16 = @splat(0),
-    offsets: [cap]deco_mirror.Offsets = undefined,
-    n: usize = 0,
-
-    fn offsetsFor(self: *DecoDimCache, g: *const Game, id: u16) deco_mirror.Offsets {
-        for (self.ids[0..self.n], self.offsets[0..self.n]) |cached_id, offs| {
-            if (cached_id == id) return offs;
-        }
-        const offs = g.decoOffsetsFor(id);
-        if (self.n < cap) {
-            self.ids[self.n] = id;
-            self.offsets[self.n] = offs;
-            self.n += 1;
-        }
-        return offs;
-    }
-};
+const DecoDimCache = Game.DecoDimCache;
 
 // ---------------------------------------------------------------------------
 // Join bundle sends
