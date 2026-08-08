@@ -35,7 +35,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `on_player_join`, `on_shutdown` and import `zdtd_log`, `zdtd_tick`,
   `zdtd_queue`; every call runs under a fuel and linear-memory budget, and a
   module that loops is disabled at its budget instead of stalling the server.
-  See `docs/PLUGIN_DEV.md`.
+  Plugins may also handle extra admin verbs via `on_admin_command` and
+  act as a chat filter via `on_chat` (deny or rewrite; first responder wins;
+  bad UTF-8 rewrite treated as deny). See `docs/PLUGIN_DEV.md`.
 - An operator web UI is available via `--webui-port`, `--webui-bind`, and
   `--webui-secret` (or env `ZDTD_WEBUI_SECRET`). It is off by default, binds
   to loopback, and refuses to start without a secret. It exposes the same

@@ -1,0 +1,4 @@
+name = "Example Chat Filter"
+version = "0.1.0"
+wasm = "plugin.wasm"
+description = "Example Wasm plugin that filters chat: suppresses messages containing 'bad' and rewrites 'hello' to 'hi'. Drop-in under mods/; enable via zdtd.toml [plugin] modules = \"mods/example_chat_filter/plugin.wasm\"."

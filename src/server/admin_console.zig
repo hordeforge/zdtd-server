@@ -774,6 +774,21 @@ pub fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const 
     return buf[0..n];
 }
 
+fn tryDispatchPluginAdmin(self: *Game, line: []const u8) bool {
+    // Bounded reply buffer: plugin admin commands are informational, not bulk
+    // dumps. 4k matches the largest single admin formatter (ban list).
+    var out: [4096]u8 = undefined;
+    if (self.plugins.adminCommand(line, &out)) |reply| {
+        self.adminReply(reply);
+        return true;
+    }
+    if (self.wasm_plugins.adminCommand(line, &out)) |reply| {
+        self.adminReply(reply);
+        return true;
+    }
+    return false;
+}
+
 pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     const trimmed = std.mem.trim(u8, line, " \t");
     const verb_end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
@@ -800,6 +815,11 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             }
         },
         .unknown => {
+            // Plugin admin commands: a plugin can handle a verb the core does
+            // not know. Auth has already gated runAdminLine (admin TCP auth),
+            // so a plugin cannot bypass it — it just handles a verb the core
+            // would otherwise report as unknown.
+            if (tryDispatchPluginAdmin(self, trimmed)) return;
             // Surface the first token so typos are obvious (matches player console).
             const bad_verb = if (verb_end > 0) trimmed[0..verb_end] else trimmed;
             self.adminWrite(admin_cmds.writeUnknownCommand, .{bad_verb});

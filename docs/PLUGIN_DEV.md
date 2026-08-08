@@ -27,12 +27,17 @@ your .wasm                        zdtd
             on_entity_killed <──  verdict hook: deny/adjust (T15)
             on_block_damage <───  verdict hook: deny/adjust (T15)
             on_quest_complete <─  verdict hook: deny/adjust (T15)
+            on_admin_command <──  first handler with reply wins
+            on_chat <───────────  filter hook: deny/rewrite
   imports:  log            ────>  provided by the host, capability-gated
             ...
 ```
 
 Export only the hooks you need. A missing export means that hook is not
-registered, and costs nothing at runtime.
+registered, and costs nothing at runtime. Additional hooks: `on_admin_command`
+(`ptr,len,out_ptr,out_cap)->i32`, first handler with bytes wins; `on_chat`
+(`sender,msg_ptr,msg_len,out_ptr,out_cap)->i32`, <0 deny, 0 keep, >0 rewrite
+(first responder wins; bad UTF-8 rewrite is treated as deny).
 
 ## Enabling a plugin
 

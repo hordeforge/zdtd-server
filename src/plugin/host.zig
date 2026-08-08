@@ -117,6 +117,47 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    /// Join gate: first plugin that denies wins.
+    pub fn playerLoginDeny(self: *PluginHost, peer_slot: u16, name: []const u8, out: []u8) ?[]const u8 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_player_login) |f| {
+                if (f(&self.view, peer_slot, name, out)) |reason| return reason;
+            }
+        }
+        return null;
+    }
+
+    /// Chat hook: first plugin that rewrites or suppresses wins. The handler
+    /// writes the filtered message into `out` and returns it; null means keep
+    /// the original, "" means suppress. Validate after — a bad rewrite is
+    /// treated as suppress.
+    pub fn chatFilter(self: *PluginHost, sender: i32, msg: []const u8, out: []u8) ?[]const u8 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_chat) |f| {
+                if (f(&self.view, sender, msg, out)) |filtered| return filtered;
+            }
+        }
+        return null;
+    }
+
+    /// Admin command hook: first plugin that handles the verb wins. The
+    /// handler writes its reply into `out` and returns the written slice; a
+    /// null return means not handled.
+    pub fn adminCommand(self: *PluginHost, cmd: []const u8, out: []u8) ?[]const u8 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_admin_command) |f| {
+                if (f(&self.view, cmd, out)) |reply| return reply;
+            }
+        }
+        return null;
+    }
+
     pub fn shutdown(self: *PluginHost) void {
         var i: usize = self.n;
         while (i > 0) {
@@ -173,4 +214,69 @@ test "host rejects duplicate and caps" {
     const overflow: api.PluginVTable = .{ .name = "overflow" };
     try std.testing.expect(!h.register(&overflow));
     try std.testing.expectEqual(max_plugins, h.count());
+}
+
+test "host chat filter hook first handler wins and suppress" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    const p1: api.PluginVTable = .{
+        .name = "c1",
+        .on_chat = &struct {
+            fn f(_: *const api.Host, _: i32, msg: []const u8, _: []u8) ?[]const u8 {
+                if (std.mem.indexOf(u8, msg, "bad") != null) return "";
+                return null;
+            }
+        }.f,
+    };
+    const p2: api.PluginVTable = .{
+        .name = "c2",
+        .on_chat = &struct {
+            fn f(_: *const api.Host, _: i32, msg: []const u8, out: []u8) ?[]const u8 {
+                const s = "hi";
+                _ = msg;
+                @memcpy(out[0..s.len], s);
+                return out[0..s.len];
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&p1));
+    try std.testing.expect(h.register(&p2));
+    h.enableAll();
+    var out: [64]u8 = undefined;
+    // "hello" reaches p2 (p1 only blocks "bad") -> rewritten to "hi".
+    try std.testing.expectEqualStrings("hi", h.chatFilter(1, "hello", &out).?);
+    try std.testing.expectEqualStrings("", h.chatFilter(1, "bad word", &out).?);
+    // c2 rewrites but only reached when c1 passes.
+    try std.testing.expectEqualStrings("hi", h.chatFilter(1, "ok", &out).?);
+}
+
+test "host admin command hook first handler wins" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    const p1: api.PluginVTable = .{
+        .name = "p1",
+        .on_admin_command = &struct {
+            fn f(_: *const api.Host, cmd: []const u8, out: []u8) ?[]const u8 {
+                if (!std.mem.startsWith(u8, cmd, "ping")) return null;
+                const s = "pong\n";
+                @memcpy(out[0..s.len], s);
+                return out[0..s.len];
+            }
+        }.f,
+    };
+    const p2: api.PluginVTable = .{
+        .name = "p2",
+        .on_admin_command = &struct {
+            fn f(_: *const api.Host, _: []const u8, out: []u8) ?[]const u8 {
+                const s = "p2\n";
+                @memcpy(out[0..s.len], s);
+                return out[0..s.len];
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&p1));
+    try std.testing.expect(h.register(&p2));
+    h.enableAll();
+    var out: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("pong\n", h.adminCommand("ping", &out).?);
+    // p1 does not handle "other", so p2 wins.
+    try std.testing.expectEqualStrings("p2\n", h.adminCommand("other", &out).?);
 }

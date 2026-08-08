@@ -63,6 +63,25 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {}
             }
         }
+        // Wasm/static plugin join gate: after sanitization, before any join effect.
+        // First deny wins; traps are ignored (allow). Ordering: plugin allowlist
+        // before identity ban so a custom allowlist can coexist with ban_list.
+        {
+            var deny_buf: [256]u8 = undefined;
+            const name_slice = if (c.name_len > 0) c.name[0..c.name_len] else "";
+            if (self.plugins.playerLoginDeny(@intCast(c.slot), name_slice, &deny_buf)) |reason| {
+                self.harness.counters.inc(.join_fail);
+                std.debug.print("zdtd: PlayerLogin plugin deny slot={d} reason={s}\n", .{ c.slot, reason });
+                self.dropClientSlot(c.slot, "plugin-deny");
+                return true;
+            }
+            if (self.wasm_plugins.playerLoginDeny(@intCast(c.slot), name_slice, &deny_buf)) |reason| {
+                self.harness.counters.inc(.join_fail);
+                std.debug.print("zdtd: PlayerLogin wasm deny slot={d} reason={s}\n", .{ c.slot, reason });
+                self.dropClientSlot(c.slot, "wasm-deny");
+                return true;
+            }
+        }
         // Identity ban (`ban add`) outlives the connection an IP ban catches,
         // so it is checked once the login name is known.
         if (c.name_len != 0 and self.ban_list.banned(c.name[0..c.name_len], clock.wallSeconds())) {

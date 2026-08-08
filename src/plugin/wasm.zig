@@ -19,10 +19,14 @@ pub const Hook = enum(u8) {
     on_entity_killed = 5,
     on_block_damage = 6,
     on_quest_complete = 7,
+    on_admin_command = 8,
+    on_chat = 9,
+    on_player_login = 10,
 
     pub const names = [_][]const u8{
-        "on_enable",       "on_tick",          "on_player_join",  "on_shutdown",
-        "on_player_death", "on_entity_killed", "on_block_damage", "on_quest_complete",
+        "on_enable",        "on_tick",          "on_player_join",  "on_shutdown",
+        "on_player_death",  "on_entity_killed", "on_block_damage", "on_quest_complete",
+        "on_admin_command", "on_chat",          "on_player_login",
     };
 };
 
@@ -75,7 +79,7 @@ pub const Plugin = struct {
     name: []const u8,
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
-    hook_present: [8]bool = .{false} ** 8,
+    hook_present: [11]bool = .{false} ** 11,
 
     pub fn load(
         allocator: std.mem.Allocator,
@@ -200,6 +204,131 @@ pub const Plugin = struct {
         };
     }
 
+    /// on_admin_command(cmd_ptr: i32, cmd_len: i32, out_ptr: i32, out_cap: i32) -> i32:
+    /// bytes written, 0 not handled, <0 error. Handled means the host replies
+    /// with the guest's buffer slice; not handled falls through to the next
+    /// plugin / core unknown. Traps disable only that module.
+    pub fn callAdminCommand(self: *Plugin, cmd: []const u8, out: []u8) ?[]const u8 {
+        if (self.disabled) return null;
+        if (!self.hook_present[@intFromEnum(Hook.on_admin_command)]) return null;
+        // Copy the command into the guest, call the hook, copy the reply back.
+        const mem = self.instance.memory() orelse return null;
+        // Allocate guest scratch via a bump helper if the module exports it
+        // (`zdtd_alloc`), otherwise use the low end of linear memory with a
+        // bounds check — small cmds (<= 512 bytes) so we can reuse a fixed
+        // region without growing. Simpler: use host-provided buffers through
+        // the imported write path: pass ptr/len into the instance's memory and
+        // read the return length.
+        var guest_mem = mem.slice();
+        // Ensure we have space: guest must have at least cmd.len + out.len.
+        // Grow if needed (one page = 64k).
+        const need: usize = cmd.len + out.len + 16;
+        if (guest_mem.len < need) {
+            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
+            _ = mem.grow(pages) orelse return null;
+            guest_mem = mem.slice();
+        }
+        // Layout: [cmd_bytes][out_region]. Keep out_region at a page-aligned-ish
+        // offset to avoid overlap with guest stack if it grows from 0.
+        const cmd_off: u32 = 1024;
+        if (@as(usize, cmd_off) + cmd.len + out.len > guest_mem.len) return null;
+        const out_off: u32 = cmd_off + @as(u32, @intCast(cmd.len));
+        @memcpy(guest_mem[cmd_off..][0..cmd.len], cmd);
+        const written: i32 = self.instance.call(
+            fn (i32, i32, i32, i32) i32,
+            "on_admin_command",
+            .{ @intCast(cmd_off), @intCast(cmd.len), @intCast(out_off), @intCast(out.len) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_admin_command disabled: {s}\n", .{ self.name, @errorName(err) });
+            return null;
+        };
+        if (written <= 0) return null;
+        const n: usize = @intCast(@min(@as(i32, @intCast(out.len)), written));
+        // Re-fetch slice in case the call grew memory.
+        const cur = mem.slice();
+        @memcpy(out[0..n], cur[out_off..][0..n]);
+        return out[0..n];
+    }
+
+    /// on_chat(sender: i32, msg_ptr: i32, msg_len: i32, out_ptr: i32, out_cap: i32) -> i32:
+    /// <0 deny, 0 keep/probe miss, >0 bytes of filtered body. A filtered body
+    /// that fails chatMsgOk is treated as deny by the caller. Traps disable
+    /// only that module and are treated as keep.
+    pub fn callChat(self: *Plugin, sender: i32, msg: []const u8, out: []u8) ?[]const u8 {
+        if (self.disabled) return null;
+        if (!self.hook_present[@intFromEnum(Hook.on_chat)]) return null;
+        const mem = self.instance.memory() orelse return null;
+        var guest_mem = mem.slice();
+        const need: usize = msg.len + out.len + 16;
+        if (guest_mem.len < need) {
+            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
+            _ = mem.grow(pages) orelse return null;
+            guest_mem = mem.slice();
+        }
+        const msg_off: u32 = 1024;
+        if (@as(usize, msg_off) + msg.len + out.len > guest_mem.len) return null;
+        const out_off: u32 = msg_off + @as(u32, @intCast(msg.len));
+        @memcpy(guest_mem[msg_off..][0..msg.len], msg);
+        const written: i32 = self.instance.call(
+            fn (i32, i32, i32, i32, i32) i32,
+            "on_chat",
+            .{ sender, @intCast(msg_off), @intCast(msg.len), @intCast(out_off), @intCast(out.len) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_chat disabled: {s}\n", .{ self.name, @errorName(err) });
+            return null;
+        };
+        if (written < 0) return "";
+        if (written == 0) return null;
+        const n: usize = @intCast(@min(@as(i32, @intCast(out.len)), written));
+        const cur = mem.slice();
+        @memcpy(out[0..n], cur[out_off..][0..n]);
+        return out[0..n];
+    }
+
+    /// on_player_login(peer_slot: i32, name_ptr: i32, name_len: i32, out_ptr: i32, out_cap: i32) -> i32:
+    /// <0 deny with reason written to out (trap/fuel -> allow), 0 allow (not handled), >0 also deny.
+    /// Spelling: a deny that returns 0 bytes is still a deny with an empty reason; the caller falls back to "denied".
+    pub fn callPlayerLogin(self: *Plugin, peer_slot: u16, name: []const u8, out: []u8) ?[]const u8 {
+        if (self.disabled) return null;
+        if (!self.hook_present[@intFromEnum(Hook.on_player_login)]) return null;
+        const mem = self.instance.memory() orelse return null;
+        var guest_mem = mem.slice();
+        const need: usize = name.len + out.len + 16;
+        if (guest_mem.len < need) {
+            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
+            _ = mem.grow(pages) orelse return null;
+            guest_mem = mem.slice();
+        }
+        const name_off: u32 = 1024;
+        if (@as(usize, name_off) + name.len + out.len > guest_mem.len) return null;
+        const out_off: u32 = name_off + @as(u32, @intCast(name.len));
+        @memcpy(guest_mem[name_off..][0..name.len], name);
+        const ret: i32 = self.instance.call(
+            fn (i32, i32, i32, i32, i32) i32,
+            "on_player_login",
+            .{ @intCast(peer_slot), @intCast(name_off), @intCast(name.len), @intCast(out_off), @intCast(out.len) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_player_login disabled: {s}\n", .{ self.name, @errorName(err) });
+            return null;
+        };
+        if (ret == 0) return null;
+        if (ret < 0) {
+            // Negative return is deny; out may be empty.
+            if (out.len == 0) return "";
+            const n: usize = @intCast(@min(@as(usize, @intCast(-ret)), out.len));
+            const cur = mem.slice();
+            @memcpy(out[0..n], cur[out_off..][0..n]);
+            return out[0..n];
+        }
+        const n: usize = @intCast(@min(@as(i32, @intCast(out.len)), ret));
+        const cur = mem.slice();
+        @memcpy(out[0..n], cur[out_off..][0..n]);
+        return out[0..n];
+    }
+
     /// Export the remaining fuel (diagnostics; the runtime enforces the budget).
     pub fn fuelRemaining(self: *Plugin) ?u64 {
         return self.instance.fuelRemaining();
@@ -296,6 +425,35 @@ pub const WasmHost = struct {
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
+    }
+
+    /// Join gate: first deny wins.
+    pub fn playerLoginDeny(self: *WasmHost, peer_slot: u16, name: []const u8, out: []u8) ?[]const u8 {
+        for (0..self.n) |i| {
+            if (self.slots[i].callPlayerLogin(peer_slot, name, out)) |reason| return reason;
+        }
+        return null;
+    }
+
+    /// Chat hook: first plugin that rewrites or denies wins. Returns the
+    /// filtered body or "" for deny; null means keep original.
+    pub fn chatFilter(self: *WasmHost, sender: i32, msg: []const u8, out: []u8) ?[]const u8 {
+        for (0..self.n) |i| {
+            if (self.slots[i].callChat(sender, msg, out)) |filtered| return filtered;
+        }
+        return null;
+    }
+
+    /// Admin command hook: first plugin that handles the verb wins. The
+    /// handler writes into `out` and returns the written slice. 0 / null means
+    /// not handled (try next plugin, then core unknown). Traps disable only
+    /// that module.
+    pub fn adminCommand(self: *WasmHost, cmd: []const u8, out: []u8) ?[]const u8 {
+        for (0..self.n) |i| {
+            if (self.slots[i].callAdminCommand(cmd, out)) |reply| return reply;
+            // A disabled module is already filtered inside callAdminCommand.
+        }
+        return null;
     }
 
     /// Reverse order, like the static host: shutdown then deinit each plugin.
@@ -528,4 +686,59 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
     try std.testing.expect(!host.slots[0].disabled);
     // A disabled module keeps reporting keep for every hook.
     try std.testing.expectEqual(@as(i32, 0), host.entityKilled(11, 1));
+}
+
+test "wasm plugin admin command hook handles ping/echo and falls through" {
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 { return 1; }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    const paths = [_][]const u8{"assets/fixtures/plugin_admin.wasm"};
+    host.loadAll(std.testing.allocator, &paths, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_admin_command)]);
+
+    var out: [4096]u8 = undefined;
+    // ping -> pong
+    {
+        const rep = host.adminCommand("ping", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expectEqualStrings("pong\n", rep.?);
+    }
+    // echo with args
+    {
+        const rep = host.adminCommand("echo hello world", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expectEqualStrings("hello world\n", rep.?);
+    }
+    // unknown verb -> not handled
+    {
+        const rep = host.adminCommand("unknown_verb", &out);
+        try std.testing.expect(rep == null);
+    }
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "wasm chat filter hook deny/rewrite/keep" {
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 { return 1; }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    const paths = [_][]const u8{"assets/fixtures/plugin_chat.wasm"};
+    host.loadAll(std.testing.allocator, &paths, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_chat)]);
+    var out: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("", host.chatFilter(1, "bad", &out).?);
+    try std.testing.expectEqualStrings("hi", host.chatFilter(1, "hello", &out).?);
+    try std.testing.expect(host.chatFilter(1, "other", &out) == null);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

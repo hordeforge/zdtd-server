@@ -47,6 +47,20 @@ pub const PluginVTable = struct {
     on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,
     on_block_damage: ?*const fn (*const Host, x: i32, y: i32, z: i32, dmg: i32) i32 = null,
     on_quest_complete: ?*const fn (*const Host, player: i32, quest_def: i32) i32 = null,
+    /// Admin command hook: receives the full console line (verb + args), writes
+    /// a reply into `out` and returns the written slice. Null return means not
+    /// handled — the next plugin is tried, then core reports unknown.
+    on_admin_command: ?*const fn (*const Host, cmd: []const u8, out: []u8) ?[]const u8 = null,
+    /// Chat hook: after core validation (rate limit, UTF-8), before broadcast.
+    /// Return null to let core broadcast as-is, a slice of `out` to replace the
+    /// message (validate again), or an empty slice "" to suppress it. Plugins
+    /// must not bypass the stock wire — only the chat body is filtered.
+    /// `sender` is the authenticated entity id.
+    on_chat: ?*const fn (*const Host, sender: i32, msg: []const u8, out: []u8) ?[]const u8 = null,
+    /// Join gate: after PlayerLogin name sanitized, before ban/whitelist and
+    /// spawn. Return null to allow, a slice of `out` as the deny reason to
+    /// reject (first non-null wins). Plugins cannot forge identity.
+    on_player_login: ?*const fn (*const Host, peer_slot: u16, name: []const u8, out: []u8) ?[]const u8 = null,
 };
 
 test "host log dispatches level and message to log_fn" {

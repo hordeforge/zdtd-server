@@ -28,29 +28,39 @@ const reverseItemType = game_mod.Game.reverseItemType;
 const max_chat_msg_len = c2s_text.max_chat_msg_len;
 const chatMsgOk = c2s_text.chatMsgOk;
 
+
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
         if (!self.acceptChatRate(c)) return true;
         if (std.mem.eql(u8, name, "NetPackageChat")) {
-            // Re-encode with the authenticated sender: echoing the client body
-            // lets any peer put words in another player's name (clients render
-            // the name from the sender entity id).
             const ch = packages.parseStockChat(body) catch return true;
             if (!chatMsgOk(ch.msg)) return true;
+            var chat_msg: []const u8 = ch.msg;
+            var chat_buf: [c2s_text.max_chat_msg_len]u8 = undefined;
+            var wasm_buf: [c2s_text.max_chat_msg_len]u8 = undefined;
+            if (self.plugins.chatFilter(c.entity_id, ch.msg, &chat_buf)) |f| {
+                if (f.len == 0) return true;
+                if (!chatMsgOk(f)) return true;
+                @memcpy(chat_buf[0..f.len], f[0..f.len]);
+                chat_msg = chat_buf[0..f.len];
+            } else if (self.wasm_plugins.chatFilter(c.entity_id, ch.msg, &wasm_buf)) |f| {
+                if (f.len == 0) return true;
+                if (!chatMsgOk(f)) return true;
+                @memcpy(chat_buf[0..f.len], f[0..f.len]);
+                chat_msg = chat_buf[0..f.len];
+            }
             const stock = packages.buildStockChat(
                 self.body_buf[0..512],
-                ch.chat_type, // carry the channel (Party/Friends/Whisper) for the client UI
+                ch.chat_type,
                 c.entity_id,
-                ch.msg,
+                chat_msg,
                 ch.recipients[0..ch.recipient_count],
             ) catch return true;
-            // Stock ChatMessageServer (chat.md §2): routing is recipient-list
-            // based, not channel based — a non-empty recipientEntityIds sends
-            // only to those clients, else broadcast to everyone.
             if (ch.recipient_count > 0) {
                 for (ch.recipients[0..ch.recipient_count]) |rid| {
-                    if (rid == c.entity_id) continue; // no self-echo
+                    if (rid == c.entity_id) continue;
                     if (self.clientByEntityId(rid)) |rc| {
                         if (rc.peer) |rpeer| {
                             self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
@@ -64,15 +74,32 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 try self.broadcastExcept("NetPackageChat", stock, c.slot);
             }
         } else {
-            // Upgrade simple chat to stock Chat when possible
             var r: wire_binary.Reader = .{ .data = body };
             var from_buf: [64]u8 = undefined;
             var msg_buf: [max_chat_msg_len]u8 = undefined;
             const from = r.readString(&from_buf) catch "";
-            const msg = r.readString(&msg_buf) catch return true;
+            var msg = r.readString(&msg_buf) catch return true;
             _ = from;
             if (!chatMsgOk(msg)) return true;
-            const stock = try packages.buildStockChat(self.body_buf[0..512], 0, c.entity_id, msg, &.{});
+            var chat_msg: []const u8 = msg;
+            var chat_buf2: [c2s_text.max_chat_msg_len]u8 = undefined;
+            var wasm_buf2: [c2s_text.max_chat_msg_len]u8 = undefined;
+            if (self.plugins.chatFilter(c.entity_id, msg, &chat_buf2)) |f| {
+                if (f.len == 0) return true;
+                if (!chatMsgOk(f)) return true;
+                @memcpy(chat_buf2[0..f.len], f[0..f.len]);
+                chat_msg = chat_buf2[0..f.len];
+                msg = chat_msg;
+            } else if (self.wasm_plugins.chatFilter(c.entity_id, msg, &wasm_buf2)) |f| {
+                if (f.len == 0) return true;
+                if (!chatMsgOk(f)) return true;
+                @memcpy(chat_buf2[0..f.len], f[0..f.len]);
+                chat_msg = chat_buf2[0..f.len];
+                msg = chat_msg;
+            } else {
+                chat_msg = msg;
+            }
+            const stock = try packages.buildStockChat(self.body_buf[0..512], 0, c.entity_id, chat_msg, &.{});
             try self.broadcast("NetPackageChat", stock);
         }
         return true;

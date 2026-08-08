@@ -27,6 +27,8 @@ A native ABI could promise neither.
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
 | Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks |
 | Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
+| Admin commands from plugins | Wasm `on_admin_command(ptr,len,out_ptr,out_cap)->i32` and static `on_admin_command(cmd,out)`; first handler that returns >0 bytes wins; falls through to core `unknown` if none handle it (admin TCP auth still gates `runAdminLine`) |
+| Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
 
 The static host stays because scenarios need to drive hooks without standing up
