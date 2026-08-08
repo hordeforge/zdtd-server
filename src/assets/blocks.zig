@@ -23,6 +23,11 @@ pub const BlockDef = struct {
     /// HeatMapStrength: heat the block feeds the AI heat map while active
     /// (forge 6, campfire 5, workbench 5, torches 1...). 0 = none.
     heat_strength: f32 = 0,
+    /// Workstation Modules list contains "fuel": the craft queue waits for
+    /// isBurning (campfire/forge/chemistry). Workbench, cement mixer and
+    /// table saw have no fuel module and advance regardless (stock
+    /// TileEntityWorkstation.HandleRecipeQueue gate, asm.il 1331687).
+    has_fuel_module: bool = false,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -90,6 +95,14 @@ pub const BlockTable = struct {
         if (self.byId(id)) |d| return d.heat_strength;
         return 0;
     }
+
+    /// True when the block's Workstation Modules list includes "fuel" (the
+    /// craft queue waits for isBurning). Unknown/offline blocks default false
+    /// (no fuel module → queue advances like a workbench).
+    pub fn hasFuelModule(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.has_fuel_module;
+        return false;
+    }
 };
 
 // Offline / no-dump slice: dump-validated pins only (assignids_comptime).
@@ -150,6 +163,7 @@ pub fn loadFromPath(
         extends: ?[]const u8 = null,
         trader_onoff: bool = false,
         heat_strength: f32 = 0,
+        has_fuel_module: bool = false,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -180,6 +194,7 @@ pub fn loadFromPath(
         var extends: ?[]const u8 = null;
         var trader_onoff = false;
         var heat_strength: f32 = 0;
+        var has_fuel_module = false;
         const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -201,6 +216,10 @@ pub fn loadFromPath(
                 }
             } else if (std.mem.eql(u8, pname, "HeatMapStrength")) {
                 if (xml.attr(clean, pi, "value")) |v| heat_strength = std.fmt.parseFloat(f32, v) catch 0;
+            } else if (std.mem.eql(u8, pname, "Modules")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    if (std.mem.indexOf(u8, v, "fuel") != null) has_fuel_module = true;
+                }
             }
             p = pi + 10;
         }
@@ -214,6 +233,7 @@ pub fn loadFromPath(
             .extends = extends,
             .trader_onoff = trader_onoff,
             .heat_strength = heat_strength,
+            .has_fuel_module = has_fuel_module,
         });
         i = bi + 7;
     }
@@ -266,6 +286,7 @@ pub fn loadFromPath(
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,
             .heat_strength = pb.heat_strength,
+            .has_fuel_module = pb.has_fuel_module,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -346,6 +367,14 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\</block>
         \\<block name="campfire">
         \\  <property name="HeatMapStrength" value="5"/>
+        \\  <property class="Workstation">
+        \\    <property name="Modules" value="tools,output,fuel,input"/>
+        \\  </property>
+        \\</block>
+        \\<block name="workbench">
+        \\  <property class="Workstation">
+        \\    <property name="Modules" value="output"/>
+        \\  </property>
         \\</block>
         \\</blocks>
     ;
@@ -380,6 +409,11 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const fire = t.byName("campfire").?;
     try std.testing.expectApproxEqAbs(@as(f32, 5), t.heatStrength(fire.id), 1e-4);
     try std.testing.expectEqual(@as(f32, 0), t.heatStrength(crate.id));
+    // Workstation Modules: campfire has a fuel module, workbench does not.
+    try std.testing.expect(t.hasFuelModule(fire.id));
+    const bench = t.byName("workbench").?;
+    try std.testing.expect(!t.hasFuelModule(bench.id));
+    try std.testing.expect(!t.hasFuelModule(crate.id));
 }
 
 fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -392,6 +426,7 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "cntWoodCrateWood01", 104 },
         .{ "doorWoodLargeGate", 105 },
         .{ "campfire", 106 },
+        .{ "workbench", 107 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

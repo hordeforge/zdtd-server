@@ -173,6 +173,10 @@ pub const Workstation = struct {
     melt_len: u8 = stock_melt_len,
     is_burning: bool = false,
     burn_time_left: f32 = 0,
+    /// Block's Workstation Modules list includes "fuel": the queue waits for
+    /// isBurning. Non-burning stations (workbench, cement mixer, table saw)
+    /// advance without fuel (stock isModuleUsed[Fuel] gate).
+    has_fuel_module: bool = false,
     is_player_placed: bool = true,
     /// Set once a client write has told us this station's real geometry. Echoing
     /// guessed array lengths would resize the client's grids, so nothing is sent
@@ -220,7 +224,10 @@ pub const Workstation = struct {
     /// a CraftCompleteData before the multiplier drops.
     fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque) void {
         if (self.queue_len == 0) return;
-        if (!self.is_burning) return;
+        // Stock gate (asm.il 1331687): only stations with a fuel module wait
+        // for isBurning; workbench / cement mixer / table saw advance without
+        // fuel (their Modules list has no "fuel").
+        if (self.has_fuel_module and !self.is_burning) return;
         const last: usize = self.queue_len - 1;
         var active = &self.queue[last];
         // A client-written CraftingTimeLeft of -inf (or a huge backlog) would let
@@ -432,6 +439,30 @@ test "workstation crafts the last queue slot and empties it" {
     try std.testing.expectEqual(@as(i16, 0), w.queue[last].multiplier);
     try std.testing.expectEqual(@as(u8, stock_queue_len), w.queue_len);
     try std.testing.expect(w.dirty);
+}
+
+test "fuel-module gate: non-burning stations advance, fuel stations wait" {
+    // Workbench (no fuel module): the queue advances without is_burning
+    // (stock TileEntityWorkstation.HandleRecipeQueue, asm.il 1331687).
+    var bench = testStation(2, 1.0);
+    bench.has_fuel_module = false;
+    bench.is_burning = false;
+    bench.burn_time_left = 0;
+    const last = bench.queue_len - 1;
+    bench.tick(1.1); // crosses 0 → one crafted
+    try std.testing.expectEqual(@as(i16, 1), bench.queue[last].multiplier);
+    // Campfire / forge (fuel module): no burning, no craft.
+    var fire = testStation(2, 1.0);
+    fire.has_fuel_module = true;
+    fire.is_burning = false;
+    fire.burn_time_left = 0;
+    fire.tick(5.0);
+    try std.testing.expectEqual(@as(i16, 2), fire.queue[last].multiplier);
+    // Once burning (with fuel left), the fuel station advances.
+    fire.is_burning = true;
+    fire.burn_time_left = 100;
+    fire.tick(1.1);
+    try std.testing.expectEqual(@as(i16, 1), fire.queue[last].multiplier);
 }
 
 test "workstation store holds past the old 64 cap (GAP 12)" {

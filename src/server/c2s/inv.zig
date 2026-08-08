@@ -394,6 +394,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 st.melt_len = ws.melt_n;
                 st.is_burning = ws.is_burning;
                 st.burn_time_left = ws.burn_time_left;
+                // Fuel-module presence is block-derived (not on the wire):
+                // the craft queue waits for burning only on fuel stations.
+                st.has_fuel_module = self.blocks.hasFuelModule(@intCast(ws.block_id));
                 st.is_player_placed = ws.is_player_placed;
                 st.block_id = ws.block_id;
                 st.geometry_known = true;
