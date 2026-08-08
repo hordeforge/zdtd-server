@@ -2332,15 +2332,17 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/workstations.zig` save/load, `src/server/game.zig`
   init/deinit, `src/world/containers.zig:129-235`
 
-- **loot.xml parse** `PARTIAL`
-  1010 groups and 339 containers parse. Not parsed: loot_prob_template (1528
-  uses), force_prob (181), abundance_type, loot_quality_template (403), the
-  loot_settings poi_tier_mod/bonus block, and requirement children. `count="all"`
-  (360 uses) falls through parseU16 and becomes pick 1. `LootGroup.entries` caps at
-  32, silently truncating 6 stock groups (perkBooks has 133 entries).
-  `LootContainer.size_x/size_y` are parsed and never used.
-  *Anchors:* `src/assets/loot.zig:243-352`, `:9`, `:281-285`, `:33-34`,
-  `src/server/game.zig:7405`, `Data/Config/loot.xml:9656`
+- **loot.xml parse** `PARTIAL` (2026-08-08 refresh)
+  1010 groups and 339 containers parse, including `loot_prob_template` (1528
+  uses, resolved to band indices at load), `force_prob` (181 uses, independent
+  roll gate) and the `loot_settings` poi_tier_mod/bonus block. `count="all"`
+  (360 uses) now spawns every entry once (stock -1 → SpawnAllItemsFromList)
+  instead of pick-1, and `LootGroup.entries` caps at 192 so stock groups
+  (perkBooks, 133 entries) are not truncated. Not parsed: abundance_type,
+  loot_quality_template (403), requirement children, group min/max level.
+  `LootContainer.size_x/size_y` drive the storage grid (2026-08-08).
+  *Anchors:* `src/assets/loot.zig` rollGroup pick_all / force_prob,
+  `Data/Config/loot.xml:9656`
 
 - **Loot roll probability model** `PARTIAL`
   `rollContainer` applies a milli-prob gate only to container-level entries at

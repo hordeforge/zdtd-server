@@ -308,6 +308,10 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **Trader window 50 entries** (fe30501): TraderStock.max_stock 12 → 50
       (stock TraderInfo.MaxItems); snapshot buffers and the TraderData wire
       carry the full window.
+- [x] **Loot count=all / force_prob / entry cap** (8e6daa9): count="all"
+      groups spawn every entry (was pick-1), force_prob entries gate
+      independently (stock asm.il 698452/698816), group entries cap 32 → 192
+      so perkBooks (133) is not truncated.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's
