@@ -27,10 +27,10 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0020](0020-wasm-only-plugin-api.md) | Wasm-only plugin API | accepted |
 | [0021](0021-config-driven-game-modes.md) | Config-driven game modes: reflected binder, `Rules` struct, hooks for logic | accepted (extends 0010) |
 
-Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS.md](../ECS.md),
-[AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../INVENTORY.md),
+Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
+[AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
 [HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
-[WIRE_CHUNK.md](../WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
+[WIRE_CHUNK.md](../wire/WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
 [WEBUI.md](../WEBUI.md), [STD_ABSTRACTIONS.md](../STD_ABSTRACTIONS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0020),
 [INDEX.md](../INDEX.md).

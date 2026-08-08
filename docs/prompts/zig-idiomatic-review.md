@@ -35,7 +35,7 @@ layout/naming/builtin choice/zero-cost abstractions, use
 |---|---|
 | `AGENTS.md` (Zig style, critical rules, anti-patterns, checklist) | Canonical house style |
 | `docs/ASSETS.md` | Asset load patterns (if touching assets) |
-| `docs/ECS.md` / `docs/SYSTEMS.md` | SoA / tick architecture |
+| `docs/ECS_SYSTEMS.md` | SoA / tick architecture |
 | Touched source files | Actual code under review |
 
 ## Non-negotiable constraints

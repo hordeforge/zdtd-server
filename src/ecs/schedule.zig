@@ -35,7 +35,7 @@ pub const TickResult = struct {
     buff_expired_n: u8 = 0,
     commands_applied: u32 = 0,
     /// A* replans this tick. Evidence for the deferred path-solve phase gap
-    /// (docs/SCALE_ARCHITECTURE.md); not used by the sim itself.
+    /// (docs/SCALE.md); not used by the sim itself.
     path_replans: u32 = 0,
     /// Replans refused by the per-tick A* node budget. Non-zero means the AI
     /// phase is demand-limited and chases are following stale buffers.

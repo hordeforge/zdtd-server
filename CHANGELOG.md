@@ -92,7 +92,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   still happen in the same order). Each switch ships with always-on metrics
   (`save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan`
   sections and the matching counters) so operators can see whether it is worth
-  turning on. See `zdtd.toml.example` and `docs/SCALE_ARCHITECTURE.md`.
+  turning on. See `zdtd.toml.example` and `docs/SCALE.md`.
 - Block stability and structural collapse: `src/world/stability.zig` ports the
   stock per-block byte plane (15 full support, 1 cap on non-support blocks, 0
   is the only value that falls). A chunk computes the plane once on first touch

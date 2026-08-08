@@ -90,7 +90,7 @@ in `assignids_comptime.zig` (tests / no-game-dir fallback).
 
 Terrain MicroSplat needs client-local `Data/Worlds/<level>/splat*.png`. That
 requires WorldInfo `fixedSizeCC=false` (FromRaw client provider). See
-`WIRE_CHUNK.md` and research `protocol-packages.md` §4.2.
+`wire/WIRE_CHUNK.md` and research `protocol-packages.md` §4.2.
 
 ## Shared I/O and load helpers (do not copy-paste)
 

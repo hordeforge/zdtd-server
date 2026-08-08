@@ -40,8 +40,8 @@ Related prompts (do not conflate):
 | Doc | Why |
 |---|---|
 | `AGENTS.md` | Hot-path no-alloc, 20 TPS, SoA, no fake wire |
-| `docs/ECS.md` | SoA columns (good SIMD shape) |
-| `docs/WIRE_CHUNK.md` / `src/wire/stock_chunk.zig` | Chunk channels, density |
+| `docs/ECS_SYSTEMS.md` | SoA columns (good SIMD shape) |
+| `docs/wire/WIRE_CHUNK.md` / `src/wire/stock_chunk.zig` | Chunk channels, density |
 | `docs/WORLDGEN.md` / `src/world/noise.zig` | Noise / height gen |
 | Code under review | Actual loops |
 

@@ -174,7 +174,7 @@ check (water renders, swimming) queued in the visual round.
 generation, and carry the water channel in the chunk package~~ **DONE**.
 
 **Grounding:** the water plane in the stock chunk payload (see
-[WIRE_CHUNK.md](WIRE_CHUNK.md)) and `water_info.xml` in the world directory.
+[WIRE_CHUNK.md](wire/WIRE_CHUNK.md)) and `water_info.xml` in the world directory.
 
 **Done when:** the client renders water where Navezgane has it, and a player can
 swim.
@@ -371,7 +371,7 @@ offline, slot clear). Parity `--coverage` now reports **0 unhandled dir=1**
 (70 handled), so the C2S surface is fully covered.
 
 **Why:** the parity coverage lists one unhandled dir=1 package:
-`NetPackagePlayerDisconnect` (PACKAGES.md). The client sends it when quitting;
+`NetPackagePlayerDisconnect` (wire/PACKAGES.md). The client sends it when quitting;
 zdtd lets the LiteNet peer-death poll (game.zig:3437) clean the player up
 instead, which works but leaves the C2S surface one package short and delays
 cleanup until the transport notices.
@@ -379,7 +379,7 @@ cleanup until the transport notices.
 **Change:** ~~add a `NetPackagePlayerDisconnect` case in `game.zig` onData that
 takes the same removal path as the transport poll (slot teardown, player save,
 `EntityRemove` broadcast). Accept it only for the sender's own peer; drop it for
-any other id. Then update the PACKAGES.md header via the parity tooling~~
+any other id. Then update the wire/PACKAGES.md header via the parity tooling~~
 **DONE**.
 
 **Grounding:** stock handler sits on the client quit path

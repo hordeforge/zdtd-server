@@ -37,7 +37,7 @@ abstractions that match stock boundaries and stdlib.
 | Doc | Why |
 |---|---|
 | `AGENTS.md` | Layers table, facades, YAGNI, rule 24 stdlib, Zig Zen |
-| `docs/ECS.md` / `docs/SYSTEMS.md` | Sim shape (SoA, systems as functions) |
+| `docs/ECS_SYSTEMS.md` | Sim shape (SoA, systems as functions) |
 | `docs/ASSETS.md` | Load boundary (game-dir XML) |
 | Code under review | Actual call sites and duplication |
 

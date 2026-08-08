@@ -28,7 +28,7 @@ world authority off the tick thread.
    deferred atomic damage apply; they do not own join or package ids.
 5. **Do not** introduce a second tick thread, actor-per-chunk world, or
    lock-free block store until scale gates prove the single-threaded owner is
-   the bottleneck (see SCALE_ARCHITECTURE / M11).
+   the bottleneck (see SCALE / M11).
 
 ## Consequences
 

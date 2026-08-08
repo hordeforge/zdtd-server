@@ -83,6 +83,6 @@ held-entity feature), so version-gate the wire where noted.
 | Doc | Role |
 |---|---|
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap inventory this closes against |
-| [PACKAGES.md](PACKAGES.md) | zdtd's package implementation status |
+| [PACKAGES.md](wire/PACKAGES.md) | zdtd's package implementation status |
 | `../7dtd-research/docs/INDEX.md` | Full stock RE hub |
 | `../7dtd-research/docs/protocol-packages.md` | Per-package wire bodies + census |

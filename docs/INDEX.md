@@ -19,7 +19,7 @@ deleted on 2026-08-06. Mentions of V3.0.1 in these documents are provenance, and
 any line number written before that date may be a V3.0.1 number, which drifts by
 roughly 3500 lines in the NetPackage region.
 
-## Read in this order
+## Read first
 
 New to the project, or picking up work:
 
@@ -28,18 +28,12 @@ New to the project, or picking up work:
    WORKS / PARTIAL / MISSING with anchors.
 3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
-
-| Doc | Role |
-|---|---|
-| [STATUS.md](STATUS.md) | What works now (gates + shipped surface). Wins on conflict |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap document: 338 features scored WORKS/PARTIAL/MISSING with anchors, plus the area narratives and deep dives |
-| [WORK_PLAN.md](WORK_PLAN.md) | Handoff-ready tasks: files, grounding, done-when, proof |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
-| [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) | Open items turned into research specs |
-| [../TODO.md](../TODO.md) | Open backlog first; shipped log below the fold |
-| [RELEASES.md](RELEASES.md) | Version, compatibility, support, release policy |
-| [../CHANGELOG.md](../CHANGELOG.md) | Consumer-visible changes and migrations |
-| [../AGENTS.md](../AGENTS.md) | Project rules for agents and humans |
+5. [../TODO.md](../TODO.md) open backlog first; shipped log below the fold.
+6. [RELEASES.md](RELEASES.md) version, compatibility, support, release policy.
+7. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
+8. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
+9. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
+   stack).
 
 ## Wire and play path
 
@@ -47,10 +41,10 @@ What goes over the socket, and how it is proven against the stock client.
 
 | Doc | Role |
 |---|---|
-| [PACKAGES.md](PACKAGES.md) | Full 190-package catalog |
-| [WIRE_CHUNK.md](WIRE_CHUNK.md) | Chunk wire path |
-| [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) | Workstation tile-entity wire |
-| [INVENTORY.md](INVENTORY.md) | Inventory wire |
+| [wire/PACKAGES.md](wire/PACKAGES.md) | Full 190-package catalog |
+| [wire/WIRE_CHUNK.md](wire/WIRE_CHUNK.md) | Chunk wire path |
+| [wire/WIRE_WORKSTATION.md](wire/WIRE_WORKSTATION.md) | Workstation tile-entity wire |
+| [wire/INVENTORY.md](wire/INVENTORY.md) | Inventory wire |
 | [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
 | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff and C2S coverage tooling |
@@ -70,10 +64,9 @@ Where the world and its data come from.
 
 | Doc | Role |
 |---|---|
-| [zig-clone.md](zig-clone.md) | M0-M6 architecture derived from the RE |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | M0-M6 architecture derived from the RE |
 | [STATE_MACHINES.md](STATE_MACHINES.md) | All stateful lifecycles with diagrams (join, AI, quests, weather, plugins, peer) |
-| [ECS.md](ECS.md) | SoA simulation |
-| [SYSTEMS.md](SYSTEMS.md) | Systems overview |
+| [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA simulation architecture and systems overview |
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |
 | [PLUGIN_DEV.md](PLUGIN_DEV.md) | Writing a plugin: hooks, limits, and building a .wasm from any language |
@@ -85,6 +78,12 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [WEBUI.md](WEBUI.md) | Operator web UI, security model, roadmap |
+
+## Scale
+
+| Doc | Role |
+|---|---|
+| [SCALE.md](SCALE.md) | M11 single-node scale switches + planet-scale shard plan (parked until M11 numbers exist) |
 
 ## Review prompts and their findings
 
@@ -103,39 +102,3 @@ is the point of the directory. When a review contradicts
 | [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md) |
 | [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](reviews/ZIG_0_16_REVIEW.md) |
 | [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
-
-## Scale (parked until M11 numbers exist)
-
-| Doc | Role |
-|---|---|
-| [SCALE_ARCHITECTURE.md](SCALE_ARCHITECTURE.md) | Substrate research; SpacetimeDB rejected |
-| [PLANET_SCALE.md](PLANET_SCALE.md) | Shard, gateway and DEM plan |
-
-## External RE (sibling repo)
-
-| Doc | Role |
-|---|---|
-| [../../7dtd-research/docs/INDEX.md](../../7dtd-research/docs/INDEX.md) | Research hub |
-| [../../7dtd-research/docs/protocol.md](../../7dtd-research/docs/protocol.md) | Envelope, join, goldens |
-| [../../7dtd-research/docs/protocol-frames.md](../../7dtd-research/docs/protocol-frames.md) | Byte frames per package |
-
-## Archive
-
-Point-in-time reports. Kept for the evidence they carry, not maintained.
-
-| Doc | Role |
-|---|---|
-| [archive/DECO_NRE.md](archive/DECO_NRE.md) | DecoManager.Read NRE investigation, RESOLVED |
-| [archive/PLAYTEST_V310_20260803.md](archive/PLAYTEST_V310_20260803.md) | V3.1.0 stock-client playtest log, 2026-08-03 |
-
-## Milestone snapshot (2026-08-06)
-
-```text
-Core playable loop     DONE  stock client joins, renders and plays Navezgane
-                             (gate 23/23, combat has stakes, POIs correct)
-M7-M10 core            DONE
-M11 interest/scale     PARTIAL  dirty bitsets and observer masks shipped;
-                                spatial cell hash and the bot gate remain
-M12-M15 depth/ops      PARTIAL  see GAP_ANALYSIS: 134 WORKS / 150 PARTIAL / 54 MISSING
-M16 / planet M2+       OPEN / parked
-```

@@ -83,7 +83,7 @@ block_id_mapping = true
 # [mode]
 # name = "default"
 
-# Performance switches (docs/SCALE_ARCHITECTURE.md). All default OFF. Each one
+# Performance switches (docs/SCALE.md). All default OFF. Each one
 # trades a documented property, so turn one on only after its always-on apm
 # section shows the cost it removes (save_encode / save_flush_wait,
 # terrain_snap, sleeper_scan).

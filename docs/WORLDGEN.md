@@ -384,7 +384,7 @@ Baked Navezgane / Pregen remain available; **proc mode is live stream gen**.
 - **W6** DEM blend policy + boundary feathering; procedural detail on DEM base
   (still streamed per chunk).
 - **W7** far-terrain LOD sampling for planet-scale streaming (ties to
-  `docs/PLANET_SCALE.md`).
+  `docs/SCALE.md`).
 
 **CLI / world mode:** `--worldgen-seed <u64>` (implies proc terrain source;
 see `src/main.zig`) or serverconfig keys in GAME_OPTIONS; flat and baked map

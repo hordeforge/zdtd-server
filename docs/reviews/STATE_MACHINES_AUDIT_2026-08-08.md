@@ -273,7 +273,7 @@ Doc status: **undocumented**; folded into the new Trader section.
 Spot-checked for anchor drift only (not re-audited): section 2 tick pipeline
 matches `ecs/schedule.zig` phase order; section 13 peer anchor
 (`litenet/peer.zig:129`) is current; section 14 claims match
-`game/world.zig:26/65/89`. `docs/zig-clone.md` 4.4 is the loadgen client-side
+`game/world.zig:26/65/89`. `docs/ZIG_CLONE.md` 4.4 is the loadgen client-side
 join sequence, consistent with the server machine here (no change).
 
 ## Doc fixes applied (this commit)

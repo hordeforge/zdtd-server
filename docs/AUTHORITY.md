@@ -143,7 +143,7 @@ keys abort startup; out-of-range values are repaired and logged by
 - [adr/0004-server-authoritative-c2s.md](adr/0004-server-authoritative-c2s.md) principle
 - [adr/0007-player-inventory-c2s-trust.md](adr/0007-player-inventory-c2s-trust.md) inv interim
 - [adr/0008-serialize-once-interest.md](adr/0008-serialize-once-interest.md) interest fan-out
-- [INVENTORY.md](INVENTORY.md) slot layout and wire directions
+- [INVENTORY.md](wire/INVENTORY.md) slot layout and wire directions
 - [GAME_OPTIONS.md](GAME_OPTIONS.md) for stock serverconfig knobs
 - [PLUGIN_API.md](PLUGIN_API.md) hooks must not bypass these gates
 - Sibling `7dtd-server-guard` is Harmony-on-stock only; outcomes reimplemented here

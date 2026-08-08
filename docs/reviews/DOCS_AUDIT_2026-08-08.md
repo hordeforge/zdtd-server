@@ -58,7 +58,7 @@ commit `f711725` (verified below).
 | `TelnetFailedLoginsBlocktime` "parsed; enforcement pending" | Enforcement exists: `admin.zig` `authenticate` locks the source out for `fail_block_minutes` after `fail_limit` failures | STALE, fixed |
 | Em dashes at lines 186, 222, 224 | House rule | FIXED |
 
-## docs/PACKAGES.md
+## docs/wire/PACKAGES.md
 
 | Claim | Code evidence | Status |
 |---|---|---|
@@ -95,7 +95,7 @@ commit `f711725` (verified below).
 | Undocumented loaders | `blocks_nim.zig` (prefab `.blocks.nim` remap) and `npc.zig` (npc.xml -> trader_info) exist but had no row; `xml_patch.zig` (the `--config-overrides` patcher) existed but was not named | STALE, fixed: rows added |
 | Id spaces + fail-closed rules | Match `maxdamage.idByName` usage and skip-on-miss behavior in loaders | CURRENT |
 
-## docs/ECS.md
+## docs/ECS_SYSTEMS.md (was docs/ECS.md)
 
 | Claim | Code evidence | Status |
 |---|---|---|
@@ -103,7 +103,7 @@ commit `f711725` (verified below).
 | Tick order (beginTick, buffs, director, ai, vehicles, turrets, despawn, drain) | `schedule.zig` `run` matches exactly | CURRENT |
 | Query/group/command/threading claims | `query.zig`, `group.zig`, `command.zig`, `util/parallel.zig` present as described | CURRENT |
 
-## docs/SYSTEMS.md
+## docs/ECS_SYSTEMS.md (was docs/SYSTEMS.md)
 
 | Claim | Code evidence | Status |
 |---|---|---|
@@ -128,7 +128,7 @@ commit `f711725` (verified below).
 | Admin `apm` / `metrics`, `status`, `guardstats` verbs | `admin.zig` parseCommand/usageFor | CURRENT |
 | `src/apm/` module set | metrics/profiler/report/root/tracy all present | CURRENT |
 
-## docs/zig-clone.md
+## docs/ZIG_CLONE.md
 
 | Claim | Code evidence | Status |
 |---|---|---|
@@ -185,15 +185,15 @@ commit `f711725` (verified below).
 |---|---|---|
 | WEBUI.md | /healthz, /readyz, /api/cmd, /api/apm.json, --webui-port/bind/secret, ZDTD_WEBUI_SECRET | CURRENT (`webui.zig` routes match) |
 | PLUGIN_API.md / PLUGIN_DEV.md | Hook set incl. T15 + on_admin_command/on_chat; PLUGIN_DEV missed `on_player_login` | PLUGIN_DEV STALE, fixed (on_player_login added) |
-| INVENTORY.md | Slot layout, authority interim, stack limits | CURRENT |
+| wire/INVENTORY.md | Slot layout, authority interim, stack limits | CURRENT |
 | MAPS.md | DTM/prefabs/water loading | CURRENT |
-| WIRE_CHUNK.md / WIRE_WORKSTATION.md | Encoders, TE type 12 v50 body | CURRENT |
+| wire/WIRE_CHUNK.md / wire/WIRE_WORKSTATION.md | Encoders, TE type 12 v50 body | CURRENT |
 | RELEASES.md | Version policy, V3.1.0 b14 only | CURRENT |
 | PARITY_TOOLING.md | Tooling lives in 7dtd-research | CURRENT |
 | STD_ABSTRACTIONS.md | std.Io map | CURRENT |
 | CLIENT_PLAYTEST.md | Design/suite | CURRENT |
 | IMPLEMENTATION_PLAN.md | M11.2/.3/.4 shipped markers; M11.1 open | CURRENT |
-| SCALE_ARCHITECTURE.md / PLANET_SCALE.md | Parked M11 | CURRENT (parked by design) |
+| SCALE.md | Parked M11 | CURRENT (parked by design) |
 
 ## Em-dash sweep (U+2014, house rule)
 

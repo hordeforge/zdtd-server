@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Workspace | [`../AGENTS.md`](../AGENTS.md) |
-| Architecture | [`docs/zig-clone.md`](docs/zig-clone.md) |
+| Architecture | [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) |
 | Wire | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
 | Gaps / plan | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
@@ -78,7 +78,7 @@ The operating principles behind every rule below. When in doubt, these decide.
 
 1. **Zig only** for server code. Wire facts from `../7dtd-research/docs` + loadgen goldens.
 2. **No game DLL or bulk IL** in this repo.
-3. **Milestones** follow zig-clone then `IMPLEMENTATION_PLAN` (M7+). Do not skip
+3. **Milestones** follow ZIG_CLONE then `IMPLEMENTATION_PLAN` (M7+). Do not skip
    join/terrain/inv fidelity to chase AI or scale theatre.
 4. **Package IDs are dynamic.** Resolve via negotiated name→id map. Never treat a
    numeric id as permanent across versions (fixtures may pin maps for tests).
@@ -278,9 +278,9 @@ Full index: [`docs/INDEX.md`](docs/INDEX.md). **STATUS wins** if inventory docs 
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased plan (M7+; post-playable stack) |
 | [`docs/AUTHORITY.md`](docs/AUTHORITY.md) | Server-authoritative C2S gates + mode |
 | [`docs/APM.md`](docs/APM.md) | Native metrics harness |
-| [`docs/PACKAGES.md`](docs/PACKAGES.md) / [`docs/GAME_OPTIONS.md`](docs/GAME_OPTIONS.md) | Package catalog / serverconfig |
-| [`docs/ECS.md`](docs/ECS.md) / [`docs/SYSTEMS.md`](docs/SYSTEMS.md) | Sim architecture |
-| [`docs/SCALE_ARCHITECTURE.md`](docs/SCALE_ARCHITECTURE.md) / [`docs/PLANET_SCALE.md`](docs/PLANET_SCALE.md) | Scale (parked until M11) |
+| [`docs/wire/PACKAGES.md`](docs/wire/PACKAGES.md) / [`docs/GAME_OPTIONS.md`](docs/GAME_OPTIONS.md) | Package catalog / serverconfig |
+| [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) | Sim architecture |
+| [`docs/SCALE.md`](docs/SCALE.md) | Scale (parked until M11) |
 | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) | Envelope, join, goldens |
 
 Architecture and RE narratives stay under `../7dtd-research/docs`. Feature status and

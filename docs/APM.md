@@ -98,7 +98,7 @@ never silently truncate a report.
 `chunk_gen`
 are **always on**, including when the matching `[perf]` switch is off. They are
 the evidence the switches are gated on: turn a switch on only after its section
-shows real cost. See docs/SCALE_ARCHITECTURE.md.
+shows real cost. See docs/SCALE.md.
 
 Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
 
@@ -227,5 +227,5 @@ guarantees it.
 | Doc | Role |
 |---|---|
 | [../README.md](../README.md) | Project |
-| [zig-clone.md](zig-clone.md) | Architecture |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture |
 | [../../7dtd-optimizer/docs/measured-scaling.md](../../7dtd-optimizer/docs/measured-scaling.md) | Stock scale shapes (design input) |

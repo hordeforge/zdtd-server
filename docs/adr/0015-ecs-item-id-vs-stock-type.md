@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-08-05
 - **Related:** [0010](0010-data-config-zig-plugins.md), [0007](0007-player-inventory-c2s-trust.md),
-  [../INVENTORY.md](../INVENTORY.md), [../ASSETS.md](../ASSETS.md)
+  [../INVENTORY.md](../wire/INVENTORY.md), [../ASSETS.md](../ASSETS.md)
 
 ## Context
 

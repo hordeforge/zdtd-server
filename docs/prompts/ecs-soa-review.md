@@ -37,17 +37,16 @@ This is complementary to:
 **Do not** adopt a third-party ECS core (Bevy-style archetypes, flecs, etc.).
 zdtd keeps **dense Slot + SoA columns + Mask + systems as functions**. Steal
 ergonomics (`query`, `command`) only when they preserve that shape
-([docs/ECS.md](../ECS.md), TODO P3).
+([docs/ECS_SYSTEMS.md](../ECS_SYSTEMS.md), TODO P3).
 
 ## Read first
 
 | Doc | Why |
 |---|---|
 | `AGENTS.md` | Layers table, SoA + serialize-once, tick rules, anti-patterns |
-| `docs/ECS.md` | Canonical ecs layout, columns, resources, query/cmd |
-| `docs/SYSTEMS.md` | What runs each tick and order |
+| `docs/ECS_SYSTEMS.md` | Canonical ecs layout, columns, resources, query/cmd; what runs each tick and order |
 | `docs/AUTHORITY.md` | C2S gates; server applies results into sim |
-| `docs/SCALE_ARCHITECTURE.md` | Why SoA + interest (not Mono shapes) |
+| `docs/SCALE.md` | Why SoA + interest (not Mono shapes) |
 | Code under review | Actual ownership and call sites |
 
 ## Non-negotiable
@@ -242,7 +241,7 @@ hook except full Game.
 3. Scan `game.zig` handlePackage arms for **stranded sim** (logic that should be
    `systems.*` / `inventory.*` / world store).
 4. Scan for **AoS / dual index** regressions (lists of entities beside columns).
-5. Check **tickAll** and Game.step order vs SYSTEMS.md; note races or double mut.
+5. Check **tickAll** and Game.step order vs ECS_SYSTEMS.md; note races or double mut.
 6. Check **query/command** usage: new loops should prefer `forEach*` / commands
    when they replace error-prone hand scans.
 7. Produce findings (below). Fix only if mode allows; keep diffs minimal.
@@ -293,7 +292,7 @@ script components, etc.).
 ### Optional patches
 
 If mode includes fixes: file list + test commands (`zig build test`, targeted
-filters). Update `docs/ECS.md` / STATUS only if ownership surface changed.
+filters). Update `docs/ECS_SYSTEMS.md` / STATUS only if ownership surface changed.
 
 ---
 
@@ -341,7 +340,7 @@ zig build test
 - [ ] P0/P1 findings listed with correct home
 - [ ] No recommendation to import a foreign ECS
 - [ ] `../reviews/ECS_REVIEW.md` created or updated
-- [ ] If code changed: tests green; ECS.md updated if public shape changed
+- [ ] If code changed: tests green; ECS_SYSTEMS.md updated if public shape changed
 - [ ] No em dashes / AI attribution
 
 ## Optional user addenda

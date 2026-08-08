@@ -197,7 +197,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 
 ### `zdtd.toml` (shipped surface)
 
-Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../zdtd.toml.example).
+Shipped loader: `src/server/zdtd_config.zig`. Template: [`zdtd.toml.example`](../../zdtd.toml.example).
 Operator docs: [GAME_OPTIONS.md](../GAME_OPTIONS.md). Precedence:
 
 ```text

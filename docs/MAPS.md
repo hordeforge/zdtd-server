@@ -63,11 +63,11 @@ generating chunk only** (no recursive world set during paint).
   patches only the true vertical/layer sites. MVP exists in the RealEarth
   sister project (`../7days-realworld`, `tools/engine_patcher`, Mono.Cecil +
   Harmony). Opt-in scaling extension, not part of the stock-client-wire core.
-  See `docs/SCALE_ARCHITECTURE.md`.
+  See `docs/SCALE.md`.
 - TTS: types + **texture channel** (per-block `textureFull` paint decoded from
   the sparse v>=10 channel and wired into the chunk `chnTextures` so paint-driven
   shape blocks render their material, not grey). Density from type + TTS; terrain
-  floor MicroSplat needs client splat load (`fixedSizeCC=false`, see WIRE_CHUNK).
+  floor MicroSplat needs client splat load (`fixedSizeCC=false`, see wire/WIRE_CHUNK).
 - No TTS name→AssignIds remap if prefab ids drift from runtime blocks.xml.
 - TTS TE lists spawn loot-type containers (Loot/SecureLoot/Composite); non-loot TEs and TTS-driven sleeper volumes not yet spawned (sleeper volumes come from prefab XML).
 - Biome paint from `biomes.png`: per-chunk dominant biome (HAVE); per-cell biome paint still one value per chunk.

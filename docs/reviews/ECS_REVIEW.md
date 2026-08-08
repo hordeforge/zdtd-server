@@ -1,7 +1,7 @@
 # ECS ownership and SoA discipline review (zdtd)
 
 Scope: `src/ecs/*` (all files) + entity/mutation-relevant C2S arms in
-`src/server/game.zig` + the ECS docs (`docs/ECS.md`, `docs/SYSTEMS.md`,
+`src/server/game.zig` + the ECS docs (`docs/ECS_SYSTEMS.md`,
 `docs/AUTHORITY.md`, `AGENTS.md`). Date: 2026-08-06. Method:
 `docs/prompts/ecs-soa-review.md` (review-only mode; findings, no patches unless
 P0). Complementary to `HARDCODE_AUDIT.md`, `SIMD_REVIEW.md`, `ZIG_REVIEW.md`,
@@ -74,7 +74,7 @@ Verdict: 3 P1, 2 P2, 2 P3. Overall grade: B+ (fixed to A- after the pass).
 
 ## Tick / systems notes
 
-- `schedule.run` order matches SYSTEMS.md: beginTick → buffs → director → ai →
+- `schedule.run` order matches ECS_SYSTEMS.md: beginTick → buffs → director → ai →
   vehicles → turrets → despawn → drain commands. Power resolve stays in
   `Game.step` (daylight), documented, not doubled.
 - Command buffer: drained once per tick (cap 64, drop + `dropped` counter);

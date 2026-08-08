@@ -20,7 +20,7 @@
 - `GAME_OPTIONS.md` already updated for the two progression knobs; `STATUS` pins `game.zig 5310` and the hook set, `HARDCODE_AUDIT` marks A31 fixed, `WORK_PLAN` T16 tells the gating story.
 
 ### Docs pass (`81d13db`)
-- `STATUS`, `STATE_MACHINES` (§2 + §12 owners), `zig-clone.md` (defer to source tree), `HARDCODE_AUDIT` suite size corrected from ~800 to ~960, `WORK_PLAN` T16/T17 updated. No behaviour change.
+- `STATUS`, `STATE_MACHINES` (§2 + §12 owners), `ZIG_CLONE.md` (defer to source tree), `HARDCODE_AUDIT` suite size corrected from ~800 to ~960, `WORK_PLAN` T16/T17 updated. No behaviour change.
 
 ## Working tree right now
 

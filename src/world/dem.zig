@@ -1,4 +1,4 @@
-//! Copernicus GLO-30 DEM streamer (M1 of docs/SCALE_ARCHITECTURE.md).
+//! Copernicus GLO-30 DEM streamer (M1 of docs/SCALE.md).
 //! One S3 object per 1x1 degree tile, Cloud-Optimized GeoTIFF:
 //! II TIFF, f32 samples, DEFLATE (compression 8) + floating-point predictor 3,
 //! 1024x1024 internal tiles, IFD + offset/count arrays inside the first 64 KiB

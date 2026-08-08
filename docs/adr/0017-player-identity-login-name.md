@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-08-05
 - **Updated:** 2026-08-07 (ZPV3 progression magic landed; identity key unchanged)
-- **Related:** [0011](0011-custom-zch-world-overlay.md), [INVENTORY.md](../INVENTORY.md), [GAME_OPTIONS.md](../GAME_OPTIONS.md)
+- **Related:** [0011](0011-custom-zch-world-overlay.md), [INVENTORY.md](../wire/INVENTORY.md), [GAME_OPTIONS.md](../GAME_OPTIONS.md)
 
 ## Context
 

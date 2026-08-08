@@ -442,7 +442,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
-| C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (72 handled across `c2s/*`; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
+| C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (72 handled across `c2s/*`; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/wire/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
@@ -502,7 +502,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | HoldingItem, bag, drops | `stock_inv.zig`, `game.zig` | Bag/PlayerInventory C2S-only; S2C echo = HoldingItem |
 | LockRequest grant + TE re-send | `packages.zig`, `game.zig` | always-grant (contention deferred) |
 | Storage TE composite stream | `stock_te.zig` | place + chunk path |
-| Workstation TE (type 12) | `stock_te.zig`, `world/workstations.zig` | ver 50 full body (fixed stock array lengths, recipe blobs, CraftCompleteData, lastInput); stock queue orientation, output-full stall and cycle carry; 2Hz burn/craft tick + dirty S2C re-broadcast and lock-grant push; see WIRE_WORKSTATION.md |
+| Workstation TE (type 12) | `stock_te.zig`, `world/workstations.zig` | ver 50 full body (fixed stock array lengths, recipe blobs, CraftCompleteData, lastInput); stock queue orientation, output-full stall and cycle carry; 2Hz burn/craft tick + dirty S2C re-broadcast and lock-grant push; see wire/WIRE_WORKSTATION.md |
 | InvData by Guid, transactional inv | `game.zig`, `containers.zig` | |
 | Death/turret loot DroppedLootContainer ECD | `stock_entity.zig` | loot stacks embedded in ECD `bag` (Bag.Write) |
 
@@ -554,7 +554,7 @@ zdtd     → Zig dedi, client wire only, no mods
 ### Other systems (simplified but wired)
 
 Vehicles, power grid, turrets, signs (shells), setblock multi parse, admin TCP
-console: see `SYSTEMS.md`, `ECS.md`.
+console: see `ECS_SYSTEMS.md`.
 
 ---
 
@@ -590,7 +590,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 | P3 | Party membership + ally persistence | Both SHIPPED: allies.zal round-trip; real `Party` state machine + `PartyData` snapshots (entity-id keyed, no PUID). Shared party scope SHIPPED: kill-XP split, shared quests, party loot stage + highest game stage feed the director |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
-| Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (PLANET_SCALE.md) |
+| Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (SCALE.md) |
 | Multi-ms | Worldgen W3–W7 | W0/W1/W2 shipped (3D density field); climate/caves/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
@@ -630,7 +630,6 @@ Full map: [INDEX.md](INDEX.md).
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
-| [PACKAGES.md](PACKAGES.md) | 190-package catalog |
+| [PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |
-| [PLANET_SCALE.md](PLANET_SCALE.md) | Shard plan (parked until M11) |
-| [SCALE_ARCHITECTURE.md](SCALE_ARCHITECTURE.md) | Substrate research (SpacetimeDB rejected) |
+| [SCALE.md](SCALE.md) | Shard plan + substrate research (parked until M11) |

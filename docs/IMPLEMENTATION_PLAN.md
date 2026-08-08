@@ -46,7 +46,7 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 6. **Custom disk OK** until stock `.ttc` codec exists; wire must still be client-legal.  
 7. **No TFP asset shipping.** Load from user `game-dir` at runtime.  
 8. **Tests with each package:** unit parse/build + scenario smoke + apm counters.  
-9. **Parallelism** only with disjoint writes or deferred apply (see ECS.md).  
+9. **Parallelism** only with disjoint writes or deferred apply (see ECS_SYSTEMS.md).  
 10. **Honest docs:** update GAP_ANALYSIS when a gap closes.
 
 ---
@@ -62,7 +62,7 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 - Annotate write/read order vs `../7dtd-research/docs/world-chunks.md` + IL.  
 - Produce golden hex fixtures under `tests/fixtures/wire/chunk_*.bin` (no game DLL).  
 
-**Exit:** documented layout in `docs/WIRE_CHUNK.md` + fixture tests.
+**Exit:** documented layout in `docs/wire/WIRE_CHUNK.md` + fixture tests.
 
 #### M7.2 Chunk encode path (stock layout)
 - Implement `packages.buildStockChunkBody` (or replace intermediate).  
@@ -413,7 +413,7 @@ Historical week-1..12 chunk/inventory stack is **done** (see STATUS). Current or
 | Next | M11.5 32-bot then 128-bot loadgen gate; power fuel/actuation; lock contention |
 | Then | quest objective types + trader group rolls; workstation recipe validation; multi-version matrix |
 | Later | P4 guard spine beyond the first cut (policy + ledgers) |
-| Parked | PLANET_SCALE M2 gateway/shards; Encryption*; Steam browser / full telnet; RWG |
+| Parked | SCALE M2 gateway/shards; Encryption*; Steam browser / full telnet; RWG |
 
 If scale pain shows before fidelity, pull M11 ahead of quest/power depth.
 
@@ -475,7 +475,7 @@ Full map: [INDEX.md](INDEX.md).
 | [STATUS.md](STATUS.md) | Living hub (wins on conflict) |
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Exhaustive gap list |
 | [../TODO.md](../TODO.md) | Open backlog |
-| [ECS.md](ECS.md) | Sim architecture |
-| [zig-clone.md](zig-clone.md) | M0–M6 + architecture |
-| [PLANET_SCALE.md](PLANET_SCALE.md) | Post-M11 planet track |
+| [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | Sim architecture |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | M0–M6 + architecture |
+| [SCALE.md](SCALE.md) | Post-M11 planet track |
 | [../../7dtd-research/docs/protocol.md](../../7dtd-research/docs/protocol.md) | Wire |

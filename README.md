@@ -59,7 +59,7 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 world origin at map center (`wx + W/2`). `--world` remains the writable zdtd save
 overlay; `.zch` files use the ZCH3 format for heights and full u32 block data.
 
-Milestones / architecture: [`docs/zig-clone.md`](docs/zig-clone.md).
+Milestones / architecture: [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md).
 
 ## Non-goals
 
@@ -80,7 +80,7 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 | [`TODO.md`](TODO.md) | Open backlog |
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
-| [`docs/ECS.md`](docs/ECS.md) / [`docs/zig-clone.md`](docs/zig-clone.md) | Sim + architecture |
+| [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) / [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) | Sim + architecture |
 | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) | Envelope, join, goldens |
 
 Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).

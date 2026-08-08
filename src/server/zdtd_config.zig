@@ -65,7 +65,7 @@ pub const Feature = struct {
     deco_objects_per_join: ?usize = null,
 };
 
-/// Performance switches (docs/SCALE_ARCHITECTURE.md). All default off: each one
+/// Performance switches (docs/SCALE.md). All default off: each one
 /// trades a documented behaviour property (write timing, lock removal, worker
 /// fan-out) and is gated until apm shows the cost it removes.
 pub const Perf = struct {

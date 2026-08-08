@@ -2263,7 +2263,7 @@ unvalidated, and durability, mods and repair do not exist.
   indices, and zdtd's response is not decodable by the stock client. Crafting via
   op 11 is unreachable from a legitimate client but trivially forgeable.
   *Anchors:* `src/wire/packages.zig:1639-1668`, `src/server/game.zig:4459-4534`,
-  `docs/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
+  `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 
 - **Unlocked recipe list on join** `PARTIAL`
@@ -2305,14 +2305,14 @@ unvalidated, and durability, mods and repair do not exist.
   timers; melt values and lastInput ride through as opaque client bytes. The forge
   does not smelt on the server.
   *Anchors:* `src/world/workstations.zig:220-253`, `:158-164`,
-  `docs/WIRE_WORKSTATION.md:171-173`
+  `docs/wire/WIRE_WORKSTATION.md:171-173`
 
 - **Workstation recipe validation against recipes.xml** `MISSING`
   The queued Recipe's output type, count, craft time and exp gain are taken from
   the client blob verbatim; nothing cross-checks recipes.xml. A modified client can
   queue any output at any rate.
   *Anchors:* `src/wire/stock_te.zig:509-523`, `src/world/workstations.zig:257-269`,
-  `docs/WIRE_WORKSTATION.md:167-169`
+  `docs/wire/WIRE_WORKSTATION.md:167-169`
 
 - **Non-fuel workstations (workbench, cement mixer, table saw)** `FIXED (2026-08-08)`
   The craft gate now mirrors stock TileEntityWorkstation.HandleRecipeQueue
@@ -3764,7 +3764,7 @@ client-visible blood-moon behaviour is IL-derived.
   nothing in that area has live stock-client evidence from it. The only live
   datapoints are `docs/archive/PLAYTEST_V310_20260803.md:53` (craft queue does not
   consume) and `:71` (bag slot waste), which line up with the stack-default and
-  instant-craft findings. `docs/WIRE_WORKSTATION.md:174` itself states there has
+  instant-craft findings. `docs/wire/WIRE_WORKSTATION.md:174` itself states there has
   been no live-client workstation playtest, so the workstation **WORKS** rows rest
   on IL grounding plus the scenario test.
 - **Entities and AI:** the client log path referenced by the audit task does not
@@ -4463,7 +4463,7 @@ not stock:
 | Loot containers / `loot.xml` | HAVE (`assets/loot.zig`) |
 | Quality / mods / durability | PARTIAL (quality/meta persist; mods shallow) |
 | Stacking / bag size | PARTIAL (items.xml Stacknumber) |
-| Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see WIRE_WORKSTATION) |
+| Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see wire/WIRE_WORKSTATION) |
 | Schematic unlocks | PARTIAL (always_unlocked recipe list on join) |
 | Trader buy against real item defs | PARTIAL (traderAlways + EconomicValue; group rolls deferred) |
 
@@ -4540,7 +4540,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
 | Async region I/O | PARTIAL (`world/chunk_flush.zig` behind `[perf] async_chunk_flush`, default off: one joined writer thread, per-key FIFO, `waitKey` gate on read/evict. Encode stays on the tick thread; still one file per chunk, no stock-style region file) |
 | Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; one surface Y per column, answering only the surface footing case. Walls and building interiors are out of the body's step/drop band and fall back to the locked hook, as does anything outside the 256-chunk / radius-2 window) |
-| Path worker pool | MISSING (A* already runs inside the parallel AI batch. A *deferred* solve phase is still not built, but the per-tick node budget it was waiting on now exists: `World.pathBudgetAdmits` spreads replans by a slot/tick stride and refused bodies follow their stored waypoint buffer, so a delayed replan no longer means a straight-line chase. `path_replans` / `path_replans_denied` counters ship as the evidence. docs/SCALE_ARCHITECTURE.md) |
+| Path worker pool | MISSING (A* already runs inside the parallel AI batch. A *deferred* solve phase is still not built, but the per-tick node budget it was waiting on now exists: `World.pathBudgetAdmits` spreads replans by a slot/tick stride and refused bodies follow their stored waypoint buffer, so a delayed replan no longer means a straight-line chase. `path_replans` / `path_replans_denied` counters ship as the evidence. docs/SCALE.md) |
 | TE loot / prefab-storage scan as a job batch | MISSING (`te_scan` section + `te_scan_cells` counter ship as evidence; the `found >= 32` early return makes an exactly-equivalent parallel scan fiddly) |
 | Metrics apm harness | HAVE (`src/apm/`) |
 | Tracy zones over apm sections | PARTIAL (`-Dtracy` + operator-supplied `-Dtracy-src`; 12 `Section` zones + per-tick frame mark only. No plots/locks/alloc/GPU zones, nothing inside ecs job workers, and CI never builds the on path. `docs/APM.md`) |
@@ -4754,7 +4754,7 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
   per-player POI tracking); distance alone decides.
 
 ### P4: Planet scale (parked)
-Gateway + shards after M11 numbers (PLANET_SCALE.md). DEM M1 proven.
+Gateway + shards after M11 numbers (SCALE.md). DEM M1 proven.
 
 ---
 
@@ -4959,7 +4959,7 @@ HONEST GAPS:
   with a name-keyed fallback for existing players.
 - **Platform verification.** Neither auth token is decoded or checked, so an
   identity is a claim, not a proof (EAC-off scope; see §2).
-- **Reported read calls.** `docs/PACKAGES.md` under-reports these packages
+- **Reported read calls.** `docs/wire/PACKAGES.md` under-reports these packages
   because `PlatformUserIdentifierAbs::FromStream` is a static call, not a
   `BinaryReader` virtual: the AllyRequest row shows only `ReadBoolean;`.
 ### Vehicle seats (multi-occupant)

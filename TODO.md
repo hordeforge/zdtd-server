@@ -207,8 +207,8 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 
 ### Parked / rejected (not near-term research-clone work)
 
-- [ ] **PARKED** Planet-scale M2–M4 gateway/shards: after M11 only; DEM M1 proven - [PLANET_SCALE.md](docs/PLANET_SCALE.md)
-- [ ] **REJECTED** SpacetimeDB substrate (SCALE_ARCHITECTURE.md); not a zdtd dependency
+- [ ] **PARKED** Planet-scale M2–M4 gateway/shards: after M11 only; DEM M1 proven - [SCALE.md](docs/SCALE.md)
+- [ ] **REJECTED** SpacetimeDB substrate (SCALE.md); not a zdtd dependency
 - [ ] **PARKED** Steam browser / full telnet parity (P3 ops); admin TCP + WebUI cover research ops
 - [ ] **NON-GOAL** Encryption* RSA+AES: platform AntiCheat only; EAC-off research scope; ServerPassword LiteNet key shipped
 - [ ] **PARKED** Wasm guest mods (ADR 0010 phase 2): after static plugins prove hooks; sandboxed fuel/memory caps; no stock Mods/ promise
@@ -246,7 +246,7 @@ PR); unpark the rest after core demo depth + M11 unless prioritized.
 - [ ] **W5** Deterministic POI placement (cell hash, cross-chunk), `.tts` stamp on first touch (multi-milestone)
 - [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1 (multi-milestone)
 - [ ] **W6** DEM + procedural blend (detail on GLO-30 base; feather edges; still per-chunk stream) (multi-milestone)
-- [ ] **W7** Far-terrain LOD sampling (ties [PLANET_SCALE.md](docs/PLANET_SCALE.md); after M11 planet track) (multi-milestone)
+- [ ] **W7** Far-terrain LOD sampling (ties [SCALE.md](docs/SCALE.md); after M11 planet track) (multi-milestone)
 - [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS still open
 - [x] Persist: player edits win over regen (ZCH3 load before regen; heights-only re-load after gen; blockmeta/containers)
 - [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-research` only; zdtd tables, no DLL
@@ -362,7 +362,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **POI/construction blocks rendered as untextured grey clay** (whole houses smooth marching-cubes terrain material): chunk block-layer only wrote the low 8 bits of each id (`stock_chunk.zig` hardcoded `upper24=false`), so every id ≥ 256 truncated to `id & 0xFF` → a wrong (usually terrain) block. Fix: emit the 3072 B/cell interleaved `m_Upper24Bits` array (`id>>8,>>16,>>24`) whenever a layer has any id ≥ 256, matching decompiled `ChunkBlockLayer.Read`. Terrain ids (<256) unaffected, that is why floor looked fine but houses didn't. Live: CGO 0→25, house textures correct.
 - [x] **Large POI chunks failed to send** (side effect of the above: upper24 grew chunks to 14-37 KB → many fragments overflowed the 64-slot reliable window → holed chunk disk → CGO 0). Fix: `Peer.sendReliable` now resumes the same fragment stream and pumps ACKs mid-message via a `pump_fn` callback (`Game.pumpAcks`) instead of restarting; `body_buf` 256→512 KB. Live: 0 failed chunk sends.
 - [x] **serverconfig.xml gameplay options fully wired** (`config.zig` → `initWithOptions` + runtime systems, all clamped + tested, docs/GAME_OPTIONS.md). Config-only: GameDifficulty (zombie hp), BloodMoonFrequency/Range/EnemyCount, PlayerKillingMode (PvP gate), DayNightLength/DayLightLength (clock/night), MaxSpawnedZombies, ZombieMove/Night/Feral/BMMove + EnemyDifficulty → `World.zombie_speed_scale`, LootAbundance (roll count scale). New backing systems built so the rest apply too: **MaxSpawnedAnimals** (daytime animal spawner + cap), **XPMultiplier** (`Game.awardXp` server ledger on kill), **BlockDamagePlayer** (scales dig damage in SetBlock), **BlockDamageAI/AIBM** (`tickZombieBlockDamage`: zombies chew cover), **AirDropFrequency** (`tickAirDrop`: scheduled supply crate), **DropOnDeath** (loot bag on player death per mode), **LandClaim** (keystone placement → `land_claims`; non-owner SetBlock denied inside `LandClaimSize`; own-claim durability ×`LandClaimOnline/OfflineDurabilityModifier`). Also: serverconfig with a missing world folder falls back to flat instead of aborting startup (`io_fs.dirExistsSimple`).
-- [x] "Starting game..." / grey floor tradeoff (2026-08-04): `fixedSizeCC=true` closes overlay (CGO thr=0) but installs ChunkProviderDummy → no splat load → grey MicroSplat floor. **Correct:** `fixedSizeCC=false` + stream r≥6 (meshable core clears viewDist²−10; r=4 max CGO≈25). Docs: STATUS, WIRE_CHUNK, research protocol-packages §4.2 + chunk-providers §4.5.
+- [x] "Starting game..." / grey floor tradeoff (2026-08-04): `fixedSizeCC=true` closes overlay (CGO thr=0) but installs ChunkProviderDummy → no splat load → grey MicroSplat floor. **Correct:** `fixedSizeCC=false` + stream r≥6 (meshable core clears viewDist²−10; r=4 max CGO≈25). Docs: STATUS, docs/wire/WIRE_CHUNK, research protocol-packages §4.2 + chunk-providers §4.5.
 - [x] Terrain AssignIds + biomes.xml layers; TTS full rawData/density; density repair rules; skip terrainFiller paint; LiteNet frag window for large textured chunks.
 - [x] **Asset catalogs from game-dir (2026-08-04):** AGENTS rule 13 + `docs/ASSETS.md`; blocks ids AssignIds-only (no sequential XML); itemToBlock name→frameShapes/cobble; biomes.xml ColorTable; power Class= scan; painting/spawning/buffs/progression loaders; traders full group expand; deco re-enable via idByName; shared `io_fs`/`paths` (DRY).
 - [x] **Deferred catalogs (2026-08-04):** vehicles.xml → spawn HP/max_speed; buffs passive_effect; progression attrs/perks + XP curve level-up; storage Closed/Open pairs from DowngradeBlock; TE type named constants; director night/day/animal groups from spawning.xml.
@@ -393,12 +393,12 @@ Review backlog sweep 3 (2026-07-22, all landed + pw19 live green Items:3):
 - [x] players.zsv v2: quality/meta per slot + journal quests persisted; restore into slot order + journal; join PDF now carries restored toolbelt/bag stacks (buildPlayerIdBodyInv); pw27 E2E: give→save→restart→rejoin→`inv 0` shows persisted slots
 - [x] admin `inv <slot>` probe; admin `give` now drops a loot bag at the player (server inv writes were clobbered by client C2S PlayerInventory pushes; pickup is client-authoritative)
 
-Scale track (docs/SCALE_ARCHITECTURE.md, research-verified 2026-07-22):
+Scale track (docs/SCALE.md, research-verified 2026-07-22):
 - [x] M1 DEM streamer proven live (GLO-30 COG; world/dem.zig)
 - [ ] **PARKED** M2 gateway split (after M11)
 - [ ] **PARKED** M3 two static shards + handoff (after M11)
 - [ ] **PARKED** M4 thread-per-core N shards (after M11)
-- SpacetimeDB: **REJECTED** (SCALE_ARCHITECTURE.md); not a dependency
+- SpacetimeDB: **REJECTED** (SCALE.md); not a dependency
 
 ### More shipped detail (2026-07-22..23)
 
@@ -407,7 +407,7 @@ Scale track (docs/SCALE_ARCHITECTURE.md, research-verified 2026-07-22):
 - [x] Workstation TE wire + Recipe parse + 2Hz sim + output materialize
 - [x] WindowFull tiering; admin TCP expansion; sleeper authored markers
 - [x] Rejoin y-clamp; PPD join name; void rescue; PosAndRot authority
-- [x] Playtest driver 11/11; C2S 32/33; PACKAGES.md; BloodmoonMusic (HordeEvent unwired)
+- [x] Playtest driver 11/11; C2S 32/33; docs/wire/PACKAGES.md; BloodmoonMusic (HordeEvent unwired)
 - [x] Deco suppress (AssignIds skew); core loop clean-playable pw38
 - [x] TTS planes; ServerPassword; AssignIds dump; chunk upper24; land claim options
 
@@ -810,7 +810,7 @@ disjoint writes*, not "everything lock-free."
 
 Detail and status for interest/pool also live in
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) M11 and
-[docs/ECS.md](docs/ECS.md). Update those when an item ships.
+[docs/ECS_SYSTEMS.md](docs/ECS_SYSTEMS.md). Update those when an item ships.
 
 ---
 

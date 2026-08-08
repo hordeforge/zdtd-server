@@ -7,9 +7,9 @@ zdtd inventory is **SoA component data** on player (and loot bag) entities, driv
 via C2S `NetPackagePlayerInventory` / player `NetPackageBag` (overwrite ECS).
 No S2C PlayerInventory echo (stock rejects that direction). Join PDF +
 `players.zsv` still seed/restore from server. Full server-authoritative inv is
-the target (ADR 0004) with exception [ADR 0007](adr/0007-player-inventory-c2s-trust.md).
-See [AUTHORITY.md](AUTHORITY.md). ECS `item_id` is a table handle, not a second
-stock catalog ([ADR 0015](adr/0015-ecs-item-id-vs-stock-type.md)).
+the target (ADR 0004) with exception [ADR 0007](../adr/0007-player-inventory-c2s-trust.md).
+See [AUTHORITY.md](../AUTHORITY.md). ECS `item_id` is a table handle, not a second
+stock catalog ([ADR 0015](../adr/0015-ecs-item-id-vs-stock-type.md)).
 
 ## Slot layout
 
@@ -102,7 +102,7 @@ version 1, slot count u16 (45 padded, `bag_slots`), stacks, locked=false, touche
 
 Starter kit: stone axe (8), food×5 (2), wood×20 (7), casinoCoin×50 (6). Full inventory + holding sent in join bundle.
 `players.zsv` restores inventory by **login name** (persist key; no platform id
-yet; [ADR 0017](adr/0017-player-identity-login-name.md)).
+yet; [ADR 0017](../adr/0017-player-identity-login-name.md)).
 
 ## Admin
 

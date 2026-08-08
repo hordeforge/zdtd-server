@@ -16,7 +16,7 @@ shifts. Fixtures may pin maps for tests only.
    (`PackageIds` / `default_mappings` + peer resolve). Send by **name**; look up
    id at send/receive.
 2. **Never** treat a bare numeric id as permanent outside test fixtures.
-3. Catalog documentation ([PACKAGES.md](../PACKAGES.md)) lists names and
+3. Catalog documentation ([PACKAGES.md](../wire/PACKAGES.md)) lists names and
    directions; ids are illustrative only.
 4. Unknown or unmapped names: omit send or drop receive (fail closed), do not
    invent parallel id spaces.

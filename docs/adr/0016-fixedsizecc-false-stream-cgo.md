@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-05
-- **Related:** [WIRE_CHUNK.md](../WIRE_CHUNK.md), [../7dtd-research/docs/protocol-packages.md](../../../7dtd-research/docs/protocol-packages.md) §4.2
+- **Related:** [WIRE_CHUNK.md](../wire/WIRE_CHUNK.md), [../7dtd-research/docs/protocol-packages.md](../../../7dtd-research/docs/protocol-packages.md) §4.2
 
 ## Context
 

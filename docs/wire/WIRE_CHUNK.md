@@ -49,7 +49,7 @@ skeleton) were deleted. Do not reintroduce parallel wire shapes; production is
 
 ## Disk (world overlay)
 
-Per-chunk `.zch` under `--world` (see [ADR 0011](adr/0011-custom-zch-world-overlay.md)):
+Per-chunk `.zch` under `--world` (see [ADR 0011](../adr/0011-custom-zch-world-overlay.md)):
 
 ```text
 'Z''C''H''3' | cx:i32 | cz:i32 | flags[4]
@@ -88,8 +88,8 @@ CGO needs r≥6 at viewDist 7), hole-free, enough adds/tick.
 Terrain floor materials on stock maps use **client MicroSplat** + local
 `Data/Worlds/<level>/splat*.png`. That requires WorldInfo **`fixedSizeCC=false`**
 so the client installs `ChunkProviderGenerateWorldFromRaw(bClientMode)` instead
-of Dummy. See [ADR 0016](adr/0016-fixedsizecc-false-stream-cgo.md),
-`../7dtd-research/docs/protocol-packages.md` §4.2 and `chunk-providers.md` §4.5.
+of Dummy. See [ADR 0016](../adr/0016-fixedsizecc-false-stream-cgo.md),
+`../../../7dtd-research/docs/protocol-packages.md` §4.2 and `chunk-providers.md` §4.5.
 Block ids alone cannot fix a grey floor when splats never load.
 
 ## Evidence
