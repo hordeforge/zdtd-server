@@ -3997,6 +3997,15 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
     try std.testing.expectEqual(@as(u64, 90), ca.xp);
     try std.testing.expectEqual(@as(u64, 90), cb.xp);
+    // The killer's client gets NetPackageEntityAddExpClient (xpType 0 = Kill)
+    // with the split XP; the mate gets NetPackageSharedPartyKill (below).
+    const xp_id = packages.idOf("NetPackageEntityAddExpClient").?;
+    const xpb = cap_a.findPkgId(xp_id) orelse return error.TestUnexpectedResult;
+    var xr = binary.Reader{ .data = xpb };
+    try std.testing.expectEqual(ca.entity_id, try xr.readI32());
+    try std.testing.expectEqual(@as(i32, 90), try xr.readI32());
+    try std.testing.expectEqual(@as(i16, 0), try xr.readI16()); // Kill tag
+    try std.testing.expectEqual(false, try xr.readBool()); // no ItemValue
     const sk_id = packages.idOf("NetPackageSharedPartyKill").?;
     const skb = cap_b.findPkgId(sk_id) orelse return error.TestUnexpectedResult;
     var r = binary.Reader{ .data = skb };
@@ -4007,11 +4016,18 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
 
     // A solo kill (party broken by B leaving) awards the full 100.
     try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 3, 0, 0)));
+    cap_a.clear();
     const zid2 = g.sim.spawnZombie(258, 70, 258, 10).?;
     const dbody2 = try packages.buildDamageBody(&dmg, zid2, 0, 3, 100, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody2));
     try std.testing.expectEqual(@as(u64, 190), ca.xp);
     try std.testing.expectEqual(@as(u64, 90), cb.xp);
+    // Solo kill: the full 100 reaches the killer via AddExpClient.
+    const xpb2 = cap_a.findPkgId(xp_id) orelse return error.TestUnexpectedResult;
+    var xr2 = binary.Reader{ .data = xpb2 };
+    try std.testing.expectEqual(ca.entity_id, try xr2.readI32());
+    try std.testing.expectEqual(@as(i32, 100), try xr2.readI32());
+    try std.testing.expectEqual(@as(i16, 0), try xr2.readI16());
 }
 
 test "scenario chat routes by recipient list and preserves the channel" {
