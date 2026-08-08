@@ -214,9 +214,10 @@ pub fn removeDirTreeSimple(rel: []const u8) void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    std.Io.Dir.cwd().deleteTree(io, rel) catch |err| switch (err) {
-        error.PathNotFound => {},
-        else => std.debug.print("zdtd: remove tree '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
+    // A missing path is a no-op (deleteTree returns null), so only real
+    // failures surface here.
+    std.Io.Dir.cwd().deleteTree(io, rel) catch |err| {
+        std.debug.print("zdtd: remove tree '{s}' failed: {s}\n", .{ rel, @errorName(err) });
     };
 }
 
