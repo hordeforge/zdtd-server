@@ -37,7 +37,34 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
         if (c.xp < next_threshold) break;
         c.level += 1;
         next_threshold += self.progression.expForLevel(c.level);
+        // Level-up refreshes the EntityNetworkStats snapshot the peers hold:
+        // stock's NED dirty path pushes PlayerStats when progression changes.
+        broadcastPlayerStats(self, slot);
     }
+}
+
+/// Push the player's NetPackagePlayerStats snapshot to every connected peer
+/// (stock NED dirty path on progression change). The player's own client
+/// derives its level locally from AddExpClient, so self is excluded.
+pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
+    if (slot >= self.clients.len) return;
+    const c = &self.clients[slot];
+    if (c.peer == null or c.entity_id <= 0 or c.name_len == 0) return;
+    const exp_to_next: i32 = @intCast(@min(
+        self.progression.expForLevel(@min(c.level + 1, self.progression.max_level)),
+        std.math.maxInt(i32),
+    ));
+    if (packages.stock_xp.buildPlayerStatsBody(self.body_buf[32..160], .{
+        .entity_id = c.entity_id,
+        .entity_name = c.name[0..c.name_len],
+        .level = c.level,
+        .exp_to_next = exp_to_next,
+    })) |psb| {
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null or cl.entity_id == c.entity_id) continue;
+            if (cl.peer) |p| self.sendGame(p, "NetPackagePlayerStats", psb) catch {};
+        }
+    } else |_| {}
 }
 
 /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md

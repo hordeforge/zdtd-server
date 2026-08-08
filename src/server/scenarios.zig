@@ -113,6 +113,51 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     try std.testing.expectEqual(@as(u8, 36), try r2.readByte());
     try std.testing.expectEqual(packages.stock_entity.class_player_male, try r2.readI32());
 
+    // Progression snapshot: B holds A's PlayerStats (name "Bot", level 1).
+    const ps_id = packages.idOf("NetPackagePlayerStats").?;
+    const psb = cap_b.findPkgIdEntity(ps_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    var pr = binary.Reader{ .data = psb };
+    try std.testing.expectEqual(ca.entity_id, try pr.readI32());
+    _ = try pr.readI32(); // killed
+    try std.testing.expectEqual(@as(u16, 0), try pr.readU16()); // empty held ItemStack
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // holdingItemIndex
+    _ = try pr.readI32(); // deathHealth
+    try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // teamNumber
+    _ = try pr.readI32(); // attachedToEntityId
+    var name_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Bot", try pr.readString(&name_buf));
+    try std.testing.expectEqual(true, try pr.readBool()); // isPlayer
+    try std.testing.expectEqual(@as(i32, 0), try pr.readI32()); // killedZombies
+    _ = try pr.readI32(); // killedPlayers
+    _ = try pr.readI32(); // experience (ExpToNextLevel)
+    try std.testing.expectEqual(@as(i32, 1), try pr.readI32()); // level
+    _ = try pr.readU32(); // totalItemsCrafted
+    _ = try pr.readF32(); // distanceWalked
+    _ = try pr.readF32(); // longestLife
+    _ = try pr.readF32(); // currentLife
+    _ = try pr.readF32(); // totalTimePlayed
+    _ = try pr.readI32(); // vehiclePose
+    try std.testing.expectEqual(false, try pr.readBool()); // isSpectator
+    try std.testing.expectEqual(true, try pr.readBool()); // hasProgression
+    const blob_len = try pr.readI16();
+    try std.testing.expectEqual(@as(i16, 17), blob_len);
+    _ = try pr.readByte(); // version 3
+    try std.testing.expectEqual(@as(u16, 1), try pr.readU16()); // Level in blob
+
+    // Level-up pushes a fresh snapshot to peers: award A enough XP for lvl 2.
+    cap_b.clear();
+    g.awardXp(ca.slot, 10000);
+    const psb2 = cap_b.findPkgIdEntity(ps_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    var pr2 = binary.Reader{ .data = psb2 };
+    try std.testing.expectEqual(ca.entity_id, try pr2.readI32());
+    // Skip to level: killed(4) itemstack(2) holdingIdx(1) deathHealth(4)
+    // team(1) attached(4) name(1+3) isPlayer(1) killedZombies(4)
+    // killedPlayers(4) experience(4) -> prefix 33 before level.
+    var skip: usize = 0;
+    while (skip < 4 + 2 + 1 + 4 + 1 + 4 + 1 + 3 + 1 + 4 + 4 + 4) : (skip += 1) _ = try pr2.readByte();
+    const lvl2 = try pr2.readI32();
+    try std.testing.expectEqual(@as(i32, @intCast(ca.level)), lvl2); // snapshot carries the new level
+
     // Dropping A broadcasts EntityRemove(Despawned) to B. The drop zeroes
     // A's client struct, so snapshot the entity id before it.
     const a_eid = ca.entity_id;

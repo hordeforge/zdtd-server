@@ -493,6 +493,8 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         });
         try self.sendGame(peer, "NetPackageEntitySpawn", body);
         c.known_entities.set(i);
+        // Progression snapshot: peer tooltip / party panel level + name.
+        try sendPlayerStatsTo(self, peer, owner, nid);
     }
     // The joiner's own body to every other client whose view covers it.
     const js = self.sim.playerByPeer(c.slot) orelse return;
@@ -532,7 +534,26 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         )) continue;
         try self.sendGame(cl.peer.?, "NetPackageEntitySpawn", jbody);
         cl.known_entities.set(js);
+        try sendPlayerStatsTo(self, cl.peer.?, c, jnid);
     }
+}
+
+/// NetPackagePlayerStats (EntityNetworkStats snapshot) for one peer: name,
+/// level and next-level XP cost from the owner's client ledger.
+fn sendPlayerStatsTo(self: *Game, peer: *ln_peer.Peer, owner: *const Client, nid: i32) !void {
+    if (owner.name_len == 0) return;
+    const exp_to_next: i32 = @intCast(@min(
+        self.progression.expForLevel(@min(owner.level + 1, self.progression.max_level)),
+        std.math.maxInt(i32),
+    ));
+    if (packages.stock_xp.buildPlayerStatsBody(self.body_buf[32..160], .{
+        .entity_id = nid,
+        .entity_name = owner.name[0..owner.name_len],
+        .level = owner.level,
+        .exp_to_next = exp_to_next,
+    })) |psb| {
+        try self.sendGame(peer, "NetPackagePlayerStats", psb);
+    } else |_| {}
 }
 
 /// Stock EntityStatChanged for core vitals (Health/Stamina/Food/Water).
