@@ -4189,8 +4189,19 @@ pub const Game = struct {
     }
 
     fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
-        var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-        const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, &stacks);
+        // Stock LootContainer.size (loot.xml <lootcontainer size="x,y">) sizes
+        // the storage grid; the client reads the cell count from the TE body,
+        // so a gun safe (4x3) shows 12 cells instead of the flat 8. The size
+        // derives per fill and the save round-trips slot_count, so a restored
+        // container keeps its capacity and a re-rolled one re-derives it.
+        if (self.loot.containerByName(loot_name)) |lc| {
+            const want = @min(@as(usize, lc.size_x) * @as(usize, lc.size_y), containers_mod.max_container_slots);
+            if (want >= 1) cont.slot_count = @intCast(want);
+        }
+        // Roll up to the container's own capacity (the roll is capped by the
+        // buffer, so a bigger container actually fills more stacks).
+        var stacks: [containers_mod.max_container_slots]assets_loot.Stack = undefined;
+        const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count]);
         var si: usize = 0;
         var i: usize = 0;
         while (i < n and si < cont.slot_count) : (i += 1) {

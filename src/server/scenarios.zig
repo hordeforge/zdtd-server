@@ -3716,6 +3716,55 @@ test "scenario container loot respawns after LootRespawnDays" {
     std.debug.print("PASS loot-respawn: container re-rolled after LootRespawnDays (fail-closed={s})\n", .{if (has_loot_list) "no" else "yes"});
 }
 
+test "scenario loot container size comes from the loot.xml size attr" {
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExistsSimple(game_dir)) return error.SkipZigTest;
+    io_fs.mkdirPathSimple("worlds");
+    freshScenarioDir("worlds/zdtd_sc_lootsize");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_lootsize", 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.loot_respawn_days = 1;
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Stock sizes: woodenChest 6x2=12, smallSafes 8x5=40 (gunSafe 8x9 caps).
+    try std.testing.expectEqual(@as(u8, 6), g.loot.containerByName("woodenChest").?.size_x);
+    try std.testing.expectEqual(@as(u8, 2), g.loot.containerByName("woodenChest").?.size_y);
+
+    // Place a wooden chest; the respawn fill must size the container 6x2=12
+    // (the flat fill previously hardcoded 8 slots).
+    const chest_id: u16 = g.maxdamage.idByName("cntWoodenChestClosed") orelse return error.TestUnexpectedResult;
+    var sb: [64]u8 = undefined;
+    var frame_buf: [8192]u8 = undefined;
+    const place = try packages.buildSetBlockBody(&sb, 251, 70, 251, chest_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", place));
+    const pos = containers_mod.PosKey{ .x = 251, .y = 70, .z = 251 };
+    const cont = g.containers.get(pos) orelse return error.TestUnexpectedResult;
+    cont.clear();
+    cont.touched = true;
+    cont.player_storage = false; // world container: respawn-eligible
+    cont.touched_day = 0;
+    var req: [36]u8 = undefined;
+    @memcpy(req[0..16], &cont.inv_guid);
+    std.mem.writeInt(i32, req[16..20], 0, .little);
+    @memcpy(req[20..36], &cont.inv_guid);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try std.testing.expectEqual(@as(u16, 12), cont.slot_count);
+    // The rolled loot fits the sized grid and the wire derives 2x6 from it.
+    var filled: u16 = 0;
+    for (cont.slots[0..cont.slot_count]) |s| {
+        if (s.count > 0 and s.item_id != 0) filled += 1;
+    }
+    try std.testing.expect(filled > 0);
+    std.debug.print("PASS loot-size: wooden chest sized 6x2={d} slots from loot.xml ({d} filled)\n", .{ cont.slot_count, filled });
+}
+
 test "scenario trader quest offers follow the trader's class" {
     // Each stock trader class maps to its own trader_*_quests list (the five
     // lists are parsed but were never selected by trader). Spawn a trader with
