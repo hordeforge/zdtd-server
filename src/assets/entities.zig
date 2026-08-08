@@ -199,6 +199,23 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         classes.deinit(allocator);
     }
 
+    // <replace_passive_effect> name -> value map (the stock HP list:
+    // healthSlim 125 ... healthBruteInfernal 3100). passive_effect rows that
+    // start with '^' reference these.
+    var hp_vars: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer hp_vars.deinit(allocator);
+    if (std.mem.indexOfPos(u8, clean, 0, "<replace_passive_effect")) |rv| {
+        const rv_end = std.mem.indexOfPos(u8, clean, rv, "</replace_passive_effect>") orelse clean.len;
+        var rpi: usize = rv;
+        while (std.mem.indexOfPos(u8, clean, rpi, "<property")) |ptag| {
+            rpi = ptag + 9;
+            if (ptag >= rv_end) break;
+            const pname = xml.attr(clean, ptag, "name") orelse continue;
+            const pval = xml.attr(clean, ptag, "value") orelse continue;
+            try hp_vars.put(allocator, try arena.dupe(u8, pname), try arena.dupe(u8, pval));
+        }
+    }
+
     var i: usize = 0;
     while (i < clean.len) {
         const tag = std.mem.indexOfPos(u8, clean, i, "<entity_class") orelse break;
@@ -221,18 +238,35 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         var props: std.StringHashMapUnmanaged([]const u8) = .{};
         var pi: usize = 0;
         while (pi < body.len) {
-            const ptag = std.mem.indexOfPos(u8, body, pi, "<property") orelse break;
+            // property rows and the HealthMax passive_effect row share the
+            // same name -> value map (a stock class carries either MaxHealth
+            // property or passive_effect name="HealthMax"; V3.1.0 ships the
+            // passive form). perc_add rows are a spawn-time +/-15% roll that
+            // zdtd pins to the base value for deterministic sims.
+            const ptag_prop = std.mem.indexOfPos(u8, body, pi, "<property");
+            const ptag_pass = std.mem.indexOfPos(u8, body, pi, "<passive_effect");
+            const is_passive = ptag_pass != null and (ptag_prop == null or ptag_pass.? < ptag_prop.?);
+            const ptag = if (is_passive) ptag_pass.? else ptag_prop orelse break;
             const pname = xml.attr(body, ptag, "name") orelse {
                 pi = ptag + 9;
                 continue;
             };
             if (xml.attr(body, ptag, "value")) |pval| {
-                // last wins
-                const kn = try arena.dupe(u8, pname);
-                const vv = try arena.dupe(u8, pval);
-                try props.put(allocator, kn, vv);
+                const keep = if (is_passive) blk: {
+                    const op = xml.attr(body, ptag, "operation") orelse "";
+                    // HealthMax base_set is the HP source; anything else that
+                    // reaches this map is ignored by the resolvers below.
+                    break :blk std.mem.eql(u8, pname, "HealthMax") and
+                        std.mem.eql(u8, op, "base_set");
+                } else true;
+                if (keep) {
+                    // last wins
+                    const kn = try arena.dupe(u8, pname);
+                    const vv = try arena.dupe(u8, pval);
+                    try props.put(allocator, kn, vv);
+                }
             }
-            pi = ptag + 9;
+            pi = if (is_passive) ptag + 14 else ptag + 9;
         }
 
         const name_owned = try arena.dupe(u8, name);
@@ -263,6 +297,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.parseF32(mh)) |f| max_hp = f;
         } else if (resolveProp(&classes, name, "HandHealthMax", 0)) |mh| {
             if (xml.parseF32(mh)) |f| max_hp = f;
+        } else if (resolveProp(&classes, name, "HealthMax", 0)) |hm| {
+            // passive_effect name="HealthMax" base_set; '^' values resolve
+            // through <replace_passive_effect> (stock zombie HP ladder).
+            const v: []const u8 = if (hm.len > 0 and hm[0] == '^')
+                (hp_vars.get(hm[1..]) orelse "")
+            else
+                hm;
+            if (xml.parseF32(v)) |f| {
+                // Bound: a crafted value must not make one entity immortal or
+                // die to a stray byte; stock tops out around 1e5 (traders).
+                if (f >= 1 and f <= 1_000_000) max_hp = f;
+            }
         }
         // V3.x: LootDropEntityClass (bag entity class name). Older docs said LootListOnDeath.
         // The class name names a bag ENTITY CLASS whose own LootList is the
