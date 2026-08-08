@@ -3769,24 +3769,38 @@ pub const Game = struct {
         const bname = self.world.biome_layers_table.nameById(biome_id) orelse return fallback;
         var buf: [16]assets_spawning.Rule = undefined;
         const n = self.spawning.rulesForBiome(bname, &buf);
+        var animal_rules: [8][]const u8 = undefined;
+        var animal_candidates: usize = 0;
         var ri: usize = 0;
         while (ri < n) : (ri += 1) {
             const r = buf[ri];
             switch (kind) {
                 .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
                 .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
-                .animal => if (r.kind == .animal) {
-                    // Stock per biome: Any (day wildlife) plus Night (night
-                    // wildlife incl. EnemyAnimals). Prefer the Night rule when
-                    // it is dark so predators actually spawn.
+                .animal => {
+                    // Stock per biome has multiple animal rules: day Any
+                    // (WildGameForest), Night wildlife (WildGameForestNight),
+                    // and Night enemy (EnemyAnimalsForest: snake, boar, wolf,
+                    // bear). Rotate across the matching rules by the spawn
+                    // counter so predators actually appear at night instead of
+                    // always picking the first Night rule.
+                    if (r.kind != .animal) continue;
                     const night = self.sim.director.clock.isNight();
-                    if (r.time == .night) {
-                        if (night) return r.entitygroup;
-                    } else if (r.time == .any or r.time == .day) {
-                        if (!night) return r.entitygroup;
+                    const matches_night = r.time == .night and night;
+                    const matches_day = (r.time == .any or r.time == .day) and !night;
+                    if (!matches_night and !matches_day) continue;
+                    if (animal_candidates < animal_rules.len) {
+                        animal_rules[animal_candidates] = r.entitygroup;
+                        animal_candidates += 1;
                     }
                 },
             }
+        }
+        if (kind == .animal and animal_candidates > 0) {
+            // Rotate deterministically by the director spawn counter so the
+            // mix of passive and enemy wildlife varies per spawn.
+            const pick = self.sim.director.total_spawned % animal_candidates;
+            return animal_rules[pick];
         }
         return fallback;
     }
