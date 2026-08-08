@@ -37,7 +37,9 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   (070bc8e) - real gameplay gap closed
 - test-review: on_player_login join gate covered via plugin_login.wasm (98c84db)
 - slop-review: last em dash removed (e2ef9b5)
-- api-review: game/craft.zig extracted from game.zig (34165f6, -170 lines)
+- api-review: game/craft.zig extracted (34165f6, -170), game/chunk_stream.zig
+  (bb3464e, -170), game/chunk_fill.zig (e5ac2fb, -270): all three arch-apis
+  shards done; game.zig 6397 -> 4666 lines
 - verified clean (no fixes): build, cli, concurrency, deps, doc, dst, fuzz,
   infra, minimalism, o11y, perf, release
 - earlier dedicated agents this session: arch, api, deps, ecs, hardcode,
@@ -46,8 +48,9 @@ verify build + full test binary + lint, commit. Later passes re-verify.
 ## Working tree right now
 
 ```
-working tree clean at 34165f6
-game.zig 5087 lines (was 5310 at handoff): loot/weather/vehicle/craft shards
+working tree clean at e5ac2fb
+game.zig 4666 lines (was 6397 at handoff): craft/chunk_stream/chunk_fill/
+  loot/weather/vehicle shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
 parity landed: trader roll + 50-entry window + lazy restock, party stage,
   loot container size, loot count=all / force_prob / quality templates,
