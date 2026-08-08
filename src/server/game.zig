@@ -1435,12 +1435,13 @@ pub const Game = struct {
         const sz: f32 = @floatFromInt(sp.z);
 
         // Keep starter zombies outside default turret range (~24) so they survive until join.
+        // A35: spawn the full resolved class so the entities carry their own stats.
         const zdef = self.entities.defaultZombie();
-        const z1 = self.sim.spawnZombieClass(sx + 40, sy, sz + 8, zdef.max_hp, zdef.hash, zdef.loot_list);
-        const z2 = self.sim.spawnZombieClass(sx - 35, sy, sz + 12, zdef.max_hp, zdef.hash, zdef.loot_list);
-        const z3 = self.sim.spawnSleeperClass(sx + 30, sy, sz - 40, zdef.max_hp + 10, zdef.hash, zdef.loot_list);
+        const z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
+        const z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
+        const z3 = self.sim.spawnSleeperDef(sx + 30, sy, sz - 40, self.entityClassOf(zdef));
         const adef = self.entities.defaultAnimal();
-        _ = self.sim.spawnAnimal(sx - 20, sy, sz - 25, adef.max_hp, adef.hash, adef.loot_list);
+        _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
         if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"), self.trader_wallet_dukes)) |trader_id| {
             self.fillTraderFromXml(trader_id);
         }
