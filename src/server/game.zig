@@ -268,13 +268,6 @@ fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32) i32
     };
 }
 
-/// Combined block-damage verdict: static host first, then Wasm (first non-zero
-/// wins; 0 = no plugin vetoes/scales, keep today's behaviour).
-fn blockDamageVerdict(self: *Game, x: i32, y: i32, z: i32, dmg: i32) i32 {
-    const sv = self.plugins.blockDamage(x, y, z, dmg);
-    return if (sv != 0) sv else self.wasm_plugins.blockDamage(x, y, z, dmg);
-}
-
 /// Max bytes of one queued command string from a guest (bounds the tokenizer).
 const max_plugin_cmd_len: usize = 128;
 

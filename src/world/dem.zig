@@ -147,13 +147,6 @@ pub fn tileKey(buf: []u8, lat: i32, lon: i32) ![]const u8 {
 pub const Anchor = struct {
     lat: f64, // degrees, world origin
     lon: f64,
-    /// meters per DEM pixel at this latitude (x varies with cos(lat))
-    pub fn metersPerPxX(self: Anchor) f64 {
-        return 30.87 * @cos(std.math.degreesToRadians(self.lat));
-    }
-    pub fn metersPerPxZ(_: Anchor) f64 {
-        return 30.87;
-    }
 };
 
 /// Elevation (meters) → 7DTD block y. Sea level 60; 12m per block band above
@@ -239,24 +232,6 @@ pub const Fetcher = struct {
         return n;
     }
 
-    /// Fetch + decode one 1024x1024 inner tile (tx,ty in 0..3) of a degree tile.
-    pub fn innerTile(self: *Fetcher, lat: i32, lon: i32, tx: u32, ty: u32, out: []f32) !void {
-        var head: [cog_header_len]u8 = undefined;
-        const hn = try self.tileHeader(lat, lon, &head);
-        const info = try parseCogHeader(head[0..hn]);
-        const ti = ty * tiles_per_side + tx;
-        if (ti >= info.tile_n) return error.Unsupported;
-        const blob_off = info.tile_offsets[ti];
-        const blob_len = info.tile_counts[ti];
-        if (blob_len == 0) return error.Unsupported;
-        const blob = try self.allocator.alloc(u8, blob_len);
-        defer self.allocator.free(blob);
-        var kbuf: [160]u8 = undefined;
-        const key = try tileKey(&kbuf, lat, lon);
-        const got = try self.fetchRange(key, blob_off, blob_len, blob);
-        if (got < blob_len) return error.HttpError;
-        try decodeTile(self.allocator, blob[0..blob_len], out);
-    }
 };
 
 test "cog header parses live GLO-30 sample" {

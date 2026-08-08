@@ -1009,13 +1009,6 @@ fn writeVec3i(w: *binary.Writer, v: Vec3i) !void {
 
 /// PlatformUserIdentifierAbs::FromStream (asm.il:30604): a false bool is the whole
 /// value; otherwise a platform byte and two length-prefixed strings follow.
-fn skipPlatformUser(r: *binary.Reader) binary.ReadError!void {
-    if (!try r.readBool()) return;
-    _ = try r.readByte();
-    try r.skipString();
-    try r.skipString();
-}
-
 /// Parse a C2S NetPackageTileEntity body as TileEntityPoweredTrigger, i.e.
 /// TileEntity/StreamModeRead.FromClient (2). Untrusted input: every field is
 /// bounded by the declared payload length and a short body is an error.
@@ -1054,7 +1047,7 @@ pub fn parsePoweredTriggerTeBody(body: []const u8) binary.ReadError!PoweredTrigg
         out.yaw = try pr.readF32();
     }
     out.trigger_type = try pr.readByte();
-    if (out.trigger_type == trigger_type_motion) try skipPlatformUser(&pr);
+    if (out.trigger_type == trigger_type_motion) try platform_user.skip(&pr);
     if (out.trigger_type == trigger_type_timer_relay) {
         out.property1 = try pr.readByte(); // StartTime
         out.property2 = try pr.readByte(); // EndTime

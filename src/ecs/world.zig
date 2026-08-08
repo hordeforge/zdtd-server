@@ -639,16 +639,6 @@ pub const World = struct {
         return id;
     }
 
-    pub fn spawnSleeperClass(self: *World, x: f32, y: f32, z: f32, hp: f32, class_hash: i32, loot_list: []const u8) ?NetId {
-        const id = self.spawnZombieClass(x, y, z, hp, class_hash, loot_list) orelse return null;
-        if (self.slotOfNetId(id)) |s| {
-            self.mask[s].sleeper = true;
-            self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
-            self.zombie_ai[s].state = .sleep;
-        }
-        return id;
-    }
-
     /// Sleeper spawn carrying the full resolved class stats on the entity (the
     /// same A35 path as spawnZombieDef): a sleeper class not preloaded into the
     /// fixed class_table still chases/bites as itself instead of the zombie row.

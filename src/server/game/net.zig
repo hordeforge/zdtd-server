@@ -357,28 +357,3 @@ pub fn unbanIp(self: *Game, ip: u32) void {
     }
 }
 
-fn isBanned(self: *const Game, ip: u32) bool {
-    if (ip == 0) return false;
-    for (self.ban_ip[0..self.ban_n]) |banned| if (banned == ip) return true;
-    return false;
-}
-
-fn joinRateLimited(self: *Game, ip: u32) bool {
-    if (ip == 0) return false;
-    if (ip == 0x7f000001) return false;
-    const now_ms: u64 = clock.monoNs() / 1_000_000;
-    const gap_ms: u64 = 500;
-    var i: usize = 0;
-    while (i < self.join_ip_n) : (i += 1) {
-        if (self.join_ip[i] != ip) continue;
-        if (now_ms -% self.join_ip_ms[i] < gap_ms) return true;
-        self.join_ip_ms[i] = now_ms;
-        return false;
-    }
-    if (self.join_ip_n < self.join_ip.len) {
-        self.join_ip[self.join_ip_n] = ip;
-        self.join_ip_ms[self.join_ip_n] = now_ms;
-        self.join_ip_n += 1;
-    }
-    return false;
-}

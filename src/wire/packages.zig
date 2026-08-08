@@ -328,33 +328,6 @@ pub fn buildPlayerIdBody(buf: []u8, entity_id: i32, team: i16, chunk_view_dim: i
     return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{});
 }
 
-pub fn buildPlayerIdBodyWithQuests(
-    buf: []u8,
-    entity_id: i32,
-    team: i16,
-    chunk_view_dim: i32,
-    sx: i32,
-    sy: i32,
-    sz: i32,
-    quests: []const stock_quest.StockQuestWrite,
-) ![]u8 {
-    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{ .quests = quests });
-}
-
-pub fn buildPlayerIdBodyFull(
-    buf: []u8,
-    entity_id: i32,
-    team: i16,
-    chunk_view_dim: i32,
-    sx: i32,
-    sy: i32,
-    sz: i32,
-    quests: []const stock_quest.StockQuestWrite,
-    unlocked_recipes: []const []const u8,
-) ![]u8 {
-    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{ .quests = quests, .unlocked_recipes = unlocked_recipes });
-}
-
 pub fn buildPlayerIdBodyInv(
     buf: []u8,
     entity_id: i32,
