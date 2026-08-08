@@ -4222,9 +4222,9 @@ test "scenario trader restock rebuilds the window lazily on open" {
     const nts = g.sim.slotOfNetId(never_id).?;
     g.fillTraderFromXml(never_id);
     g.sim.trader_stock[nts].reset_interval = -1;
+    g.sim.trader_stock[nts].last_restock_day = 1;
     g.sim.director.clock.day = 60;
     g.maybeRestockTrader(nts);
     try std.testing.expectEqual(@as(u32, 1), g.sim.trader_stock[nts].last_restock_day);
     std.debug.print("PASS trader-restock: lazy window rebuild on open after reset_interval\n", .{});
 }
-

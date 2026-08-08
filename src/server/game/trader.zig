@@ -195,7 +195,6 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     if (n > 0) self.sim.trader_stock[s].n = @intCast(n);
 }
 
-
 /// Stock TraderManager.TraderInventoryRequested / HandleFullReset
 /// (loot-economy.md §3): restock is lazy, triggered by the trader open, not a
 /// background timer. When the trader_info ResetInterval has elapsed since the
@@ -211,6 +210,9 @@ pub fn maybeRestockTrader(self: *Game, ts: ecs.Slot) void {
         if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) return;
     }
     self.fillTraderFromXml(self.sim.network_id[ts].id);
+    // fillTraderFromXml advances the day only when a trader_info row exists
+    // (XML mode); the restock decision is ours, so pin it here regardless.
+    self.sim.trader_stock[ts].last_restock_day = self.sim.director.clock.day;
     if (self.sim.trader_stock[ts].wallet < self.sim.trader_stock[ts].wallet_default) {
         self.sim.trader_stock[ts].wallet = self.sim.trader_stock[ts].wallet_default;
     }
