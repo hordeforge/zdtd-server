@@ -64,7 +64,8 @@ pub fn readConfigXml(
 }
 
 /// Load via `loadFn(allocator, path) !T` using config path resolution (no patches).
-/// Prefer tryLoadConfigPatched when overrides may be set.
+/// Thin wrapper kept: 4 call sites use the no-patch path and should not spell the
+/// null `loadFromBytes` sentinel or pay the merge/cache branch.
 pub fn tryLoadConfig(
     comptime file_name: []const u8,
     comptime T: type,

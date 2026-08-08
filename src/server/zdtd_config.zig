@@ -37,6 +37,7 @@ pub const Authority = struct {
     max_edit_range_blocks: ?f32 = null,
     max_claimed_damage: ?i32 = null,
     peer_stale_ms: ?u64 = null,
+    lock_stale_ms: ?u64 = null,
     mode: ?[]const u8 = null,
     /// P4 guard policy (src/server/guard_policy.zig). Defaults are log-only:
     /// enforce/quarantine off, dry_run on. See docs/AUTHORITY.md.
@@ -60,6 +61,7 @@ pub const Feature = struct {
     /// Send the full "blocks" NameIdMapping before the config files. Off falls
     /// back to the client assigning block ids from its own local blocks.xml.
     block_id_mapping: ?bool = null,
+    deco_objects_per_join: ?usize = null,
 };
 
 /// Performance switches (docs/SCALE_ARCHITECTURE.md). All default off: each one
@@ -203,6 +205,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.authority.max_edit_range_blocks) |v| opts.max_edit_range = v;
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
+    if (f.authority.lock_stale_ms) |v| {
+        if (@hasField(@TypeOf(opts.*), "lock_stale_ns")) opts.lock_stale_ns = v *% 1_000_000;
+    }
     if (f.authority.guard_enforce) |v| opts.guard.enforce = v;
     if (f.authority.guard_dry_run) |v| opts.guard.dry_run = v;
     if (f.authority.guard_quarantine) |v| opts.guard.quarantine = v;
@@ -217,6 +222,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.feature.deco_trees) |v| opts.deco_trees = v;
     if (f.feature.deco_mirror) |v| opts.deco_mirror = v;
     if (f.feature.block_id_mapping) |v| opts.block_id_mapping = v;
+    if (f.feature.deco_objects_per_join) |v| {
+        if (@hasField(@TypeOf(opts.*), "deco_objects_per_join")) opts.deco_objects_per_join = v;
+    }
     if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
@@ -312,6 +320,14 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.peer_stale_ms == 0) {
         std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
+    }
+    if (@hasField(@TypeOf(opts.*), "lock_stale_ns") and opts.lock_stale_ns == 0) {
+        std.debug.print("zdtd: lock_stale_ns=0 invalid; using 1\n", .{});
+        opts.lock_stale_ns = 1;
+    }
+    if (@hasField(@TypeOf(opts.*), "deco_objects_per_join") and opts.deco_objects_per_join == 0) {
+        std.debug.print("zdtd: deco_objects_per_join=0 invalid; using 1\n", .{});
+        opts.deco_objects_per_join = 1;
     }
     // Anti-abuse rate limits: caps and bursts must stay >= 1 (a 0 cap would
     // permanently starve the bucket; a 0 burst would reject every combo).

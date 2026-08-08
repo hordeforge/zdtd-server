@@ -539,4 +539,3 @@ test "an empty table resolves to not-ok rather than to zeros that look real" {
     const sv = survival(&t);
     try std.testing.expect(!sv.ok());
 }
-

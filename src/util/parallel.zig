@@ -209,10 +209,12 @@ pub fn poolIo() std.Io {
     return global_pool.io();
 }
 
-/// Process-wide mutex usable without threading an `std.Io` through callers
-/// (Zig 0.16 dropped `std.Thread.Mutex`; `std.Io.Mutex` needs an io for the
-/// contended futex path, which the pool's `Threaded` provides). No-op in
-/// single-threaded builds where the pool never runs workers.
+/// Process-wide mutex usable without threading an `std.Io` through callers.
+/// Zig 0.16 dropped `std.Thread.Mutex`; `std.Io.Mutex` needs an io for the
+/// contended futex path, which the pool's `Threaded` provides. No-op in
+/// single-threaded builds where the pool never runs workers. Kept: 5 call
+/// sites in world/assets that share the pool's `Threaded` instead of standing
+/// up a second one per lock.
 pub const IoMutex = struct {
     inner: std.Io.Mutex = .init,
 

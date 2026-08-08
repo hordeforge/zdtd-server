@@ -10,8 +10,8 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 | Bucket | Open actionable | P0 open | P1 open | Notes |
 |---|---:|---:|---:|---|
 | **A** (stock data) | ~12 | 0 | 0 | A12 vehicle fallback + **A29 trader pricing** + A22 deco skew + A20 dukes fixed |
-| **B** (zdtd policy) | ~14 | 0 | 0 | Stream/authority/feature/perf/sim/mode/plugin via `zdtd.toml`; A19 wallet configurable; open consts: AI bands, caps |
-| **OK** | 30+ | - | - | Wire / RE / physics / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
+| **B** (zdtd policy) | ~0 | 0 | 0 | `[rules.ai]` now carries the 30 AI timing/radii tunables that were the last large Bucket B bloc; stream/authority/feature/perf/sim via `zdtd.toml` already done |
+| **OK** | 30+ | - | - | Wire / RE / `gravity_accel = -9.81` RE literal / pure math / offline pins / new T1-T6 stock constants / litenet + quest-wave OKs |
 
 | Spot-check | Result |
 |---|---|
@@ -152,7 +152,7 @@ nav_objects, qualityinfo, weathersurvival, worldglobal, utilityai, …
 | B01–B07 | stream/interest/edit/claimed/stale | P1 | **Done:** Game fields + `[stream]` / `[authority]` in `zdtd.toml` |
 | B08–B12 | lock stale/channels, join gap, craft cap | P2 | Open consts; A19 wallet done via `[sim]` |
 | B13 | tick throttles % N | P1 | **Done** | All four remaining cadences are Game fields fed from `zdtd.toml [stream]`: `sleeper_tick_ticks` (10, sleeper volumes + airdrops + workstations), `turret_sync_ticks` (10), `save_interval_ticks` (100, world flush). Keys parse, merge, sanitize (0 → 1) and are listed in GAME_OPTIONS + the example file. |
-| B14–B21 | AI bands, caps, buffers | P2–P3 | Open: draft `[net]`/`[ai]`/`[caps]` sections removed from example; unknown toml keys now **abort** (`error.UnknownTomlKey`), so the draft keys are unusable until parsed |
+| B14–B21 | AI bands, caps, buffers | P2–P3 | **Mostly done:** `B14–B17` (AI bands) are `[rules.ai]` (30 tunables, Rules overlay); `B18–B21` caps/buffers remain (world/sleeper/entity caps, parallel worker count) — low-impact engineering caps, not wrong-value risks |
 | B22 | CLI + file for caps | P1 | **Done:** file via `zdtd_config`; no per-cap CLI flags (InitOptions from toml) |
 | B23–B24 | port offset, APM | P3 | Open |
 | B25 | quest kill-count boost `3 + tier*2` | P3 | **RE basis added** | `assets/quests.zig:342` now cites the RE fact: stock ClearSleepers objectives always omit `count` (11/11 in stock quests.xml) because the target is the POI's sleeper volume, counted at runtime via `QuestEvent_SleepersCleared` / `SleeperVolumePosition*` (ObjectiveClearSleepers IL). The tier-scaled floor stays as a documented approximation until the kill objective is driven by the bound POI's sleeper volume (which the B26 POI binding now makes possible). |
@@ -237,7 +237,7 @@ markup ratios (A29) here (Bucket A).
 | `assignids_comptime` + embed dump | Dump pin; subset when merged |
 | TE type enums, NodeKind, inv Op, QuestKind | RE / sim shapes |
 | OpenSimplex / pure math | No stock file |
-| `gravity_accel = -9.81` | Physics |
+| `gravity_accel = -9.81` (vehicle) | **OK as RE literal**: `EntityVehicle::cGravity` asm.il:536018; Unity `Physics.gravity.y` default; `items.xml` "default is -9.81" confirms stock; **not** a blanket physics OK (projectile `items.xml` `Gravity` per item and `blocks.xml` `FallDamage` / `entityclasses.xml` `Mass` are Bucket A when evaluated — see Bucket A table) |
 | Sleeper parseCount default 5 | Stock ParseList |
 | Test-only Steam paths + scenarios | Skip if missing |
 | chunk_size 16 | World constant |
@@ -267,7 +267,7 @@ markup ratios (A29) here (Bucket A).
 
 1. ~~**A10–A11**~~ **Done.** **A12** vehicle speed switch residuals remain.
 2. ~~**B13**~~ **Done:** sleeper/turret/save cadences are `[stream]` keys.
-3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). AI bands still open.
+3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). ~~**B14–B17**~~ **Done:** AI timing/radii (30 tunables) are `[rules.ai]` — mode pack or `zdtd.toml` without forking `systems.zig`.
 4. **A07** biome default stack pins before XML (acceptable offline).
 5. **A29 (new 08-07)** trader price/sell ratios `econ/10` `econ/50` do not match stock `EconomicValue × markup`; client display vs server charge desync. Known gap (GAP_ANALYSIS), not yet fixed.
 

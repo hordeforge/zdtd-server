@@ -79,6 +79,7 @@ pub fn mkdirPath(allocator: std.mem.Allocator, rel: []const u8) void {
     };
 }
 
+/// mkdirPath without a caller allocator (Threaded internals only).
 pub fn mkdirPathSimple(rel: []const u8) void {
     mkdirPath(std.heap.page_allocator, rel);
 }
@@ -104,6 +105,7 @@ pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []con
     try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
 }
 
+/// writeFile without a caller allocator (Threaded internals only).
 pub fn writeFileSimple(rel_path: []const u8, data: []const u8) !void {
     try writeFile(std.heap.page_allocator, rel_path, data);
 }
@@ -167,7 +169,7 @@ pub fn fileExists(allocator: std.mem.Allocator, path: []const u8) bool {
     return true;
 }
 
-/// fileExists without requiring a long-lived allocator (Threaded only).
+/// fileExists without a caller allocator (Threaded internals only).
 pub fn fileExistsSimple(path: []const u8) bool {
     return fileExists(std.heap.page_allocator, path);
 }
@@ -183,6 +185,7 @@ pub fn dirExists(allocator: std.mem.Allocator, path: []const u8) bool {
     return true;
 }
 
+/// dirExists without a caller allocator (Threaded internals only).
 pub fn dirExistsSimple(path: []const u8) bool {
     return dirExists(std.heap.page_allocator, path);
 }
@@ -199,6 +202,7 @@ pub fn deleteFile(allocator: std.mem.Allocator, path: []const u8) void {
     };
 }
 
+/// deleteFile without a caller allocator (Threaded internals only).
 pub fn deleteFileSimple(path: []const u8) void {
     deleteFile(std.heap.page_allocator, path);
 }
@@ -213,6 +217,7 @@ pub fn readLinkAbsolute(allocator: std.mem.Allocator, absolute_path: []const u8,
     return buf[0..n];
 }
 
+/// readLinkAbsolute without a caller allocator (Threaded internals only).
 pub fn readLinkAbsoluteSimple(absolute_path: []const u8, buf: []u8) ![]u8 {
     return readLinkAbsolute(std.heap.page_allocator, absolute_path, buf);
 }

@@ -311,11 +311,19 @@ pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
 /// Empty PDF matches a fresh PlayerDataFile() so stock ReadNetwork completes without EOF.
 /// `sx,sy,sz` are world spawn coords written into ECD pos + lastSpawnPosition so the
 /// local player is not created at (0,0,0) (which floods SkyManager/SignTexture NREs).
+pub const PlayerIdOpts = struct {
+    quests: []const stock_quest.StockQuestWrite = &.{},
+    unlocked_recipes: []const []const u8 = &.{},
+    toolbelt: []const stock_inv.StockSlot = &.{},
+    bag: []const stock_inv.StockSlot = &.{},
+    b_loaded: bool = true,
+    game_stage_born_at: u64 = game_stage_born_unset,
+};
+
 pub fn buildPlayerIdBody(buf: []u8, entity_id: i32, team: i16, chunk_view_dim: i32, sx: i32, sy: i32, sz: i32) ![]u8 {
-    return buildPlayerIdBodyWithQuests(buf, entity_id, team, chunk_view_dim, sx, sy, sz, &.{});
+    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{});
 }
 
-/// PlayerId with optional stock QuestJournal entries (must use client-known quest IDs).
 pub fn buildPlayerIdBodyWithQuests(
     buf: []u8,
     entity_id: i32,
@@ -326,10 +334,9 @@ pub fn buildPlayerIdBodyWithQuests(
     sz: i32,
     quests: []const stock_quest.StockQuestWrite,
 ) ![]u8 {
-    return buildPlayerIdBodyFull(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, &.{});
+    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{ .quests = quests });
 }
 
-/// PlayerId + optional unlocked recipe names (always_unlocked craft list).
 pub fn buildPlayerIdBodyFull(
     buf: []u8,
     entity_id: i32,
@@ -341,11 +348,9 @@ pub fn buildPlayerIdBodyFull(
     quests: []const stock_quest.StockQuestWrite,
     unlocked_recipes: []const []const u8,
 ) ![]u8 {
-    return buildPlayerIdBodyInv(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, unlocked_recipes, &.{}, &.{});
+    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{ .quests = quests, .unlocked_recipes = unlocked_recipes });
 }
 
-/// PlayerId carrying restored toolbelt/bag stacks (persisted players.zsv v2).
-/// Empty slices = fresh join (client uses its local starter PDF).
 pub fn buildPlayerIdBodyInv(
     buf: []u8,
     entity_id: i32,
@@ -359,13 +364,36 @@ pub fn buildPlayerIdBodyInv(
     toolbelt: []const stock_inv.StockSlot,
     bag: []const stock_inv.StockSlot,
 ) ![]u8 {
-    return buildPlayerIdBodyInvLoaded(buf, entity_id, team, chunk_view_dim, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, true, game_stage_born_unset);
+    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{
+        .quests = quests,
+        .unlocked_recipes = unlocked_recipes,
+        .toolbelt = toolbelt,
+        .bag = bag,
+    });
 }
 
 /// EntityPlayer::Init seeds gameStageBornAtWorldTime to -1 (asm.il ~503740);
 /// PlayerDataFile::CopyTo then clamps anything above the current world time
 /// down to it (asm.il ~1975949), so the sentinel reads as zero days survived.
 pub const game_stage_born_unset: u64 = std.math.maxInt(u64);
+
+pub fn buildPlayerIdBodyWithOpts(
+    buf: []u8,
+    entity_id: i32,
+    team: i16,
+    chunk_view_dim: i32,
+    sx: i32,
+    sy: i32,
+    sz: i32,
+    opts: PlayerIdOpts,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeI16(team);
+    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, opts.quests, opts.unlocked_recipes, opts.toolbelt, opts.bag, opts.b_loaded, opts.game_stage_born_at);
+    try w.writeI32(chunk_view_dim);
+    return w.written();
+}
 
 /// Like buildPlayerIdBodyInv; b_loaded=false for death-respawn re-bundle (avoids
 /// GameManager.PlayerId CreateEntity+ToPlayer on an already-spawned local player).
@@ -386,12 +414,14 @@ pub fn buildPlayerIdBodyInvLoaded(
     b_loaded: bool,
     game_stage_born_at: u64,
 ) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI32(entity_id);
-    try w.writeI16(team);
-    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, quests, unlocked_recipes, toolbelt, bag, b_loaded, game_stage_born_at);
-    try w.writeI32(chunk_view_dim);
-    return w.written();
+    return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{
+        .quests = quests,
+        .unlocked_recipes = unlocked_recipes,
+        .toolbelt = toolbelt,
+        .bag = bag,
+        .b_loaded = b_loaded,
+        .game_stage_born_at = game_stage_born_at,
+    });
 }
 
 /// Minimal empty PlayerDataFile.WriteNetwork (Write + PlayerMetaInfo.Write).
@@ -1164,9 +1194,15 @@ pub fn withBlockMeta(raw: u32, meta: u8) u32 {
     return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
 }
 
+pub const SetBlockOpts = struct {
+    damage: u16 = 0,
+    changed_by_entity: i32 = 0,
+    local_player_that_changed: i32 = 0,
+};
+
 /// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
-    return buildSetBlockBodyFull(buf, x, y, z, block_id, 0, 0);
+    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{});
 }
 
 pub fn buildSetBlockBodyFull(
@@ -1178,10 +1214,12 @@ pub fn buildSetBlockBodyFull(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
-    return buildSetBlockBodyDamage(buf, x, y, z, block_id, 0, changed_by_entity, local_player_that_changed);
+    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{
+        .changed_by_entity = changed_by_entity,
+        .local_player_that_changed = local_player_that_changed,
+    });
 }
 
-/// Authoritative SetBlock with absolute BlockValue.damage (stock DamageBlock path).
 pub fn buildSetBlockBodyDamage(
     buf: []u8,
     x: i32,
@@ -1192,7 +1230,15 @@ pub fn buildSetBlockBodyDamage(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
-    return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), damage, changed_by_entity, local_player_that_changed);
+    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{
+        .damage = damage,
+        .changed_by_entity = changed_by_entity,
+        .local_player_that_changed = local_player_that_changed,
+    });
+}
+
+pub fn buildSetBlockBodyWithOpts(buf: []u8, x: i32, y: i32, z: i32, raw: u32, opts: SetBlockOpts) ![]u8 {
+    return buildSetBlockBodyRaw(buf, x, y, z, raw, opts.damage, opts.changed_by_entity, opts.local_player_that_changed);
 }
 
 /// Authoritative SetBlock carrying the whole BlockValue.rawData. Callers that

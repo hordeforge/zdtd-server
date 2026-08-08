@@ -259,10 +259,13 @@ pub const Peer = struct {
         var off: usize = 0;
         while (part < total_parts) : (part += 1) {
             const n = @min(part_max, user.len - off);
-            // Retry this part on WindowFull, resuming the SAME fragment stream
-            // (stable frag_id, no restart) and pumping ACKs so the window drains.
-            // Restarting the whole message here would burn a fresh 29-slot run per
-            // retry and thrash the 64-slot window for large chunks.
+            // Per-part WindowFull retry: this is LiteNet-level fragmentation,
+            // not the Game-layer send path. No Game budget_ns/clock is
+            // available here (and per AGENTS.md + ../7dtd-research policy this
+            // is liteNet native: black box, residual — by design not wire
+            // correctness). The 4000-attempt cap bounds the per-part stall;
+            // the outer Game-layer calls (sendFramedReliable / sendGameBudget)
+            // still bound the whole join burst via sendReliablePumped.
             var attempts: u32 = 0;
             while (true) : (attempts += 1) {
                 self.sendOneReliable(sock, user[off .. off + n], .{

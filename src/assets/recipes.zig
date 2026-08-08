@@ -59,28 +59,32 @@ pub const RecipeTable = struct {
             n += 1;
         }
         // Starter craft demos: wooden club is learnable via perk in stock, not
-        // always_unlocked. Seed it so InvTx/UI craft can run without progression.
-        const extra = [_][]const u8{
-            "meleeWpnClubT0WoodenClub",
-            "resourceWood",
-        };
-        for (extra) |name| {
-            if (n >= out.len) break;
-            var dup = false;
-            for (out[0..n]) |e| {
-                if (std.mem.eql(u8, e, name)) {
-                    dup = true;
-                    break;
+        // always_unlocked. Seed it so InvTx/UI craft can run without progression
+        // when the offline builtin catalog has no progression. When the stock
+        // recipes.xml is loaded, extra names not in the catalog are omitted so
+        // the wire list matches what the stock client knows.
+        if (self.source == .builtin) {
+            const extra = [_][]const u8{
+                "meleeWpnClubT0WoodenClub",
+                "resourceWood",
+            };
+            for (extra) |name| {
+                if (n >= out.len) break;
+                var dup = false;
+                for (out[0..n]) |e| {
+                    if (std.mem.eql(u8, e, name)) {
+                        dup = true;
+                        break;
+                    }
                 }
+                if (dup) continue;
+                if (self.byName(name)) |d| {
+                    out[n] = d.name;
+                } else {
+                    out[n] = name;
+                }
+                n += 1;
             }
-            if (dup) continue;
-            // Prefer catalog name pointer when present (stable arena lifetime).
-            if (self.byName(name)) |d| {
-                out[n] = d.name;
-            } else {
-                out[n] = name;
-            }
-            n += 1;
         }
         return n;
     }

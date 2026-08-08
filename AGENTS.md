@@ -49,7 +49,12 @@ The operating principles behind every rule below. When in doubt, these decide.
 7. **Hold the 20 TPS budget.** The 50 ms tick is the constraint. Validate with
    loadgen plus a real stock client (EAC off) plus zdtd apm dumps, not by unit
    tests alone.
-8. **Never leave a broken build.** Keep `make check` green and tests passing;
+8. **Wire is the contract; internal structure is not.** The client only sees
+   the binary wire. Never copy stock Mono's per-entity heap shapes, Unity
+   serialized field order, or GC-friendly layouts into the sim — prefer
+   idiomatic, measurable Zig forms (SoA, pools, serialize-once) and judge
+   iteration by `apm` dumps, not by visual similarity to the RE source.
+9. **Never leave a broken build.** Keep `make check` green and tests passing;
    no "fix later," no skipped assertions to land a feature.
 
 ## Owns / does not own

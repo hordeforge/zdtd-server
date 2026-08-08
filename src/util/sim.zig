@@ -1,8 +1,10 @@
-//! Deterministic simulation mode: virtual clock + serial parallel ranges.
-//!
-//! Enable at the start of a DST harness so monoNs/sleepNs and forRanges are
-//! fully controlled by the test. Production never calls this; the default is
-//! wall clock + optional OS threads.
+//! Deterministic simulation mode: virtual clock + serial parallel ranges + DST
+//! fault injection lifecycle. Enable at the start of a DST harness so
+//! monoNs/sleepNs and forRanges are fully controlled by the test. Production
+//! never calls this; the default is wall clock + optional OS threads. Kept as
+//! the single coupling point for the three globals that must move together
+//! (clock, pool, io_fs faults) — spreading them across call sites reintroduces
+//! partial-enable flakes.
 //!
 //! Offline Game paths (port == 0) call enable/disable automatically so
 //! scenarios and unit tests share one seed-stable mono clock without each
