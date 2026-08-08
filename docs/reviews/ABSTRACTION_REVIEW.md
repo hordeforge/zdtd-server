@@ -217,3 +217,11 @@ Audited the post-review landings: the zwasm v2 plugin runtime (`e2d2fe3`,
   (8192 cap), no heap; `ensureComputed` allocates the plane only on first touch
   (documented gray area, same as the lazy block columns).
 - `stabilityAfterSetBlock` broadcasts fallen blocks with `body_buf`, no alloc.
+
+## 2026-08-08 re-audit
+
+The wave added three more `game/*` shards (loot, weather, vehicle) and one
+store method set (WorkstationStore.save/load) using the established
+`*Game`-first delegation and heap-buffer save patterns. No new layers or
+facades; `game/trader.zig` now owns the roll/restock helpers shared by the
+three fill sites (trader, trade, vending) instead of three near-duplicates.

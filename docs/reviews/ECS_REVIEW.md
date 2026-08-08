@@ -161,3 +161,11 @@ Follow-up fixes (review-only pass itself made no patches):
    `systemTurrets`, so turret kills roll `LootDropProb` like player kills (F7).
 
 Tested with `zig build test` (784 tests green before this pass; re-run after).
+
+## 2026-08-08 re-audit
+
+New sim state this wave: `StockEntry.quality`, `Workstation.has_fuel_module`,
+`BlockDef.has_fuel_module` stay SoA columns with default zero; the trader
+roll and loot quality are pure-table functions over the loaded assets (no ECS
+mutation on the roll path); the restock decision reads `trader_stock` fields
+only. Wire files still never touch sim arrays.

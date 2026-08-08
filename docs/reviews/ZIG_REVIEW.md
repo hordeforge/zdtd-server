@@ -209,3 +209,11 @@ None found. Verified call sites: `questTickGoto` runs per accepted move packet b
 ## Test status
 
 See chat summary after `make check`.
+
+## Pass 2026-08-08 (re-audit)
+
+Re-ran the naming/import/0.16 scans on the parity-wave tree: clean. No
+world → wire imports, no snake_case `pub fn`, no hungarian prefixes, no
+misleading `*_enabled` flags, `@intFromFloat` uses are legitimate float→int
+conversions, no `std.math.min/max` where builtins fit. game.zig continued
+shrinking (5310 → 5115 at the wave head; loot/weather/vehicle shards).

@@ -42,6 +42,41 @@ See [STATUS.md](../STATUS.md) and `git log` for the exact head.
 
 ---
 
+## Re-audit 2026-08-08 (parity wave + Bucket B closure)
+
+Re-ran the audit search patterns against the current tree (`main` after the
+08-08 parity wave). Bucket A stays **0 P0 / 0 P1** open: **A29 trader
+pricing** is fixed (`fillTraderFromXml` applies `traders.xml` markups to
+`EconomicValue`), **A30 restock cadence** is fully fixed (lazy rebuild on
+open, 253787f/c75d580), and the session's new landings all load stock data
+or fail closed:
+
+| Landing | Bucket check |
+|---|---|
+| Trader inventory roll (c1c3d39) | A clean: refs/counts/prob/quality from `traders.xml`; RNG policy (seed) is OK |
+| Trader window 50 (fe30501) | OK: stock `TraderInfo.MaxItems` |
+| Loot count=all / force_prob / entry cap (8e6daa9) | A clean: semantics from stock IL; caps are loader buffers |
+| Loot quality templates (cbb3bdf) | A clean: `<lootqualitytemplate>` parsed from loot.xml |
+| Loot container size (a578230) | A clean: `size` attr from loot.xml |
+| Non-burning workstation queues (586d59b) | A clean: fuel-module presence from blocks.xml `Workstation/Modules` |
+| Workstation persistence (44a4056) | OK: zdtd-owned ZWS1 format |
+| Party highest game stage (01fa28d) | OK: stock `Party.get_HighestGameStage` semantics |
+
+Bucket B residuals closed this pass (2245424): `joinRateLimited`'s 500 ms
+per-IP gap and `tryCraftRecipe`'s batch cap 20 were the last bare policy
+consts in `game.zig`; both now ride `zdtd.toml`
+(`[authority] join_rate_limit_ms`, `[sim] craft_max_times`) with the
+defaults as field initializers. Remaining B items are engineering caps
+(litenet `max_peers`, sleeper/entity/quest array sizes, parallel worker
+count, APM report cadence) documented as fixed-size architecture.
+
+Other review scans (zig-idiomatic, zig-best-practices, zig-0.16, simd,
+ecs-soa, net-send) re-run on this tree: **clean** — no hot-path heap alloc,
+no raw syscalls, no 0.15-era std.io/`FixedBufferStream`/`Thread.Pool`, no
+`world → wire` imports, no snake_case pub fns, no hungarian prefixes, wire
+never touches sim arrays, SIMD already landed in `stock_chunk`. Details in
+each review doc's 2026-08-08 line.
+
 ## Re-audit 2026-08-07 (survival / AI wave)
 
 Two Bucket A findings against code that landed the same day, both where stock
@@ -269,7 +304,7 @@ markup ratios (A29) here (Bucket A).
 2. ~~**B13**~~ **Done:** sleeper/turret/save cadences are `[stream]` keys.
 3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). ~~**B14–B17**~~ **Done:** AI timing/radii (30 tunables) are `[rules.ai]` — mode pack or `zdtd.toml` without forking `systems.zig`.
 4. **A07** biome default stack pins before XML (acceptable offline).
-5. **A29 (new 08-07)** trader price/sell ratios `econ/10` `econ/50` do not match stock `EconomicValue × markup`; client display vs server charge desync. Known gap (GAP_ANALYSIS), not yet fixed.
+5. ~~**A29**~~ **Fixed 08-07/08-08:** `fillTraderFromXml` applies `traders.xml` `buy_markup` / `sell_markdown` (per-trader `Override*` wins) to `EconomicValue`, matching the client's `XUiM_Trader` display; econ 0 stays not-tradeable (fail closed) on the trade path. The remaining pricing residuals (`EconomicSellScale`, quality lerp, `PercentUsesLeft`) are documented in GAP_ANALYSIS and are client-mirrored (wire carries no price).
 
 ---
 

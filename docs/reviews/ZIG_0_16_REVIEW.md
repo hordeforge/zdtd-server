@@ -289,3 +289,11 @@ Removed-API re-audit (must stay empty forever):
 ```bash
 rg -n 'std\.time\.(Instant|Timer)|Thread\.Pool|spawnWg|ArrayHashMap|getAppDataDir|GenericReader|AnyReader|FixedBufferStream|std\.io\.|Thread\.(Mutex|Condition|ResetEvent)|\{D\}' src --type zig
 ```
+
+## Pass 2026-08-08 (re-audit)
+
+Re-ran the 0.16 API scans on the current tree: clean. No
+`std.io`/`FixedBufferStream`/`GenericReader`/`AnyReader`/`Thread.Pool`/
+`std.time.Instant`/`getAppDataDir`, no raw `std.os.linux` file loops, all
+`ArrayList` uses are `.empty` + allocator-arg style. New code this wave
+(traders roll, loot quality, workstation save) follows the same API rules.

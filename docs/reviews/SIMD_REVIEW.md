@@ -215,3 +215,9 @@ After implementing: `make check` + loadgen join smoke + one proc `--worldgen-see
 - [x] No hot-path alloc recommendations
 - [x] No code change (review only)
 - [x] No em dashes / AI attribution
+
+## Pass 2026-08-08 (re-audit)
+
+Re-ran the dense-loop scans on the parity-wave tree. New hot loops this wave
+(loot roll, trader roll, chunk save encode) are data-dependent and bounded;
+`stock_chunk` keeps the shipped SIMD helpers. No new vectorization required.
