@@ -316,6 +316,10 @@ Core loop and parity landings. Do not re-open without new evidence.
       bands and roll looted item quality by loot stage (asm.il 698080);
       containers carry quality on the wire instead of a flat 1 (quality items
       only; stackables keep 1 so they merge).
+- [x] **Lazy trader restock on open** (253787f, c75d580): the LockRequest open
+      rebuilds the window with fresh rolls when the trader_info ResetInterval
+      elapsed (stock HandleFullReset, lazy not timed), advancing the restock
+      day and regenerating the money pool.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

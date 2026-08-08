@@ -931,11 +931,14 @@ parsed, and quest offering is unwired.
   is seeded from (world seed, trader entity, day), so the same world + trader +
   day reproduces the same stock while restock on a later day rolls fresh (sim
   rule: deterministic inputs; stock uses a time-seeded per-ItemValue
-  GameRandom). Still open: `HandleFullReset` full-rebuild restock
-  (`systems.traderRestock` refills counts only), the `TraderMaxTier` clamp,
-  and mods/modChance.
+  GameRandom). **Lazy rebuild on open (2026-08-08)**: the LockRequest open
+  calls `maybeRestockTrader` — when the trader_info ResetInterval elapsed it
+  re-runs the seeded roll (fresh counts/qualities), advances the restock day
+  and regenerates the money pool (stock HandleFullReset, loot-economy.md §3).
+  Still open: the `TraderMaxTier` clamp and mods/modChance.
   *Anchors:* `src/assets/traders.zig` rollAllRefs/spawnLootItemsFromList,
-  `src/server/game/trader.zig` rollStockRefs, `asm.il:862758-863520`
+  `src/server/game/trader.zig` rollStockRefs / maybeRestockTrader,
+  `asm.il:862758-863520`
 
 - **Inventory depth and ordering** `50-ENTRY (2026-08-08)`
   `TraderStock` now holds stock `TraderInfo.MaxItems` = 50 entries and every
