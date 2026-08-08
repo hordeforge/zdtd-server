@@ -3304,7 +3304,9 @@ pub const Game = struct {
         const h: i32 = @intCast(h_u16);
         // heightWorld = top solid; PDF/entity feet use that block Y; entity float y = h+1.
         const feet_y = if (h > 1) h else 1;
-        const dirt = world_store.block_dirt;
+        // Live AssignIds resolved at init (A05); the module pin is the offline
+        // default until resolveTerrainIds runs, so modded dumps stay correct.
+        const dirt = self.world.terrain_ids.dirt;
         // 3x3 pad of solid at surface so client mesh + BlockUnderFeet see ground.
         var dz: i32 = -1;
         while (dz <= 1) : (dz += 1) {
