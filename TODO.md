@@ -301,6 +301,10 @@ Core loop and parity landings. Do not re-open without new evidence.
       stock (asm.il 1331687) — only fuel-module stations wait for isBurning;
       workbench / cement mixer / table saw advance. Fuel-module presence is
       block-derived (blocks.xml Workstation Modules).
+- [x] **Workstation persistence** (44a4056): workstations.zws (ZWS1)
+      round-trips fuel/input/output, the smelting queue (recipe blobs),
+      craft-complete and melt across restart, so a forge's progress is not
+      lost on reboot (rule 21).
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

@@ -2322,13 +2322,14 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/blocks.zig` hasFuelModule,
   `src/world/workstations.zig` handleRecipeQueue, `asm.il:1331687`
 
-- **Workstation persistence and capacity** `MISSING`
-  `WorkstationStore` has no save/load (unlike ContainerStore) and caps at 64
-  stations world-wide with a linear position scan. A forge's fuel, input, output
-  and queue are gone on restart, and the 65th placed workstation is silently
-  dropped.
-  *Anchors:* `src/world/workstations.zig:11`, `:369-400`,
-  `src/world/containers.zig:129-235`
+- **Workstation persistence and capacity** `PERSISTED (2026-08-08), cap 256`
+  `WorkstationStore` now saves `workstations.zws` (ZWS1, pos-sorted records:
+  fuel/input/tools/output, lastInput, queue with recipe blobs, craft-complete,
+  melt, burning state) at shutdown and restores at init, so a forge's smelt
+  survives restart (rule 21). The store caps at 256 stations (GAP 12 raise,
+  `max_workstations`); the position scan is linear.
+  *Anchors:* `src/world/workstations.zig` save/load, `src/server/game.zig`
+  init/deinit, `src/world/containers.zig:129-235`
 
 - **loot.xml parse** `PARTIAL`
   1010 groups and 339 containers parse. Not parsed: loot_prob_template (1528

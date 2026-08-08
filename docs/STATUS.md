@@ -596,7 +596,7 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
 maxdamage merge), stock Chunk.write + upper24, players.zsv **ZPV3** (ZPV2 still
 read; progression tail + inv/journal), TE/blockmeta persist, claims.zlc,
-clock.zcl, weather.zwt, workstation TE sim, trader TraderData v2, electrical
+clock.zcl, weather.zwt, workstation TE sim + workstations.zws persistence, trader TraderData v2, electrical
 place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
 (2 tasks), land claim options.
 
