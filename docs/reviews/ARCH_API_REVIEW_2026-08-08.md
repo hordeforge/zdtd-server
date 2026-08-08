@@ -187,17 +187,17 @@ Do these only after the sibling's in-flight ecs/game.zig work lands. Each is
 pure move + forwarder (game.zig keeps delegating methods), same shape as the
 existing shards.
 
-1. **`game/chunk_stream.zig` (revive) — chunk send/stream, ~285 body lines**
+1. **`game/chunk_stream.zig` (revive): chunk send/stream, ~285 body lines**
    `streamChunksForClient` (98), `sendSpawnChunk` (85), `sendSpawnArea` (37),
    `sendContainersInChunk` (21), `clientHasStreamed` (8), `clientAddStreamed`
    (20), `clientRemoveStreamed` (11). Slightly over 200 because the bodies are
    what they are; alternatively split `sendSpawnChunk`+`sendSpawnArea` into
    `game/chunk_send.zig` first.
-2. **`game/chunk_fill.zig` — stream-side chunk prep/fill, ~280 body lines**
+2. **`game/chunk_fill.zig` : stream-side chunk prep/fill, ~280 body lines**
    `ensurePrefabStorageInChunk` (90), `scanChunkPower` (31),
    `fillContainerFromLoot` (40), `maybeRespawnContainer` (31), `lootSeedAt`
    (10), plus the `def`/`onTe`/`at`/`tex`/`dens` chunk-TE helpers (~75).
-3. **`game/craft.zig` — crafting + workstations, ~140 body lines (under 200)**
+3. **`game/craft.zig` : crafting + workstations, ~140 body lines (under 200)**
    `tryCraftRecipe` (61), `tryCraft` (5), `tickWorkstations` (15),
    `resolveWorkstationOutput` (14), `handItemDamage` (7), `tryRefuelGenerator`
    (14), `eatProps` (10), `itemIsArmor` (12).
