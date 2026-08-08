@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `ef7ee21`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **969/969** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `6ec286b`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **973/973** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -25,15 +25,16 @@
 ## Working tree right now
 
 ```
-working tree clean at ef7ee21
+working tree clean at 6ec286b
 game.zig 5115 lines (was 5310 at handoff): loot/weather/vehicle shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
-parity landed: trader roll, party stage, loot container size, non-burning
+parity landed: trader roll + 50-entry window, party stage, loot container
+  size, loot count=all / force_prob / quality templates, non-burning
   workstation queues, workstation persistence (ZWS1)
-969/969 tests, lint + fmt clean
+973/973 tests, lint + fmt clean
 ```
 
-All work is committed through `ef7ee21`; nothing staged or untracked except
+All work is committed through `6ec286b`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
@@ -88,6 +89,14 @@ this handoff note.
 - **Workstation persistence** (44a4056): `workstations.zws` (ZWS1) round-trips
   fuel/input/output, the smelting queue (recipe blobs), craft-complete and
   melt across restart; a forge's progress survives a reboot (rule 21).
+- **Trader window 50 entries** (fe30501): max_stock 12 → 50 (stock
+  TraderInfo.MaxItems); snapshots and the TraderData wire carry the window.
+- **Loot count=all / force_prob / entry cap** (8e6daa9): count="all" groups
+  spawn every entry (was pick-1); force_prob gates independently; entries cap
+  32 → 192 (perkBooks 133 no longer truncated).
+- **Loot quality templates** (cbb3bdf): <lootqualitytemplate> level bands
+  roll looted item quality by loot stage (asm.il 698080); containers carry
+  quality on the wire (quality items only; stackables keep 1).
 - `make check` fmt gate: `zig fmt` drift from the extraction commits fixed
   (tests.zig indentation, wasm.zig/misc.zig).
 
