@@ -28,6 +28,7 @@ const game_player = @import("game/player.zig");
 const game_join = @import("game/join.zig");
 const game_quest = @import("game/quest.zig");
 const game_social = @import("game/social.zig");
+const game_trader = @import("game/trader.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
 const c2s_quest = @import("c2s/quest.zig");
@@ -4627,200 +4628,32 @@ pub const Game = struct {
         return true;
     }
 
-    /// The item traders pay/charge in: traders.xml root `currency_item`
-    /// (stock: casinoCoin), falling back to the stock name when unset or
-    /// unresolvable.
     pub fn coinItemId(self: *const Game) u16 {
-        const name = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
-        return self.items.ecsIdByName(name);
+        return game_trader.coinItemId(self);
     }
 
-    /// Live trader AvailableMoney for the wire: stock debits it when buying
-    /// from the player and credits it when selling to them. Uninitialized
-    /// traders (wallet_default 0) fall back to the config default.
     pub fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
-        if (self.sim.mask[s].trader_stock) {
-            const m = self.sim.trader_stock[s];
-            if (m.wallet_default != 0) return m.wallet;
-        }
-        return self.trader_wallet_dukes;
+        return game_trader.traderMoney(self, s);
     }
 
-    /// Parse a stock "H:MM" hour string to minutes after midnight; null if malformed.
-    fn traderMinutes(v: []const u8) ?u32 {
-        const colon = std.mem.indexOfScalar(u8, v, ':') orelse return null;
-        if (colon == 0 or colon + 1 >= v.len) return null;
-        const h = std.fmt.parseInt(u32, v[0..colon], 10) catch return null;
-        const m = std.fmt.parseInt(u32, v[colon + 1 ..], 10) catch return null;
-        if (h > 23 or m > 59) return null;
-        return h * 60 + m;
-    }
-
-    /// trader_info open hours gate: vending machines and traders without
-    /// open_time are always open; unknown info ids (fixtures) never gate.
     pub fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
-        const info_id = self.sim.trader_stock[ts].trader_info_id;
-        if (info_id == 0) return true;
-        const info = self.traders.traderInfo(info_id) orelse return true;
-        if (info.is_vending or info.open_time.len == 0) return true;
-        const open = traderMinutes(info.open_time) orelse return true;
-        const close = traderMinutes(info.close_time) orelse return true;
-        // 24000 ticks/day, 1000 ticks/hour → minute of day = ticks*3/50.
-        const now = (@as(u32, @intCast(self.sim.director.clock.worldTimeBits() % 24000)) * 3) / 50;
-        if (close > open) return now >= open and now < close;
-        return now >= open or now < close; // overnight window
+        return game_trader.traderIsOpen(self, ts);
     }
 
-    /// EntityTrader::OnUpdateLive open/close cycle (asm.il 531757-531898):
-    /// when `!TraderInfo.IsOpen` differs from the area's closed latch, apply
-    /// `TraderArea::SetClosed` — on closing, force-unlock the trade channel
-    /// (LockManager::ForceUnlockLockTarget, channel 0) so an open window closes,
-    /// then toggle the area's TraderOnOff gate blocks.
     fn tickTraderAreas(self: *Game) void {
-        var s: ecs.Slot = 0;
-        while (s < ecs.max_entities) : (s += 1) {
-            if (!self.sim.alive[s] or !self.sim.mask[s].trader or !self.sim.mask[s].trader_stock) continue;
-            const st = &self.sim.trader_stock[s];
-            const closed = !self.traderIsOpen(s);
-            if (closed == st.is_closed) continue;
-            st.is_closed = closed;
-            if (closed) {
-                // ForceUnlockLockTarget: only the trade channel (0) is a trader
-                // lock; kick its holder with a forced unlock so the window shuts.
-                const ch: usize = 0;
-                if (self.lock_channel[ch] >= 0) {
-                    const holder: usize = @intCast(self.lock_channel[ch]);
-                    self.clearLockSlot(ch);
-                    if (holder < self.clients.len and self.clients[holder].joined) {
-                        if (self.clients[holder].peer) |p| {
-                            const resp = packages.buildLockResponseUnlock(&self.body_buf, true) catch continue;
-                            self.sendGame(p, "NetPackageLockResponse", resp) catch continue;
-                        }
-                    }
-                }
-            }
-            self.toggleTraderGates(s, closed);
-        }
+        return game_trader.tickTraderAreas(self);
     }
 
-    /// TraderArea::SetClosed gate walk: toggle IndexName="TraderOnOff" blocks in
-    /// the trader's POI area. Stock closes doors/locks via their composite door
-    /// TE features (zdtd has no door TE yet: residual) and flips BlockLight meta
-    /// bit 0x2 (close clears, open sets); loudspeakers only play a sound. Each
-    /// raw change is broadcast as the authoritative NetPackageSetBlock.
     fn toggleTraderGates(self: *Game, s: ecs.Slot, closed: bool) void {
-        const tr = self.sim.transform[s];
-        const pf = if (self.world.prefabs) |*p| p else return;
-        for (pf.items) |*d| {
-            if (world_store.prefabs.isPart(d.name)) continue;
-            const qd = pf.questData(d.name) orelse continue;
-            if (!qd.is_trader_area) continue;
-            // The trader entity sits inside its area footprint.
-            if (tr.x < @as(f32, @floatFromInt(d.x - 8)) or tr.x > @as(f32, @floatFromInt(d.x + d.size_x + 8))) continue;
-            if (tr.z < @as(f32, @floatFromInt(d.z - 8)) or tr.z > @as(f32, @floatFromInt(d.z + d.size_z + 8))) continue;
-            self.toggleGatesInArea(d, closed);
-            return;
-        }
+        return game_trader.toggleTraderGates(self, s, closed);
     }
 
     fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, closed: bool) void {
-        const x0 = d.x;
-        const x1 = d.x + d.size_x;
-        const z0 = d.z;
-        const z1 = d.z + d.size_z;
-        var bx: i32 = x0;
-        while (bx < x1) : (bx += 1) {
-            var bz: i32 = z0;
-            while (bz < z1) : (bz += 1) {
-                const surf = self.world.heightWorld(bx, bz) catch continue;
-                const y_lo: i32 = @max(@as(i32, 0), @as(i32, surf) - 4);
-                const y_hi: i32 = @min(@as(i32, 255), @as(i32, surf) + 14);
-                var y: i32 = y_lo;
-                while (y <= y_hi) : (y += 1) {
-                    const id = self.world.blockWorld(bx, y, bz) catch 0;
-                    if (id == 0) continue;
-                    if (!self.blocks.isTraderOnOff(id)) continue;
-                    // Doors and loudspeakers are handled via TE features or are
-                    // sound-only; only light gates carry the meta on/off bit.
-                    const raw = self.blockRawAt(bx, y, bz);
-                    const meta = packages.blockMeta(raw);
-                    const new_meta: u8 = if (closed) meta & ~@as(u8, 0x2) else meta | 0x2;
-                    if (new_meta == meta) continue;
-                    self.setBlockRaw(bx, y, bz, packages.withBlockMeta(raw, new_meta));
-                    if (packages.buildSetBlockBodyRaw(
-                        self.body_buf[0..96],
-                        bx,
-                        y,
-                        bz,
-                        packages.withBlockMeta(raw, new_meta),
-                        0,
-                        -1,
-                        -1,
-                    )) |sb| {
-                        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
-                    } else |_| {}
-                }
-            }
-        }
+        return game_trader.toggleGatesInArea(self, d, closed);
     }
 
-    /// Replace builtin trader stock with the trader's own traders.xml list when
-    /// resolvable to ECS items: per-trader `<trader_items>` from the trader_info
-    /// matching the entity's class (npc.xml trader_id), else traderAlways.
-    /// Price from items.xml EconomicValue when known.
     pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
-        const tt = self.traders;
-        const s = self.sim.slotOfNetId(trader_net_id) orelse return;
-        if (!self.sim.mask[s].trader_stock) return;
-        var n: usize = 0;
-        var fill: []const assets_traders.Entry = &.{};
-        var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
-        const info_id = self.sim.trader_stock[s].trader_info_id;
-        if (info_id != 0) {
-            if (tt.traderInfo(info_id)) |ti| {
-                if (ti.refs.len > 0) {
-                    const en = tt.expandTraderRefs(ti, &per_trader);
-                    fill = per_trader[0..en];
-                }
-                // Per-trader RestockInterval drives systems.traderRestock
-                // (-1 = never, 0 = daily, N = every N days). The window opens
-                // N days after fill, so the fresh stock survives its first days.
-                self.sim.trader_stock[s].reset_interval = ti.reset_interval;
-                self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
-            }
-        }
-        if (fill.len == 0) {
-            if (tt.entries.len == 0) return;
-            fill = tt.entries; // fallback traderAlways
-        }
-        // Stock GetBuyPrice/GetSellPrice (loot-economy.md): buy = econ x
-        // BuyMarkup (per-trader OverrideBuyMarkup wins), sell = econ x
-        // SellMarkdown (OverrideSellMarkdown wins). The previous econ/10 and
-        // econ/50 constants priced ~30x and ~10x low versus the client display.
-        var buy_markup: f32 = 1.0;
-        var sell_markup: f32 = 0.02;
-        if (info_id != 0) {
-            if (tt.traderInfo(info_id)) |ti| {
-                if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
-                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
-            }
-        }
-        if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
-        if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
-        for (fill) |e| {
-            if (n >= ecs.components.max_stock) break;
-            const iid = self.ecsIdFromItemName(e.name);
-            if (iid == 0) continue;
-            const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
-            self.sim.trader_stock[s].entries[n] = .{
-                .item = iid,
-                .count = e.count,
-                .price = if (econ > 0) @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * buy_markup)), 65535)) else 5,
-                .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * sell_markup)), 65535)))) else 1,
-            };
-            n += 1;
-        }
-        if (n > 0) self.sim.trader_stock[s].n = @intCast(n);
+        return game_trader.fillTraderFromXml(self, trader_net_id);
     }
 
     test "trader POIs spawn their NPC classes on a stock map" {
