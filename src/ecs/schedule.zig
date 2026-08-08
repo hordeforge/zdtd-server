@@ -145,4 +145,3 @@ test "a disabled system is skipped and the rest still run" {
     try std.testing.expectEqual(@as(u32, 0), r2.director_spawned);
     try std.testing.expect(r2.world_time > 0);
 }
-

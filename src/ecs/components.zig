@@ -108,6 +108,7 @@ pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
 
 /// EAISetAsTargetIfHurt::Start passes 400 ticks to SetAttackTarget
 /// (asm.il:436155, ldc.i4 0x190), i.e. 20 s at the stock 20 Hz AI tick.
+/// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay).
 pub const revenge_window_s: f32 = 20.0;
 
 pub const ZombieAi = struct {
