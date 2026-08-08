@@ -1,6 +1,10 @@
 //! Golden package body builders/parsers for join, motion, damage, spawn, TE.
 //! Prefer this facade for all wire/stock_* body modules (and te_types); leaf
 //! files stay importable. lint-architecture enforces stock_* re-exports here.
+//!
+//! Buffer contract: every `buildXxx*` takes a caller-owned `buf` and returns
+//! the written slice (`![]u8`); no builder allocates. Callers size `buf` from
+//! the named `*_size` / `max_*` constants and handle error.Overflow.
 
 const std = @import("std");
 const binary = @import("binary.zig");
