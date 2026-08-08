@@ -282,6 +282,12 @@ Core loop and parity landings. Do not re-open without new evidence.
 ### Shipped (2026-08-08, refactor + flake root cause)
 - [x] **game.zig shards**: loot (67f2a88), weather (6db0ed9), vehicle (82b9e24)
       extracted verbatim with thin forwarders; `game.zig` 5310 → 5099.
+- [x] **Trader inventory roll** (c1c3d39): traders.xml refs keep count
+      ranges, prob, unique_only and quality; the fill runs the ported
+      `TraderInfo` spawn (prob-weighted group picks, uniform count + quality
+      rolls, seeded per world+trader+day) and quality rides the TraderData
+      wire. GAP "Inventory roll" closed; restock full-rebuild, TraderMaxTier
+      and mods stay open.
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's

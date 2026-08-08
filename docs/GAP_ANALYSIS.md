@@ -910,21 +910,30 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/assets/traders.zig` root row, `src/server/game.zig`
   `coinItemId`, `Data/Config/traders.xml:3`
 
-- **Inventory roll (count ranges, prob, unique_only, quality, RNG)** `PARTIAL`
-  `lowCount` always takes the low bound, so counts are deterministic minima
-  (medicalBandage 3,5 gives 3; ammoGasCan 5000,10000 gives 5000). count, prob,
-  unique_only and quality on a **group ref** are dropped entirely. There is no
-  `GameRandom` roll, so every world and every restock produces the identical list.
-  *Anchors:* `src/assets/traders.zig:85-88`, `:96-106`, `asm.il:861363+`
+- **Inventory roll (count ranges, prob, unique_only, quality, RNG)** `ROLLED (2026-08-08)`
+  `fillTraderFromXml` / `fillVendingStore` run the ported `TraderInfo` spawn
+  algorithm (asm.il 862758-863520): refs keep `count="lo,hi"`, `prob`,
+  `unique_only` and `quality="lo,hi"` (the old parser dropped them), top-level
+  refs always spawn, group members are picked prob-weighted with unique dedupe
+  (`SpawnLootItemsFromList`), counts roll uniform in [min,max]
+  (`RandomSpawnCount`, asm.il 863128), and quality rolls uniform in the
+  entry's range and rides the TraderData wire slot (was hardcoded 1). The roll
+  is seeded from (world seed, trader entity, day), so the same world + trader +
+  day reproduces the same stock while restock on a later day rolls fresh (sim
+  rule: deterministic inputs; stock uses a time-seeded per-ItemValue
+  GameRandom). Still open: `HandleFullReset` full-rebuild restock
+  (`systems.traderRestock` refills counts only), the `TraderMaxTier` clamp,
+  and mods/modChance.
+  *Anchors:* `src/assets/traders.zig` rollAllRefs/spawnLootItemsFromList,
+  `src/server/game/trader.zig` rollStockRefs, `asm.il:862758-863520`
 
 - **Inventory depth and ordering** `PARTIAL`
-  `TraderStock` holds 12 entries, `expandGroup` writes into 64, and
-  `sendTraderSnapshot` caps at 16, so only the first 12 resolvable names survive.
-  `expandGroupRec` emits all direct items before descending, so XML order is not
-  preserved. Stock `traderAlways` plus a trader_info's two `<trader_items>` blocks
-  is well over a hundred stacks.
-  *Anchors:* `src/ecs/components.zig:199`, `src/assets/traders.zig:10`, `:71-81`,
-  `src/server/game.zig:5498`, `:6762`
+  `TraderStock` holds 12 entries and `sendTraderSnapshot` caps at 16, so only
+  the first 12 resolvable names survive. Stock `traderAlways` plus a
+  trader_info's two `<trader_items>` blocks is well over a hundred stacks
+  (`TraderInfo.MaxItems` is 50).
+  *Anchors:* `src/ecs/components.zig:271`, `src/assets/traders.zig`,
+  `src/server/game.zig:2616`, `:6762`
 
 - **Buy/sell pricing from items.xml EconomicValue** `PARTIAL` `(markup 2026-08-07)`
   Stock multiplies EconomicValue by `TraderInfo.BuyMarkup` (root 3,
