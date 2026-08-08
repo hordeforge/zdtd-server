@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **957/959** (2 flakes pre-existing; lint clean; `game.zig` 5829, down from 6397 via persist delegation; `src/server/game/*` owns join, tick, world, quest, social, trader, stability, replicate, net, player, types; `src/server/c2s/*` owns all 5 C2S domains).
+**Unit tests:** `zig build test` → **~960/963** (4 flakes pre-existing — GAME_OPTIONS doc + 7-bot hang — same root as before; lint clean; `game.zig` 5310, down from 6397 via persist + `game/deco|join|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and

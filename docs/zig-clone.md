@@ -101,11 +101,19 @@ Everything else (quests, traders, vehicles, full blood moon, XML parity) is late
 
 ## 2. Recommended Zig crate / module map
 
+**Wiring map:** for the live layout, see the source tree (not this
+history section). Server-owned details now live next to their systems
+(`src/ecs/schedule.zig` + `Rules.systems` toggles, `src/server/game/tick.zig`
+with `buffs.xml`-derived vs `Rules.progression` thresholds, `src/server/game/
+deco.zig` behind `[feature] deco_mirror`), and `docs/STATE_MACHINES.md` §2
+already pins the tick pipeline and its `Game.step` owners; `docs/INDEX.md` lists
+the read order. The sketch below is the founding map, not the update procedure.
+
 **Implementation tree:** sibling [`../../zdtd/`](..) (**zdtd** = Zig Days To Die).
 
 ```text
 zdtd/                        # workspace folder name
-  src/main.zig               # process entry (M0 stub today)
+  src/main.zig               # process entry
   src/protocol.zig           # wire constants from protocol.md
   net/                       # planned
     litenet.zig              # LiteNetLib peer (C bind or pure Zig later)

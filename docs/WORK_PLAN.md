@@ -656,15 +656,18 @@ auditable.
 
 ## T16. Survival: read the rates from buffs.xml instead of inventing them
 
-**Status: loader half landed 2026-08-07.** `assets/buffs.zig` now parses
-`triggered_effect action="ModifyStats"` rows and
-`StatComparePercCurrentToMax` requirements, and `buffs.survival()` resolves the
-stage thresholds (.5 / .25 / .02 of max), the starvation and dehydration HP loss
-per real second, and the starving stamina penalty. A test asserts those values
-against the **shipped** buffs.xml, so the parse is proven against stock data
-rather than a fixture. **Remaining:** call `buffs.survival()` from the survival
-tick and use it in place of `Rules.progression`, keeping the Rules value as the
-floor when the table has no rows (`Survival.ok()` reports that).
+**Status: landed 2026-08-08 (T16 wiring).** `assets/buffs.zig` parses
+`triggered_effect action="ModifyStats"` rows and `StatComparePercCurrentToMax`
+requirements, and `buffs.survival()` resolves the stage thresholds (.5 / .25 /
+.02 of max), the starvation and dehydration HP loss per real second, and the
+starving stamina penalty (proven against the shipped buffs.xml, not a fixture).
+`src/server/game/tick.zig:tickSurvival` now drives the tick from that table
+— fraction-of-max well-fed and stage-3 gates (`hungry_frac[2]` /
+`thirsty_frac[2]`), per-second `ModifyStats Health subtract .25` damage
+divided by the buff's `update_rate`, and the `StaminaChangeOT perc_subtract`
+penalty — with `Survival.ok()` as the floor guard. Two new `Rules.progression`
+knobs cover the remaining z-level policy: `block_bite_damage` (per-bite before
+`BlockDamageAI/BM` scaling) and `block_damage_range` (pressed-against-cover gate).
 
 **Note on the base depletion:** the food and water drain rates are **not** in
 buffs.xml. Stock decays those engine-side through `Stat.Tick`, scaled by
@@ -711,24 +714,23 @@ threshold requirements are needed here.
 
 ## T17. Systems: make the tick pipeline a table a mode can edit
 
+**Status: landed 2026-08-08 (direct turns).** `src/ecs/schedule.zig` exposes the
+`Rules.systems` gate and the `Phase` order that `game.zig` documents; each system
+is gated in the fixed `run(w,dt)` order (no heap chase table on the 50 ms path,
+no reorder by mode — the order encodes a real dependency: buffs before ai so
+movement reads this tick's buff state).
+
 **Why:** [ADR 0021](adr/0021-config-driven-game-modes.md) made the sim's
 *numbers* configurable, but not its *behaviour*. `ecs/schedule.zig` `run()` is a
 fixed call sequence, so a mode cannot drop the blood-moon director, skip the
 despawn pass, or insert a phase. Today that means forking `run()`, which is the
 thing mode packs exist to avoid.
 
-**Change:** turn the fixed sequence into a table of
-`{ phase: Phase, name: []const u8, run: *const fn (*World, f32) void, enabled: bool }`,
-iterated in order. The default table is exactly today's sequence, so behaviour is
-unchanged. A mode pack may disable an entry by name; the binder from T11 already
-gives it a config surface.
-
-Keep it a static table, not a dynamic registry: the set of systems is known at
-compile time, ordering stays explicit and reviewable, and there is no allocation
-or indirection added to the 20 TPS path beyond one predictable call per entry.
-
-**Files:** `src/ecs/schedule.zig`, `src/ecs/rules.zig` (the enable flags),
-`src/server/mode.zig`.
+**Change (done):** each phase is now gated on `w.rules.systems.<name>` (the mode
+pack toggles per phase in `modes/*.toml`; the direct turns use
+`--mode turns_off` with the real sim instead, covering `buffs|director|ai`).
+`builder.toml` is the worked example: `director = false` (clock still advances),
+`ai = false`, `despawn = false`. The documented order stays out of mod hands.
 
 **Done when:** a mode pack disables one system and the scenario for that system
 observes it not running, with every other system unaffected.

@@ -36,9 +36,9 @@ Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 | builtin production leakage | **Loud warn** for items/recipes/entities/loot/entitygroups/blocks/quests |
 | Absolute Steam paths | **Removed** production `defaultGameDir`; tests may still skip-if-missing |
 
-**Validation (this audit pass):** unit suite ~**800** (`zig build test`; STATUS.md
-and changelog report 796-807 while a parallel wave is landing; prior pass 771).
-Count drifts; see [STATUS.md](../STATUS.md).
+**Validation (this audit pass):** unit suite ~**960** (`zig build test`; STATUS.md
+pinned ~960/963 with 4 pre-existing flakes from the current fixtures).
+See [STATUS.md](../STATUS.md) and `git log` for the exact head.
 
 ---
 
@@ -50,7 +50,7 @@ ships the data and zdtd invented a constant instead.
 | ID | Finding | State |
 |---|---|---|
 | A30 | `Rules.ai.sense_dist_sq` was a single global documented as having "no per-entity stock equivalent". `entityclasses.xml` ships `SightRange` per class (27, 30, 40 m on different zombies), so every zdtd zombie sensed at the same 48 m. | **Fixed**: parsed into `EntityDef.sight_range`, carried on the class table, resolved by `systems.senseDistSq`; the `Rules` value is now the documented floor. |
-| A31 | `Rules.progression` invents food / water / health / stamina rates. Stock drives survival from `buffs.xml`: `buffStatusHungry01/02/03` + `buffStatusThirsty01/02/03` with `damage_type Starvation` / `Dehydration`, `StatComparePercCurrentToMax` threshold requirements (`value="0.52"`), and `FoodChangeOT` / `WaterChangeOT` / `HealthChangeOT` passive effects; stamina from `StaminaChangeOT` and the `items.xml` `StaminaLoss` stats. `assets/buffs.zig` already parses passive_effect rows and `Game.buffs` already holds the table. | **Half fixed**: `buffs.survival()` resolves the stage thresholds, the starvation/dehydration HP loss per real second and the starving stamina penalty out of the loaded table, proven against the shipped buffs.xml. The survival tick still reads `Rules.progression`; wiring is the rest of [T16](../WORK_PLAN.md). The base food/water drain is genuinely **not** in the XML (engine-side `Stat.Tick`), so it stays a policy tunable. |
+| A31 | `Rules.progression` invents food / water / health / stamina rates. Stock drives survival from `buffs.xml`: `buffStatusHungry01/02/03` + `buffStatusThirsty01/02/03` with `damage_type Starvation` / `Dehydration`, `StatComparePercCurrentToMax` threshold requirements (`value="0.52"`), and `FoodChangeOT` / `WaterChangeOT` / `HealthChangeOT` passive effects; stamina from `StaminaChangeOT` and the `items.xml` `StaminaLoss` stats. `assets/buffs.zig` already parses passive_effect rows and `Game.buffs` already holds the table. | **Fixed**: `tickSurvival` now reads `buffs.survival()` for the fraction-of-max well-fed gate and the per-second starvation/dehydration damage + stamina penalty (T16 wiring this pass, `src/server/game/tick.zig`); the base Food/Water depletion stays a policy tunable (`Rules.progression` — no `Stat.Tick` row in the V3.1.0 corpus, see docs/reviews/HARDCODE_AUDIT.md A31). |
 
 Spot-checks that came back clean in this pass: the numeric block ids left in
 `game.zig` (24629, 20001, 20002) and `stock_chunk.zig` (240) are all inside

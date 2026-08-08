@@ -63,8 +63,11 @@ stateDiagram-v2
     Commands --> [*]: drain deferred ops (systems + plugins)
 ```
 
-Owners: `src/ecs/schedule.zig:9` (`Phase`), `src/server/game.zig:9600+`
-(the `step()` body that wraps `systems.tickAll`).
+Owners: `src/ecs/schedule.zig:9` (`Phase`, `Rules.systems` per-phase gate),
+`src/server/game.zig:9600+` (the `step()` body), `src/server/game/tick.zig`
+(player survival / stamina; `buffs.xml` thresholds when the table is loaded,
+otherwise `Rules.progression`), `src/server/game/deco.zig` (deco mirror,
+`[feature] deco_mirror`).
 
 ## 3. Zombie AI task selection
 
@@ -232,6 +235,9 @@ stateDiagram-v2
 ```
 
 Owners: `src/plugin/host.zig:10`, `src/plugin/wasm.zig:49`.
+Now also `on_admin_command` (first >0 reply wins; traps = allow), `on_chat`
+(deny/rewrite; bad UTF-8 treated as deny), and `on_player_login`
+(sanitized name; first deny wins) — same isolation and fuel+memory budget.
 
 ## 11. LiteNet peer
 
@@ -265,8 +271,9 @@ stateDiagram-v2
     Expired --> [*]: claim cleared
 ```
 
-Owners: `src/server/game.zig` (`registerClaim`, `expireClaims`,
-`removeClaimAt`).
+Owners: `src/server/game.zig` / `src/server/game/world.zig`
+(`registerClaim`, `expireClaims`, `removeClaimAt`; claims persist as
+`claims.zlc` and re-map to the owner's new entity id on login).
 
 ## Keeping this document honest
 
