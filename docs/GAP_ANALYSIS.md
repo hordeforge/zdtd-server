@@ -2338,8 +2338,9 @@ unvalidated, and durability, mods and repair do not exist.
   roll gate) and the `loot_settings` poi_tier_mod/bonus block. `count="all"`
   (360 uses) now spawns every entry once (stock -1 → SpawnAllItemsFromList)
   instead of pick-1, and `LootGroup.entries` caps at 192 so stock groups
-  (perkBooks, 133 entries) are not truncated. Not parsed: abundance_type,
-  loot_quality_template (403), requirement children, group min/max level.
+  (perkBooks, 133 entries) are not truncated. `loot_quality_template` (403)
+  drives the looted item quality by stage (2026-08-08). Not parsed:
+  abundance_type, requirement children, group min/max level.
   `LootContainer.size_x/size_y` drive the storage grid (2026-08-08).
   *Anchors:* `src/assets/loot.zig` rollGroup pick_all / force_prob,
   `Data/Config/loot.xml:9656`

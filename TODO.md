@@ -312,6 +312,10 @@ Core loop and parity landings. Do not re-open without new evidence.
       groups spawn every entry (was pick-1), force_prob entries gate
       independently (stock asm.il 698452/698816), group entries cap 32 → 192
       so perkBooks (133) is not truncated.
+- [x] **Loot quality templates** (cbb3bdf): parse <lootqualitytemplate> level
+      bands and roll looted item quality by loot stage (asm.il 698080);
+      containers carry quality on the wire instead of a flat 1 (quality items
+      only; stackables keep 1 so they merge).
 - [x] **Test-suite flake root cause fixed**: the "4 pre-existing flakes" (console
       listents reply, blood-moon re-send, multi-seat join) all traced to
       scenario worlds and `.zdtd_cfg_cache` dirs retaining a previous run's
