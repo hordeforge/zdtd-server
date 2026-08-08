@@ -29,6 +29,7 @@ const game_join = @import("game/join.zig");
 const game_quest = @import("game/quest.zig");
 const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
+const game_stability = @import("game/stability.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
 const c2s_quest = @import("c2s/quest.zig");
@@ -400,72 +401,16 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
     return null;
 }
 
-/// Stability plane facts for a block id (world/stability.zig probe). Resolved
-/// through the maxdamage table's Extends-aware facts; an unknown id fails
-/// closed as a normal supporting block.
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return .{ .support = true, .ignore = false }));
-    const name = g.blocks.byId(id) orelse return .{ .support = true, .ignore = false };
-    return .{
-        .support = g.maxdamage.stabilitySupport(name.name),
-        .ignore = g.maxdamage.stabilityIgnore(name.name),
-    };
+    return game_stability.stabilityFacts(ctx, id);
 }
 
-/// The scheduled blood-moon day for the clock (GameStats.blood_moon_day):
-/// the jittered horde day of the active cycle (see WorldClock.bloodMoonDayFor),
-/// 0 when disabled.
 fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
-    return clk.bloodMoonDayFor(clk.day);
+    return game_stability.bloodMoonDayFor(clk);
 }
 
-/// Run the stock stability update after a C2S SetBlock mutation and return the
-/// count of fallen blocks. A removed block (old != air) relaxes the region and
-/// may fell neighbours; a placed block (new != air) takes its stability from
-/// the supported neighbours and re-spreads. Both run for a replace. The fallen
-/// positions are removed and broadcast here.
 pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
-    var n: usize = 0;
-    if (old_id != 0) {
-        var fallen: [stability_mod.max_fallen]stability_mod.Pos = undefined;
-        n = stability_mod.removeBlockAt(
-            &self.world,
-            x,
-            y,
-            z,
-            self.allocator,
-            self,
-            stabilityFacts,
-            &fallen,
-        );
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            const p = fallen[i];
-            self.clearBlockHp(p.x, p.y, p.z);
-            self.removeClaimAt(p.x, p.y, p.z);
-            self.clearBlockRaw(p.x, p.y, p.z);
-            self.containers.remove(.{ .x = p.x, .y = p.y, .z = p.z });
-            self.world.setBlockWorld(p.x, p.y, p.z, 0) catch continue;
-            if (packages.buildSetBlockBodyRaw(
-                self.body_buf[0..96],
-                p.x,
-                p.y,
-                p.z,
-                0,
-                0,
-                -1,
-                -1,
-            )) |sb| {
-                // Best-effort fan-out; a failed send is dropped like the tick
-                // broadcast path (the client collapses the same blocks locally).
-                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(p.x), @floatFromInt(p.z), self.interest_range) catch {};
-            } else |_| {}
-        }
-    }
-    if (new_id != 0) {
-        stability_mod.placeBlockAt(&self.world, x, y, z, self.allocator, self, stabilityFacts);
-    }
-    return n;
+    return game_stability.stabilityAfterSetBlock(self, x, y, z, old_id, new_id);
 }
 
 pub const Game = struct {
