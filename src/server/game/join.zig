@@ -557,8 +557,3 @@ pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stac
     try self.sendGame(peer, "NetPackageHoldingItem", hb);
 }
 
-/// Post-change inv echo. PlayerInventory/Bag are ToServer-only for stock
-/// clients; only HoldingItem is a valid S2C echo.
-pub fn sendHoldingEcho(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
-    try sendHoldingOnlyEx(self, peer, c, true);
-}

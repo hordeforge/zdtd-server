@@ -9,11 +9,6 @@ const packages = @import("../../wire/packages.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 
-pub fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
-    return g.world.heightWorld(wx, wz) catch 0;
-}
-
 pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
     const bm = g.world.biomes orelse return .{};

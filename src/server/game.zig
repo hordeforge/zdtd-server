@@ -1689,9 +1689,6 @@ pub const Game = struct {
     pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
         return game_deco.decoSpeciesAt(ctx, wx, wz);
     }
-    pub fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
-        return game_deco.decoOffsetsFor(self, id);
-    }
     pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
         return game_deco.mirrorDeco(self, cache, o);
     }
@@ -1962,10 +1959,6 @@ pub const Game = struct {
         return game_net.sendGameCritical(self, peer, pkg_name, body);
     }
 
-    pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
-        return game_net.sendGameBudget(self, peer, pkg_name, body, budget_ns, critical);
-    }
-
     pub fn awardXp(self: *Game, slot: usize, base: u64) void {
         return game_player.awardXp(self, slot, base);
     }
@@ -2122,10 +2115,6 @@ pub const Game = struct {
 
     pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
         return game_world.maxDamageForBlock(self, block_id);
-    }
-
-    pub fn packBlockKey(x: i32, y: i32, z: i32) u64 {
-        return game_world.packBlockKey(x, y, z);
     }
 
     pub fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {

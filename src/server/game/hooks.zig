@@ -141,11 +141,3 @@ pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     return invsys.maxStackBuiltin(item_id);
 }
 
-pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    if (g.items.byId(item_id)) |d| {
-        const n = d.name;
-        return n.len >= 5 and std.mem.eql(u8, n[0..5], "armor");
-    }
-    return invsys.isArmorOffline(item_id);
-}
