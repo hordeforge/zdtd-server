@@ -31,6 +31,7 @@ const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
+const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
 const c2s_quest = @import("c2s/quest.zig");
@@ -158,91 +159,10 @@ pub const admin_help_index = [_]admin_cmds.HelpEntry{
 /// state must show up in the server log. Counter always increments; log is
 /// rate-limited (first + every 100th) so a full disk does not flood stderr
 /// every save period while still leaving an audit trail.
-pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
-    self.harness.counters.inc(.persistence_errors);
-    const n = self.harness.counters.get(.persistence_errors);
-    if (n == 1 or n % 100 == 0) {
-        // Audit trail: without a wall-clock stamp "when did the disk fill?"
-        // is unanswerable at 3 AM, so every logged failure carries one.
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} {s} failed: {s} n={d}\n", .{ clock.wallStamp(&ts), what, @errorName(err), n });
-    }
-}
-
-/// Result of dropping named records from a ZPV2 players.zsv blob.
-/// `blob` is null when nothing was removed (caller keeps the original file).
-const Zpv2Drop = struct {
-    blob: ?[]u8 = null,
-    removed: u32 = 0,
-};
-
-/// Total length of one players.zsv record starting at `off` (name_len byte).
-/// ZPV2 records stop after the journal; ZPV3 records carry a progression tail
-/// (prog flag + level/xp/survival stats/buffs). Corrupt on out-of-bounds.
-fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile}!usize {
-    if (off >= data.len) return error.CorruptPlayersFile;
-    const nl: usize = data[off];
-    if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
-    var p = off + 1 + nl + 16;
-    const inv_n: usize = data[p];
-    p += 1 + inv_n * 7;
-    if (p >= data.len) return error.CorruptPlayersFile;
-    const jn: usize = data[p];
-    p += 1 + jn * 10;
-    if (p > data.len) return error.CorruptPlayersFile;
-    if (v3) {
-        if (p >= data.len) return error.CorruptPlayersFile;
-        const prog = data[p];
-        p += 1;
-        if (prog == 1) {
-            if (p + 2 + 8 + 16 + 1 > data.len) return error.CorruptPlayersFile;
-            p += 2 + 8 + 16; // level u16, xp u64, food/max/water/max f32x4
-            const buff_n: usize = data[p];
-            p += 1;
-            if (p + buff_n * 19 > data.len) return error.CorruptPlayersFile;
-            p += buff_n * 19;
-        }
-    }
-    return p - off;
-}
-
-/// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Builds a
-/// rewrite buffer and frees it again when no record is dropped; the early
-/// invalid-input paths do not allocate. Caller owns `blob` when non-null.
-pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
-    if (name.len == 0 or name.len > 32) return .{};
-    if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
-        return error.CorruptPlayersFile;
-    const v3 = std.mem.eql(u8, data[0..4], "ZPV3");
-    const n = std.mem.readInt(u32, data[4..8], .little);
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, data[0..4]); // keep the file's magic
-    try out.appendSlice(allocator, &[_]u8{ 0, 0, 0, 0 });
-    var written: u32 = 0;
-    var removed: u32 = 0;
-    var off: usize = 8;
-    var i: u32 = 0;
-    while (i < n) : (i += 1) {
-        const rec_start = off;
-        const rec_len = try zpvRecordLen(data, off, v3);
-        const nl: usize = data[off];
-        const rec_name = data[off + 1 ..][0..nl];
-        off += rec_len;
-        if (nl == name.len and std.mem.eql(u8, rec_name, name)) {
-            removed += 1;
-            continue;
-        }
-        try out.appendSlice(allocator, data[rec_start..off]);
-        written += 1;
-    }
-    if (removed == 0) {
-        out.deinit(allocator);
-        return .{};
-    }
-    std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
-    return .{ .blob = try out.toOwnedSlice(allocator), .removed = removed };
-}
+pub const logPersistErr = persist.logPersistErr;
+pub const Zpv2Drop = persist.Zpv2Drop;
+pub const zpvRecordLen = persist.zpvRecordLen;
+pub const zpv2DropName = persist.zpv2DropName;
 
 pub const AuthorityMode = server_config.AuthorityMode;
 

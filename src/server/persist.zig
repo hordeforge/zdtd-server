@@ -14,8 +14,49 @@ const Client = game_mod.Client;
 const io_fs = @import("../util/io_fs.zig");
 const wire_binary = @import("../wire/binary.zig");
 const ecs = @import("../ecs/root.zig");
+const clock = @import("../util/clock.zig");
 const max_land_claims = game_mod.max_land_claims;
-const logPersistErr = game_mod.logPersistErr;
+
+pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
+    self.harness.counters.inc(.persistence_errors);
+    const n = self.harness.counters.get(.persistence_errors);
+    if (n == 1 or n % 100 == 0) {
+        var ts: [19]u8 = undefined;
+        std.debug.print("zdtd: {s} {s} failed: {s} n={d}\n", .{ clock.wallStamp(&ts), what, @errorName(err), n });
+    }
+}
+
+pub const Zpv2Drop = struct {
+    blob: ?[]u8 = null,
+    removed: u32 = 0,
+};
+
+pub fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile}!usize {
+    if (off >= data.len) return error.CorruptPlayersFile;
+    const nl: usize = data[off];
+    if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
+    var p = off + 1 + nl + 16;
+    const inv_n: usize = data[p];
+    p += 1 + inv_n * 7;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const jn: usize = data[p];
+    p += 1 + jn * 10;
+    if (p > data.len) return error.CorruptPlayersFile;
+    if (v3) {
+        if (p >= data.len) return error.CorruptPlayersFile;
+        const prog = data[p];
+        p += 1;
+        if (prog == 1) {
+            if (p + 2 + 8 + 16 + 1 > data.len) return error.CorruptPlayersFile;
+            p += 2 + 8 + 16;
+            const buff_n: usize = data[p];
+            p += 1;
+            if (p + buff_n * 19 > data.len) return error.CorruptPlayersFile;
+            p += buff_n * 19;
+        }
+    }
+    return p - off;
+}
 
 pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
@@ -717,45 +758,6 @@ pub fn loadBlockMeta(self: *Game) !void {
     }
 }
 
-/// `blob` is null when nothing was removed (caller keeps the original file).
-const Zpv2Drop = struct {
-    blob: ?[]u8 = null,
-    removed: u32 = 0,
-};
-
-/// Total length of one players.zsv record starting at `off` (name_len byte).
-/// ZPV2 records stop after the journal; ZPV3 records carry a progression tail
-/// (prog flag + level/xp/survival stats/buffs). Corrupt on out-of-bounds.
-fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile}!usize {
-    if (off >= data.len) return error.CorruptPlayersFile;
-    const nl: usize = data[off];
-    if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
-    var p = off + 1 + nl + 16;
-    const inv_n: usize = data[p];
-    p += 1 + inv_n * 7;
-    if (p >= data.len) return error.CorruptPlayersFile;
-    const jn: usize = data[p];
-    p += 1 + jn * 10;
-    if (p > data.len) return error.CorruptPlayersFile;
-    if (v3) {
-        if (p >= data.len) return error.CorruptPlayersFile;
-        const prog = data[p];
-        p += 1;
-        if (prog == 1) {
-            if (p + 2 + 8 + 16 + 1 > data.len) return error.CorruptPlayersFile;
-            p += 2 + 8 + 16; // level u16, xp u64, food/max/water/max f32x4
-            const buff_n: usize = data[p];
-            p += 1;
-            if (p + buff_n * 19 > data.len) return error.CorruptPlayersFile;
-            p += buff_n * 19;
-        }
-    }
-    return p - off;
-}
-
-/// Pure ZPV2/ZPV3 rewrite: omit records whose name equals `name`. Builds a
-/// rewrite buffer and frees it again when no record is dropped; the early
-/// invalid-input paths do not allocate. Caller owns `blob` when non-null.
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
