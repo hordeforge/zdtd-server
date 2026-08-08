@@ -38,13 +38,15 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         const water_was = h.water;
         h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
         h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
-        // Stage thresholds are a fraction of max (stock StatComparePercCurrentToMax),
-        // not an absolute 0..100. Use the buff-resolved fractions when available;
-        // the Rules floor is the 80-count threshold converted to a fraction of 100.
-        const thirst_frac: [3]f32 = if (use_buff) sv.thirsty_frac else .{ 0.8, 0.8, 0.8 };
-        _ = thirst_frac;
+        // Well-fed regen and starvation: when buffs.xml is present the thresholds
+        // are fractions of max (StatComparePercCurrentToMax); otherwise fall back
+        // to Rules. The Rules well_fed_threshold is an absolute 0..100 that we
+        // compare against food/water; the buff path compares fractions. Both are
+        // documented; T16 wires the buff starvation rates and documents the regen
+        // gap (see docs/reviews/HARDCODE_AUDIT.md A31).
         var hp_delta: f32 = 0;
         if (use_buff) {
+            // Stock damage sources: ModifyStats Health .25 per buff update.
             if (h.food <= 0 or h.water <= 0) {
                 const per_s = if (h.food <= 0 and h.water <= 0)
                     @max(sv.starve_hp_per_s, sv.dehydrate_hp_per_s)
@@ -54,6 +56,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     sv.dehydrate_hp_per_s;
                 hp_delta -= per_s * secs;
             }
+            // Stock regen while well-fed is the buffUpdate gap: the above damage
+            // simply does not apply when fed. Keep a small invented regen only
+            // for offline/no-buff runs (fallback below). When buffs are loaded,
+            // regen is the absence of damage, not an extra heal.
         } else {
             if (h.food <= 0 or h.water <= 0) {
                 hp_delta -= prog.starvation_damage_per_hour * game_hours;
