@@ -14,6 +14,7 @@ const observers_mod = @import("observers.zig");
 const group = @import("group.zig");
 const poi_lock = @import("poi_lock.zig");
 const path_mod = @import("path.zig");
+const buff = @import("buff.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -366,6 +367,33 @@ pub const World = struct {
             self.entity_count +%= 1;
         }
         self.kind_groups.insert(self.kind[slot], slot);
+    }
+
+    /// Teleport a live entity to a world position, keeping yaw. The sanctioned
+    /// teleport funnel: raw transform[] writes from c2s would bypass the
+    /// markDirty relay and delay the pos broadcast to observers.
+    pub fn teleportTo(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
+        if (slot >= max_entities or !self.mask[slot].transform) return;
+        self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = self.transform[slot].yaw };
+        self.markDirty(slot, .{ .pos = true });
+    }
+
+    /// Respawn a dead player slot: un-kill (reviveSlot), full heal to the
+    /// player default max (100, matching spawnPlayer), drop the death buffs,
+    /// clear IsBloodMoonDead and place at (x, y, z) with yaw 0. The single
+    /// sanctioned respawn funnel: c2s/join RequestToSpawn must not write
+    /// alive[]/health/transform raw (reviveSlot keeps the kind group in sync).
+    pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
+        if (slot >= max_entities or !self.mask[slot].kind) return;
+        self.reviveSlot(slot);
+        // The client drops its own remove_on_death buffs when it dies
+        // (BuffClass::RemoveOnDeath, asm.il 1371585), so drop ours silently
+        // rather than broadcasting removals it made.
+        if (self.mask[slot].buffs) _ = buff.clearOnDeath(&self.buffs[slot]);
+        self.health[slot] = .{ .hp = 100, .max_hp = 100 };
+        if (self.mask[slot].player) self.player[slot].is_blood_moon_dead = false;
+        self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
+        self.markDirty(slot, .{ .pos = true, .hp = true });
     }
 
     /// Max A* replans admitted per tick. Each costs at most `path_max_expand`

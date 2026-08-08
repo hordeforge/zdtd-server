@@ -242,24 +242,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     self.sim.director.clock.worldTimeBits(),
                     c.game_stage_born_world_time,
                 );
-                self.sim.reviveSlot(si);
-                // The client drops its own remove_on_death buffs when it
-                // dies (BuffClass::RemoveOnDeath, asm.il 1371585), so drop
-                // ours silently rather than broadcasting removals it made.
-                if (self.sim.mask[si].buffs) _ = ecs.buff.clearOnDeath(&self.sim.buffs[si]);
-                self.sim.health[si] = .{ .hp = 100, .max_hp = 100 };
-                // Respawn clears IsBloodMoonDead (stock get_unModifiedGameStage).
-                if (self.sim.mask[si].player) self.sim.player[si].is_blood_moon_dead = false;
-                self.sim.transform[si] = .{
-                    .x = @as(f32, @floatFromInt(surf.x)),
-                    .y = @as(f32, @floatFromInt(surf.y)) + 0.08,
-                    .z = @as(f32, @floatFromInt(surf.z)),
-                    .yaw = 0,
-                };
-                // Raw column writes bypass the markDirty funnel; raise the
-                // bits so hp/pos relays reach in-range peers instead of
-                // waiting for the 5-tick heartbeat.
-                self.sim.markDirty(si, .{ .pos = true, .hp = true });
+                // Sanctioned respawn funnel: revive + heal + clear death
+                // buffs/IsBloodMoonDead + place + mark dirty in one call.
+                self.sim.respawnPlayer(
+                    si,
+                    @floatFromInt(surf.x),
+                    @as(f32, @floatFromInt(surf.y)) + 0.08,
+                    @floatFromInt(surf.z),
+                );
                 if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                 } else |_| {}
