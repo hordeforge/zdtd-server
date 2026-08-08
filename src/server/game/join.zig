@@ -452,6 +452,89 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
     std.debug.print("zdtd: stock EntitySpawn mobs sent={d} alive_z={d} around=({d},{d})\n", .{ sent, alive_z, px, pz });
 }
 
+/// Spawn connected players to each other (stock EntitySpawn with the player
+/// class + PlayerSpawnInfo). Without this, multiplayer stock clients never
+/// see each other's bodies: the mob spawn burst and the tick replicate path
+/// both skip players. The joiner receives every other player in its view;
+/// the joiner's own body goes to every client whose view covers it.
+pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
+    const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
+    const pfx: f32 = @floatFromInt(px);
+    const pfz: f32 = @floatFromInt(pz);
+    var i: ecs.Slot = 0;
+    while (i < ecs.max_entities) : (i += 1) {
+        if (!self.sim.alive[i] or !self.sim.mask[i].player) continue;
+        if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
+        const nid = self.sim.network_id[i].id;
+        if (nid == c.entity_id or nid <= 0) continue;
+        if (!interest.inRange(pfx, pfz, self.sim.transform[i].x, self.sim.transform[i].z, radius)) continue;
+        const owner_slot = self.sim.player[i].peer_slot;
+        if (owner_slot < 0 or @as(usize, @intCast(owner_slot)) >= self.clients.len) continue;
+        const owner = &self.clients[@intCast(owner_slot)];
+        if (owner.entity_id != nid or owner.name_len == 0) continue;
+        const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
+            self.sim.class_id[i].hash
+        else
+            packages.stock_entity.class_player_male;
+        const body = try packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
+            .entity_id = nid,
+            .entity_class = eclass,
+            .x = self.sim.transform[i].x,
+            .y = self.sim.transform[i].y,
+            .z = self.sim.transform[i].z,
+            .yaw = self.sim.transform[i].yaw,
+            .on_ground = true,
+            .player = .{
+                .entity_name = owner.name[0..owner.name_len],
+                .holding_item = null,
+                .team_number = 0,
+                .profile = null,
+            },
+        });
+        try self.sendGame(peer, "NetPackageEntitySpawn", body);
+        c.known_entities.set(i);
+    }
+    // The joiner's own body to every other client whose view covers it.
+    const js = self.sim.playerByPeer(c.slot) orelse return;
+    if (!self.sim.mask[js].transform or !self.sim.mask[js].network_id) return;
+    const jnid = self.sim.network_id[js].id;
+    if (jnid <= 0) return;
+    if (c.name_len == 0) return;
+    const jbody = try packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
+        .entity_id = jnid,
+        .entity_class = if (self.sim.mask[js].class_id and self.sim.class_id[js].hash != 0)
+            self.sim.class_id[js].hash
+        else
+            packages.stock_entity.class_player_male,
+        .x = self.sim.transform[js].x,
+        .y = self.sim.transform[js].y,
+        .z = self.sim.transform[js].z,
+        .yaw = self.sim.transform[js].yaw,
+        .on_ground = true,
+        .player = .{
+            .entity_name = c.name[0..c.name_len],
+            .holding_item = null,
+            .team_number = 0,
+            .profile = null,
+        },
+    });
+    for (&self.clients, 0..) |*cl, ci| {
+        if (ci == c.slot or !cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
+        const os = self.sim.playerByPeer(ci) orelse continue;
+        if (!self.sim.mask[os].transform) continue;
+        const oradius: i32 = if (cl.view_radius < 1) self.view_radius else cl.view_radius;
+        if (!interest.inRange(
+            self.sim.transform[os].x,
+            self.sim.transform[os].z,
+            self.sim.transform[js].x,
+            self.sim.transform[js].z,
+            oradius,
+        )) continue;
+        try self.sendGame(cl.peer.?, "NetPackageEntitySpawn", jbody);
+        cl.known_entities.set(js);
+    }
+}
+
 /// Stock EntityStatChanged for core vitals (Health/Stamina/Food/Water).
 pub fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
     const eid = c.entity_id;

@@ -79,6 +79,57 @@ test "scenario two-peer motion: B receives A PosAndRot" {
     );
 }
 
+test "scenario multiplayer player bodies spawn to peers and drop removes them" {
+    // Players must see each other: the joiner receives every other player as
+    // EntitySpawn (player class + name), and a disconnect broadcasts
+    // EntityRemove(Despawned) so no ghost body stays on the other client.
+    io_fs.mkdirPathSimple("worlds");
+    freshScenarioDir("worlds/zdtd_sc_players");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_players", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // A's join was before B existed, so B's join burst must spawn A to B
+    // and A must receive B's body (both near the (256,70,256) pad).
+    const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
+    const b_sees_a = cap_b.findPkgIdEntity(spawn_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    var r = binary.Reader{ .data = b_sees_a };
+    _ = try r.readI32(); // targeted entity id
+    try std.testing.expectEqual(@as(u8, 36), try r.readByte()); // ECD FileVersion
+    try std.testing.expectEqual(packages.stock_entity.class_player_male, try r.readI32());
+    const a_sees_b = cap_a.findPkgIdEntity(spawn_id, cb.entity_id) orelse return error.TestUnexpectedResult;
+    var r2 = binary.Reader{ .data = a_sees_b };
+    _ = try r2.readI32();
+    try std.testing.expectEqual(@as(u8, 36), try r2.readByte());
+    try std.testing.expectEqual(packages.stock_entity.class_player_male, try r2.readI32());
+
+    // Dropping A broadcasts EntityRemove(Despawned) to B. The drop zeroes
+    // A's client struct, so snapshot the entity id before it.
+    const a_eid = ca.entity_id;
+    cap_b.clear();
+    g.dropClientSlot(ca.slot, "scenario drop");
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+    const rmb = cap_b.findPkgIdEntity(rm_id, a_eid) orelse return error.TestUnexpectedResult;
+    var rr = binary.Reader{ .data = rmb };
+    try std.testing.expectEqual(a_eid, try rr.readI32());
+    try std.testing.expectEqual(@as(u8, @intFromEnum(packages.RemoveEntityReason.despawned)), try rr.readByte());
+
+    std.debug.print(
+        "PASS multiplayer-bodies: B saw A id={d}, A saw B id={d}, drop sent Remove(despawned)\n",
+        .{ a_eid, cb.entity_id },
+    );
+}
+
 test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
     io_fs.mkdirPathSimple("worlds");
     freshScenarioDir("worlds/zdtd_sc_relpos");

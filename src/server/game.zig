@@ -3138,6 +3138,22 @@ pub const Game = struct {
                 }
             }
         }
+        // Peers must drop the body, or they keep drawing a ghost player that
+        // never moves (stock disconnects broadcast EntityRemove/Despawned).
+        if (self.sim.playerByPeer(slot)) |ps| {
+            const nid = self.sim.network_id[ps].id;
+            if (nid > 0) {
+                var rb: [16]u8 = undefined;
+                const rm_body: ?[]const u8 = packages.buildRemoveBodyReason(&rb, nid, .despawned) catch null;
+                if (rm_body) |rm| {
+                    for (&self.clients) |*cl| {
+                        if (!cl.joined or cl.peer == null or cl.entity_id == nid) continue;
+                        if (cl.peer) |p| self.sendGame(p, "NetPackageEntityRemove", rm) catch {};
+                        cl.known_entities.unset(ps);
+                    }
+                }
+            }
+        }
         self.clients[slot] = .{};
         self.refreshInfoPlayers();
     }
@@ -3445,6 +3461,9 @@ pub const Game = struct {
                 try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned_early);
             }
             try self.sendStockEntitySpawns(peer, c, sx, sz);
+            // Multiplayer bodies: every other player in view spawns to this
+            // peer, and this peer's body spawns to every client that sees it.
+            try game_join.sendPlayerSpawns(self, peer, c, sx, sz);
             // Buffs already on the other players (their AddRemoveBuff relays
             // predate this peer).
             try self.sendBuffSync(peer, c);
