@@ -750,3 +750,28 @@ test "wasm chat filter hook deny/rewrite/keep" {
     try std.testing.expect(host.chatFilter(1, "other", &out) == null);
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
+
+test "wasm on_player_login join gate: deny reason, allow others" {
+    // T9 proof (WORK_PLAN): the join gate hook is covered with a real .wasm
+    // fixture. "rejectme" is denied with the reason "nope"; any other name is
+    // allowed; traps/fuel keep the gate open (allow).
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    const paths = [_][]const u8{"assets/fixtures/plugin_login.wasm"};
+    host.loadAll(std.testing.allocator, &paths, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_login)]);
+    var out: [256]u8 = undefined;
+    const reason = host.playerLoginDeny(1, "rejectme", &out).?;
+    try std.testing.expectEqualStrings("nope", reason);
+    try std.testing.expect(host.playerLoginDeny(1, "SurvivorBob", &out) == null);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
