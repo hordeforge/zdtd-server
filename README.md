@@ -1,10 +1,10 @@
 # zdtd
 
-**Zig Days To Die** (or just **ZDTD**): a from-scratch dedicated server in Zig,
+**Zeven Days to Die** (or just **ZDTD**): a from-scratch dedicated server in Zig,
 aimed at the stock 7 Days to Die **client wire** (EAC off).
 
 ```text
-7 Days to Die  →  ZDTD  →  Zig Days To Die
+7 Days to Die  →  ZDTD  →  Zeven Days to Die
      7DTD             ZDTD
 ```
 
@@ -149,4 +149,4 @@ TODO.md
 | Reading | Meaning |
 |---|---|
 | **zdtd** | Zig + 7DTD |
-| **ZDTD** | Zig Days To Die |
+| **ZDTD** | Zeven Days to Die |

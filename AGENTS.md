@@ -1,6 +1,6 @@
 # AGENTS.md - zdtd
 
-**Zig Days To Die**: clean-room dedicated server in Zig for the stock 7DTD
+**Zeven Days to Die**: clean-room dedicated server in Zig for the stock 7DTD
 **client wire** (EAC off). Research clone, not a stock Unity host for mods.
 
 | | |

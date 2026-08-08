@@ -109,7 +109,7 @@ deco.zig` behind `[feature] deco_mirror`), and `docs/STATE_MACHINES.md` §2
 already pins the tick pipeline and its `Game.step` owners; `docs/INDEX.md` lists
 the read order. The sketch below is the founding map, not the update procedure.
 
-**Implementation tree:** sibling [`../../zdtd/`](..) (**zdtd** = Zig Days To Die).
+**Implementation tree:** sibling [`../../zdtd/`](..) (**zdtd** = Zeven Days to Die).
 
 ```text
 zdtd/                        # workspace folder name
