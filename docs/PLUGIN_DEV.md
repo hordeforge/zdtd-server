@@ -29,6 +29,7 @@ your .wasm                        zdtd
             on_quest_complete <─  verdict hook: deny/adjust (T15)
             on_admin_command <──  first handler with reply wins
             on_chat <───────────  filter hook: deny/rewrite
+            on_player_login <───  join gate: first deny wins
   imports:  log            ────>  provided by the host, capability-gated
             ...
 ```
@@ -37,7 +38,9 @@ Export only the hooks you need. A missing export means that hook is not
 registered, and costs nothing at runtime. Additional hooks: `on_admin_command`
 (`ptr,len,out_ptr,out_cap)->i32`, first handler with bytes wins; `on_chat`
 (`sender,msg_ptr,msg_len,out_ptr,out_cap)->i32`, <0 deny, 0 keep, >0 rewrite
-(first responder wins; bad UTF-8 rewrite is treated as deny).
+(first responder wins; bad UTF-8 rewrite is treated as deny); `on_player_login`
+(`name_ptr,name_len,out_ptr,out_cap)->i32`, runs after name sanitization and
+before the identity ban, first deny wins (traps = allow).
 
 ## Enabling a plugin
 

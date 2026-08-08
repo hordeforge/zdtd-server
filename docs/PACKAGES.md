@@ -1,8 +1,8 @@
 # NetPackage catalog (stock V3.x, generated from parity_v3x.json)
 
 Direction: ToServer=client→server (server MUST handle), ToClient=server→client
-(server may send), Both=either. `handled` = a case in game.zig onData;
-**Totals:** 190 stock catalog rows; 33 ToServer (all handled); handled cases 70; S2C emitted 46.  
+(server may send), Both=either. `handled` = a dispatch arm in `c2s/*` (the join/move/inv/quest/misc domains, formerly game.zig onData);
+**Totals:** 190 stock catalog rows; 33 ToServer (all handled); handled cases 72; S2C emitted 46.  
 **Join map:** `packages.default_mappings` has **189** names (runtime `package_maps=189`). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
 `sent` = zdtd emits it S2C. Regenerate with ../7dtd-research/tools/parity + this script.
 
@@ -133,13 +133,13 @@ and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 | NetPackageParticleEffect | ? |  |  | `ParticleEffect.Read;ReadInt32;ReadBoolean;ReadBoolean;` |
 | NetPackagePartyActions | ? | handled |  | `ReadByte;ReadInt32;ReadInt32;ReadString;` |
 | NetPackagePartyData | ToClient | handled |  | `ReadInt32;ReadByte;ReadString;ReadInt32;ReadInt32;ReadInt32;` |
-| NetPackagePartyQuestChange | ? |  |  | `ReadInt32;ReadByte;ReadBoolean;ReadInt32;` |
+| NetPackagePartyQuestChange | ? | handled |  | `ReadInt32;ReadByte;ReadBoolean;ReadInt32;` |
 | NetPackagePersistentPlayerPositions | ToClient |  |  | `ReadInt32;SU.ReadVector3i;` |
 | NetPackagePersistentPlayerState | ToClient |  | sent | `ReadByte;PersistentPlayerData.Read;` |
 | NetPackagePickupBlock | ? |  |  | `SU.ReadVector3i;ReadUInt32;ReadInt32;` |
 | NetPackagePlayerData | ToServer | handled |  | `` |
 | NetPackagePlayerDenied | ToClient |  |  | `ReadInt32;ReadInt32;ReadInt64;ReadString;` |
-| NetPackagePlayerDisconnect | ToServer |  |  | `` |
+| NetPackagePlayerDisconnect | ToServer | handled |  | `` |
 | NetPackagePlayerEquipment | ? | handled |  | `NetPackageEntityTargeted.read;Equipment.Read;` |
 | NetPackagePlayerId | ToClient |  | sent | `ReadInt32;ReadInt16;ReadInt32;` |
 | NetPackagePlayerInventory | ToServer | handled |  | `ReadBoolean;ReadBoolean;Bag.Read;ReadBoolean;ReadInt32;ReadI` |
@@ -152,7 +152,7 @@ and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 | NetPackagePlayerSpawnedInWorld | Both |  | sent | `ReadInt32;SU.ReadVector3i;ReadInt32;` |
 | NetPackagePlayerStats | ? | handled |  | `NetPackageEntityTargeted.read;EntityNetworkStats.read;` |
 | NetPackagePlayerTwitchStats | ? |  |  | `NetPackageEntityTargeted.read;ReadBoolean;ReadBoolean;ReadBy` |
-| NetPackagePlayerVendingMachine | ? |  |  | `ReadInt32;ReadInt32;ReadInt32;ReadBoolean;` |
+| NetPackagePlayerVendingMachine | ? | handled |  | `ReadInt32;ReadInt32;ReadInt32;ReadBoolean;` |
 | NetPackageQuestEntitySpawn | ToServer | handled |  | `ReadInt32;ReadString;ReadInt32;` |
 | NetPackageQuestEvent | ? | handled | sent | `ReadInt32;SU.ReadVector3;ReadByte;ReadString;ReadInt32;ReadB` |
 | NetPackageQuestGotoPoint | ? |  |  | `ReadInt32;ReadInt32;ReadByte;ReadString;ReadInt32;ReadInt32;` |

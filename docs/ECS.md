@@ -21,6 +21,9 @@ src/ecs/
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
   inv_ledger.zig   P4 inv cause ledger (fixed ring, no heap)
+  party.zig        Party/PartyManager (membership, leader, voice lobby, shared kill XP)
+  quest_systems.zig  quest phase-advance systems (questAccept*, questOn*)
+  rules.zig        Rules struct + overlay (ADR 0021 sim-rule surface)
   path.zig         greedy path helper (no navmesh yet)
   poi_lock.zig     quest POI lockout table (locked until unlock grace)
   quest.zig        Catalog resource types (defs from stock XML or builtin)

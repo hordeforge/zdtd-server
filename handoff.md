@@ -1,4 +1,4 @@
-# Handoff — zdtd refactor + parity push
+# Handoff - zdtd refactor + parity push
 
 **Date:** 2026-08-08 (updated after flake root-cause fix)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
@@ -9,7 +9,7 @@
 
 ### game.zig shrink + modularization
 - `game.zig`: 6397 → **5310** lines so far via persist delegation + `src/server/game/*.zig` shards.
-- Shards now: `deco.zig` (84, species/dim cache/mirror), `loot.zig` (108, `ecsIdFromItemName`/`fillLootBagFromTable`/`broadcastLootSpawn`/`broadcastItemDropSpawn` — staged), `join.zig` (564), `tick.zig` (259, survival + block-chew policy), `world.zig`, `player.zig`, `quest.zig`, `replicate.zig`, `net.zig`, `types.zig`, `hooks.zig`, `sleeper.zig`, `trader.zig`, `stability.zig`, `social.zig`, `tests.zig` (1413).
+- Shards now: `deco.zig` (84, species/dim cache/mirror), `loot.zig` (108, `ecsIdFromItemName`/`fillLootBagFromTable`/`broadcastLootSpawn`/`broadcastItemDropSpawn` - staged), `join.zig` (564), `tick.zig` (259, survival + block-chew policy), `world.zig`, `player.zig`, `quest.zig`, `replicate.zig`, `net.zig`, `types.zig`, `hooks.zig`, `sleeper.zig`, `trader.zig`, `stability.zig`, `social.zig`, `tests.zig` (1413).
 - `src/server/c2s/*` owns 5 C2S domains (join, move, inv, quest, misc).
 - `src/server/root.zig` aggregates all `game_*` modules; `lint-architecture: clean` enforced.
 
@@ -41,7 +41,7 @@ this handoff note.
 
 ## What is still open (bounded next slices)
 
-1. **`game.zig` 5099 lines** — next clean shards (do NOT re-attempt the chunk_stream delegation that failed on `fillContainerFromLoot` visibility/self-call):
+1. **`game.zig` 5099 lines** - next clean shards (do NOT re-attempt the chunk_stream delegation that failed on `fillContainerFromLoot` visibility/self-call):
    - Candidates that are self-contained: `game/sleeper` group helpers already partly done, `game/stability` stubs, the join-rate-limit / ban helpers (`joinRateLimited`, `isBanned`) into `game/net.zig`, or carving `game/world.zig` storage helpers. Keep each shard < ~200 lines, verbatim bodies, forwarded via `game_*.` thin wrappers.
    - **Do not** delegate `chunk_stream.zig` chunk helpers until its internal `ensurePrefabStorageInChunk`/`fillContainerFromLoot` pub visibility + self-call cycle is fixed (prior attempt reverted at `git checkout -- src/server/game.zig src/server/chunk_stream.zig`).
 
@@ -85,7 +85,7 @@ this handoff note.
   `lootcontainer` size attr (woodenChest 6x2=12, smallSafes 8x5=40, gun safe
   capped 54) and roll up to capacity; the client shows the real cell count.
 - **Non-burning workstation queues** (586d59b): the craft gate mirrors stock
-  (asm.il 1331687) — only fuel-module stations wait for isBurning; the fuel
+  (asm.il 1331687) - only fuel-module stations wait for isBurning; the fuel
   module is block-derived (blocks.xml Workstation Modules: campfire/forge/
   chemistry have fuel, workbench/cementMixer/tableSaw do not).
 - **Workstation persistence** (44a4056): `workstations.zws` (ZWS1) round-trips
@@ -130,11 +130,11 @@ Architecture rule: every new `src/server/game/*.zig` shard must be imported via 
   - `c2s/misc.handle` (chat) → `chatFilter` after `chatMsgOk` + rate-limit
   - `c2s/join.handle` (PlayerLogin) → `playerLoginDeny` after sanitization, before identity ban
 - Claims: `src/server/game/world.zig` persists as `claims.zlc`, re-maps on login
-- Precedent for delegation: `replicate_te`, `chunk_stream`, `persist`, `game_net` — helpers take `*Game` as first param, called as `mod.fn(g, …)`
+- Precedent for delegation: `replicate_te`, `chunk_stream`, `persist`, `game_net` - helpers take `*Game` as first param, called as `mod.fn(g, …)`
 
 ## Resume checklist
 
 - [ ] Commit staged loot shard (verify `zig build` + lint after `git add`)
-- [ ] Pick one more `game.zig` shard (keep <200 lines) — avoid chunk_stream until its pub cycle is fixed
+- [ ] Pick one more `game.zig` shard (keep <200 lines) - avoid chunk_stream until its pub cycle is fixed
 - [ ] If adding a new `Rules` field, update `docs/GAME_OPTIONS.md` + `modes/*.toml` example in the same commit (coverage test `GAME_OPTIONS.md documents every Rules field`)
 - [ ] Run `make check` before pushing (catches the 4 flakes as known)

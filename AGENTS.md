@@ -51,7 +51,7 @@ The operating principles behind every rule below. When in doubt, these decide.
    tests alone.
 8. **Wire is the contract; internal structure is not.** The client only sees
    the binary wire. Never copy stock Mono's per-entity heap shapes, Unity
-   serialized field order, or GC-friendly layouts into the sim — prefer
+   serialized field order, or GC-friendly layouts into the sim - prefer
    idiomatic, measurable Zig forms (SoA, pools, serialize-once) and judge
    iteration by `apm` dumps, not by visual similarity to the RE source.
 9. **Never leave a broken build.** Keep `make check` green and tests passing;
@@ -217,9 +217,9 @@ stock client (EAC off) when practical. Unit green alone is not enough.
 ```text
 src/main.zig           CLI, DebugAllocator, construct Game, run loop
 src/protocol.zig       wire constants (challenge, tick rate; package ids live in wire/)
-src/server/game.zig    join SM; delegating façade — most paths live in game/*, c2s/*
-src/server/game/*      per-domain Game helpers (net, tick, world, player, join) — each takes *Game
-src/server/c2s/*       C2S handlers by domain (move, inv, quest, misc) — each exposes handle(*Game,*Client,*Peer,name,body) bool
+src/server/game.zig    join SM; delegating façade - most paths live in game/*, c2s/*
+src/server/game/*      per-domain Game helpers (net, tick, world, player, join) - each takes *Game
+src/server/c2s/*       C2S handlers by domain (move, inv, quest, misc) - each exposes handle(*Game,*Client,*Peer,name,body) bool
 src/server/*           admin TCP, GSI, config, persist (players.zsv), chunk_stream, trade, scenarios, webui
 src/ecs/*              SoA world, systems, inventory, quests, interest
 src/world/*            chunks, TTS, prefabs, sleepers, containers, DTM, biomes

@@ -10,7 +10,7 @@ Policy hub for loading game data from the operator's install (`--game-dir`).
 | `--config-dir` | Replace Config root (full files) |
 | `--config-overrides DIR` | **Repeatable.** Dir of xpath patch XMLs; files applied in **filename order** (then dir order). Clean-room subset of stock XmlPatcher: `set`/`setattribute`, `remove`, `append` with simple `/tag[@attr='v']/.../@attr` paths. |
 
-Optional root: `<configs file="blocks.xml">…</configs>`. If `file=` omitted, target is inferred from the first xpath tag (`/blocks/…` → blocks.xml).
+Optional root: `<configs file="blocks.xml">…</configs>`. If `file=` omitted, target is inferred from the first xpath tag (`/blocks/…` → blocks.xml). Loader: `src/assets/xml_patch.zig`.
 
 Patched bytes are written under `.zdtd_cfg_cache/` (cwd, gitignored) then parsed by existing loaders. Not a Harmony/ModAPI host.
 Implements AGENTS.md rule 15: **no hand-copied catalogs** when a loader exists
@@ -70,6 +70,8 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `vehicles.zig` | vehicles.xml | kind, velocityMax, torque, fuel |
 | `storage_pairs.zig` | blocks.xml DowngradeBlock | Closed↔Open storage ids |
 | `signs.zig` | Prefabs `*_signs.xml` | world signs |
+| `blocks_nim.zig` | Prefab `<name>.blocks.nim` | local-id → block-name remap for `.tts` types that use local indices rather than AssignIds |
+| `npc.zig` | npc.xml | npc_info entries: trader entity class / display name → traders.xml `<trader_info>` id + quest_list |
 | `wire/te_types.zig` | RE enum (not XML) | named TileEntityType constants |
 
 Wire/sim code must not pin numeric block ids except dump-validated offline pins

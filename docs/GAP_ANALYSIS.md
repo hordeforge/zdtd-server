@@ -298,7 +298,7 @@ area and the concrete work.
     blocks). Residuals: block_hp / block_raw remain FIFO sparse caches (the
     raw plane is persisted per GAP 13; block durability is recovered from the
     client's absolute wire damage after an eviction, so the larger table just
-    widens the window — persisting hp to ZCH3/blockmeta is the proper fix),
+    widens the window - persisting hp to ZCH3/blockmeta is the proper fix),
     and container/workstation tables are fixed arrays sized at the cap.
 
 13. **DONE 2026-08-07.** World: store block rotation in the chunk plane.
@@ -382,7 +382,7 @@ area and the concrete work.
     `BuffSet` applies/removes by def id, ticks durations/expiry and
     `remove_on_death`, and the tick sweep relays adds/removes to observers
     (`src/ecs/buff.zig`, `src/server/game.zig:10764`). Still open: buff
-    **effects** (FoodChangeOT/HealthChangeOT cvars and stat deltas — the
+    **effects** (FoodChangeOT/HealthChangeOT cvars and stat deltas - the
     survival loop they feed is item 22), and persisting active buffs across
     restart (they ride ZPV3 already; effect application is the gap).
 
@@ -671,7 +671,7 @@ because the per-objective Write shapes are wrong.
   (13), FinishManagedQuest (14), ResetTraderQuests (16). These are client
   notifications for stock's event-driven completion; zdtd's fetch/clear quests
   complete through the action hooks (`questOnFetchItem` / `questOnZombieKilled`),
-  so the dropped events do not block them — the earlier "neither can complete"
+  so the dropped events do not block them - the earlier "neither can complete"
   claim was based on the stock model. Stock also relays ClearSleeper so
   sleeper volumes do not respawn after the quest; that suppression is the open
   part here (sleeper volumes re-arm on volume re-trigger).
@@ -932,7 +932,7 @@ parsed, and quest offering is unwired.
   day reproduces the same stock while restock on a later day rolls fresh (sim
   rule: deterministic inputs; stock uses a time-seeded per-ItemValue
   GameRandom). **Lazy rebuild on open (2026-08-08)**: the LockRequest open
-  calls `maybeRestockTrader` — when the trader_info ResetInterval elapsed it
+  calls `maybeRestockTrader` - when the trader_info ResetInterval elapsed it
   re-runs the seeded roll (fresh counts/qualities), advances the restock day
   and regenerates the money pool (stock HandleFullReset, loot-economy.md §3).
   Still open: the `TraderMaxTier` clamp and mods/modChance.
@@ -1043,7 +1043,7 @@ parsed, and quest offering is unwired.
   (`ForceUnlockLockTarget`, channel 0) so an open window shuts, and walks the
   POI's `IndexName="TraderOnOff"` blocks to toggle them (BlockLight meta bit
   0x2 via SetBlockRPC; door close/lock via composite TEFeatureDoor/TEFeature
-  Lockable and speaker sounds are residuals — zdtd has no door TE yet).
+  Lockable and speaker sounds are residuals - zdtd has no door TE yet).
   *Anchors:* `src/server/game.zig` (`traderIsOpen` `:8765`, `tickTraderAreas`
   `:8793`, `toggleTraderGates` `:8811`), `src/assets/blocks.zig`
   (`IndexName=TraderOnOff`), `asm.il:862122-862230`,
@@ -1054,10 +1054,10 @@ parsed, and quest offering is unwired.
   The body is built and sent in the join bundle right after SpawnPoints (stock
   order): `byte cVersion=1`, `i16 count`, per area Position i32x3, PrefabSize
   i16x3, GetProtectPadding s8x3, teleport volumes (u8 count + startPos s8x3 /
-  size u8x3) — layout extracted from the IL dump
+  size u8x3) - layout extracted from the IL dump
   (`NetPackageWorldAreas::write` IL=31, `TraderArea::Write` IL=111). Data comes
   from the trader POIs' XML (`TraderAreaProtect`, `TeleportVolumeStart/Size`).
-  Note: `TraderArea::Write` does **not** serialize `IsClosed` — the IL tail is
+  Note: `TraderArea::Write` does **not** serialize `IsClosed` - the IL tail is
   `ret` right after the teleport loop (`TraderArea.il.txt:721-788`), so the
   client learns the open/close state from the `SetClosed` gate block toggles and
   its local TraderInfo hours, not from this package. `TraderAreaStates`
@@ -1091,13 +1091,13 @@ parsed, and quest offering is unwired.
   NetPackageTraderData ToServer body (isEntity | entityId/tePosition |
   hasTraderData | TraderData::Write, asm.il 843046) is parsed and mirrored
   (stock TraderData.CopyFrom) onto the entity trader's sim stock or the
-  vending store — count/markup/money from the client's post-trade copy, while
+  vending store - count/markup/money from the client's post-trade copy, while
   price/sell stay server-owned (the wire carries no price). The loadgen/sim
   9-byte trade body still works (length-distinguishable). Scenario
   `traderdata-copyfrom` covers both branches.
   **Owner lock/password/allowed editing ships 2026-08-07**: the vending TE
   composite C2S (the mirror of TileEntityVendingMachine::write, payload
-  version i32 3) is parsed (`parseVendingTeBody`) and applied owner-gated —
+  version i32 3) is parsed (`parseVendingTeBody`) and applied owner-gated -
   only the machine's owner may change isLocked / password / the allowed-user
   list; ownership and the rental term stay server-applied (the rent SM owns
   them), and the reach check matches the other TE paths. Scenario
@@ -1179,7 +1179,7 @@ encoding is one day high.
 - **Blood-moon night window (dusk to dawn)** `WORKS`
   `isBloodMoonNight` now mirrors stock `IsBloodMoonTime` (asm.il:1926341):
   active on `day==bmDay` when `hour>=dusk`, and on `day==bmDay+1` when
-  `hour<dawn` — so the horde runs dusk on the blood-moon day through dawn of
+  `hour<dawn` - so the horde runs dusk on the blood-moon day through dawn of
   the next, crossing the midnight rollover. The midnight stop and the phantom
   pre-dawn window are gone.
   *Anchors:* `src/ecs/aidirector.zig` `isBloodMoonNight`, `asm.il:1926341`,
@@ -1512,8 +1512,8 @@ can walk into every POI but none of them is the building TFP authored.
 
 - **Painting part_* decorations** `PARTIAL`
   `applyTtsPaintToChunk` now paints parts up to the volume cap
-  (`isPaintablePart`, 24^3): Navezgane's 72 parts — driveways, town signs for
-  Gravestowne/Diersville/Perishton and the Perishton pedestrian bridge — are
+  (`isPaintablePart`, 24^3): Navezgane's 72 parts - driveways, town signs for
+  Gravestowne/Diersville/Perishton and the Perishton pedestrian bridge - are
   all far under it and render like stock; only the huge RWG clutter parts stay
   skipped. `sleepers.zig` still skips them (parts rarely carry authored sleeper
   volumes).
@@ -1543,7 +1543,7 @@ can walk into every POI but none of them is the building TFP authored.
   The v>=17 sparse water channel is decoded into a dense per-cell `u16` mass
   plane (`TtsBlocks.water`, same sparse-bitstream layout as the texture
   channel) and `tts.paintDecoration` paints the resolved runtime water block at
-  every mass>0 cell — POI pools, flooded basements and water tanks render wet.
+  every mass>0 cell - POI pools, flooded basements and water tanks render wet.
   The chunk wire's water-mass channel derives full static mass from the water
   block plane, so no separate channel encode is needed. Fail closed: `water_id`
   0 (unresolved AssignIds) skips water paint. Test builds a synthetic v19 file
@@ -2985,7 +2985,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
 - **Weather gameplay effects (gates)** `DONE 2026-08-07`; **buffs: client-owned by design**
   The operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and
   ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the
-  server's sandbox gates — TemperatureSurvival, StormFreq, blood-moon settings —
+  server's sandbox gates - TemperatureSurvival, StormFreq, blood-moon settings -
   instead of its own defaults (RE sandbox-options.md §8: the client decodes
   GameStats.GetString(71) in AfterPlayerRespawn). Per weather-environment.md §4,
   the stock *dedicated* server stubs the felt-temperature helpers and does NOT
@@ -3575,7 +3575,7 @@ persists so little that a restart visibly damages a built base.
   operator set them). The `GameInfoString` enum has 20 values; zdtd omits
   ServerDescription(3), ServerWebsiteURL(4), SteamID(8), Platform(10),
   ServerLoginConfirmationText(11), Region(12), Language(13), UniqueId(14),
-  CombinedPrimaryId(15), CombinedNativeId(16) and PlayGroup(17) — platform /
+  CombinedPrimaryId(15), CombinedNativeId(16) and PlayGroup(17) - platform /
   identity fields zdtd does not own (no authorizer chain, no Steam/EOS
   presence). SandboxCode is where V3.1.0 keeps the difficulty/loot/XP preset;
   it now rides the GSI text when configured (empty = client default, matching
@@ -3953,7 +3953,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
 | Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
 | Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
-| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; shared party scope — kill XP split, shared quests — still open, see §AUTHGATE) |
+| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; shared party scope - kill XP split, shared quests - still open, see §AUTHGATE) |
 
 #### Quests / traders / dialog (stock)
 | Package | Priority |
@@ -4126,7 +4126,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
-| Party (membership) | PARTIAL (real `Party` state machine + `PartyData` snapshots; shared scope — kill-XP split, shared quests — open, §AUTHGATE) |
+| Party (membership) | PARTIAL (real `Party` state machine + `PartyData` snapshots; shared scope - kill-XP split, shared quests - open, §AUTHGATE) |
 | Allies | PARTIAL (identity-keyed AllyStore + AllyResponse, allies.zal persisted; no faction tiers) |
 | Spatial hash for queries | MISSING (broadcastNear radius only) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
@@ -4236,7 +4236,7 @@ Honest gaps:
     held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
     Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
   - *EAIRunawayFromEntity* (asm.il:435190, base EAIRunAway asm.il:434778):
-    **DONE 2026-08-07** — the `.runaway` task now covers both AITask-1
+    **DONE 2026-08-07** - the `.runaway` task now covers both AITask-1
     (RunawayWhenHurt, revenge) and AITask-2 (RunawayFromEntity, proximity): a
     0.5 s-cadence fear scan over the player/zombie/animal groups (the stock
     `data="class=EntityPlayer,EntityZombie,EntityEnemyAnimal"` filter maps to
@@ -4245,9 +4245,9 @@ Honest gaps:
     Kind-gated to passive animals like its sibling; a fleeing animal under no
     player sense moves at the 0.1x LOD `active_scale` (same throttle as
     wander), and an already-chasing animal is not preempted by fear (mutex
-    overlap) — both documented approximations. Two unit tests: flee within
+    overlap) - both documented approximations. Two unit tests: flee within
     range, no flee beyond it.
-  - *EAIApproachDistraction* (asm.il:423700): **DONE 2026-08-07** — the
+  - *EAIApproachDistraction* (asm.il:423700): **DONE 2026-08-07** - the
     `.approach_distraction` task (MutexBits 3, priority between Territorial and
     ApproachAndAttack) walks to the dropped item that `EntityItem.tickDistraction`
     (asm.il EntityItem:1341) broadcast into `pendingDistraction`, and eats it

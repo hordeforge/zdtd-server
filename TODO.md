@@ -8,11 +8,11 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
 | [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 345 features scored WORKS/PARTIAL/MISSING with anchors |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 338 features scored WORKS/PARTIAL/MISSING with anchors |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-06):** `make check` exit 0 · 758 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md) wave 2026-08-06.
+**Gates (2026-08-08):** `make check` exit 0 · 975 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md).
 
 ### Freeze (core playable)
 
@@ -169,8 +169,8 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
   V3.1.0 IL corpus). **Stamina SHIPPED** (sprint drain via MovementState 3,
   idle regen, EntityStatChanged kind 1 sync). Open: core temperature,
   wellness.
-- [x] **Storm gameplay effects (gates)** SHIPPED 2026-08-07: storm SM + `[sim] storm_frequency` (feeds the weather scheduler AND the GameStats wire), and the operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the server's sandbox gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults. Per RE (weather-environment.md §4) the stock *dedicated* server stubs felt-temperature helpers and does NOT compute wet/cold buffs — the local client computes felt temperature from the shipped per-biome params + weathersurvival.xml MinEvents — so server-side buff application would double-apply and is intentionally NOT implemented. **GSI advertising SHIPPED 2026-08-07**: the TCP GameServerInfo text (and the PlayerLoginAnswer copy) now carries `SandboxPreset`/`SandboxCode` (GameInfoString 18/19) when the operator set them; unset keys are omitted (empty = client default, same as GameStats).
-- [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted — blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Disk persistence ships (ZVNM). **Rent SM ships 2026-08-07** (server-authoritative rent/clear/extend/expire via `NetPackagePlayerVendingMachine`; scenario `vending-rent`). **Real-client trade CopyFrom ships 2026-08-07**: the stock NetPackageTraderData ToServer body is parsed and mirrored onto trader/vending stock (scenario `traderdata-copyfrom`). **Owner lock/password/allowed editing ships 2026-08-07** (vending TE composite C2S, owner-gated; scenario `vending-edit`). The vending row is closed.
+- [x] **Storm gameplay effects (gates)** SHIPPED 2026-08-07: storm SM + `[sim] storm_frequency` (feeds the weather scheduler AND the GameStats wire), and the operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the server's sandbox gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults. Per RE (weather-environment.md §4) the stock *dedicated* server stubs felt-temperature helpers and does NOT compute wet/cold buffs - the local client computes felt temperature from the shipped per-biome params + weathersurvival.xml MinEvents - so server-side buff application would double-apply and is intentionally NOT implemented. **GSI advertising SHIPPED 2026-08-07**: the TCP GameServerInfo text (and the PlayerLoginAnswer copy) now carries `SandboxPreset`/`SandboxCode` (GameInfoString 18/19) when the operator set them; unset keys are omitted (empty = client default, same as GameStats).
+- [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted - blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Disk persistence ships (ZVNM). **Rent SM ships 2026-08-07** (server-authoritative rent/clear/extend/expire via `NetPackagePlayerVendingMachine`; scenario `vending-rent`). **Real-client trade CopyFrom ships 2026-08-07**: the stock NetPackageTraderData ToServer body is parsed and mirrored onto trader/vending stock (scenario `traderdata-copyfrom`). **Owner lock/password/allowed editing ships 2026-08-07** (vending TE composite C2S, owner-gated; scenario `vending-edit`). The vending row is closed.
 - [x] GameStats: full bPersistent propertyList blob (RE initPropertyDecl order); HUD day from WorldTime (no day field in GameStats net blob); BloodMoonDay = scheduled BM
 - [x] Quest Craft + StayWithin phase kinds (quests.xml classify + `questOnCraft` / `questTickStayWithin`); Rally/UnlockPOI still `.auto`
 - [x] EAI: grid A* chase path (`path.aStarToward` + solid hook); more task types still open (MISSING §5.2.1)
@@ -178,7 +178,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] EAI ApproachSpot task (`has_spot` / spot_x,z; below chase, above wander)
 - [x] EAI DestroyArea + Territorial (home leash 32 m; destroy_area reuses break_block chew)
 - [x] EAI Look task + `Reset()` hook + `Continue()`/`CanExecute()` split (wander→look→wander cycle, `Entity::SeekYaw` body yaw)
-- [ ] EAI residual: Dodge (client animator only, and unreferenced by stock XML), Leap (jump physics + BodyDamage limbs + raycast), RangedAttack (item actions + projectiles); see MISSING §5.2.1. **RunAway\* SHIPPED 2026-08-07** (AITask-1 hurt + AITask-2 proximity flee) and **ApproachDistraction SHIPPED 2026-08-07** (dropped-item distraction: `DistractionTags`/`DistractionRadius`/`Lifetime`/`Strength`/`EatTicks` from items.xml — stock ships decoy `zombie,requires_contact` — the 20-tick tickDistraction broadcast latches nearby zombies, the task walks over and chews eat items; see GAP §5.2.1).
+- [ ] EAI residual: Dodge (client animator only, and unreferenced by stock XML), Leap (jump physics + BodyDamage limbs + raycast), RangedAttack (item actions + projectiles); see MISSING §5.2.1. **RunAway\* SHIPPED 2026-08-07** (AITask-1 hurt + AITask-2 proximity flee) and **ApproachDistraction SHIPPED 2026-08-07** (dropped-item distraction: `DistractionTags`/`DistractionRadius`/`Lifetime`/`Strength`/`EatTicks` from items.xml - stock ships decoy `zombie,requires_contact` - the 20-tick tickDistraction broadcast latches nearby zombies, the task walks over and chews eat items; see GAP §5.2.1).
 - [x] Power: fuel/SoC/timer tick; MaxFuel/OutputPerFuel/Charge from blocks.xml via maxdamage → powerblocks.Resolved → PowerNode (no default_gen_fuel consts)
 - [x] Lock contention: TE pos-key cross-channel deny + 120s stale auto-release + clear on unlock/disconnect
 - [x] Power solar day gate (`PowerNode.solar` + `resolveDay`/`tick(..., daylight)` from WorldClock)
@@ -298,7 +298,7 @@ Core loop and parity landings. Do not re-open without new evidence.
       safe capped at 54) and roll up to their capacity; the client shows the
       block's real cell count instead of a flat 8.
 - [x] **Non-burning workstation queues** (586d59b): the craft gate mirrors
-      stock (asm.il 1331687) — only fuel-module stations wait for isBurning;
+      stock (asm.il 1331687) - only fuel-module stations wait for isBurning;
       workbench / cement mixer / table saw advance. Fuel-module presence is
       block-derived (blocks.xml Workstation Modules).
 - [x] **Workstation persistence** (44a4056): workstations.zws (ZWS1)
@@ -545,7 +545,7 @@ All items below shipped. Kept as historical checklist.
   (magic ZAL1, zdtd-owned like claims.zlc) on the periodic + shutdown saves and
   restore at init.
 - [x] **Party state machine (P3)** SHIPPED 2026-08-07: `NetPackagePartyActions`
-  (entity-id keyed, no PUID — RE parties-factions.md §2) dispatches to a real
+  (entity-id keyed, no PUID - RE parties-factions.md §2) dispatches to a real
   `Party`/`PartyManager` (`src/ecs/party.zig`): AcceptInvite (creates/joins,
   8-member cap), ChangeLead, LeaveParty, KickFromParty, Disconnected,
   JoinAutoParty (party id 1), SetVoiceLobby; every mutation fans a stock-layout

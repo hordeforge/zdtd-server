@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **963/963** (three consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5111, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
+**Unit tests:** `zig build test` → **975/975** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5153, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -79,8 +79,8 @@ observable, on the live stock client:
   use the bound POI center, so markers point somewhere reachable instead of an
   invented spot. A stock `quests.xml` catalog skips the client-name prefix
   gate (server and client read the same file). Five new tests; 769 total.
-- **Blood moon (T7):** the horde now runs stock `IsBloodMoonTime` — dusk on the
-  blood-moon day through dawn of the next, crossing the midnight rollover — and
+- **Blood moon (T7):** the horde now runs stock `IsBloodMoonTime` - dusk on the
+  blood-moon day through dawn of the next, crossing the midnight rollover - and
   `worldTimeBits` encodes `(day-1)*24000` so the client HUD day, BloodMoonDay
   and the red moon align. Dusk/dawn follow `CalcDuskDawnHours`. 772 total.
 - **World integrity (T8, part):** land claims now disappear with their keystone
@@ -155,7 +155,7 @@ The full WORK_PLAN T11-T15 chain landed (ADR 0021 "config-driven game modes"),
 plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
 
 - **T11 TOML binder** (`src/util/toml_bind.zig`): `zdtd.toml` and the mode
-  packs now parse through one comptime-reflected binder — struct fields are
+  packs now parse through one comptime-reflected binder - struct fields are
   `[section]`s (dotted `[rules.combat]` recurses), the field type drives value
   parsing, `?T` means unset, and unknown keys/sections abort startup. The
   per-key chains in `zdtd_config.zig` and `mode.zig` are deleted (net
@@ -163,7 +163,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   target over `bind` added; the two existing config fuzz targets now exercise
   the binder through the real surfaces.
 - **T12 `Rules` struct** (`src/ecs/rules.zig`): the sim rule constants moved
-  out of file scope into `World.rules.<group>.<field>` — `combat`
+  out of file scope into `World.rules.<group>.<field>` - `combat`
   (attack_damage/range/cooldown), `ai` (LOD/sense/despawn ranges, chase/wander
   speed), `bloodmoon` (party distances, enemy cap, party count). Defaults pin
   the pre-move literals (a pin test fails loudly on drift); no behavioural
@@ -213,7 +213,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   text (and the PlayerLoginAnswer copy) carries `SandboxPreset`/`SandboxCode`
   when the operator set them, so the server browser can show what the server
   actually runs (RE network.md: SandboxPreset = 0x12, SandboxCode = 0x13).
-  Unset keys are omitted — empty = client default, the same semantics as the
+  Unset keys are omitted - empty = client default, the same semantics as the
   GameStats(71) blob. `gsiSafe` sanitizes the values like every other GSI
   field. Three unit tests (keys emitted, unset omitted, injection sanitized).
 - **Vending rent SM**: `NetPackagePlayerVendingMachine` (userId stream +
@@ -228,14 +228,14 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
 - **Real-client trade CopyFrom**: the stock `NetPackageTraderData` ToServer
   body (isEntity | entityId/tePosition | hasTraderData | TraderData::Write,
   asm.il 843046) is now parsed and mirrored (stock TraderData.CopyFrom) onto
-  the entity trader's sim stock and the vending store — count/markup/money
+  the entity trader's sim stock and the vending store - count/markup/money
   from the client's post-trade copy, price/sell stay server-owned. The
   loadgen 9-byte trade body still works (length-distinguishable). Scenario
   `traderdata-copyfrom` covers both branches. This is the real-client buy
   path for both traders and vending machines.
 - **Vending owner editing**: the vending TE composite C2S (mirror of
   TileEntityVendingMachine::write, payload version 3) is parsed and applied
-  owner-gated — only the machine's owner may change lock/password/allowed
+  owner-gated - only the machine's owner may change lock/password/allowed
   users; ownership and the rental term stay server-applied (the rent SM owns
   them); the reach check matches the other TE paths. Scenario `vending-edit`
   covers owner apply + non-owner denial. The vending gap row is closed.
@@ -273,13 +273,13 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   load loudly instead of silently clobbering. Unit test round-trips the file
   and the corrupt path.
 - **Party state machine (P3)**: `NetPackagePartyActions` (entity-id keyed, no
-  PUID — RE parties-factions.md §2) dispatches to a real `Party`/`PartyManager`
+  PUID - RE parties-factions.md §2) dispatches to a real `Party`/`PartyManager`
   (`src/ecs/party.zig`): AcceptInvite creates or joins (8-member cap, leader
   index 0), ChangeLead / LeaveParty / KickFromParty / Disconnected /
   JoinAutoParty (party id 1) / SetVoiceLobby mutate the authoritative group,
   and every mutation fans a stock-layout `NetPackagePartyData` snapshot
   (party id, leader index, voice lobby, member ids, changed entity, action,
-  disband — parties-factions.md §3) out to party-relevant peers. A party of
+  disband - parties-factions.md §3) out to party-relevant peers. A party of
   one auto-disbands (stock keeps no singleton party); disconnect removes the
   member. The old echo-to-sender is gone; a client-sent PartyData is rejected
   (ToClient, ownership). **Shared kill XP SHIPPED**: `Party.GetPartyXP`
@@ -328,7 +328,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   Open: the flowing-water sim.
 - **Procedural biome surface (W3 step 1)**: the proc generator samples a
   continuous low-frequency biome field (`WorldGen.biomeAt`, deterministic,
-  region-contiguous — a biome is a landmass, not per-column static) and fills
+  region-contiguous - a biome is a landmass, not per-column static) and fills
   each column with its biome's `biomes.xml` surface stack when the loaded
   table resolves more than one biome; the single-biome default is unchanged.
   Two tests: field determinism/contiguity/range and multi-biome chunk fill.
@@ -357,7 +357,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   root attributes are still ignored (GAP trader economy row).
 - **Chat recipient routing (EChatType)**: `NetPackageChat` now parses and
   preserves the full stock body (chatType, sender, msg, msgSender, bbMode,
-  recipientEntityIds — chat.md §1). Routing follows stock
+  recipientEntityIds - chat.md §1). Routing follows stock
   `ChatMessageServer` (chat.md §2): a non-empty recipient list sends only to
   those clients (Party/Friends/Whisper), otherwise broadcast; the channel
   rides the re-encode so a party message keeps its Party styling instead of
@@ -365,7 +365,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   truncated. Two wire tests + a three-peer scenario (party chat reaches only
   the recipient, global reaches everyone but the sender).
 - **GAP 12 fixed-size caps**: land claims 256→1024, containers 256→512
-  (heap encode buffer — the old stack buffer truncated saves), workstations
+  (heap encode buffer - the old stack buffer truncated saves), workstations
   64→256, damaged blocks 64→256, bans 32→128, join-rate IPs 16→64. The join
   PlayerId journal was capped at 2 quests (sim holds 8); all quests now ride
   the PDF (scenario `journal-pdf` proves 5). Overflow tests: 300 claims /
@@ -442,7 +442,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
-| C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (70 handled in game.zig; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
+| C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (72 handled across `c2s/*`; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical

@@ -27,11 +27,11 @@ whether a wedged peer can stall the 50 ms tick.
 
 | Doc | Why |
 |---|---|
-| `AGENTS.md` — "Gotchas (hard-won)" first block | The join-critical / retry-shape rules |
-| `src/server/game.zig` — `sendGame`, `sendGameBudget`, `sendGameCritical`, `sendReliablePumped`, `sendFramedReliable`, `isDroppablePackage`, `isUnreliablePackage` | The send surface |
-| `src/server/chunk_stream.zig` — `sendFramedDroppable`, `sendSpawnChunk`, `streamChunksForClient` | The stream surface |
-| `src/litenet/peer.zig` — `sendReliable`, `sendOneReliable`, `allocPending`, `resendPending`, `pump_fn` | The LiteNet window |
-| `../7dtd-research/docs/protocol.md` — join sequence | What must arrive in order |
+| `AGENTS.md` - "Gotchas (hard-won)" first block | The join-critical / retry-shape rules |
+| `src/server/game.zig` - `sendGame`, `sendGameBudget`, `sendGameCritical`, `sendReliablePumped`, `sendFramedReliable`, `isDroppablePackage`, `isUnreliablePackage` | The send surface |
+| `src/server/chunk_stream.zig` - `sendFramedDroppable`, `sendSpawnChunk`, `streamChunksForClient` | The stream surface |
+| `src/litenet/peer.zig` - `sendReliable`, `sendOneReliable`, `allocPending`, `resendPending`, `pump_fn` | The LiteNet window |
+| `../7dtd-research/docs/protocol.md` - join sequence | What must arrive in order |
 
 ## Non-negotiable constraints
 
@@ -39,11 +39,11 @@ whether a wedged peer can stall the 50 ms tick.
    WorldSpawnPoints, WorldAreas, GameStats (the enter bundle) have no client
    retry. A silent drop wedges the client on the loading screen. These go
    through `sendGameCritical` / the critical framed path with the peer's shared
-   budget; on exhaustion they return `error.WindowFull` — they never log-and-
+   budget; on exhaustion they return `error.WindowFull` - they never log-and-
    continue a bundle the client can never complete.
 2. **One retry shape.** Every reliable-window retry goes through
    `sendReliablePumped` (budget/deadline/sleep/pump). A hand-rolled
-   `while (attempts < …)` WindowFull loop is a defect — the budget/deadline/
+   `while (attempts < …)` WindowFull loop is a defect - the budget/deadline/
    sleep asymmetry between copies is the drift that caused the join-bundle
    stall. Only the budget, max-attempts and counters differ between callers.
 3. **Dead peer must not stall the tick.** The retry budget is bounded
@@ -53,7 +53,7 @@ whether a wedged peer can stall the 50 ms tick.
    immediately (`sendOneReliableOnChannel`), so scenario tests must not see
    window pressure. A capture-mode WindowFull means the send path is broken.
 5. **No second encoder / no fabricated fallbacks.** A package that cannot be
-   built correctly is omitted or sent in its stock empty form — never
+   built correctly is omitted or sent in its stock empty form - never
    truncated, zero-padded or replaced with a fake body.
 6. **Hot path:** the send path runs on the tick. No heap allocation, no growing
    lists; bodies live in `body_buf` / `send_buf`; a drop is a named-counter
@@ -75,7 +75,7 @@ whether a wedged peer can stall the 50 ms tick.
 - [ ] The drop path increments `reliable_window_drops` and logs rate-limited;
       critical drops return `error.WindowFull`.
 - [ ] Compression (`trySendCompressed` for Chunk / SignDataResponse) falls
-      through to the uncompressed frame on any overflow — never truncates.
+      through to the uncompressed frame on any overflow - never truncates.
 - [ ] Motion packages use the unreliable fast path (single datagram) and never
       enter the reliable window.
 - [ ] Capture-mode peers (scenarios) never hit WindowFull; a capture send

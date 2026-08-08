@@ -546,9 +546,9 @@ residual bare consts and new drift, not the already-extracted keys.
 | `ecs/systems.zig` | `full_ai_dist_sq`, `mid_ai_dist_sq`, `sense_dist_sq`, `attack_range_sq`, `despawn_dist_sq=200²`, `execute_delay_scale` | `src/ecs/rules.zig` / zdtd.toml **or** A if entity XML |
 | `ecs/systems.zig` | `attack_damage=8`, `chase_speed=2.2`, `wander_speed=0.8`, `attack_cooldown_s=1.2` | `src/ecs/rules.zig` / zdtd.toml (floors **A first** when entity/items XML loaded; residual floor → B) |
 | `ecs/systems.zig` | `gravity_accel = -9.81`, `vehicleKindDefaultSpeed`, accel/turn constants | `src/ecs/rules.zig` when exposed as tunables; `gravity` stays an **OK** RE literal (`EntityVehicle::cGravity`); projectile `items.xml Gravity`, `blocks.xml FallDamage`, `entityclasses Mass` are **Bucket A** when evaluated |
-| `ecs/systems.zig` | wander timers, look intervals, distraction close, territorial radius | **Bucket B** via `src/ecs/rules.zig` (sim tunables), not hard consts — if operator/mode should not tune, keep OK but **name+cite** (not anonymous floats) |
-| `server/movement.zig` | `max_horizontal_speed_mps`, `min/max_dt_s` | **Bucket B** anti-cheat caps (zdtd policy or `worldglobal.xml` when stock has it) — not "physics OK" |
-| `world/worldgen.zig` | `y_scale`, `squash`, `noise_weight` | zdtd invented worldgen — named consts **OK**, but doc the banding/performance cliff (WORLDGEN.md); stock RWG would be data |
+| `ecs/systems.zig` | wander timers, look intervals, distraction close, territorial radius | **Bucket B** via `src/ecs/rules.zig` (sim tunables), not hard consts - if operator/mode should not tune, keep OK but **name+cite** (not anonymous floats) |
+| `server/movement.zig` | `max_horizontal_speed_mps`, `min/max_dt_s` | **Bucket B** anti-cheat caps (zdtd policy or `worldglobal.xml` when stock has it) - not "physics OK" |
+| `world/worldgen.zig` | `y_scale`, `squash`, `noise_weight` | zdtd invented worldgen - named consts **OK**, but doc the banding/performance cliff (WORLDGEN.md); stock RWG would be data |
 | `ecs/electric.zig` | fuel defaults after A fix should vanish; timer policy only → B | A then B |
 | `ecs/quest.zig` | `max_phases=32`, `max_actions=8`, `max_reward_flags=16` | B caps (engineering) |
 | `world/sleepers.zig` | `max_volumes=8192` | B cap |
@@ -580,11 +580,11 @@ For every `source: enum { builtin, xml }` table:
 - Wire field sizes, package body layouts, Unity hashes from names → **OK**
 - Stock MaxFuel / EconomicValue / biome colors → **A**
 - Single-entity vehicle body gravity `-9.81` when cited as `EntityVehicle::cGravity`
-  / Unity `Physics.gravity.y` → **OK** (RE literal) — but that is the **only**
+  / Unity `Physics.gravity.y` → **OK** (RE literal) - but that is the **only**
   physics number that is OK by itself; per-item projectile `Gravity`, `FallDamage`,
   `Mass`, wander/look timers, distraction/territorial radii, accel/brake/steer
   scalars, `worldgen` field math, `movement` anti-cheat caps are **not** covered
-  by it — see OK list and Bucket B table
+  by it - see OK list and Bucket B table
 - 20 TPS as a project invariant → document; changing it is an architecture
   decision, not a drive-by toml key
 - Test-only fixture numbers → OK in tests
@@ -605,7 +605,7 @@ List these explicitly in the audit when you skip them:
 - Pure algorithm constants (OpenSimplex gradients, WFC entropy formula) with
   **no** stock file and **no** game balance meaning
 - Vehicle body gravity (`-9.81`) when cited as `EntityVehicle::cGravity` / Unity
-  `Physics.gravity.y` (items.xml comment confirms it) — but **not** a blanket
+  `Physics.gravity.y` (items.xml comment confirms it) - but **not** a blanket
   "all physics is OK": projectile `Gravity` per item, `blocks.xml` `FallDamage`,
   and `entityclasses.xml` `Mass` are **Bucket A** when the server evaluates them
   (and Bucket B / Rules if exposed as tunables)

@@ -662,10 +662,10 @@ requirements, and `buffs.survival()` resolves the stage thresholds (.5 / .25 /
 .02 of max), the starvation and dehydration HP loss per real second, and the
 starving stamina penalty (proven against the shipped buffs.xml, not a fixture).
 `src/server/game/tick.zig:tickSurvival` now drives the tick from that table
-— fraction-of-max well-fed and stage-3 gates (`hungry_frac[2]` /
+- fraction-of-max well-fed and stage-3 gates (`hungry_frac[2]` /
 `thirsty_frac[2]`), per-second `ModifyStats Health subtract .25` damage
 divided by the buff's `update_rate`, and the `StaminaChangeOT perc_subtract`
-penalty — with `Survival.ok()` as the floor guard. Two new `Rules.progression`
+penalty - with `Survival.ok()` as the floor guard. Two new `Rules.progression`
 knobs cover the remaining z-level policy: `block_bite_damage` (per-bite before
 `BlockDamageAI/BM` scaling) and `block_damage_range` (pressed-against-cover gate).
 
@@ -717,7 +717,7 @@ threshold requirements are needed here.
 **Status: landed 2026-08-08 (direct turns).** `src/ecs/schedule.zig` exposes the
 `Rules.systems` gate and the `Phase` order that `game.zig` documents; each system
 is gated in the fixed `run(w,dt)` order (no heap chase table on the 50 ms path,
-no reorder by mode — the order encodes a real dependency: buffs before ai so
+no reorder by mode - the order encodes a real dependency: buffs before ai so
 movement reads this tick's buff state).
 
 **Why:** [ADR 0021](adr/0021-config-driven-game-modes.md) made the sim's

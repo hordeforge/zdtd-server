@@ -80,6 +80,10 @@ Runtime selection is closed: **zwasm v2**, verified under Zig 0.16 on
 `error.OutOfFuel`. WASI is not used. Both are recorded with their evidence in
 [PLUGIN_API.md](../PLUGIN_API.md).
 
-Still open, and tracked as [WORK_PLAN.md](../WORK_PLAN.md) T9: the host function
-list, the capability set, the zdtd fuel and memory defaults, and the loader
-itself. Plugin authors write against [PLUGIN_DEV.md](../PLUGIN_DEV.md).
+T9 landed 2026-08-06: `src/plugin/wasm.zig` loads `[plugin] modules` from
+zdtd.toml at init (zwasm v2 runtime, no WASI), registers the host import table
+(`zdtd_log` / `zdtd_tick` / `zdtd_queue`), and runs every hook under fuel and
+memory budgets (a looping module is disabled within one tick). The T15 event
+hooks (on_player_death / on_entity_killed / on_block_damage / on_quest_complete)
+and the admin/chat/login seams shipped 2026-08-07. Plugin authors write against
+[PLUGIN_DEV.md](../PLUGIN_DEV.md).

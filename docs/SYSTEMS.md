@@ -125,9 +125,9 @@ biomes.xml, with the per-biome parameters (temp, precipitation, cloud, wind, fog
 on the raw 0..100 XML scale the client divides by 100. The package carries one
 entry per biome with no count prefix, so the body length must match what the
 client's `biomeWeather.Count` expects, and `groupIndex` is clamped because
-`BiomeDefinition::SetWeatherGroup` indexes unchecked.
-Open: storm state does not persist across a restart, and there are no
-`ForceWeather` / `SetStorm` admin commands.
+`BiomeDefinition::SetWeatherGroup` indexes unchecked. Storm state persists
+across a restart (`weather.zwt`, ZWTH1, restored at init over the fresh seed);
+there are still no `ForceWeather` / `SetStorm` admin commands.
 
 ## Pathfinding (`src/ecs/path.zig`, used by `systemZombieAi`)
 

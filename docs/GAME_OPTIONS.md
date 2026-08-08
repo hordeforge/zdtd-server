@@ -73,8 +73,10 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `TelnetPort` | 0 | u16 | stock telnet port; 0 = off |
 | `TelnetPassword` | empty | string | empty = no login and loopback bind; set = stock login prompt and INADDR_ANY bind |
 | `TelnetFailedLoginLimit` | 10 | 1..255 | failed logins before the session is dropped |
-| `TelnetFailedLoginsBlocktime` | 10 | 0..1440 | minutes a source address stays blocked (parsed; enforcement pending) |
+| `TelnetFailedLoginsBlocktime` | 10 | 0..1440 | minutes a source address stays blocked (login lockout enforced in `admin.zig` auth; 0 = no lockout) |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
+| `SandboxCode` | empty | string | Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding all 152 sandbox options, echoed verbatim into the GameStats(71) blob so a joining client decodes the server's gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults (RE sandbox-options §8). Malformed codes leave client defaults, exactly like stock |
+| `SandboxPreset` | empty | string | Sandbox preset NAME (295) for the server-browser display and stock-settings check; not used to load values. Advertised in the GSI GameInfoString (SandboxPreset = 0x12, SandboxCode = 0x13) when set; unset keys are omitted (empty = client default) |
 
 ### Web UI (CLI / env; WU0–WU2 shipped)
 
@@ -97,8 +99,8 @@ startup so misspelled operator settings cannot silently use defaults.
 | Section | Keys (subset) | Effect |
 |---|---|---|
 | `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`, `motion_replicate_period_ticks`, `world_time_send_ticks`, `vehicle_pos_send_ticks`, `sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`, `spawn_area_radius_max` | Chunk stream caps (clamped to compile cap 169) + broadcast/side-work cadences in ticks. `sleeper_tick_ticks` gates prefab sleeper volumes, airdrops and workstations; `turret_sync_ticks` gates turret state broadcasts; `save_interval_ticks` gates the periodic world flush |
-| `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `join_rate_limit_ms`, `mode` | C2S range / interest / mode. `join_rate_limit_ms` (default 500) paces connection attempts per IP like stock's ~500 ms/IP flood gate; loopback is exempt so bots and tests share 127.0.0.1 |
-| `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
+| `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `lock_stale_ms`, `join_rate_limit_ms`, `mode`, `guard_enforce`, `guard_dry_run`, `guard_quarantine`, `guard_load_shed`, `guard_window_ticks`, `guard_strong_distinct`, `guard_hard_repeat` | C2S range / interest / mode. `join_rate_limit_ms` (default 500) paces connection attempts per IP like stock's ~500 ms/IP flood gate; loopback is exempt so bots and tests share 127.0.0.1. `lock_stale_ms` (default 120 000 ms = 120 s) auto-releases a container/trade lock after the peer goes silent. The `guard_*` keys are the P4 guard policy (defaults log-only, dry-run on); see [AUTHORITY.md](AUTHORITY.md) |
+| `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `deco_objects_per_join`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `deco_objects_per_join` (default 8192): cap on join-time deco objects sent in the burst. `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE_ARCHITECTURE.md` |
 | `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `storm_frequency` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. Defaults match the previous code constants |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
@@ -183,7 +185,7 @@ test, so a retune cannot land silently).
 | `sprint_stale_seconds` | 0.5 | Policy (GAP 22): seconds without an EntitySpeeds update before the sprint latch lapses |
 | `survival_sync_seconds` | 2.0 | Policy: per-player survival S2C refresh throttle |
 | `block_bite_damage` | 10.0 | Policy: zombie block-bite damage before the `BlockDamageAI/BM` percent (tick every 0.5 s) |
-| `block_damage_range` | 3.0 | Policy: anti-kite gate — only when the zombie is within this range of its target |
+| `block_damage_range` | 3.0 | Policy: anti-kite gate - only when the zombie is within this range of its target |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
@@ -219,9 +221,9 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 
 Only the keys you set override; everything else falls through to
 `serverconfig.xml`, `zdtd.toml` and code defaults. A mode is a complete
-behavior pack — `hardcore.toml` = `player_killing_mode = 0`,
+behavior pack - `hardcore.toml` = `player_killing_mode = 0`,
 `drop_on_death = 1`, `game_difficulty = 4`, plus `[rules.combat]`
-`attack_damage = 14`, and so on — no code involved.
+`attack_damage = 14`, and so on - no code involved.
 
 Shipped examples that exercise the rules surface: [`modes/horde_lite.toml`](../modes/horde_lite.toml)
 (softer) and [`modes/survival_crunch.toml`](../modes/survival_crunch.toml) (harsher).

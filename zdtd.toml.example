@@ -1,4 +1,4 @@
-# zdtd.toml — operator tunables (Bucket B). Not stock serverconfig.
+# zdtd.toml - operator tunables (Bucket B). Not stock serverconfig.
 # Copy to <world>/zdtd.toml or CWD. Precedence:
 #   CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
 #   mode pack > --serverconfig keys > code defaults
