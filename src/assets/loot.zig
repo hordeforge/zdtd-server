@@ -6,7 +6,8 @@ const io_fs = @import("../util/io_fs.zig");
 
 pub const max_groups: usize = 2048;
 pub const max_containers: usize = 512;
-pub const max_entries: usize = 32;
+/// Widest stock group (perkBooks has 133 entries); the cap must not truncate.
+pub const max_entries: usize = 192;
 pub const max_roll_stacks: usize = 8;
 
 pub const LootEntry = struct {
@@ -20,6 +21,10 @@ pub const LootEntry = struct {
     /// loot_prob_template index + 1 into LootTable.prob_templates; 0 = none.
     /// Resolved at load so the roll path never compares template names.
     prob_template: u16 = 0,
+    /// force_prob="true": the entry rolls its prob independently instead of
+    /// joining the group's pick pool (stock SpawnAllItemsFromList /
+    /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
+    force_prob: bool = false,
 };
 
 /// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
@@ -36,9 +41,12 @@ pub const ProbTemplate = struct {
 
 pub const LootGroup = struct {
     name: []const u8 = "",
-    /// How many entries to pick (min,max); 0 means "all entries once".
+    /// How many entries to pick (min,max).
     pick_min: u8 = 1,
     pick_max: u8 = 1,
+    /// count="all": every entry spawns once (stock -1 sentinel →
+    /// SpawnAllItemsFromList; regular prob is ignored, force_prob gates).
+    pick_all: bool = false,
     entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
     entry_n: u8 = 0,
 };
@@ -153,8 +161,13 @@ pub const LootTable = struct {
             s = s *% 1103515245 +% 12345;
             // Always include the first entry unless it carries a loot stage
             // template: a template's prob is the stage gate itself, and stock
-            // never emits an entry whose band prob is 0.
-            if ((i > 0 or e.prob_template != 0) and !self.probGate(e, loot_stage, s)) continue;
+            // never emits an entry whose band prob is 0. A force_prob entry
+            // gates independently on its own prob (stock forceProb branch).
+            const gate = if (e.force_prob)
+                !self.probGate(e, loot_stage, s)
+            else
+                (i > 0 or e.prob_template != 0) and !self.probGate(e, loot_stage, s);
+            if (gate) continue;
             if (e.is_group) {
                 n += self.rollGroup(e.name, loot_stage, s, out[n..], 0);
             } else {
@@ -181,6 +194,29 @@ pub const LootTable = struct {
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0) return 0;
         var s = seed;
+        // count="all" (stock -1): every entry spawns once; regular prob is
+        // ignored, force_prob entries gate independently (SpawnAllItemsFromList,
+        // asm.il 698452).
+        if (g.pick_all) {
+            var an: usize = 0;
+            var ai: u8 = 0;
+            while (ai < g.entry_n and an < out.len) : (ai += 1) {
+                const e = g.entries[ai];
+                s = s *% 1103515245 +% 12345;
+                if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
+                if (e.is_group) {
+                    an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1);
+                } else {
+                    const cmin = e.count_min;
+                    const cmax = if (e.count_max >= cmin) e.count_max else cmin;
+                    const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
+                    const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt) };
+                    an += 1;
+                }
+            }
+            return an;
+        }
         const picks: u8 = blk: {
             if (g.pick_max <= g.pick_min) break :blk g.pick_min;
             s = s *% 1103515245 +% 12345;
@@ -197,7 +233,10 @@ pub const LootTable = struct {
             const e = g.entries[idx];
             // A picked entry still has to clear its loot stage band, so a
             // low-stage player cannot pull a top-tier item out of a group.
-            if (e.prob_template != 0 and !self.probGate(e, loot_stage, s)) continue;
+            // A force_prob entry rolls its prob independently.
+            if (e.force_prob) {
+                if (!self.probGate(e, loot_stage, s)) continue;
+            } else if (e.prob_template != 0 and !self.probGate(e, loot_stage, s)) continue;
             if (e.is_group) {
                 n += self.rollGroup(e.name, loot_stage, s, out[n..], depth + 1);
             } else {
@@ -291,6 +330,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     const n = name orelse return null;
     const cr = parseCountRange(xml.attr(tag_src, tag_at, "count") orelse "1");
     const prob = xml.parseF32(xml.attr(tag_src, tag_at, "prob") orelse "1") orelse 1;
+    const fp = xml.attr(tag_src, tag_at, "force_prob") orelse "";
     var tpl: u16 = 0;
     if (xml.attr(tag_src, tag_at, "loot_prob_template")) |tn| {
         for (templates, 0..) |t, ti| {
@@ -307,6 +347,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .count_max = cr.max,
         .prob = prob,
         .prob_template = tpl,
+        .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
     };
 }
 
@@ -425,9 +466,13 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             .name = try arena.dupe(u8, name),
         };
         if (xml.attr(clean, tag, "count")) |cv| {
-            const cr = parseCountRange(cv);
-            g.pick_min = @intCast(@min(cr.min, 255));
-            g.pick_max = @intCast(@min(cr.max, 255));
+            if (std.mem.eql(u8, cv, "all")) {
+                g.pick_all = true;
+            } else {
+                const cr = parseCountRange(cv);
+                g.pick_min = @intCast(@min(cr.min, 255));
+                g.pick_max = @intCast(@min(cr.max, 255));
+            }
         }
         var bi: usize = 0;
         while (bi < body.len and g.entry_n < max_entries) {
@@ -585,6 +630,66 @@ test "loot prob templates gate entries by loot stage" {
     }
     try std.testing.expectEqual(@as(usize, 0), seen_low);
     try std.testing.expect(seen_high >= 1);
+}
+
+test "count=all groups spawn every entry; force_prob gates independently" {
+    const src =
+        \\<lootcontainers>
+        \\<lootgroup name="allGroup" count="all">
+        \\  <item name="a" prob="0"/>
+        \\  <item name="b" prob="0.0001"/>
+        \\  <item name="c" prob="1"/>
+        \\  <item name="gated" prob="1" force_prob="true"/>
+        \\</lootgroup>
+        \\<lootgroup name="pickGroup" count="1">
+        \\  <item name="x" force_prob="true" prob="0"/>
+        \\  <item name="y" force_prob="true" prob="1"/>
+        \\  <item name="z"/>
+        \\</lootgroup>
+        \\</lootcontainers>
+    ;
+    var t = try loadFromSlice(std.testing.allocator, src);
+    defer t.deinit();
+    const ag = t.groupByName("allGroup").?;
+    try std.testing.expect(ag.pick_all);
+    try std.testing.expectEqual(@as(u8, 4), ag.entry_n);
+    // count="all": every entry spawns once regardless of prob; the force_prob
+    // entry gates on its own prob (1 here so it stays).
+    var stacks: [16]Stack = undefined;
+    const n = t.rollGroup("allGroup", 1, 7, &stacks, 0);
+    try std.testing.expectEqual(@as(usize, 4), n);
+    var saw_all = true;
+    for ([_][]const u8{ "a", "b", "c", "gated" }) |want| {
+        var seen = false;
+        for (stacks[0..n]) |s| {
+            if (std.mem.eql(u8, s.item_name, want)) seen = true;
+        }
+        if (!seen) saw_all = false;
+    }
+    try std.testing.expect(saw_all);
+    // force_prob prob=0 is never picked from the pick pool.
+    var s2: [16]Stack = undefined;
+    var i: u32 = 0;
+    var saw_x = false;
+    while (i < 200) : (i += 1) {
+        const n2 = t.rollGroup("pickGroup", 1, 1000 + i, &s2, 0);
+        for (s2[0..n2]) |s| {
+            if (std.mem.eql(u8, s.item_name, "x")) saw_x = true;
+        }
+    }
+    try std.testing.expect(!saw_x);
+    std.debug.print("PASS loot: count=all spawns every entry, force_prob gates\n", .{});
+}
+
+test "stock groups parse past the old 32-entry cap (perkBooks)" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer t.deinit();
+    // perkBooks has 133 entries; the cap must not truncate stock groups.
+    if (t.groupByName("perkBooks")) |g| {
+        try std.testing.expect(g.entry_n >= 100);
+        try std.testing.expect(g.entry_n <= max_entries);
+    }
 }
 
 test "loot rolls stay deterministic for a given stage and seed" {
