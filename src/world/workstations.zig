@@ -7,6 +7,17 @@
 
 const std = @import("std");
 const components = @import("../ecs/components.zig");
+const io_fs = @import("../util/io_fs.zig");
+
+/// Persisted workstation record caps (mirror the in-memory arrays).
+const save_slots = slots_per_group;
+const save_queue = max_ws_queue;
+const save_melt = max_ws_melt;
+const save_craft_complete = max_craft_complete;
+/// One record: pos 12 + block 4 + flags 3 + burn 4 + lens 8 + slots 336 +
+/// lastInput 2+384 + queue 4*354 + craftComplete 4*146 + melt 48.
+const persisted_workstation_size: usize = 23 + 8 + save_slots * 4 * 7 + 2 + last_input_blob_max + save_queue * (2 + 1 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 2 + recipe_blob_max) + save_craft_complete * (4 + 4 + 2 + 4 + 2 + 1 + craft_name_max + 1 + craft_name_max) + save_melt * 4;
+const save_capacity: usize = 6 + max_workstations * persisted_workstation_size;
 
 /// Game embeds WorkstationStore on the heap; 256 covers a long-lived base.
 pub const max_workstations: usize = 256;
@@ -396,6 +407,220 @@ pub const WorkstationStore = struct {
         return null;
     }
 
+    /// Persist all live workstations to {dir}/workstations.zws (ZWS1): pos,
+    /// block, fuel-module flag, burning state, the four slot groups, lastInput,
+    /// the recipe queue (blob included) and the craft-complete list. Records
+    /// sorted by pos so bytes are independent of slot assignment order.
+    /// `allocator` owns the encode buffer (256 x ~2.8 KB is too large for a
+    /// stack frame). Best-effort like the other saves; a missing file is a
+    /// fresh world on load.
+    pub fn save(self: *const WorkstationStore, dir: []const u8, allocator: std.mem.Allocator) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/workstations.zws", .{dir});
+        const buf = try allocator.alloc(u8, save_capacity);
+        defer allocator.free(buf);
+        var o: usize = 0;
+        @memcpy(buf[0..4], "ZWS1");
+        o = 6; // count patched below
+
+        var idxs: [max_workstations]u16 = undefined;
+        var n_idx: usize = 0;
+        var i: usize = 0;
+        while (i < max_workstations) : (i += 1) {
+            if (!self.used[i]) continue;
+            idxs[n_idx] = @intCast(i);
+            n_idx += 1;
+        }
+        std.mem.sort(u16, idxs[0..n_idx], self, struct {
+            fn less(store: *const WorkstationStore, a: u16, b: u16) bool {
+                const wa = store.items[a];
+                const wb = store.items[b];
+                if (wa.x != wb.x) return wa.x < wb.x;
+                if (wa.y != wb.y) return wa.y < wb.y;
+                return wa.z < wb.z;
+            }
+        }.less);
+
+        var count: u16 = 0;
+        for (idxs[0..n_idx]) |ii| {
+            const w = &self.items[ii];
+            if (o + persisted_workstation_size > buf.len) break;
+            std.mem.writeInt(i32, buf[o..][0..4], w.x, .little);
+            std.mem.writeInt(i32, buf[o + 4 ..][0..4], w.y, .little);
+            std.mem.writeInt(i32, buf[o + 8 ..][0..4], w.z, .little);
+            std.mem.writeInt(i32, buf[o + 12 ..][0..4], w.block_id, .little);
+            buf[o + 16] = @intFromBool(w.has_fuel_module);
+            buf[o + 17] = @intFromBool(w.is_burning);
+            buf[o + 18] = @intFromBool(w.is_player_placed);
+            std.mem.writeInt(u32, buf[o + 19 ..][0..4], @as(u32, @bitCast(w.burn_time_left)), .little);
+            buf[o + 23] = w.fuel_len;
+            buf[o + 24] = w.input_len;
+            buf[o + 25] = w.tools_len;
+            buf[o + 26] = w.output_len;
+            std.mem.writeInt(u16, buf[o + 27 ..][0..2], w.last_input_blob_len, .little);
+            buf[o + 29] = w.queue_len;
+            buf[o + 30] = w.melt_len;
+            o += 31;
+            inline for (.{ &w.fuel, &w.input, &w.tools, &w.output }) |grp| {
+                for (grp) |s| {
+                    std.mem.writeInt(u16, buf[o..][0..2], s.item_id, .little);
+                    std.mem.writeInt(u16, buf[o + 2 ..][0..2], s.count, .little);
+                    buf[o + 4] = s.quality;
+                    std.mem.writeInt(u16, buf[o + 5 ..][0..2], s.meta, .little);
+                    o += 7;
+                }
+            }
+            std.mem.writeInt(u16, buf[o..][0..2], w.last_input_blob_len, .little);
+            o += 2;
+            const li = @min(@as(usize, w.last_input_blob_len), last_input_blob_max);
+            @memcpy(buf[o .. o + li], w.last_input[0..li]);
+            o += li;
+            for (w.queue) |q| {
+                std.mem.writeInt(i16, buf[o..][0..2], q.multiplier, .little);
+                buf[o + 2] = @intFromBool(q.is_crafting);
+                std.mem.writeInt(u32, buf[o + 3 ..][0..4], @as(u32, @bitCast(q.craft_time_left)), .little);
+                std.mem.writeInt(u32, buf[o + 7 ..][0..4], @as(u32, @bitCast(q.one_item_craft_time)), .little);
+                buf[o + 11] = q.quality;
+                std.mem.writeInt(i32, buf[o + 12 ..][0..4], q.starting_entity_id, .little);
+                std.mem.writeInt(i32, buf[o + 16 ..][0..4], q.output_type, .little);
+                std.mem.writeInt(i32, buf[o + 20 ..][0..4], q.output_count, .little);
+                std.mem.writeInt(u32, buf[o + 24 ..][0..4], @as(u32, @bitCast(q.crafting_time)), .little);
+                std.mem.writeInt(i32, buf[o + 28 ..][0..4], q.craft_exp_gain, .little);
+                std.mem.writeInt(u16, buf[o + 32 ..][0..2], q.recipe_len, .little);
+                o += 34;
+                const rl = @min(@as(usize, q.recipe_len), recipe_blob_max);
+                @memcpy(buf[o .. o + rl], q.recipe[0..rl]);
+                o += rl;
+            }
+            for (w.craft_complete) |cc| {
+                std.mem.writeInt(i32, buf[o..][0..4], cc.crafter_entity_id, .little);
+                std.mem.writeInt(i32, buf[o + 4 ..][0..4], cc.item_type, .little);
+                std.mem.writeInt(u16, buf[o + 8 ..][0..2], cc.item_count, .little);
+                std.mem.writeInt(i32, buf[o + 10 ..][0..4], cc.exp_gain, .little);
+                std.mem.writeInt(u16, buf[o + 14 ..][0..2], cc.used_count, .little);
+                buf[o + 16] = cc.recipe_name_len;
+                @memcpy(buf[o + 17 ..][0..craft_name_max], &cc.recipe_name);
+                buf[o + 17 + craft_name_max] = cc.scrapped_len;
+                @memcpy(buf[o + 18 + craft_name_max ..][0..craft_name_max], &cc.scrapped);
+                o += 18 + 2 * craft_name_max;
+            }
+            for (w.melt) |m| {
+                std.mem.writeInt(u32, buf[o..][0..4], @as(u32, @bitCast(m)), .little);
+                o += 4;
+            }
+            count += 1;
+        }
+        std.mem.writeInt(u16, buf[4..6], count, .little);
+        try io_fs.writeFileSimple(p, buf[0..o]);
+    }
+
+    /// Decode a ZWS1 buffer (magic | count | records). Corrupt records fail
+    /// loudly; a truncated lastInput/recipe blob reads only what is present.
+    pub fn loadFromSlice(self: *WorkstationStore, buf: []const u8) !void {
+        if (buf.len < 6 or !std.mem.eql(u8, buf[0..4], "ZWS1")) return error.ReadFailed;
+        const count = std.mem.readInt(u16, buf[4..6], .little);
+        var o: usize = 6;
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            if (o + 31 > buf.len) return error.Truncated;
+            const x = std.mem.readInt(i32, buf[o..][0..4], .little);
+            const y = std.mem.readInt(i32, buf[o + 4 ..][0..4], .little);
+            const z = std.mem.readInt(i32, buf[o + 8 ..][0..4], .little);
+            const w = self.getOrCreate(x, y, z) orelse return error.NoSlot;
+            w.block_id = std.mem.readInt(i32, buf[o + 12 ..][0..4], .little);
+            w.has_fuel_module = buf[o + 16] != 0;
+            w.is_burning = buf[o + 17] != 0;
+            w.is_player_placed = buf[o + 18] != 0;
+            w.burn_time_left = @bitCast(std.mem.readInt(u32, buf[o + 19 ..][0..4], .little));
+            w.fuel_len = buf[o + 23];
+            w.input_len = buf[o + 24];
+            w.tools_len = buf[o + 25];
+            w.output_len = buf[o + 26];
+            const li_len = std.mem.readInt(u16, buf[o + 27 ..][0..2], .little);
+            w.queue_len = buf[o + 29];
+            w.melt_len = buf[o + 30];
+            o += 31;
+            inline for (.{ &w.fuel, &w.input, &w.tools, &w.output }) |grp| {
+                for (grp) |*s| {
+                    if (o + 7 > buf.len) return error.Truncated;
+                    s.* = .{
+                        .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
+                        .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
+                        .quality = buf[o + 4],
+                        .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
+                    };
+                    o += 7;
+                }
+            }
+            if (o + 2 > buf.len) return error.Truncated;
+            const li2 = std.mem.readInt(u16, buf[o..][0..2], .little);
+            o += 2;
+            if (li2 > last_input_blob_max) return error.BadRecord;
+            if (o + li2 > buf.len) return error.Truncated;
+            @memcpy(w.last_input[0..li2], buf[o .. o + li2]);
+            w.last_input_blob_len = li2;
+            o += li2;
+            _ = li_len;
+            for (&w.queue) |*q| {
+                if (o + 34 > buf.len) return error.Truncated;
+                q.* = .{
+                    .multiplier = std.mem.readInt(i16, buf[o..][0..2], .little),
+                    .is_crafting = buf[o + 2] != 0,
+                    .craft_time_left = @bitCast(std.mem.readInt(u32, buf[o + 3 ..][0..4], .little)),
+                    .one_item_craft_time = @bitCast(std.mem.readInt(u32, buf[o + 7 ..][0..4], .little)),
+                    .quality = buf[o + 11],
+                    .starting_entity_id = std.mem.readInt(i32, buf[o + 12 ..][0..4], .little),
+                    .output_type = std.mem.readInt(i32, buf[o + 16 ..][0..4], .little),
+                    .output_count = std.mem.readInt(i32, buf[o + 20 ..][0..4], .little),
+                    .crafting_time = @bitCast(std.mem.readInt(u32, buf[o + 24 ..][0..4], .little)),
+                    .craft_exp_gain = std.mem.readInt(i32, buf[o + 28 ..][0..4], .little),
+                };
+                const rl = std.mem.readInt(u16, buf[o + 32 ..][0..2], .little);
+                o += 34;
+                if (rl > recipe_blob_max or o + rl > buf.len) return error.BadRecord;
+                q.recipe_len = rl;
+                if (rl > 0) @memcpy(q.recipe[0..rl], buf[o .. o + rl]);
+                o += rl;
+            }
+            var cn: usize = 0;
+            while (cn < max_craft_complete) : (cn += 1) {
+                if (o + 18 + 2 * craft_name_max > buf.len) return error.Truncated;
+                var cc: CraftComplete = .{
+                    .crafter_entity_id = std.mem.readInt(i32, buf[o..][0..4], .little),
+                    .item_type = std.mem.readInt(i32, buf[o + 4 ..][0..4], .little),
+                    .item_count = std.mem.readInt(u16, buf[o + 8 ..][0..2], .little),
+                    .exp_gain = std.mem.readInt(i32, buf[o + 10 ..][0..4], .little),
+                    .used_count = std.mem.readInt(u16, buf[o + 14 ..][0..2], .little),
+                    .recipe_name_len = buf[o + 16],
+                    .scrapped_len = buf[o + 17 + craft_name_max],
+                };
+                @memcpy(cc.recipe_name[0..craft_name_max], buf[o + 17 ..][0..craft_name_max]);
+                @memcpy(cc.scrapped[0..craft_name_max], buf[o + 18 + craft_name_max ..][0..craft_name_max]);
+                o += 18 + 2 * craft_name_max;
+                if (cc.item_type == 0 and cc.crafter_entity_id == 0 and cc.item_count == 0) continue;
+                w.craft_complete[w.craft_complete_n] = cc;
+                w.craft_complete_n += 1;
+            }
+            for (&w.melt) |*m| {
+                if (o + 4 > buf.len) return error.Truncated;
+                m.* = @bitCast(std.mem.readInt(u32, buf[o..][0..4], .little));
+                o += 4;
+            }
+        }
+    }
+
+    /// Restore workstations from {dir}/workstations.zws; OpenFailed = fresh world.
+    pub fn load(self: *WorkstationStore, dir: []const u8, allocator: std.mem.Allocator) !void {
+        var path: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path, "{s}/workstations.zws", .{dir});
+        const data = io_fs.readFileAll(allocator, p) catch |err| switch (err) {
+            error.FileNotFound => return error.OpenFailed,
+            else => return error.ReadFailed,
+        };
+        defer allocator.free(data);
+        try self.loadFromSlice(data);
+    }
+
     pub fn tickAll(self: *WorkstationStore, dt: f32) void {
         self.tickAllResolved(dt, null, null);
     }
@@ -584,4 +809,62 @@ test "recipe blob over the cap degrades to no blob rather than truncating" {
     try std.testing.expectEqual(@as(usize, 0), q.recipeBlob().len);
     q.setRecipeBlob(big[0..8]);
     try std.testing.expectEqual(@as(usize, 8), q.recipeBlob().len);
+}
+
+test "workstation store save load roundtrip keeps queue, slots and flags" {
+    var s: WorkstationStore = .{};
+    const w = s.getOrCreate(5, 70, 6).?;
+    w.block_id = 106; // campfire
+    w.has_fuel_module = true;
+    w.is_burning = true;
+    w.burn_time_left = 42.5;
+    w.fuel[0] = .{ .item_id = 3, .count = 2, .quality = 1, .meta = 0 };
+    w.input[0] = .{ .item_id = 9, .count = 5, .quality = 1, .meta = 0 };
+    w.output_len = 2;
+    w.queue_len = stock_queue_len;
+    w.queue[w.queue_len - 1] = .{
+        .multiplier = 3,
+        .is_crafting = true,
+        .craft_time_left = 1.5,
+        .one_item_craft_time = 0.5,
+        .quality = 2,
+        .starting_entity_id = 171,
+        .output_type = 70000,
+        .output_count = 3,
+        .crafting_time = 10,
+        .craft_exp_gain = 12,
+    };
+    w.queue[w.queue_len - 1].setRecipeBlob("recipeBlobBytes");
+    var q2: QueueItem = .{ .output_type = 70001, .output_count = 1, .craft_exp_gain = 5, .starting_entity_id = 172 };
+    w.addCraftComplete(&q2, "outputItem", 2);
+    w.melt[0] = 3.25;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+
+    var s2: WorkstationStore = .{};
+    try s2.load(dir, std.testing.allocator);
+    const w2 = s2.get(5, 70, 6).?;
+    try std.testing.expectEqual(@as(i32, 106), w2.block_id);
+    try std.testing.expect(w2.has_fuel_module);
+    try std.testing.expect(w2.is_burning);
+    try std.testing.expectApproxEqAbs(@as(f32, 42.5), w2.burn_time_left, 1e-4);
+    try std.testing.expectEqual(@as(u16, 3), w2.fuel[0].item_id);
+    try std.testing.expectEqual(@as(u16, 2), w2.fuel[0].count);
+    try std.testing.expectEqual(@as(u16, 9), w2.input[0].item_id);
+    try std.testing.expectEqual(@as(u8, 2), w2.output_len);
+    try std.testing.expectEqual(@as(u8, stock_queue_len), w2.queue_len);
+    const active = w2.queue[w2.queue_len - 1];
+    try std.testing.expectEqual(@as(i16, 3), active.multiplier);
+    try std.testing.expectEqual(@as(i32, 70000), active.output_type);
+    try std.testing.expectEqual(@as(u8, 2), active.quality);
+    try std.testing.expectEqualStrings("recipeBlobBytes", active.recipeBlob());
+    try std.testing.expectEqual(@as(u8, 1), w2.craft_complete_n);
+    try std.testing.expectEqualStrings("outputItem", w2.craft_complete[0].recipeName());
+    try std.testing.expectEqual(@as(u16, 2), w2.craft_complete[0].item_count);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.25), w2.melt[0], 1e-4);
+    std.debug.print("PASS workstations-zws: round-trip keeps queue/slots/flags\n", .{});
 }

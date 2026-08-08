@@ -768,6 +768,14 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Workstation state survives restart (workstations.zws): a forge's fuel,
+        // smelting queue and outputs must not vanish on reboot (rule 21).
+        self.workstations.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load workstations", e);
+                return e;
+            }
+        };
         // Land claims survive restart (claims.zlc); restored owners re-map on login.
         self.loadClaims() catch |e| {
             if (e != error.OpenFailed) {
@@ -1737,6 +1745,7 @@ pub const Game = struct {
         }
         self.sampleFlushCounters();
         self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
+        self.workstations.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save workstations", e);
         self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
         self.saveEntities() catch |e| logPersistErr(self, "save entities", e);
