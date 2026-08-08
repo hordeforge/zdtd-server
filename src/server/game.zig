@@ -4548,6 +4548,9 @@ pub const Game = struct {
             // stock clears Stat.Changed right after the poll, and a bit left set
             // would re-send the same value on every later tick.
             self.sim.dirty[i].hp = false;
+            // Keep dirty_bits in sync with the lowered bit so an hp-only slot
+            // does not linger as a motion-replicate candidate until the next pass.
+            self.sim.syncDirtyBit(i);
             const is_player = self.sim.mask[i].player;
             const is_mob = self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal;
             // Player vitals plus mob health (EntityStats::TickWait + SendStat
