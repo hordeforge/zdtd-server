@@ -201,6 +201,12 @@ pub const Director = struct {
     /// or the fallback when the biome/rule is unknown. Game wires spawning.xml.
     biome_group_ctx: ?*anyopaque = null,
     biome_group_fn: ?*const fn (?*anyopaque, f32, f32, SpawnKind, []const u8) []const u8 = null,
+    /// Optional resolve: (ctx, class_name) → the full entityclasses stats, so
+    /// a picked class that was not preloaded into the fixed class_table still
+    /// spawns with its own HP/speeds/damage/hash/loot (A35). Game wires the
+    /// entities table; null keeps the old class_table-only resolution.
+    class_resolve_ctx: ?*anyopaque = null,
+    class_resolve_fn: ?*const fn (?*anyopaque, []const u8) ?ecs_world.EntityClass = null,
 
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
@@ -417,6 +423,12 @@ pub const Director = struct {
                                 break;
                             }
                         }
+                        // Full entityclasses stats when the animal class was not
+                        // preloaded into the fixed table (same A35 path as
+                        // zombies: bear 2500 HP instead of the 30 floor).
+                        if (animal_ct == null) {
+                            if (self.class_resolve_fn) |f| animal_ct = f(self.class_resolve_ctx, cname);
+                        }
                     }
                 }
             }
@@ -429,10 +441,19 @@ pub const Director = struct {
                 }
             }
             const hp: f32 = if (animal_ct) |ct| ct.max_hp else 30;
-            const id = if (animal_ct) |ct|
-                w.spawnAnimal(x, y, z, hp, ct.hash, ct.loot_list)
-            else
-                w.spawnAnimal(x, y, z, hp, 0, "");
+            const id = if (animal_ct) |ct| blk: {
+                // Carry the resolved stats so animals get their per-class
+                // speeds/damage too; spawnAnimal keeps the hash/loot contract.
+                const nid = w.spawnAnimal(x, y, z, hp, ct.hash, ct.loot_list) orelse break;
+                if (w.slotOfNetId(nid)) |slot| {
+                    w.class_id[slot].drop_prob = ct.drop_prob;
+                    w.class_id[slot].time_stay = ct.time_stay;
+                    w.class_id[slot].chase_speed = ct.chase_speed;
+                    w.class_id[slot].wander_speed = ct.wander_speed;
+                    w.class_id[slot].attack_damage = ct.attack_damage;
+                }
+                break :blk nid;
+            } else w.spawnAnimal(x, y, z, hp, 0, "");
             const nid = id orelse break;
             if (w.slotOfNetId(nid)) |slot| {
                 w.zombie_ai[slot].state = .wander; // wildlife roams, does not hunt
@@ -602,14 +623,21 @@ pub const Director = struct {
             bf(self.biome_group_ctx, x, z, if (self.clock.isNight()) .night else .day, fallback)
         else
             fallback;
+        var resolved: ?ecs_world.EntityClass = null;
         if (grp.len > 0) {
             if (self.group_pick_fn) |pick| {
                 if (pick(self.group_pick_ctx, grp, seed)) |cname| {
                     for (w.class_table) |slot_ct| {
                         if (slot_ct.kind == .zombie and std.mem.eql(u8, slot_ct.name, cname)) {
                             ct = slot_ct;
+                            resolved = ct;
                             break;
                         }
+                    }
+                    // Class not in the fixed table: resolve the full stats from
+                    // entityclasses.xml so its HP/speeds/damage reach the sim.
+                    if (resolved == null) {
+                        if (self.class_resolve_fn) |f| resolved = f(self.class_resolve_ctx, cname);
                     }
                 }
             }
@@ -621,8 +649,10 @@ pub const Director = struct {
             }
         }
         const bm_mul: f32 = if (self.bloodmoon_active) 1.5 else 1.0;
-        const hp: f32 = ct.max_hp * bm_mul * self.hpScale();
-        const id = if (ct.hash != 0)
+        const hp: f32 = (if (resolved) |d| d.max_hp else ct.max_hp) * bm_mul * self.hpScale();
+        const id = if (resolved) |d|
+            w.spawnZombieDef(x, y, z, hp, d)
+        else if (ct.hash != 0)
             w.spawnZombieClass(x, y, z, hp, ct.hash, ct.loot_list)
         else
             w.spawnZombie(x, y, z, hp);
@@ -919,6 +949,57 @@ test "director=false stops zombies but wildlife follows its own flag" {
         _ = dir.tick(&w, 0.1);
     }
     try std.testing.expectEqual(before, w.countKind(.animal));
+}
+test "spawned classes carry full entityclasses stats via the resolver (A35)" {
+    const Hooks = struct {
+        fn pick(_: ?*anyopaque, group: []const u8, _: u32) ?[]const u8 {
+            // The spawn group resolves to a class that is NOT in the 16-slot
+            // class_table, so the old path fell back to zombieBoe stats.
+            _ = group;
+            return "zombieBruteFeral";
+        }
+        fn resolve(_: ?*anyopaque, name: []const u8) ?ecs_world.EntityClass {
+            if (!std.mem.eql(u8, name, "zombieBruteFeral")) return null;
+            return .{
+                .name = "zombieBruteFeral",
+                .max_hp = 1200,
+                .kind = .zombie,
+                .hash = 987654321,
+                .loot_list = "zPackReg",
+                .chase_speed = 1.1,
+                .wander_speed = 0.3,
+                .attack_damage = 25,
+            };
+        }
+    };
+    var w: ecs_world.World = .{};
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 },
+        .horde_cd = 0,
+        .night_group = "ZombiesNight",
+        .group_pick_ctx = undefined,
+        .group_pick_fn = &Hooks.pick,
+        .class_resolve_ctx = undefined,
+        .class_resolve_fn = &Hooks.resolve,
+    };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const r = dir.tick(&w, 0.1);
+    try std.testing.expect(r.spawned >= 1);
+    // The spawned zombie carries the resolved per-entity stats, not the
+    // zombieBoe table default (40 HP, 0 speeds).
+    var found = false;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (!w.alive[s] or w.kind[s] != .zombie) continue;
+        found = true;
+        try std.testing.expectEqual(@as(i32, 987654321), w.class_id[s].hash);
+        try std.testing.expectApproxEqAbs(@as(f32, 1200), w.health[s].max_hp, 0.1);
+        try std.testing.expectApproxEqAbs(@as(f32, 1.1), w.class_id[s].chase_speed, 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.3), w.class_id[s].wander_speed, 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 25), w.class_id[s].attack_damage, 1e-4);
+        try std.testing.expectEqualStrings("zPackReg", w.class_id[s].loot_list);
+    }
+    try std.testing.expect(found);
 }
 
 test "bloodmoon frequency and range" {

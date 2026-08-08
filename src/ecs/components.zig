@@ -51,7 +51,8 @@ pub const Player = struct {
 };
 
 pub const ClassId = struct {
-    /// Index into World.class_table.
+    /// Index into World.class_table (fallback only when the per-entity stat
+    /// fields below are 0).
     id: u16 = 0,
     /// Unity Mono name hash for ECD EntitySpawn (0 = use table/default).
     hash: i32 = 0,
@@ -61,6 +62,12 @@ pub const ClassId = struct {
     drop_prob: f32 = 1.0,
     /// TimeStayAfterDeath seconds the corpse lingers (30 zombies, 300 animals).
     time_stay: f32 = 0,
+    /// Resolved per-entity class stats (XML chase/wander/damage). 0 = fall
+    /// back to class_table[id] then the Rules floor, so a class that was not
+    /// preloaded into the 16-slot table still behaves like itself.
+    chase_speed: f32 = 0,
+    wander_speed: f32 = 0,
+    attack_damage: f32 = 0,
 };
 
 pub const AiState = enum(u8) {

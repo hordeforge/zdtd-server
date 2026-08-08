@@ -1141,6 +1141,11 @@ pub const Game = struct {
             self.sim.director.biome_group_fn = &Game.biomeGroupName;
             self.sim.director.group_pick_ctx = self;
             self.sim.director.group_pick_fn = &Game.pickEntityGroup;
+            // Full class resolution: any entityclasses.xml class a spawn group
+            // picks reaches the sim with its own HP/speeds/damage, even when it
+            // is not preloaded into the fixed class_table (A35).
+            self.sim.director.class_resolve_ctx = self;
+            self.sim.director.class_resolve_fn = &Game.resolveSpawnClass;
             self.sim.director.stage_group_ctx = self;
             self.sim.director.stage_group_fn = &Game.pickStageGroup;
             self.sim.director.spawner_group_ctx = self;
@@ -3728,6 +3733,27 @@ pub const Game = struct {
         if (block_id == closed) return open;
         if (block_id == open) return closed;
         return null;
+    }
+
+    /// Resolve a spawn-picked class name to its full entityclasses stats
+    /// (HP/speeds/damage/hash/loot). Game-level because it needs the entities
+    /// table and the items table for HandItem DamageEntity.
+    fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {
+        const self: *Game = @ptrCast(@alignCast(ctx.?));
+        const d = self.entities.byName(class_name) orelse return null;
+        return .{
+            .name = d.name,
+            .max_hp = d.max_hp,
+            .kind = d.kind,
+            .hash = d.hash,
+            .loot_list = d.loot_list,
+            .drop_prob = d.loot_drop_prob,
+            .chase_speed = d.chase_speed,
+            .wander_speed = d.wander_speed,
+            .attack_damage = self.handItemDamage(d.hand_item),
+            .time_stay = d.time_stay,
+            .sight_range = d.sight_range,
+        };
     }
 
     fn pickEntityGroup(ctx: ?*anyopaque, group: []const u8, seed: u32) ?[]const u8 {

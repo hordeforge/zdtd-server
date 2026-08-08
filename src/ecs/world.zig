@@ -543,10 +543,29 @@ pub const World = struct {
     }
 
     pub fn spawnZombieClass(self: *World, x: f32, y: f32, z: f32, hp: f32, class_hash: i32, loot_list: []const u8) ?NetId {
+        return self.spawnZombieDef(x, y, z, hp, .{
+            .name = "zombie",
+            .max_hp = hp,
+            .kind = .zombie,
+            .hash = class_hash,
+            .loot_list = loot_list,
+        });
+    }
+
+    /// Spawn a zombie carrying the full resolved class stats on the entity, so
+    /// per-class speeds/damage reach the AI even when the class was not
+    /// preloaded into the fixed class_table (A35). The class_table index stays
+    /// the kind default; the per-entity stat fields win in the AI read.
+    pub fn spawnZombieDef(self: *World, x: f32, y: f32, z: f32, hp: f32, def: EntityClass) ?NetId {
         const id = self.spawnZombie(x, y, z, hp) orelse return null;
         if (self.slotOfNetId(id)) |s| {
-            self.class_id[s].hash = class_hash;
-            self.class_id[s].loot_list = loot_list;
+            self.class_id[s].hash = def.hash;
+            self.class_id[s].loot_list = def.loot_list;
+            self.class_id[s].drop_prob = def.drop_prob;
+            self.class_id[s].time_stay = def.time_stay;
+            self.class_id[s].chase_speed = def.chase_speed;
+            self.class_id[s].wander_speed = def.wander_speed;
+            self.class_id[s].attack_damage = def.attack_damage;
         }
         return id;
     }

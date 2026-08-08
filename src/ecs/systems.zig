@@ -1026,21 +1026,24 @@ const AiCtx = struct {
                 if (ai.decision_cd > 0) continue;
                 const sscale = ctx.zombie_speed_scale;
                 const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
-                const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
+                const pws = ctx.w.class_id[s].wander_speed;
+                const wspd: f32 = (if (pws > 0) pws * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
                 ai.active_task = .wander;
                 ai.decision_cd = 1.0;
                 wanderUpdate(ctx.w, s, ai, wspd * 0.5, ctx.dt);
                 continue;
             }
 
-            // A11: class_table from entityclasses (0 field → module floor only).
+            // A11/A35: per-entity class stats win (the resolver carries the
+            // full entityclasses row for classes not in the fixed table); the
+            // class_table row is the fallback, then the Rules floor.
             // MoveSpeed ~0.08 shamble → x10; MoveSpeedAggro max ~1.35 → x1.6.
-            // Pointer, not copy: EntityClass is ~56 bytes and only three scalar
-            // fields are read here (per alive zombie, every tick).
             const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
+            const pws = ctx.w.class_id[s].wander_speed;
+            const pcs = ctx.w.class_id[s].chase_speed;
             const sscale = ctx.zombie_speed_scale;
-            const wspd: f32 = (if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
-            const cspd: f32 = (if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed) * sscale;
+            const wspd: f32 = (if (pws > 0) pws * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
+            const cspd: f32 = (if (pcs > 0) pcs * 1.6 else if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed) * sscale;
 
             // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
             // executing task when it is no longer best or its Continue() fails.
