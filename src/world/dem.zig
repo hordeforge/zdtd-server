@@ -1,12 +1,14 @@
-//! Copernicus GLO-30 DEM streamer (M1 of docs/SCALE.md).
-//! One S3 object per 1x1 degree tile, Cloud-Optimized GeoTIFF:
-//! II TIFF, f32 samples, DEFLATE (compression 8) + floating-point predictor 3,
-//! 1024x1024 internal tiles, IFD + offset/count arrays inside the first 64 KiB
-//! (GDAL LAYOUT=IFDS_BEFORE_DATA). Verified live against
-//! copernicus-dem-30m.s3.eu-central-1.amazonaws.com (HTTP 206 range reads).
+//! Copernicus GLO-30 DEM codec: COG header parse, tile decode, S3 object key
+//! and elevation-to-block mapping (fuzz-covered in src/fuzz.zig). The S3
+//! range-fetch streaming layer (M1 of docs/SCALE.md) is parked until M11 and
+//! stays in git history for resurrection.
 //!
-//! Serves heights for world chunks by mapping world XZ meters onto the 30m
-//! grid (bilinear) and clamping elevation into 7DTD's 0..255 block band.
+//! Formats: II TIFF, f32 samples, DEFLATE (compression 8) + floating-point
+//! predictor 3, 1024x1024 internal tiles, IFD + offset/count arrays inside
+//! the first 64 KiB (GDAL LAYOUT=IFDS_BEFORE_DATA).
+//!
+//! Elevation maps world XZ meters onto the 30m grid (bilinear) and clamps
+//! into 7DTD's 0..255 block band.
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
@@ -15,8 +17,6 @@ pub const cog_header_len: usize = 64 * 1024;
 pub const tile_px: u32 = 1024;
 pub const grid_px: u32 = 3600; // 1 degree at ~30m
 pub const tiles_per_side: u32 = 4; // ceil(3600/1024)
-
-pub const bucket_host = "copernicus-dem-30m.s3.eu-central-1.amazonaws.com";
 
 pub const CogInfo = struct {
     width: u32 = 0,
@@ -158,81 +158,6 @@ pub fn elevToBlockY(elev_m: f32) u8 {
     if (y > 250) return 250;
     return @intFromFloat(y);
 }
-
-// --- S3 fetch (anonymous, HTTPS range GETs) + local disk cache ---
-
-pub const Fetcher = struct {
-    allocator: std.mem.Allocator,
-    threaded: std.Io.Threaded,
-    client: std.http.Client,
-    /// Disk cache dir for headers + decoded tiles (never tmpfs).
-    cache_dir: []const u8,
-
-    pub fn init(self: *Fetcher, allocator: std.mem.Allocator, cache_dir: []const u8) void {
-        self.* = .{
-            .allocator = allocator,
-            .threaded = std.Io.Threaded.init(allocator, .{}),
-            .client = undefined,
-            .cache_dir = cache_dir,
-        };
-        self.client = .{ .allocator = allocator, .io = self.threaded.io() };
-    }
-
-    pub fn deinit(self: *Fetcher) void {
-        self.client.deinit();
-        self.threaded.deinit();
-    }
-
-    /// Range GET into out; returns bytes written. Anonymous request.
-    pub fn fetchRange(self: *Fetcher, key: []const u8, off: u64, len: usize, out: []u8) !usize {
-        if (len == 0) return 0;
-        const end = std.math.add(u64, off, @as(u64, @intCast(len - 1))) catch return error.InvalidRange;
-        var url_buf: [512]u8 = undefined;
-        const url = try std.fmt.bufPrint(&url_buf, "https://{s}/{s}", .{ bucket_host, key });
-        var range_buf: [64]u8 = undefined;
-        const range = try std.fmt.bufPrint(&range_buf, "bytes={d}-{d}", .{ off, end });
-
-        var body: std.Io.Writer.Allocating = .init(self.allocator);
-        defer body.deinit();
-        const res = try self.client.fetch(.{
-            .location = .{ .url = url },
-            .extra_headers = &.{.{ .name = "Range", .value = range }},
-            .response_writer = &body.writer,
-        });
-        if (res.status != .partial_content and res.status != .ok) return error.HttpError;
-        const got = body.written();
-        const n = @min(got.len, out.len);
-        @memcpy(out[0..n], got[0..n]);
-        return n;
-    }
-
-    /// Header (first 64 KiB) with disk cache: {cache}/glo30_{lat}_{lon}.hdr
-    pub fn tileHeader(self: *Fetcher, lat: i32, lon: i32, out: *[cog_header_len]u8) !usize {
-        var pbuf: [512]u8 = undefined;
-        const cpath = try std.fmt.bufPrint(&pbuf, "{s}/glo30_{d}_{d}.hdr", .{ self.cache_dir, lat, lon });
-        if (io_fs.readFileAll(self.allocator, cpath)) |cached| {
-            defer self.allocator.free(cached);
-            const n = @min(cached.len, out.len);
-            if (n > 0) {
-                @memcpy(out[0..n], cached[0..n]);
-                return n;
-            }
-        } else |_| {}
-        var kbuf: [160]u8 = undefined;
-        const key = try tileKey(&kbuf, lat, lon);
-        const n = try self.fetchRange(key, 0, cog_header_len, out);
-        // Cache is optional: fetch already succeeded; disk full/permission must not fail.
-        // Still log so repeated HTTP range fetches are explainable.
-        io_fs.writeFile(self.allocator, cpath, out[0..n]) catch |err| {
-            std.debug.print(
-                "zdtd: dem header cache write failed: {s} ({s})\n",
-                .{ @errorName(err), cpath },
-            );
-        };
-        return n;
-    }
-
-};
 
 test "cog header parses live GLO-30 sample" {
     // Sample fetched 2026-07-22 (first 64KiB); skip when absent (offline CI).

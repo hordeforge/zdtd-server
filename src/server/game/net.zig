@@ -356,4 +356,3 @@ pub fn unbanIp(self: *Game, ip: u32) void {
         i += 1;
     }
 }
-

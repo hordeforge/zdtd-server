@@ -113,6 +113,30 @@ pub fn parseF32(s: []const u8) ?f32 {
     return std.fmt.parseFloat(f32, s) catch null;
 }
 
+/// Leading signed decimal of `s`, ignoring any trailing junk (`"12, 34"` → 12).
+/// Malformed XML must not crash the loader: reject instead of overflowing.
+pub fn parseI32Prefix(s: []const u8) ?i32 {
+    if (s.len == 0) return null;
+    var i: usize = 0;
+    const neg = s[0] == '-';
+    if (neg) i = 1;
+    if (i >= s.len or s[i] < '0' or s[i] > '9') return null;
+    var v: i32 = 0;
+    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {
+        v = std.math.mul(i32, v, 10) catch return null;
+        v = std.math.add(i32, v, s[i] - '0') catch return null;
+    }
+    return if (neg) -v else v;
+}
+
+test "parseI32Prefix stops at junk and rejects overflow" {
+    try std.testing.expectEqual(@as(?i32, 12), parseI32Prefix("12, 34"));
+    try std.testing.expectEqual(@as(?i32, -7), parseI32Prefix("-7"));
+    try std.testing.expectEqual(@as(?i32, null), parseI32Prefix("x1"));
+    try std.testing.expectEqual(@as(?i32, null), parseI32Prefix("-"));
+    try std.testing.expectEqual(@as(?i32, null), parseI32Prefix("99999999999999"));
+}
+
 /// One element body between open tag and matching close (or self-closing).
 pub const Element = struct {
     /// Index of '<' of the open tag.

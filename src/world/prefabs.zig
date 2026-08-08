@@ -497,23 +497,7 @@ fn fileExists(path: []const u8) bool {
     return io_fs.fileExistsSimple(path);
 }
 
-fn parseI32Prefix(s: []const u8) ?i32 {
-    if (s.len == 0) return null;
-    var i: usize = 0;
-    var neg = false;
-    if (s[0] == '-') {
-        neg = true;
-        i = 1;
-    }
-    if (i >= s.len or s[i] < '0' or s[i] > '9') return null;
-    var v: i32 = 0;
-    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {
-        // Malformed XML must not crash the loader: reject instead of overflowing.
-        v = std.math.mul(i32, v, 10) catch return null;
-        v = std.math.add(i32, v, s[i] - '0') catch return null;
-    }
-    return if (neg) -v else v;
-}
+const parseI32Prefix = xml_util.parseI32Prefix;
 
 fn attrValue(tag: []const u8, key: []const u8) ?[]const u8 {
     var search_buf: [64]u8 = undefined;

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const xml_util = @import("../assets/xml_util.zig");
 
 pub const WaterPoint = struct {
     x: i32,
@@ -57,21 +58,7 @@ pub const Sources = struct {
     }
 };
 
-fn parseI32Prefix(s: []const u8) ?i32 {
-    if (s.len == 0) return null;
-    var i: usize = 0;
-    var neg = false;
-    if (s[0] == '-') {
-        neg = true;
-        i = 1;
-    }
-    if (i >= s.len or s[i] < '0' or s[i] > '9') return null;
-    var v: i32 = 0;
-    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {
-        v = v * 10 + (s[i] - '0');
-    }
-    return if (neg) -v else v;
-}
+const parseI32Prefix = xml_util.parseI32Prefix;
 
 /// Parse `<Water pos="x, y, z"/>` entries from water_info.xml bytes.
 pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8) !Sources {
