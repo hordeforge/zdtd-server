@@ -39,6 +39,7 @@ pub const game_sleeper = @import("game/sleeper.zig");
 pub const game_hooks = @import("game/hooks.zig");
 pub const game_deco = @import("game/deco.zig");
 pub const game_loot = @import("game/loot.zig");
+pub const game_craft = @import("game/craft.zig");
 pub const game_weather = @import("game/weather.zig");
 pub const game_vehicle = @import("game/vehicle.zig");
 pub const game_tests = @import("game/tests.zig");

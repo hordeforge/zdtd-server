@@ -1,0 +1,159 @@
+//! Crafting and workstation helpers, extracted verbatim from game.zig:
+//! tryCraft/tryCraftRecipe (InvTx craft op), tickWorkstations (burn/craft +
+//! heat map feed), tryRefuelGenerator (InvTx refuel), eatProps / itemIsArmor
+//! (items.xml ItemActionEat + armor checks), resolveWorkstationOutput, and
+//! handItemDamage (entity damage from the hand item).
+
+const std = @import("std");
+const game_mod = @import("../game.zig");
+const Game = game_mod.Game;
+const Client = game_mod.Client;
+const assets_items = @import("../../assets/items.zig");
+const assets_recipes = @import("../../assets/recipes.zig");
+const invsys = @import("../../ecs/inventory.zig");
+const systems = @import("../../ecs/systems.zig");
+const replicate_te = @import("../replicate_te.zig");
+const workstations_mod = @import("../../world/workstations.zig");
+
+/// ECS armor hook: stock/builtin name starts with "armor".
+pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.byId(item_id)) |d| {
+        if (std.mem.startsWith(u8, d.name, "armor")) return true;
+    }
+    if (invsys.builtinStockNameFallback(item_id)) |n| {
+        if (std.mem.startsWith(u8, n, "armor")) return true;
+    }
+    return invsys.isArmorOffline(item_id);
+}
+
+/// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
+pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+    if (amount <= 0) return false;
+    if (c.entity_id <= 0) return false;
+    const ps = self.sim.slotOfNetId(c.entity_id) orelse return false;
+    if (!self.sim.mask[ps].transform) return false;
+    const t = self.sim.transform[ps];
+    const dx = t.x - @as(f32, @floatFromInt(x));
+    const dy = t.y - @as(f32, @floatFromInt(y));
+    const dz = t.z - @as(f32, @floatFromInt(z));
+    if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return false;
+    return self.sim.power.refuelAt(x, y, z, amount);
+}
+
+/// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).
+pub fn eatProps(ctx: ?*anyopaque, item_id: u16) invsys.EatProps {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return .{
+        .is_eat = g.items.isEat(item_id),
+        .food_amount = g.items.foodAmountFor(item_id),
+        .food_health = g.items.foodHealthFor(item_id),
+        .water_amount = g.items.waterAmountFor(item_id),
+    };
+}
+
+/// `Recipe::GetName()`, i.e. the output ItemClass name (asm.il ~274245).
+/// The name only feeds the client's `_craftCount_` XP scaling, so an unknown
+/// type still crafts, just without a per-recipe counter.
+fn resolveWorkstationOutput(ctx: ?*anyopaque, stock_type: i32) workstations_mod.ResolvedOutput {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var out: workstations_mod.ResolvedOutput = .{ .item_id = g.items.ecsIdFromStockType(stock_type) };
+    for (g.items.stock_types, 0..) |st, i| {
+        if (st != stock_type or i >= g.items.stock_names.len) continue;
+        out.stock_name = g.items.stock_names[i];
+        return out;
+    }
+    if (out.item_id != 0) {
+        if (assets_items.builtinStockName(out.item_id)) |sn| out.stock_name = sn;
+    }
+    return out;
+}
+
+/// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
+pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
+    if (recipe_index >= self.recipes.defs.len) return false;
+    return tryCraftRecipe(self, peer_slot, self.recipes.defs[recipe_index], times);
+}
+
+fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return false;
+    if (!self.sim.mask[ps].inventory) return false;
+    const n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
+    // Aggregate by ECS id so duplicate ingredient lines (or aliases that
+    // resolve to the same id) do not double-count inventory room.
+    var need: [assets_recipes.max_ingredients]struct { id: u16, count: u32 } = undefined;
+    var nn: usize = 0;
+    var i: u8 = 0;
+    while (i < recipe.ingredient_n) : (i += 1) {
+        const ing = recipe.ingredients[i];
+        const id = self.ecsIdFromItemName(ing.name);
+        if (id == 0) return false;
+        const add: u32 = @as(u32, ing.count) * n;
+        var merged = false;
+        var k: usize = 0;
+        while (k < nn) : (k += 1) {
+            if (need[k].id == id) {
+                need[k].count += add;
+                merged = true;
+                break;
+            }
+        }
+        if (!merged) {
+            if (nn >= need.len) return false;
+            need[nn] = .{ .id = id, .count = add };
+            nn += 1;
+        }
+    }
+    var j: usize = 0;
+    while (j < nn) : (j += 1) {
+        if (need[j].count > std.math.maxInt(u16)) return false;
+        if (self.sim.inventory[ps].countItem(need[j].id) < need[j].count) return false;
+    }
+    const out_id = self.ecsIdFromItemName(recipe.name);
+    if (out_id == 0) return false;
+    const out_u32: u32 = @as(u32, recipe.count) * n;
+    if (out_u32 == 0 or out_u32 > std.math.maxInt(u16)) return false;
+    const out_count: u16 = @intCast(out_u32);
+    // Snapshot so any remove/add failure restores the exact pre-craft bag.
+    const inventory_before = self.sim.inventory[ps];
+    j = 0;
+    while (j < nn) : (j += 1) {
+        if (!self.sim.inventory[ps].removeItem(need[j].id, @intCast(need[j].count))) {
+            self.sim.inventory[ps] = inventory_before;
+            return false;
+        }
+    }
+    if (!self.sim.depositItem(ps, out_id, out_count)) {
+        self.sim.inventory[ps] = inventory_before;
+        return false;
+    }
+    self.sim.markDirty(ps, .{ .inv = true });
+    const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
+    const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
+    self.sim.inv_ledger.record(p, out_id, d, .craft);
+    // Quest craft progress when objective matches recipe name.
+    systems.questOnCraft(&self.sim, peer_slot, recipe.name);
+    return true;
+}
+
+pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
+    if (hand_item.len == 0) return 0;
+    if (self.items.byName(hand_item)) |d| return d.entity_damage;
+    return 0;
+}
+
+/// One workstation step: burn/craft, then re-broadcast the stations it changed.
+pub fn tickWorkstations(self: *Game, dt: f32) !void {
+    self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self);
+    // Heat map feed (AIDirectorChunkData): burning workstations with a
+    // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
+    // raise the region's activity like stock TileEntity.heatMapLastTime.
+    for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
+        if (!u or !w.is_burning) continue;
+        const strength = self.blocks.heatStrength(@intCast(w.block_id));
+        if (strength > 0) {
+            self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, 720.0);
+        }
+    }
+    try replicate_te.broadcastDirtyWorkstations(self);
+}
