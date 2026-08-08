@@ -1,9 +1,9 @@
 # Handoff - zdtd refactor + parity push
 
-**Date:** 2026-08-08 (final session update)
+**Date:** 2026-08-09 (review-loop continuation)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `f05bca8`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **975/975** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `34165f6`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **976/976** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -22,21 +22,43 @@
 ### Docs pass (`81d13db`)
 - `STATUS`, `STATE_MACHINES` (§2 + §12 owners), `ZIG_CLONE.md` (defer to source tree), `HARDCODE_AUDIT` suite size corrected from ~800 to ~960, `WORK_PLAN` T16/T17 updated. No behaviour change.
 
+## Review loop (21 relevant ~/review-prompts reviews, in-harness passes)
+
+All 21 have at least one pass; each pass = audit, apply <=10 small fixes,
+verify build + full test binary + lint, commit. Later passes re-verify.
+
+- code-review: 3 passes (dead dup drop 6256b1e; S3 Fetcher removal +
+  parseI32Prefix 453f8fb; max_land_claims dedupe 5ee9928)
+- sec-review: wasm fuel budget corrected to per-instance lifetime + [plugin]
+  fuel/max_pages configurable (ec922c0)
+- error-review: why-comments on best-effort send catches (cdc52af)
+- config-review: parse test for plugin budget keys (0b143e0)
+- functionality-review: night animal groups rotate so EnemyAnimals* spawn
+  (070bc8e) - real gameplay gap closed
+- test-review: on_player_login join gate covered via plugin_login.wasm (98c84db)
+- slop-review: last em dash removed (e2ef9b5)
+- api-review: game/craft.zig extracted from game.zig (34165f6, -170 lines)
+- verified clean (no fixes): build, cli, concurrency, deps, doc, dst, fuzz,
+  infra, minimalism, o11y, perf, release
+- earlier dedicated agents this session: arch, api, deps, ecs, hardcode,
+  docs, statemachines, wasm (findings in docs/reviews/ 2026-08-08)
+
 ## Working tree right now
 
 ```
-working tree clean at 127a913
-game.zig 5115 lines (was 5310 at handoff): loot/weather/vehicle shards
+working tree clean at 34165f6
+game.zig 5087 lines (was 5310 at handoff): loot/weather/vehicle/craft shards
 flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
 parity landed: trader roll + 50-entry window + lazy restock, party stage,
   loot container size, loot count=all / force_prob / quality templates,
-  non-burning workstation queues, workstation persistence (ZWS1)
+  non-burning workstation queues, workstation persistence (ZWS1),
+  night enemy animals, wasm fuel budget config
 hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
   gap + craft batch cap now zdtd.toml); all other reviews re-audited clean
-974/974 tests, lint + fmt clean
+976/976 tests, lint + fmt clean
 ```
 
-All work is committed through `127a913`; nothing staged or untracked except
+All work is committed through `34165f6`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
