@@ -477,6 +477,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | PlayerLogin / LoginAnswer / enter / spawn | `server/game.zig` | EnterMultiplayer respawn type |
 | Player bodies to peers (`NetPackageEntitySpawn`, player class + name) | `server/game/join.zig` | join burst: joiner sees every in-view player; the joiner spawns to every client that sees it; `dropClientSlot` broadcasts `EntityRemove(Despawned)` so no ghost body |
 | Progression snapshots (`NetPackagePlayerStats`, EntityNetworkStats) | `wire/stock_xp.zig`, `game/join.zig`, `game/player.zig` | peer tooltip/party level: sent at join per visible player + pushed to all peers on level-up; minimal Progression.Write v3 blob (Level/ExpToNextLevel) |
+| Kill counter (`NetPackageEntityAddScoreClient`) | `wire/stock_xp.zig`, `c2s/misc.zig` | character-sheet zombie kills: per-client ledger incremented and pushed on every zombie kill |
 | PlayerId PDF (ECD + inv/equip/empty journal) | `wire/packages.zig`, `stock_inv.zig` | Spawn at real coords |
 | ConfigFile LoadLocal list | `game.zig` | Stock xmlsToLoad names |
 | WorldTime, deco first package | `stock_deco.zig` | DistantDecoTree via `idByName` (skip if dump miss) |
