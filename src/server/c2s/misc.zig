@@ -417,7 +417,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
                         return true;
                     }
-                    var ent_buf: [16]packages.TraderStockEntry = undefined;
+                    var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
                         .trader_id = self.sim.network_id[ts].id,

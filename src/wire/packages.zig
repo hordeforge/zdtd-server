@@ -3027,6 +3027,34 @@ test "stock trader data snapshot layout" {
     try std.testing.expectEqual(body.len, r.pos);
 }
 
+test "trader data snapshot holds the stock 50-entry window (MaxItems)" {
+    var buf: [4096]u8 = undefined;
+    var items: [components.max_stock]TraderStockEntry = undefined;
+    for (&items, 0..) |*it, i| {
+        it.* = .{ .item = .{ .type_id = stock_inv.items_start_here + 2, .count = 5, .quality = 1 } };
+        _ = i;
+    }
+    const body = try buildTraderDataStock(&buf, 50, 50, 1000, items[0..]);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(true, try r.readBool());
+    _ = try r.readI32();
+    try std.testing.expectEqual(true, try r.readBool());
+    _ = try r.readI32();
+    _ = try r.readU64();
+    _ = try r.readByte();
+    try std.testing.expectEqual(@as(i32, components.max_stock), try r.readI32());
+    var i: usize = 0;
+    while (i < components.max_stock) : (i += 1) {
+        const slot = try stock_inv.readItemStack(&r);
+        try std.testing.expectEqual(@as(u16, 5), slot.count);
+        _ = try r.readByte();
+        try std.testing.expectEqual(false, try r.readBool());
+    }
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte());
+    try std.testing.expectEqual(@as(i32, 1000), try r.readI32());
+    try std.testing.expectEqual(body.len, r.pos);
+}
+
 test "stock npc quest list empty fetch layout" {
     var buf: [32]u8 = undefined;
     const body = try buildNpcQuestListFetch(&buf, 50, 106, 0, &.{});

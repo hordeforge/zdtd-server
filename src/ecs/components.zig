@@ -268,7 +268,8 @@ pub const Turret = struct {
 };
 
 pub const max_journal: usize = 8;
-pub const max_stock: usize = 12;
+/// Stock TraderInfo.MaxItems (50): the trader window holds up to 50 stacks.
+pub const max_stock: usize = 50;
 /// Toolbelt 0..9, bag 10..41, equipment 42..46 (armor slots), total 47.
 /// Deliberate subset of stock layout (toolbelt 10, bag 45, equip 12 on wire).
 /// C2S apply truncates bag indices ≥ inv_bag_count; encode pads empties to stock

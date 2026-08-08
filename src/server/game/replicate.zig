@@ -105,7 +105,7 @@ pub fn replicate(self: *Game) !void {
                 .yaw = self.sim.transform[i].yaw,
                 .is_sleeper = sleeper,
                 .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
-                    var ent_buf: [16]packages.TraderStockEntry = undefined;
+                    var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);
                     break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
                 } else null,

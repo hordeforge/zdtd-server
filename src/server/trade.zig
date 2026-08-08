@@ -63,7 +63,7 @@ pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Sl
     if (!self.sim.mask[s].trader_stock) return;
     const eid = self.sim.network_id[s].id;
     // Stock TraderData with primary inventory from SoA stock table.
-    var entries: [16]packages.TraderStockEntry = undefined;
+    var entries: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
     const n = self.stockEntries(s, &entries);
     const body = try packages.buildTraderDataStock(
         self.body_buf[0..4096],
