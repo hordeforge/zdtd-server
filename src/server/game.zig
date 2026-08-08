@@ -32,6 +32,7 @@ const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
 const game_sleeper = @import("game/sleeper.zig");
+const game_hooks = @import("game/hooks.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -1556,174 +1557,40 @@ pub const Game = struct {
         return .{ .x = clamp.x, .y = y, .z = clamp.z, .applied = true };
     }
 
-    /// Terrain resting height for vehicle physics: top solid block + 1 (an
-    /// entity on the surface sits one block above the topmost solid). Backs
-    /// World.ground_fn; signature matches ecs World.ground_fn.
     fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const t = world_store.World.worldToChunk(wx, wz);
-        g.terrain_mu.lock();
-        defer g.terrain_mu.unlock();
-        // OOM / chunk-cap failure must not silently float vehicles at y=61 forever
-        // without a log line; the fallback height is only so physics keeps stepping.
-        const ch = g.world.getOrCreate(t.pos) catch |err| {
-            std.debug.print(
-                "zdtd: heightAtWorld chunk ({d},{d}) failed: {s}; fallback y=61\n",
-                .{ t.pos.x, t.pos.z, @errorName(err) },
-            );
-            return 61;
-        };
-        return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
+        return game_hooks.heightAtWorld(ctx, wx, wz);
     }
 
-    /// Spawn each trader POI's NPC at its IndexedBlockOffsets "Trader" cell.
-    /// The local cell is rotated by the prefab rotation and added to the
-    /// decoration origin (same mapping paintDecoration uses); the class comes
-    /// from ThemeTags ("traderBob" → npcTraderBob) with the per-trader
-    /// trader_info id and stock from npc.xml + traders.xml.
     fn spawnPoiTraders(self: *Game) void {
-        const pf = if (self.world.prefabs) |*p| p else return;
-        for (pf.items) |d| {
-            if (world_store.prefabs.isPart(d.name)) continue;
-            const qd = pf.questData(d.name) orelse continue;
-            if (qd.trader_tag.len == 0) continue;
-            var cname_buf: [64]u8 = undefined;
-            // "traderBob" → "npcTraderBob".
-            const cname = std.fmt.bufPrint(&cname_buf, "npcTrader{s}", .{qd.trader_tag[6..]}) catch continue;
-            const def = self.entities.byName(cname) orelse continue;
-            const r = world_tts.rotateLocalXZ(qd.trader_x, qd.trader_z, d.size_x, d.size_z, d.rot);
-            const wx: f32 = @floatFromInt(d.x + r.x);
-            const wy: f32 = @floatFromInt(d.stampY() + qd.trader_y);
-            const wz: f32 = @floatFromInt(d.z + r.z);
-            const nid = self.sim.spawnTrader(cname, wx, wy, wz, self.npc.traderIdForClass(cname), self.trader_wallet_dukes) orelse continue;
-            if (self.sim.slotOfNetId(nid)) |s| {
-                self.sim.class_id[s].hash = def.hash;
-                self.sim.class_id[s].loot_list = def.loot_list;
-            }
-            self.fillTraderFromXml(nid);
-            std.debug.print("zdtd: POI trader {s} at ({d},{d},{d}) entity={d}\n", .{ d.name, wx, @as(i32, @intFromFloat(wy)), wz, nid });
-        }
+        return game_hooks.spawnPoiTraders(self);
     }
 
-    /// ECS POI hook: prefab footprint covering world (x,z), or null outside
-    /// every prefab (also when no prefabs.xml was loaded). Backs World.poi_fn.
     fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const pf = if (g.world.prefabs) |*p| p else return null;
-        const wx: i32 = @intFromFloat(@floor(x));
-        const wz: i32 = @intFromFloat(@floor(z));
-        for (pf.items, 0..) |d, i| {
-            // City parts (driveways, roads) are never quest POIs (GAP: a quest
-            // anchored to a driveway or sign rect was not the POI stock means).
-            if (world_store.prefabs.isPart(d.name)) continue;
-            const b = pf.boundsXZ(i);
-            if (wx < b.x0 or wx >= b.x1 or wz < b.z0 or wz >= b.z1) continue;
-            return .{
-                .x = @floatFromInt(b.x0),
-                .y = @floatFromInt(d.y),
-                .z = @floatFromInt(b.z0),
-                .size_x = @floatFromInt(b.x1 - b.x0),
-                .size_y = @floatFromInt(d.size_y),
-                .size_z = @floatFromInt(b.z1 - b.z0),
-            };
-        }
-        return null;
+        return game_hooks.poiRectAtWorld(ctx, x, z);
     }
 
-    /// Party membership test for the sim hook: two entity ids are "the same
-    /// party" when both belong to one live Party. Out-of-party players (both
-    /// null) are not a party, so each still blocks the other's rally.
     fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const pa = g.parties.partyByMember(a) orelse return false;
-        return pa == g.parties.partyByMember(b);
+        return game_hooks.partySame(ctx, a, b);
     }
 
-    /// Nearest quest-eligible POI to (x,z) over the whole prefab index. Quest
-    /// defs without a static position (stock RandomPOIGoto / ClosestPOIGoto)
-    /// bind this on accept, so the marker and goto check point at a real POI
-    /// instead of an invented spot (audit B26). City parts stay excluded.
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const pf = if (g.world.prefabs) |*p| p else return null;
-        var best: ?ecs.components.PoiRect = null;
-        var best_d: f32 = std.math.inf(f32);
-        for (pf.items, 0..) |d, i| {
-            if (world_store.prefabs.isPart(d.name)) continue;
-            const b = pf.boundsXZ(i);
-            const cx = (@as(f32, @floatFromInt(b.x0)) + @as(f32, @floatFromInt(b.x1))) * 0.5;
-            const cz = (@as(f32, @floatFromInt(b.z0)) + @as(f32, @floatFromInt(b.z1))) * 0.5;
-            const dx = cx - x;
-            const dz = cz - z;
-            const dist = dx * dx + dz * dz;
-            if (dist < best_d) {
-                best_d = dist;
-                best = .{
-                    .x = @floatFromInt(b.x0),
-                    .y = @floatFromInt(d.y),
-                    .z = @floatFromInt(b.z0),
-                    .size_x = @floatFromInt(b.x1 - b.x0),
-                    .size_y = @floatFromInt(d.size_y),
-                    .size_z = @floatFromInt(b.z1 - b.z0),
-                };
-            }
-        }
-        return best;
+        return game_hooks.nearestPoiAtWorld(ctx, x, z);
     }
 
-    /// ECS path step hook: feet Y the body would stand at after moving one cell,
-    /// or null when the move is blocked. Models step-up, drop and headroom, so a
-    /// wall, a POI roof and a crawlspace are all impassable while a slope is not.
-    ///
-    /// The old bool form asked `isSolid(heightAt + 1)`, which is false for every
-    /// column by construction: `heights` is maintained as the topmost non-air
-    /// block, so the cell above it is always air and the pathfinder saw an open
-    /// world everywhere.
     pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        // Snapshot hit: same answer the locked path below would compute, without
-        // taking the process-global terrain lock from an AI worker. A miss
-        // falls through so the on-demand chunk generation side effect is kept.
-        if (g.terrain_snapshot_on) {
-            if (g.terrain_snap.standable(tx, tz, from_y)) |y| return y;
-        }
-        g.terrain_mu.lock();
-        defer g.terrain_mu.unlock();
-        return g.world.standableWorld(tx, tz, from_y) catch null;
+        return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz);
     }
 
-    /// ECS place hook: item_id → AssignIds block id (fail closed → 0).
-    /// Offline pin map only when AssignIds table is empty (no dump/game-dir).
     fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const iname: ?[]const u8 = if (g.items.byId(item_id)) |d| d.name else invsys.builtinStockNameFallback(item_id);
-        const IdCtx = struct {
-            t: *const assets_maxdamage.Table,
-            fn lookup(c: ?*anyopaque, n: []const u8) ?u16 {
-                const s: *const @This() = @ptrCast(@alignCast(c.?));
-                return s.t.idByName(n);
-            }
-        };
-        var id_ctx: IdCtx = .{ .t = &g.maxdamage };
-        const resolved = invsys.itemToBlockResolved(item_id, iname, IdCtx.lookup, &id_ctx);
-        if (resolved != 0) return resolved;
-        // Offline map for known placeables when dump misses the shape name.
-        const offline = invsys.itemToBlock(item_id);
-        if (offline != 0) return offline;
-        return 0;
+        return game_hooks.placeBlockId(ctx, item_id);
     }
 
-    /// ECS fuel hook: items.xml FuelValue (0 = not a fuel item).
     fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        return g.items.fuelValueFor(item_id);
+        return game_hooks.itemFuelValue(ctx, item_id);
     }
 
-    /// ECS stack hook: items.xml Stacknumber via ItemTable (builtin table when no XML).
     fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
-        const g: *Game = @ptrCast(@alignCast(ctx.?));
-        if (g.items.byId(item_id)) |_| return g.items.stackFor(item_id);
-        return invsys.maxStackBuiltin(item_id);
+        return game_hooks.itemStackFor(ctx, item_id);
     }
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
