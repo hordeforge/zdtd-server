@@ -116,8 +116,9 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 }
 
 /// Game embeds the claim table on the heap; 1024 covers a long-lived server
-/// (GAP 12: 256 silently dropped the 257th claim on register).
-pub const max_land_claims: usize = 1024;
+/// (GAP 12: 256 silently dropped the 257th claim on register). Single source
+/// of truth in game/types.zig; game.zig re-exports it like the other caps.
+pub const max_land_claims = game_types.max_land_claims;
 /// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
 pub const max_quest_position_data: usize = 3;
 const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
