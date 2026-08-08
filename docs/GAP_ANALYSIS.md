@@ -902,13 +902,24 @@ parsed, and quest offering is unwired.
   `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
   `:1469`, `:1472`, `:1488`
 
-- **traders.xml root economy attributes** `PARTIAL` (2026-08-07):
+- **traders.xml root economy attributes** `PARTIAL` (2026-08-07, RE'd 2026-08-08):
   `buy_markup` / `sell_markdown` were already parsed; `currency_item` is now
   parsed too and `Game.coinItemId` pays trade/rent in that item instead of a
   hardcoded "casinoCoin" name (falling back to the stock name when unset).
-  Still ignored: `quality_mod` and `quest_tier_mod`.
+  RE 2026-08-08: `quality_mod="1,2"` (stock root) feeds
+  `TraderInfo.QualityMinMod/MaxMod` (asm.il 1397236-1397257), applied in the
+  CLIENT's `ItemClass.GetBuyPrice/GetSellPrice` (asm.il 1830625-1830948) as
+  `Lerp(qualityMinMod, qualityMaxMod, (quality-1)/5)` times the econ x markup
+  base (with `PercentUsesLeft`). zdtd's trade is client-mirrored (the wire
+  carries no price; the client computes it from its own traders.xml + items
+  and the server mirrors the resulting stock/money, trade.zig
+  applyTraderDataCopyFrom), so the missing lerp only shows in the server's
+  informational price/sell fields, not in the transaction. `quest_tier_mod`
+  (stock root `0,0.05,...,0.3`) is quest-reward tier scaling
+  (asm.il 504145-504157) and stays open with the quest reward economy.
   *Anchors:* `src/assets/traders.zig` root row, `src/server/game.zig`
-  `coinItemId`, `Data/Config/traders.xml:3`
+  `coinItemId`, `Data/Config/traders.xml:3`, `asm.il:1397236-1397257`,
+  `asm.il:1830625-1830948`
 
 - **Inventory roll (count ranges, prob, unique_only, quality, RNG)** `ROLLED (2026-08-08)`
   `fillTraderFromXml` / `fillVendingStore` run the ported `TraderInfo` spawn
