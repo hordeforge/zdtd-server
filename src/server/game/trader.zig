@@ -7,6 +7,7 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const ecs = @import("../../ecs/root.zig");
+const rng_util = @import("../../util/rng.zig");
 
 pub fn coinItemId(self: *const Game) u16 {
     const name = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
@@ -120,28 +121,53 @@ pub fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, 
     }
 }
 
+/// Deterministic roll seed for a trader's inventory: (world seed, trader
+/// entity, day). Same world + trader + day → same stock; restock on a later
+/// day rolls fresh (sim rule: deterministic inputs).
+pub fn traderRollSeed(self: *const Game, trader_net_id: i32) u64 {
+    const day = self.sim.director.clock.day;
+    var buf: [16]u8 = undefined;
+    std.mem.writeInt(u64, buf[0..8], self.worldSeed(), .little);
+    std.mem.writeInt(u64, buf[8..16], @as(u64, @bitCast(@as(i64, trader_net_id))) ^ (@as(u64, day) *% 0x9E3779B97F4A7C15), .little);
+    return std.hash.Wyhash.hash(0, &buf);
+}
+
+/// Resolve the refs a trader fills from (its own `<trader_items>` when the
+/// trader_info has them, else the traderAlways fallback) and roll them into
+/// out[] with the seeded rng (stock TraderInfo::Spawn port in traders.zig).
+/// Also copies the per-trader RestockInterval onto the sim stock.
+pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.RolledItem) usize {
+    const tt = self.traders;
+    var refs: []const assets_traders.ItemRef = &.{};
+    if (self.sim.slotOfNetId(trader_net_id)) |s| {
+        if (self.sim.mask[s].trader_stock) {
+            const info_id = self.sim.trader_stock[s].trader_info_id;
+            if (info_id != 0) {
+                if (tt.traderInfo(info_id)) |ti| {
+                    if (ti.refs.len > 0) refs = ti.refs;
+                    // Per-trader RestockInterval drives systems.traderRestock
+                    // (-1 = never, 0 = daily, N = every N days).
+                    self.sim.trader_stock[s].reset_interval = ti.reset_interval;
+                    self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
+                }
+            }
+        }
+    }
+    if (refs.len == 0) refs = tt.trader_always_refs;
+    if (refs.len == 0) return 0;
+    var rng = rng_util.XorShift32.initFromU64(traderRollSeed(self, trader_net_id));
+    return tt.rollAllRefs(refs, &rng, out);
+}
+
 pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     const tt = self.traders;
     const s = self.sim.slotOfNetId(trader_net_id) orelse return;
     if (!self.sim.mask[s].trader_stock) return;
     var n: usize = 0;
-    var fill: []const assets_traders.Entry = &.{};
-    var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
+    var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
+    const rn = rollStockRefs(self, trader_net_id, &rolled);
+    if (rn == 0) return;
     const info_id = self.sim.trader_stock[s].trader_info_id;
-    if (info_id != 0) {
-        if (tt.traderInfo(info_id)) |ti| {
-            if (ti.refs.len > 0) {
-                const en = tt.expandTraderRefs(ti, &per_trader);
-                fill = per_trader[0..en];
-            }
-            self.sim.trader_stock[s].reset_interval = ti.reset_interval;
-            self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
-        }
-    }
-    if (fill.len == 0) {
-        if (tt.entries.len == 0) return;
-        fill = tt.entries;
-    }
     var buy_markup: f32 = 1.0;
     var sell_markup: f32 = 0.02;
     if (info_id != 0) {
@@ -152,14 +178,15 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     }
     if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
     if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
-    for (fill) |e| {
+    for (rolled[0..rn]) |r| {
         if (n >= ecs.components.max_stock) break;
-        const iid = self.ecsIdFromItemName(e.name);
+        const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
         const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
-            .count = e.count,
+            .count = r.count,
+            .quality = r.quality,
             .price = if (econ > 0) @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * buy_markup)), 65535)) else 5,
             .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * sell_markup)), 65535)))) else 1,
         };

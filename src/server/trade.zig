@@ -20,6 +20,7 @@ const assets_npc = @import("../assets/npc.zig");
 const resolveItemType = game_mod.Game.resolveItemType;
 const systems = @import("../ecs/systems.zig");
 const replicate_te = @import("replicate_te.zig");
+const game_trader = @import("game/trader.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
@@ -297,26 +298,10 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     const s = self.sim.slotOfNetId(trader_net_id) orelse return;
     if (!self.sim.mask[s].trader_stock) return;
     var n: usize = 0;
-    var fill: []const assets_traders.Entry = &.{};
-    var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
+    var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
+    const rn = game_trader.rollStockRefs(self, trader_net_id, &rolled);
+    if (rn == 0) return;
     const info_id = self.sim.trader_stock[s].trader_info_id;
-    if (info_id != 0) {
-        if (tt.traderInfo(info_id)) |ti| {
-            if (ti.refs.len > 0) {
-                const en = tt.expandTraderRefs(ti, &per_trader);
-                fill = per_trader[0..en];
-            }
-            // Per-trader RestockInterval drives systems.traderRestock
-            // (-1 = never, 0 = daily, N = every N days). The window opens
-            // N days after fill, so the fresh stock survives its first days.
-            self.sim.trader_stock[s].reset_interval = ti.reset_interval;
-            self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
-        }
-    }
-    if (fill.len == 0) {
-        if (tt.entries.len == 0) return;
-        fill = tt.entries; // fallback traderAlways
-    }
     // Stock GetBuyPrice/GetSellPrice (loot-economy.md): buy = econ x
     // BuyMarkup (per-trader OverrideBuyMarkup wins), sell = econ x
     // SellMarkdown (OverrideSellMarkdown wins). The previous econ/10 and
@@ -331,15 +316,16 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     }
     if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
     if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
-    for (fill) |e| {
+    for (rolled[0..rn]) |r| {
         if (n >= ecs.components.max_stock) break;
-        const iid = self.ecsIdFromItemName(e.name);
+        const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
         const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
         if (econ == 0) continue; // fail closed: no EconomicValue means not tradeable (RE GetBuyPrice)
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
-            .count = e.count,
+            .count = r.count,
+            .quality = r.quality,
             .price = @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * buy_markup)), 65535)),
             .sell = @max(1, @as(u16, @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * sell_markup)), 65535)))),
         };

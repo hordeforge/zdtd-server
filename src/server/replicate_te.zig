@@ -21,6 +21,8 @@ const containers_mod = @import("../world/containers.zig");
 const world_store = @import("../world/store.zig");
 const assets_traders = @import("../assets/traders.zig");
 const io_fs = @import("../util/io_fs.zig");
+const game_trader = @import("game/trader.zig");
+const rng_util = @import("../util/rng.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const stock_te = packages.stock_te;
 
@@ -278,34 +280,34 @@ pub fn vendingEntries(self: *Game, v: *const vending_mod.Vending, out: []package
 pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     const tt = self.traders;
     var n: usize = 0;
-    var fill: []const assets_traders.Entry = &.{};
-    var per_trader: [assets_traders.max_expand]assets_traders.Entry = undefined;
+    var refs: []const assets_traders.ItemRef = &.{};
     if (v.trader_id > 0 and v.trader_id <= 65535) {
         if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
-            if (ti.refs.len > 0) {
-                const en = tt.expandTraderRefs(ti, &per_trader);
-                fill = per_trader[0..en];
-            }
+            if (ti.refs.len > 0) refs = ti.refs;
         }
     }
-    if (fill.len == 0) {
-        if (tt.entries.len == 0) return;
-        fill = tt.entries; // traderAlways fallback (GAP: traderAlways sells vending stock)
-    }
+    if (refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
+    if (refs.len == 0) return;
+    // Deterministic per machine per day (no entity id on a vending block;
+    // the trader_id + day discriminates the stream).
+    var rng = rng_util.XorShift32.initFromU64(game_trader.traderRollSeed(self, @intCast(v.trader_id)));
+    var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
+    const rn = tt.rollAllRefs(refs, &rng, &rolled);
+    if (rn == 0) return;
     // Vending is owner-priced: the renter sets each entry's markup, so the
     // trader_info buy/sell multipliers do not apply here (loot-economy.md
     // 6). Rows start at markup 0 = base EconomicValue, which the client
     // prices from; the purchase delta runs server-side.
-    for (fill) |e| {
+    for (rolled[0..rn]) |r| {
         if (n >= vending_mod.max_vending_stock) break;
-        const iid = self.ecsIdFromItemName(e.name);
+        const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
         const type_id = Game.resolveItemType(@ptrCast(self), iid);
         if (type_id == 0) continue;
         v.stock[n] = .{
             .type_id = type_id,
-            .count = @intCast(e.count),
-            .quality = 1,
+            .count = @intCast(r.count),
+            .quality = r.quality,
             .markup = 0,
         };
         n += 1;

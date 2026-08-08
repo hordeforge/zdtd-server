@@ -1,27 +1,63 @@
-//! traders.xml: trader_item_groups with nested group refs (cycle-safe expand).
+//! traders.xml: trader_item_groups, trader_info blocks, and the stock
+//! inventory roll (TraderInfo::Spawn, asm.il 862758-863520).
+//!
+//! The roll is a faithful port of stock TraderInfo spawning: top-level refs
+//! always spawn (SpawnAllItemsFromList), group members are picked
+//! prob-weighted with dedupe (SpawnLootItemsFromList), counts roll uniform in
+//! [min,max] (RandomSpawnCount), and quality rolls uniform in the entry's
+//! quality range. The RNG is caller-supplied and seeded, so the same
+//! (world, trader, day) reproduces the same stock (sim rule: deterministic
+//! inputs), unlike stock's per-ItemValue time-seeded GameRandom.
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const rng_util = @import("../util/rng.zig");
 
-pub const max_entries: usize = 128;
 pub const max_groups: usize = 256;
 pub const max_expand: usize = 64;
 pub const max_group_depth: usize = 8;
 pub const max_traders: usize = 32;
 
-pub const Entry = struct {
-    name: []const u8 = "",
-    count: u16 = 1,
-};
-
-/// One `<item .../>` ref inside a trader_info `<trader_items>` block. A group
-/// ref expands to the group's items at fill time; a name ref is a direct item.
+/// One `<item .../>` ref inside a trader_info `<trader_items>` block or a
+/// group body. A group ref expands to the group's items at roll time; a name
+/// ref is a direct item.
 pub const ItemRef = struct {
     name: []const u8 = "",
-    count: u16 = 1,
+    count_min: u16 = 1,
+    count_max: u16 = 1,
+    /// prob attr (default 1). Group-internal picks are weighted by prob share
+    /// (stock TraderInfo::SpawnLootItemsFromList: acc += prob / sum), so 120
+    /// is a heavier weight, 0.5 is half weight, 0 never picks.
+    prob: f32 = 1,
+    /// quality="lo,hi" roll bounds; 0/0 = unset (wire quality 1).
+    quality_lo: u8 = 0,
+    quality_hi: u8 = 0,
+    unique_only: bool = false,
     group: bool = false,
+};
+
+/// traders.xml `<trader_item_group>`: the refs and the group-level count
+/// (rounds per ref expansion) and uniqueOnly flag.
+pub const Group = struct {
+    name: []const u8 = "",
+    refs: []const ItemRef = &.{},
+    /// count="N" or "lo,hi": each group-ref round rolls this many picks from
+    /// the group (stock TraderInfo::SpawnItemsFromGroup inner roll). Default
+    /// 1/1.
+    count_min: u16 = 1,
+    count_max: u16 = 1,
+    /// count="all": every group item spawns each round (-1 sentinel in stock).
+    count_all: bool = false,
+    unique_only: bool = false,
+};
+
+/// Result of a stock roll: one concrete stack to put in a trader window.
+pub const RolledItem = struct {
+    name: []const u8 = "",
+    count: u16 = 0,
+    quality: u8 = 1,
 };
 
 /// traders.xml `<trader_info id="N">` block: per-trader hours, vending /
@@ -48,20 +84,13 @@ pub const TraderInfo = struct {
     refs: []const ItemRef = &.{},
 };
 
-pub const Group = struct {
-    name: []const u8 = "",
-    /// Direct item names in this group (not nested group refs).
-    items: []const Entry = &.{},
-    /// Nested group names.
-    child_groups: []const []const u8 = &.{},
-};
-
 pub const TraderTable = struct {
-    /// Expanded traderAlways stock (direct + resolved groups, deterministic first picks).
-    entries: []const Entry = &.{},
     groups: []const Group = &.{},
     /// Per-trader `<trader_info>` blocks keyed by id.
     trader_infos: []const TraderInfo = &.{},
+    /// The traderAlways group's refs (fallback stock for traders without
+    /// their own `<trader_items>`).
+    trader_always_refs: []const ItemRef = &.{},
     /// Root `<traders>` economy row: default buy/sell multipliers (stock
     /// GetBuyPrice/GetSellPrice; per-trader Override* wins when set).
     buy_markup: f32 = 0,
@@ -91,38 +120,6 @@ pub const TraderTable = struct {
         return null;
     }
 
-    /// Expand a named group into out[] (direct items + recursive children).
-    /// Depth-limited; visits set prevents cycles. Returns count written.
-    pub fn expandGroup(self: *const TraderTable, name: []const u8, out: []Entry) usize {
-        var visited: [max_groups]bool = .{false} ** max_groups;
-        return expandGroupRec(self, name, out, 0, &visited);
-    }
-
-    fn expandGroupRec(self: *const TraderTable, name: []const u8, out: []Entry, depth: usize, visited: *[max_groups]bool) usize {
-        if (depth >= max_group_depth or out.len == 0) return 0;
-        const g = self.groupByName(name) orelse return 0;
-        // Find group index for visit bit
-        var gi: usize = 0;
-        while (gi < self.groups.len) : (gi += 1) {
-            if (std.mem.eql(u8, self.groups[gi].name, name)) break;
-        }
-        if (gi < max_groups) {
-            if (visited[gi]) return 0;
-            visited[gi] = true;
-        }
-        var n: usize = 0;
-        for (g.items) |e| {
-            if (n >= out.len) break;
-            out[n] = e;
-            n += 1;
-        }
-        for (g.child_groups) |cg| {
-            if (n >= out.len) break;
-            n += expandGroupRec(self, cg, out[n..], depth + 1, visited);
-        }
-        return n;
-    }
-
     pub fn traderInfo(self: *const TraderTable, id: u16) ?TraderInfo {
         for (self.trader_infos) |ti| {
             if (ti.id == id) return ti;
@@ -130,81 +127,221 @@ pub const TraderTable = struct {
         return null;
     }
 
-    /// Expand a trader_info's refs into out[]: direct names keep their ref
-    /// count, group refs expand via expandGroup (pick-count/RNG is the
-    /// inventory-roll row). Returns count written; preserves ref order.
-    pub fn expandTraderRefs(self: *const TraderTable, info: TraderInfo, out: []Entry) usize {
+    /// Roll every ref in a list the way stock TraderInfo::Spawn does
+    /// (SpawnAllItemsFromList, asm.il 863190): each ref always spawns, its
+    /// count rolls in [min,max], and a group ref expands through
+    /// spawnItemsFromGroup. Writes into out[]; returns count written.
+    pub fn rollAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, out: []RolledItem) usize {
         var n: usize = 0;
-        var group_buf: [max_expand]Entry = undefined;
-        for (info.refs) |r| {
-            if (n >= out.len) break;
+        for (refs) |r| {
+            const count = randomSpawnCount(rng, r.count_min, r.count_max);
+            // Stock abundance is 1.0 by default (TraderItemAbundance); the
+            // FastMax(1, count*abundance) floor stays so a 0 roll still sells 1.
+            const count_final: i32 = @max(1, count);
             if (r.group) {
-                const en = self.expandGroup(r.name, &group_buf);
-                const k = @min(en, out.len - n);
-                @memcpy(out[n..][0..k], group_buf[0..k]);
-                n += k;
+                spawnItemsFromGroup(self, r.name, count_final, rng, r.unique_only, out, &n, 0);
             } else {
-                out[n] = .{ .name = r.name, .count = r.count };
-                n += 1;
+                spawnItem(r, count_final, rng, out, &n);
             }
         }
         return n;
     }
+
+    /// Prob-weighted picks from a group's refs, stock
+    /// SpawnLootItemsFromList (asm.il 863343): one RandomFloat per pick, walk
+    /// the refs accumulating prob share, first ref whose share passes the
+    /// roll is spawned and (when unique) removed from the pool.
+    fn spawnLootItemsFromList(self: *const TraderTable, refs: []const ItemRef, num_to_spawn: i32, rng: *rng_util.XorShift32, used: ?[]bool, out: []RolledItem, n: *usize, depth: usize) void {
+        if (num_to_spawn < 0) {
+            spawnAllRefs(self, refs, rng, out, n, depth);
+            return;
+        }
+        if (num_to_spawn == 0) return;
+        var sum: f32 = 0;
+        for (refs, 0..) |r, i| {
+            if (used != null and used.?[i]) continue;
+            sum += r.prob;
+        }
+        if (sum == 0) return;
+        var pick: i32 = 0;
+        while (pick < num_to_spawn) : (pick += 1) {
+            const roll = rngFloat(rng);
+            var acc: f32 = 0;
+            var picked = false;
+            for (refs, 0..) |r, i| {
+                if (used != null and used.?[i]) continue;
+                acc += r.prob / sum;
+                if (roll > acc) continue;
+                if (used != null) used.?[i] = true;
+                const count = randomSpawnCount(rng, r.count_min, r.count_max);
+                if (r.group) {
+                    spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, out, n, depth);
+                } else {
+                    spawnItem(r, count, rng, out, n);
+                }
+                picked = true;
+                break;
+            }
+            if (!picked) return;
+        }
+    }
+
+    /// Stock SpawnAllItemsFromList (asm.il 863190) used by both the top-level
+    /// spawn (numToSpawn -1) and count="all" groups: every ref spawns with a
+    /// count roll and no prob gate.
+    fn spawnAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, out: []RolledItem, n: *usize, depth: usize) void {
+        for (refs) |r| {
+            const count: i32 = @max(1, randomSpawnCount(rng, r.count_min, r.count_max));
+            if (r.group) {
+                spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, out, n, depth);
+            } else {
+                spawnItem(r, count, rng, out, n);
+            }
+        }
+    }
+
+    /// Stock SpawnItemsFromGroup (asm.il 863290): num_to_spawn rounds, each
+    /// rolling the group's own count and picking that many refs from it.
+    fn spawnItemsFromGroup(self: *const TraderTable, group_name: []const u8, num_to_spawn: i32, rng: *rng_util.XorShift32, unique: bool, out: []RolledItem, n: *usize, depth: usize) void {
+        if (depth >= max_group_depth or n.* >= out.len) return;
+        const g = self.groupByName(group_name) orelse return;
+        if (g.refs.len == 0) return;
+        var used_buf: [max_expand]bool = .{false} ** max_expand;
+        const use_unique = g.unique_only or unique;
+        const used: ?[]bool = if (use_unique) used_buf[0..g.refs.len] else null;
+        var round: i32 = 0;
+        while (round < num_to_spawn and n.* < out.len) : (round += 1) {
+            var picks: i32 = undefined;
+            if (g.count_all) {
+                picks = -1;
+            } else {
+                picks = randomSpawnCount(rng, g.count_min, g.count_max);
+            }
+            spawnLootItemsFromList(self, g.refs, picks, rng, used, out, n, depth + 1);
+        }
+    }
+
+    /// Stock TraderInfo::SpawnItem tail (asm.il 862810): one stack with the
+    /// rolled count and a quality rolled uniform in the entry's range when the
+    /// XML set one (stock ItemValue ctor: RandomRange(min, max+1), asm.il
+    /// 616396); unset stays quality 1 (stackables have no quality).
+    fn spawnItem(r: ItemRef, count: i32, rng: *rng_util.XorShift32, out: []RolledItem, n: *usize) void {
+        if (count < 1 or n.* >= out.len) return;
+        var quality: u8 = 1;
+        if (r.quality_lo > 0 and r.quality_hi >= r.quality_lo) {
+            quality = @intCast(r.quality_lo + rng.nextBounded(@as(u32, r.quality_hi) - @as(u32, r.quality_lo) + 1));
+        }
+        out[n.*] = .{ .name = r.name, .count = @intCast(count), .quality = quality };
+        n.* += 1;
+    }
 };
 
-fn lowCount(v: []const u8) u16 {
-    const comma = std.mem.indexOfScalar(u8, v, ',') orelse v.len;
-    return std.fmt.parseInt(u16, v[0..comma], 10) catch 1;
+/// Stock TraderInfo::RandomSpawnCount (asm.il 863128): uniform float in
+/// [min-0.49, max+0.49] clamped to [min, max], rounded up with probability
+/// equal to the fraction, so ints land ~uniform in [min, max]. max < 0 (the
+/// "all" sentinel) returns -1.
+fn randomSpawnCount(rng: *rng_util.XorShift32, min: u16, max: u16) i32 {
+    var v = randomRangeF(rng, @as(f32, @floatFromInt(min)) - 0.49, @as(f32, @floatFromInt(max)) + 0.49);
+    if (v <= @as(f32, @floatFromInt(min))) return min;
+    if (v > @as(f32, @floatFromInt(max))) v = @floatFromInt(max);
+    const iv: i32 = @intFromFloat(v);
+    const frac = v - @as(f32, @floatFromInt(iv));
+    if (rngFloat(rng) < frac) return iv + 1;
+    return iv;
 }
 
-fn parseGroupBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) !struct { []Entry, [][]const u8 } {
-    var items: std.ArrayList(Entry) = .empty;
-    defer items.deinit(gpa);
-    var children: std.ArrayList([]const u8) = .empty;
-    defer children.deinit(gpa);
+/// GameRandom.RandomFloat equivalent: uniform float in [0, 1).
+fn rngFloat(rng: *rng_util.XorShift32) f32 {
+    return @as(f32, @floatFromInt(rng.next() >> 8)) / 16777216.0;
+}
+
+/// GameRandom.RandomRange(float, float) equivalent (Unity float semantics:
+/// min inclusive, max exclusive).
+fn randomRangeF(rng: *rng_util.XorShift32, min: f32, max: f32) f32 {
+    if (max <= min) return min;
+    return min + (max - min) * rngFloat(rng);
+}
+
+/// Parse a count/quality "N" or "lo,hi" attribute. "all" is handled by the
+/// caller (count_all flag); anything unparsable falls back to the default.
+fn parseMinMax(v: []const u8, dflt: u16) struct { u16, u16 } {
+    if (v.len == 0 or std.mem.eql(u8, v, "all")) return .{ dflt, dflt };
+    const comma = std.mem.indexOfScalar(u8, v, ',') orelse {
+        const n = std.fmt.parseInt(u16, v, 10) catch return .{ dflt, dflt };
+        return .{ n, n };
+    };
+    const lo = std.fmt.parseInt(u16, v[0..comma], 10) catch return .{ dflt, dflt };
+    const hi = std.fmt.parseInt(u16, v[comma + 1 ..], 10) catch lo;
+    return .{ lo, @max(lo, hi) };
+}
+
+fn parseProb(v: []const u8) f32 {
+    if (v.len == 0) return 1;
+    return std.fmt.parseFloat(f32, v) catch 1;
+}
+
+/// quality="lo,hi" (both 1..6 in stock XML); 0/0 = unset.
+fn parseQuality(v: []const u8) struct { u8, u8 } {
+    if (v.len == 0) return .{ 0, 0 };
+    const comma = std.mem.indexOfScalar(u8, v, ',') orelse {
+        const q = std.fmt.parseInt(u8, v, 10) catch return .{ 0, 0 };
+        return .{ q, q };
+    };
+    const lo = std.fmt.parseInt(u8, v[0..comma], 10) catch return .{ 0, 0 };
+    const hi = std.fmt.parseInt(u8, v[comma + 1 ..], 10) catch lo;
+    return .{ lo, @max(lo, hi) };
+}
+
+fn parseItemRef(arena: std.mem.Allocator, body: []const u8, ii: usize) ?ItemRef {
+    const gname = xml.attr(body, ii, "group");
+    const name = xml.attr(body, ii, "name") orelse {
+        // A ref must carry `group` or `name` (stock throws otherwise).
+        if (gname == null) return null;
+        return parseItemRefNamed(arena, body, ii, gname.?, true);
+    };
+    return parseItemRefNamed(arena, body, ii, name, gname != null);
+}
+
+fn parseItemRefNamed(arena: std.mem.Allocator, body: []const u8, ii: usize, ref_name: []const u8, is_group: bool) ?ItemRef {
+    const mm = parseMinMax(xml.attr(body, ii, "count") orelse "", 1);
+    const q = parseQuality(xml.attr(body, ii, "quality") orelse "");
+    const unique = xml.attr(body, ii, "unique_only") orelse "";
+    return .{
+        .name = arena.dupe(u8, ref_name) catch return null,
+        .count_min = mm[0],
+        .count_max = mm[1],
+        .prob = parseProb(xml.attr(body, ii, "prob") orelse ""),
+        .quality_lo = q[0],
+        .quality_hi = q[1],
+        .unique_only = std.mem.eql(u8, unique, "true") or std.mem.eql(u8, unique, "True"),
+        .group = is_group,
+    };
+}
+
+fn parseRefsBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
+    var refs: std.ArrayList(ItemRef) = .empty;
+    defer refs.deinit(gpa);
     var i: usize = 0;
-    while (i < body.len) {
+    while (i < body.len and refs.items.len < max_expand) {
         const ii = std.mem.indexOfPos(u8, body, i, "<item ") orelse break;
         i = ii + 6;
-        if (xml.attr(body, ii, "group")) |gname| {
-            try children.append(gpa, try arena.dupe(u8, gname));
-            continue;
+        if (parseItemRef(arena, body, ii)) |r| {
+            try refs.append(gpa, r);
         }
-        const name = xml.attr(body, ii, "name") orelse continue;
-        const count: u16 = if (xml.attr(body, ii, "count")) |cv| lowCount(cv) else 1;
-        try items.append(gpa, .{ .name = try arena.dupe(u8, name), .count = count });
     }
-    const islice = try arena.alloc(Entry, items.items.len);
-    @memcpy(islice, items.items);
-    const cslice = try arena.alloc([]const u8, children.items.len);
-    @memcpy(cslice, children.items);
-    return .{ islice, cslice };
+    const sl = try arena.alloc(ItemRef, refs.items.len);
+    @memcpy(sl, refs.items);
+    return sl;
 }
 
 /// Parse one `<trader_items>` body into ItemRefs (group and name refs kept).
 fn parseTraderRefs(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
-    var refs: std.ArrayList(ItemRef) = .empty;
-    defer refs.deinit(gpa);
-    var i: usize = 0;
-    while (i < body.len) {
-        const ii = std.mem.indexOfPos(u8, body, i, "<item ") orelse break;
-        i = ii + 6;
-        const count: u16 = if (xml.attr(body, ii, "count")) |cv| lowCount(cv) else 1;
-        if (xml.attr(body, ii, "group")) |gname| {
-            try refs.append(gpa, .{ .name = try arena.dupe(u8, gname), .count = count, .group = true });
-            continue;
-        }
-        const name = xml.attr(body, ii, "name") orelse continue;
-        try refs.append(gpa, .{ .name = try arena.dupe(u8, name), .count = count });
-    }
-    const rsl = try arena.alloc(ItemRef, refs.items.len);
-    @memcpy(rsl, refs.items);
-    return rsl;
+    return parseRefsBody(arena, gpa, body);
 }
 
-fn attrBool(v: []const u8, dflt: bool) bool {
-    if (v.len == 0) return dflt;
-    return std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
+/// Parse one `<trader_item_group>` body into ItemRefs.
+fn parseGroupBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
+    return parseRefsBody(arena, gpa, body);
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable {
@@ -234,11 +371,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         const gt = std.mem.indexOfPos(u8, clean, gi, ">") orelse break;
         const close = std.mem.indexOfPos(u8, clean, gt, "</trader_item_group>") orelse break;
         const body = clean[gt + 1 .. close];
-        const parsed = try parseGroupBody(arena, allocator, body);
+        const refs = try parseGroupBody(arena, allocator, body);
+        const cnt = xml.attr(clean, gi, "count") orelse "";
+        const count_all = std.mem.eql(u8, cnt, "all");
+        const mm = parseMinMax(cnt, 1);
+        const uniq = xml.attr(clean, gi, "unique_only") orelse "";
         try groups.append(allocator, .{
             .name = try arena.dupe(u8, gname),
-            .items = parsed[0],
-            .child_groups = parsed[1],
+            .refs = refs,
+            .count_min = mm[0],
+            .count_max = mm[1],
+            .count_all = count_all,
+            .unique_only = std.mem.eql(u8, uniq, "true") or std.mem.eql(u8, uniq, "True"),
         });
         i = close + 20;
     }
@@ -250,19 +394,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     var root_sell_markdown: f32 = 0;
     var root_currency: []const u8 = "";
     if (std.mem.indexOfPos(u8, clean, 0, "<traders")) |tr| {
-        root_buy_markup = std.fmt.parseFloat(f32, xml.attr(clean, tr, "buy_markup") orelse "0") catch 0;
-        root_sell_markdown = std.fmt.parseFloat(f32, xml.attr(clean, tr, "sell_markdown") orelse "0") catch 0;
-        if (xml.attr(clean, tr, "currency_item")) |ci| root_currency = try arena.dupe(u8, ci);
+        if (xml.attr(clean, tr, "buy_markup")) |v| root_buy_markup = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, tr, "sell_markdown")) |v| root_sell_markdown = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, tr, "currency_item")) |v| root_currency = try arena.dupe(u8, v);
     }
 
-    // Per-trader `<trader_info>` blocks: id + hours/vending/player-owned attrs
-    // + the `<trader_items>` refs that make that trader's own stock.
+    // traderAlways group refs = the shared fallback stock list.
+    var trader_always: []const ItemRef = &.{};
+    for (groups.items) |g| {
+        if (std.mem.eql(u8, g.name, "traderAlways")) {
+            trader_always = g.refs;
+            break;
+        }
+    }
+
+    // trader_info blocks (the previous loop advanced i past the groups).
     var trader_infos: std.ArrayList(TraderInfo) = .empty;
     defer trader_infos.deinit(allocator);
-    var j: usize = 0;
-    while (j < clean.len and trader_infos.items.len < max_traders) {
-        const ti = std.mem.indexOfPos(u8, clean, j, "<trader_info ") orelse break;
-        j = ti + 13;
+    i = 0;
+    while (i < clean.len and trader_infos.items.len < max_traders) {
+        const ti = std.mem.indexOfPos(u8, clean, i, "<trader_info ") orelse break;
+        i = ti + 13;
         const idv = xml.attr(clean, ti, "id") orelse continue;
         const id = std.fmt.parseInt(u16, idv, 10) catch continue;
         const gt = std.mem.indexOfPos(u8, clean, ti, ">") orelse break;
@@ -271,77 +423,87 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         if (!self_closing) {
             const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
             refs = try parseTraderRefs(arena, allocator, clean[gt + 1 .. close]);
-            j = close + "</trader_info>".len;
+            i = close + "</trader_info>".len;
         }
+        const open_time = xml.attr(clean, ti, "open_time") orelse "";
+        const close_time = xml.attr(clean, ti, "close_time") orelse "";
+        const is_vending = xml.attr(clean, ti, "is_vending") orelse "";
+        const allow_sell = xml.attr(clean, ti, "allow_sell") orelse "";
+        const player_owned = xml.attr(clean, ti, "player_owned") orelse "";
+        const rentable = xml.attr(clean, ti, "rentable") orelse "";
+        const buy_ov = xml.attr(clean, ti, "override_buy_markup") orelse "";
+        const sell_ov = xml.attr(clean, ti, "override_sell_markup") orelse "";
+        const reset = xml.attr(clean, ti, "reset_interval") orelse "";
+        const rent_cost_v = xml.attr(clean, ti, "rent_cost") orelse "";
+        const rent_time_v = xml.attr(clean, ti, "rent_time") orelse "";
         try trader_infos.append(allocator, .{
             .id = id,
-            .open_time = try arena.dupe(u8, xml.attr(clean, ti, "open_time") orelse ""),
-            .close_time = try arena.dupe(u8, xml.attr(clean, ti, "close_time") orelse ""),
-            .is_vending = attrBool(xml.attr(clean, ti, "is_vending") orelse "", false),
-            .allow_sell = attrBool(xml.attr(clean, ti, "allow_sell") orelse "", true),
-            .override_buy_markup = std.fmt.parseFloat(f32, xml.attr(clean, ti, "override_buy_markup") orelse "0") catch 0,
-            .override_sell_markup = std.fmt.parseFloat(f32, xml.attr(clean, ti, "override_sell_markup") orelse "0") catch 0,
-            .reset_interval = std.fmt.parseInt(i32, xml.attr(clean, ti, "reset_interval") orelse "0", 10) catch 0,
-            .player_owned = attrBool(xml.attr(clean, ti, "player_owned") orelse "", false),
-            .rentable = attrBool(xml.attr(clean, ti, "rentable") orelse "", false),
-            .rent_cost = std.fmt.parseInt(i32, xml.attr(clean, ti, "rent_cost") orelse "0", 10) catch 0,
-            .rent_time = std.fmt.parseInt(i32, xml.attr(clean, ti, "rent_time") orelse "0", 10) catch 0,
+            .open_time = try arena.dupe(u8, open_time),
+            .close_time = try arena.dupe(u8, close_time),
+            .is_vending = std.mem.eql(u8, is_vending, "true") or std.mem.eql(u8, is_vending, "True"),
+            .allow_sell = !(std.mem.eql(u8, allow_sell, "false") or std.mem.eql(u8, allow_sell, "False")),
+            .override_buy_markup = if (buy_ov.len > 0) std.fmt.parseFloat(f32, buy_ov) catch 0 else 0,
+            .override_sell_markup = if (sell_ov.len > 0) std.fmt.parseFloat(f32, sell_ov) catch 0 else 0,
+            .reset_interval = if (reset.len > 0) std.fmt.parseInt(i32, reset, 10) catch 0 else 0,
+            .player_owned = std.mem.eql(u8, player_owned, "true") or std.mem.eql(u8, player_owned, "True"),
+            .rentable = std.mem.eql(u8, rentable, "true") or std.mem.eql(u8, rentable, "True"),
+            .rent_cost = if (rent_cost_v.len > 0) std.fmt.parseInt(i32, rent_cost_v, 10) catch 0 else 0,
+            .rent_time = if (rent_time_v.len > 0) std.fmt.parseInt(i32, rent_time_v, 10) catch 0 else 0,
             .refs = refs,
         });
     }
-    const tisl = try arena.alloc(TraderInfo, trader_infos.items.len);
-    @memcpy(tisl, trader_infos.items);
+    if (trader_infos.items.len == 0) return error.OpenFailed;
 
     const gsl = try arena.alloc(Group, groups.items.len);
     @memcpy(gsl, groups.items);
+    const tisl = try arena.alloc(TraderInfo, trader_infos.items.len);
+    @memcpy(tisl, trader_infos.items);
 
-    var table: TraderTable = .{ .groups = gsl, .arena_ptr = arena_holder, .trader_infos = tisl, .buy_markup = root_buy_markup, .sell_markdown = root_sell_markdown, .currency_item = root_currency };
-
-    // Expand traderAlways into entries (primary stock list).
-    var expand_buf: [max_expand]Entry = undefined;
-    const en = table.expandGroup("traderAlways", &expand_buf);
-    if (en == 0) {
-        // Fallback: first group with direct items
-        for (table.groups) |g| {
-            if (g.items.len > 0) {
-                const n = @min(g.items.len, max_entries);
-                const entries = try arena.alloc(Entry, n);
-                @memcpy(entries, g.items[0..n]);
-                table.entries = entries;
-                return table;
-            }
-        }
-        return error.OpenFailed;
-    }
-    const n = @min(en, max_entries);
-    const entries = try arena.alloc(Entry, n);
-    @memcpy(entries, expand_buf[0..n]);
-    table.entries = entries;
-    return table;
+    return .{
+        .groups = gsl,
+        .trader_infos = tisl,
+        .trader_always_refs = trader_always,
+        .buy_markup = root_buy_markup,
+        .sell_markdown = root_sell_markdown,
+        .currency_item = root_currency,
+        .arena_ptr = arena_holder,
+    };
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) ?TraderTable {
     return paths.tryLoadConfig("traders.xml", TraderTable, loadFromPath, allocator, game_dir, config_dir) catch null;
 }
 
-test "trader table parses stock traderAlways when present" {
+test "trader table parses stock traderAlways and group refs with attrs" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
     var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
     defer t.deinit();
     try std.testing.expect(t.groups.len >= 5);
-    try std.testing.expect(t.entries.len >= 5);
-    var found_bandage = false;
-    for (t.entries) |e| {
-        if (std.mem.eql(u8, e.name, "medicalBandage")) {
-            found_bandage = true;
-            try std.testing.expect(e.count >= 3);
+    try std.testing.expect(t.trader_always_refs.len >= 5);
+    // Group refs keep their count ranges and unique_only (the old parser
+    // dropped them): traderAlways lists groupDyeMods unique_only count=4.
+    var saw_dye_unique = false;
+    for (t.trader_always_refs) |r| {
+        if (r.group and std.mem.eql(u8, r.name, "groupDyeMods")) {
+            saw_dye_unique = r.unique_only and r.count_min == 4 and r.count_max == 4;
         }
     }
-    try std.testing.expect(found_bandage);
-    // Nested expand of a known group with children
-    var buf: [64]Entry = undefined;
-    const n = t.expandGroup("groupAllAmmo", &buf);
-    try std.testing.expect(n > 0);
+    try std.testing.expect(saw_dye_unique);
+    // Ammo refs carry count ranges (40,150), and a prob-gated ref parses.
+    var saw_ammo_range = false;
+    var saw_prob = false;
+    for (t.trader_always_refs) |r| {
+        if (!r.group and std.mem.eql(u8, r.name, "ammoGasCan")) {
+            saw_ammo_range = r.count_min == 5000 and r.count_max == 10000;
+        }
+    }
+    if (t.groupByName("ammoAll")) |g| {
+        for (g.refs) |r| {
+            if (r.prob < 1) saw_prob = true;
+        }
+    }
+    try std.testing.expect(saw_ammo_range);
+    try std.testing.expect(saw_prob);
 }
 
 test "trader table parses trader_info blocks with per-trader items and attrs" {
@@ -383,27 +545,89 @@ test "trader table parses trader_info blocks with per-trader items and attrs" {
     try std.testing.expect(rent.rentable);
     try std.testing.expectEqual(@as(i32, 2500), rent.rent_cost);
     try std.testing.expectEqual(@as(i32, 30), rent.rent_time);
-    // expandTraderRefs resolves group refs (Joel's specialty has no traderAlways).
-    var out: [128]Entry = undefined;
-    const on = t.expandTraderRefs(joel, &out);
-    try std.testing.expect(on > joel.refs.len);
-    try std.testing.expect(on <= out.len);
-    // Jen (2) is a different list from Joel (1): different direct names.
+    // Jen (2) is a different list from Joel (1): roll both with a seeded rng
+    // and the first rolled names differ (Jen sells food, Joel armor).
     const jen = t.traderInfo(2).?;
-    var outj: [128]Entry = undefined;
-    const ojn = t.expandTraderRefs(jen, &outj);
+    var outj: [128]RolledItem = undefined;
+    var rng_j = rng_util.XorShift32.init(7);
+    const ojn = t.rollAllRefs(jen.refs, &rng_j, &outj);
     try std.testing.expect(ojn > 0);
-    var same_lead = true;
-    const k = @min(on, ojn);
-    for (out[0..k], outj[0..k]) |a, b| {
-        if (!std.mem.eql(u8, a.name, b.name)) same_lead = false;
+    var out_joel: [128]RolledItem = undefined;
+    var rng_j2 = rng_util.XorShift32.init(7);
+    const ojn2 = t.rollAllRefs(joel.refs, &rng_j2, &out_joel);
+    try std.testing.expect(ojn2 > 0);
+    try std.testing.expect(!std.mem.eql(u8, out_joel[0].name, outj[0].name));
+}
+
+test "roll stays deterministic and honours count ranges and unique_only" {
+    var arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer {
+        arena_holder.deinit();
+        std.testing.allocator.destroy(arena_holder);
     }
-    try std.testing.expect(!same_lead);
+    const arena = arena_holder.allocator();
+    const refs = [_]ItemRef{
+        .{ .name = "ammoA", .count_min = 40, .count_max = 150 },
+        .{ .name = "ammoB", .count_min = 1, .count_max = 1 },
+        .{ .name = "gunA", .quality_lo = 2, .quality_hi = 6 },
+    };
+    var t = TraderTable.empty();
+    var out: [16]RolledItem = undefined;
+    var rng_a = rng_util.XorShift32.init(99);
+    const n = t.rollAllRefs(&refs, &rng_a, &out);
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expect(out[0].count >= 40 and out[0].count <= 150);
+    try std.testing.expectEqual(@as(u16, 1), out[1].count);
+    try std.testing.expect(out[2].quality >= 2 and out[2].quality <= 6);
+    // Same seed → same roll (deterministic sim input).
+    var rng_b = rng_util.XorShift32.init(99);
+    var out2: [16]RolledItem = undefined;
+    const n2 = t.rollAllRefs(&refs, &rng_b, &out2);
+    try std.testing.expectEqual(n, n2);
+    for (out[0..n], out2[0..n2]) |a, b| {
+        try std.testing.expectEqualStrings(a.name, b.name);
+        try std.testing.expectEqual(a.count, b.count);
+        try std.testing.expectEqual(a.quality, b.quality);
+    }
+    _ = arena;
+}
+
+test "unique_only group picks distinct refs" {
+    var arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer {
+        arena_holder.deinit();
+        std.testing.allocator.destroy(arena_holder);
+    }
+    const arena = arena_holder.allocator();
+    const items = [_]ItemRef{
+        .{ .name = "modA", .prob = 100 },
+        .{ .name = "modB", .prob = 100 },
+        .{ .name = "modC", .prob = 100 },
+    };
+    const gname = arena.dupe(u8, "groupMods") catch return error.OutOfMemory;
+    const g = Group{ .name = gname, .refs = &items, .count_min = 3, .count_max = 3, .unique_only = true };
+    var t = TraderTable.empty();
+    t.groups = &[_]Group{g};
+    // The group ref: count=3 rounds × group count=3 picks = 9 picks from 3
+    // items, unique → each item at most once per group roll, so at most 3
+    // distinct names per roll and every name appears at most once per round.
+    const refs = [_]ItemRef{.{ .name = gname, .group = true, .count_min = 3, .count_max = 3 }};
+    var out: [16]RolledItem = undefined;
+    var rng = rng_util.XorShift32.init(5);
+    const n = t.rollAllRefs(&refs, &rng, &out);
+    try std.testing.expect(n >= 3);
+    var seen: [3]bool = .{false} ** 3;
+    for (out[0..n]) |r| {
+        if (std.mem.eql(u8, r.name, "modA")) seen[0] = true;
+        if (std.mem.eql(u8, r.name, "modB")) seen[1] = true;
+        if (std.mem.eql(u8, r.name, "modC")) seen[2] = true;
+    }
+    try std.testing.expect(seen[0] and seen[1] and seen[2]);
 }
 
 test "trader_info scan survives adjacent blocks with no whitespace" {
-    // The close-tag skip was one byte past "</trader_info>" (15 vs 14), so two
-    // blocks with no separator dropped every other one. Regression: both parse.
     const xml_text =
         \\<traders>
         \\  <trader_item_group name="traderAlways"><item name="medicalBandage" count="3,5"/></trader_item_group>

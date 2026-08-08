@@ -2625,7 +2625,7 @@ pub const Game = struct {
                 .item = .{
                     .type_id = type_id,
                     .count = if (ent.count > 0) ent.count else 1,
-                    .quality = 1,
+                    .quality = ent.quality,
                 },
                 // Entry.Markup demand delta: +100 after a buy, -4 after a sell
                 // (asm.il 856828-856866), reset on restock. The client shows the

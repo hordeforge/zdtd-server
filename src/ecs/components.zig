@@ -570,6 +570,9 @@ pub const Inventory = struct {
 pub const StockEntry = struct {
     item: u16 = 0,
     count: u16 = 0,
+    /// Rolled ItemValue quality (traders.xml quality="lo,hi"); 1 for
+    /// stackables without a quality range.
+    quality: u8 = 1,
     price: u16 = 0,
     sell: u16 = 0,
     /// TraderData.Entry.Markup (sbyte demand delta). Stock raises it to +100 on
