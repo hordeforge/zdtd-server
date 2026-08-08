@@ -1118,6 +1118,10 @@ const AiCtx = struct {
 /// an outer bound over every entity, not a per-entity gate, and every stock
 /// SightRange sits under it.
 fn senseDistSq(w: *const World, s: Slot) f32 {
+    // A35 per-entity layer first: the def spawns carry SightRange onto the
+    // entity, so a class outside the fixed class_table senses as itself too.
+    const pe = w.class_id[s].sight_range;
+    if (pe > 0) return pe * pe;
     const sr = w.class_table[w.class_id[s].id].sight_range;
     if (sr > 0) return sr * sr;
     return w.rules.ai.sense_dist_sq;
@@ -3829,4 +3833,8 @@ test "sense range comes from entityclasses SightRange, not the global rule" {
     w.class_table[1].sight_range = 30.0;
     w.class_id[0] = .{ .id = 1 };
     try std.testing.expectEqual(@as(f32, 900.0), senseDistSq(&w, 0));
+    // The per-entity layer (A35 def spawns) beats the class_table row: a feral
+    // resolved outside the table senses at its own SightRange, not the row.
+    w.class_id[0].sight_range = 40.0;
+    try std.testing.expectEqual(@as(f32, 1600.0), senseDistSq(&w, 0));
 }

@@ -68,6 +68,9 @@ pub const ClassId = struct {
     chase_speed: f32 = 0,
     wander_speed: f32 = 0,
     attack_damage: f32 = 0,
+    /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
+    /// sense floor (systems.senseDistSq).
+    sight_range: f32 = 0,
     /// IsEnemyEntity: false on passive wildlife, so only predators chase.
     is_enemy: bool = true,
 };

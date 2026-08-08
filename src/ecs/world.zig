@@ -569,6 +569,7 @@ pub const World = struct {
             self.class_id[s].chase_speed = def.chase_speed;
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
         }
         return id;
@@ -632,6 +633,7 @@ pub const World = struct {
             self.class_id[s].chase_speed = def.chase_speed;
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
         }
         return id;
