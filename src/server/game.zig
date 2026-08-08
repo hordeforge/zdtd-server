@@ -21,6 +21,7 @@ const parallel_util = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 const protocol = @import("../protocol.zig");
 const replicate_te = @import("replicate_te.zig");
+const game_net = @import("game_net.zig");
 const admin_console = @import("admin_console.zig");
 const ConsoleOut = admin_console.ConsoleOut;
 const TargetResult = admin_console.TargetResult;
@@ -429,29 +430,12 @@ pub const default_peer_stale_ms: u64 = 3000;
 /// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
 pub const default_deco_objects_per_join: usize = 8192;
-/// Reliable-window retry pacing: the first `window_fast_attempts` retries pump
-/// ACKs with no sleep (LAN round trips are sub-ms, so a live peer usually
-/// drains in a few passes), then a 1 ms sleep every 4th attempt paces the
-/// rest. The pacing matters for clients whose LiteNetLib Update cycle batches
-/// ACKs every ~15 ms: without it, a small mapping's outer budget exhausted in
-/// microseconds before the first ACK could arrive and dropped every join.
-/// The old fixed 0.5 s sleep wedged the single-threaded tick for up to two
-/// minutes per stuck peer and starved reapStalePeers, which is what turns a
-/// reconnect flood into repeated IdMapping WindowFull drops.
-const window_fast_attempts: u32 = 16;
-const window_retry_sleep_ns: u64 = 1_000_000; // 1 ms every 4th attempt after the fast window
-/// Wall-clock cap on the paced WindowFull retry phase in sendGame. One client
-/// ACK batch cycle (~15 ms, see above) is enough for a live peer to open its
-/// window; beyond that the peer is stuck, so the package takes the existing
-/// drop path instead of holding the 50 ms tick. Without this cap a stuck peer
-/// paced the full attempt budget (~1 s for a chunk's 4000 attempts) and the
-/// per-pass chunk stream multiplied it: observed 9.86 s single-tick overrun.
-const window_retry_budget_ns: u64 = 16_000_000; // 16 ms
-/// Join-critical send budget (sendGameCritical / sendFramedReliable critical):
-/// one shared window of retry across the enter bundle so a transiently busy
-/// peer still gets WorldInfo/IdMapping. 3 s matches the peer_stale_ms reap, so
-/// a dead peer stalls the tick at most once per join, not per package.
-const critical_retry_budget_ns: u64 = 3_000_000_000;
+/// Reliable-window retry pacing — see game_net.zig for the policy comment.
+/// Kept here so InitOptions / Game defaults and the tuning docs cite one place.
+pub const window_fast_attempts: u32 = 16;
+pub const window_retry_sleep_ns: u64 = 1_000_000;
+pub const window_retry_budget_ns: u64 = 16_000_000;
+pub const critical_retry_budget_ns: u64 = 3_000_000_000;
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 /// Scratch for serialize-once framed packets (PosAndRot ~40 B body + frame hdr).
@@ -2524,7 +2508,7 @@ pub const Game = struct {
         return self.info_port;
     }
 
-    fn refreshInfoPlayers(self: *Game) void {
+    pub fn refreshInfoPlayers(self: *Game) void {
         self.info_tcp.setPlayers(@intCast(self.countJoined()));
     }
 
@@ -3009,190 +2993,28 @@ pub const Game = struct {
         return self.net.port;
     }
 
-    fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
-        // Fast path: known live peer. This runs per inbound datagram, so the
-        // reap sweep below only pays off on the miss (new-peer) path;
-        // reapStalePeers covers dead peers once per tick regardless.
-        if (peer.alive) {
-            for (&self.clients) |*c| {
-                if (c.peer == peer) return c;
-            }
-        }
-        // Drop clients whose LiteNet peer died (disconnect / timeout).
-        // Same log/counter as reapStalePeers: whichever sweep wins the race,
-        // the disconnect still shows up in the server log.
-        for (&self.clients) |*c| {
-            if (c.peer) |p| {
-                if (!p.alive) {
-                    self.harness.counters.inc(.stale_peers_reaped);
-                    std.debug.print(
-                        "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
-                        .{ p.local_id, c.slot, c.entity_id },
-                    );
-                    // Free the seat in the sim only. This sweep can run nested
-                    // inside a sendReliable ack pump, so it must not touch the
-                    // shared send buffer; surviving peers drop the visual when
-                    // the rider entity is removed.
-                    _ = systems.vehicleDetach(&self.sim, c.entity_id);
-                    self.clearLocksForPeer(c.slot);
-                    c.* = .{};
-                    self.refreshInfoPlayers();
-                }
-            }
-        }
-        for (&self.clients) |*c| {
-            if (c.peer == peer) return c;
-        }
-        // Soft capacity: ServerMaxPlayerCount (slots still sized to max_clients).
-        var occupied: u16 = 0;
-        for (&self.clients) |*c| {
-            if (c.peer != null) occupied += 1;
-        }
-        if (occupied >= self.max_players) return null;
-        for (&self.clients, 0..) |*c, i| {
-            if (c.peer == null) {
-                c.* = .{ .peer = peer, .slot = i };
-                self.challenge_counter += 1;
-                // Both halves from the join counter (golden-ratio mix on the high
-                // half). No wall-clock: challenge bytes are seed-stable for DST
-                // replay of the join path. Still unique per accept order.
-                std.mem.writeInt(u64, c.challenge[0..8], self.challenge_counter, .little);
-                std.mem.writeInt(u64, c.challenge[8..16], self.challenge_counter *% 0x9E3779B97F4A7C15, .little);
-                return c;
-            }
-        }
-        return null;
+    pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
+        return game_net.clientFor(self, peer);
     }
 
-    /// Streaming packages may be soft-dropped on WindowFull (client re-requests
-    /// or the next stream tick resends). Everything else is join/state-critical:
-    /// dropping e.g. SignDataResponse leaves the client stuck on "Starting Game"
-    /// (worldInfoCo blocks until isLastBatch=true).
-    /// Stock EntityPlayer/NetConnectionAbs `get_ReliableDelivery` overrides
-    /// (asm.il 816202-816208, 793041-793050): these five S2C packages ride the
-    /// Unreliable delivery method, not the 64-slot reliable window. Routing
-    /// them off the window is what keeps 20 Hz motion spam from competing with
-    /// chunks and join-critical control traffic for ACK slots.
     fn isUnreliablePackage(pkg_name: []const u8) bool {
-        const names = [_][]const u8{
-            "NetPackageEntityPosAndRot",
-            "NetPackageEntityRelPosAndRot",
-            "NetPackageEntityRotation",
-            "NetPackageEntitySpeeds",
-            "NetPackageEntityStatsBuff",
-        };
-        for (names) |n| {
-            if (std.mem.eql(u8, pkg_name, n)) return true;
-        }
-        return false;
+        return game_net.isUnreliablePackage(pkg_name);
     }
 
     fn isDroppablePackage(pkg_name: []const u8) bool {
-        // NOT droppable: NetPackageDecoUpdate. DecoManager.Read only allocates
-        // loadedDecos on firstPackage=true; dropping that one NREs every
-        // continuation package, and deco is sent exactly once per session.
-        const names = [_][]const u8{
-            "NetPackageChunk",
-            "NetPackageChunkRemove",
-            "NetPackageDecoResetWorldChunk",
-            "NetPackageEntityPosAndRot",
-            "NetPackageEntitySpeeds",
-            "NetPackageVehiclePositions",
-            "NetPackageWorldTime",
-        };
-        for (names) |n| {
-            if (std.mem.eql(u8, pkg_name, n)) return true;
-        }
-        return false;
+        return game_net.isDroppablePackage(pkg_name);
     }
 
     pub fn sendGame(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
-        return self.sendGameBudget(peer, pkg_name, body, window_retry_budget_ns, false);
+        return game_net.sendGame(self, peer, pkg_name, body);
     }
 
-    /// Join-critical variant of sendGame: the enter bundle has no client retry,
-    /// so a transiently busy peer (another client's stream burst holding the
-    /// reliable window) must not lose WorldInfo / IdMapping — a silent drop
-    /// wedges the client on the loading screen forever. Uses the peer's shared
-    /// critical budget (default 3 s, matching the peer_stale_ms reap); a truly
-    /// dead peer still fails fast and is reaped.
     pub fn sendGameCritical(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) anyerror!void {
-        return self.sendGameBudget(peer, pkg_name, body, critical_retry_budget_ns, true);
+        return game_net.sendGameCritical(self, peer, pkg_name, body);
     }
 
-    fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
-        // Stock compresses NetPackageChunk and NetPackageSignDataResponse
-        // (asm.il:808641 set); deflate them into send_buf before the plain
-        // framing path so the join/stream cost drops. Bodies stay in body_buf
-        // (chunks and sign batches are built there), so the compressed frame
-        // never aliases them. On any overflow/encode failure the call falls
-        // through uncompressed.
-        if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse")) {
-            if (self.trySendCompressed(peer, pkg_name, body)) return;
-        }
-        // Count encode failures here: many callers swallow the error (`catch {}`),
-        // so this is the only place they stay visible in apm. Rate-limit the log
-        // so a bad package does not flood stdout while still showing first/100th.
-        const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
-            self.harness.counters.inc(.encode_errors);
-            const n = self.harness.counters.get(.encode_errors);
-            if (n == 1 or n % 100 == 0) {
-                // local_id identifies which peer keeps triggering the bad body;
-                // without it a faulty client is indistinguishable from a server bug.
-                std.debug.print(
-                    "zdtd: encode failed pkg={s} body_len={d} local_id={d} n={d}: {s}\n",
-                    .{ pkg_name, body.len, peer.local_id, n, @errorName(err) },
-                );
-            }
-            return err;
-        };
-        // Poll mid-send so client ACKs free the reliable window (explicit anyerror avoids
-        // inferred error-set cycles with onData).
-        // Streaming: ~8ms budget then soft-drop. Critical: keep pumping ACKs up
-        // to ~120ms; one long send beats a client wedged on "Starting Game".
-        // Motion packages (stock get_ReliableDelivery=false) never enter the
-        // window: send unreliable, falling back to reliable only if the frame
-        // exceeds the single-datagram cap (does not happen for the five).
-        if (isUnreliablePackage(pkg_name)) {
-            if (framed.len <= ln_packet.max_single_user) {
-                peer.sendUnreliable(&self.net.sock, framed) catch |err| {
-                    self.harness.counters.inc(.net_send_errors);
-                    return err;
-                };
-                self.harness.counters.add(.net_packets_out, 1);
-                self.harness.counters.add(.net_bytes_out, framed.len);
-                return;
-            }
-        }
-        const droppable = isDroppablePackage(pkg_name);
-        // Chunks are large multi-fragment; allow longer window drain than chat/etc.
-        const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
-            4000
-        else if (droppable)
-            64
-        else
-            960;
-        // One client ACK batch cycle for the paced phase; the fast phase (no
-        // sleep) is untouched, so healthy peers drain exactly as before. Critical
-        // sends share the peer budget so the whole enter bundle gets one window
-        // of retry time, not one per package.
-        var retry_budget = budget_ns;
-        if (critical) {
-            const now = clock.monoNs();
-            if (peer.critical_budget_deadline_ns < now) peer.critical_budget_deadline_ns = now + budget_ns;
-            retry_budget = @min(budget_ns, peer.critical_budget_deadline_ns -% now);
-        }
-        self.sendReliablePumped(peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
-            error.WindowFull => {
-                self.harness.counters.inc(.reliable_window_drops);
-                const drops = self.harness.counters.get(.reliable_window_drops);
-                if (drops == 1 or drops % 100 == 0) {
-                    std.debug.print("zdtd: reliable window drop pkg={s} droppable={} n={d}\n", .{ pkg_name, droppable, drops });
-                }
-                if (critical) return error.WindowFull;
-            },
-            else => return err,
-        };
+    pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
+        return game_net.sendGameBudget(self, peer, pkg_name, body, budget_ns, critical);
     }
 
     /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
@@ -3276,32 +3098,8 @@ pub const Game = struct {
     /// `budget_ns==null` means no deadline (stream/broadcast). Returns
     /// error.WindowFull on exhaustion; callers own drop counters/logs and the
     /// packages_broadcast count (via count_broadcast).
-    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
-        const retry_deadline: u64 = if (budget_ns) |b| clock.monoNs() + b else 0;
-        var attempts: u32 = 0;
-        while (attempts < max_attempts) : (attempts += 1) {
-            peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
-                error.WindowFull => {
-                    peer.resendPending(&self.net.sock) catch {
-                        self.harness.counters.inc(.net_send_errors);
-                    };
-                    self.pollNetOnce();
-                    if (budget_ns != null and clock.monoNs() >= retry_deadline) break;
-                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
-                    continue;
-                },
-                else => {
-                    self.harness.counters.inc(.net_send_errors);
-                    return err;
-                },
-            };
-            self.harness.counters.add(.net_packets_out, 1);
-            self.harness.counters.add(.net_bytes_out, framed.len);
-            if (count_broadcast) self.harness.counters.inc(.packages_broadcast);
-            self.pollNetAfterSend();
-            return;
-        }
-        return error.WindowFull;
+    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, tag: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
+        return game_net.sendReliablePumped(self, peer, tag, framed, budget_ns, max_attempts, count_broadcast);
     }
 
     /// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
@@ -3812,58 +3610,12 @@ pub const Game = struct {
     /// Post-send ACK drain, every 8th send: pollNetOnce costs a recvfrom
     /// syscall + peer scan per call, and the 64-deep reliable window has ample
     /// headroom between drains. WindowFull retry paths still pump directly.
-    fn pollNetAfterSend(self: *Game) void {
-        self.sends_since_poll += 1;
-        if (self.sends_since_poll >= 8) {
-            self.sends_since_poll = 0;
-            self.pollNetOnce();
-        }
+    pub fn pollNetAfterSend(self: *Game) void {
+        return game_net.pollNetAfterSend(self);
     }
 
-    fn pollNetOnce(self: *Game) void {
-        if (self.pumping) {
-            // Oversized uncopied payload: any handlePacket that completes a
-            // fragment would rewrite peer.deliver_buf under the live bodies.
-            if (self.drain_suppressed > 0) return;
-            // LiteNet MTU is 1327; 2 KiB covers one datagram with headroom.
-            var ctl: [2048]u8 = undefined;
-            self.net.drainControl(&ctl, 24);
-            return;
-        }
-        self.pumping = true;
-        defer self.pumping = false;
-        var n: u32 = 0;
-        while (n < 24) : (n += 1) {
-            const ev = self.net.poll(&self.recv_buf) catch |err| {
-                self.harness.counters.inc(.net_poll_errors);
-                const errors = self.harness.counters.get(.net_poll_errors);
-                if (errors == 1 or errors % 100 == 0) {
-                    std.debug.print("zdtd: net poll error={s} n={d}\n", .{ @errorName(err), errors });
-                }
-                break;
-            };
-            switch (ev) {
-                // Best-effort: one bad peer must not stop the poll loop.
-                .none => break,
-                .connected => |p| self.onConnected(p) catch |e| {
-                    self.harness.counters.inc(.join_fail);
-                    std.debug.print(
-                        "zdtd: onConnected failed local_id={d}: {s}\n",
-                        .{ p.local_id, @errorName(e) },
-                    );
-                },
-                .data => |d| self.onData(d.peer, d.payload) catch |err| {
-                    self.harness.counters.inc(.net_payload_errors);
-                    const errors = self.harness.counters.get(.net_payload_errors);
-                    if (errors == 1 or errors % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: payload failed local_id={d} error={s} n={d}\n",
-                            .{ d.peer.local_id, @errorName(err), errors },
-                        );
-                    }
-                },
-            }
-        }
+    pub fn pollNetOnce(self: *Game) void {
+        return game_net.pollNetOnce(self);
     }
 
     /// MaxDamage from blocks.xml+materials via maxdamage table. Generic floor when unknown.
@@ -4252,25 +4004,7 @@ pub const Game = struct {
     }
 
     pub fn peerIpKey(peer: *const ln_peer.Peer) u32 {
-        // Host-order key for ban/rate tables (IPv4 loopback = 0x7f000001). Port is
-        // excluded so ban/rate apply per host. IPv4-mapped IPv6 shares the IPv4 key.
-        return switch (peer.addr) {
-            .ip4 => |a| std.mem.readInt(u32, &a.bytes, .big),
-            .ip6 => |a| blk: {
-                // ::ffff:a.b.c.d → same key as native IPv4 a.b.c.d (ban dual-stack bypass).
-                if (std.mem.eql(u8, a.bytes[0..12], &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff })) {
-                    break :blk std.mem.readInt(u32, a.bytes[12..16], .big);
-                }
-                // Stable FNV-1a of the 16-byte address; never 0 (skip sentinel).
-                var h: u32 = 2166136261;
-                for (a.bytes) |b| {
-                    h ^= b;
-                    h *%= 16777619;
-                }
-                if (h == 0 or h == 0x7f000001) h ^= 0x80000000;
-                break :blk h;
-            },
-        };
+        return game_net.peerIpKey(peer);
     }
 
     /// Stock ~500ms/IP; return true if join should be rejected.
@@ -4305,21 +4039,11 @@ pub const Game = struct {
     }
 
     pub fn banIp(self: *Game, ip: u32) void {
-        if (ip == 0 or self.isBanned(ip)) return;
-        if (self.ban_n >= self.ban_ip.len) return;
-        self.ban_ip[self.ban_n] = ip;
-        self.ban_n += 1;
+        return game_net.banIp(self, ip);
     }
 
     pub fn unbanIp(self: *Game, ip: u32) void {
-        var i: usize = 0;
-        while (i < self.ban_n) : (i += 1) {
-            if (self.ban_ip[i] != ip) continue;
-            self.ban_n -= 1;
-            self.ban_ip[i] = self.ban_ip[self.ban_n];
-            self.ban_ip[self.ban_n] = 0;
-            return;
-        }
+        return game_net.unbanIp(self, ip);
     }
 
     fn pumpAcks(ctx: ?*anyopaque) void {
@@ -4328,7 +4052,7 @@ pub const Game = struct {
         self.pollNetOnce();
     }
 
-    fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
         const c = self.clientFor(peer) orelse {
             // Full or no free slot: reject without taking down the tick loop.
             self.harness.counters.inc(.join_fail);
@@ -4367,7 +4091,7 @@ pub const Game = struct {
         std.debug.print("zdtd: peer connected local_id={d} → challenge sent\n", .{peer.local_id});
     }
 
-    fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!void {
+    pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!void {
         // Hold pumping for the whole handler so sendGame / pump_fn only
         // drainControl (no nested onData, no second parse into inflate_storage).
         const was_pumping = self.pumping;
@@ -6938,7 +6662,7 @@ pub const Game = struct {
     /// the BlockValue raw (tts.zig:13); each changed block is broadcast as the
     /// authoritative SetBlock. Tag-filter residual: stock resets only
     /// quest-tagged blocks; zdtd re-paints the full prefab footprint.
-    fn resetPoiBlocks(self: *Game, wx: i32, wz: i32) void {
+    pub fn resetPoiBlocks(self: *Game, wx: i32, wz: i32) void {
         const pf = if (self.world.prefabs) |*p| p else return;
         var di: ?usize = null;
         for (pf.items, 0..) |d, i| {
@@ -7044,7 +6768,7 @@ pub const Game = struct {
     /// on the reliable channel. The body must live outside send_buf (chunks
     /// and sign batches are built in body_buf); false on any overflow/encode
     /// failure so the caller falls through to the uncompressed path.
-    fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
+    pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
         const pkg_id = packages.idOf(pkg_name) orelse return false;
         var fr: wire_frame.DeflateFramer = undefined;
         fr.begin(&self.send_buf, &self.deflate_window, 0, pkg_id, body.len) catch return false;
@@ -7058,7 +6782,7 @@ pub const Game = struct {
     /// Send an already-framed envelope on the reliable channel, pumping the window
     /// the same way `sendGame` does. Separate from `sendGame` because the compressed
     /// mapping frame is built by the streaming framer, not from a body buffer.
-    fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8, budget_ns: u64, critical: bool) anyerror!void {
+    pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, framed: []const u8, budget_ns: u64, critical: bool) anyerror!void {
         // A live peer drains a small mapping inside a few outer attempts once
         // the 1 ms pacing lets its ACK cycle run; a large one (Navezgane,
         // ~200 fragments) drains inside one sendReliable via the inner per-part
@@ -8291,7 +8015,7 @@ pub const Game = struct {
     /// when the biome map, the biome name, or the biome's rule is unknown.
     /// Fixes the wasteland-at-midnight-getting-forest-walkers gap: stock
     /// resolves per ChunkAreaBiomeSpawnData from the actual biome.
-    fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
+    pub fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
         const bm = self.world.biomes orelse return fallback;
         const biome_id = bm.atWorld(@intFromFloat(@floor(x)), @intFromFloat(@floor(z))) orelse return fallback;
@@ -8424,7 +8148,7 @@ pub const Game = struct {
 
     /// trader_info open hours gate: vending machines and traders without
     /// open_time are always open; unknown info ids (fixtures) never gate.
-    fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
+    pub fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
         const info_id = self.sim.trader_stock[ts].trader_info_id;
         if (info_id == 0) return true;
         const info = self.traders.traderInfo(info_id) orelse return true;
@@ -8534,7 +8258,7 @@ pub const Game = struct {
     /// resolvable to ECS items: per-trader `<trader_items>` from the trader_info
     /// matching the entity's class (npc.xml trader_id), else traderAlways.
     /// Price from items.xml EconomicValue when known.
-    fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
+    pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         const tt = self.traders;
         const s = self.sim.slotOfNetId(trader_net_id) orelse return;
         if (!self.sim.mask[s].trader_stock) return;
@@ -9595,150 +9319,24 @@ pub const Game = struct {
     /// Unreliable fan-out for the motion frames (PosAndRot / Speeds): fire and
     /// forget, never touches the reliable window. Oversized or failed sends are
     /// dropped (motion is replaced by the next tick's frame anyway).
-    fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-        if (framed.len > ln_packet.max_single_user) {
-            // Oversized motion frame: fall back to the droppable reliable path
-            // rather than silently dropping something the client waits for.
-            self.sendFramedDroppable(peer, framed);
-            return;
-        }
-        peer.sendUnreliable(&self.net.sock, framed) catch {
-            self.harness.counters.inc(.net_send_errors);
-        };
-        self.harness.counters.add(.net_packets_out, 1);
-        self.harness.counters.add(.net_bytes_out, framed.len);
+    pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
+        return game_net.sendFramedUnreliable(self, peer, framed);
     }
 
-    fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-        const max_attempts: u32 = 64;
-        var attempts: u32 = 0;
-        while (attempts < max_attempts) : (attempts += 1) {
-            peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
-                error.WindowFull => {
-                    peer.resendPending(&self.net.sock) catch {
-                        self.harness.counters.inc(.net_send_errors);
-                    };
-                    self.pollNetOnce();
-                    if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
-                    continue;
-                },
-                else => {
-                    // Hard send failure (not window pressure): count + rate-limit log.
-                    self.harness.counters.inc(.net_send_errors);
-                    const n = self.harness.counters.get(.net_send_errors);
-                    if (n == 1 or n % 100 == 0) {
-                        std.debug.print(
-                            "zdtd: framed stream send failed local_id={d} n={d}: {s}\n",
-                            .{ peer.local_id, n, @errorName(err) },
-                        );
-                    }
-                    return;
-                },
-            };
-            self.harness.counters.add(.net_packets_out, 1);
-            self.harness.counters.add(.net_bytes_out, framed.len);
-            self.harness.counters.inc(.packages_broadcast);
-            self.pollNetAfterSend();
-            return;
-        }
-        // Same signal as sendGame drops: counter always, log rate-limited.
-        self.harness.counters.inc(.reliable_window_drops);
-        const n = self.harness.counters.get(.reliable_window_drops);
-        if (n == 1 or n % 100 == 0) {
-            std.debug.print(
-                "zdtd: drop framed stream (reliable window full) n={d} local_id={d}\n",
-                .{ n, peer.local_id },
-            );
-        }
+    pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
+        return game_net.sendFramedDroppable(self, peer, framed);
     }
 
     pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
-        try self.broadcastExcept(name, body, null);
+        return game_net.broadcast(self, name, body);
     }
 
-    /// World-position broadcast: only clients whose player is within
-    /// `range_blocks` of (wx,wz). Chat/time stay global via broadcast().
     pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
-        // Encode failures were counter-only (no log). Match sendGame: counter +
-        // rate-limited log. Successful fan-out must also tick net_packets/bytes
-        // so apm RED rates reflect broadcast traffic (chat, setblock, time, …).
-        const framed = packages.framed(&self.send_buf, name, body) catch |err| {
-            self.harness.counters.inc(.encode_errors);
-            const n = self.harness.counters.get(.encode_errors);
-            if (n == 1 or n % 100 == 0) {
-                std.debug.print(
-                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
-                    .{ name, body.len, n, @errorName(err) },
-                );
-            }
-            return err;
-        };
-        for (&self.clients) |*c| {
-            const p = c.peer orelse continue;
-            if (!c.joined) continue;
-            // No sim player yet (join in progress): deliver rather than drop.
-            if (self.sim.playerByPeer(c.slot)) |ps| {
-                const dx = self.sim.transform[ps].x - wx;
-                const dz = self.sim.transform[ps].z - wz;
-                if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
-            }
-            self.sendReliablePumped(p, name, framed, null, 64, true) catch |err| switch (err) {
-                error.WindowFull => {
-                    self.harness.counters.inc(.reliable_window_drops);
-                    const d = self.harness.counters.get(.reliable_window_drops);
-                    if (d == 1 or d % 100 == 0) std.debug.print("zdtd: reliable window drop pkg={s} broadcastNear local_id={d} n={d}\n", .{ name, p.local_id, d });
-                },
-                else => {
-                    self.harness.counters.inc(.net_send_errors);
-                    const n2 = self.harness.counters.get(.net_send_errors);
-                    if (n2 == 1 or n2 % 100 == 0) std.debug.print("zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
-                },
-            };
-        }
+        return game_net.broadcastNear(self, name, body, wx, wz, range_blocks);
     }
 
-    fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
-        const framed = packages.framed(&self.send_buf, name, body) catch |err| {
-            self.harness.counters.inc(.encode_errors);
-            const n = self.harness.counters.get(.encode_errors);
-            if (n == 1 or n % 100 == 0) {
-                std.debug.print(
-                    "zdtd: encode failed pkg={s} body_len={d} n={d}: {s}\n",
-                    .{ name, body.len, n, @errorName(err) },
-                );
-            }
-            return err;
-        };
-        for (&self.clients) |*c| {
-            const p = c.peer orelse continue;
-            if (!c.joined) continue;
-            if (except_slot) |ex| if (c.slot == ex) continue;
-            if (isUnreliablePackage(name) and framed.len <= ln_packet.max_single_user) {
-                // Motion relay (stock get_ReliableDelivery=false): fire and
-                // forget; a dropped frame is replaced by the next tick.
-                p.sendUnreliable(&self.net.sock, framed) catch {
-                    self.harness.counters.inc(.net_send_errors);
-                    continue;
-                };
-                self.harness.counters.add(.net_packets_out, 1);
-                self.harness.counters.add(.net_bytes_out, framed.len);
-                self.harness.counters.inc(.packages_broadcast);
-            } else {
-                self.sendReliablePumped(p, name, framed, null, 64, true) catch |err| switch (err) {
-                    error.WindowFull => {
-                        self.harness.counters.inc(.reliable_window_drops);
-                        const d = self.harness.counters.get(.reliable_window_drops);
-                        if (d == 1 or d % 100 == 0) std.debug.print("zdtd: reliable window drop pkg={s} broadcast local_id={d} n={d}\n", .{ name, p.local_id, d });
-                    },
-                    else => {
-                        self.harness.counters.inc(.net_send_errors);
-                        const n2 = self.harness.counters.get(.net_send_errors);
-                        if (n2 == 1 or n2 % 100 == 0) std.debug.print("zdtd: broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
-                    },
-                };
-            }
-            self.harness.counters.inc(.packages_broadcast);
-        }
+    pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
+        return game_net.broadcastExcept(self, name, body, except_slot);
     }
 
     /// Drain the hp dirty bit into stock EntityStatChanged(Health) packages.

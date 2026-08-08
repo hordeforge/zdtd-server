@@ -33,6 +33,7 @@ pub const schedule = @import("schedule.zig");
 pub const jobs = @import("jobs.zig");
 pub const observers = @import("observers.zig");
 pub const sim_view = @import("sim_view.zig");
+pub const quest_systems = @import("quest_systems.zig");
 
 pub const World = world.World;
 pub const Slot = world.Slot;
@@ -85,4 +86,5 @@ test {
     _ = observers;
     _ = sim_view;
     _ = snapshot;
+    _ = quest_systems;
 }

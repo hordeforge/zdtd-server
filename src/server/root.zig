@@ -23,6 +23,14 @@ pub const evidence = @import("evidence.zig");
 pub const guard_policy = @import("guard_policy.zig");
 pub const ally = @import("ally.zig");
 pub const replicate_te = @import("replicate_te.zig");
+pub const chunk_stream = @import("chunk_stream.zig");
+pub const persist = @import("persist.zig");
+pub const trade = @import("trade.zig");
+pub const game_net = @import("game_net.zig");
+pub const game_tick = @import("game_tick.zig");
+pub const game_world = @import("game_world.zig");
+pub const game_player = @import("game_player.zig");
+pub const game_join = @import("game_join.zig");
 
 pub const Game = game.Game;
 /// Canonical definition lives in config (serverconfig / InitOptions parse).
@@ -45,4 +53,12 @@ test {
     _ = guard_policy;
     _ = ally;
     _ = replicate_te;
+    _ = chunk_stream;
+    _ = persist;
+    _ = trade;
+    _ = game_net;
+    _ = game_tick;
+    _ = game_world;
+    _ = game_player;
+    _ = game_join;
 }
