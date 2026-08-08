@@ -4692,8 +4692,8 @@ is on main and gated; what follows "Open:" is the honest remainder.
 2. **Weather storm / bloodMoon group state machine** SHIPPED
    (`src/world/weather.zig`). Storm state is persisted (`weather.zwt`, ZWTH1)
    and restored across restart; stock `WeatherManager::Save`/`Load` was not
-   mirrored (own format, same fields). Open: `ForceWeather` / `SetStorm` admin
-   commands.
+   mirrored (own format, same fields). Admin `storm` / `clearweather` /
+   `stormoff` console commands force and clear storms now (2026-08-09).
 3. **Path A\*** SHIPPED: grid A* over a body-aware step predicate (step-up, drop
    and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
    gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,
