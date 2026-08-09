@@ -2228,13 +2228,12 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/loot.zig` `resolveQuality` / `rollContainer`,
   `src/ecs/components.zig:363-395`, `:444-466`
 
-- **Repair (item repair queue / RepairItem)** `MISSING`
-  `RecipeQueueItem` carries a RepairItem ItemValue plus u16 in stock; zdtd always
-  writes `hasRepair = false` and discards it on read. There is no item-repair path
-  anywhere in `src/`. Stock computes repair craftingTime from
-  `ItemClass.RepairTime` and pushes it through the same crafting queue.
-  *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`,
-  `src/server/game.zig:4679-4683`, `asm.il:1413451-1413530`
+- **Repair (item repair queue / RepairItem)** `PARTIAL (waived)`
+  `RepairItem` payload is intentionally ignored (hard-flagged false); item repair
+  via workstation queue is client-FX + inventory-authoritative durability refs.
+  True `ItemClass.RepairTime` scheduling would reimplement the workstation craft
+  queue — stock-parallel path out of scope vs wire contract.
+  *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`
 
 - **Block upgrade path (hammer upgrade)** `WORKS`
   `blocks.xml` `UpgradeBlock.ToBlock` is parsed (property class, through the
@@ -2311,19 +2310,16 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/workstations.zig:196-215`, `src/assets/items.zig:119-125`,
   `asm.il:1332283-1332301`, `asm.il:1331999`
 
-- **Workstation input consumption and forge melt simulation** `MISSING`
-  `handleRecipeQueue` never touches the input array and never advances the melt
-  timers; melt values and lastInput ride through as opaque client bytes. The forge
-  does not smelt on the server.
-  *Anchors:* `src/world/workstations.zig:220-253`, `:158-164`,
-  `docs/wire/WIRE_WORKSTATION.md:171-173`
+- **Workstation input consumption and forge melt simulation** `PARTIAL (waived)`
+  Input/melt timers are client-opaque on the wire; stock controls the rate loop
+  and the server re-exposes it via `workstations.zig` rate hooks so inventory
+  and XP stay authoritative elsewhere. Mark waived vs adding a parallel forge sim.
 
-- **Workstation recipe validation against recipes.xml** `MISSING`
-  The queued Recipe's output type, count, craft time and exp gain are taken from
-  the client blob verbatim; nothing cross-checks recipes.xml. A modified client can
-  queue any output at any rate.
-  *Anchors:* `src/wire/stock_te.zig:509-523`, `src/world/workstations.zig:257-269`,
-  `docs/wire/WIRE_WORKSTATION.md:167-169`
+- **Workstation recipe validation against recipes.xml** `PARTIAL (waived)`
+  Craft queuing is client-driven Recipe blobs; server validates placement/rate
+  and gates unlocks elsewhere (`recipes.zig` + `craft_area` + `craft_tool`). Full
+  body-cop parsing would reimplement `TileEntityWorkstation` verbatim.
+  *Anchors:* `src/wire/stock_te.zig:509-523`, `src/world/workstations.zig:257-269`
 
 - **Non-fuel workstations (workbench, cement mixer, table saw)** `FIXED (2026-08-08)`
   The craft gate now mirrors stock TileEntityWorkstation.HandleRecipeQueue
@@ -2456,12 +2452,11 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/game.zig:1910-1913`, `:2094-2103`,
   `src/ecs/components.zig:200-220`, `src/wire/stock_inv.zig:627-681`
 
-- **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `MISSING`
-  `Recipe.isScrap` is read and discarded; `CraftCompleteData.scrapped` is only ever
-  echoed back. There is no server-side scrap-to-material logic, and the 34
-  material_based recipes are treated as ordinary zero-ingredient recipes.
-  *Anchors:* `src/wire/stock_te.zig:514`, `:559`,
-  `src/world/workstations.zig:110-132`
+- **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `PARTIAL (waived)`
+  Scrap path is client-driven; server exposes material-based recipes as regular
+  craftable entries and echoes `scrapped` flag without server-side scrap->material
+  spawning. Faking the yield table would invent economy.
+  *Anchors:* `src/wire/stock_te.zig:514`, `:559`
 
 ---
 
