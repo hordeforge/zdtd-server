@@ -2688,18 +2688,10 @@ and server-to-client XP/level pushes do not exist.
   post-respawn state.
   *Anchors:* `src/server/game.zig:3942-4009`, `:3956-3988`, `:6022-6056`
 
-- **Respawn zeroes food and water** `PARTIAL`
-  Bug. The respawn heal does `self.sim.health[si] = .{ .hp = 100, .max_hp = 100 }`,
-  which resets the whole struct, and Health's defaults are `food = 0` and
-  `water = 0` (only food_max/water_max default to 100). `sendJoinBundle` then takes
-  the death re-bundle branch and `sendPlayerVitals` reads those zeros out of the
-  sim and sends Food 0/100 and Water 0/100, which
-  `NetPackageEntityStatChanged::ProcessPackage` applies to the local player. Only
-  bites on death-respawn, not first join or relog, because `spawnPlayer` does set
-  100/100.
-  *Anchors:* `src/server/game.zig:3962`, `src/ecs/components.zig:22-30`,
-  `src/server/game.zig:6508-6544`, `:6185-6203`, `src/ecs/world.zig:553-556`,
-  `asm.il:201999`
+- **Respawn zeroes food and water** `WORKS`
+  `respawnPlayer` now mutates hp/max_hp only, preserving food/water/stamina and
+  seeding maxima when zero; respawn no longer starves the player to 0/100.
+  *Anchors:* `src/ecs/world.zig:respawnPlayer`, `src/ecs/components.zig:22-37`
 
 - **Bedroll / spawn point selection on respawn** `MISSING`
   `sendWorldSpawnPoints` ships the map's spawnpoints, but every respawn calls

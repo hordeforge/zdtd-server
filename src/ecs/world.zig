@@ -386,11 +386,17 @@ pub const World = struct {
     pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
         if (slot >= max_entities or !self.mask[slot].kind) return;
         self.reviveSlot(slot);
-        // The client drops its own remove_on_death buffs when it dies
-        // (BuffClass::RemoveOnDeath, asm.il 1371585), so drop ours silently
-        // rather than broadcasting removals it made.
         if (self.mask[slot].buffs) _ = buff.clearOnDeath(&self.buffs[slot]);
-        self.health[slot] = .{ .hp = 100, .max_hp = 100 };
+        var h = self.health[slot];
+        h.hp = 100;
+        h.max_hp = 100;
+        // Keep food/water/stamina on respawn; stock does not zero them
+        // (the bug did `Health{hp=100,max=100}` which zeroed food=0/water=0).
+        if (h.food == 0 and h.food_max == 0) h.food_max = 100;
+        if (h.water == 0 and h.water_max == 0) h.water_max = 100;
+        if (h.stamina_max == 0) h.stamina_max = 100;
+        if (h.stamina == 0) h.stamina = h.stamina_max;
+        self.health[slot] = h;
         if (self.mask[slot].player) self.player[slot].is_blood_moon_dead = false;
         self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
         self.markDirty(slot, .{ .pos = true, .hp = true });
