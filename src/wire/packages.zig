@@ -2744,7 +2744,7 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
         } else |_| {}
         _ = br.readI16() catch 0; // blastPower
         if (br.readF32()) |bd| {
-            if (bd > 0 and bd <= 65535) out.block_damage = @intFromFloat(bd);
+            if (bd > 0 and bd <= 65535) out.block_damage = @trunc(bd);
         } else |_| {}
         if (br.readF32()) |ed| {
             if (ed > 0 and ed <= 65535) out.entity_damage = ed;

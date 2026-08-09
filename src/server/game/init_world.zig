@@ -226,7 +226,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     // The turret is persistable and only seeds fresh; the generator is a
     // virtual node (no block) and re-seeds every boot so a restored turret
     // still finds a source after a restart.
-    const gen = self.sim.power.addNode(.generator, @intFromFloat(sx + 50), @intFromFloat(sy), @intFromFloat(sz + 50), 100);
+    const gen = self.sim.power.addNode(.generator, @trunc(sx + 50), @trunc(sy), @trunc(sz + 50), 100);
     if (!had_saved_entities) {
         if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
             if (gen) |gid| {

@@ -203,12 +203,12 @@ pub fn lootStage(in: LootInputs) i32 {
     return @max(1, floorToI32(scaled));
 }
 
-/// Saturating floor: f32 far outside i32 would be UB through @intFromFloat.
+/// Saturating floor: f32 far outside i32 would be UB through @trunc.
 fn floorToI32(v: f32) i32 {
     const f = @floor(v);
     if (f <= @as(f32, @floatFromInt(std.math.minInt(i32)))) return std.math.minInt(i32);
     if (f >= @as(f32, @floatFromInt(std.math.maxInt(i32)))) return std.math.maxInt(i32);
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 pub const Table = struct {
@@ -304,7 +304,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 
     var cfg: Config = .{};
     if (std.mem.indexOf(u8, clean, "<config")) |ci| {
-        cfg.days_alive_change_when_killed = @intFromFloat(@max(0, @min(365, parseF32Attr(clean, ci, "daysAliveChangeWhenKilled", 2))));
+        cfg.days_alive_change_when_killed = @trunc(@max(0, @min(365, parseF32Attr(clean, ci, "daysAliveChangeWhenKilled", 2))));
         cfg.difficulty_bonus = parseF32Attr(clean, ci, "difficultyBonus", 1);
         cfg.starting_weight = parseF32Attr(clean, ci, "startingWeight", 1);
         cfg.diminishing_returns = parseF32Attr(clean, ci, "diminishingReturns", 0.5);

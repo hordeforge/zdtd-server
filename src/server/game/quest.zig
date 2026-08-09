@@ -37,7 +37,7 @@ pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
                 systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
                 // The quest now dedicates this POI: restore its baked blocks
                 // (PrefabInstance.ResetBlocksAndRebuild on quest dedication).
-                self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
+                self.resetPoiBlocks(@trunc(head.px), @trunc(head.pz));
             }
             const out = try packages.stock_quest.buildQuestEvent(self.body_buf[0..64], reply);
             if (lockout.reason == .none) {
@@ -51,7 +51,7 @@ pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         .lock_poi => {
             systems.questPoiLock(&self.sim, c.entity_id, head.px, head.pz);
             // Lock acquisition = quest dedication: restore the POI blocks.
-            self.resetPoiBlocks(@intFromFloat(head.px), @intFromFloat(head.pz));
+            self.resetPoiBlocks(@trunc(head.px), @trunc(head.pz));
         },
         .unlock_poi => systems.questPoiUnlock(&self.sim, c.entity_id, head.px, head.pz),
         else => return,

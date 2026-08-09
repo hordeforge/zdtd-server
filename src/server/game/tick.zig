@@ -40,9 +40,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         if (prog.drowning_damage_per_second > 0) {
             const water_id = self.world.terrain_ids.water;
             if (water_id != 0 and self.world.blockWorld(
-                @intFromFloat(self.sim.transform[ps].x),
-                @as(i32, @intFromFloat(self.sim.transform[ps].y)) + 1,
-                @intFromFloat(self.sim.transform[ps].z),
+                @trunc(self.sim.transform[ps].x),
+                @as(i32, @trunc(self.sim.transform[ps].y)) + 1,
+                @trunc(self.sim.transform[ps].z),
             ) catch 0 == water_id) {
                 c.drown_accum += secs;
                 if (c.drown_accum >= 1.0) {
@@ -56,7 +56,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         // Radiation: stock BiomeType.Radiated (biomes.xml <biomemap
         // name="radiated"/>) deals damage while the player stands in it.
         if (prog.radiation_damage_per_second > 0) {
-            if (self.isRadiatedAt(@intFromFloat(self.sim.transform[ps].x), @intFromFloat(self.sim.transform[ps].z))) {
+            if (self.isRadiatedAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z))) {
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
                     _ = self.sim.damageFrom(c.entity_id, prog.radiation_damage_per_second * c.radiation_accum, -1);
@@ -153,7 +153,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
 /// Current whole world-hour (day*24 + hour), for time-based scheduling.
 pub fn worldHour(self: *const Game) u64 {
     const clk = self.sim.director.clock;
-    return @as(u64, clk.day) * 24 + @as(u64, @intFromFloat(clk.hours));
+    return @as(u64, clk.day) * 24 + @as(u64, @trunc(clk.hours));
 }
 
 /// AirDropFrequency: spawn a supply crate near a player every N game-hours.
@@ -185,7 +185,7 @@ pub fn tickAirDrop(self: *Game) void {
 pub fn tickZombieBlockDamage(self: *Game) void {
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
-    const base_bite: u32 = @intFromFloat(@max(0, self.sim.rules.progression.block_bite_damage));
+    const base_bite: u32 = @trunc(@max(0, self.sim.rules.progression.block_bite_damage));
     // Cached zombie group: this pass only damages blocks, never spawns or
     // destroys entities, so the slice stays valid for the whole loop.
     for (ecs.groupSlice(&self.sim, .zombie)) |s| {

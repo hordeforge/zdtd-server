@@ -8,7 +8,7 @@ const NetId = @import("entity.zig").NetId;
 pub const max_commands: usize = 64;
 /// Soft capacity warning threshold (fraction of max_commands).
 pub const warn_ratio: f32 = 0.8;
-const warn_at: usize = @intFromFloat(@as(f32, @floatFromInt(max_commands)) * warn_ratio);
+const warn_at: usize = @trunc(@as(f32, @floatFromInt(max_commands)) * warn_ratio);
 
 pub const Op = union(enum) {
     spawn_zombie: struct { x: f32, y: f32, z: f32, hp: f32 },

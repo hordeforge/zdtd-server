@@ -43,7 +43,7 @@ pub fn spawnPoiTraders(self: *Game) void {
             self.sim.class_id[s].loot_list = def.loot_list;
         }
         self.fillTraderFromXml(nid);
-        std.debug.print("zdtd: POI trader {s} at ({d},{d},{d}) entity={d}\n", .{ d.name, wx, @as(i32, @intFromFloat(wy)), wz, nid });
+        std.debug.print("zdtd: POI trader {s} at ({d},{d},{d}) entity={d}\n", .{ d.name, wx, @as(i32, @trunc(wy)), wz, nid });
     }
 }
 

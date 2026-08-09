@@ -57,6 +57,8 @@ pub const ClassId = struct {
     /// Unity Mono name hash for ECD EntitySpawn (0 = use table/default).
     hash: i32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
+    /// Must point to static/indefinite-lifetime data (comptime literal or
+    /// binary-embedded table). Never assign an arena/allocator-owned slice.
     loot_list: []const u8 = "",
     /// LootDropProb chance a death drops the bag; 1.0 default.
     drop_prob: f32 = 1.0,
@@ -623,6 +625,9 @@ fn defaultStock() [max_stock]StockEntry {
 }
 
 pub const TraderStock = struct {
+    /// Trader display name. Must point to static/indefinite-lifetime data
+    /// (comptime literal or binary-embedded table). Never assign an
+    /// arena/allocator-owned slice.
     name: []const u8 = "Trader",
     /// traders.xml `<trader_info>` id for this trader (0 = generic/default).
     trader_info_id: u16 = 0,

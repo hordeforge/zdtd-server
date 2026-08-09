@@ -244,7 +244,7 @@ fn randomSpawnCount(rng: *rng_util.XorShift32, min: u16, max: u16) i32 {
     var v = randomRangeF(rng, @as(f32, @floatFromInt(min)) - 0.49, @as(f32, @floatFromInt(max)) + 0.49);
     if (v <= @as(f32, @floatFromInt(min))) return min;
     if (v > @as(f32, @floatFromInt(max))) v = @floatFromInt(max);
-    const iv: i32 = @intFromFloat(v);
+    const iv: i32 = @trunc(v);
     const frac = v - @as(f32, @floatFromInt(iv));
     if (rngFloat(rng) < frac) return iv + 1;
     return iv;

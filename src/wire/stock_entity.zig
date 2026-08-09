@@ -277,7 +277,7 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     } else {
         try w.writeBool(false); // no bag
     }
-    // lossyCast: client-fed transforms may be NaN/inf/huge; @intFromFloat traps.
+    // lossyCast: client-fed transforms may be NaN/inf/huge; @trunc traps.
     try w.writeI32(std.math.lossyCast(i32, opts.x));
     try w.writeI32(std.math.lossyCast(i32, opts.y));
     try w.writeI32(std.math.lossyCast(i32, opts.z)); // homePosition

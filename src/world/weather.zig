@@ -416,10 +416,10 @@ pub const Manager = struct {
 };
 
 /// Tick count from a computed float, saturating so a modded duration or a tiny
-/// storm frequency can never trap @intFromFloat.
+/// storm frequency can never trap @trunc.
 fn clampTicks(v: f32) i64 {
     if (!std.math.isFinite(v)) return 0;
-    return @intFromFloat(std.math.clamp(v, -2.0e9, 2.0e9));
+    return @trunc(std.math.clamp(v, -2.0e9, 2.0e9));
 }
 
 pub const save_magic = "ZWTH1";

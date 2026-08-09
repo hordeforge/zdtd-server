@@ -156,7 +156,7 @@ pub fn elevToBlockY(elev_m: f32) u8 {
     const y = 60.0 + elev_m / 12.0;
     if (y < 1) return 1;
     if (y > 250) return 250;
-    return @intFromFloat(y);
+    return @trunc(y);
 }
 
 test "cog header parses live GLO-30 sample" {

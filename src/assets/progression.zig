@@ -26,7 +26,7 @@ pub const LevelCurve = struct {
         const mult: f64 = self.experience_multiplier;
         const cost = base * std.math.pow(f64, mult, L - 1.0);
         if (cost > @as(f64, @floatFromInt(std.math.maxInt(u32)))) return std.math.maxInt(u32);
-        return @intFromFloat(cost);
+        return @trunc(cost);
     }
 };
 

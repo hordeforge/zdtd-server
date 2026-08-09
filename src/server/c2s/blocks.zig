@@ -189,7 +189,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, 6)));
+        const rad: i32 = @trunc(@max(1, @min(ex.radius, 6)));
         if (self.sim.playerByPeer(c.slot)) |bi| {
             if (!self.sim.alive[bi] or self.sim.health[bi].hp <= 0) {
                 self.harness.counters.inc(.bounds_rejects);

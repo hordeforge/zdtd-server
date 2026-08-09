@@ -19,7 +19,7 @@ const buff = @import("buff.zig");
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
 pub const warn_ratio: f32 = 0.8;
-const entity_warn_at: usize = @intFromFloat(@as(f32, @floatFromInt(max_entities)) * warn_ratio);
+const entity_warn_at: usize = @trunc(@as(f32, @floatFromInt(max_entities)) * warn_ratio);
 pub const InvLedger = inv_ledger.Ledger;
 pub const InvCause = inv_ledger.Cause;
 pub const Slot = ent.Slot;
@@ -32,11 +32,17 @@ pub const TickLocals = locals_mod.TickLocals;
 pub const ObserverRegistry = observers_mod.Registry;
 
 pub const EntityClass = struct {
+    /// Class name for logging/debug. Must point to static/indefinite-lifetime
+    /// data (comptime literal or binary-embedded table). Never assign an
+    /// arena/allocator-owned slice.
     name: []const u8 = "zombie",
     max_hp: f32 = 40,
     kind: Kind = .zombie,
     /// ECD wire class (Unity Mono GetHashCode). 0 = stock zombieBoe default at encode.
     hash: i32 = 0,
+    /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
+    /// Must point to static/indefinite-lifetime data (comptime literal or
+    /// binary-embedded table). Never assign an arena/allocator-owned slice.
     loot_list: []const u8 = "",
     /// Chance a death drops the loot bag (entityclasses LootDropProb). 1.0 default.
     drop_prob: f32 = 1.0,
@@ -748,7 +754,7 @@ pub const World = struct {
         var h: u64 = @intCast(net_id);
         h = h *% 1103515245 +% 12345;
         h = (h >> 16) ^ h;
-        return h % 1000 < @as(u64, @intFromFloat(drop_prob * 1000));
+        return h % 1000 < @as(u64, @trunc(drop_prob * 1000));
     }
 
     pub fn spawnLootBag(self: *World, x: f32, y: f32, z: f32, item_id: u16, count: u16) ?NetId {

@@ -190,7 +190,7 @@ pub const WorldGen = struct {
         const v = noise_mod.fbm2(&self.noise, fx + 5000, fz + 3000, bm_p); // ~[-1,1]
         const t = (v + 1.0) * 0.5; // [0,1]
         const n: f32 = @floatFromInt(self.biome_n);
-        return @intFromFloat(@min(n - 1.0, t * n));
+        return @trunc(@min(n - 1.0, t * n));
     }
 
     /// 2D shaping stack (`cache_2d`): the Y around which the density gradient

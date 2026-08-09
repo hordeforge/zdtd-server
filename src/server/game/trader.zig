@@ -187,8 +187,8 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             .item = iid,
             .count = r.count,
             .quality = r.quality,
-            .price = if (econ > 0) @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * buy_markup)), 65535)) else 5,
-            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @intFromFloat(@as(f64, econ) * sell_markup)), 65535)))) else 1,
+            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * buy_markup)), 65535)) else 5,
+            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * sell_markup)), 65535)))) else 1,
         };
         n += 1;
     }

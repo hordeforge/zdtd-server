@@ -111,7 +111,7 @@ pub const WorldClock = struct {
     pub fn worldTimeBits(self: *const WorldClock) u64 {
         const d: u64 = if (self.day > 0) self.day - 1 else 0;
         const day_part: u64 = d * 24000;
-        const hour_part: u64 = @intFromFloat(self.hours * 1000.0);
+        const hour_part: u64 = @trunc(self.hours * 1000.0);
         return day_part + hour_part;
     }
 };

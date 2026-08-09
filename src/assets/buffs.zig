@@ -184,7 +184,7 @@ fn parseUpdateRateTicks(s: []const u8) i32 {
     const ticks = secs * 20.0;
     if (!(ticks > 0)) return 0; // conv.i4 of a non-positive rate fires Update every tick
     if (ticks >= @as(f32, @floatFromInt(std.math.maxInt(i32)))) return std.math.maxInt(i32);
-    return @intFromFloat(ticks);
+    return @trunc(ticks);
 }
 
 fn parseBoolAttr(s: []const u8, default: bool) bool {

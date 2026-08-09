@@ -1436,9 +1436,9 @@ test "scenario vehicle refuel caps at the tank and refunds when full" {
         }
     }
     try std.testing.expect(found);
-    const vx: i32 = @intFromFloat(g.sim.transform[vs].x);
-    const vy: i32 = @intFromFloat(g.sim.transform[vs].y);
-    const vz: i32 = @intFromFloat(g.sim.transform[vs].z);
+    const vx: i32 = @trunc(g.sim.transform[vs].x);
+    const vy: i32 = @trunc(g.sim.transform[vs].y);
+    const vz: i32 = @trunc(g.sim.transform[vs].z);
 
     g.sim.vehicle[vs].fuel = 10;
     try std.testing.expect(g.tryRefuelVehicle(c, vx, vy, vz, 50));
@@ -1474,9 +1474,9 @@ test "scenario drowning damages a submerged player" {
     const water_id = g.world.terrain_ids.water;
     if (water_id == 0) return; // flat world without water: nothing to test
 
-    const hx: i32 = @intFromFloat(g.sim.transform[ps].x);
-    const hy: i32 = @intFromFloat(g.sim.transform[ps].y);
-    const hz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    const hx: i32 = @trunc(g.sim.transform[ps].x);
+    const hy: i32 = @trunc(g.sim.transform[ps].y);
+    const hz: i32 = @trunc(g.sim.transform[ps].z);
     try g.world.setBlockWorld(hx, hy + 1, hz, water_id);
     const hp0 = g.sim.health[ps].hp;
     var k: u32 = 0;
@@ -1533,8 +1533,8 @@ test "scenario radiated biome damages the player" {
     g.world.biomes = map; // flat world has none; world.deinit frees it
     g.world.biome_layers_table.names[7] = "radiated";
 
-    const hx: i32 = @intFromFloat(g.sim.transform[ps].x);
-    const hz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    const hx: i32 = @trunc(g.sim.transform[ps].x);
+    const hz: i32 = @trunc(g.sim.transform[ps].z);
     try std.testing.expect(g.isRadiatedAt(hx, hz));
     const hp0 = g.sim.health[ps].hp;
     var k: u32 = 0;
@@ -1624,9 +1624,9 @@ test "scenario bedroll respawn: placed bed is listed and used on death" {
     const bedroll_id = g.maxdamage.idByName("bedroll") orelse return; // dump has it
     try std.testing.expect(g.isBedrollId(bedroll_id));
     const ps = g.sim.playerByPeer(c.slot).?;
-    const bx: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].x)) + 10;
-    const by: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].y));
-    const bz: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].z));
+    const bx: i32 = @as(i32, @trunc(g.sim.transform[ps].x)) + 10;
+    const by: i32 = @as(i32, @trunc(g.sim.transform[ps].y));
+    const bz: i32 = @as(i32, @trunc(g.sim.transform[ps].z));
     c.bed_x = bx;
     c.bed_y = by;
     c.bed_z = bz;
@@ -2567,9 +2567,9 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     const stock_te = packages.stock_te;
     const stock_inv = packages.stock_inv;
     const pa = g.sim.playerByPeer(ca.slot).?;
-    const wx: i32 = @intFromFloat(g.sim.transform[pa].x);
-    const wy: i32 = @intFromFloat(g.sim.transform[pa].y);
-    const wz: i32 = @intFromFloat(g.sim.transform[pa].z);
+    const wx: i32 = @trunc(g.sim.transform[pa].x);
+    const wy: i32 = @trunc(g.sim.transform[pa].y);
+    const wz: i32 = @trunc(g.sim.transform[pa].z);
 
     // Client write: full stock array lengths, fuel lit, one recipe queued in the
     // active (last) slot with a Recipe blob, and an empty craft-complete list.
@@ -2697,9 +2697,9 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     const stock_te = packages.stock_te;
     const stock_inv = packages.stock_inv;
     const pa = g.sim.playerByPeer(ca.slot).?;
-    const wx: i32 = @intFromFloat(g.sim.transform[pa].x);
-    const wy: i32 = @intFromFloat(g.sim.transform[pa].y);
-    const wz: i32 = @intFromFloat(g.sim.transform[pa].z);
+    const wx: i32 = @trunc(g.sim.transform[pa].x);
+    const wy: i32 = @trunc(g.sim.transform[pa].y);
+    const wz: i32 = @trunc(g.sim.transform[pa].z);
 
     var recipe: [128]u8 = undefined;
     var rw: @import("../wire/binary.zig").Writer = .{ .buf = &recipe };

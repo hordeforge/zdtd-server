@@ -329,10 +329,10 @@ fn saneFinite(v: ?f32, fallback: f32) f32 {
 }
 
 /// XML hours → world ticks (AddWeatherGroup multiplies by 1000). Clamped so a
-/// malformed duration can never trap @intFromFloat or run time backwards.
+/// malformed duration can never trap @trunc or run time backwards.
 fn ticksFromHours(hours: f32) i32 {
     if (!std.math.isFinite(hours) or hours <= 0) return 0;
-    return @intFromFloat(@min(hours * 1000.0, 2.0e9));
+    return @trunc(@min(hours * 1000.0, 2.0e9));
 }
 
 /// `lo,hi` pair, or a single value used for both components (Unity Vector2 parse).
@@ -1089,7 +1089,7 @@ test "parseWeatherGroups defaults and malformed input" {
     try std.testing.expectApproxEqAbs(@as(f32, 1), junk.groups[0].prob, 1e-5);
     try std.testing.expectEqual(@as(i32, 3000), junk.groups[0].duration);
     try std.testing.expectEqual(@as(f32, 0), junk.groups[0].rangeSlice(3)[0].lo);
-    // A finite but absurd duration saturates instead of trapping @intFromFloat.
+    // A finite but absurd duration saturates instead of trapping @trunc.
     const huge = parseWeatherGroups("<weather duration=\"3000000\"/>");
     try std.testing.expectEqual(@as(i32, 2_000_000_000), huge.groups[0].duration);
     // A name longer than the buffer is stored as unnamed so it matches no query.

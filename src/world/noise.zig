@@ -99,12 +99,12 @@ pub const Noise = struct {
         const x2 = x0 - 1 + 2 * g2;
         const y2 = y0 - 1 + 2 * g2;
 
-        const ii: i32 = @intFromFloat(i);
-        const jj: i32 = @intFromFloat(j);
+        const ii: i32 = @trunc(i);
+        const jj: i32 = @trunc(j);
 
         var n: f32 = 0;
         n += contrib2(self, x0, y0, ii, jj);
-        n += contrib2(self, x1, y1, ii + @as(i32, @intFromFloat(i_off)), jj + @as(i32, @intFromFloat(j_off)));
+        n += contrib2(self, x1, y1, ii + @as(i32, @trunc(i_off)), jj + @as(i32, @trunc(j_off)));
         n += contrib2(self, x2, y2, ii + 1, jj + 1);
         // Scale into ~[-1,1] (empirical for this kernel).
         return n * 70.0;
@@ -195,14 +195,14 @@ pub const Noise = struct {
         const y3 = y0 - 1 + 3 * g3;
         const z3 = z0 - 1 + 3 * g3;
 
-        const ii: i32 = @intFromFloat(i);
-        const jj: i32 = @intFromFloat(j);
-        const kk: i32 = @intFromFloat(k);
+        const ii: i32 = @trunc(i);
+        const jj: i32 = @trunc(j);
+        const kk: i32 = @trunc(k);
 
         var n: f32 = 0;
         n += contrib3(self, x0, y0, z0, ii, jj, kk);
-        n += contrib3(self, x1, y1, z1, ii + @as(i32, @intFromFloat(i_a)), jj + @as(i32, @intFromFloat(j_a)), kk + @as(i32, @intFromFloat(k_a)));
-        n += contrib3(self, x2, y2, z2, ii + @as(i32, @intFromFloat(i_b)), jj + @as(i32, @intFromFloat(j_b)), kk + @as(i32, @intFromFloat(k_b)));
+        n += contrib3(self, x1, y1, z1, ii + @as(i32, @trunc(i_a)), jj + @as(i32, @trunc(j_a)), kk + @as(i32, @trunc(k_a)));
+        n += contrib3(self, x2, y2, z2, ii + @as(i32, @trunc(i_b)), jj + @as(i32, @trunc(j_b)), kk + @as(i32, @trunc(k_b)));
         n += contrib3(self, x3, y3, z3, ii + 1, jj + 1, kk + 1);
         return n * 32.0;
     }

@@ -1506,7 +1506,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
             // XML still wins). Matches the chase/wander chain above.
             const pad: f32 = ctx.w.class_id[s].attack_damage;
             const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
-            const add: u32 = @intFromFloat(adm * @as(f32, @floatFromInt(dmg_scale)));
+            const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
             _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
@@ -2035,7 +2035,7 @@ const TurretCtx = struct {
             if (t.fire_cd <= 0) {
                 t.fire_cd = t.fire_interval;
                 t.ammo -%= 1;
-                const add: u32 = @intFromFloat(t.damage * @as(f32, @floatFromInt(dmg_scale)));
+                const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
                 // Last-hit owner: several turrets can fire at the same zombie
                 // in one tick, so the plain store would race. Atomic monotonic

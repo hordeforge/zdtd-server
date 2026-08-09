@@ -253,8 +253,8 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         out.line(" dm|cm|settempunit|debugmenu (client-side)");
     } else if (eqAny(verb, &.{ "gettime", "gt" })) {
         const clk = &self.sim.director.clock;
-        const hh: u32 = @intFromFloat(clk.hours);
-        const mm: u32 = @intFromFloat((clk.hours - @floor(clk.hours)) * 60.0);
+        const hh: u32 = @trunc(clk.hours);
+        const mm: u32 = @trunc((clk.hours - @floor(clk.hours)) * 60.0);
         out.linef("Day {d}, {d:0>2}:{d:0>2}  (bloodmoon in {d} days)", .{
             clk.day, hh, mm, self.daysToBloodMoon(),
         });
@@ -334,7 +334,7 @@ pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *C
     }
     const wt = packages.buildWorldTimeBody(self.body_buf[0..16], clk.worldTimeBits()) catch return;
     self.broadcast("NetPackageWorldTime", wt) catch {};
-    out.linef("time set: day {d} {d:0>2}:00", .{ clk.day, @as(u32, @intFromFloat(clk.hours)) });
+    out.linef("time set: day {d} {d:0>2}:00", .{ clk.day, @as(u32, @trunc(clk.hours)) });
 }
 
 pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
@@ -1097,7 +1097,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 if (!cl.joined) continue;
                 const ps = self.sim.playerByPeer(i);
                 const t = if (ps) |p| self.sim.transform[p] else ecs.components.Transform{};
-                const hp: i32 = if (ps) |p| @intFromFloat(self.sim.health[p].hp) else 0;
+                const hp: i32 = if (ps) |p| @trunc(self.sim.health[p].hp) else 0;
                 self.adminWrite(admin_cmds.writePlayerRow, .{ n, admin_cmds.PlayerRow{
                     .entity_id = cl.entity_id,
                     .name = cl.name[0..cl.name_len],
@@ -1228,8 +1228,8 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         .gettime => {
             const clk = &self.sim.director.clock;
             var tb2: [64]u8 = undefined;
-            const hh: u32 = @intFromFloat(clk.hours);
-            const mm: u32 = @intFromFloat((clk.hours - @floor(clk.hours)) * 60.0);
+            const hh: u32 = @trunc(clk.hours);
+            const mm: u32 = @trunc((clk.hours - @floor(clk.hours)) * 60.0);
             const s = std.fmt.bufPrint(&tb2, "Day {d}, {d:0>2}:{d:0>2}\n", .{ clk.day, hh, mm }) catch return;
             self.adminReply(s);
         },
@@ -1338,7 +1338,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                     .rot_y = t.yaw,
                     .dead = self.sim.mask[ei].health and self.sim.health[ei].hp <= 0,
                     .health = if (self.sim.mask[ei].health)
-                        @intFromFloat(self.sim.health[ei].hp)
+                        @trunc(self.sim.health[ei].hp)
                     else
                         null,
                 } });

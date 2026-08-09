@@ -120,7 +120,7 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
     defer cs.end();
     const peer = c.peer orelse return;
     if (self.sim.slotOfNetId(c.entity_id)) |si| {
-        const t = world_store.World.worldToChunk(@intFromFloat(self.sim.transform[si].x), @intFromFloat(self.sim.transform[si].z));
+        const t = world_store.World.worldToChunk(@trunc(self.sim.transform[si].x), @trunc(self.sim.transform[si].z));
         // Keep a hole-free disk so light/mesh neighbor rings stay valid.
         // Client mesh needs ~2-chunk halo: with r=4 only the inner 5×5 (25)
         // become CGO; spawn overlay needs viewDist^2-10 (viewDist 7 → 39).
