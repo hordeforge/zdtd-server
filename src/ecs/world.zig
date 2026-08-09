@@ -808,6 +808,9 @@ pub const World = struct {
         loot_bag_id: i32 = -1,
         /// entityclasses LootListOnDeath name (valid for bag fill after kill).
         loot_list: []const u8 = "",
+        /// True when the hit applied a knockback impulse to the victim (the
+        /// caller broadcasts NetPackageEntityVelocity so peers animate it).
+        knocked: bool = false,
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
@@ -898,6 +901,36 @@ pub const World = struct {
             }
             self.destroy(s);
             return .{ .killed = true };
+        }
+        // Non-fatal zombie/animal hit: knock the victim away from the attacker
+        // (melee/gun shove). Players are the client's own body (the client
+        // plays the hit reaction locally); traders are immune.
+        if (self.kind[s] == .zombie or self.kind[s] == .animal) {
+            var kx: f32 = 0;
+            var kz: f32 = 0;
+            if (attacker_net_id >= 0 and self.mask[s].transform) {
+                if (self.slotOfNetId(attacker_net_id)) |as_| {
+                    if (self.mask[as_].transform) {
+                        const dx = self.transform[s].x - self.transform[as_].x;
+                        const dz = self.transform[s].z - self.transform[as_].z;
+                        const d2 = dx * dx + dz * dz;
+                        if (d2 > 0.0001) {
+                            const inv = 1.0 / @sqrt(d2);
+                            kx = dx * inv;
+                            kz = dz * inv;
+                        }
+                    }
+                }
+            }
+            if (kx != 0 or kz != 0) {
+                if (self.mask[s].zombie_ai) {
+                    const ai = &self.zombie_ai[s];
+                    ai.kb_time = c.kb_seconds;
+                    ai.kb_dx = kx;
+                    ai.kb_dz = kz;
+                }
+                return .{ .knocked = true };
+            }
         }
         return .{};
     }

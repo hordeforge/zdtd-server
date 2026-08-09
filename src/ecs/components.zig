@@ -123,6 +123,11 @@ pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
 /// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay).
 pub const revenge_window_s: f32 = 20.0;
 
+/// Knockback impulse: displacement speed in blocks/s and the hit window. A
+/// 0.3 s shove at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark).
+pub const kb_speed: f32 = 8.0;
+pub const kb_seconds: f32 = 0.3;
+
 pub const ZombieAi = struct {
     state: AiState = .idle,
     target_id: i32 = -1,
@@ -190,6 +195,14 @@ pub const ZombieAi = struct {
     /// Seconds the revenge target stays valid. Stock's SetAttackTarget window
     /// is 400 ticks (asm.il:436155 ldc.i4 0x190) = 20 s at 20 Hz.
     revenge_time: f32 = 0,
+    /// Hit knockback (melee/gun hits): remaining seconds of displacement plus
+    /// the unit push direction. Applied before the AI move each tick, so the
+    /// shove wins the tick and the AI re-approaches from the pushed spot.
+    /// Set by World.damageFrom on zombie/animal hits; the Game broadcasts the
+    /// matching NetPackageEntityVelocity so the client animates the stagger.
+    kb_time: f32 = 0,
+    kb_dx: f32 = 0,
+    kb_dz: f32 = 0,
     /// EntityAlive.pendingDistraction: the nearest dropped EntityItem that
     /// broadcast itself into this entity's 25 m (distractionRadius) window
     /// (EntityItem.tickDistraction). Net id of the loot-bag entity, -1 = none.

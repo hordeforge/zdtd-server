@@ -994,6 +994,20 @@ const AiCtx = struct {
             const s: Slot = @intCast(i);
             if (!ctx.w.alive[s] or !ctx.w.mask[s].zombie_ai or !ctx.w.mask[s].transform) continue;
             var ai = &ctx.w.zombie_ai[s];
+            // Knockback shove: displace before the AI step so the push wins
+            // the tick and the entity re-approaches from the pushed spot.
+            if (ai.kb_time > 0) {
+                const w2 = ctx.w;
+                w2.transform[s].x += ai.kb_dx * c.kb_speed * ctx.dt;
+                w2.transform[s].z += ai.kb_dz * c.kb_speed * ctx.dt;
+                ai.kb_time -= ctx.dt;
+                if (ai.kb_time <= 0) {
+                    ai.kb_time = 0;
+                    ai.kb_dx = 0;
+                    ai.kb_dz = 0;
+                }
+                w2.markDirty(s, .{ .pos = true });
+            }
             // Sleepers: stay sleep until player in volume.
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
@@ -2575,15 +2589,23 @@ test "hurt zombie chases its attacker over the nearer player" {
     var t: f32 = 0;
     while (t < 0.5) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.zombie_ai[zs].target_id != far);
-    // Shot from behind by the far player: EAISetAsTargetIfHurt retargets.
+    // Shot from behind by the far player: EAISetAsTargetIfHurt retargets,
+    // and the hit shoves the zombie away from the attacker (+x, toward the
+    // near player) with the knockback impulse.
+    const x_before = w.transform[zs].x;
     _ = w.damageFrom(z, 5, far);
+    try std.testing.expect(w.zombie_ai[zs].kb_time > 0);
     _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(far, w.zombie_ai[zs].target_id);
     try std.testing.expect(w.zombie_ai[zs].alert);
-    // Walks away from the near player, toward the attacker.
+    try std.testing.expect(w.transform[zs].x > x_before + 0.2); // shove applied
+    // Let the shove finish, then verify the chase walks back toward the
+    // attacker: the 2 s run must move the body left of the shove endpoint.
+    while (w.zombie_ai[zs].kb_time > 0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const x_after_shove = w.transform[zs].x;
     t = 0;
     while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
-    try std.testing.expect(w.transform[zs].x < -0.2);
+    try std.testing.expect(w.transform[zs].x < x_after_shove - 0.2);
     // The window expires and the nearest-player sense takes over again.
     w.zombie_ai[zs].revenge_time = 0.04;
     _ = systemZombieAi(&w, 0.05);

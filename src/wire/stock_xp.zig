@@ -185,3 +185,38 @@ test "add score body is the 14-byte stock shape" {
     try std.testing.expectEqual(@as(i16, 0), try r.readI16());
     try std.testing.expectEqual(@as(i32, 0), try r.readI32());
 }
+
+/// NetPackageEntityVelocity body: entityId i32 | bAdd bool | motion Vector3
+/// (3 x f32). RE ../7dtd-research/il/netpackages-v3.1.0/NetPackageEntityVelocity_il.txt
+/// write IL=23 (NetPackageEntityTargeted base + bAdd + motion). bAdd=true
+/// means AddMotion: the client adds the vector to the entity's current motion
+/// (hit shove / knockback).
+pub const VelocityArgs = struct {
+    entity_id: i32,
+    b_add: bool = true,
+    dx: f32 = 0,
+    dy: f32 = 0,
+    dz: f32 = 0,
+};
+
+pub fn buildEntityVelocityBody(buf: []u8, args: VelocityArgs) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeI32(args.entity_id);
+    try w.writeBool(args.b_add);
+    try w.writeF32(args.dx);
+    try w.writeF32(args.dy);
+    try w.writeF32(args.dz);
+    return w.written();
+}
+
+test "entity velocity body is the 17-byte stock shape" {
+    var buf: [32]u8 = undefined;
+    const body = try buildEntityVelocityBody(&buf, .{ .entity_id = 42, .dx = 1, .dy = 0, .dz = -1 });
+    try std.testing.expectEqual(@as(usize, 17), body.len);
+    var r = binary.Reader{ .data = body };
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32());
+    try std.testing.expectEqual(true, try r.readBool());
+    try std.testing.expectEqual(@as(f32, 1), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 0), try r.readF32());
+    try std.testing.expectEqual(@as(f32, -1), try r.readF32());
+}

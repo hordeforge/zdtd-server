@@ -4349,9 +4349,26 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
     try std.testing.expect(g.parties.partyByMember(cb.entity_id) != null);
 
+    // A non-fatal hit shoves the zombie and broadcasts NetPackageEntityVelocity
+    // (bAdd=true, push away from A) to every observer, so the hit animates.
+    const zkb = g.sim.spawnZombie(258, 70, 258, 100).?;
+    var dmg: [256]u8 = undefined;
+    const kbody = try packages.buildDamageBody(&dmg, zkb, 0, 3, 10, false, ca.entity_id);
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", kbody));
+    const vel_id = packages.idOf("NetPackageEntityVelocity").?;
+    const vvb = cap_a.findPkgIdEntity(vel_id, zkb) orelse return error.TestUnexpectedResult;
+    var vr = binary.Reader{ .data = vvb };
+    try std.testing.expectEqual(zkb, try vr.readI32());
+    try std.testing.expectEqual(true, try vr.readBool()); // bAdd
+    const vdx = try vr.readF32();
+    _ = try vr.readF32(); // dy
+    const vdz = try vr.readF32();
+    // Push away from A at (256,70,256): the zombie sits due south-east.
+    try std.testing.expect(vdx > 0 or vdz > 0);
+
     // A kills a zombie: Party.GetPartyXP = 100 * (1 - 0.1 * 1 in-range mate).
     const zid = g.sim.spawnZombie(258, 70, 258, 10).?;
-    var dmg: [256]u8 = undefined;
     const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
     cap_b.clear();
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));

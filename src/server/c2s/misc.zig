@@ -12,6 +12,7 @@ const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const components = @import("../../ecs/components.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -292,6 +293,32 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Hit shove: the victim's knockback impulse animates on every peer
+        // that sees it (stock EntityAlive.AddMotion -> NetPackageEntityVelocity).
+        if (dmg.knocked) {
+            if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
+                const kb = self.sim.zombie_ai[vslot];
+                const kb_vx: f32 = kb.kb_dx * components.kb_speed;
+                const kb_vz: f32 = kb.kb_dz * components.kb_speed;
+                if (packages.stock_xp.buildEntityVelocityBody(self.body_buf[48..72], .{
+                    .entity_id = d.entity_id,
+                    .b_add = true,
+                    .dx = kb_vx,
+                    .dy = 0,
+                    .dz = kb_vz,
+                })) |vb| {
+                    const vt = self.sim.transform[vslot];
+                    for (&self.clients) |*cl| {
+                        if (!cl.joined or cl.peer == null) continue;
+                        if (self.clientObserves(cl, vt.x, vt.z)) {
+                            if (cl.peer) |p| self.sendGame(p, "NetPackageEntityVelocity", vb) catch {
+                                self.harness.counters.inc(.net_send_errors);
+                            };
+                        }
+                    }
+                } else |_| {}
+            }
+        }
         if (dmg.killed) {
             // Dead players keep the entity (client runs its own death →
             // respawn flow); EntityRemove would delete the local player.
