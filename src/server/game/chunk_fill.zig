@@ -98,7 +98,12 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .tex_at = BlockCtx.tex,
         .default_tex = TexCtx.def,
         .default_tex_ctx = &tex_ctx,
-        .dens_at = BlockCtx.dens,
+        // TTS density overrides exist only when the chunk has a densities plane;
+        // without one, dens_at returns null for every cell and writeDensityChannel
+        // falls back to 65536 scalar densityAt calls, bypassing its SIMD
+        // packDensityFromRaws fast path (gated on dens_at == null). Both agree
+        // bit-for-bit with no overrides: densityForBlock(type) per cell.
+        .dens_at = if (ch.densities == null) null else BlockCtx.dens,
         .water_block_id = self.world.terrain_ids.water,
         .dmg_at = DmgCtx.at,
         .dmg_ctx = &dmg_ctx,

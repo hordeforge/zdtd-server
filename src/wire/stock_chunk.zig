@@ -236,10 +236,25 @@ pub fn packLowerU8(raws: []const u32, lower: []u8) void {
 }
 
 /// Pack upper24 as interleaved (b1,b2,b3) per cell into upper[raws.len*3].
+/// Vectorized: bytes 8..31 of 8 raws become one 24-byte interleaved store.
+/// Scalar equivalent: upper[c*3+j] = byte j of (raws[c] >> 8).
 pub fn packUpper24(raws: []const u32, upper: []u8) void {
     std.debug.assert(upper.len >= raws.len * 3);
-    // Strided store: scalar is clear and matches stock layout; N=1024 is fine.
     var cell: usize = 0;
+    while (cell + 8 <= raws.len) : (cell += 8) {
+        const chunk: @Vector(8, u32) = raws[cell..][0..8].*;
+        // Byte j (j in 1..3) of each u32: shift then truncate to u8 lanes.
+        const b1: @Vector(8, u8) = @truncate(chunk >> @as(@Vector(8, u5), @splat(8)));
+        const b2: @Vector(8, u8) = @truncate(chunk >> @as(@Vector(8, u5), @splat(16)));
+        const b3: @Vector(8, u8) = @truncate(chunk >> @as(@Vector(8, u5), @splat(24)));
+        // Three-way per-cell interleave [b1_c, b2_c, b3_c]. @shuffle needs two
+        // equal-length sources: concat b1+b2 into 16 lanes and duplicate b3 into
+        // a 16-lane pad whose unused lanes are never selected by the mask.
+        const c12: @Vector(16, u8) = @shuffle(u8, b1, b2, upper_concat_mask);
+        const pad: @Vector(16, u8) = @shuffle(u8, b3, b3, upper_dup_mask);
+        const out: @Vector(24, u8) = @shuffle(u8, c12, pad, upper_interleave_mask);
+        upper[cell * 3 ..][0..24].* = out;
+    }
     while (cell < raws.len) : (cell += 1) {
         const raw = raws[cell];
         upper[cell * 3 + 0] = @truncate(raw >> 8);
@@ -247,6 +262,20 @@ pub fn packUpper24(raws: []const u32, upper: []u8) void {
         upper[cell * 3 + 2] = @truncate(raw >> 24);
     }
 }
+
+// @shuffle masks for packUpper24: concat(b1,b2) as c12, then the 24-lane
+// interleave [b1_c, b2_c, b3_c] selecting c12 lanes 0..7 / 8..15 and pad -1..-8
+// (Zig 0.16: non-negative mask = source a, -1..-N = source b).
+const upper_concat_mask: @Vector(16, i32) = @Vector(16, i32){
+    0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8,
+};
+const upper_dup_mask: @Vector(16, i32) = @Vector(16, i32){
+    0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8,
+};
+const upper_interleave_mask: @Vector(24, i32) = @Vector(24, i32){
+    0, 8, -1, 1, 9, -2, 2, 10, -3, 3, 11, -4,
+    4, 12, -5, 5, 13, -6, 6, 14, -7, 7, 15, -8,
+};
 
 /// Write texture plane j (byte j of each u64) into out[0..vals.len].
 pub fn packTexturePlane(vals: []const u64, plane: u3, out: []u8) void {
@@ -965,6 +994,94 @@ test "simd packLower and packTexturePlane match scalar" {
     while (i < 32) : (i += 1) {
         try std.testing.expectEqual(@as(u8, @truncate(vals[i] >> 16)), plane[i]);
     }
+}
+
+test "simd packUpper24 matches scalar interleave" {
+    // Mix: terrain ids (no upper), construction ids >= 256, meta/rot bits.
+    var raws: [40]u32 = undefined;
+    var i: usize = 0;
+    while (i < 40) : (i += 1) {
+        const t: u32 = switch (i % 4) {
+            0 => @as(u32, stock_terr_dirt),
+            1 => @as(u32, 259) | (@as(u32, 3) << 16),
+            2 => @as(u32, 1000) | (@as(u32, 1) << 24),
+            else => @as(u32, stock_terr_stone) | (@as(u32, 7) << 8),
+        };
+        raws[i] = t;
+    }
+    var upper: [40 * 3]u8 = undefined;
+    packUpper24(&raws, &upper);
+    i = 0;
+    while (i < 40) : (i += 1) {
+        const raw = raws[i];
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 8)), upper[i * 3 + 0]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 16)), upper[i * 3 + 1]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 24)), upper[i * 3 + 2]);
+    }
+    // Vector width 8 with a full band (cells_per_layer, multiple of 8).
+    var band: [1024]u32 = undefined;
+    var bi: usize = 0;
+    while (bi < 1024) : (bi += 1) band[bi] = @as(u32, @intCast(bi * 7 + 1000)) | (@as(u32, 5) << 16);
+    var band_upper: [1024 * 3]u8 = undefined;
+    packUpper24(&band, &band_upper);
+    bi = 0;
+    while (bi < 1024) : (bi += 1) {
+        const raw = band[bi];
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 8)), band_upper[bi * 3 + 0]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 16)), band_upper[bi * 3 + 1]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 24)), band_upper[bi * 3 + 2]);
+    }
+    // Odd tail length (not a multiple of 8): covers the scalar tail.
+    var short: [13]u32 = undefined;
+    var si: usize = 0;
+    while (si < 13) : (si += 1) short[si] = @as(u32, @intCast(si * 31 + 300)) | (@as(u32, 2) << 24);
+    var short_upper: [13 * 3]u8 = undefined;
+    packUpper24(&short, &short_upper);
+    si = 0;
+    while (si < 13) : (si += 1) {
+        const raw = short[si];
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 8)), short_upper[si * 3 + 0]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 16)), short_upper[si * 3 + 1]);
+        try std.testing.expectEqual(@as(u8, @truncate(raw >> 24)), short_upper[si * 3 + 2]);
+    }
+}
+
+test "dens_at always-null callback matches dens_at null encode (SIMD path)" {
+    // chunk_fill.zig passes dens_at = null when the chunk has no densities
+    // plane. This pins that the always-null-callback scalar density loop and
+    // the SIMD packDensityFromRaws path produce identical wire bytes.
+    var heights: [256]u8 = .{60} ** 256;
+    var plane: [65536]u32 = undefined;
+    var i: usize = 0;
+    while (i < plane.len) : (i += 1) {
+        const lx: i32 = @intCast(i % 16);
+        const lz: i32 = @intCast((i / 16) % 16);
+        const y: i32 = @intCast(i / 256);
+        plane[i] = defaultBlockAt(&heights, lx, y, lz);
+        if (y == 30 and lx == 2 and lz == 3) plane[i] = 259; // non-terrain solid
+    }
+    var buf_a: [131072]u8 = undefined;
+    var buf_b: [131072]u8 = undefined;
+    const via_null = try encodeNetworkChunk(&buf_a, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .raws = &plane,
+        .dens_at = null,
+    });
+    const AlwaysNull = struct {
+        fn dens(_: ?*anyopaque, _: i32, _: i32, _: i32) ?u8 {
+            return null;
+        }
+    };
+    const via_cb = try encodeNetworkChunk(&buf_b, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .raws = &plane,
+        .dens_at = AlwaysNull.dens,
+    });
+    try std.testing.expectEqualSlices(u8, via_null, via_cb);
 }
 
 test "simd packDensityFromRaws matches densityForBlock" {
