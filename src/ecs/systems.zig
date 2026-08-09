@@ -2037,7 +2037,10 @@ const TurretCtx = struct {
                 t.ammo -%= 1;
                 const add: u32 = @intFromFloat(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
-                ctx.owner_hit[zi] = t.owner_slot;
+                // Last-hit owner: several turrets can fire at the same zombie
+                // in one tick, so the plain store would race. Atomic monotonic
+                // keeps it defined; the serial kill pass reads it after join.
+                @atomicStore(i16, &ctx.owner_hit[zi], t.owner_slot, .monotonic);
             }
         }
     }
