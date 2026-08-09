@@ -41,6 +41,7 @@ const game_chunk_fill = @import("game/chunk_fill.zig");
 const game_weather = @import("game/weather.zig");
 const game_vehicle = @import("game/vehicle.zig");
 const game_config_files = @import("game/config_files.zig");
+const game_movement_helpers = @import("game/movement_helpers.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -1509,93 +1510,13 @@ pub const Game = struct {
     }
 
     pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
-        c.move_valid = true;
-        c.move_x = x;
-        c.move_y = y;
-        c.move_z = z;
-        c.move_tick = self.tick_n;
-        // Pressure plate / tripwire: step on foot cell or body cell.
-        self.tryActivateTriggerAtPlayer(x, y, z);
+        return game_movement_helpers.noteAcceptedMove(self, c, x, y, z);
     }
-
-    /// Actuate power-grid trigger nodes under the player (foot + body). Fail closed
-    /// inside electric.activateTriggerAt (must be is_trigger + powered).
-    fn tryActivateTriggerAtPlayer(self: *Game, x: f32, y: f32, z: f32) void {
-        const bx: i32 = @intFromFloat(@floor(x));
-        const by: i32 = @intFromFloat(@floor(y));
-        const bz: i32 = @intFromFloat(@floor(z));
-        // Foot cell (block under feet) then body cell (plate at standing height).
-        _ = self.sim.power.activateTriggerAt(bx, by - 1, bz);
-        _ = self.sim.power.activateTriggerAt(bx, by, bz);
-    }
-
     pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
-        if (peer_slot >= max_clients) return;
-        const c = &self.clients[peer_slot];
-        c.move_valid = false;
-        c.move_x = x;
-        c.move_y = y;
-        c.move_z = z;
-        c.move_tick = self.tick_n;
+        return game_movement_helpers.resetMoveEnvelopePeer(self, peer_slot, x, y, z);
     }
-
-    /// Horizontal speed envelope. Observe: count only, still apply client pos.
-    /// Correct: clamp to last good + max delta; soft snap S2C when clamped.
-    pub fn applyMovementEnvelope(
-        self: *Game,
-        c: *Client,
-        peer: *ln_peer.Peer,
-        entity_id: i32,
-        x: f32,
-        y: f32,
-        z: f32,
-    ) struct { x: f32, y: f32, z: f32, applied: bool } {
-        if (!c.move_valid) {
-            return .{ .x = x, .y = y, .z = z, .applied = true };
-        }
-        const tick_s: f32 = @as(f32, @floatFromInt(protocol.tick_ns)) / 1_000_000_000.0;
-        const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
-        const clamp = movement.clampHorizontal(
-            c.move_x,
-            c.move_z,
-            x,
-            z,
-            dt,
-            movement.max_horizontal_speed_mps,
-        );
-        if (!clamp.clamped) {
-            return .{ .x = x, .y = y, .z = z, .applied = true };
-        }
-        self.harness.counters.inc(.movement_rejects);
-        self.noteEvidence(c, peer.local_id, entity_id, .movement, .strong, .none, movement.max_horizontal_speed_mps, movement.max_horizontal_speed_mps);
-        // Rubber-band / speed-hack signal: counter always; log rate-limited so a
-        // sticky client does not flood stderr while first/100th stay visible.
-        const n = self.harness.counters.get(.movement_rejects);
-        if (n == 1 or n % 100 == 0) {
-            std.debug.print(
-                "zdtd: movement envelope reject n={d} local_id={d} entity={d}\n",
-                .{ n, peer.local_id, entity_id },
-            );
-        }
-        if (!self.authorityCorrects()) {
-            return .{ .x = x, .y = y, .z = z, .applied = true };
-        }
-        if (packages.buildPosAndRotBody(
-            self.body_buf[0..64],
-            entity_id,
-            clamp.x,
-            y,
-            clamp.z,
-            0,
-            0,
-            0,
-            true,
-        )) |sb| {
-            // Best-effort snap: the client already moved the entity; a failed
-            // send leaves it to the next motion relay, no state is lost.
-            self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};
-        } else |_| {}
-        return .{ .x = clamp.x, .y = y, .z = clamp.z, .applied = true };
+    pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32) game_movement_helpers.ApplyResult {
+        return game_movement_helpers.applyMovementEnvelope(self, c, peer, entity_id, x, y, z);
     }
 
     fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
