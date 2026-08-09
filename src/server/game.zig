@@ -31,6 +31,7 @@ const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
+const game_replicate_health = @import("game/replicate_health.zig");
 const game_sleeper = @import("game/sleeper.zig");
 const game_hooks = @import("game/hooks.zig");
 const game_deco = @import("game/deco.zig");
@@ -52,6 +53,8 @@ const game_trader_wire = @import("game/trader_wire.zig");
 const game_send_extra = @import("game/send_extra.zig");
 const game_rescue = @import("game/rescue.zig");
 const game_guard = @import("game/guard.zig");
+const game_session_drop = @import("game/session_drop.zig");
+const game_init_assets = @import("game/init_assets.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -130,65 +133,14 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
     return bitOf(@intCast(peer_slot));
 }
 
-/// Game embeds the claim table on the heap; 1024 covers a long-lived server
-/// (GAP 12: 256 silently dropped the 257th claim on register). Single source
-/// of truth in game/types.zig; game.zig re-exports it like the other caps.
 pub const max_land_claims = game_types.max_land_claims;
-/// Quest.PositionData entries the server ever writes: Location + POIPosition + POISize.
-pub const max_quest_position_data: usize = 3;
-const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
-
-/// `help` index. Stock names and descriptions where the verb exists in stock
-/// (ConsoleCmdHelp, asm.il 226623); zdtd-only verbs are marked so an operator can
-/// tell parity from extension at a glance.
-pub const admin_help_index = [_]admin_cmds.HelpEntry{
-    .{ .names = "admin", .description = "Manage user permission levels" },
-    .{ .names = "apm, metrics", .description = "zdtd: server APM counters and section latency" },
-    .{ .names = "ban", .description = "Manage ban entries" },
-    .{ .names = "chunkcache, cc", .description = "Display cached chunks" },
-    .{ .names = "evidence, ev", .description = "zdtd: recent authority reject evidence ring" },
-    .{ .names = "getgamepref, gg", .description = "Gets game preferences" },
-    .{ .names = "gettime, gt", .description = "Get the current game time" },
-    .{ .names = "give", .description = "zdtd: drop an item stack at a player's feet" },
-    .{ .names = "giveself, gi", .description = "zdtd: grant items to your own inventory" },
-    .{ .names = "clearweather, stormoff", .description = "zdtd: end any active storm; next storm a day out" },
-    .{ .names = "spawnairdrop", .description = "zdtd: trigger an air drop immediately" },
-    .{ .names = "storm", .description = "zdtd: force every storm-capable biome into an active storm" },
-    .{ .names = "guardclear, gc", .description = "zdtd: clear guard quarantine on a peer slot" },
-    .{ .names = "guardstats, gs", .description = "zdtd: C2S authority reject counters" },
-    .{ .names = "help", .description = "Help on console and specific commands" },
-    .{ .names = "inv", .description = "zdtd: dump a joined peer's inventory slots" },
-    .{ .names = "kick", .description = "Kicks user with optional reason" },
-    .{ .names = "kickall", .description = "Kicks all users with optional reason" },
-    .{ .names = "kill", .description = "Kill an entity by id" },
-    .{ .names = "killall, ka", .description = "Kill all AI entities" },
-    .{ .names = "listents, le", .description = "lists all entities" },
-    .{ .names = "listplayerids, lpi", .description = "Lists all players with their IDs for ingame commands" },
-    .{ .names = "listplayers, lp", .description = "lists all players" },
-    .{ .names = "mem", .description = "Prints memory information" },
-    .{ .names = "save", .description = "zdtd: save player records" },
-    .{ .names = "saveworld, sa", .description = "Saves the world manually" },
-    .{ .names = "say", .description = "Sends a message to all connected clients" },
-    .{ .names = "setgamepref, sg", .description = "Sets a game pref" },
-    .{ .names = "settime, st", .description = "Set the current game time" },
-    .{ .names = "shutdown", .description = "shuts down the game server" },
-    .{ .names = "spawnentity, se", .description = "spawns an entity" },
-    .{ .names = "status", .description = "zdtd: one-line load and error counters" },
-    .{ .names = "tele, tp", .description = "zdtd: teleport a player (stock tp is client-only)" },
-    .{ .names = "unban", .description = "zdtd: drop a raw IPv4 ban" },
-    .{ .names = "version", .description = "Get the currently running version" },
-    .{ .names = "whitelist", .description = "Manage whitelist entries" },
-    .{ .names = "wipeplayer", .description = "zdtd: erase a player record by login name" },
-};
-
-/// Persist failures are non-fatal but never silent: lost world/player/container
-/// state must show up in the server log. Counter always increments; log is
-/// rate-limited (first + every 100th) so a full disk does not flood stderr
-/// every save period while still leaving an audit trail.
-pub const logPersistErr = persist.logPersistErr;
-pub const Zpv2Drop = persist.Zpv2Drop;
-pub const zpvRecordLen = persist.zpvRecordLen;
-pub const zpv2DropName = persist.zpv2DropName;
+pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
+pub const apm_report_period_ticks = @import("game/constants.zig").apm_report_period_ticks;
+pub const admin_help_index = @import("game/constants.zig").admin_help_index;
+pub const logPersistErr = @import("game/constants.zig").logPersistErr;
+pub const Zpv2Drop = @import("game/constants.zig").Zpv2Drop;
+pub const zpvRecordLen = @import("game/constants.zig").zpvRecordLen;
+pub const zpv2DropName = @import("game/constants.zig").zpv2DropName;
 
 pub const AuthorityMode = server_config.AuthorityMode;
 
@@ -246,102 +198,12 @@ pub const flags_body_off = game_types.flags_body_off;
 pub const LandClaim = game_types.LandClaim;
 pub const Client = game_types.Client;
 
-const eqAny = c2s_text.eqAny;
-const sanitizePlayerName = c2s_text.sanitizePlayerName;
-const chatMsgOk = c2s_text.chatMsgOk;
-const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
-
-// --- Wasm plugin host callbacks (ADR 0020) ---------------------------------
-// The plugin layer hands these back the HostCtx; `data` is this Game. All run
-// on the main tick/net thread. queue only appends to the fixed sim command
-// buffer (drained once per tick by the ecs schedule); it never touches the sim
-// directly, so plugin calls cannot race or reenter the tick.
-
-const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
-
-fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
-    _ = ctx;
-    const tag = wasm_log_level_tags[@min(@as(usize, level), wasm_log_level_tags.len - 1)];
-    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, msg });
-}
-
-fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
-    return g.tick_n;
-}
-
-/// Kill verdict routed from the sim (World.kill_verdict_fn, T15): players go
-/// to on_player_death, everything else to on_entity_killed. The static host
-/// votes first, then the Wasm host; the first non-zero verdict wins. A
-/// negative return denies the death; the sim keeps the victim at 1 hp.
-fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32) i32 {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
-    return switch (kind) {
-        .player => blk: {
-            const sv = g.plugins.playerDeath(victim);
-            break :blk if (sv != 0) sv else g.wasm_plugins.playerDeath(victim);
-        },
-        else => blk: {
-            const sv = g.plugins.entityKilled(victim, attacker);
-            break :blk if (sv != 0) sv else g.wasm_plugins.entityKilled(victim, attacker);
-        },
-    };
-}
-
-/// Max bytes of one queued command string from a guest (bounds the tokenizer).
-const max_plugin_cmd_len: usize = 128;
-
-fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return));
-    if (cmd.len > max_plugin_cmd_len) {
-        std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
-        return;
-    }
-    const op = parsePluginCommand(cmd) orelse {
-        // Log verb only: args may include player names, chat text, or coords.
-        const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
-        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd[0..verb_end]});
-        return;
-    };
-    // Fixed 64-slot buffer (ecs/command.zig); drops when full, by named cap.
-    _ = g.sim.commands.push(op);
-}
-
-/// Text SimCommand grammar (PLUGIN_API.md): `spawn x y z hp`, `despawn id`,
-/// `damage id amount`. Allocation-free; unknown or malformed input returns null
-/// and the caller drops it. Extra trailing tokens are malformed, not ignored.
-fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
-    var it = std.mem.tokenizeScalar(u8, cmd, ' ');
-    const verb = it.next() orelse return null;
-    if (std.mem.eql(u8, verb, "spawn")) {
-        const x = it.next() orelse return null;
-        const y = it.next() orelse return null;
-        const z = it.next() orelse return null;
-        const hp = it.next() orelse return null;
-        if (it.next() != null) return null;
-        return .{ .spawn_zombie = .{
-            .x = std.fmt.parseFloat(f32, x) catch return null,
-            .y = std.fmt.parseFloat(f32, y) catch return null,
-            .z = std.fmt.parseFloat(f32, z) catch return null,
-            .hp = std.fmt.parseFloat(f32, hp) catch return null,
-        } };
-    }
-    if (std.mem.eql(u8, verb, "despawn")) {
-        const id = it.next() orelse return null;
-        if (it.next() != null) return null;
-        return .{ .despawn = .{ .net_id = std.fmt.parseInt(i32, id, 10) catch return null } };
-    }
-    if (std.mem.eql(u8, verb, "damage")) {
-        const id = it.next() orelse return null;
-        const amt = it.next() orelse return null;
-        if (it.next() != null) return null;
-        return .{ .damage = .{
-            .net_id = std.fmt.parseInt(i32, id, 10) catch return null,
-            .amount = std.fmt.parseFloat(f32, amt) catch return null,
-        } };
-    }
-    return null;
-}
+const game_wasm_host = @import("game/wasm_host.zig");
+pub const killVerdict = game_wasm_host.killVerdict;
+const wasmLog = game_wasm_host.wasmLog;
+const wasmTick = game_wasm_host.wasmTick;
+const wasmQueue = game_wasm_host.wasmQueue;
+const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
     return game_stability.stabilityFacts(ctx, id);
@@ -591,13 +453,9 @@ pub const Game = struct {
     storm_frequency: i32 = default_storm_frequency,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
-    pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
-        return createWithOptions(allocator, world_dir, port, .{});
-    }
+    pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game { return createWithOptions(allocator, world_dir, port, .{}); }
 
-    pub fn createWithMap(allocator: std.mem.Allocator, world_dir: []const u8, map_dir: ?[]const u8, port: u16) !*Game {
-        return createWithOptions(allocator, world_dir, port, .{ .map_dir = map_dir });
-    }
+    pub fn createWithMap(allocator: std.mem.Allocator, world_dir: []const u8, map_dir: ?[]const u8, port: u16) !*Game { return createWithOptions(allocator, world_dir, port, .{ .map_dir = map_dir }); }
 
     pub fn createWithOptions(allocator: std.mem.Allocator, world_dir: []const u8, port: u16, opts: InitOptions) !*Game {
         // Reject before allocating Game (large SoA); LiteNet uses ServerPort+2.
@@ -847,723 +705,37 @@ pub const Game = struct {
         else
             subbiome_noise.stableHash(opts.game_world));
 
-        const assets_paths = @import("../assets/paths.zig");
-        assets_paths.setOverrideDirs(opts.config_overrides);
-        if (opts.config_overrides.len > 0) {
-            std.debug.print("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
-        }
-        if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path) catch null) |cat| {
-            self.sim.setCatalog(cat);
-        }
-        // AssignIds + blocks.xml properties first so later catalogs can resolve ids.
-        if (assets_maxdamage.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |md| {
-            self.maxdamage.deinit();
-            self.maxdamage = md;
-            self.maxdamage.tryMergeBundledAssignIds(allocator);
-            self.maxdamage.resolveMaterialMaxDamage(allocator) catch |err| {
-                std.debug.print("zdtd: resolveMaterialMaxDamage failed: {s}\n", .{@errorName(err)});
-            };
-            if (self.world.prefabs) |*pf| {
-                if (pf.prefabs_root.len > 0) {
-                    var nim_path: [2048]u8 = undefined;
-                    if (std.fmt.bufPrint(&nim_path, "{s}/POIs/abandoned_house_01.blocks.nim", .{pf.prefabs_root})) |p| {
-                        self.maxdamage.mergeNim(allocator, p) catch |err| {
-                            std.debug.print("zdtd: mergeNim {s} failed: {s}\n", .{ p, @errorName(err) });
-                        };
-                    } else |_| {}
-                }
-            }
-            std.debug.print("zdtd: maxdamage names={d} ids={d} assignids={d} storage={d}\n", .{
-                self.maxdamage.by_name.count(),
-                self.maxdamage.by_id.count(),
-                self.maxdamage.id_by_name.count(),
-                self.maxdamage.storage_ids.count(),
-            });
-        } else {
-            self.maxdamage.tryMergeBundledAssignIds(allocator);
-            std.debug.print("zdtd: assignids-only names={d}\n", .{self.maxdamage.id_by_name.count()});
-        }
-        // A05: live terrain type ids from AssignIds (World.terrain_ids; pins remain offline defaults).
-        {
-            const TerrCtx = struct {
-                t: *const assets_maxdamage.Table,
-                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
-                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
-                    return self_t.t.idByName(name);
-                }
-            };
-            var terr_ctx: TerrCtx = .{ .t = &self.maxdamage };
-            self.world.resolveTerrainIds(TerrCtx.lookup, &terr_ctx);
-        }
-        // Prefab `.tts` type ids are indices into each POI's own
-        // `<name>.blocks.nim`, not runtime block ids; remap them by name the way
-        // stock does at Prefab::loadIdMapping (asm.il:928850). Installed before
-        // the first chunk is generated so no POI is stamped with local ids.
-        if (self.world.prefabs) |*pf| {
-            const NimCtx = struct {
-                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
-                    const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
-                    return t.idByName(name);
-                }
-                fn multiblock(ctx: ?*anyopaque, name: []const u8) assets_maxdamage.Dim {
-                    const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
-                    return t.multiBlockDim(name);
-                }
-            };
-            if (self.maxdamage.id_by_name.count() > 0) {
-                pf.setIdLookup(.{ .ctx = &self.maxdamage, .lookup = NimCtx.lookup, .multiblock = NimCtx.multiblock });
-            } else {
-                std.debug.print("zdtd: warn: no AssignIds table, POI block ids stay prefab-local\n", .{});
-            }
-        }
-        {
-            const IdCtx = struct {
-                t: *const assets_maxdamage.Table,
-                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
-                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
-                    return self_t.t.idByName(name);
-                }
-            };
-            var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-            if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
-                self.blocks.deinit();
-                self.blocks = bt;
-                std.debug.print("zdtd: blocks defs={d}\n", .{self.blocks.defs.len});
-            }
-        }
-        if (assets_items.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |it| {
-            self.items.deinit();
-            self.items = it;
-            std.debug.print("zdtd: items source={s} defs={d} stock_names={d}\n", .{
-                @tagName(self.items.source), self.items.defs.len, self.items.stock_names.len,
-            });
-            if (self.items.byStockName("foodCanChili")) |st| {
-                const eid = self.items.ecsIdFromStockType(st);
-                std.debug.print("zdtd: foodCanChili stock={d} ecs={d} isEat={}\n", .{
-                    st, eid, self.items.isEat(eid),
-                });
-            }
-        }
-        if (assets_signs.tryLoad(allocator, opts.game_dir) catch null) |sc| {
-            self.signs.deinit();
-            self.signs = sc;
-            std.debug.print("zdtd: sign libraries entries={d}\n", .{self.signs.entries.len});
-        }
-        if (assets_entities.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |et| {
-            self.entities.deinit();
-            self.entities = et;
-            // Push defaults into class_table for spawn helpers.
-            const zdef = self.entities.defaultZombie();
-            self.sim.setClassDef(1, .{
-                .name = zdef.name,
-                .max_hp = zdef.max_hp,
-                .kind = .zombie,
-                .hash = zdef.hash,
-                .loot_list = zdef.loot_list,
-                .drop_prob = zdef.loot_drop_prob,
-                .chase_speed = zdef.chase_speed,
-                .wander_speed = zdef.wander_speed,
-                .attack_damage = self.handItemDamage(zdef.hand_item),
-                .time_stay = zdef.time_stay,
-                .sight_range = zdef.sight_range,
-            });
-            const adef = self.entities.defaultAnimal();
-            self.sim.setClassDef(7, .{
-                .name = adef.name,
-                .max_hp = adef.max_hp,
-                .kind = .animal,
-                .hash = adef.hash,
-                .loot_list = adef.loot_list,
-                .drop_prob = adef.loot_drop_prob,
-                .chase_speed = adef.chase_speed,
-                .wander_speed = adef.wander_speed,
-                .attack_damage = self.handItemDamage(adef.hand_item),
-                .time_stay = adef.time_stay,
-                .sight_range = adef.sight_range,
-            });
-            std.debug.print("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
-                self.entities.defs.len, zdef.name, zdef.hash,
-            });
-        }
-        // Trader NPC: real class hash so the client renders EntityTrader. Runs
-        // for the builtin table too (no game-dir), where the offline demo trader
-        // still needs a renderable class; the XML def wins when a game-dir loads.
-        if (self.entities.defaultTrader()) |tdef| {
-            self.sim.setClassDef(3, .{
-                .name = tdef.name,
-                .max_hp = tdef.max_hp,
-                .kind = .trader,
-                .hash = tdef.hash,
-                .loot_list = tdef.loot_list,
-                .drop_prob = tdef.loot_drop_prob,
-            });
-        }
-        if (assets_recipes.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |rt| {
-            self.recipes.deinit();
-            self.recipes = rt;
-            std.debug.print("zdtd: recipes defs={d}\n", .{self.recipes.defs.len});
-        }
-        if (assets_loot.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |lt| {
-            self.loot.deinit();
-            self.loot = lt;
-            std.debug.print("zdtd: loot groups={d} containers={d}\n", .{ self.loot.groups.len, self.loot.containers.len });
-        }
-        self.loot.abundance_pct = opts.loot_abundance; // LootAbundance applies to builtin or xml table
-
-        if (assets_entitygroups.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |gt| {
-            self.entitygroups.deinit();
-            self.entitygroups = gt;
-            std.debug.print("zdtd: entitygroups n={d}\n", .{self.entitygroups.groups.len});
-            // Fill zombie class slots 1 + 8..11 from weighted group picks so the
-            // director can rotate varied classes (not always class_table[1]).
-            var zslot: usize = 1;
-            var pick_seed: u32 = 1;
-            while (zslot < 12) : (pick_seed += 1) {
-                const cname = self.entitygroups.pick("ZombiesAll", pick_seed) orelse break;
-                const def = self.entities.byName(cname) orelse continue;
-                self.sim.setClassDef(@intCast(zslot), .{
-                    .name = def.name,
-                    .max_hp = def.max_hp,
-                    .kind = .zombie,
-                    .hash = def.hash,
-                    .loot_list = def.loot_list,
-                    .drop_prob = def.loot_drop_prob,
-                    .chase_speed = def.chase_speed,
-                    .wander_speed = def.wander_speed,
-                    .attack_damage = self.handItemDamage(def.hand_item),
-                    .time_stay = def.time_stay,
-                });
-                zslot = if (zslot == 1) 8 else zslot + 1;
-                if (pick_seed > 32) break;
-            }
-        }
-        // After entitygroups: every <spawn group=…> must name a real entity
-        // group. Stock throws XmlLoadException there (ParseSpawn, asm.il
-        // ~1379646); zdtd warns and keeps the ladder so one bad row cannot
-        // take the server down.
-        if (assets_gamestages.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |gst| {
-            self.gamestages.deinit();
-            self.gamestages = gst;
-            var stage_n: usize = 0;
-            var missing: usize = 0;
-            for (self.gamestages.spawners) |sp| {
-                stage_n += sp.stages.len;
-                for (sp.stages) |st| {
-                    for (st.spawns) |sg| {
-                        if (self.entitygroups.byName(sg.group) == null) missing += 1;
-                    }
-                }
-            }
-            std.debug.print(
-                "zdtd: gamestages spawners={d} stages={d} groups={d} unknown_entitygroups={d}\n",
-                .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
-            );
-        }
-        if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
-            self.traders.deinit();
-            self.traders = tt;
-        }
-        if (try assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
-            self.npc.deinit();
-            self.npc = nt;
-        }
-        // Trader POIs on a stock map: spawn each POI's trader NPC at its
-        // IndexedBlockOffsets "Trader" cell so a player walking to a compound
-        // finds the trader, not an empty building (needs prefabs + entities +
-        // npc tables, hence after the loads above).
-        self.spawnPoiTraders();
-        if (assets_painting.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
-            self.painting.deinit();
-            self.painting = pt;
-            std.debug.print("zdtd: painting entries={d}\n", .{self.painting.n});
-        }
-        if (assets_spawning.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |st| {
-            self.spawning.deinit();
-            self.spawning = st;
-            std.debug.print("zdtd: spawning rules={d}\n", .{self.spawning.rules.len});
-        }
-        if (assets_buffs.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |bt| {
-            self.buffs.deinit();
-            self.buffs = bt;
-            std.debug.print("zdtd: buffs defs={d}\n", .{self.buffs.defs.len});
-        }
-        if (assets_progression.tryLoadTable(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
-            self.progression_table.deinit();
-            self.progression_table = pt;
-            self.progression = pt.curve;
-            if (pt.curve.loaded) {
-                std.debug.print("zdtd: progression max_level={d} exp_to_level={d} attrs={d} perks={d}\n", .{
-                    pt.curve.max_level,
-                    pt.curve.exp_to_level,
-                    pt.attributes.len,
-                    pt.perks.len,
-                });
-            }
-        } else if (assets_progression.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pc| {
-            self.progression = pc;
-            if (pc.loaded) {
-                std.debug.print("zdtd: progression max_level={d} exp_to_level={d}\n", .{ pc.max_level, pc.exp_to_level });
-            }
-        }
-        if (assets_vehicles.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |vt| {
-            self.vehicles.deinit();
-            self.vehicles = vt;
-            std.debug.print("zdtd: vehicles defs={d}\n", .{self.vehicles.defs.len});
-        }
-        if (assets_storage_pairs.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |sp| {
-            self.storage_pairs.deinit();
-            self.storage_pairs = sp;
-            const IdCtx = struct {
-                t: *const assets_maxdamage.Table,
-                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
-                    const s: *const @This() = @ptrCast(@alignCast(ctx.?));
-                    return s.t.idByName(name);
-                }
-            };
-            var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-            self.storage_pairs.resolveIds(IdCtx.lookup, &id_ctx);
-            std.debug.print("zdtd: storage pairs={d}\n", .{self.storage_pairs.pairs.len});
-        }
-        // Wire spawning.xml groups into director (first matching biome rule).
-        {
-            var night_g: []const u8 = "";
-            var day_g: []const u8 = "";
-            var animal_g: []const u8 = "";
-            var buf: [16]assets_spawning.Rule = undefined;
-            for ([_][]const u8{ "pine_forest", "burnt_forest", "desert", "snow", "wasteland" }) |bn| {
-                const n = self.spawning.rulesForBiome(bn, &buf);
-                var ri: usize = 0;
-                while (ri < n) : (ri += 1) {
-                    const r = buf[ri];
-                    if (r.kind == .animal and animal_g.len == 0) animal_g = r.entitygroup;
-                    if (r.kind == .zombie) {
-                        if (r.time == .night and night_g.len == 0) night_g = r.entitygroup;
-                        if (r.time == .any or r.time == .day) {
-                            if (day_g.len == 0) day_g = r.entitygroup;
-                        }
-                    }
-                }
-                if (night_g.len > 0 and day_g.len > 0) break;
-            }
-            self.sim.director.night_group = night_g;
-            self.sim.director.day_group = day_g;
-            self.sim.director.animal_group = animal_g;
-            // Biome-aware group override: resolve per spawn-point biome so e.g.
-            // wasteland at midnight spawns wasteland walkers, not pine_forest's.
-            self.sim.director.biome_group_ctx = self;
-            self.sim.director.biome_group_fn = &Game.biomeGroupName;
-            self.sim.director.group_pick_ctx = self;
-            self.sim.director.group_pick_fn = &Game.pickEntityGroup;
-            // Full class resolution: any entityclasses.xml class a spawn group
-            // picks reaches the sim with its own HP/speeds/damage, even when it
-            // is not preloaded into the fixed class_table (A35).
-            self.sim.director.class_resolve_ctx = self;
-            self.sim.director.class_resolve_fn = &Game.resolveSpawnClass;
-            self.sim.director.stage_group_ctx = self;
-            self.sim.director.stage_group_fn = &Game.pickStageGroup;
-            self.sim.director.spawner_group_ctx = self;
-            self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
-            // Plugin kill verdict (T15): routes the sim's death decision to the
-            // Wasm host (on_player_death for players, on_entity_killed for the
-            // rest). Unset hook = no plugins = today's behaviour.
-            self.sim.kill_verdict_ctx = self;
-            self.sim.kill_verdict_fn = &killVerdict;
-            if (night_g.len > 0 or day_g.len > 0) {
-                std.debug.print("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
-            }
-        }
-        if (biomes_mod.tryLoadColorTable(allocator, opts.game_dir, opts.config_dir) catch null) |ct| {
-            self.biome_colors.deinit();
-            self.biome_colors = ct;
-            // Reload biomes.png with XML colors if map already loaded.
-            if (opts.map_dir) |md| {
-                if (self.world.biomes) |*old| old.deinit();
-                self.world.biomes = biomes_mod.tryLoadWithColors(allocator, md, &self.biome_colors) catch null;
-            }
-            std.debug.print("zdtd: biome colors n={d}\n", .{self.biome_colors.colors.len});
-        }
-        // biomes.xml layer stacks → terrain columns (AssignIds names).
-        {
-            const IdCtx = struct {
-                t: *const assets_maxdamage.Table,
-                fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
-                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
-                    if (self_t.t.idByName(name)) |id| return id;
-                    // Comptime pins only when AssignIds map empty (offline / no dump).
-                    if (self_t.t.id_by_name.count() > 0) return null;
-                    const a = @import("../assets/assignids_comptime.zig");
-                    if (std.mem.eql(u8, name, "terrStone")) return a.terr_stone;
-                    if (std.mem.eql(u8, name, "terrBedrock")) return a.terr_bedrock;
-                    if (std.mem.eql(u8, name, "terrDirt")) return a.terr_dirt;
-                    if (std.mem.eql(u8, name, "terrForestGround")) return a.terr_forest_ground;
-                    if (std.mem.eql(u8, name, "terrBurntForestGround")) return a.terr_burnt_forest_ground;
-                    if (std.mem.eql(u8, name, "terrDesertGround")) return a.terr_desert_ground;
-                    if (std.mem.eql(u8, name, "terrSand")) return a.terr_sand;
-                    if (std.mem.eql(u8, name, "terrSandStone")) return a.terr_sand_stone;
-                    if (std.mem.eql(u8, name, "terrSnow")) return a.terr_snow;
-                    if (std.mem.eql(u8, name, "terrTopSoil")) return a.terr_topsoil;
-                    if (std.mem.eql(u8, name, "terrDestroyedStone")) return a.terr_destroyed_stone;
-                    if (std.mem.eql(u8, name, "terrDestroyedGrass")) return a.terr_destroyed_grass;
-                    if (std.mem.eql(u8, name, "water")) return a.water;
-                    return null;
-                }
-                /// blocks.xml IsDistantDecoration, the filter that decides which
-                /// `<decoration>` rows can become DecoObjects at all.
-                fn distantDeco(ctx: ?*anyopaque, name: []const u8) bool {
-                    const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
-                    return self_t.t.isDistantDeco(name);
-                }
-            };
-            var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-            if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, IdCtx.distantDeco, &id_ctx) catch null) |bl| {
-                self.world.biome_layers_table = bl;
-                // The procedural generator picks up the loaded biome stacks (W3).
-                self.world.syncWorldgenBiomes();
-                // Weather groups must come from the same effective biomes.xml we
-                // serve, since groupIndex is a document ordinal in that file.
-                // Frequency and countdown divisor read the very GameStats values
-                // the client is told, so server sim and client display agree.
-                const gs_defaults: packages.GameStatsValues = .{};
-                self.world.weather.initFrom(&self.world.biome_layers_table, .{
-                    .seed = opts.worldgen_seed orelse util_sim.default_seed,
-                    .day_night_length = opts.day_night_length,
-                    // [sim] storm_frequency percent -> the 1.0x divisor the
-                    // scheduler divides by (0 disables storms). Mirrors the
-                    // GameStats wire value so client and server agree.
-                    .storm_frequency = @as(f32, @floatFromInt(self.storm_frequency)) / 100.0,
-                    .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
-                });
-                self.restoreWeather();
-                const burnt = bl.stackFor(9);
-                std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
-                    bl.default_stack.n,
-                    burnt.n,
-                    if (burnt.n > 0) burnt.layers[0].block_id else 0,
-                    if (bl.hasDecos()) "yes" else "no",
-                });
-            }
-            // Clock restore is independent of the biome-layers load: a world
-            // without stock biome data must still resume its saved day/time.
-            self.restoreClock();
-            if (assets_block_textures.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
-                self.block_textures.deinit();
-                self.block_textures = bt;
-                std.debug.print("zdtd: block textures defaults={d}\n", .{self.block_textures.by_id.count()});
-            }
-        }
-        self.power_registry = ecs.powerblocks.Registry.build(&self.maxdamage);
-        std.debug.print("zdtd: power blocks registered={d}\n", .{self.power_registry.n});
-        if (opts.game_dir != null or opts.config_dir != null) {
-            if (self.maxdamage.power_class_by_name.count() == 0)
-                std.debug.print("zdtd: warn: blocks.xml Class map empty (power props missing)\n", .{});
-            if (self.items.source != .xml)
-                std.debug.print("zdtd: warn: items table builtin despite game-dir (items.xml not loaded)\n", .{});
-            if (self.recipes.source != .xml)
-                std.debug.print("zdtd: warn: recipes table builtin despite game-dir\n", .{});
-            if (self.entities.source != .xml)
-                std.debug.print("zdtd: warn: entities table builtin despite game-dir\n", .{});
-            if (self.loot.source != .xml)
-                std.debug.print("zdtd: warn: loot table builtin despite game-dir\n", .{});
-            if (self.entitygroups.source != .xml)
-                std.debug.print("zdtd: warn: entitygroups table builtin despite game-dir\n", .{});
-            if (self.blocks.source != .xml)
-                std.debug.print("zdtd: warn: blocks table builtin despite game-dir\n", .{});
-            if (self.sim.catalog.source != .stock_xml)
-                std.debug.print("zdtd: warn: quests catalog builtin despite game-dir\n", .{});
-        }
-        if (self.maxdamage.idByName("generatorbank")) |gid| {
-            if (self.power_registry.lookup(gid)) |pr| {
-                std.debug.print("zdtd: power generatorbank watts={d} max_fuel={d} out_per_fuel={d}\n", .{
-                    pr.watts, pr.max_fuel, pr.output_per_fuel,
-                });
-            }
-        }
-        // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn first
-        // so max_volumes budget covers playable area; remainder skipped (honest cap).
-        if (self.world.prefabs) |*pf| {
-            if (pf.prefabs_root.len > 0) {
-                const sp0 = self.world.primarySpawn();
-                var refs: std.ArrayList(sleepers_mod.PrefabRef) = .empty;
-                defer refs.deinit(allocator);
-                // Pass 1: within ~512m of spawn
-                for (pf.items) |d| {
-                    if (world_store.prefabs.isPart(d.name)) continue;
-                    const dx = d.x - sp0.x;
-                    const dz = d.z - sp0.z;
-                    if (dx * dx + dz * dz > 512 * 512) continue;
-                    try refs.append(allocator, .{
-                        .name = d.name,
-                        .x = d.x,
-                        // Sleeper volume starts are prefab-local, so they follow
-                        // the stamped body down through YOffset.
-                        .y = d.stampY(),
-                        .z = d.z,
-                        .rot = d.rot,
-                        .size_x = d.size_x,
-                        .size_y = d.size_y,
-                        .size_z = d.size_z,
-                    });
-                }
-                // Pass 2: fill remaining budget with farther POIs
-                if (refs.items.len < 800) {
-                    for (pf.items) |d| {
-                        if (world_store.prefabs.isPart(d.name)) continue;
-                        const dx = d.x - sp0.x;
-                        const dz = d.z - sp0.z;
-                        if (dx * dx + dz * dz <= 512 * 512) continue;
-                        try refs.append(allocator, .{
-                            .name = d.name,
-                            .x = d.x,
-                            .y = d.stampY(),
-                            .z = d.z,
-                            .rot = d.rot,
-                            .size_x = d.size_x,
-                            .size_y = d.size_y,
-                            .size_z = d.size_z,
-                        });
-                        if (refs.items.len >= 1200) break;
-                    }
-                }
-                if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items) catch |err| blk: {
-                    std.debug.print("zdtd: sleeper load failed: {s}\n", .{@errorName(err)});
-                    break :blk null;
-                }) |sv| {
-                    self.sleepers.deinit();
-                    self.sleepers = sv;
-                    // Stock POI volumes name gamestage groups, not entitygroups
-                    // (SleeperVolume::Spawn, asm.il ~1199169). Probe at stage 1,
-                    // the lowest rung any stock ladder has, so a regression back
-                    // to defaultZombie for most of the map is visible at boot.
-                    var gs_ok: usize = 0;
-                    for (self.sleepers.volumes) |vol| {
-                        if (vol.group_n == 0) continue;
-                        if (self.gamestages.sleeperEntityGroup(vol.groups[0].class_name, 1) != null) gs_ok += 1;
-                    }
-                    std.debug.print("zdtd: sleeper volumes={d} (prefabs_near={d}) gamestage_resolved={d}\n", .{ self.sleepers.volumes.len, refs.items.len, gs_ok });
-                }
-            }
-        }
-
-        // Stock: ServerPort = TCP info; LiteNet UDP = ServerPort+2 (NetworkServerLiteNetLib.GetServerPorts).
-        // port==0: ephemeral UDP only (tests), no TCP info listener.
-        const lite_port: u16 = if (port == 0) 0 else port +% 2;
-        try self.net.listen(lite_port);
-        // ServerPassword is LiteNet Connect key (not Encryption* / not PlayerLogin).
-        self.net.server_password = self.password;
-        self.info_port = port;
-        // Offline harness (port 0): virtual mono clock + serial forRanges so
-        // lock/stale/resend and parallel systems are seed-stable under DST.
-        // Run seed is worldgen when set, else default_seed (logged via getSeed).
-        // Production always passes a real ServerPort and leaves wall clock.
-        if (port == 0) {
-            const seed = opts.worldgen_seed orelse util_sim.default_seed;
-            util_sim.enableSeeded(util_sim.default_start_ns, seed);
-            // DST replay key: the single value that reproduces this run.
-            std.debug.print("zdtd: DST run seed={d}\n", .{seed});
-        }
-        // A later init error (for example invalid WebUI configuration) must not
-        // leak process-wide virtual time or forced-serial scheduling into the
-        // next test. Successful construction transfers cleanup to deinit().
-        errdefer if (port == 0) util_sim.disable();
-        if (port != 0) {
-            const level = if (opts.world_name) |wn| wn else self.world_name;
-            // Advertise ServerPort in GSI.Port; stock client dials LiteNet at Port+2.
-            self.info_tcp.start(.{
-                .game_name = "zdtd",
-                .game_host = "zdtd",
-                .level_name = level,
-                .ip = "127.0.0.1",
-                .info_port = port,
-                .max_players = self.max_players,
-                .current_players = 0,
-                .server_version = version.stock_wire_gsi_version,
-                .world_size = 6144,
-                .eac_enabled = false,
-                .password_protected = self.password.len > 0,
-                .sandbox_preset = self.sandbox_preset,
-                .sandbox_code = self.sandbox_code,
-            }) catch |err| {
-                std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
-            };
-        }
-        self.loadAdminLists();
-        if (opts.admin_port != 0) {
-            // Stock TelnetConsole::.ctor (asm.il ~270735): a password is what moves
-            // the console off loopback, so `auth` must be set before `listen`.
-            self.admin.auth = .{
-                .password = opts.telnet_password,
-                .fail_limit = opts.telnet_failed_login_limit,
-                .fail_block_minutes = opts.telnet_failed_logins_blocktime,
-            };
-            self.admin.greeting = .{
-                .version = version.stock_wire_announce,
-                .compat_version = version.stock_wire,
-                .server_ip = if (self.admin.public()) "Any" else "127.0.0.1",
-                .server_port = port,
-                .max_players = self.max_players,
-                .game_mode = "GameModeSurvival",
-                .world = opts.game_world,
-                .game_name = self.world_name,
-                .difficulty = opts.game_difficulty,
-            };
-            self.admin.listen(opts.admin_port) catch |err| {
-                std.debug.print("zdtd: warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ opts.admin_port, err });
-            };
-            if (self.admin.port != 0) {
-                std.debug.print(
-                    "zdtd: admin console {s}:{d} ({s})\n",
-                    .{
-                        if (self.admin.public()) "0.0.0.0" else "127.0.0.1",
-                        self.admin.port,
-                        if (self.admin.public()) "password required" else "unauthenticated; loopback only",
-                    },
-                );
-            }
-        }
-        if (opts.webui_port != 0) {
-            // Fail closed: operator requested webui; a silent disabled UI is a misconfig incident.
-            self.webui.listen(.{
-                .port = opts.webui_port,
-                .bind_host = opts.webui_bind,
-                .secret = opts.webui_secret,
-            }) catch |err| {
-                std.debug.print("zdtd: webui on {s}:{d} failed: {s}\n", .{
-                    opts.webui_bind,
-                    opts.webui_port,
-                    @errorName(err),
-                });
-                return err;
-            };
-            self.webui.setAdminHandler(self, Game.webuiAdminThunk);
-            std.debug.print("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
-                opts.webui_bind,
-                self.webui.port,
-            });
-        }
-        if (opts.world_name) |wn| self.world_name = wn;
-
-        const sp = self.world.primarySpawn();
-        const sy: f32 = @floatFromInt(sp.y);
-        const sx: f32 = @floatFromInt(sp.x);
-        const sz: f32 = @floatFromInt(sp.z);
-
-        // Keep starter zombies outside default turret range (~24) so they survive until join.
-        // A35: spawn the full resolved class so the entities carry their own stats.
-        const zdef = self.entities.defaultZombie();
-        const z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
-        const z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
-        const z3 = self.sim.spawnSleeperDef(sx + 30, sy, sz - 40, self.entityClassOf(zdef));
-        const adef = self.entities.defaultAnimal();
-        _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
-        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"), self.trader_wallet_dukes)) |trader_id| {
-            self.fillTraderFromXml(trader_id);
-        }
-        // Persistable kinds seed only on a fresh world; entities.zen owns
-        // them across restarts (see had_saved_entities above).
-        if (!had_saved_entities) {
-            const vk: ecs.components.VehicleKind = .minibike;
-            if (self.vehicles.byKind(vk)) |vd| {
-                _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max, vd.seat_count);
-            } else {
-                _ = self.sim.spawnVehicle(vk, sx + 6, sy, sz - 4);
-            }
-        }
-        // Near-spawn storage TE (stock TileEntity on chunk stream).
-        // Prefer runtime AssignIds id for cntWoodenChestClosed when known; else placeholder.
-        {
-            const cx: i32 = sp.x + 2;
-            const cy: i32 = sp.y;
-            const cz: i32 = sp.z + 2;
-            const chest_block: u16 = replicate_te.seedChestBlockId(self);
-            if (self.world.setBlockWorld(cx, cy, cz, chest_block)) |_| {
-                if (self.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, chest_block)) |cont| {
-                    cont.setSlot(0, .{ .item_id = 7, .count = 10, .quality = 1 }); // wood
-                    cont.setSlot(1, .{ .item_id = 2, .count = 3, .quality = 1 }); // food
-                }
-            } else |err| {
-                std.debug.print("zdtd: seed chest block ({d},{d},{d}) failed: {s}\n", .{ cx, cy, cz, @errorName(err) });
-            }
-        }
-        std.debug.print("zdtd: sim seed zombies z1={?} z2={?} sleeper={?} count={d} spawn=({d},{d},{d})\n", .{
-            z1, z2, z3, self.sim.countKind(.zombie), sp.x, sp.y, sp.z,
-        });
-
-        // Demo power grid off the spawn pad (do not auto-wire a live turret onto seed zombies).
-        // The turret is persistable and only seeds fresh; the generator is a
-        // virtual node (no block) and re-seeds every boot so a restored turret
-        // still finds a source after a restart.
-        const gen = self.sim.power.addNode(.generator, @intFromFloat(sx + 50), @intFromFloat(sy), @intFromFloat(sz + 50), 100);
-        if (!had_saved_entities) {
-            if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
-                if (gen) |gid| {
-                    if (self.sim.slotOfNetId(tid)) |ts| {
-                        _ = self.sim.power.connect(gid, self.sim.turret[ts].power_node);
-                    }
-                }
-            }
-        }
-        self.sim.power.resolve();
-
-        // Static plugins after world/assets are ready (sample_hello logs once).
-        self.plugins.enableStaticDefaults();
-        // Wasm plugins from config ([plugin] modules, ADR 0020): load once at
-        // init (allocation allowed here), then enable. loadAll logs and skips
-        // a missing or unloadable module, so one bad file does not kill boot.
-        self.wasm_plugins.loadAll(self.allocator, opts.plugin_modules, &self.wasm_ctx, opts.plugin_budget);
-        self.wasm_plugins.enable();
+        try game_init_assets.loadAssets(self, allocator, opts);
+        try @import("game/init_world.zig").initWorld(self, allocator, port, opts, had_saved_entities);
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
     /// join-phase Hard drops but is the flag for future soft-only paths.
-    pub fn authorityCorrects(self: *const Game) bool {
-        return self.authority_mode == .correct;
-    }
+    pub fn authorityCorrects(self: *const Game) bool { return self.authority_mode == .correct; }
 
-    pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
-        return game_movement_helpers.noteAcceptedMove(self, c, x, y, z);
-    }
-    pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
-        return game_movement_helpers.resetMoveEnvelopePeer(self, peer_slot, x, y, z);
-    }
+    pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void { return game_movement_helpers.noteAcceptedMove(self, c, x, y, z); }
+    pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void { return game_movement_helpers.resetMoveEnvelopePeer(self, peer_slot, x, y, z); }
     pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32) game_movement_helpers.ApplyResult {
         return game_movement_helpers.applyMovementEnvelope(self, c, peer, entity_id, x, y, z);
     }
 
-    fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
-        return game_hooks.heightAtWorld(ctx, wx, wz);
-    }
+    fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 { return game_hooks.heightAtWorld(ctx, wx, wz); }
 
-    fn spawnPoiTraders(self: *Game) void {
-        return game_hooks.spawnPoiTraders(self);
-    }
+    pub fn spawnPoiTraders(self: *Game) void { return game_hooks.spawnPoiTraders(self); }
 
-    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        return game_hooks.poiRectAtWorld(ctx, x, z);
-    }
+    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect { return game_hooks.poiRectAtWorld(ctx, x, z); }
 
-    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
-        return game_hooks.partySame(ctx, a, b);
-    }
+    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool { return game_hooks.partySame(ctx, a, b); }
 
-    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        return game_hooks.nearestPoiAtWorld(ctx, x, z);
-    }
+    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect { return game_hooks.nearestPoiAtWorld(ctx, x, z); }
 
-    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
-        return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz);
-    }
+    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 { return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz); }
 
-    fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
-        return game_hooks.placeBlockId(ctx, item_id);
-    }
+    fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 { return game_hooks.placeBlockId(ctx, item_id); }
 
-    fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
-        return game_hooks.itemFuelValue(ctx, item_id);
-    }
+    fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 { return game_hooks.itemFuelValue(ctx, item_id); }
 
-    fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
-        return game_hooks.itemStackFor(ctx, item_id);
-    }
+    fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 { return game_hooks.itemStackFor(ctx, item_id); }
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
     pub fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
@@ -1578,14 +750,10 @@ pub const Game = struct {
     pub const itemIsArmor = game_craft.itemIsArmor;
 
     /// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
-    pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
-        return game_craft.tryRefuelGenerator(self, c, x, y, z, amount);
-    }
+    pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool { return game_craft.tryRefuelGenerator(self, c, x, y, z, amount); }
 
     /// Refuel the nearest vehicle at the InvTx target coords (tank-capped).
-    pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
-        return game_craft.tryRefuelVehicle(self, c, x, y, z, amount);
-    }
+    pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool { return game_craft.tryRefuelVehicle(self, c, x, y, z, amount); }
 
     /// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).
     pub const eatProps = game_craft.eatProps;
@@ -1596,17 +764,11 @@ pub const Game = struct {
 
     /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
     /// survival/stamina loop calls it on a throttle like the vitals.
-    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
-        return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max);
-    }
+    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void { return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max); }
 
     pub const DecoDimCache = game_deco.DecoDimCache;
-    pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
-        return game_deco.decoSpeciesAt(ctx, wx, wz);
-    }
-    pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
-        return game_deco.mirrorDeco(self, cache, o);
-    }
+    pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList { return game_deco.decoSpeciesAt(ctx, wx, wz); }
+    pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool { return game_deco.mirrorDeco(self, cache, o); }
 
     /// Join-time deco burst, mirroring stock `DecoManager.SendDecosToClient`
     /// (asm.il 1263272), which is called from exactly one site in the assembly:
@@ -1624,9 +786,7 @@ pub const Game = struct {
     ///
     /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
     /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-        return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz);
-    }
+    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void { return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz); }
 
     /// Seed the deco sampler keys off, so a chunk decorates identically across
     /// joins and restarts. The worldgen seed when there is one, else the world
@@ -1647,95 +807,17 @@ pub const Game = struct {
         return r;
     }
 
-    pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
-        return game_join.sendSignDataBatches(self, peer);
-    }
+    pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendSignDataBatches(self, peer); }
 
-    pub fn deinit(self: *Game) void {
-        // Offline harness left sim mode on; restore wall clock before return so
-        // later tests that expect real monoNs are not stuck in virtual time.
-        const leave_sim = self.info_port == 0;
-        // Shutdown persist is best-effort; do not fail deinit on disk errors.
-        self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-        self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
-        {
-            // Land the shutdown save before anything else tears down. World.deinit
-            // would also drain, but doing it here keeps the wait in the histogram
-            // and surfaces any async write errors through sampleFlushCounters.
-            const fs = apm.profiler.scope(&self.harness.prof, .save_flush_wait);
-            defer fs.end();
-            self.world.flushWait();
-        }
-        self.sampleFlushCounters();
-        self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
-        self.workstations.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save workstations", e);
-        self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
-        self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
-        self.saveEntities() catch |e| logPersistErr(self, "save entities", e);
-        self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
-        self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
-        self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
-        self.saveClock() catch |e| logPersistErr(self, "save clock", e);
-        self.land_claims_n = 0;
-        self.plugins.shutdown();
-        self.wasm_plugins.shutdown();
-        self.sim.deinit();
-        self.blocks.deinit();
-        self.items.deinit();
-        self.signs.deinit();
-        self.entities.deinit();
-        self.recipes.deinit();
-        self.loot.deinit();
-        self.entitygroups.deinit();
-        self.gamestages.deinit();
-        self.maxdamage.deinit();
-        self.block_textures.deinit();
-        self.painting.deinit();
-        self.spawning.deinit();
-        self.buffs.deinit();
-        self.progression_table.deinit();
-        self.vehicles.deinit();
-        self.storage_pairs.deinit();
-        self.biome_colors.deinit();
-        self.traders.deinit();
-        self.npc.deinit();
-        self.sleepers.deinit();
-        self.admin.deinit();
-        self.webui.deinit();
-        self.info_tcp.stop();
-        self.world.deinit();
-        self.net.deinit();
-        if (leave_sim) util_sim.disable();
-    }
+    pub fn deinit(self: *Game) void { return @import("game/lifecycle.zig").deinit(self); }
+    pub fn infoPort(self: *const Game) u16 { return @import("game/lifecycle.zig").infoPort(self); }
+    pub fn refreshInfoPlayers(self: *Game) void { return @import("game/lifecycle.zig").refreshInfoPlayers(self); }
+    pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 { return @import("game/lifecycle.zig").playersPath(self, buf); }
+    pub fn savePlayers(self: *Game) !void { return @import("game/lifecycle.zig").savePlayers(self); }
+    pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 { return @import("game/lifecycle.zig").wipePlayerRecordsByName(self, name); }
+    pub fn tryRestorePlayer(self: *Game, c: *Client) void { return @import("game/lifecycle.zig").tryRestorePlayer(self, c); }
 
-    pub fn infoPort(self: *const Game) u16 {
-        return self.info_port;
-    }
-
-    pub fn refreshInfoPlayers(self: *Game) void {
-        self.info_tcp.setPlayers(@intCast(self.countJoined()));
-    }
-
-    pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
-        return persist.playersPath(self, buf);
-    }
-
-    pub fn savePlayers(self: *Game) !void {
-        return persist.savePlayers(self);
-    }
-
-    /// Remove all players.zsv records whose login name equals `name`.
-    /// Returns how many records were dropped. FileNotFound → 0 (no-op).
-    /// Does not log the name (operator reply only).
-    pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
-        return persist.wipePlayerRecordsByName(self, name);
-    }
-
-    pub fn tryRestorePlayer(self: *Game, c: *Client) void {
-        return persist.tryRestorePlayer(self, c);
-    }
-
-    fn pollAdmin(self: *Game) void {
+    pub fn pollAdmin(self: *Game) void {
         admin_console.pollAdmin(self);
     }
 
@@ -1743,7 +825,7 @@ pub const Game = struct {
         admin_console.adminReply(self, text);
     }
 
-    fn pollWebui(self: *Game) void {
+    pub fn pollWebui(self: *Game) void {
         admin_console.pollWebui(self);
     }
 
@@ -1751,9 +833,7 @@ pub const Game = struct {
         admin_console.fillWebuiSnap(self);
     }
 
-    pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
-        return admin_console.handleConsoleCmd(self, peer, c, body);
-    }
+    pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void { return admin_console.handleConsoleCmd(self, peer, c, body); }
 
     pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
         admin_console.consoleSetTime(self, it, out);
@@ -1775,37 +855,23 @@ pub const Game = struct {
         admin_console.consoleKickBan(self, name, out, do_ban);
     }
 
-    pub fn consoleKillAll(self: *Game) u32 {
-        return admin_console.consoleKillAll(self);
-    }
+    pub fn consoleKillAll(self: *Game) u32 { return admin_console.consoleKillAll(self); }
 
-    pub fn forceAirDrop(self: *Game) bool {
-        return admin_console.forceAirDrop(self);
-    }
+    pub fn forceAirDrop(self: *Game) bool { return admin_console.forceAirDrop(self); }
 
-    pub fn forceStorm(self: *Game) bool {
-        return admin_console.forceStorm(self);
-    }
+    pub fn forceStorm(self: *Game) bool { return admin_console.forceStorm(self); }
 
-    pub fn clearStorm(self: *Game) bool {
-        return admin_console.clearStorm(self);
-    }
+    pub fn clearStorm(self: *Game) bool { return admin_console.clearStorm(self); }
 
-    pub fn daysToBloodMoon(self: *const Game) u32 {
-        return admin_console.daysToBloodMoon(self);
-    }
+    pub fn daysToBloodMoon(self: *const Game) u32 { return admin_console.daysToBloodMoon(self); }
 
-    fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
-        return admin_console.webuiAdminThunk(ctx, line, out);
-    }
+    pub fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize { return admin_console.webuiAdminThunk(ctx, line, out); }
 
     pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
         admin_console.runBanCommand(self, sub);
     }
 
-    pub fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 {
-        return admin_console.adminListsPath(self, buf, name);
-    }
+    pub fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 { return admin_console.adminListsPath(self, buf, name); }
 
     pub fn saveAdminLists(self: *Game) void {
         admin_console.saveAdminLists(self);
@@ -1815,7 +881,7 @@ pub const Game = struct {
         admin_console.saveAdminListFile(self, name, ser, list);
     }
 
-    fn loadAdminLists(self: *Game) void {
+    pub fn loadAdminLists(self: *Game) void {
         admin_console.loadAdminLists(self);
     }
 
@@ -1831,9 +897,7 @@ pub const Game = struct {
         admin_console.gamePref(self, filter, name, fmt, args);
     }
 
-    pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
-        return admin_console.applyGamePrefSet(self, name, value);
-    }
+    pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool { return admin_console.applyGamePrefSet(self, name, value); }
 
     pub fn replyMem(self: *Game) void {
         admin_console.replyMem(self);
@@ -1937,11 +1001,11 @@ pub const Game = struct {
         return game_tick.worldHour(self);
     }
 
-    fn tickAirDrop(self: *Game) void {
+    pub fn tickAirDrop(self: *Game) void {
         return game_tick.tickAirDrop(self);
     }
 
-    fn tickZombieBlockDamage(self: *Game) void {
+    pub fn tickZombieBlockDamage(self: *Game) void {
         return game_tick.tickZombieBlockDamage(self);
     }
 
@@ -2071,14 +1135,14 @@ pub const Game = struct {
     pub fn saveClock(self: *const Game) !void {
         return game_clock_persist.saveClock(self);
     }
-    fn restoreClock(self: *Game) void {
+    pub fn restoreClock(self: *Game) void {
         return game_clock_persist.restoreClock(self);
     }
 
     pub fn saveWeather(self: *const Game) !void {
         return game_blockmeta.saveWeather(self);
     }
-    fn restoreWeather(self: *Game) void {
+    pub fn restoreWeather(self: *Game) void {
         return game_blockmeta.restoreWeather(self);
     }
     pub fn saveBlockMeta(self: *const Game) !void {
@@ -2102,11 +1166,11 @@ pub const Game = struct {
     }
 
     /// Drop locks held longer than the lock stale window (tick path).
-    fn reapStaleLocks(self: *Game) void {
+    pub fn reapStaleLocks(self: *Game) void {
         return game_tick.reapStaleLocks(self);
     }
 
-    fn reapStalePeers(self: *Game) void {
+    pub fn reapStalePeers(self: *Game) void {
         return game_tick.reapStalePeers(self);
     }
 
@@ -2354,7 +1418,7 @@ pub const Game = struct {
 
     /// Drop armed policy kicks once the stock 0.5 s grace has elapsed.
     /// Bounded by max_clients per tick.
-    fn reapPolicyKicks(self: *Game) void {
+    pub fn reapPolicyKicks(self: *Game) void {
         return game_tick.reapPolicyKicks(self);
     }
 
@@ -2363,72 +1427,7 @@ pub const Game = struct {
     /// names the dropping path so the server log keeps a complete join/leave
     /// trail: joins are logged, so drops (quit, kick, ban, guard) must be too.
     pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
-        std.debug.print(
-            "zdtd: player dropped slot={d} entity={d} reason={s}\n",
-            .{ slot, self.clients[slot].entity_id, reason },
-        );
-        if (self.clients[slot].peer) |p| p.alive = false;
-        // Free the seat a dropping rider held, or the vehicle stays occupied
-        // (and, for seat 0, undriveable) for the rest of the session. Sim
-        // detach still runs inside unseatRider even when the S2C attach encode
-        // or broadcast fails; log the network side so other clients stuck
-        // drawing a seated ghost are explainable.
-        self.unseatRider(self.clients[slot].entity_id) catch |err| {
-            std.debug.print(
-                "zdtd: unseat on drop failed entity={d}: {s}\n",
-                .{ self.clients[slot].entity_id, @errorName(err) },
-            );
-        };
-        self.clearLocksForPeer(slot);
-        // Offline claims start their expiry clock and lose the online HP bonus.
-        self.markClaimsForEntity(self.clients[slot].entity_id, false);
-        // Stock ServerHandleDisconnectParty (parties-factions.md §2.2): a
-        // disconnect removes the player from any party and notifies the rest.
-        if (self.parties.removePlayer(self.clients[slot].entity_id)) |r| {
-            self.broadcastPartyRemoval(r, @intFromEnum(packages.stock_party.PartyActions.disconnected)) catch |err| {
-                std.debug.print("zdtd: party disconnect broadcast failed: {s}\n", .{@errorName(err)});
-            };
-        }
-        // Stock PartyQuests.RemovePlayerFromSharedWiths (parties-factions.md
-        // §2.3): a disconnect drops the owner's shared quests; the party gets
-        // remove_quest events so their mirrors clear.
-        if (self.sim.playerByPeer(slot)) |ps| {
-            if (self.sim.mask[ps].journal) {
-                var rb: [16]u8 = undefined;
-                for (self.sim.journal[ps].slots) |s| {
-                    if (!s.active or !s.is_shared) continue;
-                    var w = wire_binary.Writer{ .buf = &rb };
-                    w.writeI32(self.clients[slot].entity_id) catch continue;
-                    w.writeByte(@intFromEnum(packages.stock_quest.SharedQuestEvent.remove_quest)) catch continue;
-                    w.writeI32(s.quest_code) catch continue;
-                    const rbody = w.written();
-                    for (&self.clients) |*cl| {
-                        if (!cl.joined or cl.entity_id == self.clients[slot].entity_id) continue;
-                        if (cl.peer) |mp| {
-                            self.sendGame(mp, "NetPackageSharedQuest", rbody) catch {};
-                        }
-                    }
-                }
-            }
-        }
-        // Peers must drop the body, or they keep drawing a ghost player that
-        // never moves (stock disconnects broadcast EntityRemove/Despawned).
-        if (self.sim.playerByPeer(slot)) |ps| {
-            const nid = self.sim.network_id[ps].id;
-            if (nid > 0) {
-                var rb: [16]u8 = undefined;
-                const rm_body: ?[]const u8 = packages.buildRemoveBodyReason(&rb, nid, .despawned) catch null;
-                if (rm_body) |rm| {
-                    for (&self.clients) |*cl| {
-                        if (!cl.joined or cl.peer == null or cl.entity_id == nid) continue;
-                        if (cl.peer) |p| self.sendGame(p, "NetPackageEntityRemove", rm) catch {};
-                        cl.known_entities.unset(ps);
-                    }
-                }
-            }
-        }
-        self.clients[slot] = .{};
-        self.refreshInfoPlayers();
+        return game_session_drop.dropClientSlot(self, slot, reason);
     }
 
     /// Quarantine check at a C2S trust boundary. Observe mode records the flag
@@ -2957,13 +1956,13 @@ pub const Game = struct {
         };
     }
 
-    fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {
+    pub fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
         const d = self.entities.byName(class_name) orelse return null;
         return self.entityClassOf(d);
     }
 
-    fn pickEntityGroup(ctx: ?*anyopaque, group: []const u8, seed: u32) ?[]const u8 {
+    pub fn pickEntityGroup(ctx: ?*anyopaque, group: []const u8, seed: u32) ?[]const u8 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.entitygroups.pick(group, seed);
     }
@@ -3042,7 +2041,7 @@ pub const Game = struct {
     }
 
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.
-    fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
+    pub fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const sp = g.gamestages.spawnerByName(spawner) orelse return null;
         const st = sp.getStage(stage) orelse return null;
@@ -3051,7 +2050,7 @@ pub const Game = struct {
     }
 
     /// spawning.xml <entityspawner name=…> → its EntityGroupName property.
-    fn pickSpawnerGroup(ctx: ?*anyopaque, spawner: []const u8) ?[]const u8 {
+    pub fn pickSpawnerGroup(ctx: ?*anyopaque, spawner: []const u8) ?[]const u8 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const s = g.spawning.spawnerByName(spawner) orelse return null;
         return s.entitygroup;
@@ -3074,7 +2073,7 @@ pub const Game = struct {
         return game_trader.traderIsOpen(self, ts);
     }
 
-    fn tickTraderAreas(self: *Game) void {
+    pub fn tickTraderAreas(self: *Game) void {
         return game_trader.tickTraderAreas(self);
     }
 
@@ -3094,7 +2093,7 @@ pub const Game = struct {
         game_trader.maybeRestockTrader(self, ts);
     }
 
-    fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
+    pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
         return game_craft.handItemDamage(self, hand_item);
     }
 
@@ -3115,7 +2114,7 @@ pub const Game = struct {
     /// Push the background flusher's atomic totals into apm counters as
     /// per-tick deltas. `world` cannot import `apm` (src/world/root.zig), so the
     /// tick thread samples instead.
-    fn sampleFlushCounters(self: *Game) void {
+    pub fn sampleFlushCounters(self: *Game) void {
         const f = &self.world.flush;
         const q = f.queued.load(.monotonic);
         const w = f.written.load(.monotonic);
@@ -3133,7 +2132,7 @@ pub const Game = struct {
         self.flush_seen = .{ .queued = q, .written = w, .errors = e, .sync = s, .waits = wt };
     }
 
-    fn gatherPlayerPositions(
+    pub fn gatherPlayerPositions(
         self: *Game,
         px: *[max_clients]f32,
         py: *[max_clients]f32,
@@ -3144,7 +2143,7 @@ pub const Game = struct {
 
     pub const SleeperScanCtx = game_sleeper.SleeperScanCtx;
 
-    fn tickSleeperVolumes(self: *Game) void {
+    pub fn tickSleeperVolumes(self: *Game) void {
         return game_sleeper.tickSleeperVolumes(self);
     }
 
@@ -3276,95 +2275,11 @@ pub const Game = struct {
     /// server and passes `_inRangeOnly = enumStat != 0`, so Health goes to every
     /// player tracking the entity **and** to the entity itself, range regardless.
     pub fn replicatePlayerHealth(self: *Game) void {
-        var i: ecs.Slot = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
-            // Cleared even when nothing goes out (no observers, not a player):
-            // stock clears Stat.Changed right after the poll, and a bit left set
-            // would re-send the same value on every later tick.
-            self.sim.dirty[i].hp = false;
-            // Keep dirty_bits in sync with the lowered bit so an hp-only slot
-            // does not linger as a motion-replicate candidate until the next pass.
-            self.sim.syncDirtyBit(i);
-            const is_player = self.sim.mask[i].player;
-            const is_mob = self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal;
-            // Player vitals plus mob health (EntityStats::TickWait + SendStat
-            // ChangePacket cover NPCs too; the corpse-dwell hp=0 must reach the
-            // client so the death shows instead of a full-health body).
-            if ((!is_player and !is_mob) or !self.sim.mask[i].health) continue;
-            // Death screen: when a player hits 0 (any killer: C2S, AI, traps,
-            // environment), stock sends NetPackageWorldSpawnPoints so the
-            // respawn menu lists world spawn + the player's bedroll.
-            if (is_player and self.sim.health[i].hp <= 0) {
-                const owner_slot = self.sim.player[i].peer_slot;
-                if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
-                    const oc = &self.clients[@intCast(owner_slot)];
-                    if (oc.peer) |op| {
-                        const wsp = self.world.primarySpawn();
-                        var entries: [2]packages.stock_entity.SpawnPointEntry = undefined;
-                        var en: usize = 0;
-                        entries[en] = .{
-                            .x = @floatFromInt(wsp.x),
-                            .y = @floatFromInt(wsp.y),
-                            .z = @floatFromInt(wsp.z),
-                        };
-                        en += 1;
-                        if (oc.has_bed and en < entries.len) {
-                            entries[en] = .{
-                                .x = @floatFromInt(oc.bed_x),
-                                .y = @floatFromInt(oc.bed_y),
-                                .z = @floatFromInt(oc.bed_z),
-                            };
-                            en += 1;
-                        }
-                        if (packages.stock_entity.buildWorldSpawnPointsBody(self.body_buf[96..200], entries[0..en])) |spb| {
-                            self.sendGame(op, "NetPackageWorldSpawnPoints", spb) catch {
-                                self.harness.counters.inc(.net_send_errors);
-                            };
-                        } else |_| {}
-                    }
-                }
-            }
-            if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
-            const nid = self.sim.network_id[i].id;
-            if (nid <= 0) continue;
-            const body = packages.buildEntityStatChangedBody(
-                self.body_buf[0..32],
-                nid,
-                -1,
-                .health,
-                self.sim.health[i].hp,
-                self.sim.health[i].max_hp,
-                0,
-            ) catch {
-                self.harness.counters.inc(.encode_errors);
-                continue;
-            };
-            self.harness.counters.inc(.packages_encoded);
-            const tp = self.sim.transform[i];
-            for (&self.clients) |*cl| {
-                if (!cl.joined or !cl.entered) continue;
-                const peer = cl.peer orelse continue;
-                // No owner skip here (motion has one): the victim's own client is
-                // exactly who needs this, it drives the flinch and the death screen.
-                const owner = is_player and self.sim.player[i].peer_slot == @as(i32, @intCast(cl.slot));
-                if (!owner and !self.clientObserves(cl, tp.x, tp.z)) continue;
-                // Reliable: a dropped hp=0 leaves the player alive on their own
-                // screen but dead to the server, unable to fight back.
-                self.sendGame(peer, "NetPackageEntityStatChanged", body) catch {
-                    self.harness.counters.inc(.net_send_errors);
-                };
-            }
-        }
+        return @import("game/replicate_health.zig").replicatePlayerHealth(self);
     }
 
-    /// True when (wx,wz) is inside this client's interest box.
     pub fn clientObserves(self: *const Game, cl: *const Client, wx: f32, wz: f32) bool {
-        if (cl.entity_id <= 0) return false;
-        const oi = self.sim.slotOfNetId(cl.entity_id) orelse return false;
-        if (!self.sim.mask[oi].transform) return false;
-        const op = self.sim.transform[oi];
-        return interest.inRange(op.x, op.z, wx, wz, cl.view_radius);
+        return @import("game/replicate_health.zig").clientObserves(self, cl, wx, wz);
     }
 
     /// C2S NetPackageAddRemoveBuff (asm.il 202415). Stock's server branch re-Setups
@@ -3388,11 +2303,11 @@ pub const Game = struct {
         return game_social.relayBuff(self, entity_id, buff_name, adding, instigator_id, except_slot);
     }
 
-    fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
+    pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
         return game_social.broadcastBuffExpiries(self, r);
     }
 
-    fn replicate(self: *Game) !void {
+    pub fn replicate(self: *Game) !void {
         return game_replicate.replicate(self);
     }
 
@@ -3401,368 +2316,7 @@ pub const Game = struct {
     }
 
     pub fn step(self: *Game) !void {
-        const sc = apm.profiler.scope(&self.harness.prof, .tick_total);
-        var completed = false;
-        defer {
-            // End profiling before advancing logical time: a deterministic
-            // step has no host-runtime latency, but it still consumes one
-            // stock tick for deadlines, retries, and stale-state checks.
-            sc.end();
-            // One server tick = one Tracy frame (no-op unless -Dtracy=true).
-            apm.tracy.frameMark();
-            if (completed and clock.isVirtual()) util_sim.advanceTick();
-        }
-        self.tick_n += 1;
-        self.harness.counters.inc(.ticks);
-        self.plugins.setTick(self.tick_n);
-
-        {
-            const sn = apm.profiler.scope(&self.harness.prof, .net_poll);
-            defer sn.end();
-            var polls: u32 = 0;
-            while (polls < 64) : (polls += 1) {
-                // Socket-level poll failures are process-fatal (bound UDP is dead).
-                // Per-peer connect/payload failures must not take down the dedi.
-                const ev = self.net.poll(&self.recv_buf) catch |err| {
-                    self.harness.counters.inc(.net_poll_errors);
-                    if (util_sim.isEnabled()) {
-                        var seed_buf: [32]u8 = undefined;
-                        std.debug.print("zdtd: net poll error: {s} ({s})\n", .{
-                            @errorName(err),
-                            util_sim.formatSeed(&seed_buf),
-                        });
-                    } else {
-                        std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
-                };
-                switch (ev) {
-                    .none => break,
-                    .connected => |p| self.onConnected(p) catch |e| {
-                        self.harness.counters.inc(.join_fail);
-                        std.debug.print(
-                            "zdtd: onConnected failed local_id={d}: {s}\n",
-                            .{ p.local_id, @errorName(e) },
-                        );
-                    },
-                    .data => |d| self.onData(d.peer, d.payload) catch |err| {
-                        self.harness.counters.inc(.net_payload_errors);
-                        std.debug.print(
-                            "zdtd: payload failed local_id={d} error={s}\n",
-                            .{ d.peer.local_id, @errorName(err) },
-                        );
-                    },
-                }
-            }
-            // Drop silent peers (client quit) so we stop flooding a stuck window.
-            self.reapStalePeers();
-            // Guard-policy kicks land 0.5 s after PlayerDenied (stock parity).
-            self.reapPolicyKicks();
-            // Drain several TCP info queries per tick (browser / connect dialog).
-            var info_n: u32 = 0;
-            while (info_n < 8) : (info_n += 1) self.info_tcp.poll();
-            self.pollAdmin();
-            // A few webui polls per tick (accept + serve); work stays off sim sections.
-            var web_n: u32 = 0;
-            while (web_n < 4) : (web_n += 1) self.pollWebui();
-        }
-
-        const dt: f32 = 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second));
-        {
-            const se = apm.profiler.scope(&self.harness.prof, .sim_entities);
-            defer se.end();
-            // Rebuild before tickAll: AI workers read it lock-free, and nothing
-            // mutates blocks between here and the end of the AI phase.
-            if (self.terrain_snapshot_on) {
-                const ts = apm.profiler.scope(&self.harness.prof, .terrain_snap);
-                var px: [max_clients]f32 = undefined;
-                var py: [max_clients]f32 = undefined;
-                var pz: [max_clients]f32 = undefined;
-                const pn = self.gatherPlayerPositions(&px, &py, &pz);
-                const covered = self.terrain_snap.rebuild(&self.world, px[0..pn], pz[0..pn]);
-                ts.end();
-                self.harness.counters.add(.terrain_snap_chunks, covered);
-            }
-            // The director's spawn branches read the party stage; stock
-            // recomputes it when the event fires (CalcGameStageAround), and the
-            // director's own cooldowns are what gate the events here.
-            self.sim.director.party_stage = self.partyHighestGameStage();
-            const r = systems.tickAll(&self.sim, dt);
-            self.harness.counters.add(.path_replans, r.path_replans);
-            self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
-            // PlayerEntityStats survival loop after the world clock advanced.
-            self.tickSurvival(dt);
-            // A chewed-up eat distraction (EntityItem.OnUpdateEntity SetDead,
-            // asm.il EntityItem:0100-0113) is removed like a collected drop:
-            // EntityRemove(Despawned) so every observer drops the local item.
-            {
-                var bs: ecs.Slot = 0;
-                while (bs < ecs.max_entities) : (bs += 1) {
-                    if (!self.sim.alive[bs] or !self.sim.mask[bs].loot_bag) continue;
-                    const b = self.sim.loot_bag[bs];
-                    if ((b.distraction_tags & 1) == 0 or b.distraction_eat_ticks > 0) continue;
-                    const lid = self.sim.network_id[bs].id;
-                    if (packages.buildRemoveBodyReason(&self.body_buf, lid, .despawned)) |rm| {
-                        self.broadcast("NetPackageEntityRemove", rm) catch {};
-                    } else |_| {}
-                    self.sim.destroy(bs);
-                }
-            }
-            // Land-claim expiry on the in-game day roll (owner offline too long).
-            if (self.claims_last_day != self.sim.director.clock.day) {
-                self.claims_last_day = self.sim.director.clock.day;
-                // Expired vending rentals return to unowned (loot-economy §6:
-                // currentDay > rentalEndDay -> ClearVendingMachine).
-                for (self.vending.items[0..], self.vending.used[0..]) |*v, u| {
-                    if (!u) continue;
-                    if (v.rental_end_day > 0 and self.sim.director.clock.day > v.rental_end_day) v.clear();
-                }
-                self.expireClaims();
-            }
-            // BloodMoonDay re-send on the day roll (GAP §6): a client that
-            // joined mid-cycle keeps the stale red-moon HUD day otherwise.
-            {
-                const bm = bloodMoonDayFor(self.sim.director.clock);
-                if (self.last_bm_day != bm) {
-                    if (self.last_bm_day >= 0) self.broadcastGameStats() catch |err| {
-                        self.harness.counters.inc(.net_send_errors);
-                        std.debug.print("zdtd: broadcastGameStats failed: {s}\n", .{@errorName(err)});
-                    };
-                    self.last_bm_day = bm;
-                }
-            }
-            if (self.terrain_snapshot_on) {
-                const now = self.terrain_snap.misses.load(.monotonic);
-                self.harness.counters.add(.terrain_snap_misses, now -| self.snap_misses_seen);
-                self.snap_misses_seen = now;
-            }
-            // Prefab sleeper volumes (zdtd.toml [stream] sleeper_tick_ticks).
-            if (self.tick_n % self.sleeper_tick_ticks == 0) self.tickSleeperVolumes();
-            // Air drops + zombie block damage at the same cadence.
-            if (self.tick_n % self.sleeper_tick_ticks == 0) {
-                self.tickAirDrop();
-                self.tickZombieBlockDamage();
-            }
-            // Workstation burn/craft; dirty stations re-broadcast state.
-            if (self.tick_n % self.sleeper_tick_ticks == 0) {
-                // dt follows the configured cadence (0.05 s per tick) so burn
-                // speed stays wall-clock correct when sleeper_tick_ticks != 10.
-                self.tickWorkstations(@as(f32, @floatFromInt(self.sleeper_tick_ticks)) * 0.05) catch |err| {
-                    self.harness.counters.inc(.net_send_errors);
-                    std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
-                };
-            }
-            // Power fuel/SoC/timers every tick (props from blocks.xml via registry).
-            const daylight = !self.sim.director.clock.isNight();
-            _ = self.sim.power.tick(dt, daylight);
-            replicate_te.broadcastPowerVisuals(self);
-            self.reapStaleLocks();
-            // Corpse dwell sweep (TimeStayAfterDeath): expired bodies get the
-            // EntityRemove broadcast, so the client's ragdoll lasts its dwell.
-            {
-                var corpses: [16]ecs.entity.NetId = undefined;
-                const nc = self.sim.sweepCorpses(dt, &corpses);
-                var ci: usize = 0;
-                while (ci < nc) : (ci += 1) {
-                    const rm = packages.buildRemoveBody(&self.body_buf, corpses[ci]) catch continue;
-                    self.broadcast("NetPackageEntityRemove", rm) catch continue;
-                }
-            }
-            // Trader open/close cycle (edge-latched per trader).
-            self.tickTraderAreas();
-            if (r.turret_kills > 0) {
-                // Trap kills credit the turret's owner (stock: turret/trap kills
-                // give the placer quest progress, XP and the kill counter).
-                var tk: u8 = 0;
-                while (tk < r.killed_n) : (tk += 1) {
-                    const owner = r.owner_slots[tk];
-                    if (owner < 0 or @as(usize, @intCast(owner)) >= self.clients.len) continue;
-                    const osz: usize = @intCast(owner);
-                    const oc = &self.clients[osz];
-                    if (!oc.joined) continue;
-                    systems.questOnZombieKilled(&self.sim, osz);
-                    self.killXpAward(osz, 100);
-                    if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
-                    if (oc.peer) |kpeer| {
-                        if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
-                            .entity_id = oc.entity_id,
-                            .zombie_kills = oc.zombie_kills,
-                        })) |ab| {
-                            self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
-                                self.harness.counters.inc(.net_send_errors);
-                            };
-                        } else |_| {}
-                    }
-                }
-            }
-            // Turret kills: remove corpses on stock clients, then scrap ECD+Bag.
-            var ki: u8 = 0;
-            while (ki < r.killed_n) : (ki += 1) {
-                const kid = r.killed_ids[ki];
-                if (kid <= 0) continue;
-                const rm = try packages.buildRemoveBody(&self.body_buf, kid);
-                try self.broadcast("NetPackageEntityRemove", rm);
-            }
-            var di: u8 = 0;
-            while (di < r.despawned_n) : (di += 1) {
-                const did = r.despawned_ids[di];
-                if (did <= 0) continue;
-                const rm = try packages.buildRemoveBodyReason(&self.body_buf, did, .despawned);
-                try self.broadcast("NetPackageEntityRemove", rm);
-            }
-            // Expired buffs: tell every client so HUD icons and remote-entity
-            // effects end at the same tick the server ended them.
-            if (r.buff_expired_n > 0) try self.broadcastBuffExpiries(&r);
-            var li: u8 = 0;
-            while (li < r.loot_n) : (li += 1) {
-                const lid = r.loot_bag_ids[li];
-                if (lid > 0) {
-                    // Refill from loot.xml (turret/AI kills otherwise keep the seed scrap).
-                    self.fillLootBagFromTable(lid, "", @bitCast(lid), self.partyLootStage());
-                    try self.broadcastLootSpawn(lid);
-                }
-            }
-            self.harness.counters.add(.entities_ticked, self.sim.countKind(.zombie));
-
-            if (self.tick_n % self.world_time_send_ticks == 0) {
-                const tb = try packages.buildWorldTimeBody(self.body_buf[0..16], r.world_time);
-                try self.broadcast("NetPackageWorldTime", tb);
-                // Storm scheduling is driven by world time, so it advances even
-                // while shedding; only the broadcast below is deferrable.
-                self.world.weather.tick(
-                    &self.world.biome_layers_table,
-                    @intCast(@min(r.world_time, std.math.maxInt(i64))),
-                    self.sim.director.bloodmoon_active,
-                );
-                // Weather is cosmetic and safe to defer under load; WorldTime is not
-                // (clients drive day/night and blood-moon state off it).
-                if (!self.loadShedding()) try self.broadcastWeather();
-                // Blood-moon horde music trigger (single bool; drives client
-                // audio + tension on day-7 nights).
-                const bm = self.sim.director.bloodmoon_active;
-                if (bm != self.bloodmoon_sent) {
-                    self.bloodmoon_sent = bm;
-                    const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], bm);
-                    try self.broadcast("NetPackageBloodmoonMusic", bm_body);
-                }
-            }
-            if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
-            if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
-            // Null on_tick hooks are a branch only (sample_hello is enable-only).
-            self.plugins.onTick();
-            // Wasm plugin hooks run late in the tick, after the sim settles;
-            // their queued commands are drained by the next tick's schedule.
-            self.wasm_plugins.onTick();
-        }
-        // Quest rewards payout at tick end: the sim credits the wallet coins on
-        // completion and stashes the def; items and exp need the assets table
-        // and the client xp ledger, so the Game drains here (one place covers
-        // every completion site, C2S handlers and tickAll alike).
-        {
-            const cn = self.sim.completed_quests_n;
-            var ci: usize = 0;
-            while (ci < cn) : (ci += 1) {
-                const cq = self.sim.completed_quests_ring[ci];
-                if (cq.slot >= self.sim.player.len) continue;
-                const peer: usize = @intCast(self.sim.player[cq.slot].peer_slot);
-                if (peer >= self.clients.len) continue;
-                const d = self.sim.catalog.byId(cq.def_id) orelse continue;
-                // on_quest_complete verdict (T15): <0 withholds the payout,
-                // >0 scales it (200 = double). 0 keeps today's behaviour. The
-                // wallet coins were credited in the sim at completion; this
-                // gates the item/exp half (and can be extended to coins when
-                // the sim gains a verdict path of its own).
-                const sv = self.plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
-                const v = if (sv != 0) sv else self.wasm_plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
-                if (v < 0) continue;
-                const pct: u32 = if (v > 0) @intCast(v) else 100;
-                var ri: usize = 0;
-                while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
-                    const spec = d.rewards[ri];
-                    const scaled: u32 = @as(u32, spec.value) * pct / 100;
-                    switch (spec.kind) {
-                        .item, .loot_item => {
-                            const eid = self.items.ecsIdByName(spec.item_name);
-                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
-                        },
-                        .exp => self.awardXp(peer, scaled),
-                        else => {},
-                    }
-                }
-            }
-            self.sim.completed_quests_n = 0;
-        }
-
-        try self.replicate();
-        // Periodic world flush so dig/build survives crash without explicit admin save.
-        if (self.tick_n % self.save_interval_ticks == 0) {
-            const ss = apm.profiler.scope(&self.harness.prof, .save_io);
-            defer ss.end();
-            {
-                // saveAll = encode (+ inline write when sync). Split out so the
-                // async-flush decision has an encode-vs-write histogram.
-                const es = apm.profiler.scope(&self.harness.prof, .save_encode);
-                defer es.end();
-                self.world.saveAll() catch |e| logPersistErr(self, "save world", e);
-            }
-            self.containers.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save containers", e);
-            self.vending.save(self.world.world_dir) catch |e| logPersistErr(self, "save vending", e);
-            self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
-            self.saveEntities() catch |e| logPersistErr(self, "save entities", e);
-            self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
-            self.saveBlockMeta() catch |e| logPersistErr(self, "save block meta", e);
-            self.saveWeather() catch |e| logPersistErr(self, "save weather", e);
-            self.saveClock() catch |e| logPersistErr(self, "save clock", e);
-            if (self.players_dirty) {
-                self.players_dirty = false;
-                self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-            }
-        }
-        self.sampleFlushCounters();
-
-        // One parseable line per minute gives unbounded production runs a
-        // bounded-cost health signal without per-packet label cardinality.
-        // Machine metrics go to stdout, human diagnostics to stderr: keeping
-        // the JSONL on its own stream lets log scrapers (jq/fluentd) parse
-        // every line instead of choking on interleaved `zdtd:` free text.
-        if (self.tick_n % apm_report_period_ticks == 0) {
-            var snap = self.harness.snapshot();
-            // Instantaneous gauges ride the same JSON line as counters so log
-            // scrapers get load + error rates in one event (not a free-text tail).
-            var entered_n: u32 = 0;
-            var peers_alive: u32 = 0;
-            for (&self.clients) |cl| {
-                if (cl.entered) entered_n += 1;
-            }
-            for (&self.net.peers) |p| {
-                if (p.alive) peers_alive += 1;
-            }
-            snap.ops = .{
-                .tick = self.tick_n,
-                .joined = self.countJoined(),
-                .entered = entered_n,
-                .peers_alive = peers_alive,
-                .zombies = @intCast(@min(self.sim.countKind(.zombie), std.math.maxInt(u32))),
-                .chunks = @intCast(@min(self.world.chunks.count(), std.math.maxInt(u32))),
-            };
-            var report_buf: [apm.report.max_json_bytes]u8 = undefined;
-            var report_writer: std.Io.Writer = .fixed(&report_buf);
-            var report_ok = true;
-            apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
-                report_ok = false;
-                std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
-            };
-            if (report_ok) {
-                // Per-minute cadence; not the tick hot path, so a transient
-                // Io.Threaded init is fine (same pattern as main.printStdout).
-                var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-                defer threaded.deinit();
-                std.Io.File.stdout().writeStreamingAll(threaded.io(), report_writer.buffered()) catch |e| {
-                    std.debug.print("zdtd: apm report write failed: {s}\n", .{@errorName(e)});
-                };
-            }
-        }
-        completed = true;
+        return @import("game/step.zig").step(self);
     }
 
     fn anyEnteredClient(self: *const Game) bool {
@@ -3806,11 +2360,11 @@ pub const Game = struct {
         try game_vehicle.sendSeatedRiders(self, peer);
     }
 
-    fn broadcastVehiclePositions(self: *Game) !void {
+    pub fn broadcastVehiclePositions(self: *Game) !void {
         try game_vehicle.broadcastVehiclePositions(self);
     }
 
-    fn broadcastTurretSync(self: *Game) !void {
+    pub fn broadcastTurretSync(self: *Game) !void {
         try game_vehicle.broadcastTurretSync(self);
     }
 
@@ -3847,100 +2401,39 @@ pub const Game = struct {
     }
 
     pub fn applyDamage(self: *Game, entity_id: i32, amount: f32) bool {
-        return self.sim.damage(entity_id, amount).killed;
+        return @import("game/harness.zig").applyDamage(self, entity_id, amount);
     }
 
     pub fn setBlock(self: *Game, x: i32, y: i32, z: i32, id: u16) !void {
-        try self.world.setBlockWorld(x, y, z, id);
-        if (self.isStorageBlockId(id)) {
-            _ = self.containers.getOrCreate(.{ .x = x, .y = y, .z = z }, 8, @intCast(id));
-        } else {
-            self.containers.remove(.{ .x = x, .y = y, .z = z });
-        }
+        return @import("game/harness.zig").setBlock(self, x, y, z, id);
     }
 
-    /// Loadgen / scenario join with a null platform identity, which is what a
-    /// client running without a platform session sends.
     pub fn attachJoinedClient(self: *Game, capture: ?*ln_peer.Capture) !*Client {
-        return self.attachJoinedClientAs(capture, null);
+        return @import("game/harness.zig").attachJoinedClient(self, capture);
     }
 
-    /// Same join, but the synthetic login carries `puid` as both the native and
-    /// the crossplatform identity, so the real PlayerLogin decode runs.
     pub fn attachJoinedClientAs(self: *Game, capture: ?*ln_peer.Capture, puid: ?platform_user.Id) !*Client {
-        var peer_ptr: ?*ln_peer.Peer = null;
-        for (&self.net.peers) |*p| {
-            if (p.alive) continue;
-            p.* = .{};
-            p.alive = true;
-            p.local_id = self.net.next_local_id;
-            self.net.next_local_id += 1;
-            p.authenticated = false;
-            p.capture = capture;
-            const fake_port: u16 = @intCast(10000 + @as(u16, @intCast(p.local_id)));
-            const addr: @import("../litenet/udp_socket.zig").IpAddress = .{
-                .ip4 = .{
-                    .bytes = .{ 127, 0, 0, 1 },
-                    .port = fake_port,
-                },
-            };
-            p.setAddr(&addr);
-            peer_ptr = p;
-            break;
-        }
-        const peer = peer_ptr orelse return error.TooManyPeers;
-        try self.onConnected(peer);
-        const c = self.clientFor(peer) orelse return error.NoClient;
-        var ch: [17]u8 = undefined;
-        wire_frame.buildChallenge(&ch, c.challenge);
-        try self.onData(peer, &ch);
-        var login_body: [256]u8 = undefined;
-        var w: wire_binary.Writer = .{ .buf = &login_body };
-        try w.writeString("Bot");
-        try platform_user.write(&w, puid);
-        try w.writeString("");
-        try platform_user.write(&w, puid);
-        try w.writeString("");
-        try w.writeString(version.stock_wire_announce);
-        try w.writeString(version.stock_wire_announce);
-        try w.writeU64(0);
-        var frame_buf: [512]u8 = undefined;
-        const framed = try packages.framed(&frame_buf, "NetPackagePlayerLogin", w.written());
-        try self.onData(peer, framed);
-        // Match stock/loadgen: enter → spawn so WorldInfo then PlayerId/chunks are sent.
-        if (packages.idOf("NetPackageRequestToEnterGame")) |enter_id| {
-            var enter_frame: [64]u8 = undefined;
-            const ef = try wire_frame.framePackage(&enter_frame, 0, enter_id, &[_]u8{});
-            try self.onData(peer, ef);
-        }
-        if (packages.idOf("NetPackageRequestToSpawnPlayer")) |spawn_id| {
-            var spawn_body: [4]u8 = undefined;
-            std.mem.writeInt(i16, spawn_body[0..2], 4, .little);
-            // nearEntityId i32 after profile is optional; empty body uses defaults in handler
-            var spawn_frame: [64]u8 = undefined;
-            const sf = try wire_frame.framePackage(&spawn_frame, 0, spawn_id, spawn_body[0..2]);
-            try self.onData(peer, sf);
-        }
-        if (!c.joined or c.entity_id <= 0) return error.JoinFailed;
-        return c;
+        return @import("game/harness.zig").attachJoinedClientAs(self, capture, puid);
     }
 
     pub fn injectFramed(self: *Game, c: *Client, framed: []const u8) !void {
-        const peer = c.peer orelse return error.NoPeer;
-        try self.onData(peer, framed);
+        return @import("game/harness.zig").injectFramed(self, c, framed);
     }
 
     pub fn replicateNow(self: *Game) !void {
-        try self.replicate();
+        return @import("game/harness.zig").replicateNow(self);
     }
 
-    /// Stock `NetPackagePartyActions.ProcessPackage` (parties-factions.md §2.2):
-    /// the client never mutates the authoritative `Party`; each
-    /// `currentOperation` selects a server handler, and every mutation fans a
-    /// `NetPackagePartyData` snapshot out to the party-relevant peers. Entity
-    /// ids are validated against live joined clients at the trust boundary.
     pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
-        return game_social.handlePartyActions(self, c, body);
+        return @import("game/harness.zig").handlePartyActions(self, c, body);
+    }
+
+    pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
+        return @import("game/harness.zig").acceptQuestFor(self, c, def_id);
+    }
+
+    pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
+        return @import("game/harness.zig").handleAllyRequest(self, c, body);
     }
 
     fn broadcastPartySnapshot(
@@ -3953,26 +2446,19 @@ pub const Game = struct {
         action: u8,
         disband: bool,
     ) !void {
-        return game_social.broadcastPartySnapshot(self, party_id, leader_index, voice, members, changed, action, disband);
+        return @import("game/social.zig").broadcastPartySnapshot(self, party_id, leader_index, voice, members, changed, action, disband);
     }
 
-    fn broadcastPartyRemoval(self: *Game, r: ecs.party.Removal, action: u8) !void {
-        return game_social.broadcastPartyRemoval(self, r, action);
+    pub fn broadcastPartyRemoval(self: *Game, r: @import("../ecs/party.zig").Removal, action: u8) !void {
+        return @import("game/social.zig").broadcastPartyRemoval(self, r, action);
     }
 
     pub fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
-        return game_social.clientByEntityId(self, entity_id);
-    }
-
-    pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
-        return game_social.acceptQuestFor(self, c, def_id);
+        return @import("game/social.zig").clientByEntityId(self, entity_id);
     }
 
     fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
-        return game_social.shareQuestWithParty(self, c, def_id);
+        return @import("game/social.zig").shareQuestWithParty(self, c, def_id);
     }
 
-    pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
-        return game_social.handleAllyRequest(self, c, body);
-    }
 };
