@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **975/975** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5155, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
+**Unit tests:** `zig build test` → **983/983** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5155, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -200,6 +200,13 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   Store test covers the plane + save/reload round trip.
 - **StormFrequency knob**: `[sim] storm_frequency` (percent, default 100; 0
   disables storms) feeds both the weather scheduler divisor and the GameStats
+- **Wave 2 (2026-08-09)**: console `storm` / `clearweather` / `stormoff`
+  force and clear storms; workstation craft authority (per-craft count and
+  duration come from recipes.xml, not the client blob; in-place queue
+  validation); item drops commit via `NetPackageEntitySpawnResponse` (the
+  thrower's client DecItems its bag); liteNet per-part WindowFull pump yield
+  so join-critical ACKs land (blocks IdMapping now sends; loadgen join smoke
+  8/8 full joins).
   wire value, so client and server agree. No V3.1.0 serverconfig key exists
   (world state); documented in GAME_OPTIONS and zdtd.toml.example.
 - **Storm survival gates (SandboxCode)**: the operator's `SandboxCode` /
