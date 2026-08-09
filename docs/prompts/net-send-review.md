@@ -31,7 +31,7 @@ whether a wedged peer can stall the 50 ms tick.
 | `src/server/game.zig` - `sendGame`, `sendGameBudget`, `sendGameCritical`, `sendReliablePumped`, `sendFramedReliable`, `isDroppablePackage`, `isUnreliablePackage` | The send surface |
 | `src/server/chunk_stream.zig` - `sendFramedDroppable`, `sendSpawnChunk`, `streamChunksForClient` | The stream surface |
 | `src/litenet/peer.zig` - `sendReliable`, `sendOneReliable`, `allocPending`, `resendPending`, `pump_fn` | The LiteNet window |
-| `../7dtd-research/docs/protocol.md` - join sequence | What must arrive in order |
+| `../../../7dtd-research/docs/protocol.md` - join sequence | What must arrive in order |
 
 ## Non-negotiable constraints
 

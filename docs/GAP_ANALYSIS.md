@@ -427,7 +427,7 @@ area and the concrete work.
     **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
     per-block byte plane (15 full / 1 non-support cap / 0 falls), reset +
     distribute on first touch, and the incremental removal/placement paths
-    from `StabilityCalculator`/`ChannelCalculator` (RE: `../7dtd-research/docs/stability.md`).
+    from `StabilityCalculator`/`ChannelCalculator` (RE: `../../7dtd-research/docs/stability.md`).
     A C2S SetBlock that removes a support block fells the dependency chain and
     broadcasts the collapse; placing re-spreads from supported neighbours.
     Support/ignore membership resolves from the block tables, not hardcoded.
@@ -721,7 +721,7 @@ because the per-objective Write shapes are wrong.
   `7dtd-research` dump of the quest objective sync path before implementing;
   guessing would invent wire behavior.
   *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`,
-  `../7dtd-research/docs/quests-challenges.md` §5 (client owns the quest)
+  `../../7dtd-research/docs/quests-challenges.md` §5 (client owns the quest)
 
 - **Server-side journal: accept, phase advance, turn-in, coins** `WORKS`
   `questAccept` allocates a slot, assigns a monotonic quest_code, resolves a POI
@@ -1653,7 +1653,7 @@ can walk into every POI but none of them is the building TFP authored.
   and the POI a quest lands in is chosen from the fabricated `quests.xml`
   coordinates, not stock's tag/tier/biome selection: QuestPrefabManager
   (`PoiTag`, `QuestTags` filter, tier range) is not yet reversed in
-  `../7dtd-research/docs/quests-challenges.md`.
+  `../../7dtd-research/docs/quests-challenges.md`.
   *Anchors:* `src/server/game.zig:1738`, `src/world/prefabs.zig:66`, `:224`,
   `Data/Prefabs/POIs/AAA_utility_waterworks.xml`
 
@@ -3012,7 +3012,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
   `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig` `gameStatsValues`,
   `src/wire/packages.zig:2039-2040`,
-  `../7dtd-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
+  `../../7dtd-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
   WorldClock advances hours from real dt scaled by DayNightLength, dawn fixed at
@@ -3078,7 +3078,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Known gaps: a placed block that would fall instantly still stands until a
   support change under it (stock seeds 15 everywhere too, so this matches stock);
   no `EntityFallingBlock` visual entity (the client collapses locally).
-  *Anchors:* `src/world/stability.zig`, `../7dtd-research/docs/stability.md`
+  *Anchors:* `src/world/stability.zig`, `../../7dtd-research/docs/stability.md`
 
 - **Structural collapse / falling blocks** `BLOCKED (2026-08-07)`
   The stability plane and collapse removal are shipped (the server removes
@@ -3912,7 +3912,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Entity lifecycle
 | Package | Priority |
 |---|---|
-| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../7dtd-research/docs/protocol-packages.md` 5.1 |
+| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../../7dtd-research/docs/protocol-packages.md` 5.1 |
 | `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
 | `NetPackageEntityTeleport` | P1 |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | P1 |
@@ -5012,7 +5012,7 @@ HONEST GAPS:
 ### V3.1.0 wire note (2026-08-02)
 
 `NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
-payload length (was u16). Stock RE: `../7dtd-research/docs/protocol-packages.md` §6.12
+payload length (was u16). Stock RE: `../../7dtd-research/docs/protocol-packages.md` §6.12
 and the research topic docs.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /

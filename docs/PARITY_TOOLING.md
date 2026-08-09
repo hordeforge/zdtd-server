@@ -1,6 +1,6 @@
 # Parity tooling: keep zdtd in sync with stock 7DTD
 
-Scripts live in the reversing project: `../7dtd-research/tools/parity/`
+Scripts live in the reversing project: `../../7dtd-research/tools/parity/`
 (reversing tooling does not live in zdtd; see AGENTS.md principle 4).
 
 When The Fun Pimps ship a new dedicated-server build, the wire can change.
@@ -9,7 +9,7 @@ so updating is mechanical instead of a re-RE from scratch.
 
 ## What it captures
 
-`../7dtd-research/tools/parity/ParitySurface.cs` extracts a stable JSON snapshot from any
+`../../7dtd-research/tools/parity/ParitySurface.cs` extracts a stable JSON snapshot from any
 `Assembly-CSharp.dll`:
 
 - Every `NetPackage*` with its `read`/`write` **wire call sequence** (the

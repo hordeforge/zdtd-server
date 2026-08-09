@@ -59,7 +59,7 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 
 #### M7.1 RE: stock NetPackageChunk body
 - Capture live dedi join chunk packets (loadgen or Wireshark).  
-- Annotate write/read order vs `../7dtd-research/docs/world-chunks.md` + IL.  
+- Annotate write/read order vs `../../7dtd-research/docs/world-chunks.md` + IL.  
 - Produce golden hex fixtures under `tests/fixtures/wire/chunk_*.bin` (no game DLL).  
 
 **Exit:** documented layout in `docs/wire/WIRE_CHUNK.md` + fixture tests.

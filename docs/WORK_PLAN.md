@@ -85,7 +85,7 @@ area and a large part of quests sit downstream of this one change.
 **Grounding:** `EntityTrader` creation and the `TraderData` block in
 `EntityCreationData::write`; `NetPackageTraderData` is ToServer-only, so the two
 real S2C paths are the creation data and the lock response (see
-`../7dtd-research/docs/loot-economy.md`, updated 2026-08-06).
+`../../7dtd-research/docs/loot-economy.md`, updated 2026-08-06).
 
 **Done when:** a stock client sees a trader NPC standing in a trader POI, can
 open it, and the trade window is populated from server data.
@@ -205,7 +205,7 @@ survival stats, keyed by platform user id rather than login name~~ **DONE**
 (level/XP/buffs/survival; login-name key per ADR 0017).
 
 **Grounding:** `Progression::Write` blob layout and the XP curve exponent
-recorded in `../7dtd-research/docs/progression.md`.
+recorded in `../../7dtd-research/docs/progression.md`.
 
 **Done when:** a player reconnects after a server restart with the same level,
 perks, buffs and survival state.
@@ -238,7 +238,7 @@ resolved, and the accept path is missing, so quests cannot start.
 **Grounding:** reflection-only `ParseObjective`, the four objective Write shapes,
 fail-soft `Quest::Read`, `NPCQuestList` `RemoveQuest` as the accept signal, and
 QuestEvent 9/12/13/14/16, all recorded in
-`../7dtd-research/docs/quests-challenges.md` (2026-08-06).
+`../../7dtd-research/docs/quests-challenges.md` (2026-08-06).
 
 **Done when:** a player can take a quest from a trader, see it in the journal,
 and complete it.
@@ -270,7 +270,7 @@ wrong night, so the signature event of the game reads as broken.
 and the client-visible day encoding~~ **DONE**.
 
 **Grounding:** all four helpers are recorded with IL line numbers in
-`../7dtd-research/docs/aidirector.md` (2026-08-06).
+`../../7dtd-research/docs/aidirector.md` (2026-08-06).
 
 **Done when:** the horde runs from dusk to dawn on day 7 and the client shows a
 red moon on that night and no other.
@@ -385,8 +385,8 @@ any other id. Then update the wire/PACKAGES.md header via the parity tooling~~
 **DONE**.
 
 **Grounding:** stock handler sits on the client quit path
-(`../7dtd-research/docs/inventories/netpackages.md`,
-`../7dtd-research/docs/protocol-packages.md`); the transport poll it would
+(`../../7dtd-research/docs/inventories/netpackages.md`,
+`../../7dtd-research/docs/protocol-packages.md`); the transport poll it would
 replace is game.zig:3437.
 
 **Done when:** parity `--coverage` reports 0 unhandled dir=1, and a client quit

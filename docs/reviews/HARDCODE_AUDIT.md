@@ -3,7 +3,7 @@
 Date: 2026-08-07 (update re-audit of the 2026-08-06 pass; prior pass
 2026-08-04). Method: `docs/prompts/hardcoded-data-review.md` + systematic
 `rg` / file reads against `src/`, stock `Data/Config`,
-`docs/ASSETS.md`, `docs/GAME_OPTIONS.md`, `../7dtd-research/docs/loot-economy.md`.
+`docs/ASSETS.md`, `docs/GAME_OPTIONS.md`, `../../../7dtd-research/docs/loot-economy.md`.
 
 ## Executive summary
 

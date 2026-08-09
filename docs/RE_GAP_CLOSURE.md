@@ -70,10 +70,10 @@ Key facts zdtd should honor:
 ## 4. Staying current
 
 The RE is pinned to stable V3.1.0 b14. After a game update, run
-`../7dtd-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
+`../../7dtd-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
 reports changed packages / types / enums so this table and the affected zdtd bodies
 can be revised. The experimental branch already differs (see
-`../7dtd-research/docs/protocol-packages.md`: `NetPackageTileEntity` widened,
+`../../7dtd-research/docs/protocol-packages.md`: `NetPackageTileEntity` widened,
 held-entity feature), so version-gate the wire where noted.
 
 ---
@@ -84,5 +84,5 @@ held-entity feature), so version-gate the wire where noted.
 |---|---|
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap inventory this closes against |
 | [PACKAGES.md](wire/PACKAGES.md) | zdtd's package implementation status |
-| `../7dtd-research/docs/INDEX.md` | Full stock RE hub |
-| `../7dtd-research/docs/protocol-packages.md` | Per-package wire bodies + census |
+| `../../7dtd-research/docs/INDEX.md` | Full stock RE hub |
+| `../../7dtd-research/docs/protocol-packages.md` | Per-package wire bodies + census |
