@@ -207,6 +207,11 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   thrower's client DecItems its bag); liteNet per-part WindowFull pump yield
   so join-critical ACKs land (blocks IdMapping now sends; loadgen join smoke
   8/8 full joins).
+- **Wave 3 (2026-08-09)**: hit knockback + `NetPackageEntityVelocity`; turret
+  kills credit the placing owner (quest/XP/score); vehicle refuel via gas-can
+  InvTx; drowning + radiated biome damage (Rules knobs); explosion entity
+  damage + thrower credit; `NetPackageWorldSpawnPoints` on death with the
+  bedroll entry; respawn at the bedroll when placed.
   wire value, so client and server agree. No V3.1.0 serverconfig key exists
   (world state); documented in GAME_OPTIONS and zdtd.toml.example.
 - **Storm survival gates (SandboxCode)**: the operator's `SandboxCode` /
