@@ -43,6 +43,7 @@ const game_vehicle = @import("game/vehicle.zig");
 const game_config_files = @import("game/config_files.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_net_handlers = @import("game/net_handlers.zig");
+const game_rate_limits = @import("game/rate_limits.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2951,58 +2952,17 @@ pub const Game = struct {
         );
     }
 
-    /// Refill + spend one inv token. False → caller should drop and count throttle.
     pub fn takeInvToken(self: *Game, c: *Client) bool {
-        const now = clock.monoNs();
-        // A fresh bucket starts full (tokens default 0 on the struct so the
-        // cap stays a config value; the first call seeds the configured cap).
-        if (c.inv_refill_ns == 0) {
-            c.inv_refill_ns = now;
-            c.inv_tokens = self.inv_bucket_cap;
-        }
-        while (c.inv_tokens < self.inv_bucket_cap and now -% c.inv_refill_ns >= self.inv_refill_ns) {
-            c.inv_tokens += 1;
-            c.inv_refill_ns +%= self.inv_refill_ns;
-        }
-        if (c.inv_tokens == 0) return false;
-        c.inv_tokens -= 1;
-        return true;
+        return game_rate_limits.takeInvToken(self, c);
     }
-
     pub fn takeBlockToken(self: *Game, c: *Client) bool {
-        const now = clock.monoNs();
-        if (c.block_refill_ns == 0) {
-            c.block_refill_ns = now;
-            c.block_tokens = self.block_bucket_cap;
-        }
-        while (c.block_tokens < self.block_bucket_cap and now -% c.block_refill_ns >= self.block_refill_ns) {
-            c.block_tokens += 1;
-            c.block_refill_ns +%= self.block_refill_ns;
-        }
-        if (c.block_tokens == 0) return false;
-        c.block_tokens -= 1;
-        return true;
+        return game_rate_limits.takeBlockToken(self, c);
     }
-
-    /// Combat rate gate: allow burst of damage_burst_max within min_damage_gap.
     pub fn takeDamageToken(self: *Game, c: *Client) bool {
-        const now = clock.monoNs();
-        if (c.last_damage_ns != 0 and now -% c.last_damage_ns < self.min_damage_gap_ns) {
-            if (c.damage_burst >= self.damage_burst_max) return false;
-            c.damage_burst += 1;
-        } else {
-            c.damage_burst = 1;
-        }
-        c.last_damage_ns = now;
-        return true;
+        return game_rate_limits.takeDamageToken(self, c);
     }
-
-    /// Per-peer chat flood gate. Returns true and stamps `last_chat_ns` when allowed.
     pub fn acceptChatRate(self: *const Game, c: *Client) bool {
-        const now = clock.monoNs();
-        if (c.last_chat_ns != 0 and now -% c.last_chat_ns < self.min_chat_gap_ns) return false;
-        c.last_chat_ns = now;
-        return true;
+        return game_rate_limits.acceptChatRate(self, c);
     }
 
     /// Reach + land-claim gate for a block edit requested by `c` (ADR 0004).

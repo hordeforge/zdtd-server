@@ -47,6 +47,7 @@ pub const game_vehicle = @import("game/vehicle.zig");
 pub const game_config_files = @import("game/config_files.zig");
 pub const game_movement_helpers = @import("game/movement_helpers.zig");
 pub const game_net_handlers = @import("game/net_handlers.zig");
+pub const game_rate_limits = @import("game/rate_limits.zig");
 pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
@@ -98,6 +99,7 @@ test {
     _ = game_config_files;
     _ = game_movement_helpers;
     _ = game_net_handlers;
+    _ = game_rate_limits;
     _ = game_tests;
     _ = c2s_inv;
     _ = c2s_move;
