@@ -129,6 +129,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 st, eid, self.items.isEat(eid),
             });
         }
+    } else if (self.stock_catalogs_requested) {
+        std.debug.print("zdtd: warn: items.xml failed to load; item-dependent actions fail closed\n", .{});
     }
     if (assets_signs.tryLoad(allocator, opts.game_dir) catch null) |sc| {
         self.signs.deinit();

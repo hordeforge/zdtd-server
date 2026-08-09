@@ -959,15 +959,20 @@ pub const World = struct {
     }
 
     /// Corpse sweep: decrement dwell timers; destroy expired corpses. Returns
-    /// the removed net ids (caller broadcasts EntityRemove).
+    /// the count written to `out`, which the caller broadcasts as EntityRemove.
     pub fn sweepCorpses(self: *World, dt: f32, out: []NetId) usize {
         var n: usize = 0;
         var s: Slot = 0;
         while (s < max_entities) : (s += 1) {
             if (!self.alive[s] or self.health[s].corpse_seconds <= 0) continue;
+            // Report list full: stop before a removal nobody would be told
+            // about (destroy without EntityRemove leaves a permanent client
+            // ghost). The remaining corpses keep their dwell and expire on a
+            // later tick, like systemTurrets' kill-report cap.
+            if (n >= out.len) break;
             self.health[s].corpse_seconds -= dt;
             if (self.health[s].corpse_seconds > 0) continue;
-            if (n < out.len) out[n] = self.network_id[s].id;
+            out[n] = self.network_id[s].id;
             n += 1;
             self.destroy(s);
         }
@@ -1343,4 +1348,23 @@ test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
     try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
     try std.testing.expectEqual(id, out[0]);
     try std.testing.expect(!w.alive[s]);
+}
+
+test "sweepCorpses never destroys more than it reports" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        const id = w.spawnZombie(@floatFromInt(i), 70, 0, 10).?;
+        try std.testing.expect(w.damage(id, 9999).killed);
+    }
+    // Buffer smaller than the expiring set: the overflow keeps its slot so the
+    // caller never has to broadcast an EntityRemove it was not handed.
+    var out: [2]NetId = undefined;
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(u32, 3), w.countKind(.zombie));
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
 }

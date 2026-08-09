@@ -437,7 +437,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             const tx = tr.readI32() catch break;
                             const tty = tr.readI32() catch break;
                             const tz = tr.readI32() catch break;
-                            if (ty == 1) tr.skipString() catch {};
+                            if (ty == 1) tr.skipString() catch break;
                             // TileEntity lock target (type 0): a vending block
                             // under the position opens as a vending machine.
                             if (self.vending.get(.{ .x = tx, .y = tty, .z = tz }) != null) {
@@ -509,7 +509,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             const x = tr.readI32() catch break;
                             const y = tr.readI32() catch break;
                             const z = tr.readI32() catch break;
-                            if (ty == 1) tr.skipString() catch {};
+                            if (ty == 1) tr.skipString() catch break;
                             try replicate_te.sendStorageTe(self, peer, x, y, z);
                             try replicate_te.sendWorkstationTe(self, peer, x, y, z);
                             try replicate_te.sendVendingTe(self, peer, x, y, z);

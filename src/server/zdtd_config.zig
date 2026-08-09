@@ -456,8 +456,9 @@ test "parse rules overlay sections" {
     try std.testing.expectEqual(@as(?u32, 4), f.rules.bloodmoon.max_parties);
 }
 
-test "applyToInitOptions deco_trees only when set" {
-    const Opts = struct {
+/// Mirror of the server init-options shape the merge helpers write into.
+/// One superset covers every test below; helpers ignore fields they do not know.
+const TestOpts = struct {
         max_streamed_chunks: usize = 169,
         chunk_adds_per_stream_tick: u32 = 8,
         chunk_stream_radius_min: i32 = 7,
@@ -493,8 +494,10 @@ test "applyToInitOptions deco_trees only when set" {
         terrain_snapshot: bool = false,
         job_batches: bool = false,
         guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+};
+
+test "applyToInitOptions deco_trees only when set" {
+    var o: TestOpts = .{};
     var none = try parse(std.testing.allocator, "[feature]\nwire_chunks = false\n");
     defer none.deinit();
     applyToInitOptions(&none, &o);
@@ -568,37 +571,7 @@ test "parse preserves hashes in quoted values and rejects malformed sections" {
 }
 
 test "sanitizeInitOptions repairs bad radii" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        max_claimed_damage: i32 = 200,
-        max_edit_range: f32 = 96,
-        interest_range: f32 = 160,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{
+    var o: TestOpts = .{
         .max_streamed_chunks = 0,
         .chunk_stream_radius_min = 8,
         .chunk_stream_radius_max = 3,
@@ -612,117 +585,20 @@ test "sanitizeInitOptions repairs bad radii" {
 }
 
 test "sanitizeInitOptions rejects non-finite ranges" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        max_claimed_damage: i32 = 200,
-        max_edit_range: f32 = std.math.nan(f32),
-        interest_range: f32 = std.math.inf(f32),
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{ .max_edit_range = std.math.nan(f32), .interest_range = std.math.inf(f32) };
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(@as(f32, 1), o.max_edit_range);
     try std.testing.expectEqual(@as(f32, 1), o.interest_range);
 }
 
 test "sanitizeInitOptions clamps max_streamed_chunks to cap" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        max_claimed_damage: i32 = 200,
-        max_edit_range: f32 = 96,
-        interest_range: f32 = 160,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{ .max_streamed_chunks = 999 };
+    var o: TestOpts = .{ .max_streamed_chunks = 999 };
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(max_streamed_chunks_cap, o.max_streamed_chunks);
 }
 
 test "guard policy merges from [authority] and clamps" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        interest_range: f32 = 160,
-        max_edit_range: f32 = 96,
-        max_claimed_damage: i32 = 200,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        wire_chunks: bool = true,
-        deco_trees: bool = true,
-        deco_mirror: bool = true,
-        block_id_mapping: bool = true,
-        async_chunk_flush: bool = false,
-        terrain_snapshot: bool = false,
-        job_batches: bool = false,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{};
     // Default: log-only ladder, nothing denies.
     try std.testing.expectEqual(false, o.guard.enforce);
     try std.testing.expectEqual(true, o.guard.dry_run);
@@ -761,44 +637,7 @@ test "parse rejects unknown guard key and bad bool" {
 }
 
 test "[perf] switches default off and merge only when set" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        interest_range: f32 = 160,
-        max_edit_range: f32 = 96,
-        max_claimed_damage: i32 = 200,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        wire_chunks: bool = true,
-        deco_trees: bool = true,
-        deco_mirror: bool = true,
-        block_id_mapping: bool = true,
-        async_chunk_flush: bool = false,
-        terrain_snapshot: bool = false,
-        job_batches: bool = false,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{};
     var none = try parse(std.testing.allocator, "[perf]\njob_batches = true\n");
     defer none.deinit();
     applyToInitOptions(&none, &o);
@@ -824,44 +663,7 @@ test "[perf] switches default off and merge only when set" {
 }
 
 test "[sim] trader_wallet_dukes parses, merges, and clamps" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        interest_range: f32 = 160,
-        max_edit_range: f32 = 96,
-        max_claimed_damage: i32 = 200,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        wire_chunks: bool = true,
-        deco_trees: bool = true,
-        deco_mirror: bool = true,
-        block_id_mapping: bool = true,
-        async_chunk_flush: bool = false,
-        terrain_snapshot: bool = false,
-        job_batches: bool = false,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{};
     var f = try parse(std.testing.allocator,
         \\[sim]
         \\trader_wallet_dukes = 2500
@@ -880,44 +682,7 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
 }
 
 test "[sim] storm_frequency parses and merges" {
-    const Opts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        interest_range: f32 = 160,
-        max_edit_range: f32 = 96,
-        max_claimed_damage: i32 = 200,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        wire_chunks: bool = true,
-        deco_trees: bool = true,
-        deco_mirror: bool = true,
-        block_id_mapping: bool = true,
-        async_chunk_flush: bool = false,
-        terrain_snapshot: bool = false,
-        job_batches: bool = false,
-        guard: guard_policy.Policy = .{},
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{};
     var f = try parse(std.testing.allocator, "[sim]\nstorm_frequency = 250\n");
     defer f.deinit();
     applyToInitOptions(&f, &o);
@@ -925,7 +690,7 @@ test "[sim] storm_frequency parses and merges" {
     // Default untouched when the key is absent.
     var empty = try parse(std.testing.allocator, "[sim]\ntrader_wallet_dukes = 5\n");
     defer empty.deinit();
-    var o2: Opts = .{};
+    var o2: TestOpts = .{};
     applyToInitOptions(&empty, &o2);
     try std.testing.expectEqual(@as(i32, 100), o2.storm_frequency);
 }

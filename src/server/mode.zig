@@ -200,8 +200,8 @@ test "parse default pack" {
     try std.testing.expectEqual(true, p.enable_sample_plugin.?);
 }
 
-test "applyToInitOptions overrides only set fields" {
-    const Opts = struct {
+/// Mirror of the server init-options shape applyToInitOptions writes into.
+const TestOpts = struct {
         max_spawned_zombies: u16 = 100,
         blood_moon_frequency: u8 = 3,
         game_difficulty: u8 = 2,
@@ -230,8 +230,10 @@ test "applyToInitOptions overrides only set fields" {
         loot_respawn_days: u16 = 7,
         enable_sample_plugin: bool = false,
         wire_chunks: bool = true,
-    };
-    var o: Opts = .{};
+};
+
+test "applyToInitOptions overrides only set fields" {
+    var o: TestOpts = .{};
     var p = try parse(std.testing.allocator,
         \\max_spawned_zombies = 32
         \\enable_sample_plugin = true
@@ -245,36 +247,7 @@ test "applyToInitOptions overrides only set fields" {
 }
 
 test "applyToInitOptions clamps max_spawned_zombies" {
-    const Opts = struct {
-        max_spawned_zombies: u16 = 64,
-        blood_moon_frequency: u8 = 7,
-        game_difficulty: u8 = 2,
-        blood_moon_enemy_count: u8 = 8,
-        blood_moon_range: u8 = 0,
-        player_killing_mode: u8 = 3,
-        day_night_length: u16 = 60,
-        day_light_length: u8 = 18,
-        zombie_move: u8 = 0,
-        zombie_move_night: u8 = 3,
-        zombie_feral_move: u8 = 3,
-        zombie_bm_move: u8 = 3,
-        enemy_difficulty: u8 = 0,
-        loot_abundance: u16 = 100,
-        xp_multiplier: u16 = 100,
-        block_damage_player: u16 = 100,
-        block_damage_ai: u16 = 100,
-        block_damage_ai_bm: u16 = 100,
-        max_spawned_animals: u16 = 50,
-        air_drop_frequency: u16 = 72,
-        drop_on_death: u8 = 1,
-        land_claim_size: u16 = 41,
-        land_claim_online_durability_modifier: u16 = 4,
-        land_claim_offline_durability_modifier: u16 = 4,
-        land_claim_expiry_days: u16 = 3,
-        loot_respawn_days: u16 = 7,
-        enable_sample_plugin: bool = false,
-    };
-    var o: Opts = .{};
+    var o: TestOpts = .{ .max_spawned_zombies = 64, .blood_moon_frequency = 7 };
     var p = try parse(std.testing.allocator,
         \\max_spawned_zombies = 9000
     );

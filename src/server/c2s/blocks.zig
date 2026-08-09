@@ -57,7 +57,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const cur_raw = self.blockRawAt(b.x, b.y, b.z);
             if (cur_id != 0 and b.block_id == cur_id and b.damage == cur_dmg and b.raw != 0 and b.raw != cur_raw) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);
-                self.world.setBlockRawWorld(b.x, b.y, b.z, b.raw) catch {};
+                try self.world.setBlockRawWorld(b.x, b.y, b.z, b.raw);
                 const on = (packages.blockMeta(b.raw) & packages.block_meta_on) != 0;
                 if (self.sim.power.setSwitchAt(b.x, b.y, b.z, on)) {
                     self.sim.power.resolve();
@@ -242,6 +242,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const ed2 = edx * edx + edy * edy + edz * edz;
             if (ed2 > e_rad * e_rad) continue;
             if (self.sim.kind[es] == .trader) continue;
+            // A kill inside this loop spawns the corpse's loot bag (hp 1) into
+            // the first free slot, which may sit above `es`. Damaging it would
+            // destroy the bag on the spawning tick and bill a second kill.
+            if (self.sim.kind[es] == .loot_bag) continue;
             const fall = 1.0 - @sqrt(ed2) / e_rad;
             if (fall <= 0) continue;
             var amount = e_dmg * fall;

@@ -114,7 +114,12 @@ pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i3
 
 pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const iname: ?[]const u8 = if (g.items.byId(item_id)) |d| d.name else invsys.builtinStockNameFallback(item_id);
+    const iname: ?[]const u8 = if (g.items.byId(item_id)) |d|
+        d.name
+    else if (g.items.source == .builtin and !g.stock_catalogs_requested)
+        invsys.builtinStockNameFallback(item_id)
+    else
+        null;
     const IdCtx = struct {
         t: *const assets_maxdamage.Table,
         fn lookup(c: ?*anyopaque, n: []const u8) ?u16 {
@@ -125,8 +130,7 @@ pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     var id_ctx: IdCtx = .{ .t = &g.maxdamage };
     const resolved = invsys.itemToBlockResolved(item_id, iname, IdCtx.lookup, &id_ctx);
     if (resolved != 0) return resolved;
-    const offline = invsys.itemToBlock(item_id);
-    if (offline != 0) return offline;
+    if (g.items.source == .builtin and !g.stock_catalogs_requested) return invsys.itemToBlock(item_id);
     return 0;
 }
 

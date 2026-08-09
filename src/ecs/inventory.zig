@@ -103,13 +103,13 @@ pub fn itemToBlockResolved(
     // Stock placeables: item → shape block (AssignIds), not the item type id.
     if (std.mem.eql(u8, name, "resourceWood") or std.mem.eql(u8, name, "wood")) {
         if (id_by_name(ctx, "frameShapes:cube")) |id| return id;
-        return place_wood_block_id;
+        return 0;
     }
     if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable") or
         std.mem.eql(u8, name, "cobblestone"))
     {
         if (id_by_name(ctx, "cobblestoneShapes:cube")) |id| return id;
-        return place_cobble_block_id;
+        return 0;
     }
     // Other items: only accept an explicit block-shaped name if present in dump.
     if (id_by_name(ctx, name)) |id| {
@@ -711,6 +711,22 @@ test "equip armor and place wood" {
     const pr = placeBlock(&w, 0, wood_slot, 1, 70, 1);
     try std.testing.expect(pr.ok);
     try std.testing.expectEqual(place_wood_block_id, pr.place_block);
+}
+
+test "resolved placeables fail closed when AssignIds lacks the block name" {
+    const Missing = struct {
+        fn lookup(_: ?*anyopaque, _: []const u8) ?u16 {
+            return null;
+        }
+    };
+    try std.testing.expectEqual(
+        @as(u16, 0),
+        itemToBlockResolved(7, "resourceWood", Missing.lookup, null),
+    );
+    try std.testing.expectEqual(
+        @as(u16, 0),
+        itemToBlockResolved(10, "resourceCobblestones", Missing.lookup, null),
+    );
 }
 
 test "degradeUse wears a tool down and clamps at zero" {

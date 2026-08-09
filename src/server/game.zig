@@ -327,6 +327,9 @@ pub const Game = struct {
     authority_mode: AuthorityMode = .correct,
     blocks: assets_blocks.BlockTable = assets_blocks.BlockTable.builtin(),
     items: assets_items.ItemTable = assets_items.ItemTable.builtin(),
+    /// A stock/config catalog root was requested. Builtin item aliases remain
+    /// available only for explicit offline runs; load failures fail closed.
+    stock_catalogs_requested: bool = false,
     signs: assets_signs.Catalog = assets_signs.Catalog.empty(),
     entities: assets_entities.EntityTable = assets_entities.EntityTable.builtin(),
     recipes: assets_recipes.RecipeTable = assets_recipes.RecipeTable.builtin(),
@@ -478,6 +481,7 @@ pub const Game = struct {
         self.* = .{
             .allocator = allocator,
             .world = try world_store.World.init(allocator, world_dir),
+            .stock_catalogs_requested = opts.game_dir != null or opts.config_dir != null,
             .view_radius = opts.view_radius,
             .max_players = max_pl,
             .wire_chunks = opts.wire_chunks,
@@ -1147,6 +1151,9 @@ pub const Game = struct {
     }
     pub fn saveBlockMeta(self: *const Game) !void {
         return game_blockmeta.saveBlockMeta(self);
+    }
+    pub fn saveAllStores(self: *Game) bool {
+        return persist.saveAllStores(self);
     }
     fn loadBlockMeta(self: *Game) !void {
         return game_blockmeta.loadBlockMeta(self);

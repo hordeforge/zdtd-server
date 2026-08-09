@@ -951,40 +951,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         },
         .save => {
             // Same honesty as saveworld: never claim success when disk I/O failed.
-            var save_failed = false;
-            self.savePlayers() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save players", e);
-            };
-            self.world.saveAll() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save world", e);
-            };
-            self.containers.save(self.world.world_dir, self.allocator) catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save containers", e);
-            };
-            self.vending.save(self.world.world_dir) catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save vending", e);
-            };
-            self.saveClaims() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save claims", e);
-            };
-            self.saveBlockMeta() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save block meta", e);
-            };
-            self.saveWeather() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save weather", e);
-            };
-            self.saveClock() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save clock", e);
-            };
-            self.adminReply(if (save_failed) "save failed; see server log\n" else "saved\n");
+            self.adminReply(if (self.saveAllStores()) "saved\n" else "save failed; see server log\n");
         },
         .kick => |k| {
             const res = self.resolveAdminTarget(k.target);
@@ -1347,40 +1314,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             self.adminWrite(admin_cmds.writeTotal, .{n});
         },
         .saveworld => {
-            var save_failed = false;
-            self.world.saveAll() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save world", e);
-            };
-            self.containers.save(self.world.world_dir, self.allocator) catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save containers", e);
-            };
-            self.vending.save(self.world.world_dir) catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save vending", e);
-            };
-            self.saveClaims() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save claims", e);
-            };
-            self.saveBlockMeta() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save block meta", e);
-            };
-            self.saveWeather() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save weather", e);
-            };
-            self.saveClock() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save clock", e);
-            };
-            self.savePlayers() catch |e| {
-                save_failed = true;
-                logPersistErr(self, "save players", e);
-            };
-            self.adminReply(if (save_failed) "world save failed; see server log\n" else "world saved\n");
+            self.adminReply(if (self.saveAllStores()) "world saved\n" else "world save failed; see server log\n");
         },
         .shutdown => {
             self.adminReply("shutting down\n");

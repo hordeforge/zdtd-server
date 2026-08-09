@@ -26,6 +26,32 @@ pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     }
 }
 
+/// One canonical ladder over every zdtd-owned store, so an operator-triggered
+/// save covers exactly what the autosave tick covers. Each store is attempted
+/// even when an earlier one failed; returns false if any failed (already
+/// logged), so callers never report success over a disk error.
+pub fn saveAllStores(self: *Game) bool {
+    var ok = true;
+    const note = struct {
+        fn f(o: *bool, g: *Game, what: []const u8, err: anyerror) void {
+            o.* = false;
+            logPersistErr(g, what, err);
+        }
+    }.f;
+    self.world.saveAll() catch |e| note(&ok, self, "save world", e);
+    self.containers.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save containers", e);
+    self.workstations.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save workstations", e);
+    self.vending.save(self.world.world_dir) catch |e| note(&ok, self, "save vending", e);
+    self.saveClaims() catch |e| note(&ok, self, "save claims", e);
+    self.saveEntities() catch |e| note(&ok, self, "save entities", e);
+    self.allies.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save allies", e);
+    self.saveBlockMeta() catch |e| note(&ok, self, "save block meta", e);
+    self.saveWeather() catch |e| note(&ok, self, "save weather", e);
+    self.saveClock() catch |e| note(&ok, self, "save clock", e);
+    self.savePlayers() catch |e| note(&ok, self, "save players", e);
+    return ok;
+}
+
 pub const Zpv2Drop = struct {
     blob: ?[]u8 = null,
     removed: u32 = 0,

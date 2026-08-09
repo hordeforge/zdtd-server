@@ -14,20 +14,6 @@ const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 
-/// Sim rule parameters (ADR 0021): read as w.rules.<group>.<field>; defaults
-/// live in rules.zig (pinned by its test) and are overlaid from mode packs /
-/// zdtd.toml. The pre-move file-scope constants are gone by design.
-/// Replan grid A* at most this often while chasing (keeps 20 TPS budget).
-/// Now on w.rules.ai.path_replan_interval_s (Rules).
-/// Max A* node expansions per replan (coarse local grid).
-/// Now on w.rules.ai.path_max_expand (Rules).
-/// Snap to next waypoint within this distance (blocks).
-/// Now on w.rules.ai.path_wp_arrive (Rules).
-/// Manhattan cells the goal may drift from the one the buffer was planned for
-/// before the path is re-solved. One cell of drift leaves the buffered route
-/// pointing the same way, so chasing a walking player does not re-solve on
-/// every block boundary it crosses.
-/// Now on w.rules.ai.path_goal_slack (Rules).
 /// Fixed-point damage unit (1.0 hp = 100).
 const dmg_scale: u32 = 100;
 
@@ -171,7 +157,7 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         // Stock's Stat setter raises Stat.Changed and EntityStats::TickWait
         // turns that into a stat-change package (asm.il:199393). dirty.hp is
         // that flag here: without it the victim's client never sees the hit.
-        if (w.mask[i].dirty) w.dirty[i].hp = true;
+        w.markDirty(i, .{ .hp = true });
         if (w.health[i].hp <= 0) {
             // Kill verdict (T15): a plugin may deny the death; the victim
             // survives at 1 hp and the hit is consumed. The attacker is not
@@ -839,15 +825,6 @@ const zombie_tasks = [_]Task{
     .{ .id = .wander, .priority = 2, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
 };
 
-/// Arrive radius (m) for EAIApproachSpot; clears has_spot.
-/// Now on w.rules.ai.spot_arrive (Rules).
-/// EAITerritorial leash radius (m). Now on w.rules.ai.territorial_radius.
-/// Sparse random gate for DestroyArea while chasing — now on w.rules.ai.destroy_area_rng_mod.
-/// EAITaskList.executeDelayScale base — now on w.rules.ai.execute_delay_scale.
-/// EAILook / SeekYaw / EAIWander / EAIApproachSpot / EAIApproachDistraction
-/// timing + radii — all moved to w.rules.ai.* so a mode pack controls them
-/// without forking systems.zig. See src/ecs/rules.zig Ai for the field list
-/// and docs/GAME_OPTIONS.md for the [rules.ai] table.
 fn taskById(id: c.TaskId) ?Task {
     for (zombie_tasks) |t| {
         if (t.id == id) return t;
@@ -1281,8 +1258,6 @@ fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) 
     if (!ai.path_blocked and ai.wander_rng != 0) ai.wander_rng +%= 1;
 }
 
-/// EAIRunAway::.ctor fleeDistance = 20 (asm.il:434801).
-/// Now on w.rules.ai.flee_distance (Rules).
 /// EAIRunawayWhenHurt::CanExecute (asm.il:435706): a revenge target is
 /// required, and with the default lowHealthPercent of 1 (.ctor, asm.il:435622)
 /// the health fraction gate is skipped entirely. EAIRunAway::CanExecute then
@@ -1892,8 +1867,6 @@ pub fn vehicleTickHeld(w: *World, dt: f32) void {
 /// (EntityVehicle::EnterVehicle → StartAttachToEntity(this, -1), asm.il:541872).
 pub const seat_any: i16 = -1;
 
-/// Squared horizontal range a fresh mount must be inside (8 m).
-/// Now on w.rules.ai.mount_range_sq (Rules).
 /// Seat this rider already holds on this vehicle, mirroring
 /// Entity::FindAttachSlot (asm.il:406478).
 pub fn vehicleFindSeat(w: *const World, vslot: Slot, player_net: i32) ?u8 {
