@@ -51,7 +51,8 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   objective coverage SHIPPED for the stock catalog (census: all 16 types
   classified; template inheritance resolved, real quests.xml test), hit
   knockback + NetPackageEntityVelocity broadcast (8571b11), turret kills
-  credit the placing owner (quest/XP/kill counter/AddScore) (bba97c8)
+  credit the placing owner (quest/XP/kill counter/AddScore) (bba97c8),
+  vehicle refuel via gas-can InvTx (tank-capped, refund on full) (ee6a419)
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
   reproduced at 6256b1e). Solo loadgen join smoke CONFIRMED: 8/8 full join
@@ -81,7 +82,7 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `bba97c8`; nothing staged or untracked except
+All work is committed through `ee6a419`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
