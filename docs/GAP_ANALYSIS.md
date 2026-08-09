@@ -4710,11 +4710,12 @@ is on main and gated; what follows "Open:" is the honest remainder.
    stream).
 6. **Workstation RecipeQueue** SHIPPED: the C2S/S2C body is complete (fixed stock
    array lengths, trailing `lastInput`, `CraftCompleteData`, recipe blobs) and the
-   craft tick follows `HandleRecipeQueue` / `cycleRecipeQueue`. Open: the server
-   trusts the client's `Recipe` blob for output type, count and time instead of
-   validating against recipes.xml; the Module gate is now block-derived
-   (non-burning workbench / cement mixer advance, 2026-08-08); no live-client
-   playtest of the forge UI.
+   craft tick follows `HandleRecipeQueue` / `cycleRecipeQueue`. The server now
+   validates the client's `Recipe` blob against recipes.xml: only recipe
+   outputs craftable on the station's CraftingAreaRecipes survive, and per-craft
+   count + duration come from the recipe, not the blob (2026-08-09). The Module
+   gate is block-derived (non-burning workbench / cement mixer advance,
+   2026-08-08); no live-client playtest of the forge UI.
 
 ### P2: Multiplayer CPU (M11)
 
