@@ -513,7 +513,7 @@ moment a client can receive them.
 
 Lifting the cap is an **opt-in client mod**, kept strictly outside the
 stock-client-wire-only core (AGENTS.md clean-room policy: zdtd ships no client
-mod for the base loop). The sister project **RealEarth** at `../7days-realworld`
+mod for the base loop). The sister project **RealEarth** at `../7dtd-realworld`
 (v0.2.1) is the existing MVP:
 
 - `tools/engine_patcher/Program.cs` uses **Mono.Cecil** to patch
@@ -626,7 +626,7 @@ player+entity count, **[T+P]** both.
   and no tick stall.
   - **M2a. Tall terrain (optional, client-mod dependency).** **[T]** Add a true
     1m elevation branch in the DEM mapping, gated on a client that ran the
-    RealEarth `engine_patcher` YDim expand (`../7days-realworld`, section 4).
+    RealEarth `engine_patcher` YDim expand (`../7dtd-realworld`, section 4).
     Depends on the opt-in client mod; stock clients keep the M2 clamp. Gate:
     a YDim-expanded client renders Mont Blanc at true height; a stock client
     on the same server still joins with the clamped band.
@@ -665,5 +665,5 @@ player+entity count, **[T+P]** both.
 | `ecs/interest.zig` + `known_entities` (become gateway subscription) | static region map + cell→region assignment |
 | persistence formats `.zch2`/`.zct`/`.zbm`/`.zsv` (per-region) | handoff protocol: apron, snapshot, remap (M5) |
 | `world/dem.zig` streamer + disk header cache | DEM inner-tile LRU + edited-chunk cold tier |
-| RealEarth `engine_patcher` YDim expand (`../7days-realworld`, opt-in client mod) | true-1m DEM branch gated on client height (M2a) |
+| RealEarth `engine_patcher` YDim expand (`../7dtd-realworld`, opt-in client mod) | true-1m DEM branch gated on client height (M2a) |
 | `util/parallel.zig` range-split workers | control-plane split/merge coordinator (M7) |
