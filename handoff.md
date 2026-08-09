@@ -54,8 +54,9 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   credit the placing owner (quest/XP/kill counter/AddScore) (bba97c8),
   vehicle refuel via gas-can InvTx (tank-capped, refund on full) (ee6a419),
   drowning damage (head-block water gate, Rules knob, 2 hp/s) (landed in
-  sibling commit 4c68158 - the sibling swept uncommitted changes; verify
-  git status + commit promptly after each pass)
+  sibling commit 4c68158), radiated biome damage (biome-name gate, Rules
+  knob, 8 hp/s) (e1cea62) - note: the sibling swept uncommitted changes
+  once; commit promptly after each pass
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
   reproduced at 6256b1e). Solo loadgen join smoke CONFIRMED: 8/8 full join
@@ -85,8 +86,8 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `4c68158` (sibling sweep); nothing staged or
-untracked except this handoff note.
+All work is committed through `e1cea62`; nothing staged or untracked except
+this handoff note.
 
 ## What is still open (bounded next slices)
 
