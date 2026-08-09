@@ -3914,18 +3914,16 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../../7dtd-research/docs/protocol-packages.md` 5.1 |
 | `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
-| `NetPackageEntityTeleport` | P1 |
+| `NetPackageEntityTeleport` | HAVE (respawn at world spawn, admin teleportplayer/goto, void-fall recovery all send the stock body; `World.teleportTo` sim funnel) |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | PARTIAL (2026-08-09): hit knockback shoves zombies/animals (8 blocks/s, 0.3 s, away from the attacker) and broadcasts `NetPackageEntityVelocity` (bAdd=true) to observers. Open: `EntitySpeeds`/`EntityPhysics` bodies and momentum-driven ragdoll remain |
 | `NetPackageEntityRotation` | P2 |
 | `NetPackageEntityAnimationData` | P2 |
 | `NetPackageEntityRagdoll` | P2 |
-| `NetPackageEntityAttach` / detach | P1 (vehicles, seats) |
-| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health also replicates from the tick pass whenever `dirty.hp` is set, so AI melee, C2S damage and death reach the client the way `EntityStats::TickWait` polls `Stat.Changed` (asm.il:199393); NPC stats and buffs deferred) |
-| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buff set is server-owned via AddRemoveBuff) |
-| `NetPackageEntityAttach` / detach | HAVE (server resolves slot, replies AttachClient/DetachClient) |
-| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; buffs deferred) |
+| `NetPackageEntityAttach` / detach | SHIPPED (vehicle multi-seat: seatRider/unseatRider broadcast attach/detach to observers; C2S seat requests resolved server-side) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health replicates from the tick pass on `dirty.hp` so AI melee, C2S damage and death reach the client per `EntityStats::TickWait` (asm.il:199393); buff set is server-owned via AddRemoveBuff with join sync; NPC stat-change and cvar sync deferred) |
+
 | `NetPackageEntityStealth` | P2 |
-| `NetPackageEntityCollect` | P1 (loot) |
+| `NetPackageEntityCollect` | SHIPPED (loot pickup: the C2S collect handler broadcasts the stock body to observers) |
 | `NetPackageEntityWaypointList` / map markers | P2 |
 | `NetPackageEntityAddExp*` / skills | P2 |
 | `NetPackageEntityAwardKillServer` | P2 |
