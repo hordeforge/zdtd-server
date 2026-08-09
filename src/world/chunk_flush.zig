@@ -201,8 +201,17 @@ pub const Flusher = struct {
             self.mu.unlock(io);
 
             io_fs.writeFile(e.path, e.payload) catch |err| {
-                _ = self.errors.fetchAdd(1, .monotonic);
-                std.debug.print("zdtd: async chunk write '{s}' failed: {s}\n", .{ e.path, @errorName(err) });
+                // Rate-limit like persist.logPersistErr: a full or read-only disk
+                // fails every queued write, and one line per chunk would bury the
+                // first (most useful) one under thousands of duplicates. The
+                // `errors` counter stays exact for apm.
+                const n = self.errors.fetchAdd(1, .monotonic) + 1;
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: async chunk write '{s}' failed: {s} n={d}\n",
+                        .{ e.path, @errorName(err), n },
+                    );
+                }
             };
             a.free(e.path);
             a.free(e.payload);

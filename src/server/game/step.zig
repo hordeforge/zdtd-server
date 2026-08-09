@@ -15,6 +15,7 @@ const interest = @import("../../ecs/interest.zig");
 const replicate_te = @import("../replicate_te.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const game_stability = @import("stability.zig");
+const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
 
 pub fn step(self: *Game) !void {
@@ -58,10 +59,7 @@ pub fn step(self: *Game) !void {
                 },
                 .data => |d| self.onData(d.peer, d.payload) catch |err| {
                     self.harness.counters.inc(.net_payload_errors);
-                    std.debug.print(
-                        "zdtd: payload failed local_id={d} error={s}\n",
-                        .{ d.peer.local_id, @errorName(err) },
-                    );
+                    game_net.logPayloadErr(self, d.peer.local_id, err);
                 },
             }
         }

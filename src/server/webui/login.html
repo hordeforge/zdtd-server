@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · zdtd</title>
-<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:#e8eaef;background:#12141a}main{max-width:36rem}
-code{background:#141824;padding:0.15em 0.4em;border-radius:3px}a{color:#72b3e4;text-decoration:underline}
-label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid #6a738c;border-radius:6px;background:#141824;color:#e8eaef;font:inherit}
-button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:#72b3e4;color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #f0b64f;outline-offset:3px}
-@media(forced-colors:active){body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
+<style>/* Same token set as shell.html: dark ops palette, sans chrome, mono for machine values. */
+:root{color-scheme:dark;--bg:#12141a;--sunken:#141824;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--edge:#6a738c;--warn:#f0b64f;--err:#ff8585;--sans:system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--fs-micro:0.8125rem;--fs-title:1.25rem}
+*{box-sizing:border-box}body{font-family:var(--sans);margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:var(--fg);background:var(--bg)}main{max-width:36rem}
+h1{font-size:var(--fs-title);margin:0;font-weight:600;letter-spacing:0.02em}.meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro);margin:0.15rem 0 1.25rem}
+code{background:var(--sunken);padding:0.15em 0.4em;border-radius:3px;font-family:var(--mono)}a{color:var(--acc);text-decoration:underline}
+label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid var(--edge);border-radius:6px;background:var(--sunken);color:var(--fg);font-family:var(--mono);font-size:1rem}
+button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:var(--acc);color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(--warn);outline-offset:3px}
+@media(forced-colors:active){:root{--bg:Canvas;--sunken:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--edge:ButtonText;--warn:Highlight;--err:MarkText}body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
 </style></head>
-<body><main><h1>zdtd webui</h1>
+<body><main><h1>zdtd</h1><p class="meta">webui · sign in</p>
 <p>Sign in with the webui shared secret to set a session cookie.</p>
 <form method="post" action="/login">
 <label for="login-token">Shared secret</label>

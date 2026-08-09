@@ -229,7 +229,8 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     // Log verb only: args may include player names, chat text, or coords.
     const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
     self.harness.counters.inc(.player_console_commands);
-    std.debug.print("zdtd: audit source=player_console slot={d} command={s}\n", .{ c.slot, cmd[0..verb_end] });
+    var ts: [19]u8 = undefined;
+    std.debug.print("zdtd: {s} audit source=player_console slot={d} command={s}\n", .{ clock.wallStamp(&ts), c.slot, cmd[0..verb_end] });
 
     var out: ConsoleOut = .{};
     var it = std.mem.tokenizeAny(u8, cmd, " ");
@@ -817,7 +818,8 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     const trimmed = std.mem.trim(u8, line, " \t");
     const verb_end = std.mem.findAny(u8, trimmed, " \t") orelse trimmed.len;
     self.harness.counters.inc(.admin_commands);
-    std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
+    var ts: [19]u8 = undefined;
+    std.debug.print("zdtd: {s} audit source={s} command={s}\n", .{ clock.wallStamp(&ts), source, trimmed[0..verb_end] });
     const cmd = admin_mod.parseCommand(line);
     switch (cmd) {
         .help => |topic| {

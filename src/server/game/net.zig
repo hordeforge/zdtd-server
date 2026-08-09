@@ -256,6 +256,20 @@ pub fn pollNetAfterSend(self: *Game) void {
     self.pollNetOnce();
 }
 
+/// Rate-limited log for a failed C2S payload, shared by both poll sites.
+/// A peer spraying malformed packets would otherwise emit one blocking stderr
+/// write per packet on the tick thread, turning a decode fault into a stall and
+/// burying the first (diagnostic) line. The counter stays exact.
+pub fn logPayloadErr(self: *Game, local_id: i32, err: anyerror) void {
+    const n = self.harness.counters.get(.net_payload_errors);
+    if (n == 1 or n % 100 == 0) {
+        std.debug.print(
+            "zdtd: payload failed local_id={d} error={s} n={d}\n",
+            .{ local_id, @errorName(err), n },
+        );
+    }
+}
+
 pub fn pollNetOnce(self: *Game) void {
     if (self.pumping) {
         var ctl: [2048]u8 = undefined;
@@ -263,8 +277,15 @@ pub fn pollNetOnce(self: *Game) void {
         return;
     }
     if (self.drain_suppressed > 0) return;
-    const ev = self.net.poll(&self.recv_buf) catch {
+    const ev = self.net.poll(&self.recv_buf) catch |err| {
+        // Unlike step's poll loop this one cannot propagate, so the error name
+        // only survives if it is logged here: otherwise net_poll_errors climbs
+        // with no way to tell a socket fault from a decode fault.
         self.harness.counters.inc(.net_poll_errors);
+        const n = self.harness.counters.get(.net_poll_errors);
+        if (n == 1 or n % 100 == 0) {
+            std.debug.print("zdtd: net poll error (drain): {s} n={d}\n", .{ @errorName(err), n });
+        }
         return;
     };
     switch (ev) {
@@ -275,7 +296,7 @@ pub fn pollNetOnce(self: *Game) void {
         },
         .data => |d| self.onData(d.peer, d.payload) catch |err| {
             self.harness.counters.inc(.net_payload_errors);
-            std.debug.print("zdtd: payload failed local_id={d} error={s}\n", .{ d.peer.local_id, @errorName(err) });
+            logPayloadErr(self, d.peer.local_id, err);
         },
     }
 }

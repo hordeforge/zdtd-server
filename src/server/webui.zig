@@ -244,7 +244,8 @@ pub const Server = struct {
         if (self.login_fails >= login_fail_limit) {
             self.login_lock_until_ns = clock.monoNs() +% login_lockout_ns;
             self.login_fails = 0;
-            std.debug.print("zdtd: webui login lockout ({d} s)\n", .{login_lockout_ns / std.time.ns_per_s});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} webui login lockout ({d} s)\n", .{ clock.wallStamp(&ts), login_lockout_ns / std.time.ns_per_s });
         }
     }
 
@@ -463,6 +464,11 @@ pub const Server = struct {
                     self.login_fails = 0;
                     self.login_lock_until_ns = 0;
                     self.set_cookie = true;
+                    // Successes are as load-bearing as failures for an audit
+                    // trail: /api/cmd runs privileged console lines under this
+                    // session, and only this line dates the sign-in.
+                    var ts: [19]u8 = undefined;
+                    std.debug.print("zdtd: {s} webui login ok\n", .{clock.wallStamp(&ts)});
                     // 303 See Other: POST → GET dashboard (PRG; matches /logout).
                     try self.httpRedirect(&req, "/");
                     return;
@@ -490,7 +496,8 @@ pub const Server = struct {
                     return;
                 }
                 self.noteLoginFailure();
-                std.debug.print("zdtd: webui auth rejected (bad credential)\n", .{});
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} webui auth rejected (bad credential)\n", .{clock.wallStamp(&ts)});
             }
             if (std.mem.startsWith(u8, path, "/api/")) {
                 // Machine clients: Bearer challenge + plain body (no HTML login form).
@@ -2144,7 +2151,9 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Recent commands\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion") != null);
-    try std.testing.expect(std.mem.find(u8, html, "border:1px solid #6a738c") != null);
+    // Control borders come from the --edge token; both halves must stay in sync.
+    try std.testing.expect(std.mem.find(u8, html, "--edge:#6a738c") != null);
+    try std.testing.expect(std.mem.find(u8, html, "border:1px solid var(--edge)") != null);
     try std.testing.expect(std.mem.find(u8, html, "text-decoration:underline") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);

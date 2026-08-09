@@ -190,6 +190,11 @@ pub const Server = struct {
             self.authed[i] = true;
             self.fails[i] = 0;
             self.login_lock_until_ns = 0;
+            // Log the success too: "who held a console session when X happened"
+            // is unanswerable from failures alone, and the `audit source=admin`
+            // command lines below have no session to attribute them to.
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} admin login ok session={d}\n", .{ clock.wallStamp(&ts), i });
             self.reply("Logon successful.\n\n\n\n");
             self.writeGreeting();
             return true;
