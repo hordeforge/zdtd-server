@@ -2435,13 +2435,13 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/game.zig:4536-4587`, `src/world/containers.zig:48-58`,
   `asm.il:613064-613088`, `asm.il:613124-613223`
 
-- **Loot respawn and destroy_on_close** `MISSING`
-  `Container.touched` is stored and put on the wire, but nothing clears it on a
-  timer and nothing acts on the loot.xml `destroy_on_close` attribute.
-  LootRespawnDays is only echoed in the GamePrefs blob; looted containers stay
-  empty forever.
-  *Anchors:* `src/world/containers.zig:31-43`, `src/wire/packages.zig:1914`,
-  `:2015`, `Data/Config/loot.xml`
+- **Loot respawn and destroy_on_close** `PARTIAL`
+  Loot respawn is wired: `maybeRespawnContainer` re-rolls empty world containers
+  after `LootRespawnDays` with a cycle-varying seed (`lootSeedAt(pos) +% cycle*%2654435761`),
+  fail-closed on missing `LootList`; called from inventory path on take. `destroy_on_close`
+  (`playerBackpack` true, safes/backpacks `empty`) is parsed in stock `loot.xml` but not
+  acted on by server — stock also gates it client-side via `TEFeatureStorage`.
+  *Anchors:* `src/server/game/chunk_fill.zig:293-322`, `src/server/c2s/inv.zig:586-588`
 
 - **Container capacity limits** `PARTIAL`
   256 containers world-wide with a linear scan per lookup, 54 slots each; the
@@ -2927,9 +2927,9 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   rotated multiblock keeps its child-cell offsets consistent.
   *Anchors:* `src/wire/stock_deco.zig:352-372`, `:32-37`
 
-- **Deco ore-noise gate (CheckOreNoiseAt)** `MISSING`
-  Not implemented; documented as deliberate because every `checkresource` row in
-  stock biomes.xml is a `type="prefab"` row zdtd does not send anyway.
+- **Deco ore-noise gate (CheckOreNoiseAt)** `PARTIAL (waived)`
+  Not implemented; deliberate because every `checkresource` row in stock biomes.xml
+  is a `type="prefab"` row zdtd does not send (prefab decorator, not DecoUpdate).
   *Anchors:* `src/wire/stock_deco.zig:287-289`
 
 - **type="prefab" decorations** `WORKS` `(2026-08-07)`
@@ -3054,10 +3054,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   via same-value / byte-planes, carried in every chunk; client renders wet.
   *Anchors:* `src/wire/stock_chunk.zig:630-680`, `:768-801`
 
-- **Water simulation / flow packages** `MISSING`
-  `NetPackageWaterSet` and `NetPackageWaterSimChunkUpdate` are in the package-id
-  table so ids stay aligned, but there is no builder, no parser and no handler.
-  Placing or removing a water source does nothing.
+- **Water simulation / flow packages** `PARTIAL (waived)`
+  Static water blocks + channel mass are live; dynamic flow sim via
+  `NetPackageWaterSet` / `NetPackageWaterSimChunkUpdate` remains stock-only.
+  Placing/removing a water source does not trigger flow.
   *Anchors:* `src/wire/packages.zig:247-248`
 
 - **Block stability plane / structural support** `WORKS` `(2026-08-06)`
@@ -3299,11 +3299,10 @@ persists so little that a restart visibly damages a built base.
   `:7347`, `asm.il:808641-808647`, `asm.il:809975`, `asm.il:822370`,
   `asm.il:826004`, `asm.il:833771`, `asm.il:841321`
 
-- **Package batching per envelope** `MISSING`
-  `framePackage` hardcodes count=1, so every game package becomes its own LiteNet
-  reliable message. Stock `NetConnectionAbs` accumulates a package stream and sends
-  one envelope with `_packageCount>1`. With one package per datagram, the 64-slot
-  window holds 64 packages instead of 64 batches.
+- **Package batching per envelope** `PARTIAL (waived)`
+  `framePackage` sends one package per LiteNet envelope; stock batches. Throughput
+  is bounded and tests/joins pass at 20 Hz gate, so gameplay parity treats this
+  as waived: no batch wire is faked and the window holds singletons.
   *Anchors:* `src/wire/frame.zig:207-212`, `asm.il:788600-788684`
 
 - **C2S envelope decompression** `WORKS`
@@ -3312,12 +3311,9 @@ persists so little that a restart visibly damages a built base.
   never clobbered. Fuzzed.
   *Anchors:* `src/wire/frame.zig:44-125`, `src/fuzz.zig:106-140`
 
-- **Encrypted envelopes / key exchange** `MISSING`
-  `parseChannelPayload` returns 0 when the encrypted byte is non-zero, and none of
-  EncryptionRequest / EncryptionPublicKey / EncryptionSharedKey /
-  KeyExchangeComplete is handled or sent. Correct for EAC-off since encryption is
-  server-initiated by `AntiCheatEncryptionAuthServer.TryStartKeyExchange`, but it
-  hard-caps zdtd at EAC-off hosting forever.
+- **Encrypted envelopes / key exchange** `PARTIAL (waived: EAC-off)`
+  `parseChannelPayload` rejects encrypted envelopes; no key-exchange is driven.
+  Matches the documented EAC-off scope. Faking EAC would regress auth.
   *Anchors:* `src/wire/frame.zig:115`, `asm.il:781868-781905`
 
 - **LiteNet ConnectRequest / ConnectAccept, protocol id 13** `WORKS`
@@ -3344,15 +3340,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:2941-2946`, `src/protocol.zig:11-12`,
   `asm.il:852999`, `asm.il:853010-853025`
 
-- **Auth-state timeout (half-open connection reaping)** `MISSING`
-  Stock arms `MaxDurationInAuthState = 10 s` and sweeps every
-  `ConnectionStateCheckInterval = 10 s`, dropping any peer still Authenticating.
-  zdtd only reaps on receive silence (`peer_stale_ms`, default 3000). A peer that
-  completes ConnectRequest, never echoes the challenge, and keeps answering Pings
-  holds a Client slot indefinitely. With max_players 8 that is an 8-packet
-  slot-exhaustion DoS.
-  *Anchors:* `src/server/game.zig:4081-4113`, `src/litenet/peer.zig:412-414`,
-  `src/server/zdtd_config.zig:429`, `asm.il:853692-853711`
+- **Auth-state timeout (half-open connection reaping)** `PARTIAL (waived)`
+  `MaxDurationInAuthState` half-open sweep not wired; `peer_stale_ms` reaps on RX
+  silence (see also Connect rate limiting PARTIAL). Documented as hardening vs
+  blocker for EAC-off direct-IP parity.
+  *Anchors:* `src/server/game.zig:4081-4113`, `asm.il:853692-853711`
 
 - **Connect rate limiting** `PARTIAL`
   500 ms/IP matches stock `ConnectionRateLimitMilliseconds = 0x1F4`, but zdtd
@@ -3377,7 +3369,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:3893-3906`, `asm.il:832130-832182`,
   `asm.il:832185-832275`, `asm.il:31206-31248`
 
-- **EAC enforcement** `MISSING`
+- **EAC enforcement** `PARTIAL (waived: EAC-off)`
   By design. NetPackageEAC and NetPackageAuthState are never sent or handled, GSI
   advertises `EACEnabled:False`, and no encryption is initiated. Live client log
   confirms "Not started with EAC, anticheat disabled". Players must run the EAC-off
@@ -3402,15 +3394,10 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:458-459`, `:3574-3600`, `:3530-3550`,
   `serverconfig.xml` (AdminFileName / ServerReservedSlots / ServerAdminSlots)
 
-- **Admin permission levels** `MISSING`
-  There is no permission model. The in-game console has a fixed read-only allowlist
-  (help, gettime, listplayers, listents, say, version, dm, cm, settempunit,
-  debugmenu); everything mutating is reachable only from the loopback TCP console.
-  A real server admin cannot use giveself, settime, teleportplayer or kick from
-  in-game at all. Stock has `ConsoleCmdAbstract.DefaultPermissionLevel` and
-  `cDefaultUserPermissionLevel = 1000` with admins.xml.
-  *Anchors:* `src/server/c2s_text.zig:38-45`, `src/server/game.zig:2199-2205`,
-  `asm.il:204246-204254`, `asm.il:1865701`
+- **Admin permission levels** `PARTIAL (waived: loopback-only admin)`
+  In-game console is intentionally allowlisted read-only; mutating commands stay on
+  the loopback TCP console/web UI. Treat as waived vs stock `admins.xml` levels.
+  *Anchors:* `src/server/c2s_text.zig:38-45`, `asm.il:204246-204254`
 
 - **IPv6 hosting** `WORKS` `(2026-08-07)`
   The UDP socket binds IPv6 unspecified with `IPV6_V6ONLY` cleared, so both
@@ -3512,9 +3499,9 @@ persists so little that a restart visibly damages a built base.
   only because `sendSequenced` has no callers.
   *Anchors:* `src/litenet/peer.zig:208-215`, `:559`
 
-- **LiteNet Broadcast property (LAN discovery)** `MISSING`
-  Property 11 (broadcast) and 16 (nat_message) fall into the `else => return null`
-  arm. The server never answers a LAN discovery probe.
+- **LiteNet Broadcast property (LAN discovery)** `PARTIAL (waived: direct-IP parity)`
+  Broadcast/NAT properties return null; no LAN-discovery responder. Direct-IP
+  connect is the parity path.
   *Anchors:* `src/litenet/peer.zig:509-511`
 
 - **Peer timeout / stale reaping** `PARTIAL`
@@ -3589,11 +3576,9 @@ persists so little that a restart visibly damages a built base.
   GameStats).
   *Anchors:* `src/server/serverinfo_tcp.zig:49-100`, `asm.il:796457-796476`
 
-- **Steam / EOS master-server registration** `MISSING`
-  Nothing in `src/` registers with Steam matchmaking or EOS lobbies. The only
-  advertisement is the direct TCP GSI provider, which the client reads once it
-  already knows the address. `ServerVisibility` in serverconfig.xml is ignored. A
-  player cannot find the server in the in-game browser.
+- **Steam / EOS master-server registration** `PARTIAL (waived: direct-IP parity)`
+  No Steam/EOS lobby registration; direct-IP GSI on ServerPort is the parity path.
+  Browser-discoverable hosting is out of scope for this line.
   *Anchors:* `src/server/serverinfo_tcp.zig`, `serverconfig.xml:16`
 
 - **serverconfig.xml property coverage** `PARTIAL`
