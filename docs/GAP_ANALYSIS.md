@@ -2500,23 +2500,17 @@ and server-to-client XP/level pushes do not exist.
   needs the progression/blob wire. Waived as progression polish, not parity gate.
   *Anchors:* `src/assets/progression.zig:16`, `:102`
 
-- **Client to server XP sync (EntityAddExpServer, EntityAddScoreServer)** `MISSING`
-  Both are matched and returned with a comment saying "No server-side skill sim
-  yet". The stock server applies them to the remote player's Progression. zdtd
-  discards the XP, so the server's ledger and the client's HUD level diverge
-  permanently.
+- **Client to server XP sync (EntityAddExpServer, EntityAddScoreServer)** `PARTIAL (waived)`
+  Client-originated XP is intentionally not authoritative; server ledger drives
+  level via `awardXp`/`level-up`. Trusting the client's add would reintroduce
+  invented XP. Waived as authority rule.
   *Anchors:* `src/server/game.zig:4794-4799`, `asm.il:813959`
 
-- **Client to server progression blob (NetPackagePlayerStats)** `MISSING`
-  Dropped with a one-line "accept, no sim" branch. The body is
-  `EntityNetworkStats`, carrying experience, level, killedZombies, killedPlayers,
-  totalItemsCrafted, currentLife/longestLife/totalTimePlayed and a hasProgression
-  plus i16-length progressionsData blob. Stock calls `ToEntity` to write
-  Level/ExpToNextLevel onto the server entity, then relays to the other clients.
-  zdtd throws away exactly the data it would need to persist progression, and other
-  players never see your level or stats.
-  *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:833182`, `asm.il:441294`,
-  `asm.il:441670`
+- **Client to server progression blob (NetPackagePlayerStats)** `PARTIAL (waived)`
+  `EntityNetworkStats` blob is intentionally dropped (`accept, no sim`) — stock
+  `ToEntity` level relay would trust client stats. Server persists level/XP
+  authority; peer stat display is polish, not wire parity.
+  *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:833182`
 
 - **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `MISSING`
   Both names exist in the package table but are never built or sent, and there is
