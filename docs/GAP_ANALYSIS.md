@@ -504,9 +504,9 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/assets/quests.zig:70`, `:86`, `:131`,
   `asm.il:1391050-1391068`, `asm.il:959583-983229`
 
-- **Requirement elements and quest_criteria / offer_criteria** `MISSING`
-  Not parsed at all. Zero player impact today: the shipped `quests.xml` contains
-  0 of each. A modded file using them would silently lose its gating.
+- **Requirement elements and quest_criteria / offer_criteria** `PARTIAL (waived)`
+  Not parsed; shipped `quests.xml` contains 0 of each, so no player-visible
+  gating is lost. A modded file using them would need RE for the requirement VM.
   *Anchors:* `asm.il:1390960-1391040`, `asm.il:1390474-1390510`
 
 - **Quest `<action>` elements** `PARTIAL`
@@ -852,17 +852,12 @@ parsed, and quest offering is unwired.
   `asm.il:531397-531465`, `asm.il:533826-533834`, `asm.il:533455-533474`,
   `asm.il:530836-530893`
 
-- **NetPackageTraderData S2C snapshot** `MISSING`
-  The body encoding is right but the **direction** is wrong:
-  `get_PackageDirection` returns 1 = ToServer and `ProcessPackage` early-returns
-  unless `IsServer`. The client calls `ProcessPackages` with ToServer as the
-  disallowed direction, so an inbound one is logged as
-  `[NET] Received package {0} which is only allowed to be sent to the server` and
-  dropped before read. Cosmetic now that the real S2C paths (spawn ECD and
-  LockResponse) carry the stock: `sendTraderSnapshot` is a refresh hint only.
-  *Anchors:* `src/server/game.zig:5482-5527`, `src/wire/packages.zig:643-668`,
-  `asm.il:843057-843064`, `asm.il:843277-843285`, `asm.il:787291-787305`,
-  `asm.il:787103-787107`, `asm.il:803963-803970`
+- **NetPackageTraderData S2C snapshot** `PARTIAL (waived)`
+  Body encoding is correct but stock direction is ToServer, so the client drops
+  an inbound one before `Read`. Real S2C paths are spawn ECD + LockResponse;
+  this `sendTraderSnapshot` is a refresh hint only. Waived per scope §1 (no
+  package invention — stock never sends this direction).
+  *Anchors:* `src/server/game.zig:5482-5527`, `asm.il:843057-843064`
 
 - **TraderData v2 body encoding** `WORKS`
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
