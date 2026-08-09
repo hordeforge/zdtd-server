@@ -4646,6 +4646,19 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expectEqual(@as(i16, 1), try psr.readI16()); // playerKills
     try std.testing.expectEqual(@as(i16, 0), try psr.readI16()); // otherTeamNumber
     try std.testing.expectEqual(@as(i32, 0), try psr.readI32()); // conditions
+    // B's death screen gets the spawn list (stock WorldSpawnPoints).
+    const wsp_id = packages.idOf("NetPackageWorldSpawnPoints").?;
+    const wspb = cap_b.findPkgId(wsp_id) orelse return error.TestUnexpectedResult;
+    var wr = binary.Reader{ .data = wspb };
+    try std.testing.expectEqual(@as(u8, 2), try wr.readByte()); // list version
+    try std.testing.expectEqual(@as(i32, 1), try wr.readI32()); // one entry (world spawn)
+    try std.testing.expectEqual(@as(u16, 0), try wr.readU16()); // SpawnPosition version
+    _ = try wr.readF32();
+    _ = try wr.readF32();
+    _ = try wr.readF32();
+    _ = try wr.readF32(); // heading
+    _ = try wr.readI32(); // team
+    _ = try wr.readI32(); // activeInGameMode
 }
 
 test "scenario chat routes by recipient list and preserves the channel" {

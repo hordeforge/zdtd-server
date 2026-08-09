@@ -688,3 +688,52 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
     try std.testing.expectEqual(@as(f32, 0), try r.readF32()); // stressAmount (v36 tail)
     try std.testing.expect(r.pos == body.len);
 }
+
+/// NetPackageWorldSpawnPoints body: SpawnPointList (RE
+/// ../7dtd-research/il/full-v3.1.0/_global/SpawnPointList.il.txt write IL=25
+/// + SpawnPoint/SpawnPosition). Sent on death so the client's respawn screen
+/// lists the available spawn points. Layout: version u8 (2) + count i32 +
+/// per point: SpawnPosition (version u16 0 + position xyz f32 + heading f32)
+/// + team i32 + activeInGameMode i32.
+pub const SpawnPointEntry = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    heading: f32 = 0,
+    team: i32 = 0,
+    active_in_game_mode: i32 = 0,
+};
+
+pub fn buildWorldSpawnPointsBody(buf: []u8, points: []const SpawnPointEntry) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeByte(2); // SpawnPointList.CurrentSaveVersion (.cctor ldc.i4.2)
+    try w.writeI32(@intCast(points.len));
+    for (points) |p| {
+        try w.writeU16(0); // SpawnPosition version
+        try w.writeF32(p.x);
+        try w.writeF32(p.y);
+        try w.writeF32(p.z);
+        try w.writeF32(p.heading);
+        try w.writeI32(p.team);
+        try w.writeI32(p.active_in_game_mode);
+    }
+    return w.written();
+}
+
+test "world spawn points body is the stock SpawnPointList shape" {
+    var buf: [64]u8 = undefined;
+    const body = try buildWorldSpawnPointsBody(&buf, &.{
+        .{ .x = 10, .y = 70, .z = 20, .heading = 90 },
+    });
+    try std.testing.expectEqual(@as(usize, 5 + 26), body.len);
+    var r = binary.Reader{ .data = body };
+    try std.testing.expectEqual(@as(u8, 2), try r.readByte()); // version
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // count
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // SpawnPosition version
+    try std.testing.expectEqual(@as(f32, 10), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 70), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 20), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 90), try r.readF32()); // heading
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // team
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // activeInGameMode
+}

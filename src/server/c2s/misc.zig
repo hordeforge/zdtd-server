@@ -334,6 +334,33 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // animation; the tick sweep broadcasts EntityRemove when
                 // the dwell expires. The loot bag below still spawns now.
             } else {
+                // The death screen needs the spawn list: stock sends
+                // NetPackageWorldSpawnPoints on death (GameManager.
+                // SetSpawnPointList) so the respawn menu shows the options.
+                // zdtd ships the world spawn entry; the bed/claim entries
+                // ride the same list when bedroll tracking lands.
+                if (self.sim.slotOfNetId(d.entity_id)) |ti| {
+                    if (self.sim.mask[ti].transform) {
+                        const sp = self.world.primarySpawn();
+                        if (packages.stock_entity.buildWorldSpawnPointsBody(self.body_buf[96..160], &.{
+                            .{
+                                .x = @floatFromInt(sp.x),
+                                .y = @floatFromInt(sp.y),
+                                .z = @floatFromInt(sp.z),
+                            },
+                        })) |spb| {
+                            // The victim's client shows the respawn menu.
+                            const victim_slot = self.sim.player[ti].peer_slot;
+                            if (victim_slot >= 0 and @as(usize, @intCast(victim_slot)) < self.clients.len) {
+                                if (self.clients[@intCast(victim_slot)].peer) |vpeer| {
+                                    self.sendGame(vpeer, "NetPackageWorldSpawnPoints", spb) catch {
+                                        self.harness.counters.inc(.net_send_errors);
+                                    };
+                                }
+                            }
+                        } else |_| {}
+                    }
+                }
                 // DropOnDeath: 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete.
                 // Modes 1..3 drop a loot bag at the death position; 0/4 drop nothing.
                 if (self.drop_on_death >= 1 and self.drop_on_death <= 3) {
