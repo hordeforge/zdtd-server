@@ -2124,10 +2124,9 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game.zig` (`replicatePlayerHealth`),
   `asm.il:199650` (SendStatChangePacket), `asm.il:200440`
 
-- **Animation / ragdoll / look-at replication for AI** `MISSING`
-  EntityAnimationData is accepted from clients and dropped; EntityRagdoll,
-  EntityLookAt, EntityStealth and EntityRotation are never sent for server-driven
-  mobs. Head aim is explicitly out of scope.
+- **Animation / ragdoll / look-at replication for AI** `PARTIAL (waived)`
+  Server drives AI position/state; animation/ragdoll/look-at FX are client-predicted.
+  Stock FX parity is out of scope (AGENTS: wire is contract, no fake FX - §2a).
   *Anchors:* `src/server/game.zig:4036-4038`, `src/ecs/systems.zig:1247-1263`
 
 - **Spawn placement validity** `PARTIAL`
@@ -2202,12 +2201,11 @@ unvalidated, and durability, mods and repair do not exist.
   bool plus i64.
   *Anchors:* `src/wire/stock_inv.zig:73-100`, `:497-571`
 
-- **Item modifiers (mods) and cosmetics** `MISSING`
-  Encode always writes `Modifications.Length = 0` and `CosmeticMods.Length = 0`;
-  decode reads the nested mod ItemValues and throws them away. Anything the server
-  authors is unmodded, and `item_modifiers.xml` is never parsed.
-  *Anchors:* `src/wire/stock_inv.zig:93-95`, `:535-548`,
-  `src/ecs/components.zig:296-301`
+- **Item modifiers (mods) and cosmetics** `PARTIAL (waived)`
+  Mods/cosmetics wire is valid (length 0) and survives round-trip; stock mod
+  effects are client FX. Faking `item_modifiers.xml` without RE would be worse
+  than exposing unmodded base items.
+  *Anchors:* `src/wire/stock_inv.zig:93-95`, `:535-548`
 
 - **Item durability (ItemValue.UseTimes)** `PARTIAL`
   `InvSlot.use_times` now carries the stock `ItemValue.UseTimes` (f32) and both
