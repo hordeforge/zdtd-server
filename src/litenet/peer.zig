@@ -23,6 +23,10 @@ const assemble_cap: usize = max_payload;
 /// Game: (windowSize-1)/8 + 2 = 9 bitmap payload bytes on Ack.
 const ack_bitmap_bytes: usize = (packet.window_size - 1) / 8 + 2;
 const resend_ns: u64 = 80_000_000; // 80ms, similar ballpark to LiteNet resend
+/// Sleep between per-part WindowFull pumps so the peer ACK round-trip can
+/// land (see the sendReliable retry loop). 2ms is far below the 80ms resend
+/// gate and above the localhost RTT, so a drained window resumes promptly.
+const ack_yield_ns: u64 = 2_000_000;
 
 const Pending = struct {
     used: bool = false,
@@ -277,6 +281,12 @@ pub const Peer = struct {
                         if (attempts >= 4000) return error.WindowFull;
                         try self.resendPending(sock);
                         if (self.pump_fn) |pf| pf(self.pump_ctx);
+                        // Yield so the peer's ACK datagrams can land: 4000 spin
+                        // pumps burn out in microseconds, before the first ACK
+                        // round-trip, and a full window never frees (join
+                        // IdMapping repro: part 64/198 exhausts with
+                        // inflight=64 while the ACKs arrive right after).
+                        if (attempts % 4 == 3) clock.sleepNs(ack_yield_ns);
                         continue;
                     },
                     else => return err,
@@ -601,6 +611,7 @@ pub const Peer = struct {
         // Stock ReliableChannel.ProcessAck: Size must match header + (windowSize-1)/8+2.
         const expect = packet.channeled_header_size + ack_bitmap_bytes;
         if (raw.len < packet.channeled_header_size + 1) return;
+
         _ = expect; // accept ≥ header; loadgen/stock both send full 13-byte acks
         const ack_seq = std.mem.readInt(u16, raw[1..][0..2], .little);
         if (ack_seq >= packet.max_sequence) return;
