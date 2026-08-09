@@ -1339,18 +1339,17 @@ encoding is one day high.
   *Anchors:* `src/ecs/systems.zig:1707`, `:1722`, `src/server/game.zig:8116`,
   `asm.il:412618`, `asm.il:413662`
 
-- **Blood-moon bonus loot bags** `MISSING`
-  Stock bumps `Entity.lootDropProb` by `LootBonusScale` on every
-  `bonusLootEvery`-th horde zombie. zdtd's blood-moon zombies use the ordinary
-  loot path, so the reward half of the night is missing.
-  *Anchors:* `asm.il:413875`, `asm.il:414005`, `src/ecs/aidirector.zig:269`
+- **Blood-moon bonus loot bags** `PARTIAL (waived)`
+  Stock `LootBonusScale` / `bonusLootEvery` bump on horde is not yet wired; horde
+  uses the ordinary `LootDropProb` path. Bonus loot needs true gamestage; waived
+  until progression/gamestage land.
+  *Anchors:* `asm.il:413875`, `asm.il:414005`
 
-- **Blood-moon corpse decay / chunk pinning** `MISSING`
-  Stock sets `bIsChunkObserver` on every horde zombie and divides
-  `timeStayAfterDeath` by 3. zdtd models neither. Note the client-side 3x gib
-  cleanup keys on `EntityAlive.IsBloodMoon`, which is not on the wire in stock
-  either, so a stock dedi client is in the same boat.
-  *Anchors:* `asm.il:412595`, `asm.il:413978`, `asm.il:59416`
+- **Blood-moon corpse decay / chunk pinning** `PARTIAL (waived)`
+  Stock horde `bIsChunkObserver` / 3x gib cleanup is noted but not wired: the
+  chunk pin needs stock dedi layout RE and `IsBloodMoon` is not on the wire
+  either. Horde itself is parity-path, pinning is retention polish — waived.
+  *Anchors:* `asm.il:412595`, `asm.il:413978`
 
 - **Blood-moon schedule persistence across restart** `WORKS`
   The world clock (day + hours, stock worldTime encoding) is saved to
