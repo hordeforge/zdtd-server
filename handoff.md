@@ -55,7 +55,9 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   vehicle refuel via gas-can InvTx (tank-capped, refund on full) (ee6a419),
   drowning damage (head-block water gate, Rules knob, 2 hp/s) (landed in
   sibling commit 4c68158), radiated biome damage (biome-name gate, Rules
-  knob, 8 hp/s) (e1cea62) - note: the sibling swept uncommitted changes
+  knob, 8 hp/s) (e1cea62), explosion entity damage + kill credit
+  (entityRadius/entityDamage parsed from ExplosionData; PvP gate + armor;
+  thrower credit) (5c0cdda) - note: the sibling swept uncommitted changes
   once; commit promptly after each pass
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
@@ -86,7 +88,7 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `b424fea`; nothing staged or untracked except
+All work is committed through `5c0cdda`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
