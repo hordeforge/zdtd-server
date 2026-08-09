@@ -55,6 +55,7 @@ pub const game_bans = @import("game/bans.zig");
 pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
+pub const c2s_blocks = @import("c2s/blocks.zig");
 pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
 pub const c2s_misc = @import("c2s/misc.zig");
@@ -110,6 +111,7 @@ test {
     _ = game_bans;
     _ = game_tests;
     _ = c2s_inv;
+    _ = c2s_blocks;
     _ = c2s_move;
     _ = c2s_quest;
     _ = c2s_misc;

@@ -11,6 +11,7 @@ const phase_gate = @import("../phase_gate.zig");
 const c2s_join = @import("join.zig");
 const c2s_move = @import("move.zig");
 const c2s_inv = @import("inv.zig");
+const c2s_blocks = @import("blocks.zig");
 const c2s_quest = @import("quest.zig");
 const c2s_misc = @import("misc.zig");
 
@@ -35,6 +36,7 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
     if (try c2s_join.handle(self, c, peer, name, body)) return;
     if (try c2s_move.handle(self, c, peer, name, body)) return;
     if (try c2s_inv.handle(self, c, peer, name, body)) return;
+    if (try c2s_blocks.handle(self, c, peer, name, body)) return;
     if (try c2s_quest.handle(self, c, peer, name, body)) return;
     if (try c2s_misc.handle(self, c, peer, name, body)) return;
     self.harness.counters.inc(.c2s_unhandled);
