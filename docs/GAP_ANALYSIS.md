@@ -4698,12 +4698,15 @@ is on main and gated; what follows "Open:" is the honest remainder.
    and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
    gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,
    jump and climb, data-driven per-class task graphs (5.2.1).
-4. **Quest objective coverage** PARTIAL: Craft, StayWithin, POIStayWithin
-   (2026-08-09: now executes with the zone bound to the quest's POI rect) and
-   Rally execute. Open: the remaining unmodelled types still auto-complete,
-   some quests.xml `<action>` kinds beyond UnlockPOI are parsed but not fired,
-   53 client-known defs parse empty because template inheritance is not
-   resolved (see GAP_ANALYSIS section 4).
+4. **Quest objective coverage** SHIPPED for the stock V3.1.0 catalog
+   (2026-08-09): a census of the shipped quests.xml (16 objective types, 119
+   objectives) shows every type is classified to an executing phase kind,
+   POIStayWithin now uses the bound POI rect as its zone, and template
+   inheritance is resolved by the two-pass T6 merge (tests load the real
+   quests.xml: 262 defs, starter + tier quests resolve). Open: `<action>`
+   kinds beyond UnlockPOI are parsed but not fired (SetCVar / ShowMessageWindow
+   are client-side by stock design), and a MOD quest with an unclassified
+   objective type still auto-completes (see GAP_ANALYSIS section 4).
 5. **Power trigger TE wire** SHIPPED: Switch meta gate on SetBlock, delay and
    duration from ClientTriggerData, edge-triggered meta broadcast of grid state.
    Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a
