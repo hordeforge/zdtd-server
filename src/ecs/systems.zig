@@ -1994,6 +1994,9 @@ const TurretCtx = struct {
     /// Per-slot powered flags, resolved once per tick from the power grid so
     /// each turret skips the O(node_n) isEntityPowered scan.
     powered: *const [max_entities]bool,
+    /// Last-hit owner client slot per zombie (parallel to dmg_fp), for kill
+    /// attribution: the turret that fired the final shot owns the kill.
+    owner_hit: []i16,
 
     fn work(ctx: TurretCtx, begin: usize, end: usize) void {
         var i: usize = begin;
@@ -2034,6 +2037,7 @@ const TurretCtx = struct {
                 t.ammo -%= 1;
                 const add: u32 = @intFromFloat(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
+                ctx.owner_hit[zi] = t.owner_slot;
             }
         }
     }
@@ -2044,6 +2048,8 @@ pub const TurretTick = struct {
     /// Dead zombie net ids (for S2C EntityRemove).
     killed_ids: [16]i32 = .{-1} ** 16,
     killed_n: u8 = 0,
+    /// Owner client slot per kill (parallel to killed_ids; -1 unowned).
+    owner_slots: [16]i16 = .{-1} ** 16,
     loot_bag_ids: [16]i32 = .{-1} ** 16,
     loot_n: u8 = 0,
 };
@@ -2069,7 +2075,8 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (!node.powered or node.entity_id < 0) continue;
         if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
     }
-    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .powered = &powered };
+    var owner_hit: [max_entities]i16 = .{-1} ** max_entities;
+    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .powered = &powered, .owner_hit = owner_hit[0..] };
     // Same small-population gate as systemZombieAi: pool sync costs more than
     // a serial sweep of 512 slots when few entities are alive.
     if (w.entity_count < 64) TurretCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, TurretCtx.work);
@@ -2111,6 +2118,7 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             out.kills += 1;
             if (zid > 0 and out.killed_n < out.killed_ids.len) {
                 out.killed_ids[out.killed_n] = zid;
+                out.owner_slots[out.killed_n] = owner_hit[i];
                 out.killed_n += 1;
             }
             if (w.rollLootDrop(zid, drop_prob)) {

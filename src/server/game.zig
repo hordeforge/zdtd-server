@@ -4293,10 +4293,28 @@ pub const Game = struct {
             // Trader open/close cycle (edge-latched per trader).
             self.tickTraderAreas();
             if (r.turret_kills > 0) {
-                for (&self.clients) |*cl| {
-                    if (!cl.joined) continue;
-                    var n: u32 = 0;
-                    while (n < r.turret_kills) : (n += 1) systems.questOnZombieKilled(&self.sim, cl.slot);
+                // Trap kills credit the turret's owner (stock: turret/trap kills
+                // give the placer quest progress, XP and the kill counter).
+                var tk: u8 = 0;
+                while (tk < r.killed_n) : (tk += 1) {
+                    const owner = r.owner_slots[tk];
+                    if (owner < 0 or @as(usize, @intCast(owner)) >= self.clients.len) continue;
+                    const osz: usize = @intCast(owner);
+                    const oc = &self.clients[osz];
+                    if (!oc.joined) continue;
+                    systems.questOnZombieKilled(&self.sim, osz);
+                    self.killXpAward(osz, 100);
+                    if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
+                    if (oc.peer) |kpeer| {
+                        if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
+                            .entity_id = oc.entity_id,
+                            .zombie_kills = oc.zombie_kills,
+                        })) |ab| {
+                            self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
+                                self.harness.counters.inc(.net_send_errors);
+                            };
+                        } else |_| {}
+                    }
                 }
             }
             // Turret kills: remove corpses on stock clients, then scrap ECD+Bag.

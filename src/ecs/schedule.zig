@@ -25,6 +25,8 @@ pub const TickResult = struct {
     turret_kills: u32 = 0,
     killed_ids: [16]i32 = .{0} ** 16,
     killed_n: u8 = 0,
+    /// Owner client slot per turret kill (parallel to killed_ids).
+    owner_slots: [16]i16 = .{-1} ** 16,
     loot_bag_ids: [16]i32 = .{0} ** 16,
     loot_n: u8 = 0,
     despawned_ids: [8]i32 = .{0} ** 8,
@@ -97,6 +99,7 @@ pub fn run(w: *World, dt: f32) TickResult {
     };
     @memcpy(out.buff_expired[0..buff_n], buff_expired[0..buff_n]);
     @memcpy(out.killed_ids[0..tk.killed_n], tk.killed_ids[0..tk.killed_n]);
+    @memcpy(out.owner_slots[0..tk.killed_n], tk.owner_slots[0..tk.killed_n]);
     @memcpy(out.loot_bag_ids[0..tk.loot_n], tk.loot_bag_ids[0..tk.loot_n]);
     @memcpy(out.despawned_ids[0..de_n], de_ids[0..de_n]);
     return out;

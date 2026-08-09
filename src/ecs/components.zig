@@ -290,6 +290,9 @@ pub const Turret = struct {
     ammo: u16 = 200,
     target_id: i32 = -1,
     power_node: u16 = 0,
+    /// Client slot that placed the turret; -1 = unowned (demo). Trap kills
+    /// credit this owner with quest progress, XP and the kill counter.
+    owner_slot: i16 = -1,
 };
 
 pub const max_journal: usize = 8;

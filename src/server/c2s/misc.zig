@@ -607,6 +607,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // spam loop cannot plant turrets map-wide and drain the entity table.
         if (!self.placeAllowed(c, x, y, z)) return true;
         if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
+            if (self.sim.slotOfNetId(tid)) |ts_| self.sim.turret[ts_].owner_slot = @intCast(c.slot);
             var gi: ?u16 = null;
             var i: usize = 0;
             while (i < self.sim.power.node_n) : (i += 1) {
