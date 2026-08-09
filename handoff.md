@@ -1,9 +1,9 @@
 # Handoff - zdtd refactor + parity push
 
-**Date:** 2026-08-09 (review-loop continuation)
+**Date:** 2026-08-09 (review-loop continuation, wave 2)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `34165f6`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **976/976** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `9bf5713`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **983/983** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -40,28 +40,42 @@ verify build + full test binary + lint, commit. Later passes re-verify.
 - api-review: game/craft.zig extracted (34165f6, -170), game/chunk_stream.zig
   (bb3464e, -170), game/chunk_fill.zig (e5ac2fb, -270): all three arch-apis
   shards done; game.zig 6397 -> 4666 lines
+- ecs-arch pass: World.teleportTo + World.respawnPlayer funnels (3e8e04c)
+- functionality wave (wire parity, all RE-grounded + scenario-covered):
+  AddExpClient kill XP (35ecc77), player bodies to peers + drop EntityRemove
+  (e02a41d), PlayerStats progression snapshots (1138d41), AddScoreClient kill
+  counter (71bee7e), PvP playerKills (1f0df06), storm admin commands
+  (d2a2506), workstation craft authority count/time from recipes.xml +
+  in-place queue validation bugfix (e8ff7d2), EntitySpawnResponse drop commit
+  (a864ed8)
+- litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
+  pre-existing join blocker (IdMapping ~198 fragments never drained;
+  reproduced at 6256b1e); loadgen join smoke now sends the IdMapping
+  (env note: rerun the smoke solo; the sibling agent's loadgen/telnet shares
+  the box and its SIGKILLs contaminated later runs)
 - verified clean (no fixes): build, cli, concurrency, deps, doc, dst, fuzz,
   infra, minimalism, o11y, perf, release
 - earlier dedicated agents this session: arch, api, deps, ecs, hardcode,
   docs, statemachines, wasm (findings in docs/reviews/ 2026-08-08)
+- concurrent sibling agent lands docs commits on main (af5ce6b, aa9ae79);
+  verify git status before every commit
 
 ## Working tree right now
 
 ```
-working tree clean at e5ac2fb
+working tree clean at 9bf5713
 game.zig 4666 lines (was 6397 at handoff): craft/chunk_stream/chunk_fill/
-  loot/weather/vehicle shards
-flakes fixed: had_saved_entities demo-seed gate + freshScenarioDir wipe
-parity landed: trader roll + 50-entry window + lazy restock, party stage,
-  loot container size, loot count=all / force_prob / quality templates,
-  non-burning workstation queues, workstation persistence (ZWS1),
-  night enemy animals, wasm fuel budget config
+  loot/weather/vehicle shards; ecs funnels for teleport/respawn
+parity landed (wave 2): night predators, wasm fuel budget config,
+  on_player_login coverage, kill XP wire, multiplayer player bodies +
+  progression snapshots + kill counters (PvE+PvP), storm admin commands,
+  workstation recipe authority, item-drop commit, liteNet window pump
 hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
   gap + craft batch cap now zdtd.toml); all other reviews re-audited clean
-976/976 tests, lint + fmt clean
+983/983 tests, lint + fmt clean
 ```
 
-All work is committed through `34165f6`; nothing staged or untracked except
+All work is committed through `9bf5713`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
