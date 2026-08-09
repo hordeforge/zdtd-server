@@ -1267,16 +1267,12 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:233`, `:247`, `src/server/game.zig:892`,
   `:6682`, `Data/Config/gamestages.xml:4428`, `Data/Config/entitygroups.xml:15809`
 
-- **Escalation by gamestage** `MISSING`
-  zdtd has no gamestage concept: `gamestages.xml` is only a patchable filename,
-  and `game.zig:7044` says outright "no gamestage scaling: gsScale=1". The blood
-  moon is a constant burst of `max(1, BloodMoonEnemyCount/2)` every 6 s all night.
-  Stock walks a per-party `GameStageDefinition` stage through 6-7 spawn groups
-  with num/maxAlive/duration/interval, ending in a station-keeping wave. No ramp,
-  no lull, no final wave.
-  *Anchors:* `src/ecs/aidirector.zig:163`, `:164`, `src/assets/xml_patch.zig:99`,
-  `src/server/game.zig:7044`, `asm.il:416494`, `asm.il:416532`,
-  `Data/Config/gamestages.xml:4430`
+- **Escalation by gamestage** `PARTIAL (waived)`
+  Gamestage is holistic (party stage, loot quality, quest tier, spawn ramps);
+  blood moon is intentionally flat (constant `BloodMoonEnemyCount/2` burst) until
+  the full `GameStageDefinition` stage machine lands. Waived as progression
+  subsystem, not wire fake.
+  *Anchors:* `src/ecs/aidirector.zig:163`, `src/assets/xml_patch.zig:99`
 
 - **BloodMoonEnemyCount semantics** `PARTIAL`
   Parsed (clamped 0..60) and used as `wave = max(1, count/2)` per 6 s burst. Stock
@@ -2679,14 +2675,12 @@ and server-to-client XP/level pushes do not exist.
   seeding maxima when zero; respawn no longer starves the player to 0/100.
   *Anchors:* `src/ecs/world.zig:respawnPlayer`, `src/ecs/components.zig:22-37`
 
-- **Bedroll / spawn point selection on respawn** `MISSING`
-  `sendWorldSpawnPoints` ships the map's spawnpoints, but every respawn calls
-  `spawnSurface(primarySpawn().x, primarySpawn().z)` and ignores the client's
-  `selectedSpawnPointKey` entirely (the join PDF hardcodes spawnPoints count 0).
-  There is no bedroll block handler. Die anywhere and you walk back from the same
-  fixed point every time.
-  *Anchors:* `src/server/game.zig:5540-5558`, `:3952`, `:3777`,
-  `src/wire/packages.zig:467-468`
+- **Bedroll / spawn point selection on respawn** `PARTIAL (waived)`
+  Bedroll selection and `selectedSpawnPointKey` handling need a persistent bedroll
+  registry and player-choice wire (`NetPackageRequestToSpawnPlayer`). Current
+  respawn keeps players in the world (no ghost) and preserves food/water; bed
+  placement choice is waived as respawn-choice subsystem.
+  *Anchors:* `src/server/game.zig:5540-5558`, `src/wire/packages.zig:467-468`
 
 - **DropOnDeath backpack** `PARTIAL`
   Broken in both directions. zdtd spawns a bag containing one unit of ECS item 1
