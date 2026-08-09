@@ -128,7 +128,7 @@ pub fn pathForName(name: []const u8, buf: []u8) ![]const u8 {
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Pack {
     const read_buf = try allocator.alloc(u8, max_mode_bytes + 1);
     defer allocator.free(read_buf);
-    const data = try io_fs.readFileInto(allocator, path, read_buf);
+    const data = try io_fs.readFileInto(path, read_buf);
     if (data.len > max_mode_bytes) return error.ModeTooLarge;
     return try parse(allocator, data);
 }
@@ -202,34 +202,34 @@ test "parse default pack" {
 
 /// Mirror of the server init-options shape applyToInitOptions writes into.
 const TestOpts = struct {
-        max_spawned_zombies: u16 = 100,
-        blood_moon_frequency: u8 = 3,
-        game_difficulty: u8 = 2,
-        blood_moon_enemy_count: u8 = 8,
-        blood_moon_range: u8 = 0,
-        player_killing_mode: u8 = 3,
-        day_night_length: u16 = 60,
-        day_light_length: u8 = 18,
-        zombie_move: u8 = 0,
-        zombie_move_night: u8 = 3,
-        zombie_feral_move: u8 = 3,
-        zombie_bm_move: u8 = 3,
-        enemy_difficulty: u8 = 0,
-        loot_abundance: u16 = 100,
-        xp_multiplier: u16 = 100,
-        block_damage_player: u16 = 100,
-        block_damage_ai: u16 = 100,
-        block_damage_ai_bm: u16 = 100,
-        max_spawned_animals: u16 = 50,
-        air_drop_frequency: u16 = 72,
-        drop_on_death: u8 = 1,
-        land_claim_size: u16 = 41,
-        land_claim_online_durability_modifier: u16 = 4,
-        land_claim_offline_durability_modifier: u16 = 4,
-        land_claim_expiry_days: u16 = 3,
-        loot_respawn_days: u16 = 7,
-        enable_sample_plugin: bool = false,
-        wire_chunks: bool = true,
+    max_spawned_zombies: u16 = 100,
+    blood_moon_frequency: u8 = 3,
+    game_difficulty: u8 = 2,
+    blood_moon_enemy_count: u8 = 8,
+    blood_moon_range: u8 = 0,
+    player_killing_mode: u8 = 3,
+    day_night_length: u16 = 60,
+    day_light_length: u8 = 18,
+    zombie_move: u8 = 0,
+    zombie_move_night: u8 = 3,
+    zombie_feral_move: u8 = 3,
+    zombie_bm_move: u8 = 3,
+    enemy_difficulty: u8 = 0,
+    loot_abundance: u16 = 100,
+    xp_multiplier: u16 = 100,
+    block_damage_player: u16 = 100,
+    block_damage_ai: u16 = 100,
+    block_damage_ai_bm: u16 = 100,
+    max_spawned_animals: u16 = 50,
+    air_drop_frequency: u16 = 72,
+    drop_on_death: u8 = 1,
+    land_claim_size: u16 = 41,
+    land_claim_online_durability_modifier: u16 = 4,
+    land_claim_offline_durability_modifier: u16 = 4,
+    land_claim_expiry_days: u16 = 3,
+    loot_respawn_days: u16 = 7,
+    enable_sample_plugin: bool = false,
+    wire_chunks: bool = true,
 };
 
 test "applyToInitOptions overrides only set fields" {
@@ -268,7 +268,7 @@ test "isValidModeName rejects path traversal" {
 }
 
 test "loadByName default file when present" {
-    if (!io_fs.fileExistsSimple("modes/default.toml")) return;
+    if (!io_fs.fileExists("modes/default.toml")) return;
     var p = try loadByName(std.testing.allocator, "default");
     defer p.deinit();
     try std.testing.expectEqualStrings("default", p.name);
@@ -328,7 +328,7 @@ test "mode pack binds [rules.*] overlay sections" {
 test "shipped example packs parse and exercise the rules surface" {
     // T13 fixtures: modes/horde_lite.toml and modes/survival_crunch.toml must
     // parse and carry [rules.*] overlays (skip when absent, e.g. dist runs).
-    if (!io_fs.fileExistsSimple("modes/horde_lite.toml")) return;
+    if (!io_fs.fileExists("modes/horde_lite.toml")) return;
     var hl = try loadFromPath(std.testing.allocator, "modes/horde_lite.toml");
     defer hl.deinit();
     try std.testing.expectEqualStrings("horde_lite", hl.name);
@@ -339,7 +339,7 @@ test "shipped example packs parse and exercise the rules surface" {
     rules_mod.mergeOverlay(&r, &hl.rules);
     try std.testing.expectEqual(@as(f32, 5.0), r.combat.attack_damage);
 
-    if (!io_fs.fileExistsSimple("modes/survival_crunch.toml")) return;
+    if (!io_fs.fileExists("modes/survival_crunch.toml")) return;
     var sc = try loadFromPath(std.testing.allocator, "modes/survival_crunch.toml");
     defer sc.deinit();
     try std.testing.expectEqualStrings("survival_crunch", sc.name);
@@ -352,14 +352,14 @@ test "GAME_OPTIONS.md documents every Rules field" {
     // ADR 0021: the mode-pack reference is generated from the Rules struct, so
     // it cannot drift from the parser. Every leaf field must appear in
     // docs/GAME_OPTIONS.md (skip when the doc is absent, e.g. dist runs).
-    if (!io_fs.fileExistsSimple("docs/GAME_OPTIONS.md")) return;
+    if (!io_fs.fileExists("docs/GAME_OPTIONS.md")) return;
     const buf = try std.testing.allocator.alloc(u8, 512 * 1024);
     defer std.testing.allocator.free(buf);
-    const doc = try io_fs.readFileInto(std.testing.allocator, "docs/GAME_OPTIONS.md", buf);
+    const doc = try io_fs.readFileInto("docs/GAME_OPTIONS.md", buf);
     inline for (std.meta.fields(rules_mod.Rules)) |group| {
         inline for (std.meta.fields(group.type)) |f| {
             try std.testing.expect(
-                std.mem.indexOf(u8, doc, f.name) != null,
+                std.mem.find(u8, doc, f.name) != null,
             );
         }
     }

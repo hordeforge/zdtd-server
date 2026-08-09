@@ -66,7 +66,7 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8) !Sources {
     var search: usize = 0;
     while (search < xml.len) {
         const rest = xml[search..];
-        const i = std.mem.indexOf(u8, rest, "pos=\"") orelse break;
+        const i = std.mem.find(u8, rest, "pos=\"") orelse break;
         count += 1;
         search += i + 5;
     }
@@ -76,17 +76,17 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8) !Sources {
     search = 0;
     while (n < count) {
         const rest = xml[search..];
-        const i = std.mem.indexOf(u8, rest, "pos=\"") orelse break;
+        const i = std.mem.find(u8, rest, "pos=\"") orelse break;
         var p = rest[i + 5 ..];
         search += i + 5;
         // skip spaces
         while (p.len > 0 and p[0] == ' ') p = p[1..];
         const x = parseI32Prefix(p) orelse continue;
-        const c1 = std.mem.indexOfScalar(u8, p, ',') orelse continue;
+        const c1 = std.mem.findScalar(u8, p, ',') orelse continue;
         p = p[c1 + 1 ..];
         while (p.len > 0 and p[0] == ' ') p = p[1..];
         const y = parseI32Prefix(p) orelse continue;
-        const c2 = std.mem.indexOfScalar(u8, p, ',') orelse continue;
+        const c2 = std.mem.findScalar(u8, p, ',') orelse continue;
         p = p[c2 + 1 ..];
         while (p.len > 0 and p[0] == ' ') p = p[1..];
         const z = parseI32Prefix(p) orelse continue;
@@ -123,9 +123,9 @@ test "parse water pos" {
         \\  <Water pos="-192, 72, 1924"/>
         \\</WaterSources>
     ;
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_water_test");
-    try io_fs.writeFileSimple("worlds/zdtd_water_test/water_info.xml", xml);
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath("worlds/zdtd_water_test");
+    try io_fs.writeFile("worlds/zdtd_water_test/water_info.xml", xml);
     var s = try loadFromWorldDir(std.testing.allocator, "worlds/zdtd_water_test");
     defer s.deinit();
     try std.testing.expectEqual(@as(usize, 2), s.points.len);

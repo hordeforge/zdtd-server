@@ -1212,7 +1212,7 @@ fn fuzzBiomePng(_: void, smith: *std.testing.Smith) !void {
     const input = storage[0..len];
     // Skip mid-size claimed dims: valid but each iteration would alloc MBs.
     // Tiny dims and the >max_png_dim reject path stay exercised.
-    if (std.mem.indexOf(u8, input, "IHDR")) |at| {
+    if (std.mem.find(u8, input, "IHDR")) |at| {
         if (at + 12 <= input.len) {
             const w = std.mem.readInt(u32, input[at + 4 ..][0..4], .big);
             const h = std.mem.readInt(u32, input[at + 8 ..][0..4], .big);

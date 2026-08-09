@@ -181,9 +181,9 @@ test "cog header parses live GLO-30 sample" {
 test "tile key format" {
     var buf: [160]u8 = undefined;
     const k = try tileKey(&buf, 45, 6);
-    try std.testing.expect(std.mem.indexOf(u8, k, "N45_00_E006_00") != null);
+    try std.testing.expect(std.mem.find(u8, k, "N45_00_E006_00") != null);
     const k2 = try tileKey(&buf, -33, -70);
-    try std.testing.expect(std.mem.indexOf(u8, k2, "S33_00_W070_00") != null);
+    try std.testing.expect(std.mem.find(u8, k2, "S33_00_W070_00") != null);
 }
 
 test "elev to block y clamps" {

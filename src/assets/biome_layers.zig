@@ -305,7 +305,7 @@ pub const Table = struct {
 
 fn firstBlockName(blockname: []const u8) []const u8 {
     // wasteland: "terrDestroyedStone,terrDestroyedGrass"
-    if (std.mem.indexOfScalar(u8, blockname, ',')) |c| return std.mem.trim(u8, blockname[0..c], " \t");
+    if (std.mem.findScalar(u8, blockname, ',')) |c| return std.mem.trim(u8, blockname[0..c], " \t");
     return std.mem.trim(u8, blockname, " \t");
 }
 
@@ -337,7 +337,7 @@ fn ticksFromHours(hours: f32) i32 {
 
 /// `lo,hi` pair, or a single value used for both components (Unity Vector2 parse).
 fn parsePair(s: []const u8, lo: *f32, hi: *f32) void {
-    if (std.mem.indexOfScalar(u8, s, ',')) |c| {
+    if (std.mem.findScalar(u8, s, ',')) |c| {
         lo.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[0..c], " \t")), lo.*);
         hi.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[c + 1 ..], " \t")), hi.*);
         return;
@@ -369,7 +369,7 @@ fn tagNameAt(body: []const u8, lt: usize) []const u8 {
 fn parseWeatherConditions(group_body: []const u8, g: *WeatherGroup) void {
     var i: usize = 0;
     while (i < group_body.len) {
-        const lt = std.mem.indexOfScalarPos(u8, group_body, i, '<') orelse break;
+        const lt = std.mem.findScalarPos(u8, group_body, i, '<') orelse break;
         i = lt + 1;
         const tag = tagNameAt(group_body, lt);
         if (tag.len == 0) continue;
@@ -447,16 +447,16 @@ fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const 
     var st: Stack = .{};
     // Prefer first <layers>…</layers> in the biome (often inside the first subbiome).
     const layers_body: []const u8 = blk: {
-        if (std.mem.indexOf(u8, body, "<layers")) |ls| {
-            const gt = std.mem.indexOfPos(u8, body, ls, ">") orelse break :blk body;
-            const close = std.mem.indexOfPos(u8, body, gt, "</layers>") orelse break :blk body;
+        if (std.mem.find(u8, body, "<layers")) |ls| {
+            const gt = std.mem.findPos(u8, body, ls, ">") orelse break :blk body;
+            const close = std.mem.findPos(u8, body, gt, "</layers>") orelse break :blk body;
             break :blk body[gt + 1 .. close];
         }
         break :blk body;
     };
     var i: usize = 0;
     while (i < layers_body.len and st.n < max_layers) {
-        const li = std.mem.indexOfPos(u8, layers_body, i, "<layer") orelse break;
+        const li = std.mem.findPos(u8, layers_body, i, "<layer") orelse break;
         const depth_s = xml.attr(layers_body, li, "depth") orelse {
             i = li + 6;
             continue;
@@ -490,16 +490,16 @@ fn decorationsBody(body: []const u8) ?[]const u8 {
     var i: usize = 0;
     var sub_end: usize = 0;
     while (i < body.len) {
-        const di = std.mem.indexOfPos(u8, body, i, "<decorations>") orelse break;
-        const close = std.mem.indexOfPos(u8, body, di, "</decorations>") orelse break;
+        const di = std.mem.findPos(u8, body, i, "<decorations>") orelse break;
+        const close = std.mem.findPos(u8, body, di, "</decorations>") orelse break;
         const inner = body[di + 13 .. close];
         // Is this group inside a <subbiome> that has not closed yet?
         if (di >= sub_end) {
             sub_end = 0;
             var si: usize = 0;
-            while (std.mem.indexOfPos(u8, body, si, "<subbiome")) |sb| {
+            while (std.mem.findPos(u8, body, si, "<subbiome")) |sb| {
                 if (sb > di) break;
-                const se = std.mem.indexOfPos(u8, body, sb, "</subbiome>") orelse body.len;
+                const se = std.mem.findPos(u8, body, sb, "</subbiome>") orelse body.len;
                 if (sb < di and di < se) {
                     sub_end = se;
                     break;
@@ -543,9 +543,9 @@ fn parseSubBiomes(
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len and n < out.len) {
-        const si = std.mem.indexOfPos(u8, body, i, "<subbiome") orelse break;
-        const gt = std.mem.indexOfPos(u8, body, si, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, body, gt, "</subbiome>") orelse break;
+        const si = std.mem.findPos(u8, body, i, "<subbiome") orelse break;
+        const gt = std.mem.findPos(u8, body, si, ">") orelse break;
+        const close = std.mem.findPos(u8, body, gt, "</subbiome>") orelse break;
         var noise_vals: [3]f32 = undefined;
         const noise_s = xml.attr(body, si, "noise") orelse {
             i = close + 11;
@@ -587,7 +587,7 @@ fn parseDecoBody(
     const decos = decorationsBody(body) orelse return set;
     var i: usize = 0;
     while (i < decos.len and set.n < max_deco_per_biome) {
-        const di = std.mem.indexOfPos(u8, decos, i, "<decoration") orelse break;
+        const di = std.mem.findPos(u8, decos, i, "<decoration") orelse break;
         i = di + 11;
         // type="prefab" rows name a POI, not a block: no DecoObject to send.
         const kind = xml.attr(decos, di, "type") orelse continue;
@@ -637,7 +637,7 @@ pub fn loadFromPath(
     var name_by_id: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id;
     var i: usize = 0;
     while (i < clean.len) {
-        const mi = std.mem.indexOfPos(u8, clean, i, "<biomemap") orelse break;
+        const mi = std.mem.findPos(u8, clean, i, "<biomemap") orelse break;
         const id_s = xml.attr(clean, mi, "id") orelse {
             i = mi + 9;
             continue;
@@ -668,13 +668,13 @@ pub fn loadFromPath(
     const deco_ok = is_distant_deco orelse noDistantDeco;
     i = 0;
     while (i < clean.len) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<biome ") orelse break;
         const bname = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, clean, gt, "</biome>") orelse break;
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt, "</biome>") orelse break;
         const body = clean[gt + 1 .. close];
         // First <layers> group (top-level or first subbiome).
         const st = parseStackBody(body, id_by_name, ctx);
@@ -765,10 +765,10 @@ pub fn tryLoad(
     }
     const merged = try paths.readConfigXml(allocator, "biomes.xml", game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
-    io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/biomes.xml";
     {
-        io_fs.writeFile(allocator, cp, merged) catch return loadLogged(allocator, base, id_by_name, is_distant_deco, ctx);
+        io_fs.writeFile(cp, merged) catch return loadLogged(allocator, base, id_by_name, is_distant_deco, ctx);
     }
     return loadLogged(allocator, cp, id_by_name, is_distant_deco, ctx);
 }
@@ -856,8 +856,8 @@ test "decorations parse keeps distant deco in XML order" {
         \\</biomes>
     ;
     const path = ".zdtd_test_biomes_deco.xml";
-    try io_fs.writeFile(std.testing.allocator, path, src);
-    defer io_fs.deleteFile(std.testing.allocator, path);
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
 
     var t = try loadFromPath(std.testing.allocator, path, testDecoId, testDistantDeco, null);
     defer t.deinit();
@@ -908,8 +908,8 @@ test "decorations parse without a distant-deco filter yields nothing" {
         \\</biomes>
     ;
     const path = ".zdtd_test_biomes_nodeco.xml";
-    try io_fs.writeFile(std.testing.allocator, path, src);
-    defer io_fs.deleteFile(std.testing.allocator, path);
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
     var t = try loadFromPath(std.testing.allocator, path, testDecoId, null, null);
     defer t.deinit();
     try std.testing.expect(!t.hasDecos());
@@ -971,7 +971,7 @@ test "stock biomes.xml subbiomes carry the dense tree lists (GAP 18)" {
     // that resolves a subbiome gets stock-like density instead of ~3 objects
     // per join window. Real ids come from the maxdamage table.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
-    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var md = (try maxdamage.tryLoad(std.testing.allocator, game_dir, null)) orelse return error.SkipZigTest;
     defer md.deinit();
     // Production Game merges the operator's AssignIds dump; the test uses the

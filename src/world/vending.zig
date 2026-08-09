@@ -239,7 +239,7 @@ pub const VendingStore = struct {
             saved_count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], saved_count, .little);
-        try io_fs.writeFileSimple(p, buf[0..o]);
+        try io_fs.writeFile(p, buf[0..o]);
     }
 
     /// Decode a ZVNM1 buffer (magic | count | records). Used by load and fuzz.
@@ -318,7 +318,7 @@ pub const VendingStore = struct {
         var path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&path, "{s}/vending.zvn", .{dir});
         var buf: [save_capacity]u8 = undefined;
-        const bytes = io_fs.readFileInto(std.heap.page_allocator, p, &buf) catch |err| switch (err) {
+        const bytes = io_fs.readFileInto(p, &buf) catch |err| switch (err) {
             // No file = never saved; caller regenerates. Anything else surfaces
             // so the caller logs it before the next save clobbers data.
             error.FileNotFound => return error.OpenFailed,

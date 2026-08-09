@@ -240,7 +240,7 @@ pub const Server = struct {
                 continue;
             }
             var total = pending;
-            if (std.mem.indexOfScalar(u8, self.recv_bufs[i][0..pending], '\n') == null) {
+            if (std.mem.findScalar(u8, self.recv_bufs[i][0..pending], '\n') == null) {
                 const dst = self.recv_bufs[i][pending..];
                 const n = tcp.read(s.*, dst) catch |err| switch (err) {
                     error.WouldBlock => continue,
@@ -255,7 +255,7 @@ pub const Server = struct {
                 }
                 total += n;
             }
-            const newline = std.mem.indexOfScalar(u8, self.recv_bufs[i][0..total], '\n') orelse {
+            const newline = std.mem.findScalar(u8, self.recv_bufs[i][0..total], '\n') orelse {
                 self.recv_lens[i] = total;
                 continue;
             };

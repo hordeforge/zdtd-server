@@ -365,7 +365,7 @@ const builtin_containers = [_]LootContainer{
 };
 
 fn parseCountRange(s: []const u8) struct { min: u16, max: u16 } {
-    if (std.mem.indexOfScalar(u8, s, ',')) |c| {
+    if (std.mem.findScalar(u8, s, ',')) |c| {
         const a = xml.parseU16(std.mem.trim(u8, s[0..c], " \t")) orelse 1;
         const b = xml.parseU16(std.mem.trim(u8, s[c + 1 ..], " \t")) orelse a;
         return .{ .min = a, .max = b };
@@ -403,7 +403,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
 
 /// `level="a,b"` on a `<loot>` band; a bare number covers exactly that level.
 fn parseLevelRange(s: []const u8) struct { min: i32, max: i32 } {
-    const comma = std.mem.indexOfScalar(u8, s, ',') orelse {
+    const comma = std.mem.findScalar(u8, s, ',') orelse {
         const v = std.fmt.parseInt(i32, std.mem.trim(u8, s, " \t"), 10) catch 0;
         return .{ .min = v, .max = v };
     };
@@ -452,7 +452,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     // <loot_settings poi_tier_mod="…" poi_tier_bonus="…"/>
     var poi_mod: []const f32 = &.{};
     var poi_bonus: []const f32 = &.{};
-    if (std.mem.indexOf(u8, clean, "<loot_settings")) |ls| {
+    if (std.mem.find(u8, clean, "<loot_settings")) |ls| {
         if (xml.attr(clean, ls, "poi_tier_mod")) |v| poi_mod = try parseF32List(arena, v);
         if (xml.attr(clean, ls, "poi_tier_bonus")) |v| poi_bonus = try parseF32List(arena, v);
     }
@@ -463,8 +463,8 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     var bands: std.ArrayList(ProbBand) = .empty;
     defer bands.deinit(allocator);
     var ti: usize = 0;
-    while (std.mem.indexOfPos(u8, clean, ti, "<lootprobtemplate")) |tag| {
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+    while (std.mem.findPos(u8, clean, ti, "<lootprobtemplate")) |tag| {
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             ti = gt + 1;
             continue;
@@ -472,13 +472,13 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         var body: []const u8 = "";
         ti = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</lootprobtemplate>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</lootprobtemplate>") orelse break;
             body = clean[gt + 1 .. close];
             ti = close + 19;
         }
         bands.clearRetainingCapacity();
         var bi: usize = 0;
-        while (std.mem.indexOfPos(u8, body, bi, "<loot")) |ltag| {
+        while (std.mem.findPos(u8, body, bi, "<loot")) |ltag| {
             bi = ltag + 5;
             const lvl = xml.attr(body, ltag, "level") orelse continue;
             const lr = parseLevelRange(lvl);
@@ -500,37 +500,37 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     var q_templates: std.ArrayList(QualityTemplate) = .empty;
     defer q_templates.deinit(allocator);
     var qti: usize = 0;
-    while (std.mem.indexOfPos(u8, clean, qti, "<lootqualitytemplate")) |qt_tag| {
+    while (std.mem.findPos(u8, clean, qti, "<lootqualitytemplate")) |qt_tag| {
         const qt_name = xml.attr(clean, qt_tag, "name") orelse {
             qti = qt_tag + 21;
             continue;
         };
-        const qt_gt = std.mem.indexOfPos(u8, clean, qt_tag, ">") orelse break;
+        const qt_gt = std.mem.findPos(u8, clean, qt_tag, ">") orelse break;
         var qt_body: []const u8 = "";
         qti = qt_gt + 1;
         if (!(qt_gt > qt_tag and clean[qt_gt - 1] == '/')) {
-            const qt_close = std.mem.indexOfPos(u8, clean, qt_gt, "</lootqualitytemplate>") orelse break;
+            const qt_close = std.mem.findPos(u8, clean, qt_gt, "</lootqualitytemplate>") orelse break;
             qt_body = clean[qt_gt + 1 .. qt_close];
             qti = qt_close + 22;
         }
         var q_bands: std.ArrayList(QualityBand) = .empty;
         defer q_bands.deinit(allocator);
         var bi: usize = 0;
-        while (std.mem.indexOfPos(u8, qt_body, bi, "<qualitytemplate")) |b_tag| {
+        while (std.mem.findPos(u8, qt_body, bi, "<qualitytemplate")) |b_tag| {
             bi = b_tag + 16;
             const lvl = xml.attr(qt_body, b_tag, "level") orelse continue;
             const lr = parseLevelRange(lvl);
             const dflt = xml.parseU16(std.mem.trim(u8, xml.attr(qt_body, b_tag, "default_quality") orelse "1", " \t")) orelse 1;
-            const b_gt = std.mem.indexOfPos(u8, qt_body, b_tag, ">") orelse break;
+            const b_gt = std.mem.findPos(u8, qt_body, b_tag, ">") orelse break;
             var b_body: []const u8 = "";
             if (!(b_gt > b_tag and qt_body[b_gt - 1] == '/')) {
-                const b_close = std.mem.indexOfPos(u8, qt_body, b_gt, "</qualitytemplate>") orelse break;
+                const b_close = std.mem.findPos(u8, qt_body, b_gt, "</qualitytemplate>") orelse break;
                 b_body = qt_body[b_gt + 1 .. b_close];
             }
             var picks: std.ArrayList(QualityPick) = .empty;
             defer picks.deinit(allocator);
             var pi: usize = 0;
-            while (std.mem.indexOfPos(u8, b_body, pi, "<loot ")) |p_tag| {
+            while (std.mem.findPos(u8, b_body, pi, "<loot ")) |p_tag| {
                 pi = p_tag + 6;
                 const q = xml.parseU16(std.mem.trim(u8, xml.attr(b_body, p_tag, "quality") orelse "1", " \t")) orelse 1;
                 const p = xml.parseF32(std.mem.trim(u8, xml.attr(b_body, p_tag, "prob") orelse "0", " \t")) orelse 0;
@@ -554,16 +554,16 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     // lootgroup
     var i: usize = 0;
     while (i < clean.len and groups.items.len < max_groups) {
-        const tag = std.mem.indexOfPos(u8, clean, i, "<lootgroup") orelse break;
+        const tag = std.mem.findPos(u8, clean, i, "<lootgroup") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 10;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         var body: []const u8 = "";
         var next_i = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</lootgroup>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</lootgroup>") orelse break;
             body = clean[gt + 1 .. close];
             next_i = close + 12;
         }
@@ -584,7 +584,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         }
         var bi: usize = 0;
         while (bi < body.len and g.entry_n < max_entries) {
-            const itag = std.mem.indexOfPos(u8, body, bi, "<item") orelse break;
+            const itag = std.mem.findPos(u8, body, bi, "<item") orelse break;
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
@@ -600,16 +600,16 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
     // lootcontainer
     i = 0;
     while (i < clean.len and containers.items.len < max_containers) {
-        const tag = std.mem.indexOfPos(u8, clean, i, "<lootcontainer") orelse break;
+        const tag = std.mem.findPos(u8, clean, i, "<lootcontainer") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 14;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         var body: []const u8 = "";
         var next_i = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</lootcontainer>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</lootcontainer>") orelse break;
             body = clean[gt + 1 .. close];
             next_i = close + 16;
         }
@@ -620,14 +620,14 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             c.quality_template = try arena.dupe(u8, lqt);
         }
         if (xml.attr(clean, tag, "size")) |sz| {
-            if (std.mem.indexOfScalar(u8, sz, ',')) |comma| {
+            if (std.mem.findScalar(u8, sz, ',')) |comma| {
                 c.size_x = @intCast(xml.parseU16(std.mem.trim(u8, sz[0..comma], " \t")) orelse 8);
                 c.size_y = @intCast(xml.parseU16(std.mem.trim(u8, sz[comma + 1 ..], " \t")) orelse 6);
             }
         }
         var bi: usize = 0;
         while (bi < body.len and c.entry_n < max_entries) {
-            const itag = std.mem.indexOfPos(u8, body, bi, "<item") orelse break;
+            const itag = std.mem.findPos(u8, body, bi, "<item") orelse break;
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);

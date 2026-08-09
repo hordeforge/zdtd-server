@@ -30,7 +30,7 @@ pub fn splitRanges(total: usize, workers: usize, out: *[max_workers]Range) usize
     var at: usize = 0;
     var produced: usize = 0;
     while (i < w) : (i += 1) {
-        const len = base + @as(usize, if (i < rem) 1 else 0);
+        const len = base + @as(usize, @intFromBool(i < rem));
         if (len == 0) continue;
         out[produced] = .{ .begin = at, .end = at + len };
         at += len;

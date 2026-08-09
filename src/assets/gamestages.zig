@@ -303,7 +303,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
     const arena = arena_holder.allocator();
 
     var cfg: Config = .{};
-    if (std.mem.indexOf(u8, clean, "<config")) |ci| {
+    if (std.mem.find(u8, clean, "<config")) |ci| {
         cfg.days_alive_change_when_killed = @trunc(@max(0, @min(365, parseF32Attr(clean, ci, "daysAliveChangeWhenKilled", 2))));
         cfg.difficulty_bonus = parseF32Attr(clean, ci, "difficultyBonus", 1);
         cfg.starting_weight = parseF32Attr(clean, ci, "startingWeight", 1);
@@ -318,7 +318,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
     var groups: std.ArrayList(Group) = .empty;
     defer groups.deinit(allocator);
     var i: usize = 0;
-    while (std.mem.indexOfPos(u8, clean, i, "<group")) |tag| {
+    while (std.mem.findPos(u8, clean, i, "<group")) |tag| {
         i = tag + 6;
         const name = xml.attr(clean, tag, "name") orelse continue;
         const spawner = xml.attr(clean, tag, "spawner") orelse continue;
@@ -339,8 +339,8 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
     defer spawn_buf.deinit(allocator);
 
     i = 0;
-    while (std.mem.indexOfPos(u8, clean, i, "<spawner")) |tag| {
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+    while (std.mem.findPos(u8, clean, i, "<spawner")) |tag| {
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = gt + 1;
             continue;
@@ -348,7 +348,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
         var body: []const u8 = "";
         i = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</spawner>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</spawner>") orelse break;
             body = clean[gt + 1 .. close];
             i = close + 10;
         }
@@ -356,13 +356,13 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 
         stage_buf.clearRetainingCapacity();
         var bi: usize = 0;
-        while (std.mem.indexOfPos(u8, body, bi, "<gamestage")) |st_tag| {
-            const st_gt = std.mem.indexOfPos(u8, body, st_tag, ">") orelse break;
+        while (std.mem.findPos(u8, body, bi, "<gamestage")) |st_tag| {
+            const st_gt = std.mem.findPos(u8, body, st_tag, ">") orelse break;
             const num_s = xml.attr(body, st_tag, "stage");
             var st_body: []const u8 = "";
             bi = st_gt + 1;
             if (!(st_gt > st_tag and body[st_gt - 1] == '/')) {
-                const st_close = std.mem.indexOfPos(u8, body, st_gt, "</gamestage>") orelse break;
+                const st_close = std.mem.findPos(u8, body, st_gt, "</gamestage>") orelse break;
                 st_body = body[st_gt + 1 .. st_close];
                 bi = st_close + 12;
             }
@@ -372,7 +372,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 
             spawn_buf.clearRetainingCapacity();
             var si: usize = 0;
-            while (std.mem.indexOfPos(u8, st_body, si, "<spawn")) |sp_tag| {
+            while (std.mem.findPos(u8, st_body, si, "<spawn")) |sp_tag| {
                 si = sp_tag + 6;
                 const grp = xml.attr(st_body, sp_tag, "group") orelse continue;
                 if (grp.len == 0) continue;

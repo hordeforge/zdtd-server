@@ -12,7 +12,7 @@ pub fn saveClock(self: *const Game) !void {
     var buf: [16]u8 = undefined;
     @memcpy(buf[0..4], "ZCL1");
     std.mem.writeInt(u64, buf[4..12], self.sim.director.clock.worldTimeBits(), .little);
-    try io_fs.writeFile(self.allocator, p, buf[0..12]);
+    try io_fs.writeFile(p, buf[0..12]);
 }
 
 pub fn restoreClock(self: *Game) void {
@@ -21,9 +21,9 @@ pub fn restoreClock(self: *Game) void {
         std.debug.print("zdtd: clock.zcl path too long; keeping fresh clock\n", .{});
         return;
     };
-    if (!io_fs.fileExistsSimple(p)) return;
+    if (!io_fs.fileExists(p)) return;
     var buf: [16]u8 = undefined;
-    const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
+    const bytes = io_fs.readFileInto(p, &buf) catch |err| {
         logPersistErr(self, "restore clock", err);
         return;
     };

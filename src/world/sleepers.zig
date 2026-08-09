@@ -82,10 +82,6 @@ pub const Store = struct {
     }
 };
 
-fn fileExists(path: []const u8) bool {
-    return io_fs.fileExistsSimple(path);
-}
-
 fn prop(body: []const u8, name: []const u8) ?[]const u8 {
     return xml.propertyValue(body, name);
 }
@@ -94,7 +90,7 @@ fn prop(body: []const u8, name: []const u8) ?[]const u8 {
 fn nextSegment(s: []const u8, start: *usize) ?[]const u8 {
     if (start.* >= s.len) return null;
     const rest = s[start.*..];
-    if (std.mem.indexOfScalar(u8, rest, '#')) |h| {
+    if (std.mem.findScalar(u8, rest, '#')) |h| {
         const seg = std.mem.trim(u8, rest[0..h], " \t");
         start.* += h + 1;
         return seg;
@@ -146,7 +142,7 @@ fn findPrefabFile(prefabs_root: []const u8, name: []const u8, ext: []const u8, b
     const subdirs = [_][]const u8{ "POIs", "Parts", "RWGTiles" };
     for (subdirs) |sub| {
         const p = std.fmt.bufPrint(buf, "{s}/{s}/{s}{s}", .{ prefabs_root, sub, name, ext }) catch continue;
-        if (fileExists(p)) return p;
+        if (io_fs.fileExists(p)) return p;
     }
     return null;
 }
@@ -224,7 +220,7 @@ pub fn loadFromPrefabs(
                 const need = prefabs_root.len + 1 + sub.len + 1 + d.name.len + 4;
                 if (need >= path_buf.len) continue;
                 const p = std.fmt.bufPrint(&path_buf, "{s}/{s}/{s}.xml", .{ prefabs_root, sub, d.name }) catch continue;
-                if (!fileExists(p)) continue;
+                if (!io_fs.fileExists(p)) continue;
                 const raw = io_fs.readFileAll(allocator, p) catch continue;
                 defer allocator.free(raw);
                 // Stock prefab XML often has UTF-8 BOM.
@@ -392,7 +388,7 @@ pub fn loadFromPrefabs(
 
 test "parse abandoned_house sleeper volumes if present" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/abandoned_house_01.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.xml")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
         .name = "abandoned_house_01",
         .x = 100,
@@ -419,8 +415,8 @@ test "parse abandoned_house sleeper volumes if present" {
 
 test "abandoned_house authored sleeper spawn points inside volumes if present" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
-    if (!fileExists(root ++ "/POIs/abandoned_house_01.blocks.nim")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.blocks.nim")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
         .name = "abandoned_house_01",
         .x = 100,

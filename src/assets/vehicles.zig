@@ -59,11 +59,11 @@ pub const Table = struct {
 };
 
 fn kindFromName(name: []const u8) ?components.VehicleKind {
-    if (std.mem.indexOf(u8, name, "Bicycle") != null) return .bicycle;
-    if (std.mem.indexOf(u8, name, "Minibike") != null) return .minibike;
-    if (std.mem.indexOf(u8, name, "Motorcycle") != null) return .motorcycle;
-    if (std.mem.indexOf(u8, name, "Truck4x4") != null or std.mem.indexOf(u8, name, "4x4") != null) return .four_by_four;
-    if (std.mem.indexOf(u8, name, "Gyrocopter") != null) return .gyrocopter;
+    if (std.mem.find(u8, name, "Bicycle") != null) return .bicycle;
+    if (std.mem.find(u8, name, "Minibike") != null) return .minibike;
+    if (std.mem.find(u8, name, "Motorcycle") != null) return .motorcycle;
+    if (std.mem.find(u8, name, "Truck4x4") != null or std.mem.find(u8, name, "4x4") != null) return .four_by_four;
+    if (std.mem.find(u8, name, "Gyrocopter") != null) return .gyrocopter;
     return null;
 }
 
@@ -80,15 +80,15 @@ fn seatCountFromBody(body: []const u8) u8 {
     var i: usize = 0;
     while (i < max_seat_scan and n < components.max_seats) : (i += 1) {
         const needle = std.fmt.bufPrint(&needle_buf, "class=\"seat{d}\"", .{i}) catch break;
-        const at = std.mem.indexOf(u8, body, needle) orelse break;
+        const at = std.mem.find(u8, body, needle) orelse break;
         const rest = at + needle.len;
         // Bound the block by its close tag, or by the next class block when the
         // seat element is self-closing and therefore has no children at all.
-        var end = std.mem.indexOfPos(u8, body, rest, "</property>") orelse body.len;
-        if (std.mem.indexOfPos(u8, body, rest, "<property class=\"")) |next| {
+        var end = std.mem.findPos(u8, body, rest, "</property>") orelse body.len;
+        if (std.mem.findPos(u8, body, rest, "<property class=\"")) |next| {
             if (next < end) end = next;
         }
-        if (std.mem.indexOf(u8, body[rest..end], "name=\"mod\"") != null) break;
+        if (std.mem.find(u8, body[rest..end], "name=\"mod\"") != null) break;
         n += 1;
     }
     return if (n == 0) 1 else n;
@@ -96,7 +96,7 @@ fn seatCountFromBody(body: []const u8) u8 {
 
 /// First float from "a, b, c, d" or single value.
 fn firstF32(s: []const u8) f32 {
-    const comma = std.mem.indexOfScalar(u8, s, ',') orelse s.len;
+    const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
     const t = std.mem.trim(u8, s[0..comma], " \t");
     return std.fmt.parseFloat(f32, t) catch 0;
 }
@@ -120,7 +120,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_vehicles) {
-        const vi = std.mem.indexOfPos(u8, clean, i, "<vehicle ") orelse break;
+        const vi = std.mem.findPos(u8, clean, i, "<vehicle ") orelse break;
         const vname = xml.attr(clean, vi, "name") orelse {
             i = vi + 9;
             continue;
@@ -129,8 +129,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             i = vi + 9;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, vi, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, clean, gt, "</vehicle>") orelse break;
+        const gt = std.mem.findPos(u8, clean, vi, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt, "</vehicle>") orelse break;
         const body = clean[gt + 1 .. close];
 
         var vel: f32 = 7;
@@ -148,7 +148,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             if (f > 0) torque = f;
         }
         // engine fuelKmPerL may be nested; scan body
-        if (std.mem.indexOf(u8, body, "fuelKmPerL")) |fi| {
+        if (std.mem.find(u8, body, "fuelKmPerL")) |fi| {
             if (xml.attr(body, fi, "value")) |v| {
                 const f = firstF32(v);
                 if (f > 0) fuel = f;

@@ -32,7 +32,7 @@ fn parseXPath(xpath: []const u8) ?ParsedXPath {
     if (s.len == 0) return null;
     if (s[0] == '/') s = s[1..];
     // Trailing /@attr
-    if (std.mem.lastIndexOf(u8, s, "/@")) |at| {
+    if (std.mem.findLast(u8, s, "/@")) |at| {
         out.set_attr = s[at + 2 ..];
         s = s[0..at];
     }
@@ -41,19 +41,19 @@ fn parseXPath(xpath: []const u8) ?ParsedXPath {
         if (raw.len == 0) continue;
         if (out.n >= out.segs.len) return null;
         var seg: XSeg = .{};
-        if (std.mem.indexOfScalar(u8, raw, '[')) |br| {
+        if (std.mem.findScalar(u8, raw, '[')) |br| {
             seg.tag = raw[0..br];
             // [@name='val'] or [@name="val"]
             const filt = raw[br..];
-            if (std.mem.indexOf(u8, filt, "@")) |ai| {
+            if (std.mem.find(u8, filt, "@")) |ai| {
                 const rest = filt[ai + 1 ..];
-                const eq = std.mem.indexOfScalar(u8, rest, '=') orelse return null;
+                const eq = std.mem.findScalar(u8, rest, '=') orelse return null;
                 seg.filter_attr = std.mem.trim(u8, rest[0..eq], " \t");
                 var v = std.mem.trim(u8, rest[eq + 1 ..], " \t]");
                 if (v.len >= 2 and (v[0] == '\'' or v[0] == '"')) {
                     const q = v[0];
                     v = v[1..];
-                    if (std.mem.indexOfScalar(u8, v, q)) |qe| v = v[0..qe];
+                    if (std.mem.findScalar(u8, v, q)) |qe| v = v[0..qe];
                 }
                 seg.filter_val = v;
             }
@@ -146,14 +146,14 @@ fn findElementIn(hay: []const u8, xp: ParsedXPath, start_seg: usize) ?usize {
     if (start_seg >= xp.n) return null;
     var search_from: usize = 0;
     while (search_from < hay.len) {
-        const lt = std.mem.indexOfPos(u8, hay, search_from, "<") orelse break;
+        const lt = std.mem.findPos(u8, hay, search_from, "<") orelse break;
         if (lt + 1 < hay.len and (hay[lt + 1] == '/' or hay[lt + 1] == '!' or hay[lt + 1] == '?')) {
             search_from = lt + 1;
             continue;
         }
         if (elementMatches(hay, lt, xp.segs[start_seg])) {
             if (start_seg + 1 == xp.n) return lt;
-            const gt = std.mem.indexOfPos(u8, hay, lt, ">") orelse break;
+            const gt = std.mem.findPos(u8, hay, lt, ">") orelse break;
             if (gt > lt and hay[gt - 1] == '/') {
                 search_from = gt + 1;
                 continue;
@@ -166,7 +166,7 @@ fn findElementIn(hay: []const u8, xp: ParsedXPath, start_seg: usize) ?usize {
             @memcpy(close_buf[2..][0..tag.len], tag);
             close_buf[2 + tag.len] = '>';
             const close_tag = close_buf[0 .. 3 + tag.len];
-            const close = std.mem.indexOfPos(u8, hay, gt + 1, close_tag) orelse {
+            const close = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse {
                 search_from = gt + 1;
                 continue;
             };
@@ -183,7 +183,7 @@ fn findElementIn(hay: []const u8, xp: ParsedXPath, start_seg: usize) ?usize {
 }
 
 fn elementSpan(hay: []const u8, open_at: usize) ?struct { start: usize, end: usize } {
-    const gt = std.mem.indexOfPos(u8, hay, open_at, ">") orelse return null;
+    const gt = std.mem.findPos(u8, hay, open_at, ">") orelse return null;
     if (gt > open_at and hay[gt - 1] == '/') {
         return .{ .start = open_at, .end = gt + 1 };
     }
@@ -203,12 +203,12 @@ fn elementSpan(hay: []const u8, open_at: usize) ?struct { start: usize, end: usi
     @memcpy(close_buf[2..][0..tag.len], tag);
     close_buf[2 + tag.len] = '>';
     const close_tag = close_buf[0 .. 3 + tag.len];
-    const close = std.mem.indexOfPos(u8, hay, gt + 1, close_tag) orelse return null;
+    const close = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse return null;
     return .{ .start = open_at, .end = close + close_tag.len };
 }
 
 fn setAttribute(allocator: std.mem.Allocator, hay: []const u8, open_at: usize, attr_name: []const u8, new_val: []const u8) ![]u8 {
-    const gt = std.mem.indexOfPos(u8, hay, open_at, ">") orelse return error.BadElement;
+    const gt = std.mem.findPos(u8, hay, open_at, ">") orelse return error.BadElement;
     const window = hay[open_at .. gt + 1];
     // Find attr="..."
     var needle_buf: [80]u8 = undefined;
@@ -216,12 +216,12 @@ fn setAttribute(allocator: std.mem.Allocator, hay: []const u8, open_at: usize, a
     @memcpy(needle_buf[0..attr_name.len], attr_name);
     needle_buf[attr_name.len] = '=';
     const needle = needle_buf[0 .. attr_name.len + 1];
-    if (std.mem.indexOf(u8, window, needle)) |ai| {
+    if (std.mem.find(u8, window, needle)) |ai| {
         var p = open_at + ai + needle.len;
         while (p < hay.len and (hay[p] == ' ' or hay[p] == '\t')) p += 1;
         if (p >= hay.len or hay[p] != '"') return error.BadAttr;
         const vstart = p + 1;
-        const vend = std.mem.indexOfScalarPos(u8, hay, vstart, '"') orelse return error.BadAttr;
+        const vend = std.mem.findScalarPos(u8, hay, vstart, '"') orelse return error.BadAttr;
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(allocator);
         try out.appendSlice(allocator, hay[0..vstart]);
@@ -262,7 +262,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
 
     // Optional file= on configs root
     var patch_file_filter: ?[]const u8 = null;
-    if (std.mem.indexOf(u8, clean, "<configs")) |ci| {
+    if (std.mem.find(u8, clean, "<configs")) |ci| {
         if (xml.attr(clean, ci, "file")) |f| patch_file_filter = f;
     }
     if (patch_file_filter) |pf| {
@@ -274,7 +274,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
 
     var i: usize = 0;
     while (i < clean.len) {
-        const lt = std.mem.indexOfPos(u8, clean, i, "<") orelse break;
+        const lt = std.mem.findPos(u8, clean, i, "<") orelse break;
         if (lt + 1 >= clean.len) break;
         if (clean[lt + 1] == '/' or clean[lt + 1] == '!' or clean[lt + 1] == '?') {
             i = lt + 1;
@@ -304,7 +304,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 }
             }
         }
-        const gt = std.mem.indexOfPos(u8, clean, lt, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, lt, ">") orelse break;
         const self_close = gt > lt and clean[gt - 1] == '/';
         var body: []const u8 = "";
         var next_i = gt + 1;
@@ -319,7 +319,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             @memcpy(cbuf[2..][0..op.len], op);
             cbuf[2 + op.len] = '>';
             const ct = cbuf[0 .. 3 + op.len];
-            const cl = std.mem.indexOfPos(u8, clean, gt + 1, ct) orelse {
+            const cl = std.mem.findPos(u8, clean, gt + 1, ct) orelse {
                 i = gt + 1;
                 continue;
             };
@@ -370,7 +370,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 continue;
             };
             // Insert before closing tag of matched element
-            const gt2 = std.mem.indexOfPos(u8, cur, open, ">") orelse {
+            const gt2 = std.mem.findPos(u8, cur, open, ">") orelse {
                 i = next_i;
                 continue;
             };
@@ -500,8 +500,8 @@ test "set MaxFuel on generatorbank" {
     ;
     const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml");
     defer std.testing.allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "value=\"50\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "12250") != null);
+    try std.testing.expect(std.mem.find(u8, out, "value=\"50\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "12250") != null);
 }
 
 test "remove block" {
@@ -518,8 +518,8 @@ test "remove block" {
     ;
     const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml");
     defer std.testing.allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "name=\"a\"") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "name=\"b\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "name=\"a\"") == null);
+    try std.testing.expect(std.mem.find(u8, out, "name=\"b\"") != null);
 }
 
 test "fileFromXPath" {

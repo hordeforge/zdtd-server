@@ -461,7 +461,7 @@ test "rotateRawY cycles the 45 degree band and leaves unknown rotations alone" {
 
 test "tts load abandoned_house block types if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
-    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var t = try loadBlocks(std.testing.allocator, p);
     defer t.deinit();

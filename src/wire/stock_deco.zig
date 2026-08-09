@@ -85,7 +85,7 @@ pub fn finishDecoUpdate(buf: []u8, first_package: bool, count: usize, end: usize
     if (buf.len < end or end < objects_off) return error.Overflow;
     // Illegal state: header count must describe exactly the bytes written.
     if (end - objects_off != count * deco_size) return error.Overflow;
-    buf[0] = if (first_package) 1 else 0;
+    buf[0] = @intFromBool(first_package);
     std.mem.writeInt(i32, buf[1..5], @intCast(end - header_len), .little);
     std.mem.writeInt(i32, buf[5..9], @intCast(count), .little);
     return buf[0..end];

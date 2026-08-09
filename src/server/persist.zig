@@ -248,7 +248,7 @@ pub fn savePlayers(self: *Game) !void {
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
-    try io_fs.writeFile(self.allocator, path, out.items);
+    try io_fs.writeFile(path, out.items);
 }
 
 /// Remove all players.zsv records whose login name equals `name`.
@@ -266,7 +266,7 @@ pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
     const filtered = try zpv2DropName(self.allocator, data, name);
     defer if (filtered.blob) |b| self.allocator.free(b);
     if (filtered.removed == 0) return 0;
-    try io_fs.writeFile(self.allocator, path, filtered.blob.?);
+    try io_fs.writeFile(path, filtered.blob.?);
     return filtered.removed;
 }
 
@@ -483,7 +483,7 @@ pub fn saveEntities(self: *Game) !void {
     }
     const written = w.written();
     std.mem.writeInt(u16, written[4..6], count, .little);
-    try io_fs.writeFileSimple(p, written);
+    try io_fs.writeFile(p, written);
 }
 
 /// Restore vehicles/turrets from entities.zen. A missing file is a fresh
@@ -562,7 +562,7 @@ pub fn saveClaims(self: *Game) !void {
         count += 1;
     }
     std.mem.writeInt(u16, buf[4..6], count, .little);
-    try io_fs.writeFileSimple(p, buf[0..o]);
+    try io_fs.writeFile(p, buf[0..o]);
 }
 
 /// Restore land claims from claims.zlc. Restored claims have no live owner

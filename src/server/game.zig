@@ -456,9 +456,13 @@ pub const Game = struct {
     storm_frequency: i32 = default_storm_frequency,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
-    pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game { return createWithOptions(allocator, world_dir, port, .{}); }
+    pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
+        return createWithOptions(allocator, world_dir, port, .{});
+    }
 
-    pub fn createWithMap(allocator: std.mem.Allocator, world_dir: []const u8, map_dir: ?[]const u8, port: u16) !*Game { return createWithOptions(allocator, world_dir, port, .{ .map_dir = map_dir }); }
+    pub fn createWithMap(allocator: std.mem.Allocator, world_dir: []const u8, map_dir: ?[]const u8, port: u16) !*Game {
+        return createWithOptions(allocator, world_dir, port, .{ .map_dir = map_dir });
+    }
 
     pub fn createWithOptions(allocator: std.mem.Allocator, world_dir: []const u8, port: u16, opts: InitOptions) !*Game {
         // Reject before allocating Game (large SoA); LiteNet uses ServerPort+2.
@@ -548,7 +552,7 @@ pub const Game = struct {
             .sandbox_preset = opts.sandbox_preset,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
-                .data = @ptrCast(self),
+                .data = self,
                 .log_fn = &wasmLog,
                 .tick_fn = &wasmTick,
                 .queue_fn = &wasmQueue,
@@ -715,31 +719,55 @@ pub const Game = struct {
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
     /// join-phase Hard drops but is the flag for future soft-only paths.
-    pub fn authorityCorrects(self: *const Game) bool { return self.authority_mode == .correct; }
+    pub fn authorityCorrects(self: *const Game) bool {
+        return self.authority_mode == .correct;
+    }
 
-    pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void { return game_movement_helpers.noteAcceptedMove(self, c, x, y, z); }
-    pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void { return game_movement_helpers.resetMoveEnvelopePeer(self, peer_slot, x, y, z); }
+    pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+        return game_movement_helpers.noteAcceptedMove(self, c, x, y, z);
+    }
+    pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
+        return game_movement_helpers.resetMoveEnvelopePeer(self, peer_slot, x, y, z);
+    }
     pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32) game_movement_helpers.ApplyResult {
         return game_movement_helpers.applyMovementEnvelope(self, c, peer, entity_id, x, y, z);
     }
 
-    fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 { return game_hooks.heightAtWorld(ctx, wx, wz); }
+    fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
+        return game_hooks.heightAtWorld(ctx, wx, wz);
+    }
 
-    pub fn spawnPoiTraders(self: *Game) void { return game_hooks.spawnPoiTraders(self); }
+    pub fn spawnPoiTraders(self: *Game) void {
+        return game_hooks.spawnPoiTraders(self);
+    }
 
-    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect { return game_hooks.poiRectAtWorld(ctx, x, z); }
+    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
+        return game_hooks.poiRectAtWorld(ctx, x, z);
+    }
 
-    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool { return game_hooks.partySame(ctx, a, b); }
+    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
+        return game_hooks.partySame(ctx, a, b);
+    }
 
-    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect { return game_hooks.nearestPoiAtWorld(ctx, x, z); }
+    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
+        return game_hooks.nearestPoiAtWorld(ctx, x, z);
+    }
 
-    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 { return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz); }
+    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
+        return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz);
+    }
 
-    fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 { return game_hooks.placeBlockId(ctx, item_id); }
+    fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
+        return game_hooks.placeBlockId(ctx, item_id);
+    }
 
-    fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 { return game_hooks.itemFuelValue(ctx, item_id); }
+    fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
+        return game_hooks.itemFuelValue(ctx, item_id);
+    }
 
-    fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 { return game_hooks.itemStackFor(ctx, item_id); }
+    fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
+        return game_hooks.itemStackFor(ctx, item_id);
+    }
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
     pub fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
@@ -754,10 +782,14 @@ pub const Game = struct {
     pub const itemIsArmor = game_craft.itemIsArmor;
 
     /// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
-    pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool { return game_craft.tryRefuelGenerator(self, c, x, y, z, amount); }
+    pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+        return game_craft.tryRefuelGenerator(self, c, x, y, z, amount);
+    }
 
     /// Refuel the nearest vehicle at the InvTx target coords (tank-capped).
-    pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool { return game_craft.tryRefuelVehicle(self, c, x, y, z, amount); }
+    pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+        return game_craft.tryRefuelVehicle(self, c, x, y, z, amount);
+    }
 
     /// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).
     pub const eatProps = game_craft.eatProps;
@@ -768,11 +800,17 @@ pub const Game = struct {
 
     /// PlayerEntityStats.Stamina sync (EntityStatChanged kind 1); the
     /// survival/stamina loop calls it on a throttle like the vitals.
-    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void { return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max); }
+    pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamina: f32, stamina_max: f32) !void {
+        return game_join.sendStaminaStats(self, peer, entity_id, stamina, stamina_max);
+    }
 
     pub const DecoDimCache = game_deco.DecoDimCache;
-    pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList { return game_deco.decoSpeciesAt(ctx, wx, wz); }
-    pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool { return game_deco.mirrorDeco(self, cache, o); }
+    pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
+        return game_deco.decoSpeciesAt(ctx, wx, wz);
+    }
+    pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
+        return game_deco.mirrorDeco(self, cache, o);
+    }
 
     /// Join-time deco burst, mirroring stock `DecoManager.SendDecosToClient`
     /// (asm.il 1263272), which is called from exactly one site in the assembly:
@@ -790,7 +828,9 @@ pub const Game = struct {
     ///
     /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
     /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void { return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz); }
+    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+        return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz);
+    }
 
     /// Seed the deco sampler keys off, so a chunk decorates identically across
     /// joins and restarts. The worldgen seed when there is one, else the world
@@ -811,15 +851,31 @@ pub const Game = struct {
         return r;
     }
 
-    pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void { return game_join.sendSignDataBatches(self, peer); }
+    pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendSignDataBatches(self, peer);
+    }
 
-    pub fn deinit(self: *Game) void { return @import("game/lifecycle.zig").deinit(self); }
-    pub fn infoPort(self: *const Game) u16 { return @import("game/lifecycle.zig").infoPort(self); }
-    pub fn refreshInfoPlayers(self: *Game) void { return @import("game/lifecycle.zig").refreshInfoPlayers(self); }
-    pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 { return @import("game/lifecycle.zig").playersPath(self, buf); }
-    pub fn savePlayers(self: *Game) !void { return @import("game/lifecycle.zig").savePlayers(self); }
-    pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 { return @import("game/lifecycle.zig").wipePlayerRecordsByName(self, name); }
-    pub fn tryRestorePlayer(self: *Game, c: *Client) void { return @import("game/lifecycle.zig").tryRestorePlayer(self, c); }
+    pub fn deinit(self: *Game) void {
+        return @import("game/lifecycle.zig").deinit(self);
+    }
+    pub fn infoPort(self: *const Game) u16 {
+        return @import("game/lifecycle.zig").infoPort(self);
+    }
+    pub fn refreshInfoPlayers(self: *Game) void {
+        return @import("game/lifecycle.zig").refreshInfoPlayers(self);
+    }
+    pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
+        return @import("game/lifecycle.zig").playersPath(self, buf);
+    }
+    pub fn savePlayers(self: *Game) !void {
+        return @import("game/lifecycle.zig").savePlayers(self);
+    }
+    pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
+        return @import("game/lifecycle.zig").wipePlayerRecordsByName(self, name);
+    }
+    pub fn tryRestorePlayer(self: *Game, c: *Client) void {
+        return @import("game/lifecycle.zig").tryRestorePlayer(self, c);
+    }
 
     pub fn pollAdmin(self: *Game) void {
         admin_console.pollAdmin(self);
@@ -837,7 +893,9 @@ pub const Game = struct {
         admin_console.fillWebuiSnap(self);
     }
 
-    pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void { return admin_console.handleConsoleCmd(self, peer, c, body); }
+    pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
+        return admin_console.handleConsoleCmd(self, peer, c, body);
+    }
 
     pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
         admin_console.consoleSetTime(self, it, out);
@@ -859,23 +917,37 @@ pub const Game = struct {
         admin_console.consoleKickBan(self, name, out, do_ban);
     }
 
-    pub fn consoleKillAll(self: *Game) u32 { return admin_console.consoleKillAll(self); }
+    pub fn consoleKillAll(self: *Game) u32 {
+        return admin_console.consoleKillAll(self);
+    }
 
-    pub fn forceAirDrop(self: *Game) bool { return admin_console.forceAirDrop(self); }
+    pub fn forceAirDrop(self: *Game) bool {
+        return admin_console.forceAirDrop(self);
+    }
 
-    pub fn forceStorm(self: *Game) bool { return admin_console.forceStorm(self); }
+    pub fn forceStorm(self: *Game) bool {
+        return admin_console.forceStorm(self);
+    }
 
-    pub fn clearStorm(self: *Game) bool { return admin_console.clearStorm(self); }
+    pub fn clearStorm(self: *Game) bool {
+        return admin_console.clearStorm(self);
+    }
 
-    pub fn daysToBloodMoon(self: *const Game) u32 { return admin_console.daysToBloodMoon(self); }
+    pub fn daysToBloodMoon(self: *const Game) u32 {
+        return admin_console.daysToBloodMoon(self);
+    }
 
-    pub fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize { return admin_console.webuiAdminThunk(ctx, line, out); }
+    pub fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
+        return admin_console.webuiAdminThunk(ctx, line, out);
+    }
 
     pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
         admin_console.runBanCommand(self, sub);
     }
 
-    pub fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 { return admin_console.adminListsPath(self, buf, name); }
+    pub fn adminListsPath(self: *const Game, buf: []u8, name: []const u8) ![]const u8 {
+        return admin_console.adminListsPath(self, buf, name);
+    }
 
     pub fn saveAdminLists(self: *Game) void {
         admin_console.saveAdminLists(self);
@@ -901,7 +973,9 @@ pub const Game = struct {
         admin_console.gamePref(self, filter, name, fmt, args);
     }
 
-    pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool { return admin_console.applyGamePrefSet(self, name, value); }
+    pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
+        return admin_console.applyGamePrefSet(self, name, value);
+    }
 
     pub fn replyMem(self: *Game) void {
         admin_console.replyMem(self);
@@ -1527,7 +1601,7 @@ pub const Game = struct {
         const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
         const h: i32 = @intCast(h_u16);
         // heightWorld = top solid; PDF/entity feet use that block Y; entity float y = h+1.
-        const feet_y = if (h > 1) h else 1;
+        const feet_y = @max(h, 1);
         // Live AssignIds resolved at init (A05); the module pin is the offline
         // default until resolveTerrainIds runs, so modded dumps stay correct.
         const dirt = self.world.terrain_ids.dirt;
@@ -2001,7 +2075,7 @@ pub const Game = struct {
         const bm = self.world.biomes orelse return false;
         const id = bm.atWorld(wx, wz) orelse return false;
         const name = self.world.biome_layers_table.names[id] orelse return false;
-        return std.mem.indexOf(u8, name, "radiat") != null;
+        return std.mem.find(u8, name, "radiat") != null;
     }
 
     pub fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
@@ -2467,5 +2541,4 @@ pub const Game = struct {
     fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
         return @import("game/social.zig").shareQuestWithParty(self, c, def_id);
     }
-
 };

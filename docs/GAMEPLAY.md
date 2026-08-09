@@ -120,10 +120,9 @@ flowchart TD
     L --> M
 ```
 
-Anchors: `src/server/trade.zig:78` (`handleTrade`), `src/ecs/systems.zig:664`
-(`trade`), `src/server/trade.zig:117` (`applyTraderDataCopyFrom`),
-`src/server/game/trader.zig:167` (`fillTraderFromXml` prices),
-`src/server/trade.zig:26` (`stockEntries`, markup on the wire).
+Anchors: `src/server/game/trader_wire.zig` (`handleTrade`,
+`applyTraderDataCopyFrom`, and `stockEntries`), `src/ecs/systems.zig` (`trade`),
+and `src/server/game/trader.zig` (`fillTraderFromXml` prices).
 
 ## 4. Trader inventory roll
 
@@ -198,9 +197,9 @@ flowchart TD
 
 Anchors: `src/assets/loot.zig:196` (`rollContainer`), `:262` (`rollGroup`),
 `:142` (`probGate`), `:123` (`resolveQuality`), `:154` (`scaleCount`),
-`src/server/chunk_stream.zig:247` (`fillContainerFromLoot` feeds the stacks
+`src/server/game/chunk_fill.zig` (`fillContainerFromLoot` feeds the stacks
 into a container and stamps `touched_day`). The loot stage is the party loot
-stage (`game.zig:4225`); the seed is deterministic per position and respawn
+stage; the seed is deterministic per position and respawn
 cycle (see [STATE_MACHINES.md#17-loot-respawn](STATE_MACHINES.md#17-loot-respawn)).
 
 ## 6. Survival and stamina

@@ -442,7 +442,7 @@ pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
         if (d.kind != .craft) continue;
         // Optional: def.name is recipe id or contains it.
         if (d.name.len > 0 and recipe_name.len > 0) {
-            if (std.mem.indexOf(u8, recipe_name, d.name) == null and std.mem.indexOf(u8, d.name, recipe_name) == null)
+            if (std.mem.find(u8, recipe_name, d.name) == null and std.mem.find(u8, d.name, recipe_name) == null)
                 continue;
         }
         s.progress +|= 1;
@@ -2479,7 +2479,7 @@ test "budget-denied tick still walks the buffered path" {
     _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.zombie_ai[zs].currentWp() != null);
     w.path_stride = 2;
-    w.path_tick = if (zs % 2 == 0) 1 else 0; // (slot + tick) % 2 != 0
+    w.path_tick = @intFromBool(zs % 2 == 0); // (slot + tick) % 2 != 0
     try std.testing.expect(!w.pathBudgetAdmits(zs));
     const x0 = w.transform[zs].x;
     const before = w.path_replans.load(.monotonic);

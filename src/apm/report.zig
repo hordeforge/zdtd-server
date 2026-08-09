@@ -140,10 +140,10 @@ test "report text non-empty" {
     const text = w.buffered();
     try std.testing.expect(text.len > 20);
     // Structure: header, counters with ticks=1, and a tick_total section row.
-    try std.testing.expect(std.mem.indexOf(u8, text, "zdtd-apm snapshot") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "ticks=1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "tick_total") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "sections") != null);
+    try std.testing.expect(std.mem.find(u8, text, "zdtd-apm snapshot") != null);
+    try std.testing.expect(std.mem.find(u8, text, "ticks=1") != null);
+    try std.testing.expect(std.mem.find(u8, text, "tick_total") != null);
+    try std.testing.expect(std.mem.find(u8, text, "sections") != null);
 }
 
 test "report json includes ops when set" {
@@ -155,9 +155,9 @@ test "report json includes ops when set" {
     var w: std.Io.Writer = .fixed(&buf);
     try writeJsonLine(&s, &w);
     const line = w.buffered();
-    try std.testing.expect(std.mem.indexOf(u8, line, "\"type\":\"zdtd_apm\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line, "\"ops\":{\"tick\":42") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line, "\"joined\":2") != null);
+    try std.testing.expect(std.mem.find(u8, line, "\"type\":\"zdtd_apm\"") != null);
+    try std.testing.expect(std.mem.find(u8, line, "\"ops\":{\"tick\":42") != null);
+    try std.testing.expect(std.mem.find(u8, line, "\"joined\":2") != null);
 }
 
 test "text and json dumps fit their comptime bounds at max values" {
@@ -190,7 +190,7 @@ test "text and json dumps fit their comptime bounds at max values" {
     // Every named section must appear (none skipped for count==0).
     inline for (@typeInfo(profiler.Section).@"enum".fields) |f| {
         if (comptime f.name[0] != '_') {
-            try std.testing.expect(std.mem.indexOf(u8, jw.buffered(), "\"" ++ f.name ++ "\"") != null);
+            try std.testing.expect(std.mem.find(u8, jw.buffered(), "\"" ++ f.name ++ "\"") != null);
         }
     }
 }

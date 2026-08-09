@@ -173,7 +173,7 @@ const max_toml_bytes: usize = 256 * 1024;
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !File {
     const read_buf = try allocator.alloc(u8, max_toml_bytes + 1);
     defer allocator.free(read_buf);
-    const data = try io_fs.readFileInto(allocator, path, read_buf);
+    const data = try io_fs.readFileInto(path, read_buf);
     if (data.len > max_toml_bytes) return error.TomlTooLarge;
     return try parse(allocator, data);
 }
@@ -459,41 +459,41 @@ test "parse rules overlay sections" {
 /// Mirror of the server init-options shape the merge helpers write into.
 /// One superset covers every test below; helpers ignore fields they do not know.
 const TestOpts = struct {
-        max_streamed_chunks: usize = 169,
-        chunk_adds_per_stream_tick: u32 = 8,
-        chunk_stream_radius_min: i32 = 7,
-        chunk_stream_radius_max: i32 = 9,
-        chunk_stream_period_ticks: u64 = 5,
-        motion_replicate_period_ticks: u64 = 2,
-        world_time_send_ticks: u64 = 20,
-        vehicle_pos_send_ticks: u64 = 5,
-        sleeper_tick_ticks: u64 = 10,
-        turret_sync_ticks: u64 = 10,
-        save_interval_ticks: u64 = 100,
-        spawn_area_radius_max: i32 = 8,
-        interest_range: f32 = 160,
-        max_edit_range: f32 = 96,
-        max_claimed_damage: i32 = 200,
-        peer_stale_ms: u64 = 3000,
-        trader_wallet_dukes: i32 = 5000,
-        min_chat_gap_ns: u64 = 200_000_000,
-        inv_bucket_cap: u8 = 40,
-        inv_refill_ns: u64 = 50_000_000,
-        block_bucket_cap: u8 = 30,
-        block_refill_ns: u64 = 33_000_000,
-        min_damage_gap_ns: u64 = 80_000_000,
-        damage_burst_max: u8 = 4,
-        trader_restock_cap: u16 = 50,
-        trader_restock_refill: u16 = 10,
-        storm_frequency: i32 = 100,
-        wire_chunks: bool = true,
-        deco_trees: bool = true,
-        deco_mirror: bool = true,
-        block_id_mapping: bool = true,
-        async_chunk_flush: bool = false,
-        terrain_snapshot: bool = false,
-        job_batches: bool = false,
-        guard: guard_policy.Policy = .{},
+    max_streamed_chunks: usize = 169,
+    chunk_adds_per_stream_tick: u32 = 8,
+    chunk_stream_radius_min: i32 = 7,
+    chunk_stream_radius_max: i32 = 9,
+    chunk_stream_period_ticks: u64 = 5,
+    motion_replicate_period_ticks: u64 = 2,
+    world_time_send_ticks: u64 = 20,
+    vehicle_pos_send_ticks: u64 = 5,
+    sleeper_tick_ticks: u64 = 10,
+    turret_sync_ticks: u64 = 10,
+    save_interval_ticks: u64 = 100,
+    spawn_area_radius_max: i32 = 8,
+    interest_range: f32 = 160,
+    max_edit_range: f32 = 96,
+    max_claimed_damage: i32 = 200,
+    peer_stale_ms: u64 = 3000,
+    trader_wallet_dukes: i32 = 5000,
+    min_chat_gap_ns: u64 = 200_000_000,
+    inv_bucket_cap: u8 = 40,
+    inv_refill_ns: u64 = 50_000_000,
+    block_bucket_cap: u8 = 30,
+    block_refill_ns: u64 = 33_000_000,
+    min_damage_gap_ns: u64 = 80_000_000,
+    damage_burst_max: u8 = 4,
+    trader_restock_cap: u16 = 50,
+    trader_restock_refill: u16 = 10,
+    storm_frequency: i32 = 100,
+    wire_chunks: bool = true,
+    deco_trees: bool = true,
+    deco_mirror: bool = true,
+    block_id_mapping: bool = true,
+    async_chunk_flush: bool = false,
+    terrain_snapshot: bool = false,
+    job_batches: bool = false,
+    guard: guard_policy.Policy = .{},
 };
 
 test "applyToInitOptions deco_trees only when set" {
@@ -523,13 +523,13 @@ test "applyToInitOptions deco_trees only when set" {
 
 test "loadFromPath rejects oversized file" {
     const dir = "worlds/zdtd_toml_big";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath(dir);
     const path = dir ++ "/zdtd.toml";
     const big = try std.testing.allocator.alloc(u8, max_toml_bytes + 1);
     defer std.testing.allocator.free(big);
     @memset(big, '#');
-    try io_fs.writeFileSimple(path, big);
+    try io_fs.writeFile(path, big);
     try std.testing.expectError(error.TomlTooLarge, loadFromPath(std.testing.allocator, path));
 }
 

@@ -80,7 +80,7 @@ pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTabl
     var name_to_id: std.StringHashMapUnmanaged(u8) = .{};
     var i: usize = 0;
     while (i < clean.len) {
-        const mi = std.mem.indexOfPos(u8, clean, i, "<biomemap") orelse break;
+        const mi = std.mem.findPos(u8, clean, i, "<biomemap") orelse break;
         const id_s = xml.attr(clean, mi, "id") orelse {
             i = mi + 9;
             continue;
@@ -104,7 +104,7 @@ pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTabl
 
     i = 0;
     while (i < clean.len) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<biome ") orelse break;
         const bname = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
@@ -370,7 +370,7 @@ test "colorToId stock keys" {
 
 test "load navezgane biomes.png if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane/biomes.png";
-    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var m = try loadPngR(std.testing.allocator, p);
     defer m.deinit();

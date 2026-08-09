@@ -106,16 +106,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
 
     var i: usize = 0;
     while (i < clean.len) {
-        const tag = std.mem.indexOfPos(u8, clean, i, "<entitygroup") orelse break;
+        const tag = std.mem.findPos(u8, clean, i, "<entitygroup") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 12;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         var body: []const u8 = "";
         var next_i = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</entitygroup>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</entitygroup>") orelse break;
             body = clean[gt + 1 .. close];
             next_i = close + 14;
         }
@@ -125,7 +125,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
         entry_buf.clearRetainingCapacity();
         var bi: usize = 0;
         while (bi < body.len) {
-            const et = std.mem.indexOfPos(u8, body, bi, "<e ") orelse break;
+            const et = std.mem.findPos(u8, body, bi, "<e ") orelse break;
             const en = xml.attr(body, et, "n") orelse {
                 bi = et + 3;
                 continue;

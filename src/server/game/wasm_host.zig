@@ -43,7 +43,7 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
         return;
     }
     const op = parsePluginCommand(cmd) orelse {
-        const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
+        const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
         std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd[0..verb_end]});
         return;
     };

@@ -29,7 +29,7 @@ const stock_te = packages.stock_te;
 pub fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
     for (dst, src) |*d, s| {
         d.* = if (s.count > 0 and s.item_id != 0) .{
-            .type_id = Game.resolveItemType(@ptrCast(self), s.item_id),
+            .type_id = Game.resolveItemType(self, s.item_id),
             .count = s.count,
             .quality = s.quality,
             .meta = s.meta,
@@ -134,7 +134,7 @@ pub fn seedChestBlockId(self: *Game) u16 {
     var buf: [32]u8 = undefined;
     // Optional override file: missing is fine; other I/O must not look like
     // "no override" when the operator left a broken/unreadable file.
-    const slice = io_fs.readFileInto(self.allocator, path, &buf) catch |err| {
+    const slice = io_fs.readFileInto(path, &buf) catch |err| {
         if (err != error.FileNotFound) {
             std.debug.print(
                 "zdtd: seed_chest_block_id read failed: {s}; using AssignIds/default\n",
@@ -302,7 +302,7 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
         if (n >= vending_mod.max_vending_stock) break;
         const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
-        const type_id = Game.resolveItemType(@ptrCast(self), iid);
+        const type_id = Game.resolveItemType(self, iid);
         if (type_id == 0) continue;
         v.stock[n] = .{
             .type_id = type_id,

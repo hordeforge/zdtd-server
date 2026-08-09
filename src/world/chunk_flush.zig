@@ -154,7 +154,7 @@ pub const Flusher = struct {
         const io = parallel.poolIo();
         self.mu.lockUncancelable(io);
         defer self.mu.unlock(io);
-        return self.n + @as(usize, if (self.cur_active) 1 else 0);
+        return self.n + @as(usize, @intFromBool(self.cur_active));
     }
 
     /// Drain every queued write, then join the writer. Joined, never detached:
@@ -200,7 +200,7 @@ pub const Flusher = struct {
             self.cur_active = true;
             self.mu.unlock(io);
 
-            io_fs.writeFile(a, e.path, e.payload) catch |err| {
+            io_fs.writeFile(e.path, e.payload) catch |err| {
                 _ = self.errors.fetchAdd(1, .monotonic);
                 std.debug.print("zdtd: async chunk write '{s}' failed: {s}\n", .{ e.path, @errorName(err) });
             };

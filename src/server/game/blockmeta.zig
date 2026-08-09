@@ -47,7 +47,7 @@ pub fn saveBlockMeta(self: *const Game) !void {
         std.mem.writeInt(u16, buf[o + 8 ..][0..2], self.block_hp[idx], .little);
         o += 10;
     }
-    try io_fs.writeFile(self.allocator, p, buf[0..o]);
+    try io_fs.writeFile(p, buf[0..o]);
 }
 
 pub fn loadBlockMeta(self: *Game) !void {
@@ -86,7 +86,7 @@ pub fn saveWeather(self: *const Game) !void {
     const p = try std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir});
     var buf: [1024]u8 = undefined;
     const enc = try self.world.weather.encode(&buf);
-    try io_fs.writeFile(self.allocator, p, enc);
+    try io_fs.writeFile(p, enc);
 }
 
 pub fn restoreWeather(self: *Game) void {
@@ -95,9 +95,9 @@ pub fn restoreWeather(self: *Game) void {
         std.debug.print("zdtd: weather.zwt path too long; keeping fresh roll\n", .{});
         return;
     };
-    if (!io_fs.fileExistsSimple(p)) return;
+    if (!io_fs.fileExists(p)) return;
     var buf: [1024]u8 = undefined;
-    const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
+    const bytes = io_fs.readFileInto(p, &buf) catch |err| {
         self.harness.counters.inc(.persistence_errors);
         std.debug.print("zdtd: restore weather failed: {s}\n", .{@errorName(err)});
         return;

@@ -197,7 +197,7 @@ fn infoLog(quiet: bool, comptime fmt: []const u8, fmt_args: anytype) void {
 
 /// Split `--name` / `--name=value` into (name, optional value).
 fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
-    if (std.mem.indexOfScalar(u8, a, '=')) |eq| {
+    if (std.mem.findScalar(u8, a, '=')) |eq| {
         return .{ .name = a[0..eq], .value = a[eq + 1 ..] };
     }
     return .{ .name = a, .value = null };
@@ -254,7 +254,7 @@ fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 
 fn isSafeWorldDirName(name: []const u8) bool {
     if (name.len == 0 or name.len > 128) return false;
     if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) return false;
-    if (std.mem.indexOfScalar(u8, name, 0) != null) return false;
+    if (std.mem.findScalar(u8, name, 0) != null) return false;
     for (name) |c| {
         if (c == '/' or c == '\\') return false;
     }
@@ -389,34 +389,34 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Fail closed on operator-supplied paths before Game.create (clearer than
     // a late FileNotFound from deep inside asset/map load).
     if (game_dir) |gd| {
-        if (!io_fs.dirExistsSimple(gd)) {
+        if (!io_fs.dirExists(gd)) {
             fatal("game install not found: '{s}' (check --game-dir)", .{gd});
         }
     }
     if (map_dir) |md| {
-        if (!io_fs.dirExistsSimple(md)) {
+        if (!io_fs.dirExists(md)) {
             fatal("map directory not found: '{s}' (check --map)", .{md});
         }
     }
     if (config_dir) |cd| {
-        if (!io_fs.dirExistsSimple(cd)) {
+        if (!io_fs.dirExists(cd)) {
             fatal("config directory not found: '{s}' (check --config-dir)", .{cd});
         }
     }
     if (quests_path) |qp| {
-        if (!io_fs.fileExistsSimple(qp)) {
+        if (!io_fs.fileExists(qp)) {
             fatal("quests file not found: '{s}' (check --quests)", .{qp});
         }
     }
     for (config_overrides.items) |od| {
-        if (!io_fs.dirExistsSimple(od)) {
+        if (!io_fs.dirExists(od)) {
             fatal("config-overrides directory not found: '{s}'", .{od});
         }
     }
 
     if (serverconfig_path) |scp| {
         // Explicit path: fail fast (do not silently run with defaults).
-        if (!io_fs.fileExistsSimple(scp)) {
+        if (!io_fs.fileExists(scp)) {
             fatal("serverconfig file not found: '{s}' (check --serverconfig)", .{scp});
         }
         cfg_owned = server_config.loadFromPath(gpa, scp) catch |err| {
@@ -464,7 +464,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             }
             if (game_dir) |root| {
                 const candidate = try std.fmt.bufPrint(&map_path_buf, "{s}/Data/Worlds/{s}", .{ root, wn });
-                if (io_fs.dirExistsSimple(candidate)) {
+                if (io_fs.dirExists(candidate)) {
                     map_dir = candidate;
                 } else if (world_name_cli) {
                     usageError("world '{s}' not found under --game-dir '{s}/Data/Worlds'", .{ wn, root });
@@ -590,9 +590,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     const toml_path: ?[]const u8 = blk: {
         if (world_toml) |wt| {
-            if (io_fs.fileExistsSimple(wt)) break :blk wt;
+            if (io_fs.fileExists(wt)) break :blk wt;
         }
-        if (io_fs.fileExistsSimple("zdtd.toml")) break :blk "zdtd.toml";
+        if (io_fs.fileExists("zdtd.toml")) break :blk "zdtd.toml";
         break :blk null;
     };
     var toml_owned: ?zdtd_config.File = null;

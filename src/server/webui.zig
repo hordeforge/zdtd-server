@@ -328,7 +328,7 @@ pub const Server = struct {
         self.recv_len += n;
 
         // Wait until headers are complete before handing off to std.http.Server.
-        const head_end = std.mem.indexOf(u8, self.recv_buf[0..self.recv_len], "\r\n\r\n") orelse {
+        const head_end = std.mem.find(u8, self.recv_buf[0..self.recv_len], "\r\n\r\n") orelse {
             if (self.recv_len >= max_req) self.closeClient();
             return;
         };
@@ -659,7 +659,7 @@ pub const Server = struct {
         const al = std.fmt.bufPrint(&audit_line, "> {s}", .{line}) catch line;
         self.pushAudit(al);
         if (reply_len > 0) {
-            const first = std.mem.indexOfScalar(u8, reply, '\n') orelse reply.len;
+            const first = std.mem.findScalar(u8, reply, '\n') orelse reply.len;
             self.pushAudit(reply[0..@min(first, max_audit_line)]);
         }
 
@@ -940,7 +940,7 @@ fn parseIpv4(host: []const u8) !u32 {
 
 fn pathOnly(target: []const u8) []const u8 {
     if (target.len == 0) return "/";
-    if (std.mem.indexOfScalar(u8, target, '?')) |q| return target[0..q];
+    if (std.mem.findScalar(u8, target, '?')) |q| return target[0..q];
     return target;
 }
 
@@ -955,7 +955,7 @@ fn validatedContentLength(head: []const u8) !?usize {
     _ = it.next();
     while (it.next()) |line| {
         if (line.len == 0) break;
-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const colon = std.mem.findScalar(u8, line, ':') orelse continue;
         const key = std.mem.trim(u8, line[0..colon], " \t");
         if (!std.ascii.eqlIgnoreCase(key, "Content-Length")) continue;
         if (found != null) return error.DuplicateContentLength;
@@ -968,7 +968,7 @@ fn validatedContentLength(head: []const u8) !?usize {
 
 fn isFormContentType(value: ?[]const u8) bool {
     const raw = value orelse return false;
-    const semicolon = std.mem.indexOfScalar(u8, raw, ';') orelse raw.len;
+    const semicolon = std.mem.findScalar(u8, raw, ';') orelse raw.len;
     const media_type = std.mem.trim(u8, raw[0..semicolon], " \t");
     return std.ascii.eqlIgnoreCase(media_type, "application/x-www-form-urlencoded");
 }
@@ -976,9 +976,9 @@ fn isFormContentType(value: ?[]const u8) bool {
 fn formField(body: []u8, name: []const u8) ?[]const u8 {
     var start: usize = 0;
     while (start <= body.len) {
-        const amp = std.mem.indexOfScalar(u8, body[start..], '&') orelse body.len - start;
+        const amp = std.mem.findScalar(u8, body[start..], '&') orelse body.len - start;
         const pair = body[start .. start + amp];
-        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse {
+        const eq = std.mem.findScalar(u8, pair, '=') orelse {
             if (start + amp >= body.len) break;
             start += amp + 1;
             continue;
@@ -1065,7 +1065,7 @@ fn mediaTypePresent(accept: []const u8, media: []const u8) bool {
     var it = std.mem.splitScalar(u8, accept, ',');
     while (it.next()) |part| {
         const raw = std.mem.trim(u8, part, " \t");
-        const semi = std.mem.indexOfScalar(u8, raw, ';') orelse raw.len;
+        const semi = std.mem.findScalar(u8, raw, ';') orelse raw.len;
         const mt = std.mem.trim(u8, raw[0..semi], " \t");
         if (std.ascii.eqlIgnoreCase(mt, media)) return true;
     }
@@ -1074,7 +1074,7 @@ fn mediaTypePresent(accept: []const u8, media: []const u8) bool {
 
 /// First-line prefixes used by Game.runAdminLine for operator-visible failures.
 fn adminReplyLooksFailed(reply: []const u8) bool {
-    const first = std.mem.indexOfScalar(u8, reply, '\n') orelse reply.len;
+    const first = std.mem.findScalar(u8, reply, '\n') orelse reply.len;
     const line = std.mem.trimEnd(u8, reply[0..first], " \t\r");
     const prefixes = [_][]const u8{
         // Stock console error shapes (SdtdConsole::executeCommand, asm.il:269448;
@@ -1227,7 +1227,7 @@ fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
     _ = it.next();
     while (it.next()) |line| {
         if (line.len == 0) break;
-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const colon = std.mem.findScalar(u8, line, ':') orelse continue;
         const key = std.mem.trim(u8, line[0..colon], " \t");
         if (!std.ascii.eqlIgnoreCase(key, name)) continue;
         return std.mem.trim(u8, line[colon + 1 ..], " \t");
@@ -1324,9 +1324,9 @@ test "shell template substitutes every placeholder" {
     const out = try renderShell(&buf, "deadbeef");
     // A missed placeholder would ship "__ZDTD_CSRF__" to the browser and break
     // the logout form, which no other test would notice.
-    try std.testing.expect(std.mem.indexOf(u8, out, "__ZDTD_") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "value=\"deadbeef\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, version.product) != null);
+    try std.testing.expect(std.mem.find(u8, out, "__ZDTD_") == null);
+    try std.testing.expect(std.mem.find(u8, out, "value=\"deadbeef\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, version.product) != null);
 }
 
 test "renderTemplate reports a buffer too small instead of truncating" {
@@ -1813,21 +1813,21 @@ test "POST /login sets session cookie only on valid token" {
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(s.set_cookie);
     // PRG: 303 See Other to the dashboard (not 200 with a form body).
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 303 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") != null);
     s.set_cookie = false;
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 11\r\n\r\ntoken=wrong");
     try std.testing.expect(!s.set_cookie);
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 401 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(!s.set_cookie);
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 415 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 415 ") != null);
     // Missing token field: no cookie; client mistake (distinct from wrong secret).
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 0\r\n\r\n");
     try std.testing.expect(!s.set_cookie);
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 400 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 400 ") != null);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 6\r\n\r\ntoken=");
     try std.testing.expect(!s.set_cookie);
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 400 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 400 ") != null);
 }
 
 test "malformed request lines are client faults, not internal errors" {
@@ -1847,9 +1847,9 @@ test "malformed request lines are client faults, not internal errors" {
     for (cases) |req| {
         try testServeHttp(&s, req);
         const resp = s.testResp();
-        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 400 ") != null);
-        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 500 ") == null);
-        try std.testing.expect(std.mem.indexOf(u8, resp, "bad request") != null);
+        try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 400 ") != null);
+        try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 500 ") == null);
+        try std.testing.expect(std.mem.find(u8, resp, "bad request") != null);
     }
 }
 
@@ -1868,10 +1868,10 @@ test "HEAD accepted on GET-only dashboard routes" {
     for (cases) |req| {
         try testServeHttp(&s, req);
         const resp = s.testResp();
-        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 200 ") != null);
-        try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 405 ") == null);
+        try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+        try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 405 ") == null);
         // HEAD must not carry a body after the header block.
-        if (std.mem.indexOf(u8, resp, "\r\n\r\n")) |end| {
+        if (std.mem.find(u8, resp, "\r\n\r\n")) |end| {
             try std.testing.expectEqual(@as(usize, 0), resp[end + 4 ..].len);
         } else {
             return error.TestUnexpectedResult;
@@ -1893,12 +1893,12 @@ test "GET /login redirects when session cookie is already valid" {
     );
     try testServeHttp(&s, req);
     const resp = s.testResp();
-    try std.testing.expect(std.mem.indexOf(u8, resp, "HTTP/1.1 303 ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, resp, "Location: /") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 303 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Location: /") != null);
     // Anonymous GET /login still serves the form.
     try testServeHttp(&s, "GET /login HTTP/1.1\r\n\r\n");
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "HTTP/1.1 200 ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, s.testResp(), "Shared secret") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Shared secret") != null);
 }
 
 test "fillSessionToken rotates with its nonce and is not the secret" {
@@ -1976,24 +1976,24 @@ test "render status fits buffer" {
     s.world_name_len = 4;
     var buf: [4096]u8 = undefined;
     const html = try renderStatus(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, html, "42") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "test") != null);
+    try std.testing.expect(std.mem.find(u8, html, "42") != null);
+    try std.testing.expect(std.mem.find(u8, html, "test") != null);
     const apm = try renderApm(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, apm, "tick mean") != null);
+    try std.testing.expect(std.mem.find(u8, apm, "tick mean") != null);
     const js = try renderApmJson(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"tick\":42") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"net_p99_ns\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"save_mean_ns\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"max_players\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"phase_rejects\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"ownership_rejects\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"bounds_rejects\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"movement_rejects\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"decode_rejects\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"world\":\"test\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"wire_chunks\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"players\":[") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"webui_port\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"tick\":42") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"net_p99_ns\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"save_mean_ns\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"max_players\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"phase_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"ownership_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"bounds_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"movement_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"decode_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"world\":\"test\"") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"wire_chunks\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"players\":[") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"webui_port\":") != null);
 }
 
 test "httpReasonPhrase covers early rawRespond statuses" {
@@ -2015,9 +2015,9 @@ test "adminLineOk rejects control chars" {
 test "formatSessionCookie sets Max-Age" {
     var buf: [128]u8 = undefined;
     const c = try formatSessionCookie(&buf, "0123456789abcdef0123456789abcdef");
-    try std.testing.expect(std.mem.indexOf(u8, c, "Max-Age=43200") != null);
-    try std.testing.expect(std.mem.indexOf(u8, c, "HttpOnly") != null);
-    try std.testing.expect(std.mem.indexOf(u8, c, "SameSite=Strict") != null);
+    try std.testing.expect(std.mem.find(u8, c, "Max-Age=43200") != null);
+    try std.testing.expect(std.mem.find(u8, c, "HttpOnly") != null);
+    try std.testing.expect(std.mem.find(u8, c, "SameSite=Strict") != null);
 }
 
 test "login lockout after repeated failures" {
@@ -2050,10 +2050,10 @@ test "renderPlayers html-escapes client names" {
     @memcpy(s.players[0].name[0..15], "<img onerror=1>");
     var buf: [2048]u8 = undefined;
     const html = try renderPlayers(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<img") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "&lt;img") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<caption class=\"sr-only\">Connected players</caption>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<th scope=\"col\">Name</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<img") == null);
+    try std.testing.expect(std.mem.find(u8, html, "&lt;img") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<caption class=\"sr-only\">Connected players</caption>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"col\">Name</th>") != null);
 }
 
 const http_fuzz_corpus = [_][]const u8{
@@ -2117,9 +2117,9 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
     const escaped = w.buffered();
     try std.testing.expect(escaped.len <= esc_buf.len);
     // Unescaped angle brackets must not survive (XSS hardening for webui).
-    try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '<') == null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '>') == null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '"') == null);
+    try std.testing.expect(std.mem.findScalar(u8, escaped, '<') == null);
+    try std.testing.expect(std.mem.findScalar(u8, escaped, '>') == null);
+    try std.testing.expect(std.mem.findScalar(u8, escaped, '"') == null);
 }
 
 test "renderShell exposes console names and status updates" {
@@ -2128,84 +2128,84 @@ test "renderShell exposes console names and status updates" {
     const nonce = [_]u8{0x33} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
     const html = try renderShell(&buf, sess[0..]);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<label for=\"cmd-line\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "maxlength=\"256\" required") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"cmd-out\" role=\"status\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "class=\"skip-link\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, ":focus-visible") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"auto-refresh\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"refresh-now\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "aria-label=\"Dashboard sections\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"status-section\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "action=\"/logout\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "window.confirm") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"status-heading\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "aria-label=\"Recent commands\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "forced-colors:active") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "prefers-reduced-motion") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "border:1px solid #6a738c") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "text-decoration:underline") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "out.setAttribute('aria-busy','true')") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "pre.cmd-out:focus-visible,#console-log:focus-visible") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "list-style:none") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "aria-labelledby=\"status-heading\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "Loading performance data") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "Loading command history") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "position:sticky") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "keepFocus") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "r.status===401") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "let inFlight=false") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "if(!el.hasAttribute('data-load-error'))") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "forced-color-adjust:none") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "prefers-reduced-motion: reduce').matches") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "JavaScript is required for live updates") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<label for=\"cmd-line\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "maxlength=\"256\" required") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-out\" role=\"status\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "class=\"skip-link\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"auto-refresh\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-now\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Dashboard sections\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"status-section\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "window.confirm") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"status-heading\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Recent commands\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "forced-colors:active") != null);
+    try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion") != null);
+    try std.testing.expect(std.mem.find(u8, html, "border:1px solid #6a738c") != null);
+    try std.testing.expect(std.mem.find(u8, html, "text-decoration:underline") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);
+    try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('aria-busy','true')") != null);
+    try std.testing.expect(std.mem.find(u8, html, "pre.cmd-out:focus-visible,#console-log:focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "list-style:none") != null);
+    try std.testing.expect(std.mem.find(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-labelledby=\"status-heading\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "Loading performance data") != null);
+    try std.testing.expect(std.mem.find(u8, html, "Loading command history") != null);
+    try std.testing.expect(std.mem.find(u8, html, "position:sticky") != null);
+    try std.testing.expect(std.mem.find(u8, html, "keepFocus") != null);
+    try std.testing.expect(std.mem.find(u8, html, "r.status===401") != null);
+    try std.testing.expect(std.mem.find(u8, html, "let inFlight=false") != null);
+    try std.testing.expect(std.mem.find(u8, html, "if(!el.hasAttribute('data-load-error'))") != null);
+    try std.testing.expect(std.mem.find(u8, html, "forced-color-adjust:none") == null);
+    try std.testing.expect(std.mem.find(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
+    try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion: reduce').matches") == null);
+    try std.testing.expect(std.mem.find(u8, html, "JavaScript is required for live updates") != null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
-    try std.testing.expect(std.mem.indexOf(u8, html, "s3cr3t") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, sess[0..]) != null);
+    try std.testing.expect(std.mem.find(u8, html, "s3cr3t") == null);
+    try std.testing.expect(std.mem.find(u8, html, sess[0..]) != null);
     // Runtime body_buf for GET / is 16384; shell must fit.
     try std.testing.expect(html.len < 16384);
 }
 
 test "loginHintHtml exposes labeled secret form" {
     const ok = loginHintHtml(false);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "<label for=\"login-token\">Shared secret</label>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "name=\"token\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "type=\"password\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "maxlength=\"128\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "role=\"alert\"") == null);
+    try std.testing.expect(std.mem.find(u8, ok, "<label for=\"login-token\">Shared secret</label>") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "name=\"token\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "type=\"password\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "maxlength=\"128\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
     const bad = loginHintHtml(true);
-    try std.testing.expect(std.mem.indexOf(u8, bad, "role=\"alert\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, bad, "aria-invalid=\"true\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, bad, "Sign-in failed") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "aria-invalid") == null);
-    try std.testing.expect(std.mem.indexOf(u8, ok, "forced-colors:active") != null);
-    try std.testing.expect(std.mem.indexOf(u8, bad, "color:MarkText;background:Mark") != null);
-    try std.testing.expect(std.mem.indexOf(u8, bad, "forced-color-adjust:none") == null);
+    try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "aria-invalid=\"true\"") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "aria-invalid") == null);
+    try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "forced-color-adjust:none") == null);
     const locked = loginLockoutHtml();
-    try std.testing.expect(std.mem.indexOf(u8, locked, "Too many failed sign-ins") != null);
-    try std.testing.expect(std.mem.indexOf(u8, locked, "role=\"alert\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, locked, "method=\"post\" action=\"/login\"") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "Too many failed sign-ins") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "role=\"alert\"") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "method=\"post\" action=\"/login\"") != null);
     // During lockout, controls are disabled so users cannot keep submitting failures.
-    try std.testing.expect(std.mem.indexOf(u8, locked, "disabled>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, locked, "tabindex=\"-1\" autofocus") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "disabled>") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "tabindex=\"-1\" autofocus") != null);
 }
 
 test "command result marks known failures and is keyboard-scrollable" {
     var buf: [2048]u8 = undefined;
     const reply = try renderCmdReply(&buf, "status", "ok");
-    try std.testing.expect(std.mem.indexOf(u8, reply, "tabindex=\"0\"") != null);
+    try std.testing.expect(std.mem.find(u8, reply, "tabindex=\"0\"") != null);
     // No aria-label: the pre is read by the #cmd-out live region, and a label
     // would mask the actual command output from screen reader announcements.
-    try std.testing.expect(std.mem.indexOf(u8, reply, "aria-label=") == null);
-    try std.testing.expect(std.mem.indexOf(u8, reply, "class=\"cmd-out err\"") == null);
+    try std.testing.expect(std.mem.find(u8, reply, "aria-label=") == null);
+    try std.testing.expect(std.mem.find(u8, reply, "class=\"cmd-out err\"") == null);
     const fail = try renderCmdReply(&buf, "frob", "unknown command 'frob'. 'help' for list.\n");
-    try std.testing.expect(std.mem.indexOf(u8, fail, "class=\"cmd-out err\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, fail, "role=\"alert\"") != null);
+    try std.testing.expect(std.mem.find(u8, fail, "class=\"cmd-out err\"") != null);
+    try std.testing.expect(std.mem.find(u8, fail, "role=\"alert\"") != null);
     try std.testing.expect(adminReplyLooksFailed("bad arguments to 'inv'. usage: inv <slot>\n"));
     try std.testing.expect(!adminReplyLooksFailed("kicked\n"));
     // Stock console error shapes must light the failure indicator too.
@@ -2225,53 +2225,53 @@ test "command result marks known failures and is keyboard-scrollable" {
     var s: Server = .{};
     var log_buf: [2048]u8 = undefined;
     const log = try renderConsoleLog(&log_buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, log, "tabindex=\"0\"") == null);
-    try std.testing.expect(std.mem.indexOf(u8, log, "aria-label=\"Recent commands\"") == null);
+    try std.testing.expect(std.mem.find(u8, log, "tabindex=\"0\"") == null);
+    try std.testing.expect(std.mem.find(u8, log, "aria-label=\"Recent commands\"") == null);
     // Failure replies in the audit ring keep the same err styling as #cmd-out.
     s.pushAudit("> frob");
     s.pushAudit("unknown command 'frob'. 'help' for list.");
     const log_err = try renderConsoleLog(&log_buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, log_err, "<span class=\"err\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, log_err, "unknown command") != null);
+    try std.testing.expect(std.mem.find(u8, log_err, "<span class=\"err\">") != null);
+    try std.testing.expect(std.mem.find(u8, log_err, "unknown command") != null);
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x44} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
     var shell_buf: [16 * 1024]u8 = undefined;
     const shell = try renderShell(&shell_buf, sess[0..]);
-    try std.testing.expect(std.mem.indexOf(u8, shell, "id=\"console-log\" role=\"region\" aria-label=\"Recent commands\" tabindex=\"0\"") != null);
+    try std.testing.expect(std.mem.find(u8, shell, "id=\"console-log\" role=\"region\" aria-label=\"Recent commands\" tabindex=\"0\"") != null);
 }
 
 test "renderStatus and renderApm use list markup for stat grids" {
     var snap: Snapshot = .{ .tick_n = 1 };
     var buf: [8192]u8 = undefined;
     const status = try renderStatus(&buf, &snap);
-    try std.testing.expect(std.mem.indexOf(u8, status, "<ul class=\"grid\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status, "<li class=\"stat\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status, "server tick") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status, "not set") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status, "(unnamed)") != null);
+    try std.testing.expect(std.mem.find(u8, status, "<ul class=\"grid\">") != null);
+    try std.testing.expect(std.mem.find(u8, status, "<li class=\"stat\">") != null);
+    try std.testing.expect(std.mem.find(u8, status, "server tick") != null);
+    try std.testing.expect(std.mem.find(u8, status, "not set") != null);
+    try std.testing.expect(std.mem.find(u8, status, "(unnamed)") != null);
     // Zero overruns stay neutral; non-zero overruns use warn styling.
-    try std.testing.expect(std.mem.indexOf(u8, status, "class=\"num warn-text\"") == null);
+    try std.testing.expect(std.mem.find(u8, status, "class=\"num warn-text\"") == null);
     snap.tick_overruns = 3;
     const status_warn = try renderStatus(&buf, &snap);
-    try std.testing.expect(std.mem.indexOf(u8, status_warn, "class=\"num warn-text\"") != null);
+    try std.testing.expect(std.mem.find(u8, status_warn, "class=\"num warn-text\"") != null);
     var apm_buf: [8192]u8 = undefined;
     const apm = try renderApm(&apm_buf, &snap);
-    try std.testing.expect(std.mem.indexOf(u8, apm, "<ul class=\"grid\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, apm, "<li class=\"stat\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, apm, "class=\"num warn-text\"") != null);
+    try std.testing.expect(std.mem.find(u8, apm, "<ul class=\"grid\">") != null);
+    try std.testing.expect(std.mem.find(u8, apm, "<li class=\"stat\">") != null);
+    try std.testing.expect(std.mem.find(u8, apm, "class=\"num warn-text\"") != null);
     snap.join_fail = 2;
     const apm_err = try renderApm(&apm_buf, &snap);
-    try std.testing.expect(std.mem.indexOf(u8, apm_err, "class=\"num err\"") != null);
+    try std.testing.expect(std.mem.find(u8, apm_err, "class=\"num err\"") != null);
 }
 
 test "renderStatus uses h3 for subsections under shell Status h2" {
     var s: Snapshot = .{ .tick_n = 1 };
     var buf: [4096]u8 = undefined;
     const html = try renderStatus(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<h2>Status</h2>") == null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<h3>Entities</h3>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<h3>Server</h3>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<h2>Status</h2>") == null);
+    try std.testing.expect(std.mem.find(u8, html, "<h3>Entities</h3>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<h3>Server</h3>") != null);
 }
 
 test "renderPlayers identifies each player name as a row header" {
@@ -2281,7 +2281,7 @@ test "renderPlayers identifies each player name as a row header" {
     @memcpy(s.players[0].name[0..3], "Ada");
     var buf: [4096]u8 = undefined;
     const html = try renderPlayers(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<th scope=\"row\">Ada</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">Ada</th>") != null);
 }
 
 test "renderApmJson includes escaped player names and world" {
@@ -2303,11 +2303,11 @@ test "renderApmJson includes escaped player names and world" {
     @memcpy(s.players[0].name[0..5], "A\"b\\c");
     var buf: [8192]u8 = undefined;
     const js = try renderApmJson(&buf, &s);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"world\":\"Na\\\"ve\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"wire_chunks\":false") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"name\":\"A\\\"b\\\\c\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"slot\":1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, js, "\"entity_id\":100") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"world\":\"Na\\\"ve\"") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"wire_chunks\":false") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"name\":\"A\\\"b\\\\c\"") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"slot\":1") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"entity_id\":100") != null);
 }
 
 test "prefersPlainBody honors Accept without HTML" {

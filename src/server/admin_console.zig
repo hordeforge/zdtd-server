@@ -227,7 +227,7 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     const cmd = packages.parseConsoleCmd(body, &cmdbuf);
     if (cmd.len == 0) return;
     // Log verb only: args may include player names, chat text, or coords.
-    const verb_end = std.mem.indexOfScalar(u8, cmd, ' ') orelse cmd.len;
+    const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
     self.harness.counters.inc(.player_console_commands);
     std.debug.print("zdtd: audit source=player_console slot={d} command={s}\n", .{ c.slot, cmd[0..verb_end] });
 
@@ -580,7 +580,7 @@ pub fn saveAdminListFile(self: *Game, name: []const u8, comptime ser: anytype, l
     var buf: [16 * 1024]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     ser(&w, list) catch |e| return logPersistErr(self, "serialize admin list", e);
-    io_fs.writeFile(self.allocator, path, w.buffered()) catch |e|
+    io_fs.writeFile(path, w.buffered()) catch |e|
         logPersistErr(self, "save admin list", e);
 }
 
@@ -648,7 +648,7 @@ pub fn replyGamePrefs(self: *Game, filter: []const u8) void {
 }
 
 pub fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
-    if (filter.len != 0 and std.ascii.indexOfIgnoreCase(name, filter) == null) return;
+    if (filter.len != 0 and std.ascii.findIgnoreCase(name, filter) == null) return;
     var vb: [96]u8 = undefined;
     const v = std.fmt.bufPrint(&vb, fmt, args) catch return;
     self.adminWrite(admin_cmds.writeGamePref, .{ name, v });
@@ -756,7 +756,7 @@ pub fn resolveAdminTarget(self: *const Game, t: admin_mod.Target) TargetResult {
             var hit: ?usize = null;
             for (&self.clients, 0..) |*cl, i| {
                 if (!cl.joined) continue;
-                if (std.ascii.indexOfIgnoreCase(cl.name[0..cl.name_len], nm) == null) continue;
+                if (std.ascii.findIgnoreCase(cl.name[0..cl.name_len], nm) == null) continue;
                 if (hit != null) return .ambiguous;
                 hit = i;
             }
@@ -815,7 +815,7 @@ fn tryDispatchPluginAdmin(self: *Game, line: []const u8) bool {
 
 pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     const trimmed = std.mem.trim(u8, line, " \t");
-    const verb_end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
+    const verb_end = std.mem.findAny(u8, trimmed, " \t") orelse trimmed.len;
     self.harness.counters.inc(.admin_commands);
     std.debug.print("zdtd: audit source={s} command={s}\n", .{ source, trimmed[0..verb_end] });
     const cmd = admin_mod.parseCommand(line);
@@ -1242,16 +1242,16 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             const sx = tr.x + 3;
             const sz = tr.z + 3;
             // Name-based vehicle/trader shortcuts (entityclasses often tags them as zombie).
-            const low_vehicle = std.mem.indexOf(u8, nm, "vehicle") != null or std.mem.indexOf(u8, nm, "Bicycle") != null or std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "Motorcycle") != null or std.mem.indexOf(u8, nm, "4x4") != null or std.mem.indexOf(u8, nm, "Truck") != null or std.mem.indexOf(u8, nm, "Gyrocopter") != null;
+            const low_vehicle = std.mem.find(u8, nm, "vehicle") != null or std.mem.find(u8, nm, "Bicycle") != null or std.mem.find(u8, nm, "Minibike") != null or std.mem.find(u8, nm, "Motorcycle") != null or std.mem.find(u8, nm, "4x4") != null or std.mem.find(u8, nm, "Truck") != null or std.mem.find(u8, nm, "Gyrocopter") != null;
             const nid = blk: {
                 if (low_vehicle or def.kind == .vehicle) {
-                    const vk: ecs.components.VehicleKind = if (std.mem.indexOf(u8, nm, "Bicycle") != null or std.mem.indexOf(u8, nm, "bicycle") != null)
+                    const vk: ecs.components.VehicleKind = if (std.mem.find(u8, nm, "Bicycle") != null or std.mem.find(u8, nm, "bicycle") != null)
                         .bicycle
-                    else if (std.mem.indexOf(u8, nm, "Minibike") != null or std.mem.indexOf(u8, nm, "minibike") != null)
+                    else if (std.mem.find(u8, nm, "Minibike") != null or std.mem.find(u8, nm, "minibike") != null)
                         .minibike
-                    else if (std.mem.indexOf(u8, nm, "Motorcycle") != null or std.mem.indexOf(u8, nm, "motorcycle") != null)
+                    else if (std.mem.find(u8, nm, "Motorcycle") != null or std.mem.find(u8, nm, "motorcycle") != null)
                         .motorcycle
-                    else if (std.mem.indexOf(u8, nm, "Gyro") != null or std.mem.indexOf(u8, nm, "gyro") != null)
+                    else if (std.mem.find(u8, nm, "Gyro") != null or std.mem.find(u8, nm, "gyro") != null)
                         .gyrocopter
                     else
                         .four_by_four;
@@ -1389,7 +1389,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
 pub fn dumpEvidenceFile(self: *Game, path: []const u8) !usize {
     var dump: [16384]u8 = undefined;
     const n = self.evidence.dumpText(&dump);
-    try io_fs.writeFile(self.allocator, path, dump[0..n]);
+    try io_fs.writeFile(path, dump[0..n]);
     return self.evidence.n;
 }
 

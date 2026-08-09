@@ -266,7 +266,7 @@ fn randomRangeF(rng: *rng_util.XorShift32, min: f32, max: f32) f32 {
 /// caller (count_all flag); anything unparsable falls back to the default.
 fn parseMinMax(v: []const u8, dflt: u16) struct { u16, u16 } {
     if (v.len == 0 or std.mem.eql(u8, v, "all")) return .{ dflt, dflt };
-    const comma = std.mem.indexOfScalar(u8, v, ',') orelse {
+    const comma = std.mem.findScalar(u8, v, ',') orelse {
         const n = std.fmt.parseInt(u16, v, 10) catch return .{ dflt, dflt };
         return .{ n, n };
     };
@@ -283,7 +283,7 @@ fn parseProb(v: []const u8) f32 {
 /// quality="lo,hi" (both 1..6 in stock XML); 0/0 = unset.
 fn parseQuality(v: []const u8) struct { u8, u8 } {
     if (v.len == 0) return .{ 0, 0 };
-    const comma = std.mem.indexOfScalar(u8, v, ',') orelse {
+    const comma = std.mem.findScalar(u8, v, ',') orelse {
         const q = std.fmt.parseInt(u8, v, 10) catch return .{ 0, 0 };
         return .{ q, q };
     };
@@ -323,7 +323,7 @@ fn parseRefsBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const
     defer refs.deinit(gpa);
     var i: usize = 0;
     while (i < body.len and refs.items.len < max_expand) {
-        const ii = std.mem.indexOfPos(u8, body, i, "<item ") orelse break;
+        const ii = std.mem.findPos(u8, body, i, "<item ") orelse break;
         i = ii + 6;
         if (parseItemRef(arena, body, ii)) |r| {
             try refs.append(gpa, r);
@@ -363,13 +363,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
 
     var i: usize = 0;
     while (i < clean.len and groups.items.len < max_groups) {
-        const gi = std.mem.indexOfPos(u8, clean, i, "<trader_item_group ") orelse break;
+        const gi = std.mem.findPos(u8, clean, i, "<trader_item_group ") orelse break;
         const gname = xml.attr(clean, gi, "name") orelse {
             i = gi + 18;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, gi, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, clean, gt, "</trader_item_group>") orelse break;
+        const gt = std.mem.findPos(u8, clean, gi, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt, "</trader_item_group>") orelse break;
         const body = clean[gt + 1 .. close];
         const refs = try parseGroupBody(arena, allocator, body);
         const cnt = xml.attr(clean, gi, "count") orelse "";
@@ -393,7 +393,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     var root_buy_markup: f32 = 0;
     var root_sell_markdown: f32 = 0;
     var root_currency: []const u8 = "";
-    if (std.mem.indexOfPos(u8, clean, 0, "<traders")) |tr| {
+    if (std.mem.findPos(u8, clean, 0, "<traders")) |tr| {
         if (xml.attr(clean, tr, "buy_markup")) |v| root_buy_markup = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "sell_markdown")) |v| root_sell_markdown = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "currency_item")) |v| root_currency = try arena.dupe(u8, v);
@@ -413,15 +413,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     defer trader_infos.deinit(allocator);
     i = 0;
     while (i < clean.len and trader_infos.items.len < max_traders) {
-        const ti = std.mem.indexOfPos(u8, clean, i, "<trader_info ") orelse break;
+        const ti = std.mem.findPos(u8, clean, i, "<trader_info ") orelse break;
         i = ti + 13;
         const idv = xml.attr(clean, ti, "id") orelse continue;
         const id = std.fmt.parseInt(u16, idv, 10) catch continue;
-        const gt = std.mem.indexOfPos(u8, clean, ti, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, ti, ">") orelse break;
         const self_closing = gt > ti and clean[gt - 1] == '/';
         var refs: []const ItemRef = &.{};
         if (!self_closing) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</trader_info>") orelse break;
             refs = try parseTraderRefs(arena, allocator, clean[gt + 1 .. close]);
             i = close + "</trader_info>".len;
         }
@@ -647,15 +647,15 @@ test "trader_info scan survives adjacent blocks with no whitespace" {
     defer infos.deinit(std.testing.allocator);
     var j: usize = 0;
     while (j < clean.len and infos.items.len < max_traders) {
-        const ti = std.mem.indexOfPos(u8, clean, j, "<trader_info ") orelse break;
+        const ti = std.mem.findPos(u8, clean, j, "<trader_info ") orelse break;
         j = ti + 13;
         const idv = xml.attr(clean, ti, "id") orelse continue;
         const id = std.fmt.parseInt(u16, idv, 10) catch continue;
-        const gt = std.mem.indexOfPos(u8, clean, ti, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, ti, ">") orelse break;
         const self_closing = gt > ti and clean[gt - 1] == '/';
         var refs: []const ItemRef = &.{};
         if (!self_closing) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</trader_info>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</trader_info>") orelse break;
             refs = try parseTraderRefs(arena, std.testing.allocator, clean[gt + 1 .. close]);
             j = close + "</trader_info>".len;
         }
@@ -674,7 +674,7 @@ test "traders root economy attributes parse (currency_item, markup)" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/traders.xml", .{dir});
-    try io_fs.writeFileSimple(path, "<traders buy_markup=\"3\" sell_markdown=\"0.2\" currency_item=\"dukeCoin\" >\n" ++
+    try io_fs.writeFile(path, "<traders buy_markup=\"3\" sell_markdown=\"0.2\" currency_item=\"dukeCoin\" >\n" ++
         "  <trader_item_group name=\"groupTest\">\n" ++
         "    <item name=\"resourceWood\" count=\"10\"/>\n" ++
         "  </trader_item_group>\n" ++
@@ -692,7 +692,7 @@ test "traders root economy attributes parse (currency_item, markup)" {
     // Unset currency_item stays empty (Game falls back to the stock name).
     var p2: [std.fs.max_path_bytes]u8 = undefined;
     const path2 = try std.fmt.bufPrint(&p2, "{s}/traders2.xml", .{dir});
-    try io_fs.writeFileSimple(path2, "<traders buy_markup=\"2\" >\n" ++
+    try io_fs.writeFile(path2, "<traders buy_markup=\"2\" >\n" ++
         "  <trader_item_group name=\"groupTest\">\n" ++
         "    <item name=\"resourceWood\" count=\"1\"/>\n" ++
         "  </trader_item_group>\n" ++

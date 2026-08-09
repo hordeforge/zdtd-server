@@ -159,9 +159,9 @@ fn parseBoolLoose(s: []const u8) bool {
 
 fn inferKind(name: []const u8, tags: []const u8, is_animal: bool, is_enemy: bool) components.Kind {
     _ = is_enemy;
-    if (std.mem.startsWith(u8, name, "player") or std.mem.indexOf(u8, tags, "player") != null) return .player;
-    if (is_animal or std.mem.startsWith(u8, name, "animal") or std.mem.indexOf(u8, tags, "animal") != null) return .animal;
-    if (std.mem.startsWith(u8, name, "npcTrader") or std.mem.indexOf(u8, name, "trader") != null) return .trader;
+    if (std.mem.startsWith(u8, name, "player") or std.mem.find(u8, tags, "player") != null) return .player;
+    if (is_animal or std.mem.startsWith(u8, name, "animal") or std.mem.find(u8, tags, "animal") != null) return .animal;
+    if (std.mem.startsWith(u8, name, "npcTrader") or std.mem.find(u8, name, "trader") != null) return .trader;
     return .zombie;
 }
 
@@ -204,10 +204,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     // start with '^' reference these.
     var hp_vars: std.StringHashMapUnmanaged([]const u8) = .{};
     defer hp_vars.deinit(allocator);
-    if (std.mem.indexOfPos(u8, clean, 0, "<replace_passive_effect")) |rv| {
-        const rv_end = std.mem.indexOfPos(u8, clean, rv, "</replace_passive_effect>") orelse clean.len;
+    if (std.mem.findPos(u8, clean, 0, "<replace_passive_effect")) |rv| {
+        const rv_end = std.mem.findPos(u8, clean, rv, "</replace_passive_effect>") orelse clean.len;
         var rpi: usize = rv;
-        while (std.mem.indexOfPos(u8, clean, rpi, "<property")) |ptag| {
+        while (std.mem.findPos(u8, clean, rpi, "<property")) |ptag| {
             rpi = ptag + 9;
             if (ptag >= rv_end) break;
             const pname = xml.attr(clean, ptag, "name") orelse continue;
@@ -218,19 +218,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
 
     var i: usize = 0;
     while (i < clean.len) {
-        const tag = std.mem.indexOfPos(u8, clean, i, "<entity_class") orelse break;
+        const tag = std.mem.findPos(u8, clean, i, "<entity_class") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 12;
             continue;
         };
         const extends = xml.attr(clean, tag, "extends");
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         // self-closing?
         var body_end = gt + 1;
         if (gt > tag and clean[gt - 1] == '/') {
             // empty
         } else {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</entity_class>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</entity_class>") orelse break;
             body_end = close;
         }
         const body = clean[gt + 1 .. body_end];
@@ -243,8 +243,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             // property or passive_effect name="HealthMax"; V3.1.0 ships the
             // passive form). perc_add rows are a spawn-time +/-15% roll that
             // zdtd pins to the base value for deterministic sims.
-            const ptag_prop = std.mem.indexOfPos(u8, body, pi, "<property");
-            const ptag_pass = std.mem.indexOfPos(u8, body, pi, "<passive_effect");
+            const ptag_prop = std.mem.findPos(u8, body, pi, "<property");
+            const ptag_pass = std.mem.findPos(u8, body, pi, "<passive_effect");
             const is_passive = ptag_pass != null and (ptag_prop == null or ptag_pass.? < ptag_prop.?);
             const ptag = if (is_passive) ptag_pass.? else ptag_prop orelse break;
             const pname = xml.attr(body, ptag, "name") orelse {
@@ -317,7 +317,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         var loot = resolveProp(&classes, name, "LootDropEntityClass", 0) orelse
             (resolveProp(&classes, name, "LootListOnDeath", 0) orelse "");
         if (loot.len > 0) {
-            const bag_class = if (std.mem.indexOfScalar(u8, loot, ',')) |ci| loot[0..ci] else loot;
+            const bag_class = if (std.mem.findScalar(u8, loot, ',')) |ci| loot[0..ci] else loot;
             const bag_list = resolveProp(&classes, bag_class, "LootList", 0);
             if (bag_list) |bl| {
                 if (bl.len > 0) loot = bl;
@@ -335,7 +335,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         // MoveSpeedAggro "min, max": take max (night chase). MoveSpeed = shamble.
         var chase: f32 = 0;
         if (resolveProp(&classes, name, "MoveSpeedAggro", 0)) |msa| {
-            const comma = std.mem.indexOfScalar(u8, msa, ',');
+            const comma = std.mem.findScalar(u8, msa, ',');
             const hi = if (comma) |ci| std.mem.trim(u8, msa[ci + 1 ..], " ") else msa;
             if (xml.parseF32(hi)) |f| chase = f;
         }

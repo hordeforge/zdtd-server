@@ -86,8 +86,8 @@ test "zpv2DropName removes matching player record only" {
     try std.testing.expect(dropped.blob != null);
     const out = dropped.blob.?;
     try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, out[4..8], .little));
-    try std.testing.expect(std.mem.indexOf(u8, out, "Alice") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Bob") != null);
+    try std.testing.expect(std.mem.find(u8, out, "Alice") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Bob") != null);
 
     const none = try zpv2DropName(std.testing.allocator, buf[0..o], "Carol");
     try std.testing.expectEqual(@as(u32, 0), none.removed);
@@ -241,7 +241,7 @@ test "players zpv3 restore skips a preceding record's progression tail" {
     writeRec(&buf, &o, "Bot", 9, 555, 42);
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
-    try io_fs.writeFile(std.testing.allocator, zsv, buf[0..o]);
+    try io_fs.writeFile(zsv, buf[0..o]);
 
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -376,8 +376,8 @@ test "evidence JSONL flush writes the ring to a file (P4)" {
     try std.testing.expectEqual(@as(usize, 2), n);
     const read = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(read);
-    try std.testing.expect(std.mem.indexOf(u8, read, "\"det\":\"bounds\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, read, "\"sev\":\"hard\"") != null);
+    try std.testing.expect(std.mem.find(u8, read, "\"det\":\"bounds\"") != null);
+    try std.testing.expect(std.mem.find(u8, read, "\"sev\":\"hard\"") != null);
 }
 
 test "offline init failure restores deterministic sim globals" {
@@ -392,7 +392,7 @@ test "offline init failure restores deterministic sim globals" {
 }
 
 test "offline successful step advances exactly one virtual tick" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_step_clock", 0);
     defer {
         g.deinit();
@@ -405,7 +405,7 @@ test "offline successful step advances exactly one virtual tick" {
 }
 
 test "offline init records default DST run seed" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/dst_run_seed", 0);
     defer {
         g.deinit();
@@ -415,7 +415,7 @@ test "offline init records default DST run seed" {
 }
 
 test "offline steps replay same world_time for same seed" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     // Unique per invocation: concurrent test processes share .zdtd_cfg_cache,
     // so fixed dir names would race on each other's saved clock state.
     const ts = clock.monoNs();
@@ -458,7 +458,7 @@ test "offline steps replay same world_time for same seed" {
 test "ban expiry under virtual wall is seed-stable" {
     // Offline Game enables the virtual clock: wallSeconds must not sample host
     // REALTIME or ban add/expire cannot replay from a seed.
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_ban_wall", 0, .{
         .enable_sample_plugin = false,
     });
@@ -477,7 +477,7 @@ test "ban expiry under virtual wall is seed-stable" {
 }
 
 test "world clock persists across a restart (BM calendar survives)" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/clock_persist";
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
@@ -505,7 +505,7 @@ test "world clock persists across a restart (BM calendar survives)" {
 }
 
 test "setgamepref applies runtime GameStats prefs and broadcasts" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/pref_set_test";
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .enable_sample_plugin = false,
@@ -731,7 +731,7 @@ test "[perf] switches run on the live step path" {
 }
 
 test "power visuals rewrite block meta once per state change" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/power_visuals", 0, .{
         .enable_sample_plugin = false,
     });
@@ -888,10 +888,10 @@ test "sleeper volume groups resolve through the gamestage ladder" {
 }
 
 test "console replies use the stock error and listing shapes" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     // Start from a fresh world: a previous run's persisted vehicles would
     // bloat listents rows past the 8 KiB reply sink and drop the total line.
-    io_fs.removeDirTreeSimple(".zdtd_cfg_cache/admin_stock_shapes");
+    io_fs.removeDirTree(".zdtd_cfg_cache/admin_stock_shapes");
     const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/admin_stock_shapes", 0);
     defer {
         g.deinit();
@@ -923,8 +923,8 @@ test "console replies use the stock error and listing shapes" {
 
     const help = adminRun(g, &sink, "help");
     try std.testing.expect(std.mem.startsWith(u8, help, "*** Generic Console Help ***\n"));
-    try std.testing.expect(std.mem.indexOf(u8, help, "*** List of Commands ***\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, help, " => lists all players\n") != null);
+    try std.testing.expect(std.mem.find(u8, help, "*** List of Commands ***\n") != null);
+    try std.testing.expect(std.mem.find(u8, help, " => lists all players\n") != null);
 
     // `help <topic>` resolves the usage line; an unknown topic gets the same
     // unknown-command reply a bare miss gets.
@@ -942,18 +942,18 @@ test "console replies use the stock error and listing shapes" {
 
     // listents rows carry the stock field order for the seeded zombies.
     const ents = adminRun(g, &sink, "listents");
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", pos=(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", rot=(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, ", lifetime=float.Max, remote=False, dead=False, health=") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ents, "in the game\n") != null);
+    try std.testing.expect(std.mem.find(u8, ents, ", pos=(") != null);
+    try std.testing.expect(std.mem.find(u8, ents, ", rot=(") != null);
+    try std.testing.expect(std.mem.find(u8, ents, ", lifetime=float.Max, remote=False, dead=False, health=") != null);
+    try std.testing.expect(std.mem.find(u8, ents, "in the game\n") != null);
 
     try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "chunkcache"), "Chunks: "));
     try std.testing.expect(std.mem.startsWith(u8, adminRun(g, &sink, "mem"), "Time: "));
-    try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "gg ServerPort"), "GamePref.ServerPort = ") != null);
+    try std.testing.expect(std.mem.find(u8, adminRun(g, &sink, "gg ServerPort"), "GamePref.ServerPort = ") != null);
 }
 
 test "admin, whitelist and ban lists persist across a restart" {
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/admin_lists_persist";
     var sink: [8192]u8 = undefined;
     {
@@ -982,11 +982,11 @@ test "admin, whitelist and ban lists persist across a restart" {
             std.testing.allocator.destroy(g);
         }
         const admins = adminRun(g, &sink, "admin list");
-        try std.testing.expect(std.mem.indexOf(u8, admins, "0: Alice (stored name: Alice)\n") != null);
-        try std.testing.expect(std.mem.indexOf(u8, adminRun(g, &sink, "whitelist list"), "  Bob (stored name: Bob)\n") != null);
+        try std.testing.expect(std.mem.find(u8, admins, "0: Alice (stored name: Alice)\n") != null);
+        try std.testing.expect(std.mem.find(u8, adminRun(g, &sink, "whitelist list"), "  Bob (stored name: Bob)\n") != null);
         const bans = adminRun(g, &sink, "ban list");
-        try std.testing.expect(std.mem.indexOf(u8, bans, "Carol) - rude\n") != null);
-        try std.testing.expect(std.mem.indexOf(u8, bans, "Dave") == null);
+        try std.testing.expect(std.mem.find(u8, bans, "Carol) - rude\n") != null);
+        try std.testing.expect(std.mem.find(u8, bans, "Dave") == null);
 
         try std.testing.expectEqualStrings(
             "Carol removed from ban list.\n",
@@ -1229,8 +1229,8 @@ test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
 test "trader POIs spawn their NPC classes on a stock map" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";
-    if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_traders", 0, .{
         .map_dir = map,
         .game_dir = game_dir,
@@ -1256,8 +1256,8 @@ test "trader POIs spawn their NPC classes on a stock map" {
 test "POI reset restores baked blocks over player edits" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";
-    if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     var g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_reset", 0, .{
         .map_dir = map,
         .game_dir = game_dir,
@@ -1306,8 +1306,8 @@ test "POI reset restores baked blocks over player edits" {
 test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";
-    if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/biome_spawn_groups", 0, .{
         .map_dir = map,
         .game_dir = game_dir,
@@ -1353,7 +1353,7 @@ test "per-trader stock and hours come from trader_info + npc.xml" {
     const tt = assets_traders.loadFromPath(std.testing.allocator, traders_path) catch return error.SkipZigTest;
     const nt = assets_npc.loadFromPath(std.testing.allocator, npc_path) catch return error.SkipZigTest;
 
-    io_fs.mkdirPathSimple(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/trader_info_stock", 0, .{});
     defer {
         g.deinit();

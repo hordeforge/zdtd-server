@@ -194,7 +194,7 @@ fn parseBoolAttr(s: []const u8, default: bool) bool {
 }
 
 fn firstF32(s: []const u8) f32 {
-    const comma = std.mem.indexOfScalar(u8, s, ',') orelse s.len;
+    const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
     return std.fmt.parseFloat(f32, std.mem.trim(u8, s[0..comma], " \t")) catch 0;
 }
 
@@ -229,28 +229,28 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
     var i: usize = 0;
     while (i < clean.len and metas.items.len < max_buffs) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<buff ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<buff ") orelse break;
         const name = xml.attr(clean, bi, "name") orelse {
             i = bi + 6;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
         var body_end = gt + 1;
         if (!(gt > bi and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</buff>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</buff>") orelse break;
             body_end = close;
         }
         const body = clean[gt + 1 .. body_end];
         var meta: BuffDef = .{ .name = try arena.dupe(u8, name) };
         if (xml.attr(clean, bi, "duration")) |d| {
             meta.duration = std.fmt.parseFloat(f32, d) catch 0;
-        } else if (std.mem.indexOf(u8, body, "<duration")) |di| {
+        } else if (std.mem.find(u8, body, "<duration")) |di| {
             if (xml.attr(body, di, "value")) |v| meta.duration = std.fmt.parseFloat(f32, v) catch 0;
         }
-        if (std.mem.indexOf(u8, body, "<stack_type")) |si| {
+        if (std.mem.find(u8, body, "<stack_type")) |si| {
             if (xml.attr(body, si, "value")) |v| meta.stack_type = parseStackType(v);
         }
-        if (std.mem.indexOf(u8, body, "<update_rate")) |ui| {
+        if (std.mem.find(u8, body, "<update_rate")) |ui| {
             if (xml.attr(body, ui, "value")) |v| meta.update_rate_ticks = parseUpdateRateTicks(v);
         }
         if (xml.attr(clean, bi, "remove_on_death")) |v| meta.remove_on_death = parseBoolAttr(v, true);
@@ -258,10 +258,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         var mj: usize = 0;
         var mn: usize = 0;
         while (mj < body.len and mn < max_stat_mods_per_buff and mods_list.items.len < max_stat_mods_total) {
-            const ti = std.mem.indexOfPos(u8, body, mj, "action=\"ModifyStats\"") orelse break;
+            const ti = std.mem.findPos(u8, body, mj, "action=\"ModifyStats\"") orelse break;
             mj = ti + 20;
             // Attributes sit on the same tag, so scan from the tag open.
-            const tag = std.mem.lastIndexOfScalar(u8, body[0..ti], '<') orelse continue;
+            const tag = std.mem.findScalarLast(u8, body[0..ti], '<') orelse continue;
             const st = xml.attr(body, tag, "stat") orelse continue;
             const op_s = xml.attr(body, tag, "operation") orelse "add";
             const val_s = xml.attr(body, tag, "value") orelse "0";
@@ -277,14 +277,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         var tj: usize = 0;
         var tn: usize = 0;
         while (tj < body.len and tn < max_thresholds_per_buff and thresholds_list.items.len < max_thresholds_total) {
-            const ri = std.mem.indexOfPos(u8, body, tj, "StatComparePercCurrentToMax") orelse break;
+            const ri = std.mem.findPos(u8, body, tj, "StatComparePercCurrentToMax") orelse break;
             tj = ri + 27;
-            const tag = std.mem.lastIndexOfScalar(u8, body[0..ri], '<') orelse continue;
+            const tag = std.mem.findScalarLast(u8, body[0..ri], '<') orelse continue;
             const st = xml.attr(body, tag, "stat") orelse continue;
             const val_s = xml.attr(body, tag, "value") orelse continue;
             // The gated buff is the AddBuff on the enclosing triggered_effect,
             // which opens before this requirement.
-            const te = std.mem.lastIndexOf(u8, body[0..ri], "<triggered_effect") orelse continue;
+            const te = std.mem.findLast(u8, body[0..ri], "<triggered_effect") orelse continue;
             const gated = xml.attr(body, te, "buff") orelse "";
             try thresholds_list.append(allocator, .{
                 .buff = try arena.dupe(u8, gated),
@@ -298,7 +298,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         var j: usize = 0;
         var pn: usize = 0;
         while (j < body.len and pn < max_passives_per_buff and passives_list.items.len < max_passives_total) {
-            const pi = std.mem.indexOfPos(u8, body, j, "<passive_effect ") orelse break;
+            const pi = std.mem.findPos(u8, body, j, "<passive_effect ") orelse break;
             const en = xml.attr(body, pi, "name") orelse {
                 j = pi + 16;
                 continue;
@@ -406,9 +406,9 @@ pub fn survival(t: *const Table) Survival {
                 2
             else
                 continue;
-            if (eqIgnoreCase(th.stat, "Food") and std.mem.indexOf(u8, th.buff, "Hungry") != null) {
+            if (eqIgnoreCase(th.stat, "Food") and std.mem.find(u8, th.buff, "Hungry") != null) {
                 out.hungry_frac[stage] = th.value;
-            } else if (eqIgnoreCase(th.stat, "Water") and std.mem.indexOf(u8, th.buff, "Thirsty") != null) {
+            } else if (eqIgnoreCase(th.stat, "Water") and std.mem.find(u8, th.buff, "Thirsty") != null) {
                 out.thirsty_frac[stage] = th.value;
             }
         }
@@ -483,9 +483,9 @@ test "parsed buff fields: stack, duration, update rate, remove_on_death" {
         \\</buffs>
     ;
     const path = "worlds/zdtd_buffs_parse.xml";
-    io_fs.mkdirPathSimple("worlds");
-    try io_fs.writeFileSimple(path, xml_src);
-    defer io_fs.deleteFileSimple(path);
+    io_fs.mkdirPath("worlds");
+    try io_fs.writeFile(path, xml_src);
+    defer io_fs.deleteFile(path);
 
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

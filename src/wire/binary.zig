@@ -106,7 +106,7 @@ pub const Writer = struct {
     }
 
     pub fn writeBool(self: *Writer, v: bool) error{Overflow}!void {
-        try self.writeByte(if (v) 1 else 0);
+        try self.writeByte(@intFromBool(v));
     }
 
     fn writeInt(self: *Writer, comptime T: type, v: T) error{Overflow}!void {

@@ -341,7 +341,7 @@ fn itemActionClassIs(body: []const u8, want: []const u8) bool {
     // Prefer nested <property class="Action0"> ... Class=Eat
     var i: usize = 0;
     while (i < body.len) {
-        const pi = std.mem.indexOfPos(u8, body, i, "<property") orelse break;
+        const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
         const cn = xml.attr(body, pi, "class") orelse {
             i = pi + 9;
             continue;
@@ -366,8 +366,8 @@ fn itemActionClassIs(body: []const u8, want: []const u8) bool {
 fn firstCvarAdd(body: []const u8, cvar: []const u8) ?f32 {
     var i: usize = 0;
     while (i < body.len) {
-        const ti = std.mem.indexOfPos(u8, body, i, "triggered_effect") orelse break;
-        const end = std.mem.indexOfPos(u8, body, ti, "/>") orelse (std.mem.indexOfPos(u8, body, ti, ">") orelse break);
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
         const win = body[ti .. end + 2];
         const cv = xml.attr(win, 0, "cvar") orelse {
             i = ti + 10;
@@ -485,7 +485,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
     while (i < clean.len and stock_names.items.len < max_items) {
-        const ii = std.mem.indexOfPos(u8, clean, i, "<item ") orelse break;
+        const ii = std.mem.findPos(u8, clean, i, "<item ") orelse break;
         const name = xml.attr(clean, ii, "name") orelse {
             i = ii + 6;
             continue;
@@ -499,7 +499,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         }
         if (!exists) {
             // Stacknumber + EconomicValue from this item's property block.
-            const item_end = std.mem.indexOfPos(u8, clean, ii + 6, "<item ") orelse clean.len;
+            const item_end = std.mem.findPos(u8, clean, ii + 6, "<item ") orelse clean.len;
             const stack_own = xml.propertyValue(clean[ii..item_end], "Stacknumber");
             var stack: u16 = stock_default_stack;
             if (stack_own) |v| {
@@ -542,7 +542,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (xml.propertyValue(body, "DistractionTags")) |v| {
                 var t = v;
                 while (t.len > 0) {
-                    const comma = std.mem.indexOfScalar(u8, t, ',') orelse t.len;
+                    const comma = std.mem.findScalar(u8, t, ',') orelse t.len;
                     const tag = t[0..comma];
                     if (std.mem.eql(u8, tag, "eat")) dtags |= 1;
                     if (std.mem.eql(u8, tag, "requires_contact")) dtags |= 2;
@@ -727,7 +727,7 @@ test "DistractionTags + Distraction* effects parse (stock decoy shape)" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
-    try io_fs.writeFileSimple(path, "<items>\n" ++
+    try io_fs.writeFile(path, "<items>\n" ++
         "  <item name=\"resourceRockDecoy\">\n" ++
         "    <property name=\"ThrowableDecoy\" value=\"true\"/>\n" ++
         "    <property name=\"DistractionTags\" value=\"zombie,requires_contact\"/>\n" ++

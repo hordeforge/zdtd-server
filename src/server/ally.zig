@@ -211,7 +211,7 @@ pub const Store = struct {
             save_count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], save_count, .little);
-        try io_fs.writeFile(allocator, path, buf[0..o]);
+        try io_fs.writeFile(path, buf[0..o]);
     }
 
     /// Restore allies from `{dir}/allies.zal`. A missing file is a fresh
@@ -344,7 +344,7 @@ test "ally store persists across restart (allies.zal)" {
     // Corrupt file fails closed, not silently empty.
     var bad_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const bad_path = try std.fmt.bufPrint(&bad_path_buf, "{s}/allies.zal", .{dir});
-    try io_fs.writeFileSimple(bad_path, "ZAL1\x00\x01\xff");
+    try io_fs.writeFile(bad_path, "ZAL1\x00\x01\xff");
     var bad: Store = .{};
     try std.testing.expectError(error.ReadFailed, bad.load(dir, std.testing.allocator));
 }

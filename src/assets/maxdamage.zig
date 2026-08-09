@@ -300,7 +300,7 @@ pub const Table = struct {
             // Accept "id\tname", "id name", "name=id"
             var id: u16 = 0;
             var name: []const u8 = "";
-            if (std.mem.indexOfScalar(u8, line, '=')) |eq| {
+            if (std.mem.findScalar(u8, line, '=')) |eq| {
                 name = std.mem.trim(u8, line[0..eq], " \t");
                 const id_s = std.mem.trim(u8, line[eq + 1 ..], " \t");
                 id = std.fmt.parseInt(u16, id_s, 10) catch continue;
@@ -338,15 +338,15 @@ pub const Table = struct {
         const arena = try self.arenaAlloc(allocator);
         var i: usize = 0;
         while (i < clean.len) {
-            const mi = std.mem.indexOfPos(u8, clean, i, "<material ") orelse break;
+            const mi = std.mem.findPos(u8, clean, i, "<material ") orelse break;
             const mid = xml.attr(clean, mi, "id") orelse {
                 i = mi + 10;
                 continue;
             };
-            const gt = std.mem.indexOfPos(u8, clean, mi, ">") orelse break;
+            const gt = std.mem.findPos(u8, clean, mi, ">") orelse break;
             var body_end = gt + 1;
             if (!(gt > mi and clean[gt - 1] == '/')) {
-                const close = std.mem.indexOfPos(u8, clean, gt, "</material>") orelse break;
+                const close = std.mem.findPos(u8, clean, gt, "</material>") orelse break;
                 body_end = close;
             }
             const body = clean[gt + 1 .. body_end];
@@ -384,7 +384,7 @@ pub const Table = struct {
         }
         // zig-out/bin/zdtd → ../../src/assets/… via /proc/self/exe
         var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
-        if (io_fs.readLinkAbsoluteSimple("/proc/self/exe", &exe_buf)) |exe| {
+        if (io_fs.readLinkAbsolute("/proc/self/exe", &exe_buf)) |exe| {
             if (std.fs.path.dirname(exe)) |bin_dir| {
                 if (std.fs.path.dirname(bin_dir)) |out_dir| {
                     if (std.fs.path.dirname(out_dir)) |root| {
@@ -531,15 +531,15 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .{};
     var i: usize = 0;
     while (i < clean.len) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
         const name = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
         var body_end = gt + 1;
         if (!(gt > bi and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</block>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</block>") orelse break;
             body_end = close;
         }
         const body = clean[gt + 1 .. body_end];
@@ -666,9 +666,9 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
         if (paths.override_dirs.len > 0) {
             if (try paths.readConfigXml(allocator, "materials.xml", game_dir, config_dir)) |merged| {
                 defer allocator.free(merged);
-                io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+                io_fs.mkdirPath(".zdtd_cfg_cache");
                 const cp = ".zdtd_cfg_cache/materials.xml";
-                if (io_fs.writeFile(allocator, cp, merged)) |_| {
+                if (io_fs.writeFile(cp, merged)) |_| {
                     mergeMaterialsLogged(&tbl, allocator, cp);
                 } else |err| {
                     std.debug.print("zdtd: materials.xml cache write failed: {s}; using base path\n", .{@errorName(err)});
@@ -766,7 +766,7 @@ test "deco facts follow Extends chains and fail closed" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_deco.xml", .{dir});
-    try io_fs.writeFile(std.testing.allocator, path, xml_src);
+    try io_fs.writeFile(path, xml_src);
 
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();

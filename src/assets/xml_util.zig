@@ -9,7 +9,7 @@ pub fn stripComments(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
     var i: usize = 0;
     while (i < src.len) {
         if (i + 3 < src.len and src[i] == '<' and src[i + 1] == '!' and src[i + 2] == '-' and src[i + 3] == '-') {
-            const end = std.mem.indexOfPos(u8, src, i + 4, "-->") orelse {
+            const end = std.mem.findPos(u8, src, i + 4, "-->") orelse {
                 // Unclosed comment: drop rest.
                 break;
             };
@@ -65,7 +65,7 @@ pub fn attr(hay: []const u8, start: usize, name: []const u8) ?[]const u8 {
 pub fn propertyValue(body: []const u8, name: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < body.len) {
-        const pi = std.mem.indexOfPos(u8, body, i, "<property") orelse break;
+        const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
         const name_v = attr(body, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -84,7 +84,7 @@ pub fn propertyValue(body: []const u8, name: []const u8) ?[]const u8 {
 pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < body.len) {
-        const pi = std.mem.indexOfPos(u8, body, i, "<passive_effect") orelse break;
+        const pi = std.mem.findPos(u8, body, i, "<passive_effect") orelse break;
         const name_v = attr(body, pi, "name") orelse {
             i = pi + 15;
             continue;
@@ -155,8 +155,8 @@ pub fn nextElement(
     comptime open_prefix: []const u8,
     comptime close_tag: []const u8,
 ) ?Element {
-    const open_at = std.mem.indexOfPos(u8, hay, start, open_prefix) orelse return null;
-    const gt = std.mem.indexOfPos(u8, hay, open_at, ">") orelse return null;
+    const open_at = std.mem.findPos(u8, hay, start, open_prefix) orelse return null;
+    const gt = std.mem.findPos(u8, hay, open_at, ">") orelse return null;
     if (gt > open_at and hay[gt - 1] == '/') {
         return .{
             .open_at = open_at,
@@ -164,7 +164,7 @@ pub fn nextElement(
             .next_i = gt + 1,
         };
     }
-    const close = std.mem.indexOfPos(u8, hay, gt, close_tag) orelse return null;
+    const close = std.mem.findPos(u8, hay, gt, close_tag) orelse return null;
     return .{
         .open_at = open_at,
         .body = hay[gt + 1 .. close],
@@ -181,14 +181,14 @@ test "strip comments removes doc block" {
     ;
     const clean = try stripComments(std.testing.allocator, src);
     defer std.testing.allocator.free(clean);
-    try std.testing.expect(std.mem.indexOf(u8, clean, "bogus") == null);
-    try std.testing.expect(std.mem.indexOf(u8, clean, "starter_quest") != null);
+    try std.testing.expect(std.mem.find(u8, clean, "bogus") == null);
+    try std.testing.expect(std.mem.find(u8, clean, "starter_quest") != null);
 }
 
 test "attr and propertyValue" {
     const s = "<quest id=\"tier1_clear\" difficulty=\"1\"><property name=\"name_key\" value=\"quest_tier1_clear\"/></quest>";
     try std.testing.expectEqualStrings("tier1_clear", attr(s, 0, "id").?);
-    const body_start = std.mem.indexOf(u8, s, ">").? + 1;
+    const body_start = std.mem.find(u8, s, ">").? + 1;
     try std.testing.expectEqualStrings("quest_tier1_clear", propertyValue(s[body_start..], "name_key").?);
 }
 

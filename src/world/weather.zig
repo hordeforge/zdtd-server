@@ -351,7 +351,7 @@ pub const Manager = struct {
             buf[o + 1] = st.group_index;
             buf[o + 2] = st.remaining_seconds;
             buf[o + 3] = st.storm_state;
-            buf[o + 4] = if (st.storm_world_time != null) 1 else 0;
+            buf[o + 4] = @intFromBool(st.storm_world_time != null);
             std.mem.writeInt(i64, buf[o + 5 ..][0..8], st.storm_world_time orelse 0, .little);
             std.mem.writeInt(i64, buf[o + 13 ..][0..8], st.storm_duration, .little);
             std.mem.writeInt(i64, buf[o + 21 ..][0..8], st.next_rand_world_time, .little);
@@ -363,7 +363,7 @@ pub const Manager = struct {
         }
         std.mem.writeInt(u32, buf[o..][0..4], self.rand.state, .little);
         std.mem.writeInt(i64, buf[o + 4 ..][0..8], self.last_update_world_time, .little);
-        buf[o + 12] = if (self.blood_moon_forced) 1 else 0;
+        buf[o + 12] = @intFromBool(self.blood_moon_forced);
         return buf[0 .. o + 13];
     }
 

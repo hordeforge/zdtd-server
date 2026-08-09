@@ -603,7 +603,7 @@ test "gameStageBornAtWorldTime rides the same offset as the -1 sentinel" {
     const set = try buildPlayerIdBodyInvLoaded(&b, 171, 0, 4, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, born);
     // Only the eight bytes of the field change; the body must not resize.
     try std.testing.expectEqual(dflt.len, set.len);
-    const off = std.mem.indexOf(u8, dflt, &@as([8]u8, @bitCast(game_stage_born_unset))) orelse
+    const off = std.mem.find(u8, dflt, &@as([8]u8, @bitCast(game_stage_born_unset))) orelse
         return error.SentinelNotFound;
     try std.testing.expectEqual(born, std.mem.readInt(u64, set[off..][0..8], .little));
     var i: usize = 0;
@@ -1691,7 +1691,7 @@ pub fn parseInvTxRequest(body: []const u8) !struct { op: u8, a: u16, b: u16, qty
 /// Response: ok:u8 | dropped_entity:i32 | then optional inventory snap (caller appends).
 pub fn buildInvTxResponseHead(buf: []u8, ok: bool, dropped_entity: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(if (ok) 1 else 0);
+    try w.writeByte(@intFromBool(ok));
     try w.writeI32(dropped_entity);
     return w.written();
 }

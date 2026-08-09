@@ -91,15 +91,15 @@ pub const Table = struct {
         defer allocator.free(clean);
         var i: usize = 0;
         while (i < clean.len) {
-            const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
+            const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
             const name = xml.attr(clean, bi, "name") orelse {
                 i = bi + 7;
                 continue;
             };
-            const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
+            const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
             var body_end = gt + 1;
             if (!(gt > bi and clean[gt - 1] == '/')) {
-                const close = std.mem.indexOfPos(u8, clean, gt, "</block>") orelse break;
+                const close = std.mem.findPos(u8, clean, gt, "</block>") orelse break;
                 body_end = close;
             }
             const body = clean[gt + 1 .. body_end];
@@ -136,9 +136,9 @@ pub fn tryLoad(
         if (paths.override_dirs.len > 0) {
             if (try paths.readConfigXml(allocator, "blocks.xml", game_dir, config_dir)) |merged| {
                 defer allocator.free(merged);
-                io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+                io_fs.mkdirPath(".zdtd_cfg_cache");
                 const cp = ".zdtd_cfg_cache/blocks.xml";
-                if (io_fs.writeFile(allocator, cp, merged)) |_| {
+                if (io_fs.writeFile(cp, merged)) |_| {
                     break :blk cp;
                 } else |_| {}
             }

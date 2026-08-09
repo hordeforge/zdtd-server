@@ -436,7 +436,7 @@ pub const World = struct {
     sync_fallbacks: std.atomic.Value(u64) = .init(0),
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
-        io_fs.mkdirPath(allocator, world_dir);
+        io_fs.mkdirPath(world_dir);
         return .{
             .chunks = std.AutoHashMap(u64, Chunk).init(allocator),
             .world_dir = try allocator.dupe(u8, world_dir),
@@ -534,7 +534,7 @@ pub const World = struct {
         defer if (owned_prefab_root) |r| self.allocator.free(r);
         const prefab_root: ?[]const u8 = blk: {
             if (prefabs_data_dir) |p| break :blk p;
-            if (std.mem.lastIndexOfScalar(u8, map_dir, '/')) |slash| {
+            if (std.mem.findScalarLast(u8, map_dir, '/')) |slash| {
                 const worlds = map_dir[0..slash];
                 if (std.mem.endsWith(u8, worlds, "/Worlds") or std.mem.endsWith(u8, worlds, "\\Worlds")) {
                     const data = worlds[0 .. worlds.len - "/Worlds".len];
@@ -839,9 +839,9 @@ pub const World = struct {
         hdr[3] = '3';
         std.mem.writeInt(i32, hdr[4..8], c.pos.x, .little);
         std.mem.writeInt(i32, hdr[8..12], c.pos.z, .little);
-        hdr[12] = if (has_blocks) 1 else 0;
-        hdr[13] = if (has_textures) 1 else 0;
-        hdr[14] = if (has_densities) 1 else 0;
+        hdr[12] = @intFromBool(has_blocks);
+        hdr[13] = @intFromBool(has_textures);
+        hdr[14] = @intFromBool(has_densities);
         hdr[15] = 0;
         var total: usize = hdr.len + c.heights.len;
         if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
@@ -889,19 +889,19 @@ pub const World = struct {
         if (self.asyncEnabled()) {
             const owned_path = io_a.dupe(u8, path) catch {
                 defer io_a.free(payload);
-                return io_fs.writeFile(io_a, path, payload);
+                return io_fs.writeFile(path, payload);
             };
             self.flush.submit(c.pos.hash(), owned_path, payload) catch {
                 // Queue full or shut down: write inline rather than drop.
                 defer io_a.free(owned_path);
                 defer io_a.free(payload);
                 _ = self.sync_fallbacks.fetchAdd(1, .monotonic);
-                return io_fs.writeFile(io_a, path, payload);
+                return io_fs.writeFile(path, payload);
             };
             return;
         }
         defer io_a.free(payload);
-        try io_fs.writeFile(io_a, path, payload);
+        try io_fs.writeFile(path, payload);
     }
 
     /// Block until nothing is queued or in flight for this world's chunks.
@@ -1273,7 +1273,7 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
     @memcpy(torn[0..4], "ZCH3");
     torn[12] = 1; // Claims a block plane that is not present.
     @memset(torn[16..], 200);
-    try io_fs.writeFileSimple(path, &torn);
+    try io_fs.writeFile(path, &torn);
 
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -1284,23 +1284,23 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
     // The filename is not identity: embedded coordinates must agree too.
     std.mem.writeInt(i32, torn[4..8], 7, .little);
     torn[12] = 0;
-    try io_fs.writeFileSimple(path, &torn);
+    try io_fs.writeFile(path, &torn);
     var direct = Chunk.generateFlat(.{ .x = 0, .z = 0 });
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
     try std.testing.expectEqual(@as(u16, sea_level), direct.heightAt(0, 0));
 
     @memcpy(torn[0..4], "NOPE");
     std.mem.writeInt(i32, torn[4..8], 0, .little);
-    try io_fs.writeFileSimple(path, &torn);
+    try io_fs.writeFile(path, &torn);
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
 }
 
 test "stock map heights via DTM if Navezgane present" {
     const map = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
-    if (!io_fs.dirExistsSimple(map)) return error.SkipZigTest;
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
 
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple("worlds/zdtd_navezgane_test");
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath("worlds/zdtd_navezgane_test");
     var w = try World.init(std.testing.allocator, "worlds/zdtd_navezgane_test");
     defer w.deinit();
     try w.loadStockMap(map);
@@ -1414,7 +1414,7 @@ test "navezgane spawn chunk carries its POI blocks" {
     // The stock client saw only terrain where abandoned_house_07 stands, so the
     // POI must survive the whole store path, not just the prefab index.
     const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
-    if (!io_fs.fileExistsSimple(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
 
     var w = try World.init(std.testing.allocator, "worlds/zdtd_poi_test");
     defer w.deinit();
@@ -1438,7 +1438,7 @@ test "navezgane heights agree with the blocks in the same column" {
     // held it several blocks above the terrain top, which is what a heights
     // plane that disagrees with the painted blocks looks like.
     const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
-    if (!io_fs.fileExistsSimple(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
 
     var w = try World.init(std.testing.allocator, "worlds/zdtd_height_test");
     defer w.deinit();

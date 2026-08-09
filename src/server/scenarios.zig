@@ -27,12 +27,12 @@ const assets_traders = @import("../assets/traders.zig");
 /// accumulated enough across runs to exhaust the entity table (join failure)
 /// and bloat listents replies. Wipe the dir before each scenario seeds it.
 fn freshScenarioDir(dir: []const u8) void {
-    io_fs.removeDirTreeSimple(dir);
-    io_fs.mkdirPathSimple(dir);
+    io_fs.removeDirTree(dir);
+    io_fs.mkdirPath(dir);
 }
 
 test "scenario two-peer motion: B receives A PosAndRot" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_motion");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -84,7 +84,7 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     // Players must see each other: the joiner receives every other player as
     // EntitySpawn (player class + name), and a disconnect broadcasts
     // EntityRemove(Despawned) so no ghost body stays on the other client.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_players");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -177,7 +177,7 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
 }
 
 test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_relpos");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -376,7 +376,7 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
 }
 
 test "scenario setblock: peer B receives SetBlock after A edit" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_block");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -439,7 +439,7 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
 }
 
 test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_disconnect");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -466,7 +466,7 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
 }
 
 test "scenario SetBlock lower damage repairs instead of adding" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_repair");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -496,7 +496,7 @@ test "scenario SetBlock lower damage repairs instead of adding" {
 }
 
 test "scenario hammer upgrade validates the UpgradeBlock target" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_upgrade");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -543,7 +543,7 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
 }
 
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_switch");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -598,7 +598,7 @@ test "scenario power switch: meta flip gates the grid and keeps the meta on the 
 }
 
 test "scenario powered trigger TE: malformed body leaves containers alone" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_trigger");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -690,12 +690,12 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
 const navezgane_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
 
 fn stockMapPresent() bool {
-    return io_fs.dirExistsSimple(navezgane_path) or io_fs.fileExistsSimple(navezgane_path);
+    return io_fs.dirExists(navezgane_path) or io_fs.fileExists(navezgane_path);
 }
 
 test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
     if (!stockMapPresent()) return error.SkipZigTest;
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_stockmap");
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -790,8 +790,8 @@ test "scenario synthetic DTM fixture always runs" {
     const map_dir = try std.fmt.bufPrint(&map_buf, "{s}/map", .{root});
     var save_buf: [std.fs.max_path_bytes]u8 = undefined;
     const save_dir = try std.fmt.bufPrint(&save_buf, "{s}/save", .{root});
-    io_fs.mkdirPathSimple(map_dir);
-    io_fs.mkdirPathSimple(save_dir);
+    io_fs.mkdirPath(map_dir);
+    io_fs.mkdirPath(save_dir);
     try writeFixtureMap(map_dir);
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -1074,7 +1074,7 @@ test "scenario quest accept kill complete and trader buy" {
 }
 
 test "scenario vending machine opens via LockRequest with TraderData" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_vending");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1188,10 +1188,10 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     const tdir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var tpath_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tpath = try std.fmt.bufPrint(&tpath_buf, "{s}/traders_close.xml", .{tdir});
-    try io_fs.writeFile(std.testing.allocator, tpath, tsrc);
+    try io_fs.writeFile(tpath, tsrc);
     const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
 
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_traders_close");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1251,7 +1251,7 @@ test "scenario trader close cycle force-unlocks the trade channel" {
 }
 
 test "scenario blood moon parties pool nearby players into one horde" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_bmparty");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1315,7 +1315,7 @@ test "scenario blood moon parties pool nearby players into one horde" {
 }
 
 test "party highest game stage feeds the director (max, not party level)" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_gsmax");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1348,7 +1348,7 @@ test "party highest game stage feeds the director (max, not party level)" {
 }
 
 test "scenario trader RemoveQuest accepts and drops the quest from offers" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_qaccept");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1789,7 +1789,7 @@ test "scenario vehicle enter drive and turret kills with power" {
 }
 
 test "scenario pressure plate trigger pulse powers wired load" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_trig");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1831,7 +1831,7 @@ test "scenario pressure plate trigger pulse powers wired load" {
 }
 
 test "scenario inventory move drop place equip" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_inv");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1971,7 +1971,7 @@ test "scenario inventory move drop place equip" {
 }
 
 test "scenario aidirector night spawn" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_dir");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1996,7 +1996,7 @@ test "scenario aidirector night spawn" {
 }
 
 test "scenario weather storm cycle and blood moon override" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_weather");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2091,7 +2091,7 @@ test "scenario weather storm cycle and blood moon override" {
 }
 
 test "scenario console storm commands force and clear the storm" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_stormcmd");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2141,7 +2141,7 @@ test "scenario console storm commands force and clear the storm" {
 }
 
 test "scenario craft invtx + explosion dig + lock deny" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_craft");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2219,7 +2219,7 @@ test "scenario craft invtx + explosion dig + lock deny" {
 }
 
 test "scenario gas can refuel generator via InvTx place" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_refuel");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2304,7 +2304,7 @@ test "scenario gas can refuel generator via InvTx place" {
 }
 
 test "scenario ItemActionEat via InvTx use applies food and hp" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_eat");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2346,7 +2346,7 @@ test "scenario ItemActionEat via InvTx use applies food and hp" {
 
 test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp" {
     // Stock client path (ADR 0007): DecHoldingItem locally then C2S PlayerInventory.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_eat_pi");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2394,7 +2394,7 @@ test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp"
 }
 
 test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_speedhack");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2444,7 +2444,7 @@ test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });
-    try io_fs.writeFileSimple(path, data);
+    try io_fs.writeFile(path, data);
 }
 
 /// Fire two distinct Strong detectors on one peer: speedhack movement
@@ -2468,7 +2468,7 @@ fn tripTwoStrongSignals(g: *game_mod.Game, c: anytype) !void {
 }
 
 test "scenario guard policy: two distinct strong signals log-only by default" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_guard_log");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2498,7 +2498,7 @@ test "scenario guard policy: two distinct strong signals log-only by default" {
 }
 
 test "scenario guard policy: quarantine denies only the abused surface" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_guard_quar");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2548,7 +2548,7 @@ test "scenario guard policy: quarantine denies only the abused surface" {
 }
 
 test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock geometry" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ws");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2830,7 +2830,7 @@ test "scenario POIStayWithin bounds the stay zone to the quest POI rect" {
 }
 
 test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_unload");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2921,7 +2921,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     // Regression for the "zombies cannot hurt you" gap: server-side melee moved
     // health[].hp and nothing was ever sent, so the victim's client saw no damage,
     // no death screen, and the server-side corpse could not fight back.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_hp_repl");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2988,7 +2988,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
 }
 
 test "scenario ally invite accept and identity spoof reject" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ally");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3081,7 +3081,7 @@ test "scenario ally invite accept and identity spoof reject" {
 }
 
 test "scenario buff add relays to observers and expires on the server clock" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_buff");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3167,7 +3167,7 @@ test "scenario buff add relays to observers and expires on the server clock" {
 }
 
 test "scenario buff rejects unknown names and foreign entities" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_buff_rej");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3230,7 +3230,7 @@ test "scenario buff rejects unknown names and foreign entities" {
 }
 
 test "scenario replace-stack buff re-add restarts instead of duplicating" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_buff_stack");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3291,7 +3291,7 @@ test "scenario replace-stack buff re-add restarts instead of duplicating" {
 }
 
 test "scenario replicate serialize-once: a second viewer costs fan-out, not encodes" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_rep_once");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3351,7 +3351,7 @@ test "scenario replicate serialize-once: a second viewer costs fan-out, not enco
 }
 
 test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_rep_dirty");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3415,7 +3415,7 @@ test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" 
 }
 
 test "scenario multi-seat: driver plus passenger, dismount frees the seat" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_seats");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3537,7 +3537,7 @@ test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel
     // config path (plugin_modules). Hello registers hooks, observes ticks and
     // queues a SimCommand that the sim applies; the looper is cut off by the
     // fuel budget within one tick and the server keeps ticking.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_wasm");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3606,7 +3606,7 @@ test "scenario mode pack rules overlay changes sim behaviour" {
     try std.testing.expectEqual(@as(f32, 42.0), rules.combat.attack_damage);
     try std.testing.expectEqual(@as(f32, 36.0), rules.ai.sense_dist_sq);
 
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_rules");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3773,7 +3773,7 @@ test "scenario vending rent state machine (loot-economy §6)" {
     // TraderInfo.RentCost currency, the term is rent_time in-game days, one
     // machine per player, and an expired rental returns to unowned.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
-    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -3892,7 +3892,7 @@ test "scenario stock NetPackageTraderData ToServer CopyFrom (real-client trade)"
     // entity trader or vending TE; the wire carries no price, so price/sell
     // stay server-owned. This is the real-client buy path (loot-economy §5).
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
-    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -3969,7 +3969,7 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
     // server applies them only for the machine's owner; ownership and the
     // rental term stay server-owned (the rent SM applies them).
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
-    if (!io_fs.dirExistsSimple(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -4084,7 +4084,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
     try std.testing.expectEqualStrings("AAAJABJACJADJARFBNC", g.gameStatsValues().sandbox_code);
     var gs_buf: [1024]u8 = undefined;
     const gs = try packages.buildGameStatsBodyValues(&gs_buf, g.gameStatsValues());
-    try std.testing.expect(std.mem.indexOf(u8, gs, "AAAJABJACJADJARFBNC") != null);
+    try std.testing.expect(std.mem.find(u8, gs, "AAAJABJACJADJARFBNC") != null);
 
     // 0 disables storms (weather-env.md: World.StormFrequency == 0).
     const g2 = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .storm_frequency = 0, .config_dir = "assets/fixtures" });
@@ -4155,14 +4155,14 @@ test "scenario blood moon day re-send fires on the day roll" {
     // GAP §6: a client that joined mid-cycle must get a fresh GameStats blob
     // when the scheduled blood-moon day rolls, or its red-moon HUD day stays
     // stale forever. Force the clock past the first horde and step.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_bmday");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     // The clock now persists (clock.zcl); this scenario deliberately mutates
     // the day, so start from a fresh calendar each run.
-    io_fs.deleteFile(gpa, "worlds/zdtd_sc_bmday/clock.zcl");
+    io_fs.deleteFile("worlds/zdtd_sc_bmday/clock.zcl");
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmday", 0);
     defer {
@@ -4298,7 +4298,7 @@ test "scenario land claims persist across restart and re-map on login" {
 }
 
 test "scenario container loot respawns after LootRespawnDays" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootrespawn");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4357,8 +4357,8 @@ test "scenario container loot respawns after LootRespawnDays" {
 
 test "scenario loot container size comes from the loot.xml size attr" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
-    if (!io_fs.dirExistsSimple(game_dir)) return error.SkipZigTest;
-    io_fs.mkdirPathSimple("worlds");
+    if (!io_fs.dirExists(game_dir)) return error.SkipZigTest;
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootsize");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4409,7 +4409,7 @@ test "scenario trader quest offers follow the trader's class" {
     // lists are parsed but were never selected by trader). Spawn a trader with
     // the rekt class hash and assert its offer list is trader_rekt_quests, not
     // the jen default.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_traders");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4453,9 +4453,9 @@ test "scenario trader quest offers follow the trader's class" {
     try std.testing.expect(count >= 1);
     // The rekt list carries clear_the_noise (not in the jen list), and the
     // QuestPacketEntry quest ids are written as raw strings in the response.
-    try std.testing.expect(std.mem.indexOf(u8, body, "quest_rekt_errand") != null);
+    try std.testing.expect(std.mem.find(u8, body, "quest_rekt_errand") != null);
     // intro_buried_supplies is a stock quest the old quest_/tier filter dropped.
-    try std.testing.expect(std.mem.indexOf(u8, body, "intro_buried_supplies") != null);
+    try std.testing.expect(std.mem.find(u8, body, "intro_buried_supplies") != null);
     // The offer list is filtered by the requested tier (stock DifficultyTier ==
     // tierLevel): a tier-2 fetch must not offer the tier-1 errand.
     cap.clear();
@@ -4471,7 +4471,7 @@ test "scenario block_activated objective event advances the phase" {
     // POIBlockActivate used to be auto-scaffolding (never waited). With the
     // block_activate kind, the phase is real work advanced only by the
     // client's NetPackageQuestObjectiveUpdate block_activated event.
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_blockobj");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4893,7 +4893,7 @@ test "scenario party quest change fans objective deltas to the other members" {
 }
 
 test "scenario trader restock rebuilds the window lazily on open" {
-    io_fs.mkdirPathSimple("worlds");
+    io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_restock");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();

@@ -19,7 +19,7 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
     while (e < stock.n and n < out.len) : (e += 1) {
         const ent = stock.entries[e];
         if (ent.count == 0) continue;
-        const type_id: i32 = Game.resolveItemType(@ptrCast(self), ent.item);
+        const type_id: i32 = Game.resolveItemType(self, ent.item);
         out[n] = .{
             .item = .{ .type_id = type_id, .count = if (ent.count > 0) ent.count else 1, .quality = ent.quality },
             .markup = ent.markup,

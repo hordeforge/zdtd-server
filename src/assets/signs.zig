@@ -87,13 +87,13 @@ fn attrValue(open_tag: []const u8, key: []const u8) ?[]const u8 {
     const needle = needle_buf[0 .. key.len + 2];
     // Anchor on a preceding delimiter: `prob=` must not match `force_prob=`.
     var from: usize = 0;
-    const i = while (std.mem.indexOfPos(u8, open_tag, from, needle)) |k| {
+    const i = while (std.mem.findPos(u8, open_tag, from, needle)) |k| {
         if (k > 0 and (open_tag[k - 1] == ' ' or open_tag[k - 1] == '\t' or
             open_tag[k - 1] == '\n' or open_tag[k - 1] == '\r')) break k;
         from = k + 1;
     } else return null;
     const start = i + needle.len;
-    const end = std.mem.indexOfPos(u8, open_tag, start, "\"") orelse return null;
+    const end = std.mem.findPos(u8, open_tag, start, "\"") orelse return null;
     return open_tag[start..end];
 }
 
@@ -190,8 +190,8 @@ fn parseSignsFile(
     const lib_owned = try arena.dupe(u8, library);
     var i: usize = 0;
     while (i < raw.len and list.items.len < max_signs) {
-        const si = std.mem.indexOfPos(u8, raw, i, "<sign ") orelse break;
-        const gt = std.mem.indexOfPos(u8, raw, si, ">") orelse break;
+        const si = std.mem.findPos(u8, raw, i, "<sign ") orelse break;
+        const gt = std.mem.findPos(u8, raw, si, ">") orelse break;
         const tag = raw[si .. gt + 1];
         i = gt + 1;
 

@@ -89,7 +89,7 @@ fn parseKind(s: ?[]const u8) SpawnKind {
 }
 
 fn lowF32List(s: []const u8) f32 {
-    const comma = std.mem.indexOfScalar(u8, s, ',') orelse s.len;
+    const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
     return std.fmt.parseFloat(f32, s[0..comma]) catch 1.0;
 }
 
@@ -116,19 +116,19 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_rules) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<biome ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<biome ") orelse break;
         const bname = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, clean, gt, "</biome>") orelse break;
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt, "</biome>") orelse break;
         const body = clean[gt + 1 .. close];
         const bn = try arena.dupe(u8, bname);
 
         var j: usize = 0;
         while (j < body.len and list.items.len < max_rules) {
-            const si = std.mem.indexOfPos(u8, body, j, "<spawn ") orelse break;
+            const si = std.mem.findPos(u8, body, j, "<spawn ") orelse break;
             const eg = xml.attr(body, si, "entitygroup") orelse {
                 j = si + 7;
                 continue;
@@ -154,8 +154,8 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
     var spawners: std.ArrayList(Spawner) = .empty;
     defer spawners.deinit(allocator);
     i = 0;
-    while (std.mem.indexOfPos(u8, clean, i, "<entityspawner")) |tag| {
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+    while (std.mem.findPos(u8, clean, i, "<entityspawner")) |tag| {
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = gt + 1;
             continue;
@@ -163,7 +163,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
         var body: []const u8 = "";
         i = gt + 1;
         if (!(gt > tag and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</entityspawner>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</entityspawner>") orelse break;
             body = clean[gt + 1 .. close];
             i = close + 16;
         }
@@ -189,7 +189,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 /// Low bound of a `"1,2"` style property list; 0 when absent or unparsable.
 fn lowU8List(s: ?[]const u8) u8 {
     const v = s orelse return 0;
-    const comma = std.mem.indexOfScalar(u8, v, ',') orelse v.len;
+    const comma = std.mem.findScalar(u8, v, ',') orelse v.len;
     return std.fmt.parseInt(u8, std.mem.trim(u8, v[0..comma], " \t"), 10) catch 0;
 }
 

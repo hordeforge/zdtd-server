@@ -104,5 +104,5 @@ test "ring wraps and dump" {
     var buf: [4096]u8 = undefined;
     const n = r.dumpText(&buf);
     try std.testing.expect(n > 0);
-    try std.testing.expect(std.mem.indexOf(u8, buf[0..n], "\"det\":\"throttle\"") != null);
+    try std.testing.expect(std.mem.find(u8, buf[0..n], "\"det\":\"throttle\"") != null);
 }

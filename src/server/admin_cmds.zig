@@ -421,7 +421,7 @@ pub fn deserializePermissions(list: *PermissionList, text: []const u8) LoadResul
 /// Field separators must never survive into a stored value or the next load
 /// would read a different number of fields than were written.
 fn sanitize(s: []const u8) []const u8 {
-    if (std.mem.indexOfAny(u8, s, "\t\r\n") == null) return s;
+    if (std.mem.findAny(u8, s, "\t\r\n") == null) return s;
     return "-unknown-";
 }
 
@@ -556,10 +556,10 @@ test "help index uses the stock headers and arrow separator" {
     };
     const out = try render(&buf, writeHelp, .{@as([]const HelpEntry, &entries)});
     try std.testing.expect(std.mem.startsWith(u8, out, "*** Generic Console Help ***\n"));
-    try std.testing.expect(std.mem.indexOf(u8, out, "\n*** List of Commands ***\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "listplayers, lp => lists all players\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\n*** List of Commands ***\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "listplayers, lp => lists all players\n") != null);
     // Names are padded to the widest entry so the arrows line up.
-    try std.testing.expect(std.mem.indexOf(u8, out, "mem             => Prints memory information\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "mem             => Prints memory information\n") != null);
 }
 
 test "ban list add, replace, remove and expiry" {
@@ -598,9 +598,9 @@ test "ban list output matches stock header block" {
     var buf: [512]u8 = undefined;
     const out = try render(&buf, writeBanList, .{&l});
     try std.testing.expect(std.mem.startsWith(u8, out, "Ban list entries:\n  Banned until - UserID (name) - Reason\n"));
-    try std.testing.expect(std.mem.indexOf(u8, out, "2023-11-14 22:13:20 - Alice (Alice) - griefing\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "2023-11-14 22:13:20 - Alice (Alice) - griefing\n") != null);
     // Stock prints "-unknown-" where a field is missing, never an empty column.
-    try std.testing.expect(std.mem.indexOf(u8, out, "- Bob (Bob) - -unknown-\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "- Bob (Bob) - -unknown-\n") != null);
 }
 
 test "admin and whitelist listings match stock headers" {

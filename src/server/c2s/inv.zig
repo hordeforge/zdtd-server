@@ -100,7 +100,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (lost > units_left) lost = units_left;
                 var u: u32 = 0;
                 while (u < lost) : (u += 1) {
-                    const props = eatProps(@ptrCast(self), e.id);
+                    const props = eatProps(self, e.id);
                     const r = invsys.applyEatProps(&self.sim, ps, props);
                     if (!r.ate) break;
                     ate_any = true;
@@ -117,7 +117,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (eid != 0 and self.items.isEat(eid)) {
                     var u: u32 = 0;
                     while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), eid);
+                        const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
                         ate_any = true;
@@ -137,7 +137,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (eid != 0 and self.items.isEat(eid)) {
                     var u: u32 = 0;
                     while (u < lost) : (u += 1) {
-                        const props = eatProps(@ptrCast(self), eid);
+                        const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
                         ate_any = true;

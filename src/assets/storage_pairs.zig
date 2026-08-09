@@ -70,7 +70,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_pairs) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
         const bname = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
@@ -79,10 +79,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             i = bi + 7;
             continue;
         }
-        const gt = std.mem.indexOfPos(u8, clean, bi, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
         var body_end = gt + 1;
         if (!(gt > bi and clean[gt - 1] == '/')) {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</block>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</block>") orelse break;
             body_end = close;
         }
         const body = clean[gt + 1 .. body_end];
@@ -90,7 +90,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             i = body_end + 1;
             continue;
         };
-        if (std.mem.indexOf(u8, open, "Open") == null) {
+        if (std.mem.find(u8, open, "Open") == null) {
             i = body_end + 1;
             continue;
         }

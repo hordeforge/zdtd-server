@@ -102,7 +102,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
 
 test "load abandoned_house blocks.nim if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
-    if (!io_fs.fileExistsSimple(p)) return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var m = try loadFromPath(std.testing.allocator, p);
     defer m.deinit();

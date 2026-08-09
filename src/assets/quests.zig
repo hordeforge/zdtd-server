@@ -11,18 +11,14 @@ const quest = @import("../ecs/quest.zig");
 
 pub const max_list_entries: usize = 64;
 
-pub fn fileExists(path: []const u8) bool {
-    return io_fs.fileExistsSimple(path);
-}
-
 /// `…/Data/Worlds/<Name>` → `…/Data/Config/quests.xml`
 pub fn configPathFromMapDir(map_dir: []const u8, buf: []u8) ?[]const u8 {
     const marker = "/Worlds/";
-    if (std.mem.lastIndexOf(u8, map_dir, marker)) |wi| {
+    if (std.mem.findLast(u8, map_dir, marker)) |wi| {
         return std.fmt.bufPrint(buf, "{s}/Config/quests.xml", .{map_dir[0..wi]}) catch null;
     }
     const m2 = "Worlds/";
-    if (std.mem.lastIndexOf(u8, map_dir, m2)) |w2| {
+    if (std.mem.findLast(u8, map_dir, m2)) |w2| {
         if (w2 == 0) return null;
         // strip trailing path segment parent: map_dir[0..w2] may end without slash
         const data = if (map_dir[w2 - 1] == '/') map_dir[0 .. w2 - 1] else map_dir[0..w2];
@@ -106,9 +102,9 @@ fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind 
 
 /// Extent (exclusive end) of the `<objective …>` element starting at `oi`.
 fn objectiveElementEnd(body: []const u8, oi: usize) usize {
-    const tag_end = std.mem.indexOfPos(u8, body, oi, ">") orelse return body.len;
+    const tag_end = std.mem.findPos(u8, body, oi, ">") orelse return body.len;
     if (tag_end > oi and body[tag_end - 1] == '/') return tag_end + 1;
-    if (std.mem.indexOfPos(u8, body, tag_end, "</objective>")) |cl| return cl + "</objective>".len;
+    if (std.mem.findPos(u8, body, tag_end, "</objective>")) |cl| return cl + "</objective>".len;
     return tag_end + 1;
 }
 
@@ -166,7 +162,7 @@ fn pickPrimaryKind(body: []const u8) struct { kind: quest.QuestKind, target: u16
 
     var i: usize = 0;
     while (i < body.len) {
-        const oi = std.mem.indexOfPos(u8, body, i, "<objective") orelse break;
+        const oi = std.mem.findPos(u8, body, i, "<objective") orelse break;
         const typ = xml.attr(body, oi, "type") orelse {
             i = oi + 10;
             continue;
@@ -217,7 +213,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
 
     var i: usize = 0;
     while (i < body.len and n < objs.len) {
-        const oi = std.mem.indexOfPos(u8, body, i, "<objective") orelse break;
+        const oi = std.mem.findPos(u8, body, i, "<objective") orelse break;
         const elem_end = objectiveElementEnd(body, oi);
         i = oi + "<objective".len;
         const typ = xml.attr(body, oi, "type") orelse continue;
@@ -271,8 +267,8 @@ fn sumCoinReward(body: []const u8) u32 {
     var total: u32 = 0;
     var i: usize = 0;
     while (i < body.len) {
-        const ri = std.mem.indexOfPos(u8, body, i, "<reward") orelse break;
-        const gt = std.mem.indexOfPos(u8, body, ri, ">") orelse break;
+        const ri = std.mem.findPos(u8, body, i, "<reward") orelse break;
+        const gt = std.mem.findPos(u8, body, ri, ">") orelse break;
         const open = body[ri .. gt + 1];
         const typ = xml.attr(open, 0, "type") orelse {
             i = gt + 1;
@@ -382,7 +378,7 @@ fn countTags(body: []const u8, tag: []const u8) u8 {
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len) {
-        const at = std.mem.indexOfPos(u8, body, i, tag) orelse break;
+        const at = std.mem.findPos(u8, body, i, tag) orelse break;
         n +%= 1;
         i = at + tag.len;
         if (n == 255) break;
@@ -395,8 +391,8 @@ fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[ques
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len and n < quest.max_reward_flags) {
-        const at = std.mem.indexOfPos(u8, body, i, "<reward") orelse break;
-        const gt = std.mem.indexOfPos(u8, body, at, ">") orelse break;
+        const at = std.mem.findPos(u8, body, i, "<reward") orelse break;
+        const gt = std.mem.findPos(u8, body, at, ">") orelse break;
         const open = body[at .. gt + 1];
         const typ = xml.attr(open, 0, "type") orelse "";
         var spec: quest.RewardSpec = .{};
@@ -438,8 +434,8 @@ fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_act
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len and n < quest.max_actions) {
-        const at = std.mem.indexOfPos(u8, body, i, "<action") orelse break;
-        const gt = std.mem.indexOfPos(u8, body, at, ">") orelse break;
+        const at = std.mem.findPos(u8, body, i, "<action") orelse break;
+        const gt = std.mem.findPos(u8, body, at, ">") orelse break;
         const open = body[at .. gt + 1];
         const typ = xml.attr(open, 0, "type") orelse "";
         var spec: quest.QuestActionSpec = .{};
@@ -457,7 +453,7 @@ fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_act
             spec.kind = .other;
         }
         // Inner <property name= value=> pairs until the matching </action>.
-        const close = std.mem.indexOfPos(u8, body, gt, "</action>") orelse (gt + 1);
+        const close = std.mem.findPos(u8, body, gt, "</action>") orelse (gt + 1);
         const inner = body[gt + 1 .. close];
         if (xml.propertyValue(inner, "phase")) |p| spec.phase = xml.parseU8(p) orelse 0;
         if (xml.propertyValue(inner, "cvar")) |c| spec.name = arena.dupe(u8, c) catch "";
@@ -488,7 +484,7 @@ fn parseVariables(body: []const u8, out: *[max_quest_vars]QuestVar) u8 {
     var n: u8 = 0;
     var i: usize = 0;
     while (i < body.len) {
-        const vi = std.mem.indexOfPos(u8, body, i, "<variable") orelse break;
+        const vi = std.mem.findPos(u8, body, i, "<variable") orelse break;
         const name = xml.attr(body, vi, "name") orelse {
             i = vi + 9;
             continue;
@@ -522,7 +518,7 @@ fn parseVariables(body: []const u8, out: *[max_quest_vars]QuestVar) u8 {
 fn resolveDifficultyTier(body: []const u8, vars: []const QuestVar) u8 {
     var i: usize = 0;
     while (i < body.len) {
-        const pi = std.mem.indexOfPos(u8, body, i, "<property") orelse break;
+        const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
         const pn = xml.attr(body, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -557,7 +553,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     var starter_name: []const u8 = try dupe(arena, "quest_whiteRiverCitizen1");
     var max_tier: u8 = 6;
     var qpt: u8 = 10;
-    if (std.mem.indexOf(u8, clean, "<quests")) |qi| {
+    if (std.mem.find(u8, clean, "<quests")) |qi| {
         if (xml.attr(clean, qi, "starter_quest")) |s| starter_name = try dupe(arena, s);
         if (xml.attr(clean, qi, "max_quest_tier")) |s| max_tier = xml.parseU8(s) orelse 6;
         if (xml.attr(clean, qi, "quests_per_tier")) |s| qpt = xml.parseU8(s) orelse 10;
@@ -576,7 +572,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     {
         var si: usize = 0;
         while (si < clean.len) {
-            const qi2 = std.mem.indexOfPos(u8, clean, si, "<quest") orelse break;
+            const qi2 = std.mem.findPos(u8, clean, si, "<quest") orelse break;
             if (std.mem.startsWith(u8, clean[qi2..], "<quests") or std.mem.startsWith(u8, clean[qi2..], "<quest_list")) {
                 si = qi2 + 7;
                 continue;
@@ -585,10 +581,10 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
                 si = qi2 + 6;
                 continue;
             };
-            const gt2 = std.mem.indexOfPos(u8, clean, qi2, ">") orelse break;
+            const gt2 = std.mem.findPos(u8, clean, qi2, ">") orelse break;
             var body_end = gt2 + 1;
             if (!(gt2 > qi2 and clean[gt2 - 1] == '/')) {
-                const cl2 = std.mem.indexOfPos(u8, clean, gt2, "</quest>") orelse break;
+                const cl2 = std.mem.findPos(u8, clean, gt2, "</quest>") orelse break;
                 body_end = cl2;
             } else {
                 // Self-closing placeholder (a quest_list entry, e.g.
@@ -632,7 +628,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     var next_id: u16 = 1;
     var i: usize = 0;
     while (i < clean.len) {
-        const qi = std.mem.indexOfPos(u8, clean, i, "<quest") orelse break;
+        const qi = std.mem.findPos(u8, clean, i, "<quest") orelse break;
         if (std.mem.startsWith(u8, clean[qi..], "<quests")) {
             i = qi + 7;
             continue;
@@ -645,11 +641,11 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
             i = qi + 6;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, qi, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, qi, ">") orelse break;
         const self_closing = gt > qi and clean[gt - 1] == '/';
         var body_end = gt + 1;
         if (!self_closing) {
-            const cl = std.mem.indexOfPos(u8, clean, gt, "</quest>") orelse break;
+            const cl = std.mem.findPos(u8, clean, gt, "</quest>") orelse break;
             body_end = cl;
         }
         if (self_closing) {
@@ -692,13 +688,13 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     defer lists_tmp.deinit(allocator);
     i = 0;
     while (i < clean.len) {
-        const li = std.mem.indexOfPos(u8, clean, i, "<quest_list") orelse break;
+        const li = std.mem.findPos(u8, clean, i, "<quest_list") orelse break;
         const list_id = xml.attr(clean, li, "id") orelse {
             i = li + 11;
             continue;
         };
-        const gt = std.mem.indexOfPos(u8, clean, li, ">") orelse break;
-        const close = std.mem.indexOfPos(u8, clean, gt + 1, "</quest_list>") orelse {
+        const gt = std.mem.findPos(u8, clean, li, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt + 1, "</quest_list>") orelse {
             i = gt + 1;
             continue;
         };
@@ -707,7 +703,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
         var en: usize = 0;
         var j: usize = 0;
         while (j < lbody.len and en < max_list_entries) {
-            const qref = std.mem.indexOfPos(u8, lbody, j, "<quest") orelse break;
+            const qref = std.mem.findPos(u8, lbody, j, "<quest") orelse break;
             if (xml.attr(lbody, qref, "id")) |ref_name| {
                 for (defs_slice) |d| {
                     if (std.mem.eql(u8, d.name, ref_name)) {
@@ -779,41 +775,41 @@ pub fn tryLoad(
         }
     }.call;
     if (quests_path) |p| {
-        if (!fileExists(p)) return error.OpenFailed;
+        if (!io_fs.fileExists(p)) return error.OpenFailed;
         if (paths.override_dirs.len == 0) return try loadLogged(allocator, p);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
         defer allocator.free(merged);
-        io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+        io_fs.mkdirPath(".zdtd_cfg_cache");
         const cp = ".zdtd_cfg_cache/quests.xml";
         {
-            try io_fs.writeFile(allocator, cp, merged);
+            try io_fs.writeFile(cp, merged);
         }
         return try loadLogged(allocator, cp);
     }
     if (paths.override_dirs.len > 0) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
             defer allocator.free(merged);
-            io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+            io_fs.mkdirPath(".zdtd_cfg_cache");
             const cp = ".zdtd_cfg_cache/quests.xml";
             {
-                try io_fs.writeFile(allocator, cp, merged);
+                try io_fs.writeFile(cp, merged);
             }
             return try loadLogged(allocator, cp);
         }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);
-        if (fileExists(p)) return try loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
     }
     if (game_dir) |gd| {
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/quests.xml", .{gd});
-        if (fileExists(p)) return try loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
     }
     if (map_dir) |md| {
         if (configPathFromMapDir(md, &path_buf)) |p| {
-            if (fileExists(p)) return try loadLogged(allocator, p);
+            if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
         }
     }
     return null;
@@ -914,7 +910,7 @@ test "rally point objective becomes a rally phase without stealing one" {
 
 test "load stock quests.xml when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
-    if (!fileExists(path)) return;
+    if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path);
     defer cat.deinit();
     try std.testing.expect(cat.defs.len > 50);
@@ -1020,7 +1016,7 @@ test "rewards parse kinds, item names and values in document order" {
 
 test "stock quests.xml template quests parse non-empty" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
-    if (!fileExists(path)) return;
+    if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path);
     defer cat.deinit();
     // 67 stock quests use template=; the derived challenge rewards must carry

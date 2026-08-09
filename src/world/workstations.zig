@@ -266,7 +266,7 @@ pub const Workstation = struct {
             const carry = active.craft_time_left;
             self.cycleRecipeQueue();
             active = &self.queue[last];
-            active.craft_time_left += if (carry < 0) carry else 0;
+            active.craft_time_left += @min(carry, 0);
             self.dirty = true;
         }
     }
@@ -511,7 +511,7 @@ pub const WorkstationStore = struct {
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
-        try io_fs.writeFileSimple(p, buf[0..o]);
+        try io_fs.writeFile(p, buf[0..o]);
     }
 
     /// Decode a ZWS1 buffer (magic | count | records). Corrupt records fail

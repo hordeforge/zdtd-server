@@ -36,13 +36,13 @@ pub fn bind(comptime T: type, dst: *T, src: []const u8, a: std.mem.Allocator) !v
         var line = std.mem.trim(u8, try stripComment(raw), " \t\r");
         if (line.len == 0) continue;
         if (line[0] == '[') {
-            const end = std.mem.indexOfScalar(u8, line, ']') orelse return error.BadToml;
+            const end = std.mem.findScalar(u8, line, ']') orelse return error.BadToml;
             if (std.mem.trim(u8, line[end + 1 ..], " \t").len != 0) return error.BadToml;
             section = std.mem.trim(u8, line[1..end], " \t");
             if (section.len == 0) return error.BadToml;
             continue;
         }
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.BadToml;
+        const eq = std.mem.findScalar(u8, line, '=') orelse return error.BadToml;
         const key = std.mem.trim(u8, line[0..eq], " \t");
         if (key.len == 0) return error.BadToml;
         const val = std.mem.trim(u8, line[eq + 1 ..], " \t");

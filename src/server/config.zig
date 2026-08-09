@@ -102,7 +102,7 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
     // <property name="ServerPort" value="26900"/>
     var i: usize = 0;
     while (i < hay.len) {
-        const pi = std.mem.indexOfPos(u8, hay, i, "<property") orelse break;
+        const pi = std.mem.findPos(u8, hay, i, "<property") orelse break;
         const n = xml.attr(hay, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -179,7 +179,7 @@ fn editDistanceCap(a: []const u8, b: []const u8, cap: usize) usize {
 fn warnNearMissPropertyNames(hay: []const u8) void {
     var i: usize = 0;
     while (i < hay.len) {
-        const pi = std.mem.indexOfPos(u8, hay, i, "<property") orelse break;
+        const pi = std.mem.findPos(u8, hay, i, "<property") orelse break;
         const n = xml.attr(hay, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -214,8 +214,8 @@ fn warnNearMissPropertyNames(hay: []const u8) void {
 
 /// Parse serverconfig.xml bytes (subset of stock ServerSettings).
 pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
-    if (std.mem.indexOf(u8, raw, "<ServerSettings") == null or
-        std.mem.indexOf(u8, raw, "</ServerSettings>") == null)
+    if (std.mem.find(u8, raw, "<ServerSettings") == null or
+        std.mem.find(u8, raw, "</ServerSettings>") == null)
     {
         return error.BadServerConfig;
     }
@@ -318,7 +318,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Config {
     const read_buf = try allocator.alloc(u8, max_serverconfig_bytes + 1);
     defer allocator.free(read_buf);
-    const raw = try io_fs.readFileInto(allocator, path, read_buf);
+    const raw = try io_fs.readFileInto(path, read_buf);
     if (raw.len > max_serverconfig_bytes) return error.ServerConfigTooLarge;
     return parse(allocator, raw);
 }
@@ -367,7 +367,7 @@ test "parse config fixture" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u16, 27002), cfg.port);
@@ -414,7 +414,7 @@ test "parse gameplay options with clamping" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u8, 5), cfg.game_difficulty); // 99 clamped to max 5
@@ -456,7 +456,7 @@ test "parse land claim expiry and loot respawn days" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u16, 14), cfg.land_claim_expiry_days);
@@ -472,10 +472,10 @@ test "parse authority mode observe" {
         \\</ServerSettings>
     ;
     const dir = "worlds/zdtd_cfg_auth";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath(dir);
     const path = dir ++ "/serverconfig.xml";
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(AuthorityMode.observe, cfg.authority_mode);
@@ -490,10 +490,10 @@ test "parse authority mode permissive alias and land claim odd" {
         \\</ServerSettings>
     ;
     const dir = "worlds/zdtd_cfg_auth2";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath(dir);
     const path = dir ++ "/serverconfig.xml";
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(AuthorityMode.observe, cfg.authority_mode);
@@ -516,7 +516,7 @@ test "near-miss property names still load known keys" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
-    try io_fs.writeFileSimple(path, xml_src);
+    try io_fs.writeFile(path, xml_src);
     var cfg = try loadFromPath(std.testing.allocator, path);
     defer cfg.deinit();
     try std.testing.expectEqual(@as(u16, 27099), cfg.port);

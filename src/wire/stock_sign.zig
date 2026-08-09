@@ -64,7 +64,7 @@ pub fn buildSignDataResponseBatch(
     std.mem.writeInt(u32, buf[size_off..][0..4], size_incl, .little);
 
     const data_len: i32 = @intCast(end_pos - data_start);
-    buf[0] = if (is_last and i >= entries.len) 1 else 0;
+    buf[0] = @intFromBool(is_last and i >= entries.len);
     std.mem.writeInt(i32, buf[1..5], data_len, .little);
     return .{ .body = buf[0..end_pos], .next = i };
 }

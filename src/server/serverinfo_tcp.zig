@@ -164,37 +164,37 @@ test "info text has Port and CRLF records" {
         .info_port = 27015,
     });
     // Port is ServerPort; client connects LiteNet to Port+2.
-    try std.testing.expect(std.mem.indexOf(u8, t, "Port:27015;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "GameName:zdtd;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "EACEnabled:False;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "AllowCrossplay:False;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "IsDedicated:True;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "IsPasswordProtected:False;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "\r\n") != null);
+    try std.testing.expect(std.mem.find(u8, t, "Port:27015;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "GameName:zdtd;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "EACEnabled:False;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "AllowCrossplay:False;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "IsDedicated:True;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "IsPasswordProtected:False;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "\r\n") != null);
     try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
 }
 
 test "info text advertises password and sanitizes GSI fields" {
     var buf: [1024]u8 = undefined;
     const pw = try buildInfoText(&buf, .{ .password_protected = true });
-    try std.testing.expect(std.mem.indexOf(u8, pw, "IsPasswordProtected:True;") != null);
+    try std.testing.expect(std.mem.find(u8, pw, "IsPasswordProtected:True;") != null);
 
     const inj = try buildInfoText(&buf, .{ .level_name = "evil;\r\nInjected:1", .info_port = 27015 });
     // CR/LF/; must not create a new GSI key line; still one Port: record (info_port).
-    try std.testing.expect(std.mem.indexOf(u8, inj, "\r\nInjected:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, inj, "LevelName:evil") != null);
-    try std.testing.expect(std.mem.indexOf(u8, inj, "Port:27015;") != null);
+    try std.testing.expect(std.mem.find(u8, inj, "\r\nInjected:") == null);
+    try std.testing.expect(std.mem.find(u8, inj, "LevelName:evil") != null);
+    try std.testing.expect(std.mem.find(u8, inj, "Port:27015;") != null);
 }
 
 test "info text clamps player counts" {
     var buf: [1024]u8 = undefined;
     const full = try buildInfoText(&buf, .{ .max_players = 8, .current_players = 12 });
-    try std.testing.expect(std.mem.indexOf(u8, full, "CurrentPlayers:8;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, full, "FreePlayerSlots:0;") != null);
+    try std.testing.expect(std.mem.find(u8, full, "CurrentPlayers:8;") != null);
+    try std.testing.expect(std.mem.find(u8, full, "FreePlayerSlots:0;") != null);
 
     const empty = try buildInfoText(&buf, .{ .max_players = 8, .current_players = -1 });
-    try std.testing.expect(std.mem.indexOf(u8, empty, "CurrentPlayers:0;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, empty, "FreePlayerSlots:8;") != null);
+    try std.testing.expect(std.mem.find(u8, empty, "CurrentPlayers:0;") != null);
+    try std.testing.expect(std.mem.find(u8, empty, "FreePlayerSlots:8;") != null);
 }
 
 test "info text advertises sandbox preset and code (GameInfoString 18/19)" {
@@ -207,8 +207,8 @@ test "info text advertises sandbox preset and code (GameInfoString 18/19)" {
         .sandbox_preset = "Adventurer",
         .sandbox_code = "AAAJABJACJADJARFBNC",
     });
-    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:Adventurer;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxCode:AAAJABJACJADJARFBNC;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "SandboxPreset:Adventurer;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "SandboxCode:AAAJABJACJADJARFBNC;") != null);
     // The string block keeps its stock trailing blank line.
     try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
 }
@@ -221,8 +221,8 @@ test "info text omits sandbox keys when unset (empty = client default)" {
         .ip = "127.0.0.1",
         .info_port = 27015,
     });
-    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxCode:") == null);
+    try std.testing.expect(std.mem.find(u8, t, "SandboxPreset:") == null);
+    try std.testing.expect(std.mem.find(u8, t, "SandboxCode:") == null);
     try std.testing.expect(std.mem.endsWith(u8, t, "\r\n\r\n"));
 }
 
@@ -232,8 +232,8 @@ test "info text sanitizes sandbox values like the other GSI fields" {
         .info_port = 27015,
         .sandbox_preset = "evil;\r\nInjected:1",
     });
-    try std.testing.expect(std.mem.indexOf(u8, t, "\r\nInjected:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, t, "SandboxPreset:evil") != null);
+    try std.testing.expect(std.mem.find(u8, t, "\r\nInjected:") == null);
+    try std.testing.expect(std.mem.find(u8, t, "SandboxPreset:evil") != null);
 }
 
 test "response header is 5 digit length" {

@@ -106,10 +106,10 @@ pub fn tryLoadConfigPatched(
         };
     }
     // Cache patched XML next to cwd (not tmpfs /tmp).
-    io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     var cache_path_buf: [512]u8 = undefined;
     const cache_path = std.fmt.bufPrint(&cache_path_buf, ".zdtd_cfg_cache/{s}", .{file_name}) catch return null;
-    io_fs.writeFile(allocator, cache_path, merged) catch |err| {
+    io_fs.writeFile(cache_path, merged) catch |err| {
         std.debug.print("zdtd: write config cache {s} failed: {s}\n", .{ cache_path, @errorName(err) });
         return null;
     };

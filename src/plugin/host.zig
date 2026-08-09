@@ -222,7 +222,7 @@ test "host chat filter hook first handler wins and suppress" {
         .name = "c1",
         .on_chat = &struct {
             fn f(_: *const api.Host, _: i32, msg: []const u8, _: []u8) ?[]const u8 {
-                if (std.mem.indexOf(u8, msg, "bad") != null) return "";
+                if (std.mem.find(u8, msg, "bad") != null) return "";
                 return null;
             }
         }.f,

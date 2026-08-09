@@ -275,11 +275,11 @@ stateDiagram-v2
     Open --> Open: daily timer restock (traderRestock on day roll)
 ```
 
-Owners: `src/server/game/trader.zig:34` (`traderIsOpen`), `:46`
-(`tickTraderAreas`), `:204` (`maybeRestockTrader`), `:127` (`traderRollSeed`),
-`src/ecs/systems.zig:751` (`traderRestock`), `src/server/c2s/misc.zig:411`
-(trader open via LockRequest, denied outside hours), `src/server/trade.zig`
-(`handleTrade`, `applyTraderDataCopyFrom`).
+Owners: `src/server/game/trader.zig` (`traderIsOpen`, `tickTraderAreas`,
+`maybeRestockTrader`, and `traderRollSeed`), `src/ecs/systems.zig`
+(`traderRestock`), `src/server/c2s/misc.zig` (trader open via LockRequest,
+denied outside hours), and `src/server/game/trader_wire.zig` (`handleTrade`,
+`applyTraderDataCopyFrom`).
 
 Restock cadence (`TraderStock.reset_interval` from traders.xml ResetInterval):
 -1 never, 0 daily (spawn default), N > 0 every N days. The roll is
@@ -476,9 +476,9 @@ stateDiagram-v2
     Touched --> [*]: block removed / destroyed
 ```
 
-Owners: `src/server/chunk_stream.zig:247` (`fillContainerFromLoot`, stamps
-`touched_day`), `:268` (`maybeRespawnContainer`), `src/server/game.zig:4252`
-(delegation), `src/server/c2s/inv.zig:549` (re-roll before serving
+Owners: `src/server/game/chunk_fill.zig` (`fillContainerFromLoot`, stamps
+`touched_day`, and `maybeRespawnContainer`), `src/server/game.zig`
+(forwarding methods), `src/server/c2s/inv.zig` (re-roll before serving
 `NetPackageInventoryDataRequest`), `src/world/containers.zig:33`
 (`touched` / `touched_day`), `:44` (`setSlot`).
 
@@ -544,10 +544,9 @@ stateDiagram-v2
     StreamPass --> [*]: peer disconnect
 ```
 
-Owners: `src/server/chunk_stream.zig:396` (`streamChunksForClient`), `:328`
-(`clientAddStreamed`), `src/server/game/net.zig:119` (`sendReliablePumped`),
-`:160` (`sendFramedDroppable` soft-drop), `:147` (`sendFramedUnreliable`
-motion frames).
+Owners: `src/server/game/chunk_stream.zig` (`streamChunksForClient` and
+`clientAddStreamed`) and `src/server/game/net.zig` (`sendReliablePumped`,
+`sendFramedDroppable` soft-drop, and `sendFramedUnreliable` motion frames).
 
 Notes: the radius is clamped to `[chunk_stream_radius_min, max]` and shrunk to
 a square that fits `max_streamed_chunks`; each pass adds at most

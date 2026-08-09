@@ -78,7 +78,7 @@ fn loadCurveOnly(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
     const clean = try xml.stripComments(allocator, raw);
     defer allocator.free(clean);
     var c: LevelCurve = .{};
-    const li = std.mem.indexOf(u8, clean, "<level ") orelse return c;
+    const li = std.mem.find(u8, clean, "<level ") orelse return c;
     if (xml.attr(clean, li, "max_level")) |v| c.max_level = std.fmt.parseInt(u16, v, 10) catch c.max_level;
     if (xml.attr(clean, li, "exp_to_level")) |v| c.exp_to_level = std.fmt.parseInt(u32, v, 10) catch c.exp_to_level;
     if (xml.attr(clean, li, "experience_multiplier")) |v| c.experience_multiplier = std.fmt.parseFloat(f32, v) catch c.experience_multiplier;
@@ -103,7 +103,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     const arena = arena_holder.allocator();
 
     var curve: LevelCurve = .{};
-    if (std.mem.indexOf(u8, clean, "<level ")) |li| {
+    if (std.mem.find(u8, clean, "<level ")) |li| {
         if (xml.attr(clean, li, "max_level")) |v| curve.max_level = std.fmt.parseInt(u16, v, 10) catch curve.max_level;
         if (xml.attr(clean, li, "exp_to_level")) |v| curve.exp_to_level = std.fmt.parseInt(u32, v, 10) catch curve.exp_to_level;
         if (xml.attr(clean, li, "experience_multiplier")) |v| curve.experience_multiplier = std.fmt.parseFloat(f32, v) catch curve.experience_multiplier;
@@ -122,7 +122,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     var def_max: u8 = 10;
     var def_cost: u16 = 1;
     var def_mult: f32 = 1.14;
-    if (std.mem.indexOf(u8, clean, "<attributes ")) |ai| {
+    if (std.mem.find(u8, clean, "<attributes ")) |ai| {
         if (xml.attr(clean, ai, "min_level")) |v| def_min = std.fmt.parseInt(u8, v, 10) catch def_min;
         if (xml.attr(clean, ai, "max_level")) |v| def_max = std.fmt.parseInt(u8, v, 10) catch def_max;
         if (xml.attr(clean, ai, "base_skill_point_cost")) |v| def_cost = std.fmt.parseInt(u16, v, 10) catch def_cost;
@@ -131,7 +131,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
 
     var i: usize = 0;
     while (i < clean.len and attrs.items.len < max_attrs) {
-        const ai = std.mem.indexOfPos(u8, clean, i, "<attribute ") orelse break;
+        const ai = std.mem.findPos(u8, clean, i, "<attribute ") orelse break;
         const aname = xml.attr(clean, ai, "name") orelse {
             i = ai + 11;
             continue;
@@ -148,7 +148,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
 
     i = 0;
     while (i < clean.len and perks.items.len < max_perks) {
-        const pi = std.mem.indexOfPos(u8, clean, i, "<perk ") orelse break;
+        const pi = std.mem.findPos(u8, clean, i, "<perk ") orelse break;
         const pname = xml.attr(clean, pi, "name") orelse {
             i = pi + 6;
             continue;
@@ -159,7 +159,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         // parent: walk back for nearest <attribute name=
         var parent: []const u8 = "";
-        if (std.mem.lastIndexOf(u8, clean[0..pi], "<attribute ")) |ab| {
+        if (std.mem.findLast(u8, clean[0..pi], "<attribute ")) |ab| {
             if (xml.attr(clean, ab, "name")) |pn| parent = try arena.dupe(u8, pn);
         }
         try perks.append(allocator, .{

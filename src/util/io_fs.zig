@@ -13,7 +13,7 @@ var write_fail_remaining: std.atomic.Value(u32) = .init(0);
 /// Remaining synthetic read failures for DST fault injection (0 = off).
 var read_fail_remaining: std.atomic.Value(u32) = .init(0);
 
-/// Force the next `n` `writeFile` / `writeFileSimple` calls to return
+/// Force the next `n` `writeFile` calls to return
 /// `error.DiskQuota` without touching the OS. Pair with a fixed sim seed so
 /// the failure lands on the same save step every replay.
 pub fn injectWriteFailures(n: u32) void {
@@ -66,8 +66,7 @@ fn ioThreaded() std.Io.Threaded {
     return std.Io.Threaded.init(std.heap.page_allocator, .{});
 }
 
-pub fn mkdirPath(allocator: std.mem.Allocator, rel: []const u8) void {
-    _ = allocator;
+pub fn mkdirPath(rel: []const u8) void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -79,18 +78,12 @@ pub fn mkdirPath(allocator: std.mem.Allocator, rel: []const u8) void {
     };
 }
 
-/// mkdirPath without a caller allocator (Threaded internals only).
-pub fn mkdirPathSimple(rel: []const u8) void {
-    mkdirPath(std.heap.page_allocator, rel);
-}
-
-pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []const u8) !void {
-    _ = allocator;
+pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
     if (consumeWriteFault()) return error.DiskQuota;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    if (std.mem.lastIndexOfScalar(u8, rel_path, '/')) |sl| {
+    if (std.mem.findScalarLast(u8, rel_path, '/')) |sl| {
         if (sl > 0) try std.Io.Dir.cwd().createDirPath(io, rel_path[0..sl]);
     }
     // Write temp then rename: a crash or full disk mid-write must not corrupt
@@ -103,11 +96,6 @@ pub fn writeFile(allocator: std.mem.Allocator, rel_path: []const u8, data: []con
     };
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = data });
     try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
-}
-
-/// writeFile without a caller allocator (Threaded internals only).
-pub fn writeFileSimple(rel_path: []const u8, data: []const u8) !void {
-    try writeFile(std.heap.page_allocator, rel_path, data);
 }
 
 /// List file basenames in `dir_path`, sorted lexicographically.
@@ -149,8 +137,7 @@ pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 }
 
 /// Read up to `buf.len` bytes into `buf`. Returns slice of bytes read.
-pub fn readFileInto(allocator: std.mem.Allocator, path: []const u8, buf: []u8) ![]u8 {
-    _ = allocator;
+pub fn readFileInto(path: []const u8, buf: []u8) ![]u8 {
     if (consumeReadFault()) return error.InputOutput;
     var threaded = ioThreaded();
     defer threaded.deinit();
@@ -159,8 +146,7 @@ pub fn readFileInto(allocator: std.mem.Allocator, path: []const u8, buf: []u8) !
 }
 
 /// True if path can be opened for reading as a file.
-pub fn fileExists(allocator: std.mem.Allocator, path: []const u8) bool {
-    _ = allocator;
+pub fn fileExists(path: []const u8) bool {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -169,14 +155,8 @@ pub fn fileExists(allocator: std.mem.Allocator, path: []const u8) bool {
     return true;
 }
 
-/// fileExists without a caller allocator (Threaded internals only).
-pub fn fileExistsSimple(path: []const u8) bool {
-    return fileExists(std.heap.page_allocator, path);
-}
-
 /// True if path is an existing directory (or can be opened as one).
-pub fn dirExists(allocator: std.mem.Allocator, path: []const u8) bool {
-    _ = allocator;
+pub fn dirExists(path: []const u8) bool {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -185,14 +165,8 @@ pub fn dirExists(allocator: std.mem.Allocator, path: []const u8) bool {
     return true;
 }
 
-/// dirExists without a caller allocator (Threaded internals only).
-pub fn dirExistsSimple(path: []const u8) bool {
-    return dirExists(std.heap.page_allocator, path);
-}
-
 /// Best-effort delete; ignores missing path. Other failures are logged.
-pub fn deleteFile(allocator: std.mem.Allocator, path: []const u8) void {
-    _ = allocator;
+pub fn deleteFile(path: []const u8) void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -202,15 +176,10 @@ pub fn deleteFile(allocator: std.mem.Allocator, path: []const u8) void {
     };
 }
 
-/// deleteFile without a caller allocator (Threaded internals only).
-pub fn deleteFileSimple(path: []const u8) void {
-    deleteFile(std.heap.page_allocator, path);
-}
-
 /// Best-effort recursive removal of a directory tree (files, subdirs,
 /// symlinks). A missing path is a no-op. Used by tests so each scenario world
 /// starts fresh instead of inheriting persisted state from a previous run.
-pub fn removeDirTreeSimple(rel: []const u8) void {
+pub fn removeDirTree(rel: []const u8) void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -222,18 +191,12 @@ pub fn removeDirTreeSimple(rel: []const u8) void {
 }
 
 /// Read symlink target into `buf`. Returns slice of `buf` or error.
-pub fn readLinkAbsolute(allocator: std.mem.Allocator, absolute_path: []const u8, buf: []u8) ![]u8 {
-    _ = allocator;
+pub fn readLinkAbsolute(absolute_path: []const u8, buf: []u8) ![]u8 {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
     const n = try std.Io.Dir.readLinkAbsolute(io, absolute_path, buf);
     return buf[0..n];
-}
-
-/// readLinkAbsolute without a caller allocator (Threaded internals only).
-pub fn readLinkAbsoluteSimple(absolute_path: []const u8, buf: []u8) ![]u8 {
-    return readLinkAbsolute(std.heap.page_allocator, absolute_path, buf);
 }
 
 test "write read roundtrip under cache dir" {
@@ -244,17 +207,17 @@ test "write read roundtrip under cache dir" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var p_buf: [std.fs.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_test.txt", .{dir});
-    try writeFile(a, p, "hello");
+    try writeFile(p, "hello");
     const got = try readFileAll(a, p);
     defer a.free(got);
     try std.testing.expectEqualStrings("hello", got);
-    try std.testing.expect(fileExists(a, p));
-    try std.testing.expect(!fileExistsSimple("/no/such/zdtd_path_xyz"));
+    try std.testing.expect(fileExists(p));
+    try std.testing.expect(!fileExists("/no/such/zdtd_path_xyz"));
     var small: [8]u8 = undefined;
-    const into = try readFileInto(a, p, &small);
+    const into = try readFileInto(p, &small);
     try std.testing.expectEqualStrings("hello", into);
-    deleteFile(a, p);
-    try std.testing.expect(!fileExists(a, p));
+    deleteFile(p);
+    try std.testing.expect(!fileExists(p));
 }
 
 test "injectWriteFailures fails then recovers" {
@@ -267,11 +230,11 @@ test "injectWriteFailures fails then recovers" {
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_fault.txt", .{dir});
     injectWriteFailures(2);
     try std.testing.expectEqual(@as(u32, 2), pendingWriteFailures());
-    try std.testing.expectError(error.DiskQuota, writeFileSimple(p, "x"));
+    try std.testing.expectError(error.DiskQuota, writeFile(p, "x"));
     try std.testing.expectEqual(@as(u32, 1), pendingWriteFailures());
-    try std.testing.expectError(error.DiskQuota, writeFileSimple(p, "x"));
+    try std.testing.expectError(error.DiskQuota, writeFile(p, "x"));
     try std.testing.expectEqual(@as(u32, 0), pendingWriteFailures());
-    try writeFileSimple(p, "ok");
+    try writeFile(p, "ok");
 }
 
 test "injectReadFailures fails then recovers" {
@@ -282,7 +245,7 @@ test "injectReadFailures fails then recovers" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var p_buf: [std.fs.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_read_fault.txt", .{dir});
-    try writeFileSimple(p, "payload");
+    try writeFile(p, "payload");
     injectReadFailures(1);
     try std.testing.expectEqual(@as(u32, 1), pendingReadFailures());
     try std.testing.expectError(error.InputOutput, readFileAll(std.testing.allocator, p));

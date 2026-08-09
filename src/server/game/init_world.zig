@@ -1,5 +1,5 @@
 //! Post-asset init: sleeper volumes, network listen, seed entities, power demo.
-//! Extracted verbatim from game.zig so the source of truth stays one file.
+//! World-store initialization and persisted-world restoration for `Game.init`.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");

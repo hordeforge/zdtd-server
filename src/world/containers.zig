@@ -190,7 +190,7 @@ pub const ContainerStore = struct {
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
-        try io_fs.writeFileSimple(p, buf[0..o]);
+        try io_fs.writeFile(p, buf[0..o]);
     }
 
     /// Decode a ZCT1 buffer (magic | count | records). Used by load and fuzz.
@@ -345,5 +345,5 @@ test "container persistence retains every full-capacity container" {
     try std.testing.expectEqual(max_containers, s2.n);
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
     try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);
-    io_fs.deleteFileSimple("./containers.zct");
+    io_fs.deleteFile("./containers.zct");
 }

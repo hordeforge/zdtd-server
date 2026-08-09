@@ -65,10 +65,10 @@ pub fn isPaintablePart(d: Decoration) bool {
 /// Local cell of the trader NPC from `IndexedBlockOffsets class="Trader"`:
 /// the first nested `name="N" value="x, y, z"`. Null when the POI has none.
 fn traderCellOf(content: []const u8) ?[3]i32 {
-    const ci = std.mem.indexOf(u8, content, "class=\"Trader\"") orelse return null;
-    const vi = std.mem.indexOfPos(u8, content, ci, "value=\"") orelse return null;
+    const ci = std.mem.find(u8, content, "class=\"Trader\"") orelse return null;
+    const vi = std.mem.findPos(u8, content, ci, "value=\"") orelse return null;
     const start = vi + 7;
-    const end = std.mem.indexOfScalarPos(u8, content, start, '"') orelse return null;
+    const end = std.mem.findScalarPos(u8, content, start, '"') orelse return null;
     var cell: [3]i32 = .{ 0, 0, 0 };
     var it = std.mem.tokenizeScalar(u8, content[start..end], ',');
     var n: usize = 0;
@@ -240,7 +240,7 @@ pub const Index = struct {
             const need = self.prefabs_root.len + 1 + sub.len + 1 + name.len + ext.len;
             if (need >= path_buf.len) continue;
             const p = std.fmt.bufPrint(path_buf, "{s}/{s}/{s}{s}", .{ self.prefabs_root, sub, name, ext }) catch continue;
-            if (fileExists(p)) return p;
+            if (io_fs.fileExists(p)) return p;
         }
         return null;
     }
@@ -493,18 +493,14 @@ pub const Index = struct {
     }
 };
 
-fn fileExists(path: []const u8) bool {
-    return io_fs.fileExistsSimple(path);
-}
-
 const parseI32Prefix = xml_util.parseI32Prefix;
 
 fn attrValue(tag: []const u8, key: []const u8) ?[]const u8 {
     var search_buf: [64]u8 = undefined;
     const needle = std.fmt.bufPrint(&search_buf, "{s}=\"", .{key}) catch return null;
-    const i = std.mem.indexOf(u8, tag, needle) orelse return null;
+    const i = std.mem.find(u8, tag, needle) orelse return null;
     const start = i + needle.len;
-    const end = std.mem.indexOfScalar(u8, tag[start..], '"') orelse return null;
+    const end = std.mem.findScalar(u8, tag[start..], '"') orelse return null;
     return tag[start .. start + end];
 }
 
@@ -516,7 +512,7 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
     var search: usize = 0;
     while (search < xml.len) {
         const rest = xml[search..];
-        const di = std.mem.indexOf(u8, rest, "<decoration") orelse break;
+        const di = std.mem.find(u8, rest, "<decoration") orelse break;
         count += 1;
         search += di + 11;
     }
@@ -541,18 +537,18 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
     search = 0;
     while (n < count) {
         const rest = xml[search..];
-        const di = std.mem.indexOf(u8, rest, "<decoration") orelse break;
+        const di = std.mem.find(u8, rest, "<decoration") orelse break;
         const tag_start = search + di;
-        const tag_rel = std.mem.indexOfScalar(u8, xml[tag_start..], '>') orelse break;
+        const tag_rel = std.mem.findScalar(u8, xml[tag_start..], '>') orelse break;
         const tag = xml[tag_start .. tag_start + tag_rel];
         search = tag_start + tag_rel + 1;
 
         const name_v = attrValue(tag, "name") orelse continue;
         const pos_v = attrValue(tag, "position") orelse continue;
         const x = parseI32Prefix(pos_v) orelse continue;
-        const c1 = std.mem.indexOfScalar(u8, pos_v, ',') orelse continue;
+        const c1 = std.mem.findScalar(u8, pos_v, ',') orelse continue;
         const y = parseI32Prefix(pos_v[c1 + 1 ..]) orelse continue;
-        const c2 = std.mem.indexOfScalar(u8, pos_v[c1 + 1 ..], ',') orelse continue;
+        const c2 = std.mem.findScalar(u8, pos_v[c1 + 1 ..], ',') orelse continue;
         const z = parseI32Prefix(pos_v[c1 + 1 + c2 + 1 ..]) orelse continue;
 
         var rot: u8 = 0;
@@ -613,7 +609,7 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8, pre
 fn readTtsSize(path: []const u8, sx: *i32, sy: *i32, sz: *i32) bool {
     // Header-only read: a .tts can be multi-MB, and startup probes every prefab.
     var hdr: [14]u8 = undefined;
-    const data = io_fs.readFileInto(std.heap.page_allocator, path, &hdr) catch return false;
+    const data = io_fs.readFileInto(path, &hdr) catch return false;
     if (data.len < 14) return false;
     if (!std.mem.eql(u8, data[0..4], "tts\x00")) return false;
     sx.* = std.mem.readInt(u16, data[8..10], .little);
@@ -629,8 +625,8 @@ fn readTtsSize(path: []const u8, sx: *i32, sy: *i32, sz: *i32) bool {
 /// every failure path here returns 0 rather than an error.
 fn parseYOffset(xml: []const u8) i32 {
     var search: usize = 0;
-    while (std.mem.indexOfPos(u8, xml, search, "<property")) |tag_start| {
-        const tag_end = std.mem.indexOfScalarPos(u8, xml, tag_start, '>') orelse return 0;
+    while (std.mem.findPos(u8, xml, search, "<property")) |tag_start| {
+        const tag_end = std.mem.findScalarPos(u8, xml, tag_start, '>') orelse return 0;
         const tag = xml[tag_start..tag_end];
         search = tag_end + 1;
         // Exact name compare: the same file also carries "DistantPOIYOffset".
@@ -712,9 +708,9 @@ test "parse decoration line" {
     ;
     // write temp file
     const dir = "worlds/zdtd_prefab_test";
-    io_fs.mkdirPathSimple("worlds");
-    io_fs.mkdirPathSimple(dir);
-    try io_fs.writeFileSimple(dir ++ "/prefabs.xml", xml);
+    io_fs.mkdirPath("worlds");
+    io_fs.mkdirPath(dir);
+    try io_fs.writeFile(dir ++ "/prefabs.xml", xml);
 
     var idx = try loadFromWorldDir(std.testing.allocator, dir, null);
     defer idx.deinit();
@@ -739,7 +735,7 @@ test "parse decoration line" {
 
 test "tts size read abandoned_house if present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
-    if (!fileExists(p)) return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var sx: i32 = 0;
     var sy: i32 = 0;
     var sz: i32 = 0;
@@ -781,8 +777,8 @@ test "YOffset applies to the stamp origin but not to the terrain pad" {
     std.mem.writeInt(u16, hdr[8..10], 12, .little);
     std.mem.writeInt(u16, hdr[10..12], 6, .little);
     std.mem.writeInt(u16, hdr[12..14], 12, .little);
-    try io_fs.writeFileSimple(root ++ "/POIs/zdtd_yoffset_poi.tts", &hdr);
-    try io_fs.writeFileSimple(root ++ "/POIs/zdtd_yoffset_poi.xml",
+    try io_fs.writeFile(root ++ "/POIs/zdtd_yoffset_poi.tts", &hdr);
+    try io_fs.writeFile(root ++ "/POIs/zdtd_yoffset_poi.xml",
         \\<prefab>
         \\  <property name="DistantPOIYOffset" value="0" />
         \\  <property name="YOffset" value="-7" />
@@ -790,7 +786,7 @@ test "YOffset applies to the stamp origin but not to the terrain pad" {
     );
 
     const world_dir = "worlds/zdtd_yoffset_test";
-    try io_fs.writeFileSimple(world_dir ++ "/prefabs.xml",
+    try io_fs.writeFile(world_dir ++ "/prefabs.xml",
         \\<prefabs>
         \\  <decoration type="model" name="zdtd_yoffset_poi" position="4,60,4" rotation="0" y_is_groundlevel="true" />
         \\  <decoration type="model" name="zdtd_yoffset_poi" position="4,60,4" rotation="0" y_is_groundlevel="false" />
@@ -815,10 +811,10 @@ test "YOffset applies to the stamp origin but not to the terrain pad" {
 
 test "stock cave_07 stamps its body below the declared ground" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/cave_07.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/cave_07.tts")) return error.SkipZigTest;
 
     const world_dir = "worlds/zdtd_yoffset_cave_test";
-    try io_fs.writeFileSimple(world_dir ++ "/prefabs.xml",
+    try io_fs.writeFile(world_dir ++ "/prefabs.xml",
         \\<prefabs>
         \\  <decoration type="model" name="cave_07" position="0,60,0" rotation="0" y_is_groundlevel="true" />
         \\</prefabs>
@@ -854,8 +850,8 @@ test "navezgane paints a real POI into its chunk" {
     // so a POI that the index lists must actually reach the paint callback.
     const world_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
     const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(world_dir ++ "/prefabs.xml")) return error.SkipZigTest;
-    if (!fileExists(prefab_root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(world_dir ++ "/prefabs.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(prefab_root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
 
     var idx = try loadFromWorldDir(std.testing.allocator, world_dir, prefab_root);
     defer idx.deinit();
@@ -881,7 +877,7 @@ test "navezgane paints a real POI into its chunk" {
 
 test "prefab type ids remap through blocks.nim into runtime ids" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
     var table = maxdamage.Table.empty();
     defer table.deinit();
     table.tryMergeBundledAssignIds(std.testing.allocator);
@@ -951,15 +947,15 @@ test "prefab type ids remap through blocks.nim into runtime ids" {
 
 test "quest data and part filter from the stock install" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="AAA_utility_waterworks" position="0,0,0" rotation="0" /></prefabs>
     , root);
     defer idx.deinit();
     const qd = idx.questData("AAA_utility_waterworks").?;
     try std.testing.expect(qd.tier == 1);
-    try std.testing.expect(std.mem.indexOf(u8, qd.tags, "fetch") != null);
-    try std.testing.expect(std.mem.indexOf(u8, qd.tags, "infested") != null);
+    try std.testing.expect(std.mem.find(u8, qd.tags, "fetch") != null);
+    try std.testing.expect(std.mem.find(u8, qd.tags, "infested") != null);
     // Cached negative: a name with no POI XML returns empty data, not an error.
     const none = idx.questData("part_5m_water_tower").?;
     try std.testing.expect(none.tags.len == 0 and none.tier == 0);
@@ -972,7 +968,7 @@ test "quest data and part filter from the stock install" {
 
 test "trader POI data: cell and class tag from the stock install" {
     const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/trader_bob.xml")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/trader_bob.xml")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="trader_bob" position="0,0,0" rotation="2" /></prefabs>
     , root);
@@ -1014,7 +1010,7 @@ test "part decorations paint up to the volume cap" {
 
 test "part decoration paints its blocks into the chunk" {
     const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
-    if (!fileExists(prefab_root ++ "/Parts/part_5m_water_tower.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(prefab_root ++ "/Parts/part_5m_water_tower.tts")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="part_5m_water_tower" position="100,60,100" rotation="0" /></prefabs>
     , prefab_root);
@@ -1044,7 +1040,7 @@ test "multi-block children regenerate from the parent's MultiBlockDim" {
     // must exist where the parent's blocks.xml MultiBlockDim says.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const root = game_dir ++ "/Data/Prefabs";
-    if (!fileExists(root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
     var table = (maxdamage.tryLoad(std.testing.allocator, game_dir, null) catch null) orelse return error.SkipZigTest;
     defer table.deinit();
     table.tryMergeBundledAssignIds(std.testing.allocator);

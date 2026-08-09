@@ -23,7 +23,7 @@ pub fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
 }
 
 fn traderMinutes(v: []const u8) ?u32 {
-    const colon = std.mem.indexOfScalar(u8, v, ':') orelse return null;
+    const colon = std.mem.findScalar(u8, v, ':') orelse return null;
     if (colon == 0 or colon + 1 >= v.len) return null;
     const h = std.fmt.parseInt(u32, v[0..colon], 10) catch return null;
     const m = std.fmt.parseInt(u32, v[colon + 1 ..], 10) catch return null;

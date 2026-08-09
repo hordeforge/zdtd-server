@@ -117,15 +117,14 @@ src/main.zig           entry CLI (--port/--world/--ticks/--once)
 src/protocol.zig       wire constants from RE
 src/litenet/           UDP + Connect/Accept + reliable channel (game LiteNet)
 src/wire/              channel envelope + package bodies
-src/server/game.zig    join SM, tick, interest, combat, save
+src/server/game.zig    Game state and delegating facade
+src/server/game/       per-domain tick, join, world, player, and net helpers
+src/server/c2s/        phase-gated client-package handlers by domain
 src/ecs/               SoA ECS: components, systems, catalog/power/director resources
 src/util/parallel.zig  multi-thread range split (AI, turrets, chunk save)
 src/assets/            stock config loaders (quests.xml, …)
 assets/fixtures/       offline XML fixtures for tests
-src/world/store.zig    16×256×16 chunks + ZCH3 persistence in .zch files
-src/world/dtm.zig      stock Navezgane/Pregen dtm.raw + map_info + spawns
-src/world/prefabs.zig  prefab footprints
-src/world/water.zig    water_info sources
+src/world/             chunks, ZCH3 persistence, maps, prefabs, water, and worldgen
 src/apm/               metrics + section profiler + report
 src/version.zig        product/wire version pins (read by scripts/check-release.sh)
 src/fuzz.zig           fuzz entry (`zig build fuzz`, part of `make check`)

@@ -199,7 +199,7 @@ pub fn loadFromPath(
 
     var i: usize = 0;
     while (i < clean.len and parsed.items.len < max_blocks) {
-        const bi = std.mem.indexOfPos(u8, clean, i, "<block ") orelse break;
+        const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
         const name = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;
@@ -223,10 +223,10 @@ pub fn loadFromPath(
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
         var crafting_areas: ?[]const u8 = null;
-        const body_end = if (std.mem.indexOfPos(u8, clean, bi, "</block>")) |e| e else clean.len;
+        const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
-            const pi = std.mem.indexOfPos(u8, clean, p, "<property ") orelse break;
+            const pi = std.mem.findPos(u8, clean, p, "<property ") orelse break;
             if (pi > body_end) break;
             const pname = xml.attr(clean, pi, "name") orelse {
                 p = pi + 10;
@@ -246,7 +246,7 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| heat_strength = std.fmt.parseFloat(f32, v) catch 0;
             } else if (std.mem.eql(u8, pname, "Modules")) {
                 if (xml.attr(clean, pi, "value")) |v| {
-                    if (std.mem.indexOf(u8, v, "fuel") != null) has_fuel_module = true;
+                    if (std.mem.find(u8, v, "fuel") != null) has_fuel_module = true;
                 }
             } else if (std.mem.eql(u8, pname, "CraftingAreaRecipes")) {
                 crafting_areas = xml.attr(clean, pi, "value");
@@ -339,10 +339,10 @@ pub fn tryLoad(
     }
     const merged = try paths.readConfigXml(allocator, "blocks.xml", game_dir, config_dir) orelse return null;
     defer allocator.free(merged);
-    io_fs.mkdirPath(allocator, ".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/blocks.xml";
     {
-        io_fs.writeFile(allocator, cp, merged) catch |err| {
+        io_fs.writeFile(cp, merged) catch |err| {
             std.debug.print("zdtd: write config cache {s} failed: {s}; using base path\n", .{ cp, @errorName(err) });
             return loadLogged(allocator, base, id_by_name, ctx);
         };
@@ -418,8 +418,8 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\</blocks>
     ;
     const path = ".zdtd_test_blocks_vending.xml";
-    try io_fs.writeFile(std.testing.allocator, path, src);
-    defer io_fs.deleteFile(std.testing.allocator, path);
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
 
     var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
     defer t.deinit();

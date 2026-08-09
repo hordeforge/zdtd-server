@@ -135,19 +135,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
 
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_recipes) {
-        const tag = std.mem.indexOfPos(u8, clean, i, "<recipe") orelse break;
+        const tag = std.mem.findPos(u8, clean, i, "<recipe") orelse break;
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 7;
             continue;
         };
         // Skip wildcard forge scrap stubs without ingredients when body empty.
-        const gt = std.mem.indexOfPos(u8, clean, tag, ">") orelse break;
+        const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         var body: []const u8 = "";
         var next_i = gt + 1;
         if (gt > tag and clean[gt - 1] == '/') {
             // self-closing
         } else {
-            const close = std.mem.indexOfPos(u8, clean, gt, "</recipe>") orelse break;
+            const close = std.mem.findPos(u8, clean, gt, "</recipe>") orelse break;
             body = clean[gt + 1 .. close];
             next_i = close + 9;
         }
@@ -168,7 +168,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
 
         var ii: usize = 0;
         while (ii < body.len and def.ingredient_n < max_ingredients) {
-            const itag = std.mem.indexOfPos(u8, body, ii, "<ingredient") orelse break;
+            const itag = std.mem.findPos(u8, body, ii, "<ingredient") orelse break;
             const iname = xml.attr(body, itag, "name") orelse {
                 ii = itag + 11;
                 continue;

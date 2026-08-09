@@ -66,13 +66,13 @@ pub const MapMeta = struct {
 pub fn parseMapInfoSize(xml: []const u8) !struct { w: i32, h: i32 } {
     // Look for HeightMapSize" value=" or HeightMapSize"value="
     const key = "HeightMapSize";
-    const ki = std.mem.indexOf(u8, xml, key) orelse return error.NoHeightMapSize;
+    const ki = std.mem.find(u8, xml, key) orelse return error.NoHeightMapSize;
     const rest = xml[ki..];
-    const q1 = std.mem.indexOf(u8, rest, "\"") orelse return error.BadMapInfo;
+    const q1 = std.mem.find(u8, rest, "\"") orelse return error.BadMapInfo;
     const after = rest[q1 + 1 ..];
     // may be Name" first if we hit wrong - find value=
     const vkey = "value=";
-    const vi = std.mem.indexOf(u8, rest, vkey) orelse return error.BadMapInfo;
+    const vi = std.mem.find(u8, rest, vkey) orelse return error.BadMapInfo;
     var p = rest[vi + vkey.len ..];
     // skip optional quote
     if (p.len > 0 and p[0] == '"') p = p[1..];
@@ -100,7 +100,7 @@ pub fn parseSpawnPoints(xml: []const u8, out: []SpawnPoint) usize {
     var search: usize = 0;
     while (n < out.len) {
         const rest = xml[search..];
-        const pi = std.mem.indexOf(u8, rest, "position=\"") orelse break;
+        const pi = std.mem.find(u8, rest, "position=\"") orelse break;
         var p = rest[pi + "position=\"".len ..];
         const x = parseI32Prefix(p) orelse break;
         p = skipToComma(p) orelse break;
@@ -119,12 +119,12 @@ pub fn parseSpawnPoints(xml: []const u8, out: []SpawnPoint) usize {
 const parseI32Prefix = xml_util.parseI32Prefix;
 
 fn skipToComma(s: []const u8) ?[]const u8 {
-    const i = std.mem.indexOfScalar(u8, s, ',') orelse return null;
+    const i = std.mem.findScalar(u8, s, ',') orelse return null;
     return s[i..];
 }
 
 fn fileExists(path: []const u8) bool {
-    return io_fs.fileExistsSimple(path);
+    return io_fs.fileExists(path);
 }
 
 fn joinPath(buf: []u8, a: []const u8, b: []const u8) ![]const u8 {

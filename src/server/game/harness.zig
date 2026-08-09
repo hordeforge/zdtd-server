@@ -1,5 +1,6 @@
-//! Test / scenario harness — attachJoinedClient, setBlock, injectFramed, etc.
-//! Extracted verbatim from game.zig. Only used by tests/scenarios/loadgen paths.
+//! In-process test and scenario helpers for joined clients, packet injection,
+//! replication, and direct world setup. Production networking does not use
+//! these shortcuts.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");

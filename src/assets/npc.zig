@@ -77,7 +77,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !NpcTable {
     defer entries.deinit(allocator);
     var i: usize = 0;
     while (i < clean.len and entries.items.len < max_npcs) {
-        const ni = std.mem.indexOfPos(u8, clean, i, "<npc_info") orelse break;
+        const ni = std.mem.findPos(u8, clean, i, "<npc_info") orelse break;
         i = ni + 9;
         const tid = xml.attr(clean, ni, "trader_id") orelse continue;
         const trader_id = std.fmt.parseInt(u16, tid, 10) catch continue;
