@@ -2573,45 +2573,7 @@ pub const Game = struct {
     }
 
     fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
-        if (id >= packages.default_mappings.len) {
-            std.debug.print("zdtd: unmapped package local_id={d} package_id={d} body_len={d}\n", .{ peer.local_id, id, body.len });
-            return;
-        }
-        const name = packages.default_mappings[id];
-
-        // Phase gate: connecting/joined (pre-enter) only join-SM packages.
-        // Playing (entered) allows all names; typed handlers still validate.
-        // Phase is always Hard (never apply play C2S pre-enter).
-        {
-            const phase = phase_gate.phaseOf(c.joined, c.entered);
-            if (!phase_gate.allowed(phase, name)) {
-                self.harness.counters.inc(.phase_rejects);
-                self.noteEvidence(c, peer.local_id, c.entity_id, .phase, .hard, .none, 1, 0);
-                // First + every 100th: join-SM bugs show as phase spikes with no log.
-                const n = self.harness.counters.get(.phase_rejects);
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: phase reject n={d} pkg={s} joined={} entered={} local_id={d}\n",
-                        .{ n, name, c.joined, c.entered, peer.local_id },
-                    );
-                }
-                return;
-            }
-        }
-
-        if (try c2s_join.handle(self, c, peer, name, body)) return;
-        if (try c2s_move.handle(self, c, peer, name, body)) return;
-        if (try c2s_inv.handle(self, c, peer, name, body)) return;
-        if (try c2s_quest.handle(self, c, peer, name, body)) return;
-        if (try c2s_misc.handle(self, c, peer, name, body)) return;
-        self.harness.counters.inc(.c2s_unhandled);
-        const un = self.harness.counters.get(.c2s_unhandled);
-        if (un == 1 or un % 100 == 0) {
-            std.debug.print(
-                "zdtd: unhandled C2S pkg={s} local_id={d} n={d}\n",
-                .{ name, peer.local_id, un },
-            );
-        }
+        return @import("c2s/dispatch.zig").handlePackage(self, c, peer, id, body);
     }
 
     /// Convert sim trader_stock into wire TraderStockEntry list (shared by the
