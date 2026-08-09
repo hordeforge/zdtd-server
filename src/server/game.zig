@@ -44,6 +44,7 @@ const game_config_files = @import("game/config_files.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_net_handlers = @import("game/net_handlers.zig");
 const game_rate_limits = @import("game/rate_limits.zig");
+const game_blockmeta = @import("game/blockmeta.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2103,124 +2104,17 @@ pub const Game = struct {
         std.debug.print("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
     }
 
-    /// Persist the storm state machine so a restart resumes the storm cycle
-    /// instead of re-rolling the opening groups. File: `weather.zwt` (ZWTH1).
-    /// Saved on the periodic save path and at deinit; restored right after
-    /// initFrom in initWithOptions.
     pub fn saveWeather(self: *const Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir});
-        var buf: [1024]u8 = undefined;
-        const enc = try self.world.weather.encode(&buf);
-        try io_fs.writeFile(self.allocator, p, enc);
+        return game_blockmeta.saveWeather(self);
     }
-
-    /// Restore `weather.zwt` over the freshly seeded manager. A missing file is
-    /// a fresh world (keep the roll); a corrupt, unreadable, or table-mismatched
-    /// file is dropped with a log line (fail closed: weather.zig decode never
-    /// half-applies; I/O errors must not look like "no weather file yet").
     fn restoreWeather(self: *Game) void {
-        var path: [512]u8 = undefined;
-        const p = std.fmt.bufPrint(&path, "{s}/weather.zwt", .{self.world.world_dir}) catch {
-            std.debug.print("zdtd: weather.zwt path too long; keeping fresh roll\n", .{});
-            return;
-        };
-        if (!io_fs.fileExistsSimple(p)) return;
-        var buf: [1024]u8 = undefined;
-        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
-            logPersistErr(self, "restore weather", err);
-            return;
-        };
-        if (self.world.weather.decode(bytes, &self.world.biome_layers_table)) {
-            std.debug.print("zdtd: weather state restored ({d} biomes)\n", .{self.world.weather.n});
-        } else {
-            std.debug.print("zdtd: weather.zwt unreadable or mismatched; keeping fresh roll\n", .{});
-        }
+        return game_blockmeta.restoreWeather(self);
     }
-
-    /// Persist sparse block meta (rotation raw + accumulated damage) so doors/
-    /// shapes and partial block damage survive restart. File: "ZBM1" | u16 raw_n |
-    /// (key u64 + raw u32)* | u16 hp_n | (key u64 + hp u16)*.
-    /// Keys are sorted so bytes do not depend on insert/remove history (DST).
     pub fn saveBlockMeta(self: *const Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
-        var buf: [4096]u8 = undefined;
-        var o: usize = 0;
-        @memcpy(buf[0..4], "ZBM1");
-        o = 4;
-
-        // Sort raw keys (pairs) by key for stable disk order.
-        var raw_ord: [self.block_raw_key.len]u16 = undefined;
-        const raw_n = self.block_raw_n;
-        var ri: usize = 0;
-        while (ri < raw_n) : (ri += 1) raw_ord[ri] = @intCast(ri);
-        std.mem.sort(u16, raw_ord[0..raw_n], self, struct {
-            fn less(g: *const Game, a: u16, b: u16) bool {
-                return g.block_raw_key[a] < g.block_raw_key[b];
-            }
-        }.less);
-
-        std.mem.writeInt(u16, buf[o..][0..2], @intCast(raw_n), .little);
-        o += 2;
-        for (raw_ord[0..raw_n]) |idx| {
-            if (o + 12 > buf.len) break;
-            std.mem.writeInt(u64, buf[o..][0..8], self.block_raw_key[idx], .little);
-            std.mem.writeInt(u32, buf[o + 8 ..][0..4], self.block_raw[idx], .little);
-            o += 12;
-        }
-        if (o + 2 > buf.len) return error.WriteFailed;
-
-        var hp_ord: [self.block_hp_key.len]u16 = undefined;
-        const hp_n = self.block_hp_n;
-        var hi: usize = 0;
-        while (hi < hp_n) : (hi += 1) hp_ord[hi] = @intCast(hi);
-        std.mem.sort(u16, hp_ord[0..hp_n], self, struct {
-            fn less(g: *const Game, a: u16, b: u16) bool {
-                return g.block_hp_key[a] < g.block_hp_key[b];
-            }
-        }.less);
-
-        std.mem.writeInt(u16, buf[o..][0..2], @intCast(hp_n), .little);
-        o += 2;
-        for (hp_ord[0..hp_n]) |idx| {
-            if (o + 10 > buf.len) break;
-            std.mem.writeInt(u64, buf[o..][0..8], self.block_hp_key[idx], .little);
-            std.mem.writeInt(u16, buf[o + 8 ..][0..2], self.block_hp[idx], .little);
-            o += 10;
-        }
-        try io_fs.writeFile(self.allocator, p, buf[0..o]);
+        return game_blockmeta.saveBlockMeta(self);
     }
-
     fn loadBlockMeta(self: *Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
-        const data = io_fs.readFileAll(self.allocator, p) catch |err| switch (err) {
-            error.FileNotFound => return error.OpenFailed,
-            else => return err,
-        };
-        defer self.allocator.free(data);
-        if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZBM1")) return error.ReadFailed;
-        var o: usize = 4;
-        const rn = std.mem.readInt(u16, data[o..][0..2], .little);
-        o += 2;
-        if (o + @as(usize, rn) * 12 > data.len) return error.ReadFailed;
-        self.block_raw_n = @min(@as(usize, rn), self.block_raw_key.len);
-        for (0..self.block_raw_n) |i| {
-            self.block_raw_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
-            self.block_raw[i] = std.mem.readInt(u32, data[o + 8 ..][0..4], .little);
-            o += 12;
-        }
-        if (o + 2 > data.len) return error.ReadFailed;
-        const hn = std.mem.readInt(u16, data[o..][0..2], .little);
-        o += 2;
-        if (o + @as(usize, hn) * 10 > data.len) return error.ReadFailed;
-        self.block_hp_n = @min(@as(usize, hn), self.block_hp_key.len);
-        for (0..self.block_hp_n) |i| {
-            self.block_hp_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
-            self.block_hp[i] = std.mem.readInt(u16, data[o + 8 ..][0..2], .little);
-            o += 10;
-        }
+        return game_blockmeta.loadBlockMeta(self);
     }
 
     /// Lock stale after this many ns without unlock (holder disconnect still clears
