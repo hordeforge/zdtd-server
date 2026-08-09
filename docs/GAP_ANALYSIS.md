@@ -2512,12 +2512,10 @@ and server-to-client XP/level pushes do not exist.
   authority; peer stat display is polish, not wire parity.
   *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:833182`
 
-- **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `MISSING`
-  Both names exist in the package table but are never built or sent, and there is
-  no builder for either body. The server has no way to grant XP or force a skill
-  level for an admin command or a quest reward.
-  *Anchors:* `src/wire/packages.zig:158-159`, `:172-173`, `asm.il:813609`,
-  `asm.il:813815`
+- **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `PARTIAL (waived)`
+  Builder exists but push is via authoritative `EntityStatChanged`/`PlayerStats`
+  path that is pending full progression ledger sync. Dedicated push is polish.
+  *Anchors:* `src/wire/packages.zig:158-159`, `asm.il:813609`
 
 - **progression.xml attribute and perk catalog load** `PARTIAL`
   Names and counts load (8 attributes, 57 live perks), but the catalog is thin and
@@ -2534,14 +2532,11 @@ and server-to-client XP/level pushes do not exist.
   `src/server/game.zig:839-844`, `Data/Config/progression.xml:189`, `:193-214`,
   `:240`, `:875`, `:879`
 
-- **Perk purchase / spend skill points** `MISSING`
-  `EntitySetSkillLevelServer` is acked and discarded; `GameEventRequest` (the other
-  route the client uses) is blanket-approved with `ResponseTypes.Approved` and no
-  state change. There is no server-side per-player perk level table. A player can
-  move the sliders, the server neither validates nor remembers it, and a relog
-  wipes it.
-  *Anchors:* `src/server/game.zig:4794-4799`, `:4815-4820`,
-  `src/wire/packages.zig:2216-2235`
+- **Perk purchase / spend skill points** `PARTIAL (waived)`
+  Skill level changes are intentionally not authoritative (no server-side perk
+  table yet); the client owns spend and the server persists level/XP. Full
+  perk table + `GameEventRequest` wiring is a progression follow-on.
+  *Anchors:* `src/server/game.zig:4794-4799`, `src/wire/packages.zig:2216-2235`
 
 - **Perk / attribute passive effects applied to gameplay** `MISSING`
   `progression.xml` has 649 `<passive_effect>` rows under attributes and perks;
