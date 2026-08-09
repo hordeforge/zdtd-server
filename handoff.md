@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-09 (review-loop continuation, wave 2)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `a006c8a`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **984/984** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `f783db1`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **985/985** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -49,7 +49,8 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   in-place queue validation bugfix (e8ff7d2), EntitySpawnResponse drop commit
   (a864ed8), POIStayWithin executes with the POI-rect zone (9bec76f), quest
   objective coverage SHIPPED for the stock catalog (census: all 16 types
-  classified; template inheritance resolved, real quests.xml test)
+  classified; template inheritance resolved, real quests.xml test), hit
+  knockback + NetPackageEntityVelocity broadcast (8571b11)
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
   reproduced at 6256b1e). Solo loadgen join smoke CONFIRMED: 8/8 full join
@@ -66,20 +67,20 @@ verify build + full test binary + lint, commit. Later passes re-verify.
 ## Working tree right now
 
 ```
-working tree clean at a006c8a
+working tree clean at f783db1
 game.zig 4666 lines (was 6397 at handoff): craft/chunk_stream/chunk_fill/
   loot/weather/vehicle shards; ecs funnels for teleport/respawn
 parity landed (wave 2): night predators, wasm fuel budget config,
   on_player_login coverage, kill XP wire, multiplayer player bodies +
   progression snapshots + kill counters (PvE+PvP), storm admin commands,
   workstation recipe authority, item-drop commit, POIStayWithin + full stock
-  quest objective census, liteNet window pump
+  quest objective census, hit knockback + velocity wire, liteNet window pump
 hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
   gap + craft batch cap now zdtd.toml); all other reviews re-audited clean
-984/984 tests, lint + fmt clean
+985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `a006c8a`; nothing staged or untracked except
+All work is committed through `f783db1`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
