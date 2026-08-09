@@ -50,9 +50,10 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   (a864ed8)
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
-  reproduced at 6256b1e); loadgen join smoke now sends the IdMapping
-  (env note: rerun the smoke solo; the sibling agent's loadgen/telnet shares
-  the box and its SIGKILLs contaminated later runs)
+  reproduced at 6256b1e). Solo loadgen join smoke CONFIRMED: 8/8 full join
+  cycles pass (PlayerId spawn -> PlayerSpawnedInWorld -> 22 actions ->
+  idle reap), IdMapping wire=260021 sent every cycle. (The sibling agent's
+  loadgen/telnet shares the box; its SIGKILLs contaminated concurrent runs.)
 - verified clean (no fixes): build, cli, concurrency, deps, doc, dst, fuzz,
   infra, minimalism, o11y, perf, release
 - earlier dedicated agents this session: arch, api, deps, ecs, hardcode,
