@@ -40,6 +40,7 @@ const game_chunk_stream = @import("game/chunk_stream.zig");
 const game_chunk_fill = @import("game/chunk_fill.zig");
 const game_weather = @import("game/weather.zig");
 const game_vehicle = @import("game/vehicle.zig");
+const game_config_files = @import("game/config_files.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2878,24 +2879,7 @@ pub const Game = struct {
     }
 
     pub fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
-        // Exact SendToClients=true names from stock WorldStaticData .cctor (49 total, 42 sent).
-        const names = [_][]const u8{
-            "events",               "materials",          "physicsbodies",   "painting",          "shapes",               "blocks",
-            "progression",          "buffs",              "misc",            "items",             "item_modifiers",       "entityclasses",
-            "qualityinfo",          "sounds",             "recipes",         "blockplaceholders", "loot",                 "entitygroups",
-            "utilityai",            "vehicles",           "weathersurvival", "archetypes",        "challenges",           "quests",
-            "traders",              "npc",                "dialogs",         "ui_display",        "nav_objects",          "gameevents",
-            "twitch",               "twitch_events",      "dmscontent",      "XUi_Common/styles", "XUi_Common/templates", "XUi_InGame/styles",
-            "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",          "sandbox_overrides",
-        };
-        for (names) |name| {
-            var w: wire_binary.Writer = .{ .buf = self.body_buf[0..] };
-            try w.writeString(name);
-            try w.writeI32(-1); // null payload => EClientFileState.LoadLocal
-            try self.sendGame(peer, "NetPackageConfigFile", w.written());
-            peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
-            self.pollNetOnce();
-        }
+        return game_config_files.sendLocalConfigFiles(self, peer);
     }
 
     /// If feet Y is deep void / far below DTM surface, snap to surface+0.9 and
