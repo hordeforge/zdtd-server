@@ -3979,7 +3979,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | Stock vehicle packages (beyond simplified trio) | P1 |
 | Seats multi-occupant | HAVE (base seats from vehicles.xml; no seat-mod budget) |
-| Fuel / storage as items | P1 |
+| Fuel / storage as items | PARTIAL (2026-08-09): vehicle fuel drains, persists, and the gas-can InvTx refuels the tank (capped, refund on full); generators refuel via the same path. Open: vehicle/turret storage TEs (ammo insert, parts) |
 | Vehicle damage / parts | P2 |
 
 #### Electricity / traps
