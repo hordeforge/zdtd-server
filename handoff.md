@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-09 (review-loop continuation, wave 2)
 **Goal (paused):** `finish all open items. game.zig refactor, extraction of hardcoded logic etc; reach 100% feature parity from a gameplay point of view`
-**Branch:** `main` at `aec9eda`; working tree clean
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **989/989** (consecutive runs green; flakes fixed, see below)
+**Branch:** `main` at `b0e2565`; working tree clean
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` **991/991** (consecutive runs green; flakes fixed, see below)
 
 ## What landed in this series
 
@@ -90,7 +90,7 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `d155ad5`; nothing staged or untracked except
+All work is committed through `b0e2565`; nothing staged or untracked except
 this handoff note.
 
 `make check` full gate green 2026-08-09 (release-check + lint + build +
