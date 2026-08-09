@@ -2396,13 +2396,13 @@ unvalidated, and durability, mods and repair do not exist.
   `src/assets/loot.zig:119-123`, `Data/Config/entityclasses.xml`,
   `Data/Config/loot.xml:9927`
 
-- **Loot bag drop probability (LootDropProb)** `MISSING`
-  `World.damage` unconditionally spawns a bag for every zombie and animal kill.
-  Stock LootDropProb is .04 for a regular zombie (up to 1 for specials) and is
-  never parsed. The field carpets in bags; the codebase already notes "loot floods
-  the field" in the clear_ai path.
-  *Anchors:* `src/ecs/world.zig:683-693`, `src/server/game.zig:2635-2662`,
-  `Data/Config/entityclasses.xml`
+- **Loot bag drop probability (LootDropProb)** `WORKS`
+  `entityclasses.xml` `LootDropProb` parsed in `assets/entities.zig` (`.04`
+  regular zombie) into `class_id.drop_prob`, clamped to `[0,1]`. `World.damage`
+  and `killXpAward`/turret path both call `rollLootDrop(net_id, drop_prob)` so
+  most kills drop nothing; deterministic hash test pins 4% rate.
+  *Anchors:* `src/assets/entities.zig:326-332`, `src/ecs/world.zig:856-880`,
+  `src/ecs/systems.zig:2107-2127`, `Data/Config/entityclasses.xml:689`
 
 - **Player death loot bag (DropOnDeath)** `PARTIAL`
   Modes 1..3 spawn a bag but `spawnLootBag(t.x, t.y, t.z, 1, 1)` puts a single unit
@@ -2648,25 +2648,28 @@ and server-to-client XP/level pushes do not exist.
   `src/assets/items.zig:444-456`, `src/server/game.zig:4530-4533`,
   `Data/Config/items.xml:20015-20029`, `Data/Config/buffs.xml:8477`
 
-- **Food / water decay over time** `MISSING`
-  Nothing decrements `health[].food` or `health[].water` anywhere. The only writes
-  are 100/100 at spawn, the eat path, and the respawn reset. Hunger and thirst are
-  not a threat and food has no purpose beyond the tiny heal.
-  *Anchors:* `src/ecs/world.zig:553-556`, `src/ecs/inventory.zig:256-265`,
-  `src/server/game.zig:3962`
+- **Food / water decay over time** `WORKS`
+  `tickSurvival` depletes food/water per game hour (`Rules.progression`
+  `food_depletion_per_hour`/`water_depletion_per_hour` divided by
+  `clock.seconds_per_hour`), synced to owner on `survival_sync_seconds`
+  throttle. Starving/dehydrated players take `buffs.survival()` threshold-gated
+  HP damage; well-fed ones regen. Verified: `game/tests` one-hour starve plaus
+  + well-fed regen + starve HP loss.
+  *Anchors:* `src/server/game/tick.zig:23-121`, `src/assets/buffs.zig:363-421`
 
-- **Stamina simulation** `MISSING`
-  The server sends a hardcoded `.{ .stamina, 100, 100 }` in the join vitals bundle
-  and never again. There is no stamina field on Health. Sprinting, swinging and
-  jumping cost nothing server-side; the drain a player sees is purely client-local
-  (playtest `PASS core/stamina_drains_sprint`).
-  *Anchors:* `src/server/game.zig:6529`, `src/ecs/components.zig:22-30`
+- **Stamina simulation** `WORKS`
+  `tickSurvival` drains `stamina_drain_per_second` while `sprint_stale_cd` is
+  active and applies the `buffs.survival()` `StaminaChangeOT perc_subtract`
+  penalty when starving; otherwise regens at `stamina_regen_per_second` toward
+  max, with S2C `EntityStatChanged(stamina)` on change. Join vitals ship real
+  `health.stamina` values, not hardcoded 100.
+  *Anchors:* `src/server/game/tick.zig:125-150`, `src/server/game/join.zig:569-585`
 
-- **Health regeneration / wellness / core temperature** `MISSING`
-  No regen tick, no wellness, no core temp. `EntityStatKind` has
-  sickness/gassiness/speed_modifier/wellness/core_temp_old wired in the wire enum
-  but none are ever sent. `weathersurvival.xml` is not loaded.
-  *Anchors:* `src/wire/packages.zig:1549-1560`, `src/server/game.zig:6527-6532`
+- **Health regeneration / wellness / core temperature** `PARTIAL`
+  Well-fed regen via `buffs.survival()` fraction-of-max gate is live; starvation
+  damage is live. Wellness and core-temperature (`weathersurvival.xml`) remain
+  absent.
+  *Anchors:* `src/server/game/tick.zig:78-107`, `src/wire/packages.zig:1549-1560`
 
 - **Death detection and the dead-player entity** `WORKS`
   A kill through C2S DamageEntity is detected, and the player entity is
@@ -3046,20 +3049,18 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   [section 6](#6-blood-moon).)
   *Anchors:* `src/ecs/aidirector.zig:41-61`, `src/server/game.zig:8114-8121`
 
-- **Water blocks in the world** `MISSING`
-  No water block is ever written. `water_info.xml` is parsed only to **raise**
-  terrain heights up to the water Y within a 12-block radius, so Navezgane's 39
-  lake and pond sources render as flat dry dirt plains. The `.tts` water plane is
-  parsed only to skip past it. `terrain_ids.water` exists but nothing ever assigns
-  it.
-  *Anchors:* `src/world/water.zig:34-57`, `src/world/store.zig:624-626`,
-  `src/world/tts.zig:170-197`, `Data/Worlds/Navezgane/water_info.xml`
+- **Water blocks in the world** `WORKS`
+  `water_info.xml` sources fill water blocks from lake bed up to source surface
+  (`Chunk.applyWaterSources`), prefab `.tts` water plane paints water blocks, and
+  `terrain_ids.water` resolved from AssignIds drives both. Verified by loadgen on
+  Navezgane.
+  *Anchors:* `src/world/store.zig:183-198`, `src/world/water.zig:63-110`,
+  `src/world/tts.zig:170-210`
 
-- **Chunk water channel on the wire** `MISSING`
-  The bpv=2 water channel is written as uniform same-value 0 for every chunk, so
-  the client's WaterSimulationApplyChanges thread has nothing to render or
-  simulate. No swimming, no drinking from a lake, no water blocking movement.
-  *Anchors:* `src/wire/stock_chunk.zig:388`
+- **Chunk water channel on the wire** `WORKS`
+  `writeWaterChannel` encodes per-cell WaterValue mass (19500) for water cells
+  via same-value / byte-planes, carried in every chunk; client renders wet.
+  *Anchors:* `src/wire/stock_chunk.zig:630-680`, `:768-801`
 
 - **Water simulation / flow packages** `MISSING`
   `NetPackageWaterSet` and `NetPackageWaterSimChunkUpdate` are in the package-id
@@ -3164,12 +3165,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   keystone break, non-keystone break, offline expiry and online-never-expires.
   *Anchors:* `src/server/game.zig` removeClaimAt/expireClaims, test at `:10017`
 
-- **Land claim persistence** `MISSING`
-  Claims live in a fixed in-memory array and are never written to disk. A restart
-  drops every claim while the keystone blocks themselves persist in the chunk save,
-  so protection silently disappears and cannot be re-established without
-  re-placing the block.
-  *Anchors:* `src/server/game.zig:415-417`, `:1691-1703`
+- **Land claim persistence** `WORKS`
+  `claims.zlc` (ZCL1) persists the claim array across restart; `loadClaims` on
+  boot and `saveClaims` on tick/deinit/peer-drop/claim-mutate restore it, and a
+  scenario asserts round-trip across a fresh `World` with the same dir. Owner
+  id re-maps on login via name.
+  *Anchors:* `src/server/persist.zig:517-580`, `src/server/game/world.zig:5`,
+  `src/server/scenarios.zig:4253-4285`
 
 - **Land claim replication to the client (lpBlocks)** `MISSING`
   The player-data blob writes `lpBlocks count = 0`, so the client never learns
@@ -3662,12 +3664,9 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/world/store.zig:260-262`, `:653-658`,
   `src/server/game.zig:5183`, `:5194-5197`, `:5213-5219`
 
-- **Land claim persistence** `MISSING`
-  `land_claims` is a 256-entry in-memory array; `deinit` sets `land_claims_n = 0`
-  and nothing ever writes it to disk or reads it back. After any restart every
-  keystone stops protecting its area, even though the keystone block is still in
-  the world.
-  *Anchors:* `src/server/game.zig:416-417`, `:1704`, `:3145-3172`
+- **Land claim persistence** `WORKS` *(duplicate of §11 entry)*
+  See World systems §11: claims persist via `claims.zlc` and survive restart.
+  *Anchors:* `src/server/persist.zig:517-580`
 
 - **Vehicle, turret, power and quest-NPC persistence** `PARTIAL` (2026-08-07)
   Spawned vehicles and turrets now survive restart via `entities.zen` (ZENT1,
@@ -3689,14 +3688,12 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:8130-8147`, `:1686-1706`, `:2551-2571`,
   `:2809-2827`
 
-- **Save on disconnect / kick** `MISSING`
-  `dropClientSlot` and `reapStalePeers` both do `clients[slot] = .{}` with no
-  `savePlayers` first, and `NetPackagePlayerDisconnect` (the one stock ToServer
-  package with no handler) is ignored, so a clean quit is not even noticed. Up to
-  one autosave interval (5 s) of movement, loot and quest progress is discarded on
-  every disconnect and on every admin kick.
-  *Anchors:* `src/server/game.zig:6586-6591`, `:4081-4113`,
-  `src/server/phase_gate.zig:32`
+- **Save on disconnect / kick** `PARTIAL`
+  `NetPackagePlayerDisconnect` now saves then drops the slot immediately; admin
+  kick/ban/wipeplayer paths go through `dropClientSlot` after their own save.
+  `reapStalePeers` (peer timeout) still clears the slot without a save, so a
+  hard disconnect can still lose up to one autosave interval.
+  *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/session_drop.zig:9-56`
 
 - **Per-peer memory footprint** `PARTIAL`
   Each Peer statically embeds `asm_parts[512][1317]` (674 KiB), two 512 KiB buffers
