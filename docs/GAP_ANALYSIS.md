@@ -3913,7 +3913,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority |
 |---|---|
 | `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../7dtd-research/docs/protocol-packages.md` 5.1 |
-| `NetPackageEntitySpawnResponse` | P1 (builder shipped; place/throw only: never on join: client ProcessPackage calls ItemValue.ItemClass on empty item → NRE) |
+| `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
 | `NetPackageEntityTeleport` | P1 |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | P1 |
 | `NetPackageEntityRotation` | P2 |
