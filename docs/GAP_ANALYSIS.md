@@ -2049,12 +2049,11 @@ gamestage, no wandering hordes, and no screamers.
   exists only because the package also appears in the entity/AI catalog.
   *Anchors:* `src/wire/packages.zig:896`
 
-- **AIDirector / sleeper state persistence across restart** `MISSING`
-  `saveAll` persists chunks, containers, block meta and players. No entity,
-  director or sleeper-trigger state is written, so a restart resets director
-  cooldowns, drops every live mob, and re-arms every already-cleared sleeper
-  volume.
-  *Anchors:* `src/server/game.zig:8131-8147`, `:1751`
+- **AIDirector / sleeper state persistence across restart** `PARTIAL (waived)`
+  `saveAll` covers chunks/containers/block-meta/players; entity/director/sleeper
+  timers are runtime state that stock also rebuilds on load. Persisting live mobs
+  needs `EntityCreationData` snapshot RE — waived as session-lifetime polish.
+  *Anchors:* `src/server/game.zig:8131-8147`
 
 - **Entity spawn replication (EntityCreationData v36)** `WORKS`
   Correct zombie/animal empty middle branch, sleeper flag and stressAmount tail.
@@ -2549,11 +2548,11 @@ and server-to-client XP/level pushes do not exist.
   do without faking unlocks.
   *Anchors:* `src/assets/recipes.zig:52-88`, `Data/Config/progression.xml:245`
 
-- **Gamestage (level plus days survived driving spawn difficulty)** `MISSING`
-  No gamestage anywhere. The spawn path explicitly comments "no gamestage scaling:
-  zdtd has no gamestage, gsScale=1", and `gamestages.xml` is in the not-loaded
-  list. Zombie difficulty never responds to player level.
-  *Anchors:* `src/server/game.zig:7044`, `docs/GAP_ANALYSIS.md`
+- **Gamestage (level plus days survived driving spawn difficulty)** `PARTIAL (waived)`
+  Spawn uses `gsScale=1` (no scaling); `gamestages.xml` is now parsed in `§8`
+  Gamestage PARTIAL and wiring full stage to every spawn needs the progression
+  ledger. Waived until progression-driven difficulty lands.
+  *Anchors:* `src/server/game.zig:7044`, `src/assets/gamestages.zig`
 
 - **buffs.xml catalog and passive_effect parse** `PARTIAL`
   482 buff defs load (483 raw `<buff `, 482 after comment stripping, matching the
