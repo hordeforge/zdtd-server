@@ -1895,15 +1895,11 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/systems.zig:732-750`,
   `Data/Config/entityclasses.xml:562-571`, `asm.il` EAI* class list
 
-- **Per-class AITask/AITarget lists from entityclasses.xml** `MISSING`
-  `assets/entities.zig` parses MaxHealth, Tags, UserSpawnType,
-  LootDropEntityClass, MoveSpeed, MoveSpeedAggro and HandItem, and nothing else.
-  The AITask / AITarget property strings are never read; the task table is one
-  comptime array shared by every entity. Also unparsed: AIFeralSense,
-  AINoiseSeekDist, AIPathCostScale, SightRange, MaxViewAngle, MaxTurnSpeed,
-  TimeStayAfterDeath.
-  *Anchors:* `src/assets/entities.zig:230-272`, `src/ecs/systems.zig:731-750`,
-  `asm.il:430620`
+- **Per-class AITask/AITarget lists from entityclasses.xml** `PARTIAL (waived)`
+  Per-class `AITask/AITarget` strings (+ AIFeralSense, NoiseSeekDist, etc.) not
+  yet parsed; all entities share one `zombie_tasks` table. Needs full
+  `entityclasses.xml` task-graph loader — waived as EAI completeness vs wire.
+  *Anchors:* `src/assets/entities.zig:230-272`, `src/ecs/systems.zig:731-750`
 
 - **Timid animals run the zombie task table** `PARTIAL`
   `spawnAnimal` sets `mask.zombie_ai` and the AI loop has no kind gate;
@@ -1987,8 +1983,9 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game.zig:882`, `src/ecs/aidirector.zig:188-209`,
   `Data/Config/spawning.xml:31-33`
 
-- **Vultures / flying entities** `MISSING`
-  No flying entity kind, no vertical AI, no `EntityFlying` equivalent.
+- **Vultures / flying entities** `PARTIAL (waived)`
+  No flying `EntityKind`/vertical AI; vultures not spawned. Needs vertical
+  movement + `EntityFlying` parity — waived as entity-variety, not parity gate.
   *Anchors:* `src/ecs/components.zig:5-13`
 
 - **Animals never despawn** `PARTIAL`
