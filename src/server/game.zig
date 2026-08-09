@@ -45,6 +45,7 @@ const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_net_handlers = @import("game/net_handlers.zig");
 const game_rate_limits = @import("game/rate_limits.zig");
 const game_blockmeta = @import("game/blockmeta.zig");
+const game_clock_persist = @import("game/clock_persist.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2061,47 +2062,11 @@ pub const Game = struct {
         return game_world.clearBlockRaw(self, x, y, z);
     }
 
-    /// Persist the world clock (day + hours as stock worldTime) so a restart
-    /// keeps the calendar — the blood-moon schedule derives from the day, so a
-    /// save used to reset to day 1 and never be more than 7 days from its
-    /// first horde. File: `clock.zcl` ("ZCL1" | u64 worldTime), the same
-    /// encoding stock persists (GamePrefs worldTime / WorldClock Read+Write).
-    /// Saved on the periodic save path and at deinit; restored right after the
-    /// fresh clock in initWithOptions.
     pub fn saveClock(self: *const Game) !void {
-        var path: [512]u8 = undefined;
-        const p = try std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir});
-        var buf: [16]u8 = undefined;
-        @memcpy(buf[0..4], "ZCL1");
-        std.mem.writeInt(u64, buf[4..12], self.sim.director.clock.worldTimeBits(), .little);
-        try io_fs.writeFile(self.allocator, p, buf[0..12]);
+        return game_clock_persist.saveClock(self);
     }
-
-    /// Restore `clock.zcl` over the freshly seeded clock. A missing file is a
-    /// fresh world (keep day 1); a corrupt or unreadable file is dropped with a
-    /// log line (never silent: the next save would otherwise clobber day 1).
     fn restoreClock(self: *Game) void {
-        var path: [512]u8 = undefined;
-        const p = std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir}) catch {
-            std.debug.print("zdtd: clock.zcl path too long; keeping fresh clock\n", .{});
-            return;
-        };
-        if (!io_fs.fileExistsSimple(p)) return;
-        var buf: [16]u8 = undefined;
-        const bytes = io_fs.readFileInto(self.allocator, p, &buf) catch |err| {
-            // File exists but could not be read: operator must know the calendar
-            // reset is involuntary, not a fresh world.
-            logPersistErr(self, "restore clock", err);
-            return;
-        };
-        if (bytes.len < 12 or !std.mem.eql(u8, bytes[0..4], "ZCL1")) {
-            std.debug.print("zdtd: clock.zcl unreadable or mismatched; keeping fresh clock\n", .{});
-            return;
-        }
-        const wt = std.mem.readInt(u64, bytes[4..12], .little);
-        self.sim.director.clock.day = @intCast(wt / 24000 + 1);
-        self.sim.director.clock.hours = @as(f32, @floatFromInt(wt % 24000)) / 1000.0;
-        std.debug.print("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
+        return game_clock_persist.restoreClock(self);
     }
 
     pub fn saveWeather(self: *const Game) !void {
