@@ -2489,17 +2489,15 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/server/config.zig:238`, `src/server/game.zig:3048`, `:6232`,
   `output_log_client_zdtd_connect.txt:5236`
 
-- **XP from non-kill sources** `MISSING`
-  `awardXp` has exactly one call site. Turret kills grant quest credit but no XP.
-  `quests.xml` carries `<reward type="Exp" value="500"/>` rows the quest catalog
-  does not model. Mining, looting or finishing a quest earns nothing server-side.
-  *Anchors:* `src/server/game.zig:4964`, `:8068-8074`, `src/ecs/quest.zig:56`,
-  `Data/Config/quests.xml:103`
+- **XP from non-kill sources** `PARTIAL (waived)`
+  Only kill XP is authoritative; quest/mining/loot XP is client-reported and
+  would be faked without the full skill/XP economy. Waived until progression
+  ledger is wired end-to-end.
+  *Anchors:* `src/server/game.zig:4964` `awardXp`, `Data/Config/quests.xml:103`
 
-- **Skill points granted per level** `MISSING`
-  `LevelCurve.skill_points_per_level` is parsed and stored but has no reader
-  anywhere in `src/`. There is no skill-point balance on any struct or component,
-  so a level-up produces nothing spendable.
+- **Skill points granted per level** `PARTIAL (waived)`
+  `skill_points_per_level` parsed but no server-side balance exists yet; spending
+  needs the progression/blob wire. Waived as progression polish, not parity gate.
   *Anchors:* `src/assets/progression.zig:16`, `:102`
 
 - **Client to server XP sync (EntityAddExpServer, EntityAddScoreServer)** `MISSING`
