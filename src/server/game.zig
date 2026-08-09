@@ -47,6 +47,7 @@ const game_rate_limits = @import("game/rate_limits.zig");
 const game_blockmeta = @import("game/blockmeta.zig");
 const game_clock_persist = @import("game/clock_persist.zig");
 const game_locks = @import("game/locks.zig");
+const game_bans = @import("game/bans.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2109,34 +2110,11 @@ pub const Game = struct {
         return game_net.peerIpKey(peer);
     }
 
-    /// Stock ~500ms/IP; return true if join should be rejected.
     pub fn joinRateLimited(self: *Game, ip: u32) bool {
-        if (ip == 0) return false;
-        if (ip == 0x7f000001) return false;
-        const now_ms: u64 = clock.monoNs() / 1_000_000;
-        const gap_ms: u64 = self.join_rate_limit_ms;
-        var i: usize = 0;
-        while (i < self.join_ip_n) : (i += 1) {
-            if (self.join_ip[i] != ip) continue;
-            if (now_ms -% self.join_ip_ms[i] < gap_ms) return true;
-            self.join_ip_ms[i] = now_ms;
-            return false;
-        }
-        if (self.join_ip_n < self.join_ip.len) {
-            self.join_ip[self.join_ip_n] = ip;
-            self.join_ip_ms[self.join_ip_n] = now_ms;
-            self.join_ip_n += 1;
-        }
-        return false;
+        return game_bans.joinRateLimited(self, ip);
     }
-
     pub fn isBanned(self: *const Game, ip: u32) bool {
-        if (ip == 0) return false;
-        var i: usize = 0;
-        while (i < self.ban_n) : (i += 1) {
-            if (self.ban_ip[i] == ip) return true;
-        }
-        return false;
+        return game_bans.isBanned(self, ip);
     }
 
     pub fn banIp(self: *Game, ip: u32) void {
