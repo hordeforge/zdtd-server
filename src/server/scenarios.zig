@@ -2336,6 +2336,99 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     std.debug.print("PASS workstation: queue depth {d}, craft complete acknowledged\n", .{st.queue_len});
 }
 
+test "scenario workstation recipe authority: count and time from recipes.xml" {
+    // GAP P1: the server must not trust the client's Recipe blob. With a
+    // recipes.xml loaded, a spoofed queue entry (count 2, time 0.2) is
+    // overwritten with the recipe's count (3) and craft_time (3.0).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .config_dir = "assets/fixtures",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expect(g.recipes.source == .xml);
+
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const ws = @import("../world/workstations.zig");
+    const stock_te = packages.stock_te;
+    const stock_inv = packages.stock_inv;
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const wx: i32 = @intFromFloat(g.sim.transform[pa].x);
+    const wy: i32 = @intFromFloat(g.sim.transform[pa].y);
+    const wz: i32 = @intFromFloat(g.sim.transform[pa].z);
+
+    var recipe: [128]u8 = undefined;
+    var rw: @import("../wire/binary.zig").Writer = .{ .buf = &recipe };
+    // A real AssignIds stock type the runtime dump resolves (the queue's
+    // output_type is the stock wire type; a synthetic builtin index would
+    // not resolve and blocks are in the offline AssignIds dump).
+    const out_type: i32 = @intCast(g.maxdamage.idByName("frameShapes:cube") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqual(@as(i32, 16107), out_type);
+    try rw.writeU16(1);
+    try rw.writeI32(out_type);
+    try rw.writeI32(2);
+    try rw.writeBool(false);
+    try rw.writeF32(1.0);
+    try rw.writeI32(9);
+    try rw.writeString("forge");
+    try rw.writeI32(0);
+
+    var fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
+    fuel[0] = .{ .type_id = out_type, .count = 4 };
+    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    var last_input_buf: [64]u8 = undefined;
+    var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
+    for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
+    const melt = [_]f32{0} ** ws.stock_melt_len;
+    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    queue[queue.len - 1] = .{
+        .multiplier = 2,
+        .is_crafting = true,
+        .craft_time_left = 0.2, // spoofed: server must replace with 3.0
+        .one_item_craft_time = 0.2, // spoofed
+        .starting_entity_id = ca.entity_id,
+        .output_type = out_type,
+        .output_count = 2, // spoofed: recipe says 3
+        .craft_exp_gain = 9,
+    };
+    queue[queue.len - 1].setRecipeBlob(rw.written());
+
+    var body: [4096]u8 = undefined;
+    const c2s = try stock_te.buildWorkstationTeBody(&body, 3, wx, wy, wz, 1301, .{
+        .fuel = fuel[0..],
+        .input = input[0..],
+        .tools = tools[0..],
+        .output = output[0..],
+        .last_input_count = ws.stock_last_input_len,
+        .last_input = liw.written(),
+        .queue = queue[0..],
+        .melt = melt[0..],
+        .is_burning = true,
+        .burn_time_left = 30,
+    });
+    var fb: [4096]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageTileEntity", c2s));
+
+    const st = g.workstations.get(wx, wy, wz).?;
+    const q = st.queue[st.queue_len - 1];
+    try std.testing.expectEqual(@as(u16, 3), q.output_count); // recipe count wins
+    try std.testing.expectEqual(@as(f32, 3.0), q.one_item_craft_time); // recipe time wins
+    try std.testing.expectEqual(@as(f32, 3.0), q.craft_time_left);
+
+    std.debug.print("PASS workstation-authority: spoofed count/time replaced by recipe 3/3.0\n", .{});
+}
+
 test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     io_fs.mkdirPathSimple("worlds");
     freshScenarioDir("worlds/zdtd_sc_unload");

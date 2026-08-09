@@ -361,25 +361,48 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // types and non-recipe outputs are dropped. Builtin recipes
                 // (offline/test) carry no stock types, so validation is off.
                 if (self.recipes.source == .xml) {
-                    var q_ok: [workstations_mod.max_ws_queue]workstations_mod.QueueItem = undefined;
-                    var qn: usize = 0;
-                    for (ws.queue[0..ws.queue_n]) |q| {
-                        if (q.output_type == 0 or q.output_count <= 0) continue;
-                        const iname = self.items.nameByStockType(q.output_type) orelse continue;
-                        const rd = self.recipes.byName(iname) orelse continue;
+                    // Validate in place: the stock client treats the LAST
+                    // queue slot as the active crafting entry, so compacting
+                    // accepted items to the front would strand them. Rejected
+                    // slots are cleared so nothing stale keeps crafting.
+                    for (st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]) |*dst, q| {
+                        if (q.output_type == 0 or q.output_count <= 0) {
+                            dst.* = .{};
+                            continue;
+                        }
+                        // Stock type → name: prefer the items table (loaded
+                        // items.xml), fall back to the runtime AssignIds dump
+                        // so a recipes.xml-only config still validates.
+                        const iname = self.items.nameByStockType(q.output_type) orelse blk: {
+                            if (q.output_type < 0 or q.output_type > std.math.maxInt(u16)) break :blk null;
+                            break :blk self.maxdamage.idName(@intCast(q.output_type));
+                        } orelse {
+                            dst.* = .{};
+                            continue;
+                        };
+                        const rd = self.recipes.byName(iname) orelse {
+                            dst.* = .{};
+                            continue;
+                        };
                         // The recipe must also be craftable on THIS station:
                         // its craft_area has to be in the block's
                         // CraftingAreaRecipes (or the block name when no list
                         // is declared), so a modified client cannot queue a
                         // forge output on a campfire.
-                        if (rd.craft_area.len > 0 and !self.blocks.allowsCraftArea(@intCast(ws.block_id), rd.craft_area)) continue;
-                        q_ok[qn] = q;
-                        qn += 1;
+                        if (rd.craft_area.len > 0 and !self.blocks.allowsCraftArea(@intCast(ws.block_id), rd.craft_area)) {
+                            dst.* = .{};
+                            continue;
+                        }
+                        // Authority: per-craft count and duration come from
+                        // recipes.xml, not the client blob (a modified client
+                        // could otherwise claim any output count or craft in
+                        // zero time). Stock HandleRecipeQueue reads the Recipe
+                        // object for both; the item restarts on the server time.
+                        dst.* = q;
+                        dst.output_count = rd.count;
+                        dst.one_item_craft_time = rd.craft_time;
+                        dst.craft_time_left = rd.craft_time;
                     }
-                    @memcpy(st.queue[0..qn], q_ok[0..qn]);
-                    // Clear the slots the validation dropped so a previous
-                    // tick's queue cannot linger as a live craft.
-                    for (st.queue[qn..]) |*q| q.* = .{};
                 } else {
                     @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
                 }

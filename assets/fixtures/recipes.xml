@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Offline fixture for the workstation recipe-authority test: one recipe
+     whose output is a block from the AssignIds dump (frameShapes:cube = 16107)
+     with a distinct count (3) and craft_time (3.0) so a spoofed client blob
+     (count 2, time 0.2) must be overwritten from this file. -->
+<recipes>
+  <recipe name="frameShapes:cube" count="3" craft_time="3">
+    <ingredient name="frameShapes:cube" count="1"/>
+  </recipe>
+</recipes>
