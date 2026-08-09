@@ -9,6 +9,7 @@ const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
+const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
@@ -220,6 +221,62 @@ test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
     }
     try std.testing.expect(cap_a.findPkgIdEntity(pos_id, ca.entity_id) == null);
     std.debug.print("PASS relpos-motion: B received PosAndRot relay for A after RelPos inject\n", .{});
+}
+
+test "scenario item drop commits with EntitySpawnResponse" {
+    // Stock ItemDropServer answers the thrower with EntitySpawnResponse(success,
+    // item): the client DecItems its own bag on receipt (the drop commit).
+    // Without it the thrown stack lingers in the client bag until re-sync.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+
+    // Give A a wood stack to drop, then drop 1 via the real package path.
+    const wood_id = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood_id != 0);
+    _ = invsys.give(&g.sim, ca.slot, wood_id, 10);
+    const stack = packages.stock_inv.StockSlot{ .type_id = packages.stock_inv.itemTypeFromIndex(7), .count = 1 };
+    var db: [128]u8 = undefined;
+    var dw: @import("../wire/binary.zig").Writer = .{ .buf = &db };
+    try packages.stock_inv.writeItemStack(&dw, stack);
+    try dw.writeF32(260);
+    try dw.writeF32(70);
+    try dw.writeF32(260);
+    try dw.writeF32(0); // initialMotion
+    try dw.writeF32(0);
+    try dw.writeF32(0);
+    try dw.writeF32(0); // randomPosAdd
+    try dw.writeF32(0);
+    try dw.writeF32(0);
+    try dw.writeF32(60); // lifetime
+    try dw.writeI32(-1); // entityId (server assigns)
+    try dw.writeI32(7); // clientInstanceId
+    try dw.writeBool(false);
+    var fb: [256]u8 = undefined;
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemDrop", dw.written()));
+
+    const resp_id = packages.idOf("NetPackageEntitySpawnResponse").?;
+    const rb = cap_a.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
+    var rr = binary.Reader{ .data = rb };
+    try std.testing.expectEqual(true, try rr.readBool()); // success
+    // The dropped item's ItemValue follows (never the empty sentinel: the
+    // client dereferences ItemValue.ItemClass on receipt).
+    const iv_type = try rr.readI32();
+    try std.testing.expect(iv_type != 0);
+
+    std.debug.print("PASS item-drop-commit: EntitySpawnResponse success, item type={d}\n", .{iv_type});
 }
 
 test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {

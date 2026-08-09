@@ -211,6 +211,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (dropped > 0) {
             // Stock ItemDropServer → EntityItem (class "item"), not death bag.
             try self.broadcastItemDropSpawn(dropped, d.stack, c.entity_id, d.client_instance_id);
+            // EntitySpawnResponse(success, item): the thrower's client DecItems
+            // its own inventory on receipt, committing the drop. Without it the
+            // stack stays in the client bag until the next inventory sync.
+            if (packages.buildEntitySpawnResponse(self.body_buf[16..48], true, d.stack)) |rb| {
+                try self.sendGame(peer, "NetPackageEntitySpawnResponse", rb);
+            } else |_| {}
             try self.sendHoldingEcho(peer, c);
             // Rebaseline eatable units so Path C does not treat drop as eat.
             if (self.sim.mask[ps].inventory) {

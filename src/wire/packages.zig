@@ -655,11 +655,19 @@ pub fn buildEntityTeleportBody(buf: []u8, entity_id: i32, x: f32, y: f32, z: f32
     return buildPosAndRotBody(buf, entity_id, x, y, z, rx, ry, rz, on_ground);
 }
 
-/// NetPackageEntitySpawnResponse: success:bool | ItemValue (empty byte 0 when no item).
-pub fn buildEntitySpawnResponse(buf: []u8, success: bool) ![]u8 {
+/// NetPackageEntitySpawnResponse: success:bool | ItemValue. The client's
+/// ProcessPackage dereferences ItemValue.ItemClass unconditionally, so the
+/// item must be real: an empty sentinel NREs the stock client (the reason
+/// this is only sent on place/throw, never on join). `item` null still
+/// writes the empty sentinel for callers that only need the ack.
+pub fn buildEntitySpawnResponse(buf: []u8, success: bool, item: ?stock_inv.StockSlot) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(success);
-    try stock_inv.writeEmptyItemValue(&w);
+    if (item) |it| {
+        try stock_inv.writeItemValue(&w, it);
+    } else {
+        try stock_inv.writeEmptyItemValue(&w);
+    }
     return w.written();
 }
 
@@ -2968,7 +2976,7 @@ test "vehicle data sync header framing" {
 
 test "entity spawn response and teleport layout" {
     var buf: [64]u8 = undefined;
-    const sr = try buildEntitySpawnResponse(&buf, true);
+    const sr = try buildEntitySpawnResponse(&buf, true, null);
     try std.testing.expectEqual(@as(usize, 2), sr.len); // success + empty ItemValue
     try std.testing.expectEqual(@as(u8, 1), sr[0]);
     try std.testing.expectEqual(@as(u8, 0), sr[1]);
