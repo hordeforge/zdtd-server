@@ -86,7 +86,7 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `e1cea62`; nothing staged or untracked except
+All work is committed through `b424fea`; nothing staged or untracked except
 this handoff note.
 
 ## What is still open (bounded next slices)
