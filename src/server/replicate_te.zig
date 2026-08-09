@@ -178,10 +178,10 @@ pub fn broadcastPowerVisuals(self: *Game) void {
         const n = &self.sim.power.nodes[i];
         const on = ecs.electric.nodeIsOn(n.*);
         if (n.net_synced and n.net_on == on and n.net_powered == n.powered) continue;
+        const block_id = self.world.blockWorld(n.x, n.y, n.z) catch continue;
         n.net_synced = true;
         n.net_on = on;
         n.net_powered = n.powered;
-        const block_id = self.world.blockWorld(n.x, n.y, n.z) catch continue;
         if (block_id == 0) continue;
         const stored = self.blockRawAt(n.x, n.y, n.z);
         const base: u32 = if ((stored & 0xffff) == block_id) stored else @as(u32, block_id);

@@ -441,7 +441,7 @@ pub const World = struct {
     /// Resting terrain height at world (x,z) via the optional ground hook, or
     /// null when unset (no terrain data; caller skips physics).
     pub fn groundY(self: *const World, x: f32, z: f32) ?f32 {
-        if (self.ground_fn) |f| return f(self.ground_ctx, @intFromFloat(@floor(x)), @intFromFloat(@floor(z)));
+        if (self.ground_fn) |f| return f(self.ground_ctx, @floor(x), @floor(z));
         return null;
     }
 
@@ -794,7 +794,7 @@ pub const World = struct {
 
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
         const s = self.spawnBase(.turret, x, y, z, 150) orelse return null;
-        const nid = self.power.addNode(.consumer, @intFromFloat(@floor(x)), @intFromFloat(@floor(y)), @intFromFloat(@floor(z)), 25) orelse {
+        const nid = self.power.addNode(.consumer, @floor(x), @floor(y), @floor(z), 25) orelse {
             self.destroy(s);
             return null;
         };

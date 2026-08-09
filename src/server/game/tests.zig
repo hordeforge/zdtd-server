@@ -700,8 +700,8 @@ test "zombie chases over real terrain and stays on the surface" {
     // open ground passable).
     try std.testing.expect(g.sim.transform[zs].x < x0 - 1.0);
     // Feet sit on the column the body is standing over, not at spawn height.
-    const wx: i32 = @intFromFloat(@floor(g.sim.transform[zs].x));
-    const wz: i32 = @intFromFloat(@floor(g.sim.transform[zs].z));
+    const wx: i32 = @floor(g.sim.transform[zs].x);
+    const wz: i32 = @floor(g.sim.transform[zs].z);
     const h: i32 = try g.world.heightWorld(wx, wz);
     try std.testing.expectEqual(@as(f32, @floatFromInt(h + 1)), g.sim.transform[zs].y);
 }

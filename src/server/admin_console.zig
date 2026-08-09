@@ -642,7 +642,7 @@ pub fn replyGamePrefs(self: *Game, filter: []const u8) void {
     self.gamePref(filter, "ViewRadius", "{d}", .{self.view_radius});
     self.gamePref(filter, "GameDifficulty", "{d}", .{self.sim.director.difficulty});
     self.gamePref(filter, "DayNightLength", "{d}", .{
-        @as(u32, @intFromFloat(@round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0))),
+        @as(u32, @round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0)),
     });
     self.gamePref(filter, "TelnetPort", "{d}", .{self.admin.port});
 }

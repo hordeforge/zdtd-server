@@ -201,9 +201,9 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         if (len < 0.1 or len > block_range) continue; // only when pressed against cover
         dx /= len;
         dz /= len;
-        const bx: i32 = @intFromFloat(@floor(zt.x + dx));
-        const bz: i32 = @intFromFloat(@floor(zt.z + dz));
-        const by: i32 = @intFromFloat(@floor(zt.y + 1)); // head height
+        const bx: i32 = @floor(zt.x + dx);
+        const bz: i32 = @floor(zt.z + dz);
+        const by: i32 = @floor(zt.y + 1); // head height
         const solid = self.world.isSolidWorld(bx, by, bz) catch continue;
         if (!solid) continue;
         const id = self.blockIdAtWorld(bx, by, bz);

@@ -2000,7 +2000,7 @@ pub const Game = struct {
     pub fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
         const bm = self.world.biomes orelse return fallback;
-        const biome_id = bm.atWorld(@intFromFloat(@floor(x)), @intFromFloat(@floor(z))) orelse return fallback;
+        const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return fallback;
         const bname = self.world.biome_layers_table.nameById(biome_id) orelse return fallback;
         var buf: [16]assets_spawning.Rule = undefined;
         const n = self.spawning.rulesForBiome(bname, &buf);

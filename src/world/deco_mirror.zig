@@ -62,7 +62,7 @@ fn axisLo(dim: u8) i32 {
 
 fn axisHi(dim: u8) i32 {
     const half: f32 = @as(f32, @floatFromInt(dim)) / 2.0 + 0.1;
-    return @as(i32, @intFromFloat(@round(half))) - 1;
+    return @as(i32, @round(half)) - 1;
 }
 
 /// Cell offsets for a `MultiBlockDim`. Returns a single (0,0,0) for 1x1x1.

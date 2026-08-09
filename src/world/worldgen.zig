@@ -159,7 +159,7 @@ const Sampler = struct {
     fn airAbove(self: *const Sampler) i32 {
         var m: f32 = self.cache2d[0];
         for (self.cache2d[1..]) |t| m = @max(m, t);
-        const y: i32 = @intFromFloat(@ceil(m + margin));
+        const y: i32 = @ceil(m + margin);
         return @min(y, y_dim - 1);
     }
 };
@@ -277,7 +277,7 @@ pub const WorldGen = struct {
                 ));
             }
         }
-        var y: i32 = @min(@as(i32, @intFromFloat(@ceil(top + margin))), y_dim - 1);
+        var y: i32 = @min(@as(i32, @ceil(top + margin)), y_dim - 1);
         while (y >= bedrock_h) : (y -= 1) {
             if (self.density(wx, y, wz) > 0) return @intCast(y);
         }
@@ -474,8 +474,8 @@ test "worldgen guaranteed band and heights inside surface limits" {
                 hi = @max(hi, t);
             }
         }
-        const solid_below: i32 = @intFromFloat(@floor(lo - margin));
-        const air_above: i32 = @intFromFloat(@ceil(hi + margin));
+        const solid_below: i32 = @floor(lo - margin);
+        const air_above: i32 = @ceil(hi + margin);
         try std.testing.expect(solid_below >= min_surface);
         try std.testing.expect(air_above <= max_surface);
         for (heights, 0..) |h, col| {

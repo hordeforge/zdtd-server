@@ -1351,8 +1351,8 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
 
 fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
     const wn = s.world_name[0..s.world_name_len];
-    const hh: u32 = @intFromFloat(@floor(s.hours));
-    const mm: u32 = @intFromFloat(@floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0));
+    const hh: u32 = @floor(s.hours);
+    const mm: u32 = @floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0);
     const bm: []const u8 = if (s.bloodmoon_active) "<span class=\"warn-text\">ACTIVE</span>" else "idle";
     const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
     // HTML display only (JSON keeps "set"/"open" for tool stability).

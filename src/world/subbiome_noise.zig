@@ -166,9 +166,9 @@ pub const PerlinNoise = struct {
     /// 2D gradient noise (asm.il 2198860-2198966): four lattice corners,
     /// smoothstep interpolation, `*1.8181818...` clamped to [-1, 1].
     pub fn noise(self: *const PerlinNoise, x: f64, y: f64) f64 {
-        const ix: i32 = @intFromFloat(@floor(x));
+        const ix: i32 = @floor(x);
         const fx = x - @as(f64, @floatFromInt(ix));
-        const iy: i32 = @intFromFloat(@floor(y));
+        const iy: i32 = @floor(y);
         const fy = y - @as(f64, @floatFromInt(iy));
         const sx = smooth(fx);
         const sy = smooth(fy);

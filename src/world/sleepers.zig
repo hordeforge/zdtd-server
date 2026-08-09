@@ -67,17 +67,17 @@ pub const Store = struct {
     pub fn containsXZ(self: *const Store, vi: usize, x: f32, z: f32) bool {
         if (vi >= self.volumes.len) return false;
         const v = &self.volumes[vi];
-        const xi: i32 = @intFromFloat(@floor(x));
-        const zi: i32 = @intFromFloat(@floor(z));
+        const xi: i32 = @floor(x);
+        const zi: i32 = @floor(z);
         return xi >= v.x0 and xi < v.x1 and zi >= v.z0 and zi < v.z1;
     }
 
     pub fn contains(self: *const Store, vi: usize, x: f32, y: f32, z: f32) bool {
         if (vi >= self.volumes.len) return false;
         const v = &self.volumes[vi];
-        const xi: i32 = @intFromFloat(@floor(x));
-        const yi: i32 = @intFromFloat(@floor(y));
-        const zi: i32 = @intFromFloat(@floor(z));
+        const xi: i32 = @floor(x);
+        const yi: i32 = @floor(y);
+        const zi: i32 = @floor(z);
         return xi >= v.x0 and xi < v.x1 and yi >= v.y0 and yi < v.y1 and zi >= v.z0 and zi < v.z1;
     }
 };

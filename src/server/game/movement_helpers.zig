@@ -20,9 +20,9 @@ pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
 }
 
 fn tryActivateTriggerAtPlayer(self: *Game, x: f32, y: f32, z: f32) void {
-    const bx: i32 = @intFromFloat(@floor(x));
-    const by: i32 = @intFromFloat(@floor(y));
-    const bz: i32 = @intFromFloat(@floor(z));
+    const bx: i32 = @floor(x);
+    const by: i32 = @floor(y);
+    const bz: i32 = @floor(z);
     _ = self.sim.power.activateTriggerAt(bx, by - 1, bz);
     _ = self.sim.power.activateTriggerAt(bx, by, bz);
 }

@@ -150,7 +150,7 @@ pub const LatencyHist = struct {
     /// Approximate percentile: walk buckets until cumulative count >= target.
     pub fn percentileNs(self: *const LatencyHist, p: f64) u64 {
         if (self.count == 0) return 0;
-        const target: u64 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.count)) * p / 100.0));
+        const target: u64 = @ceil(@as(f64, @floatFromInt(self.count)) * p / 100.0);
         var acc: u64 = 0;
         for (self.buckets, 0..) |c, i| {
             acc = std.math.add(u64, acc, c) catch std.math.maxInt(u64);

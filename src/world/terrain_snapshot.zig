@@ -103,8 +103,8 @@ pub const Snapshot = struct {
         std.debug.assert(px.len == pz.len);
         self.clear();
         for (px, pz) |x, z| {
-            const cx = @divFloor(@as(i32, @intFromFloat(@floor(x))), store.chunk_size);
-            const cz = @divFloor(@as(i32, @intFromFloat(@floor(z))), store.chunk_size);
+            const cx = @divFloor(@as(i32, @floor(x)), store.chunk_size);
+            const cz = @divFloor(@as(i32, @floor(z)), store.chunk_size);
             var dz: i32 = -snap_radius_chunks;
             while (dz <= snap_radius_chunks) : (dz += 1) {
                 var dx: i32 = -snap_radius_chunks;

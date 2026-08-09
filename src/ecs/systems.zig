@@ -1257,7 +1257,7 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
         _ = w.path_replans_denied.fetchAdd(1, .monotonic);
         return;
     }
-    replanPath(w, s, ai, @intFromFloat(@floor(ai.path_goal_x)), @intFromFloat(@floor(ai.path_goal_z)));
+    replanPath(w, s, ai, @floor(ai.path_goal_x), @floor(ai.path_goal_z));
 }
 
 /// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
@@ -1529,17 +1529,17 @@ fn pathStepCb(ctx: ?*anyopaque, fx: i32, fz: i32, fy: i32, tx: i32, tz: i32) ?i3
 /// probe resolves it inside the same step/drop band the search uses; the ground
 /// hook is the fallback for a body further off than one step.
 fn footingY(w: *World, s: Slot, sx: i32, sz: i32) i32 {
-    const cur: i32 = @intFromFloat(@floor(w.transform[s].y));
+    const cur: i32 = @floor(w.transform[s].y);
     if (w.stepTo(sx, sz, cur, sx, sz)) |y| return y;
-    if (w.groundY(w.transform[s].x, w.transform[s].z)) |gy| return @intFromFloat(@floor(gy));
+    if (w.groundY(w.transform[s].x, w.transform[s].z)) |gy| return @floor(gy);
     return cur;
 }
 
 /// One A* solve, refilling the whole waypoint buffer. Sets path_blocked when
 /// the solve could not reach the goal cell (sealed cover → BreakBlock).
 fn replanPath(w: *World, s: Slot, ai: *c.ZombieAi, gxi: i32, gzi: i32) void {
-    const sx: i32 = @intFromFloat(@floor(w.transform[s].x));
-    const sz: i32 = @intFromFloat(@floor(w.transform[s].z));
+    const sx: i32 = @floor(w.transform[s].x);
+    const sz: i32 = @floor(w.transform[s].z);
     const sy = footingY(w, s, sx, sz);
     w.transform[s].y = @floatFromInt(sy);
     _ = w.path_replans.fetchAdd(1, .monotonic);
@@ -1572,8 +1572,8 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
         return;
     }
     if (ai.path_replan_cd > 0) ai.path_replan_cd -= dt;
-    const gxi: i32 = @intFromFloat(@floor(gx));
-    const gzi: i32 = @intFromFloat(@floor(gz));
+    const gxi: i32 = @floor(gx);
+    const gzi: i32 = @floor(gz);
     // Reasons to solve again: the buffer is walked out, the goal left the cell
     // it was planned for, or the path is blocked and destroyed cover may have
     // opened a route. All of them wait for the throttle, including the spent

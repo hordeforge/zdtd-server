@@ -715,8 +715,8 @@ pub const Director = struct {
 
     /// 5x5-chunk region key for a world position (AIDirectorChunkData map).
     fn heatRegionKey(wx: f32, wz: f32) i64 {
-        const rx: i64 = @divFloor(@as(i64, @intFromFloat(@floor(wx))), heat_region_world);
-        const rz: i64 = @divFloor(@as(i64, @intFromFloat(@floor(wz))), heat_region_world);
+        const rx: i64 = @divFloor(@as(i64, @floor(wx)), heat_region_world);
+        const rz: i64 = @divFloor(@as(i64, @floor(wz)), heat_region_world);
         return (rx << 32) | (rz & 0xFFFFFFFF);
     }
 

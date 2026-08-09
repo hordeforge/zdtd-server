@@ -129,7 +129,7 @@ pub const LootTable = struct {
                 const roll: u32 = (s >> 16) % 1000;
                 for (band.picks) |p| {
                     if (p.prob <= 0) continue;
-                    const thresh: u32 = @intFromFloat(@round(p.prob * 1000.0));
+                    const thresh: u32 = @round(p.prob * 1000.0);
                     if (roll <= thresh) return p.quality;
                 }
                 return band.default_quality;
@@ -147,7 +147,7 @@ pub const LootTable = struct {
         if (!std.math.isFinite(p)) return false;
         if (p >= 1.0) return true;
         if (p <= 0.0) return false;
-        const thresh: u32 = @intFromFloat(@round(p * 1000.0));
+        const thresh: u32 = @round(p * 1000.0);
         return (s % 1000) <= thresh;
     }
 

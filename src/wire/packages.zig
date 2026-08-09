@@ -699,7 +699,7 @@ pub fn buildTraderDataStock(
 }
 
 /// Widest world coordinate a client may claim. Downstream sim code funnels
-/// positions through `@intFromFloat(@floor(v))`, which traps on NaN/inf/huge in
+/// positions through `@floor(v)`, which traps on NaN/inf/huge in
 /// safe builds, so non-finite coordinates are rejected at the wire boundary
 /// rather than clamped somewhere deeper.
 const world_coord_limit: f32 = 1 << 24;

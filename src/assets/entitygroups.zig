@@ -57,7 +57,7 @@ pub const GroupTable = struct {
         var sum_mw: u64 = 0;
         for (g.entries) |e| {
             if (e.weight <= 0) continue;
-            sum_mw += @as(u64, @intFromFloat(@round(e.weight * 1000.0)));
+            sum_mw += @as(u64, @round(e.weight * 1000.0));
         }
         if (sum_mw == 0) return null;
         // Match prior scale: (s % 10000) / 10000 * sum, via integer multiply.
@@ -65,7 +65,7 @@ pub const GroupTable = struct {
         var acc_mw: u64 = 0;
         for (g.entries) |e| {
             if (e.weight <= 0) continue;
-            acc_mw += @as(u64, @intFromFloat(@round(e.weight * 1000.0)));
+            acc_mw += @as(u64, @round(e.weight * 1000.0));
             if (r_mw < acc_mw) return e.name;
         }
         return g.entries[g.entries.len - 1].name;

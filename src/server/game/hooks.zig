@@ -50,8 +50,8 @@ pub fn spawnPoiTraders(self: *Game) void {
 pub fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const pf = if (g.world.prefabs) |*p| p else return null;
-    const wx: i32 = @intFromFloat(@floor(x));
-    const wz: i32 = @intFromFloat(@floor(z));
+    const wx: i32 = @floor(x);
+    const wz: i32 = @floor(z);
     for (pf.items, 0..) |d, i| {
         if (world_store.prefabs.isPart(d.name)) continue;
         const b = pf.boundsXZ(i);

@@ -15,8 +15,8 @@ pub fn cellOf(x: f32, z: f32) struct { cx: i32, cz: i32 } {
     // Floor the division, not the coordinate: truncating first puts every
     // position in (-cell_size, 0) into cell 0 and skews range around the origin.
     return .{
-        .cx = @intFromFloat(@floor(x / cell_size)),
-        .cz = @intFromFloat(@floor(z / cell_size)),
+        .cx = @floor(x / cell_size),
+        .cz = @floor(z / cell_size),
     };
 }
 
@@ -50,7 +50,7 @@ pub fn clearAfterReplicate(d: *Dirty) void {
 
 /// Bit set of observers, one bit per client slot (bit k = client k).
 pub fn ObserverMask(comptime lanes: comptime_int) type {
-    return std.meta.Int(.unsigned, lanes);
+    return @Int(.unsigned, lanes);
 }
 
 /// Which of `lanes` observers have entity cell (ecx,ecz) in interest range,
