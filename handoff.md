@@ -91,8 +91,8 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 All work is committed through `aec9eda`; nothing staged or untracked except
 this handoff note.
 
-Next: rerun `make check` (aborted mid-run on 2026-08-09 by a request
-timeout; the per-step gates build/test/lint are green individually).
+`make check` full gate green 2026-08-09 (release-check + lint + build +
+test + fuzz, rc=0).
 
 ## What is still open (bounded next slices)
 
