@@ -1,7 +1,7 @@
 # Work plan: handoff-ready tasks
 
-**Date pin:** 2026-08-06. **Head:** `2768e30` (gap analysis rescored at this head). **Gates at pin:** `make check`
-exit 0, 758 unit tests, live stock-client gate 23/23.
+**Date pin:** 2026-08-09. **Head:** current `main` (game.zig 2464, 42 shards, `lint-architecture: clean`, 991 tests, GAP 0 MISSING via honest waivers with RE cites).
+  Prior pin `2768e30` (2026-08-06, 758 tests). Gates: `zig build` + `zig build test` + `lint-architecture` clean; no Bucket A hardcode on production path.
 
 This file exists to be handed to an agent or a programmer who has no other
 context. Every task below is self-contained: what to change, which files, the

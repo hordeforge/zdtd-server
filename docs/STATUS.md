@@ -2,7 +2,7 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **988/988** (consecutive runs green; the earlier 4 flakes shared one root cause: scenario worlds and `.zdtd_cfg_cache` dirs kept a previous run's `entities.zen`, and every boot re-seeded the demo minibike + turret on top of the restored ones, so vehicle/turret records accumulated until entity slots or the 8 KiB console reply sink ran out. Fixed by seeding persistable kinds only on a fresh world (`had_saved_entities`) and wiping each scenario world before the test (`freshScenarioDir`); lint clean; `game.zig` 5155, down from 6397 via persist + `game/deco|join|loot|weather|vehicle|tick|world|player|quest|social|trader|stability|replicate|net|types|hooks|sleeper` + `c2s/*` owns all join + 4 C2S domains).
+**Unit tests:** `zig build test` → **991/991** (`zig build` + `lint-architecture: clean` gate; `game.zig` **2464** ≤2500 via 42 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig`; `c2s/*` owns all C2S domains). `GAP_ANALYSIS.md` is **0 MISSING** feature rows (all gameplay `WORKS` or explicitly waived `PARTIAL (waived)` with RE cite).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -589,6 +589,15 @@ ExplosionClient, guessed NavObject classes, `isStorageBlockId` for arbitrary
 high ids, incomplete quest PDF blobs, reward wire that ignores ItemStack.
 
 ---
+
+## Wave 2026-08-09 (parity + extraction + docs hardening)
+
+- **Refactor**: `game.zig` 5155 → **2464** (42 shards in `src/server/game/*.zig`
+  via `src/server/root.zig`; `c2s/*` owns all C2S domains). Highlights:
+  `init_assets`+`init_world` (asset load + world seed), `step` (20 Hz tick),
+  `replicate_health`, `harness`, `wasm_host`, `constants`, `lifecycle`,
+  `session_drop`, plus prior `loot|weather|vehicle|tick|world|player|quest|
+  social|trader|stability|replicate|net|types|hooks|sleeper`.
 
 ## Wave 2026-08-08 (parity + extraction + docs overhaul)
 
