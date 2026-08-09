@@ -538,11 +538,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.sim.power.resolve();
             }
         } else if (r.ok and r.refuel_amount > 0) {
-            // Gas can / FuelValue item used at generator coords (InvTx place).
-            if (!self.tryRefuelGenerator(c, r.place_x, r.place_y, r.place_z, r.refuel_amount)) {
-                // Refund the consumed fuel unit (inventory already took one).
-                if (r.refuel_item_id != 0) _ = invsys.give(&self.sim, c.slot, r.refuel_item_id, 1);
-                r.ok = false;
+            // Gas can / FuelValue item used on a vehicle or at generator coords
+            // (InvTx place). Vehicle first: the client targets the body.
+            if (!self.tryRefuelVehicle(c, r.place_x, r.place_y, r.place_z, r.refuel_amount)) {
+                if (!self.tryRefuelGenerator(c, r.place_x, r.place_y, r.place_z, r.refuel_amount)) {
+                    // Refund the consumed fuel unit (inventory already took one).
+                    if (r.refuel_item_id != 0) _ = invsys.give(&self.sim, c.slot, r.refuel_item_id, 1);
+                    r.ok = false;
+                }
             }
         }
         // Refunds via give() also append; count all ledger appends for this C2S.

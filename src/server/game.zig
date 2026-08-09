@@ -1650,6 +1650,11 @@ pub const Game = struct {
         return game_craft.tryRefuelGenerator(self, c, x, y, z, amount);
     }
 
+    /// Refuel the nearest vehicle at the InvTx target coords (tank-capped).
+    pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+        return game_craft.tryRefuelVehicle(self, c, x, y, z, amount);
+    }
+
     /// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).
     pub const eatProps = game_craft.eatProps;
 

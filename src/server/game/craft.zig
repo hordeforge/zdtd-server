@@ -5,6 +5,7 @@
 //! handItemDamage (entity damage from the hand item).
 
 const std = @import("std");
+const ecs = @import("../../ecs/root.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -14,6 +15,10 @@ const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
+
+/// Vehicle tank cap (blocks/s drain scale) and the InvTx refuel pickup reach.
+pub const vehicle_fuel_max: f32 = 100;
+const vehicle_refuel_reach: f32 = 3.0;
 
 /// ECS armor hook: stock/builtin name starts with "armor".
 pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
@@ -39,6 +44,42 @@ pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32,
     const dz = t.z - @as(f32, @floatFromInt(z));
     if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return false;
     return self.sim.power.refuelAt(x, y, z, amount);
+}
+
+/// Refuel a vehicle the peer targets: the InvTx place coords point at the
+/// body, so find the nearest vehicle within refuel_reach blocks and add the
+/// item's FuelValue units, capped at the vehicle's tank. Returns false when
+/// nothing is near or the tank is already full (the caller refunds the can).
+pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {
+    if (amount <= 0) return false;
+    if (c.entity_id <= 0) return false;
+    const ps = self.sim.slotOfNetId(c.entity_id) orelse return false;
+    if (!self.sim.mask[ps].transform) return false;
+    const t = self.sim.transform[ps];
+    const dx = t.x - @as(f32, @floatFromInt(x));
+    const dy = t.y - @as(f32, @floatFromInt(y));
+    const dz = t.z - @as(f32, @floatFromInt(z));
+    if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return false;
+    var best: ?ecs.Slot = null;
+    var best_d = vehicle_refuel_reach * vehicle_refuel_reach;
+    for (ecs.groupSlice(&self.sim, .vehicle)) |vs| {
+        if (!self.sim.mask[vs].transform) continue;
+        const vx = self.sim.transform[vs].x - @as(f32, @floatFromInt(x));
+        const vz = self.sim.transform[vs].z - @as(f32, @floatFromInt(z));
+        const d2 = vx * vx + vz * vz;
+        if (d2 < best_d) {
+            best_d = d2;
+            best = vs;
+        }
+    }
+    const vs = best orelse return false;
+    const v = &self.sim.vehicle[vs];
+    if (v.fuel >= vehicle_fuel_max) return false;
+    v.fuel = @min(vehicle_fuel_max, v.fuel + amount);
+    // Fuel is a vehicle payload; pos flags the vehicle for the periodic
+    // position broadcast without forcing a motion relay.
+    self.sim.markDirty(vs, .{ .pos = true });
+    return true;
 }
 
 /// items.xml ItemActionEat props for InvTx use (ItemActionEat.consume).

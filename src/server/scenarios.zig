@@ -1408,6 +1408,50 @@ test "scenario trader RemoveQuest accepts and drops the quest from offers" {
     try std.testing.expectEqual(before_count - 1, after_count);
 }
 
+test "scenario vehicle refuel caps at the tank and refunds when full" {
+    // Fuel items used on a vehicle (InvTx place at the body) fill the tank
+    // capped at vehicle_fuel_max; a full tank returns false so the can is
+    // refunded (mirrors the generator refuel refund).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    var vs: ecs.Slot = 0;
+    var found = false;
+    while (vs < ecs.max_entities) : (vs += 1) {
+        if (g.sim.alive[vs] and g.sim.mask[vs].vehicle) {
+            found = true;
+            break;
+        }
+    }
+    try std.testing.expect(found);
+    const vx: i32 = @intFromFloat(g.sim.transform[vs].x);
+    const vy: i32 = @intFromFloat(g.sim.transform[vs].y);
+    const vz: i32 = @intFromFloat(g.sim.transform[vs].z);
+
+    g.sim.vehicle[vs].fuel = 10;
+    try std.testing.expect(g.tryRefuelVehicle(c, vx, vy, vz, 50));
+    try std.testing.expectEqual(@as(f32, 60), g.sim.vehicle[vs].fuel);
+    // Over-fill clamps at the cap.
+    try std.testing.expect(g.tryRefuelVehicle(c, vx, vy, vz, 500));
+    try std.testing.expectEqual(@as(f32, 100), g.sim.vehicle[vs].fuel);
+    // A full tank refunds (false -> the InvTx handler returns the can).
+    try std.testing.expect(!g.tryRefuelVehicle(c, vx, vy, vz, 10));
+
+    std.debug.print("PASS vehicle-refuel: 10+50=60, clamp 100, full refunds\n", .{});
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
