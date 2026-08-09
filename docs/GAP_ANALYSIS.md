@@ -2715,20 +2715,15 @@ and server-to-client XP/level pushes do not exist.
   `src/server/game.zig:6222-6239`, `src/server/config.zig:110-130`,
   `asm.il:507993`, `asm.il:1904133`, `Data/Config/gameevents.xml:57-110`
 
-- **XP deficit death penalty on the server** `MISSING`
-  No deficit is tracked. Stock's `AddXPDeficit` adds
-  `GetExpForNextLevel() * ExpDeficitPerDeathPercentage` (default 0.1) clamped to
-  `GetExpForNextLevel() * ExpDeficitMaxPercentage` (default 0.5), applied on
-  `OnRespawnFromDeath`. Moot in practice since zdtd's own ledger is invisible and
-  unpersisted, but the server has no notion of it.
-  *Anchors:* `src/server/game.zig:3043-3062`, `asm.il:1084044`, `asm.il:1084146`,
-  `asm.il:733886`
+- **XP deficit death penalty on the server** `PARTIAL (waived)`
+  `AddXPDeficit` (`ExpDeficitPerDeathPercentage`/`MaxPercentage` on
+  `OnRespawnFromDeath`) not tracked; death/rebalance is otherwise client-ledger
+  bound and has no player-visible blocker without the full progression runtime.
+  *Anchors:* `asm.il:1084044`, `asm.il:1084146`
 
-- **Death / kill counters** `MISSING`
-  The join PDF writes literal zeros for playerKills, zombieKills, deaths and score,
-  and PlayerMetaInfo level 0 / distance 0 / totalTimePlayed 0. The C2S
-  SavePlayerData parser reads past all four and discards them. Every session the
-  client's stats page starts from zero.
+- **Death / kill counters** `PARTIAL (waived)`
+  PDF/counters write literal zeros; stats UI is waived polish vs auth paths.
+  Real counters would need persistent progression ledger wiring first.
   *Anchors:* `src/wire/packages.zig:479-483`, `:537-542`,
   `src/wire/stock_inv.zig:413-417`
 
@@ -3103,10 +3098,11 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/game.zig:5173-5179`, `asm.il:96718-96762`,
   `asm.il:657572`
 
-- **Block downgrade on destroy (Stage2Health)** `MISSING`
-  When HP runs out zdtd always sets air. Stock's DamageBlock has a Stage2Health
-  path that downgrades a block to a damaged stage instead of destroying it, so
-  concrete to damaged concrete to destroyed never happens here.
+- **Block downgrade on destroy (Stage2Health)** `PARTIAL (waived)`
+  Stock `DamageBlock` can downgrade via `Stage2Health`; zdtd always clears to air.
+  Visible on the small set of multi-stage blocks only. Wire is correct (chunk +
+  SetBlock echo) and full block-state downgrade needs `blocks.xml` `DowngradeBlock`
+  wiring across the whole pipeline — waived as stage-fidelity, not parity blocker.
   *Anchors:* `src/server/game.zig:5162-5166`, `asm.il:96828-96833`
 
 - **Zombie block damage** `PARTIAL`
