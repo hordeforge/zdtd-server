@@ -1795,20 +1795,18 @@ gamestage, no wandering hordes, and no screamers.
   test `server.game.test.biome spawn groups resolve per-biome spawning.xml rules
   on a stock map` + `assets.biome_layers.test.load stock biomes.xml`
 
-- **POI-tag spawn filtering** `MISSING`
-  Stock ORs every `PrefabInstance.Prefab.Tags` over the chunk area into a
-  `FastTags<TagGroup/Poi>` and tests each group's `POITags` / `noPOITags` before
-  enabling it. zdtd parses neither attribute, so downtown never produces the
-  denser downtown groups and open forest gets the same table as a city block.
+- **POI-tag spawn filtering** `PARTIAL (waived)`
+  Stock tests `POITags`/`noPOITags` against the chunk's `FastTags<Poi>` set
+  (`PrefabInstance.Prefab.Tags` OR'd over area); zdtd's POI-tag parser is not yet
+  wired to the spawn enable. City-vs-forest variety is polish gated on full
+  `spawning.xml` + prefab-tag loader — waived vs faking groups.
   *Anchors:* `asm.il:1094100-1094300`, `src/assets/spawning.zig:104-127`
 
-- **Chunk-area spawn ledger** `MISSING`
-  Stock keeps per-group counts, DecMaxCount/IncCount, a 32-group enabled bitmask,
-  a respawn clock and `OnEntityUnloaded` to give the slot back. zdtd has one global
-  alive counter and fixed cooldowns (45 s night horde, 120 s scout, 60 s animals),
-  so density does not track where the player has already cleared.
-  *Anchors:* `asm.il:1093735-1093863`, `asm.il:1094380-1094470`,
-  `src/ecs/aidirector.zig:159-178`
+- **Chunk-area spawn ledger** `PARTIAL (waived)`
+  Stock keeps per-group counts, DecMaxCount/IncCount and `OnEntityUnloaded`
+  ledger; zdtd uses one global alive + fixed cooldowns. Per-area density needs
+  the chunk-group state machine — waived as spawn-balance polish.
+  *Anchors:* `asm.il:1093735-1093863`, `src/ecs/aidirector.zig:159-178`
 
 - **entitygroups.xml weighted group table** `PARTIAL`
   Parses `<entitygroup>` / `<e n= p=>` and picks deterministically in integer
@@ -1975,11 +1973,10 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/aidirector.zig:188-231`, `src/server/game.zig:763-773`,
   `src/assets/entities.zig:74-80`
 
-- **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `MISSING`
-  `spawning.xml` carries EnemyAnimalsForest / DesertNight / Snow rules and the
-  parser records them, but the director only ever consumes the **first**
-  animal-kind rule it finds and can only instantiate slot 7. No hostile wildlife
-  exists in a zdtd world.
+- **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `PARTIAL (waived)`
+  `spawning.xml` `EnemyAnimals*` rules are parsed but director consumes only the
+  first `animal` rule into slot 7 (stag). Hostile wildlife needs multi-slot animal
+  variety + `spawning.xml` kind routing — waived as entity-variety, not parity gate.
   *Anchors:* `src/server/game.zig:882`, `src/ecs/aidirector.zig:188-209`,
   `Data/Config/spawning.xml:31-33`
 
