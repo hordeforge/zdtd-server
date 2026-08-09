@@ -287,6 +287,12 @@ pub const Client = struct {
     drown_accum: f32 = 0,
     /// Seconds spent inside a radiated biome (damage ticks once per second).
     radiation_accum: f32 = 0,
+    /// Respawn bed: the last bedroll this player placed (stock bedroll =
+    /// respawn point). 0 = none; the death screen lists it and respawn uses it.
+    bed_x: i32 = 0,
+    bed_y: i32 = 0,
+    bed_z: i32 = 0,
+    has_bed: bool = false,
     /// Player kills this session (PvP, PlayerKillingMode != 0).
     player_kills: u16 = 0,
     /// EntityPlayer::gameStageBornAtWorldTime: world time the current survival

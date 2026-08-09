@@ -1600,6 +1600,66 @@ test "scenario explosion damages entities and credits the kill" {
     std.debug.print("PASS explosion: close zombie killed, thrower credited 1 kill\n", .{});
 }
 
+test "scenario bedroll respawn: placed bed is listed and used on death" {
+    // Stock bedroll placement sets the respawn point: the death screen lists
+    // it after the world spawn and RequestToSpawnPlayer respawns there.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // The bedroll block resolves by name (dump id), and the placement record
+    // recognizes it; then simulate the placement record (the InvTx place path
+    // derives coords from the packed entity_id, covered by its own tests).
+    const bedroll_id = g.maxdamage.idByName("bedroll") orelse return; // dump has it
+    try std.testing.expect(g.isBedrollId(bedroll_id));
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const bx: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].x)) + 10;
+    const by: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].y));
+    const bz: i32 = @as(i32, @intFromFloat(g.sim.transform[ps].z));
+    c.bed_x = bx;
+    c.bed_y = by;
+    c.bed_z = bz;
+    c.has_bed = true;
+
+    // A zombie bites the player to death (AI path, not C2S damage), so the
+    // spawn list must arrive from the hp-replicate pass for any killer.
+    const zid = g.sim.spawnZombie(256, 70, 256, 5).?;
+    _ = g.sim.damageFrom(c.entity_id, 100, g.sim.network_id[g.sim.slotOfNetId(zid).?].id);
+    cap.clear();
+    try g.step();
+    try std.testing.expect(g.sim.health[g.sim.slotOfNetId(c.entity_id).?].hp <= 0);
+
+    // Death screen lists world spawn + the bed.
+    const wsp_id = packages.idOf("NetPackageWorldSpawnPoints").?;
+    const wspb = cap.findPkgId(wsp_id) orelse return error.TestUnexpectedResult;
+    var wr = binary.Reader{ .data = wspb };
+    try std.testing.expectEqual(@as(u8, 2), try wr.readByte());
+    try std.testing.expectEqual(@as(i32, 2), try wr.readI32()); // world + bed
+    _ = try wr.readU16();
+    _ = try wr.readF32();
+    _ = try wr.readF32();
+    _ = try wr.readF32();
+    _ = try wr.readF32();
+    _ = try wr.readI32();
+    _ = try wr.readI32();
+    _ = try wr.readU16();
+    const bed_x = try wr.readF32();
+    try std.testing.expectEqual(@as(f32, @floatFromInt(bx)), bed_x);
+
+    std.debug.print("PASS bedroll: placed at {d}, listed on death, respawn target set\n", .{bx});
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4646,7 +4706,8 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expectEqual(@as(i16, 1), try psr.readI16()); // playerKills
     try std.testing.expectEqual(@as(i16, 0), try psr.readI16()); // otherTeamNumber
     try std.testing.expectEqual(@as(i32, 0), try psr.readI32()); // conditions
-    // B's death screen gets the spawn list (stock WorldSpawnPoints).
+    // B's death screen gets the spawn list on the next hp-replicate pass.
+    try g.step();
     const wsp_id = packages.idOf("NetPackageWorldSpawnPoints").?;
     const wspb = cap_b.findPkgId(wsp_id) orelse return error.TestUnexpectedResult;
     var wr = binary.Reader{ .data = wspb };

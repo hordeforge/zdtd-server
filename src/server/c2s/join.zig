@@ -242,13 +242,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     self.sim.director.clock.worldTimeBits(),
                     c.game_stage_born_world_time,
                 );
+                // Respawn target: the player's bedroll when set (stock
+                // EntityPlayer.spawnPoint), else the world spawn.
+                const rpx: i32 = if (c.has_bed) c.bed_x else sp.x;
+                const rpz: i32 = if (c.has_bed) c.bed_z else sp.z;
+                const bed_surf = self.spawnSurface(rpx, rpz);
                 // Sanctioned respawn funnel: revive + heal + clear death
                 // buffs/IsBloodMoonDead + place + mark dirty in one call.
                 self.sim.respawnPlayer(
                     si,
-                    @floatFromInt(surf.x),
-                    @as(f32, @floatFromInt(surf.y)) + 0.08,
-                    @floatFromInt(surf.z),
+                    @floatFromInt(bed_surf.x),
+                    @as(f32, @floatFromInt(bed_surf.y)) + 0.08,
+                    @floatFromInt(bed_surf.z),
                 );
                 if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
@@ -256,15 +261,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @floatFromInt(sp.x), @floatFromInt(sp.y), @floatFromInt(sp.z), 0, 0, 0, true)) |tb| {
                     try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                 } else |_| {}
-                if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(surf.x)), @as(f32, @floatFromInt(surf.y)) + 0.08, @as(f32, @floatFromInt(surf.z)), 0, 0, 0, true)) |tb| {
+                if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
                     try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                 } else |_| {}
                 const spawned = try packages.buildSpawnedBody(
                     self.body_buf[256..384],
                     @intFromEnum(packages.RespawnType.died),
-                    surf.x,
-                    surf.y,
-                    surf.z,
+                    bed_surf.x,
+                    bed_surf.y,
+                    bed_surf.z,
                     c.entity_id,
                 );
                 try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);

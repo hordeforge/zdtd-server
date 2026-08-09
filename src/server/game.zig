@@ -3758,6 +3758,22 @@ pub const Game = struct {
     /// when the biome map, the biome name, or the biome's rule is unknown.
     /// Fixes the wasteland-at-midnight-getting-forest-walkers gap: stock
     /// resolves per ChunkAreaBiomeSpawnData from the actual biome.
+    /// True when the block id is a bedroll (stock respawn bed): the classic
+    /// bedroll plus the colored variants. Name-based via the runtime AssignIds
+    /// dump, never a hardcoded id list.
+    pub fn isBedrollId(self: *const Game, block_id: u16) bool {
+        const names = [_][]const u8{
+            "bedroll",      "bedrollRed",  "bedrollOrange", "bedrollYellow",
+            "bedrollGreen", "bedrollBlue", "bedrollPurple", "bedrollPink",
+        };
+        for (names) |n| {
+            if (self.maxdamage.idByName(n)) |id| {
+                if (id == block_id) return true;
+            }
+        }
+        return false;
+    }
+
     /// True when the world biome at (wx,wz) is the stock radiated biome
     /// (biomes.xml <biomemap name="radiated"/>), which deals damage over time.
     pub fn isRadiatedAt(self: *const Game, wx: i32, wz: i32) bool {
@@ -4061,6 +4077,39 @@ pub const Game = struct {
             // ChangePacket cover NPCs too; the corpse-dwell hp=0 must reach the
             // client so the death shows instead of a full-health body).
             if ((!is_player and !is_mob) or !self.sim.mask[i].health) continue;
+            // Death screen: when a player hits 0 (any killer: C2S, AI, traps,
+            // environment), stock sends NetPackageWorldSpawnPoints so the
+            // respawn menu lists world spawn + the player's bedroll.
+            if (is_player and self.sim.health[i].hp <= 0) {
+                const owner_slot = self.sim.player[i].peer_slot;
+                if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
+                    const oc = &self.clients[@intCast(owner_slot)];
+                    if (oc.peer) |op| {
+                        const wsp = self.world.primarySpawn();
+                        var entries: [2]packages.stock_entity.SpawnPointEntry = undefined;
+                        var en: usize = 0;
+                        entries[en] = .{
+                            .x = @floatFromInt(wsp.x),
+                            .y = @floatFromInt(wsp.y),
+                            .z = @floatFromInt(wsp.z),
+                        };
+                        en += 1;
+                        if (oc.has_bed and en < entries.len) {
+                            entries[en] = .{
+                                .x = @floatFromInt(oc.bed_x),
+                                .y = @floatFromInt(oc.bed_y),
+                                .z = @floatFromInt(oc.bed_z),
+                            };
+                            en += 1;
+                        }
+                        if (packages.stock_entity.buildWorldSpawnPointsBody(self.body_buf[96..200], entries[0..en])) |spb| {
+                            self.sendGame(op, "NetPackageWorldSpawnPoints", spb) catch {
+                                self.harness.counters.inc(.net_send_errors);
+                            };
+                        } else |_| {}
+                    }
+                }
+            }
             if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
             const nid = self.sim.network_id[i].id;
             if (nid <= 0) continue;

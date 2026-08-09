@@ -528,6 +528,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         if (r.ok and r.place_block != 0) {
             try self.world.setBlockWorld(r.place_x, r.place_y, r.place_z, r.place_block);
+            // A placed bedroll becomes the player's respawn point (stock
+            // bedroll blocks set EntityPlayer.spawnPoint on placement).
+            if (self.isBedrollId(@truncate(r.place_block))) {
+                c.bed_x = r.place_x;
+                c.bed_y = r.place_y;
+                c.bed_z = r.place_z;
+                c.has_bed = true;
+            }
             const sb = try packages.buildSetBlockBody(&self.body_buf, r.place_x, r.place_y, r.place_z, r.place_block);
             try self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(r.place_x), @floatFromInt(r.place_z), self.interest_range);
             // Power nodes from placeable generators (same path as SetBlock).
