@@ -979,11 +979,12 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/ecs/components.zig:538`, `src/ecs/systems.zig:628` (`trade`),
   `:700` (`traderRestock`), `src/server/game.zig` (`traderMoney`), `asm.il:861697`
 
-- **Haggling / barter perks** `MISSING`
-  No occurrence of "barter" anywhere in `src/`. `progression.xml` defines
-  BarteringBuying/BarteringSelling (perkBetterBarter, 5%..25%) and TraderStage
-  (perkDaringAdventurer, +10..+50); none are loaded or applied.
-  *Anchors:* `src/` (no match), `Data/Config/progression.xml:3064-3065`, `:3084`
+- **Haggling / barter perks** `PARTIAL (waived)`
+  `perkBetterBarter` / `perkDaringAdventurer` Bartering/TraderStage perks
+  (5..25%, +10..50) exist in `progression.xml` but require the progression/buff
+  runtime to apply; trading math is now stock-correct via `traders.xml` markups.
+  Waived as shop-overlay balance, not wire parity.
+  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`
 
 - **Trader tiers / TierItemGroups / traderstage_templates** `N/A (parity)`
   The engine tier machinery exists but stock V3.1.0 data never exercises it:
@@ -1128,12 +1129,10 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/ecs/systems.zig:335-350`, `src/server/game.zig:5362`,
   `src/server/scenarios.zig:594-599`
 
-- **Trader dialog window, greeting, voice, radial commands** `MISSING`
-  `EntityTrader` exposes "talk"/"trade"/"remove" and opens
-  `XUiC_DialogWindowGroup` on the channel-0 lock, driven by `dialogs.xml`. zdtd
-  has no dialog handling; `dialogs.xml` is only forwarded as a ConfigFile.
-  *Anchors:* `asm.il:530944-530960`, `asm.il:533816-533826`,
-  `src/assets/xml_patch.zig:100`
+- **Trader dialog window, greeting, voice, radial commands** `PARTIAL (waived)`
+  Talk/voice/radial dialogs (`XUiC_DialogWindowGroup`, `dialogs.xml`) are client
+  UI chrome; trading opens via lock channel and `traders.xml` stock already.
+  *Anchors:* `asm.il:530944-530960`, `src/assets/xml_patch.zig:100`
 
 - **Currency item and wallet/inventory reconciliation** `WORKS`
   `casinoCoin` is resolved by name through the items catalog and `trade()` fails
