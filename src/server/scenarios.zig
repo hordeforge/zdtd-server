@@ -1544,6 +1544,62 @@ test "scenario radiated biome damages the player" {
     std.debug.print("PASS radiation: hp {d:.0} -> {d:.0} in radiated biome\n", .{ hp0, g.sim.health[ps].hp });
 }
 
+test "scenario explosion damages entities and credits the kill" {
+    // Stock explosions hurt everything in the radius (linear falloff); a
+    // zombie close enough dies and the thrower gets quest/XP/score credit.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const zid = g.sim.spawnZombie(257, 70, 257, 30).?;
+
+    var body: [256]u8 = undefined;
+    var w: @import("../wire/binary.zig").Writer = .{ .buf = &body };
+    try w.writeF32(256);
+    try w.writeF32(70);
+    try w.writeF32(256); // center
+    try w.writeI32(256);
+    try w.writeI32(70);
+    try w.writeI32(256); // block pos
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1); // quat
+    try w.writeU16(18); // blob len
+    try w.writeI16(0); // particleIndex
+    try w.writeI16(10); // duration deci-seconds
+    try w.writeI16(60); // blockRadius 3.0
+    try w.writeI16(120); // entityRadius 6.0
+    try w.writeI16(100); // blastPower
+    try w.writeF32(50); // blockDamage
+    try w.writeF32(200); // entityDamage
+    try w.writeI32(c.entity_id);
+    try w.writeF32(0); // delay
+    var fb: [512]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageExplosionInitiate", w.written()));
+
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.health[zs].hp <= 0); // close enough to die
+    const score_id = packages.idOf("NetPackageEntityAddScoreClient").?;
+    const sb = cap.findPkgIdEntity(score_id, c.entity_id) orelse return error.TestUnexpectedResult;
+    var sr = binary.Reader{ .data = sb };
+    _ = try sr.readI32();
+    try std.testing.expectEqual(@as(i16, 1), try sr.readI16()); // zombieKills
+
+    std.debug.print("PASS explosion: close zombie killed, thrower credited 1 kill\n", .{});
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

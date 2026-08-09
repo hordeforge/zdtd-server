@@ -921,8 +921,54 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
         }
+        // Entity damage: stock explosions hurt everything in the radius with
+        // a linear falloff (other players gated by PvP mode like melee; the
+        // thrower can hurt themself). Kills credit the thrower.
+        const e_rad: f32 = @max(1, ex.entity_radius);
+        const e_dmg: f32 = if (ex.entity_damage > 0) ex.entity_damage else @as(f32, @floatFromInt(ex.block_damage));
+        var es: ecs.Slot = 0;
+        while (es < ecs.max_entities) : (es += 1) {
+            if (!self.sim.alive[es] or !self.sim.mask[es].transform or !self.sim.mask[es].health) continue;
+            const nid = self.sim.network_id[es].id;
+            if (nid <= 0) continue;
+            const t = self.sim.transform[es];
+            const edx = t.x - ex.wx;
+            const edy = t.y - ex.wy;
+            const edz = t.z - ex.wz;
+            const ed2 = edx * edx + edy * edy + edz * edz;
+            if (ed2 > e_rad * e_rad) continue;
+            if (self.sim.kind[es] == .trader) continue;
+            const fall = 1.0 - @sqrt(ed2) / e_rad;
+            if (fall <= 0) continue;
+            var amount = e_dmg * fall;
+            if (self.sim.mask[es].player and self.sim.player[es].peer_slot >= 0) {
+                const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
+                // PvP gate: PlayerKillingMode 0 blocks damage to other players.
+                if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
+                if (victim_slot != c.slot) {
+                    const mit = invsys.armorMitigation(&self.sim, victim_slot);
+                    amount *= (1.0 - mit);
+                }
+            }
+            const dmg = self.sim.damageFrom(nid, amount, if (c.entity_id > 0) c.entity_id else -1);
+            if (dmg.killed and !self.sim.mask[es].player) {
+                systems.questOnZombieKilled(&self.sim, c.slot);
+                self.killXpAward(c.slot, 100);
+                if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
+                if (c.peer) |kpeer| {
+                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{
+                        .entity_id = c.entity_id,
+                        .zombie_kills = c.zombie_kills,
+                    })) |ab| {
+                        self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
+                            self.harness.counters.inc(.net_send_errors);
+                        };
+                    } else |_| {}
+                }
+            }
+        }
         const client_body = try packages.buildExplosionClient(
-            self.body_buf[64..256],
+            self.body_buf[96..288],
             ex.wx,
             ex.wy,
             ex.wz,

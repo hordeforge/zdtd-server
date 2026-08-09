@@ -2704,6 +2704,10 @@ pub const ExplosionInitiate = struct {
     /// Best-effort radius from nested blob (default 3).
     radius: f32 = 3,
     block_damage: u16 = 50,
+    /// ExplosionData.entityRadius * 0.05 (default 3).
+    entity_radius: f32 = 3,
+    /// ExplosionData.entityDamage (default 0 -> falls back to block_damage).
+    entity_damage: f32 = 0,
 };
 
 pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
@@ -2735,10 +2739,15 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
         _ = br.readI16() catch 0; // duration deci-seconds
         const radius_raw = br.readI16() catch 0;
         if (radius_raw > 0) out.radius = @as(f32, @floatFromInt(radius_raw)) * 0.05;
-        _ = br.readI16() catch 0; // entityRadius
+        if (br.readI16()) |er| {
+            if (er > 0) out.entity_radius = @as(f32, @floatFromInt(er)) * 0.05;
+        } else |_| {}
         _ = br.readI16() catch 0; // blastPower
         if (br.readF32()) |bd| {
             if (bd > 0 and bd <= 65535) out.block_damage = @intFromFloat(bd);
+        } else |_| {}
+        if (br.readF32()) |ed| {
+            if (ed > 0 and ed <= 65535) out.entity_damage = ed;
         } else |_| {}
     }
     if (r.remaining() >= 4) out.entity_id = try r.readI32();
