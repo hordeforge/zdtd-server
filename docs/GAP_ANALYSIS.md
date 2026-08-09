@@ -2901,11 +2901,11 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/store.zig:260-262`, `src/server/game.zig:465`,
   `:3305-3336`, `:7310-7314`
 
-- **Block damage in the chunk wire** `MISSING`
-  The damage channel is written as uniform same-value 0. A partially chewed base
-  wall re-renders pristine on every chunk resend, even for blocks the server still
-  tracks.
-  *Anchors:* `src/wire/stock_chunk.zig:384`
+- **Block damage in the chunk wire** `WORKS`
+  `writeDamageChannel` encodes the per-cell u16 damage via the `dmg_at` hook
+  (`getBlockHp` sparse store, 256-entry FIFO); chunkFill threads it through
+  `DmgCtx` (world coords). Null hook falls back to all-zero.
+  *Anchors:* `src/wire/stock_chunk.zig:writeDamageChannel`, `src/server/game/chunk_fill.zig:DmgCtx`
 
 - **Join-time deco burst (NetPackageDecoUpdate) plus world mirror** `PARTIAL`
   One `firstPackage=true` burst at RequestToEnterGame, 4096 objects per package,

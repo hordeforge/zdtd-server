@@ -74,6 +74,18 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         }
     };
     var tex_ctx: TexCtx = .{ .t = &self.block_textures };
+    const DmgCtx = struct {
+        g: *Game,
+        cx: i32,
+        cz: i32,
+        fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u16 {
+            const d: *const @This() = @ptrCast(@alignCast(ctx.?));
+            const wx = d.cx * 16 + lx;
+            const wz = d.cz * 16 + lz;
+            return d.g.getBlockHp(wx, y, wz);
+        }
+    };
+    var dmg_ctx: DmgCtx = .{ .g = self, .cx = cx, .cz = cz };
     // Stock Chunk.write payload inside NetPackageChunk (overwrite=false first delivery).
     const body = try packages.stock_chunk.buildNetPackageChunkNew(&self.body_buf, .{
         .cx = cx,
@@ -88,6 +100,8 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .default_tex_ctx = &tex_ctx,
         .dens_at = BlockCtx.dens,
         .water_block_id = self.world.terrain_ids.water,
+        .dmg_at = DmgCtx.at,
+        .dmg_ctx = &dmg_ctx,
         .raws_scratch = &self.chunk_raws,
     });
     const before_out = self.harness.counters.get(.net_packets_out);

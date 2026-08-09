@@ -49,6 +49,8 @@ pub const BlockAtFn = *const fn (ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32
 pub const TexAtFn = *const fn (ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u64;
 /// Optional density override (TTS sbyte as u8). Null return → densityForBlock.
 pub const DensAtFn = *const fn (ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) ?u8;
+/// Per-cell block damage (u16, bpv=2). Null → all-zero (no damage).
+pub const DmgAtFn = *const fn (ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u16;
 
 pub const EncodeOpts = struct {
     cx: i32,
@@ -72,6 +74,9 @@ pub const EncodeOpts = struct {
     /// AssignIds water block id; 0 disables the water channel (all-zero).
     /// When set, cells whose block type is water carry water_mass_full.
     water_block_id: u16 = 0,
+    /// Optional per-cell damage (u16). Null → no damage channel data.
+    dmg_at: ?DmgAtFn = null,
+    dmg_ctx: ?*anyopaque = null,
     /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
     /// encodeNetworkChunk fills it once and shares it with the block-layer loop
     /// and the density/water channels so blockAt is not re-invoked per channel.
@@ -502,8 +507,7 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // light bpv=1: full sun+block (0xFF). Zero light makes the whole mesh black/grey
     // until client LightChunk runs; seed bright so first mesh is readable.
     try writeChannelSame(&w, 1, &[_]u8{0xFF});
-    // damage bpv=2 same 0
-    try writeChannelSame(&w, 2, &[_]u8{ 0, 0 });
+    try writeDamageChannel(&w, opts_memo);
     // textures[0] bpv=6: TTS paint, else blocks.xml default Texture packing.
     try writeTextureChannel(&w, opts_memo);
     // water bpv=2: per-cell WaterValue mass. Static lake cells carry the full
@@ -664,6 +668,48 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
             continue;
         }
         try w.writeByte(0); // presence: full byte-planes
+        var plane_buf: [cells_per_layer]u8 = undefined;
+        var j: u1 = 0;
+        while (true) {
+            packU16Plane(&vals, j, &plane_buf);
+            try w.writeBytes(&plane_buf);
+            if (j == 1) break;
+            j = 1;
+        }
+    }
+}
+
+/// Damage channel (bpv=2): per-cell u16 block HP. Null dmg_at → all-zero.
+fn writeDamageChannel(w: *binary.Writer, opts: EncodeOpts) !void {
+    if (opts.dmg_at == null) {
+        try writeChannelSame(w, 2, &[_]u8{ 0, 0 });
+        return;
+    }
+    const f = opts.dmg_at.?;
+    const ctx = opts.dmg_ctx;
+    var band: usize = 0;
+    while (band < layers_n) : (band += 1) {
+        const y0: i32 = @intCast(band * 4);
+        var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
+        var has_dmg = false;
+        var ly: i32 = 0;
+        while (ly < 4) : (ly += 1) {
+            var lz: i32 = 0;
+            while (lz < 16) : (lz += 1) {
+                var lx: i32 = 0;
+                while (lx < 16) : (lx += 1) {
+                    const v = f(ctx, lx, y0 + ly, lz);
+                    if (v != 0) has_dmg = true;
+                    vals[layerCell(lx, ly, lz)] = v;
+                }
+            }
+        }
+        if (!has_dmg) {
+            try w.writeByte(1);
+            try w.writeU16(0);
+            continue;
+        }
+        try w.writeByte(0);
         var plane_buf: [cells_per_layer]u8 = undefined;
         var j: u1 = 0;
         while (true) {
