@@ -50,6 +50,7 @@ const game_locks = @import("game/locks.zig");
 const game_bans = @import("game/bans.zig");
 const game_trader_wire = @import("game/trader_wire.zig");
 const game_send_extra = @import("game/send_extra.zig");
+const game_rescue = @import("game/rescue.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2325,41 +2326,10 @@ pub const Game = struct {
     /// Threshold surface-8 (was -24): late-suite mesh float still placeable after
     /// SetBlock pre-snap; deeper than -8 without snap caused type=0 power fails.
     pub fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32, do_teleport: bool) !?f32 {
-        // lossyCast: transforms accumulate client RelPos deltas, so a drifted
-        // (or non-finite) value must not trap the checked @intFromFloat.
-        const gx: i32 = std.math.lossyCast(i32, @floor(x));
-        const gz: i32 = std.math.lossyCast(i32, @floor(z));
-        const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
-        const surface: f32 = @floatFromInt(h_u16);
-        const min_y = surface + 0.9;
-        // ONLY true void (below the world floor). A surface-relative trigger is
-        // wrong: being far under the column surface is normal play (mining, POI
-        // basements, ravines, caves). The old `y < surface - 8` yanked a
-        // sprinting player 9 blocks into the air on Navezgane terrain
-        // (playtest core/sprint_motor: hopMax 38.86 m between samples) and would
-        // have made digging down impossible.
-        if (!(y < -1.0)) return null;
-        self.sim.setPos(entity_id, x, min_y, z, 0);
-        if (do_teleport) {
-            if (packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, min_y, z, 0, 0, 0, true)) |tb| {
-                try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-            } else |_| {}
-        }
-        std.debug.print("zdtd: void rescue entity={d} y={d:.1} surf={d:.0} -> {d:.1}\n", .{ entity_id, y, surface, min_y });
-        return min_y;
+        return game_rescue.rescueDeepVoid(self, peer, entity_id, x, y, z, do_teleport);
     }
-
-    /// SetBlock/edit reach: full 3D, but clamp vertical delta so client mesh float
-    /// (player Y vs block Y) does not reject valid horizontal places.
     pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
-        const dx = bx - px;
-        const dz = bz - pz;
-        var dy = by - py;
-        const max_v: f32 = 12.0;
-        if (dy > max_v) dy = max_v;
-        if (dy < -max_v) dy = -max_v;
-        const r = self.max_edit_range;
-        return dx * dx + dy * dy + dz * dz <= r * r;
+        return game_rescue.withinEditReach(self, px, py, pz, bx, by, bz);
     }
 
     /// Single choke point for detector evidence: records into the ring and runs

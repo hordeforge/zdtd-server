@@ -54,6 +54,7 @@ pub const game_locks = @import("game/locks.zig");
 pub const game_bans = @import("game/bans.zig");
 pub const game_trader_wire = @import("game/trader_wire.zig");
 pub const game_send_extra = @import("game/send_extra.zig");
+pub const game_rescue = @import("game/rescue.zig");
 pub const game_tests = @import("game/tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
@@ -113,6 +114,7 @@ test {
     _ = game_bans;
     _ = game_trader_wire;
     _ = game_send_extra;
+    _ = game_rescue;
     _ = game_tests;
     _ = c2s_inv;
     _ = c2s_blocks;
