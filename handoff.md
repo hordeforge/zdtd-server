@@ -57,8 +57,10 @@ verify build + full test binary + lint, commit. Later passes re-verify.
   sibling commit 4c68158), radiated biome damage (biome-name gate, Rules
   knob, 8 hp/s) (e1cea62), explosion entity damage + kill credit
   (entityRadius/entityDamage parsed from ExplosionData; PvP gate + armor;
-  thrower credit) (5c0cdda) - note: the sibling swept uncommitted changes
-  once; commit promptly after each pass
+  thrower credit) (5c0cdda), NetPackageWorldSpawnPoints on death (death-
+  screen spawn list, world-spawn entry; bed/claim entries ride the same
+  list when bedroll tracking lands) (b00bcdc) - note: the sibling swept
+  uncommitted changes once; commit promptly after each pass
 - litenet fix: per-part WindowFull pump yield so ACKs land (9bf5713) -
   pre-existing join blocker (IdMapping ~198 fragments never drained;
   reproduced at 6256b1e). Solo loadgen join smoke CONFIRMED: 8/8 full join
@@ -88,7 +90,7 @@ hardcode review re-run: A29/A30 fixed, Bucket B closed (join rate-limit
 985/985 tests, lint + fmt clean
 ```
 
-All work is committed through `aec9eda`; nothing staged or untracked except
+All work is committed through `b00bcdc`; nothing staged or untracked except
 this handoff note.
 
 `make check` full gate green 2026-08-09 (release-check + lint + build +
