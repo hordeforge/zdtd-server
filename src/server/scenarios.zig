@@ -1452,6 +1452,47 @@ test "scenario vehicle refuel caps at the tank and refunds when full" {
     std.debug.print("PASS vehicle-refuel: 10+50=60, clamp 100, full refunds\n", .{});
 }
 
+test "scenario drowning damages a submerged player" {
+    // The client drains its local O2 bar first; the server is authoritative
+    // for the hp loss: while the head block is water the player takes
+    // drowning_damage_per_second (2 hp/s) in 1 s ticks.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const water_id = g.world.terrain_ids.water;
+    if (water_id == 0) return; // flat world without water: nothing to test
+
+    const hx: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const hy: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const hz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    try g.world.setBlockWorld(hx, hy + 1, hz, water_id);
+    const hp0 = g.sim.health[ps].hp;
+    var k: u32 = 0;
+    while (k < 25) : (k += 1) try g.step(); // >1 s submerged
+    try std.testing.expect(g.sim.health[ps].hp < hp0);
+    // Out of the water: no further loss.
+    try g.world.setBlockWorld(hx, hy + 1, hz, world_store.block_air);
+    const hp1 = g.sim.health[ps].hp;
+    k = 0;
+    while (k < 25) : (k += 1) try g.step();
+    // No drown-scale loss after surfacing (regen drift is fine).
+    try std.testing.expect(g.sim.health[ps].hp >= hp1 - 0.5);
+
+    std.debug.print("PASS drowning: hp {d:.0} -> {d:.0} submerged, stable after surface\n", .{ hp0, hp1 });
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -189,6 +189,9 @@ pub const Progression = struct {
     /// Zombie block-bite damage before BlockDamageAI/BM scaling (every 0.5 s pass).
     /// Mirrors the prior `base_bite: u32 = 10` constant in game/tick.zig.
     block_bite_damage: f32 = 10.0,
+    /// HP lost per real second while the head block is water (drowning, after
+    /// the client's local O2 bar empties; stock ~2 hp/s).
+    drowning_damage_per_second: f32 = 2.0,
     /// Pressed-against-cover range gate for block chew (m). Anti-kite: only when
     /// the zombie is within this range of its target and facing it.
     block_damage_range: f32 = 3.0,
@@ -269,6 +272,7 @@ pub const ProgressionOverlay = struct {
     sprint_stale_seconds: ?f32 = null,
     survival_sync_seconds: ?f32 = null,
     block_bite_damage: ?f32 = null,
+    drowning_damage_per_second: ?f32 = null,
     block_damage_range: ?f32 = null,
 };
 
