@@ -42,6 +42,7 @@ const game_weather = @import("game/weather.zig");
 const game_vehicle = @import("game/vehicle.zig");
 const game_config_files = @import("game/config_files.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
+const game_net_handlers = @import("game/net_handlers.zig");
 const persist = @import("persist.zig");
 const c2s_move = @import("c2s/move.zig");
 const c2s_inv = @import("c2s/inv.zig");
@@ -2284,9 +2285,8 @@ pub const Game = struct {
     }
 
     /// Stock ~500ms/IP; return true if join should be rejected.
-    fn joinRateLimited(self: *Game, ip: u32) bool {
+    pub fn joinRateLimited(self: *Game, ip: u32) bool {
         if (ip == 0) return false;
-        // Loopback multi-bot / unit tests share 127.0.0.1: do not throttle.
         if (ip == 0x7f000001) return false;
         const now_ms: u64 = clock.monoNs() / 1_000_000;
         const gap_ms: u64 = self.join_rate_limit_ms;
@@ -2305,7 +2305,7 @@ pub const Game = struct {
         return false;
     }
 
-    fn isBanned(self: *const Game, ip: u32) bool {
+    pub fn isBanned(self: *const Game, ip: u32) bool {
         if (ip == 0) return false;
         var i: usize = 0;
         while (i < self.ban_n) : (i += 1) {
@@ -2322,156 +2322,20 @@ pub const Game = struct {
         return game_net.unbanIp(self, ip);
     }
 
-    fn pumpAcks(ctx: ?*anyopaque) void {
+    pub fn pumpAcks(ctx: ?*anyopaque) void {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
         // pollNetOnce reentrancy: control-only drain when already pumping.
         self.pollNetOnce();
     }
 
     pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
-        const c = self.clientFor(peer) orelse {
-            // Full or no free slot: reject without taking down the tick loop.
-            self.harness.counters.inc(.join_fail);
-            std.debug.print(
-                "zdtd: join rejected (no client slot) local_id={d} max_players={d}\n",
-                .{ peer.local_id, self.max_players },
-            );
-            peer.alive = false;
-            return;
-        };
-        peer.pump_fn = &pumpAcks;
-        peer.pump_ctx = self;
-        const ip = peerIpKey(peer);
-        if (self.isBanned(ip)) {
-            std.debug.print("zdtd: ban reject local_id={d}\n", .{peer.local_id});
-            self.harness.counters.inc(.join_fail);
-            peer.alive = false;
-            c.* = .{};
-            return;
-        }
-        if (self.joinRateLimited(ip)) {
-            std.debug.print("zdtd: join rate-limit local_id={d}\n", .{peer.local_id});
-            self.harness.counters.inc(.join_fail);
-            peer.alive = false;
-            c.* = .{};
-            return;
-        }
-        var ch: [17]u8 = undefined;
-        wire_frame.buildChallenge(&ch, c.challenge);
-        peer.sendReliable(&self.net.sock, &ch) catch |err| {
-            self.harness.counters.inc(.net_send_errors);
-            self.harness.counters.inc(.join_fail);
-            std.debug.print("zdtd: challenge send failed local_id={d} error={s}\n", .{ peer.local_id, @errorName(err) });
-            return;
-        };
-        std.debug.print("zdtd: peer connected local_id={d} → challenge sent\n", .{peer.local_id});
+        return game_net_handlers.onConnected(self, peer);
     }
-
     pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!void {
-        // Hold pumping for the whole handler so sendGame / pump_fn only
-        // drainControl (no nested onData, no second parse into inflate_storage).
-        const was_pumping = self.pumping;
-        self.pumping = true;
-        defer self.pumping = was_pumping;
-
-        const c = self.clientFor(peer) orelse return;
-        self.harness.counters.add(.net_packets_in, 1);
-        self.harness.counters.add(.net_bytes_in, payload.len);
-
-        if (!c.authed_challenge) {
-            if (wire_frame.isChallenge(payload) and std.mem.eql(u8, payload[1..17], &c.challenge)) {
-                c.authed_challenge = true;
-                peer.authenticated = true;
-                const body = try packages.buildPackageIdsBody(&self.body_buf, .{}, &packages.default_mappings);
-                try self.sendGame(peer, "NetPackagePackageIds", body);
-                // Immediate resend once so PackageIds is not lost before first ack.
-                peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
-                // Replay any game payload that raced ahead of the challenge echo.
-                if (c.preauth_len > 0) {
-                    const saved = c.preauth_buf[0..c.preauth_len];
-                    c.preauth_len = 0;
-                    try self.dispatchGamePayload(c, peer, saved);
-                }
-            } else if (wire_frame.isChallenge(payload)) {
-                std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d}\n", .{ peer.local_id, payload.len });
-            } else if (payload.len > 0 and payload.len <= c.preauth_buf.len) {
-                @memcpy(c.preauth_buf[0..payload.len], payload);
-                c.preauth_len = payload.len;
-            }
-            return;
-        }
-        if (wire_frame.isChallenge(payload)) return;
-        try self.dispatchGamePayload(c, peer, payload);
+        return game_net_handlers.onData(self, peer, payload);
     }
-
-    fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload: []const u8) !void {
-        // Package.body slices alias the payload for the whole handle loop.
-        // Uncompressed C2S aliases recv_buf; fragmented aliases peer.deliver_buf.
-        // Copy into payload_hold so mid-handler ACK drains cannot clobber bodies.
-        const stable: []const u8 = blk: {
-            if (payload.len <= self.payload_hold.len) {
-                @memcpy(self.payload_hold[0..payload.len], payload);
-                break :blk self.payload_hold[0..payload.len];
-            }
-            // Rare oversized multi-fragment C2S: keep original pointer and
-            // suppress reentrant drain for the duration (see drain_suppressed).
-            self.drain_suppressed +%= 1;
-            break :blk payload;
-        };
-        defer if (payload.len > self.payload_hold.len) {
-            self.drain_suppressed -%= 1;
-        };
-
-        var pkgs: [16]wire_frame.Package = undefined;
-        const n = wire_frame.parseChannelPayload(stable, &pkgs);
-        if (n == 0 and stable.len > 0) {
-            // Frame header only (8 bytes): avoid dumping string fields (names, etc.).
-            var hex: [24]u8 = undefined;
-            const show = @min(stable.len, 8);
-            var hi: usize = 0;
-            var bi: usize = 0;
-            while (bi < show and hi + 2 <= hex.len) : (bi += 1) {
-                const s = std.fmt.bufPrint(hex[hi..], "{x:0>2}", .{stable[bi]}) catch break;
-                hi += s.len;
-            }
-            if (stable.len >= 9) {
-                const psz = std.mem.readInt(i32, stable[1..5], .little);
-                std.debug.print("zdtd: unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{
-                    stable.len,
-                    hex[0..hi],
-                    stable[0],
-                    psz,
-                    stable[5],
-                    stable[6],
-                    std.mem.readInt(u16, stable[7..9], .little),
-                });
-            } else {
-                std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
-            }
-            // Retry if payload omitted leading channel byte.
-            if (stable.len >= 10) {
-                var alt: [16]wire_frame.Package = undefined;
-                var tmp: [8192]u8 = undefined;
-                if (stable.len + 1 <= tmp.len) {
-                    tmp[0] = 0;
-                    @memcpy(tmp[1..][0..stable.len], stable);
-                    const n2 = wire_frame.parseChannelPayload(tmp[0 .. stable.len + 1], &alt);
-                    if (n2 > 0) {
-                        std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
-                        var j: usize = 0;
-                        while (j < n2) : (j += 1) {
-                            try self.handlePackage(c, peer, alt[j].id, alt[j].body);
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            try self.handlePackage(c, peer, pkgs[i].id, pkgs[i].body);
-        }
+    pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload: []const u8) !void {
+        return game_net_handlers.dispatchGamePayload(self, c, peer, payload);
     }
 
     /// Stock GameServerInfo.ToString(true) body used as NetPackagePlayerLoginAnswer.data.
@@ -2494,7 +2358,7 @@ pub const Game = struct {
         return try serverinfo_tcp.buildInfoText(buf, info);
     }
 
-    fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
+    pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
         return @import("c2s/dispatch.zig").handlePackage(self, c, peer, id, body);
     }
 
