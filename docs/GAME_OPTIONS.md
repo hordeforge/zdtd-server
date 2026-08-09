@@ -188,6 +188,7 @@ test, so a retune cannot land silently).
 | `block_bite_damage` | 10.0 | Policy: zombie block-bite damage before the `BlockDamageAI/BM` percent (tick every 0.5 s) |
 | `block_damage_range` | 3.0 | Policy: anti-kite gate - only when the zombie is within this range of its target |
 | `drowning_damage_per_second` | 2.0 | HP lost per real second while the head block is water (drowning, after the client's local O2 bar empties; stock ~2 hp/s) |
+| `radiation_damage_per_second` | 8.0 | HP lost per real second inside a radiated biome (biomes.xml `<biomemap name="radiated"/>`; stock BiomeType.Radiated is deadly) |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved

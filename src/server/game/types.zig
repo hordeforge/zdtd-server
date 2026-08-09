@@ -285,6 +285,8 @@ pub const Client = struct {
     /// Seconds spent with the head block underwater, for the drowning damage
     /// accumulator (damage ticks once per second while submerged).
     drown_accum: f32 = 0,
+    /// Seconds spent inside a radiated biome (damage ticks once per second).
+    radiation_accum: f32 = 0,
     /// Player kills this session (PvP, PlayerKillingMode != 0).
     player_kills: u16 = 0,
     /// EntityPlayer::gameStageBornAtWorldTime: world time the current survival

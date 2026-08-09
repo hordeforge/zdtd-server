@@ -3758,6 +3758,15 @@ pub const Game = struct {
     /// when the biome map, the biome name, or the biome's rule is unknown.
     /// Fixes the wasteland-at-midnight-getting-forest-walkers gap: stock
     /// resolves per ChunkAreaBiomeSpawnData from the actual biome.
+    /// True when the world biome at (wx,wz) is the stock radiated biome
+    /// (biomes.xml <biomemap name="radiated"/>), which deals damage over time.
+    pub fn isRadiatedAt(self: *const Game, wx: i32, wz: i32) bool {
+        const bm = self.world.biomes orelse return false;
+        const id = bm.atWorld(wx, wz) orelse return false;
+        const name = self.world.biome_layers_table.names[id] orelse return false;
+        return std.mem.indexOf(u8, name, "radiat") != null;
+    }
+
     pub fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
         const self: *Game = @ptrCast(@alignCast(ctx.?));
         const bm = self.world.biomes orelse return fallback;

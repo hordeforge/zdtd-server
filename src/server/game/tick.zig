@@ -53,6 +53,19 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.drown_accum = 0;
             }
         }
+        // Radiation: stock BiomeType.Radiated (biomes.xml <biomemap
+        // name="radiated"/>) deals damage while the player stands in it.
+        if (prog.radiation_damage_per_second > 0) {
+            if (self.isRadiatedAt(@intFromFloat(self.sim.transform[ps].x), @intFromFloat(self.sim.transform[ps].z))) {
+                c.radiation_accum += secs;
+                if (c.radiation_accum >= 1.0) {
+                    _ = self.sim.damageFrom(c.entity_id, prog.radiation_damage_per_second * c.radiation_accum, -1);
+                    c.radiation_accum = 0;
+                }
+            } else {
+                c.radiation_accum = 0;
+            }
+        }
         const food_was = h.food;
         const water_was = h.water;
         h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);

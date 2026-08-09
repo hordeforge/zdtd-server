@@ -192,6 +192,9 @@ pub const Progression = struct {
     /// HP lost per real second while the head block is water (drowning, after
     /// the client's local O2 bar empties; stock ~2 hp/s).
     drowning_damage_per_second: f32 = 2.0,
+    /// HP lost per real second inside a radiated biome (biomes.xml
+    /// <biomemap name="radiated"/>; stock BiomeType.Radiated is deadly).
+    radiation_damage_per_second: f32 = 8.0,
     /// Pressed-against-cover range gate for block chew (m). Anti-kite: only when
     /// the zombie is within this range of its target and facing it.
     block_damage_range: f32 = 3.0,
@@ -273,6 +276,7 @@ pub const ProgressionOverlay = struct {
     survival_sync_seconds: ?f32 = null,
     block_bite_damage: ?f32 = null,
     drowning_damage_per_second: ?f32 = null,
+    radiation_damage_per_second: ?f32 = null,
     block_damage_range: ?f32 = null,
 };
 

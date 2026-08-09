@@ -1493,6 +1493,57 @@ test "scenario drowning damages a submerged player" {
     std.debug.print("PASS drowning: hp {d:.0} -> {d:.0} submerged, stable after surface\n", .{ hp0, hp1 });
 }
 
+test "scenario radiated biome damages the player" {
+    // Stock BiomeType.Radiated (biomes.xml <biomemap name="radiated"/>) deals
+    // damage over time; the server is authoritative for the hp loss.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // Synthesize a 1x1 biome map covering the pad with the radiated name.
+    const bm_mod = @import("../world/biomes.zig");
+    // 513x514 map centered so the (256,256) pad lands inside (z flips: row 0
+    // is north, so the pad row is dz = half_h - 1 - z = 0).
+    const bw: usize = 513;
+    const bh: usize = 514;
+    var map = bm_mod.BiomeMap{};
+    map.width = @intCast(bw);
+    map.height = @intCast(bh);
+    map.scale = 1;
+    map.half_w = 256;
+    map.half_h = 257;
+    map.allocator = gpa;
+    map.r = gpa.alloc(u8, bw * bh) catch return error.OutOfMemory;
+    @memset(map.r, 3); // pine_forest everywhere else
+    const dx: usize = @intCast(256 + 256);
+    const dz: usize = @intCast(257 - 1 - 256);
+    map.r[dz * bw + dx] = 7; // radiated biomemap id at the pad
+    g.world.biomes = map; // flat world has none; world.deinit frees it
+    g.world.biome_layers_table.names[7] = "radiated";
+
+    const hx: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const hz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    try std.testing.expect(g.isRadiatedAt(hx, hz));
+    const hp0 = g.sim.health[ps].hp;
+    var k: u32 = 0;
+    while (k < 25) : (k += 1) try g.step(); // >1 s in the zone
+    try std.testing.expect(g.sim.health[ps].hp < hp0);
+
+    std.debug.print("PASS radiation: hp {d:.0} -> {d:.0} in radiated biome\n", .{ hp0, g.sim.health[ps].hp });
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
