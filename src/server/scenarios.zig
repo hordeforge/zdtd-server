@@ -2486,6 +2486,71 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     std.debug.print("PASS workstation-authority: spoofed count/time replaced by recipe 3/3.0\n", .{});
 }
 
+test "scenario POIStayWithin bounds the stay zone to the quest POI rect" {
+    // GAP P1: POIStayWithin auto-completed because it classified to `.auto`.
+    // It now maps to stay_within and the zone is the quest's bound POI rect.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const qmod = @import("../ecs/quest.zig");
+    const phases = [_]qmod.PhaseSpec{.{ .kind = .stay_within, .required = 3 }};
+    const custom = [_]qmod.QuestDef{.{
+        .id = 42,
+        .kind = .stay_within,
+        .name = "stay_in_the_poi",
+        .title = "Stay in the POI",
+        .target_count = 3,
+        .reward_coin = 5,
+        .objective_count = 1,
+        .reward_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+    }};
+    g.sim.catalog.defs = custom[0..];
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 42));
+
+    // Bind a POI rect around the (256,70,256) pad (flat world has no POIs,
+    // so the accept path left poi unset; a stock map would bind it there).
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var bound = false;
+    for (&g.sim.journal[ps].slots) |*s| {
+        if (!s.active or s.def_id != 42) continue;
+        s.poi = .{ .x = 252, .y = 70, .z = 252, .size_x = 8, .size_y = 4, .size_z = 8 };
+        bound = true;
+    }
+    try std.testing.expect(bound);
+
+    // Outside the POI footprint: no progress.
+    systems.questTickStayWithin(&g.sim, c.slot, 320, 320);
+    var p1: u16 = 0;
+    for (&g.sim.journal[ps].slots) |*s| {
+        if (!s.active or s.def_id != 42) continue;
+        p1 = s.progress;
+    }
+    try std.testing.expectEqual(@as(u16, 0), p1);
+
+    // Inside the POI: three stays complete the quest (turn_in=false).
+    systems.questTickStayWithin(&g.sim, c.slot, 256, 256);
+    systems.questTickStayWithin(&g.sim, c.slot, 256, 256);
+    systems.questTickStayWithin(&g.sim, c.slot, 256, 256);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 42));
+
+    std.debug.print("PASS poi-stay-within: outside blocked, inside completed in 3 stays\n", .{});
+}
+
 test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     io_fs.mkdirPathSimple("worlds");
     freshScenarioDir("worlds/zdtd_sc_unload");

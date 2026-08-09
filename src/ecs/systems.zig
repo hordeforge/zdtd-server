@@ -544,9 +544,19 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
             if (d.kind != .stay_within) continue;
             break :blk @max(8, @as(f32, @floatFromInt(d.target_count)));
         };
-        const dx = px - d.tx;
-        const dz = pz - d.tz;
-        const r2 = radius * radius;
+        // POIStayWithin bounds the zone to the quest's POI rect (bound at
+        // accept via nearestPoi): the player must be inside the building's
+        // footprint, not just near a point. Plain StayWithin keeps the
+        // def-position radius.
+        const cx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
+        const cz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
+        const eff_radius: f32 = if (s.poi.valid())
+            @max(radius, @min(s.poi.size_x, s.poi.size_z) * 0.5)
+        else
+            radius;
+        const dx = px - cx;
+        const dz = pz - cz;
+        const r2 = eff_radius * eff_radius;
         if (dx * dx + dz * dz <= r2) {
             if (d.phases.len > 0) {
                 bumpPhase(w, ps, s, d, .stay_within, 1);
