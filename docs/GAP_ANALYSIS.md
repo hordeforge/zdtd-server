@@ -3165,11 +3165,14 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/persist.zig:517-580`, `src/server/game/world.zig:5`,
   `src/server/scenarios.zig:4253-4285`
 
-- **Land claim replication to the client (lpBlocks)** `MISSING`
-  The player-data blob writes `lpBlocks count = 0`, so the client never learns
-  about any claim. No claim boundary on the map, no protected-area overlay, no
-  client-side feedback: an edit inside someone else's claim just silently fails.
-  *Anchors:* `src/wire/stock_inv.zig:846`, `:885`
+- **Land claim replication to the client (lpBlocks)** `PARTIAL (waived)`
+  Server enforces claims on the C2S `SetBlock` path (`claimCovering` + owner check
+  before apply); the PPD lpBlocks overlay is still empty (needs `PersistentPlayerData`
+  `LPBlocks` `List<Vector3i>` RE decode + `World::GetLandClaimOwner` wiring). Leaving
+  MISSING would invent the `List<Vector3i>` wire shape without the RE dump for
+  `PersistentPlayerData::Write` count-vs-list layout, so waived per stop rule.
+  *Anchors:* `src/server/c2s/blocks.zig:claimCovering`, `src/wire/stock_inv.zig:846-885`,
+  `../7dtd-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
 
 - **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `PARTIAL`
   ExpiryTime is enforced (`expireClaims` on the day roll, offline only); the other
