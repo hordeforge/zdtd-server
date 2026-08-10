@@ -431,7 +431,7 @@ which starts zdtd and points loadgen at the LiteNet port (`ServerPort + 2`).
 
 | Stock | Clone |
 |---|---|
-| Telnet admin | Optional (loadgen spawn hooks only if you implement them) |
+| Telnet admin | Stock-like console on `--admin-port`; disabled by default |
 | `settargetfps` | N/A (you own loop) |
 | Steam server browser | Later (Steamworks) |
 | EAC | Off; document |
@@ -543,7 +543,7 @@ Parallel RE tracks (feed packages/):
 | Loadgen | [`../../7dtd-loadgen/docs/README.md`](../../7dtd-loadgen/docs/README.md) (zdtd validation) |
 | HOST_TUNING | [`../../7dtd-optimizer/docs/HOST_TUNING.md`](../../7dtd-optimizer/docs/HOST_TUNING.md) (host ops ideas) |
 | SIM_PARALLELISM | [`../../7dtd-optimizer/docs/SIM_PARALLELISM.md`](../../7dtd-optimizer/docs/SIM_PARALLELISM.md) (stock MT limits) |
-| zdtd | [`../../zdtd/`](..) (implementation; no mods, no APM) |
+| zdtd | [`../../zdtd/`](..) (implementation; no mods; native metrics in `src/apm/`) |
 
 ## Changelog
 

@@ -31,6 +31,40 @@ fn freshScenarioDir(dir: []const u8) void {
     io_fs.mkdirPath(dir);
 }
 
+test "scenario pre-login world package is rejected by production dispatch" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const peer = &g.net.peers[0];
+    peer.* = .{ .alive = true, .local_id = 1, .authenticated = true };
+    const c = g.clientFor(peer) orelse return error.TestUnexpectedResult;
+    c.authed_challenge = true;
+    try std.testing.expect(!c.joined);
+
+    const x: i32 = 250;
+    const y: i32 = 150;
+    const z: i32 = 250;
+    const before = try g.world.blockWorld(x, y, z);
+    var body_buf: [64]u8 = undefined;
+    const body = try packages.buildSetBlockBody(&body_buf, x, y, z, world_store.block_stone);
+    var frame_buf: [128]u8 = undefined;
+    try g.onData(peer, try packages.framed(&frame_buf, "NetPackageSetBlock", body));
+
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.phase_rejects));
+    try std.testing.expectEqual(before, try g.world.blockWorld(x, y, z));
+}
+
 test "scenario two-peer motion: B receives A PosAndRot" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_motion");

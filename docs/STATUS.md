@@ -2,7 +2,11 @@
 
 **Date pin:** 2026-08-08  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
-**Unit tests:** `zig build test` → **991/991** (`zig build` + `lint-architecture: clean` gate; `game.zig` **2464** ≤2500 via 42 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig`; `c2s/*` owns all C2S domains). `GAP_ANALYSIS.md` is **0 MISSING** feature rows (all gameplay `WORKS` or explicitly waived `PARTIAL (waived)` with RE cite).
+**Validation:** `make check` passes (`zig build test`, fuzz, and
+`lint-architecture: clean`); `game.zig` delegates to 42 shards in
+`src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
+owns all C2S domains. `GAP_ANALYSIS.md` is **0 MISSING** feature rows (all
+gameplay `WORKS` or explicitly waived `PARTIAL (waived)` with RE cite).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
