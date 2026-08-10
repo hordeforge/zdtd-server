@@ -69,12 +69,12 @@ pub const Table = struct {
 /// Curve-only load (fallback when the full table parse fails). Parses the file
 /// once, lightly, and does not build or leak the attribute/perk arena.
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
-    return loadCurveOnly(allocator, path);
-}
-
-fn loadCurveOnly(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
+    return parseCurve(clean);
+}
+
+fn parseCurve(clean: []const u8) LevelCurve {
     var c: LevelCurve = .{};
     const li = std.mem.find(u8, clean, "<level ") orelse return c;
     if (xml.attr(clean, li, "max_level")) |v| c.max_level = std.fmt.parseInt(u16, v, 10) catch c.max_level;
@@ -98,15 +98,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     }
     const arena = arena_holder.allocator();
 
-    var curve: LevelCurve = .{};
-    if (std.mem.find(u8, clean, "<level ")) |li| {
-        if (xml.attr(clean, li, "max_level")) |v| curve.max_level = std.fmt.parseInt(u16, v, 10) catch curve.max_level;
-        if (xml.attr(clean, li, "exp_to_level")) |v| curve.exp_to_level = std.fmt.parseInt(u32, v, 10) catch curve.exp_to_level;
-        if (xml.attr(clean, li, "experience_multiplier")) |v| curve.experience_multiplier = std.fmt.parseFloat(f32, v) catch curve.experience_multiplier;
-        if (xml.attr(clean, li, "skill_points_per_level")) |v| curve.skill_points_per_level = std.fmt.parseInt(u16, v, 10) catch curve.skill_points_per_level;
-        if (xml.attr(clean, li, "clamp_exp_cost_at_level")) |v| curve.clamp_exp_cost_at_level = std.fmt.parseInt(u16, v, 10) catch curve.clamp_exp_cost_at_level;
-        curve.loaded = true;
-    }
+    const curve = parseCurve(clean);
 
     var attrs: std.ArrayList(AttrDef) = .empty;
     defer attrs.deinit(allocator);
