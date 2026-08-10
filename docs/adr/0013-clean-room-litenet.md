@@ -35,6 +35,10 @@ runtime. The Zig process must speak the **client wire** with EAC off.
   by upgrading a black-box DLL.
 - Incomplete LiteNet features (rare channels, NAT punch beyond GSI) stay
   explicit gaps rather than accidental stock behavior.
+- The stock `UnsyncedEvents=true` receive-thread design races
+  `ConnectionManager.Clients` enumeration under join churn (a managed race,
+  not native: research `docs/network.md` §4.0); the clean-room stack owns its
+  event dispatch and avoids that class of bug by construction.
 
 ## Alternatives considered
 
