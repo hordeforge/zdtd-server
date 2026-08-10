@@ -187,6 +187,12 @@ test "tile key format" {
     try std.testing.expect(std.mem.find(u8, k2, "S33_00_W070_00") != null);
 }
 
+test "decode tile classifies corrupt deflate data" {
+    const out = try std.testing.allocator.alloc(f32, tile_px * tile_px);
+    defer std.testing.allocator.free(out);
+    try std.testing.expectError(error.BadInflate, decodeTile(std.testing.allocator, &.{ 0x78, 0x9c }, out));
+}
+
 test "elev to block y clamps" {
     try std.testing.expectEqual(@as(u8, 60), elevToBlockY(0));
     try std.testing.expectEqual(@as(u8, 250), elevToBlockY(9000));

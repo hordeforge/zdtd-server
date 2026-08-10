@@ -123,10 +123,6 @@ fn skipToComma(s: []const u8) ?[]const u8 {
     return s[i..];
 }
 
-fn fileExists(path: []const u8) bool {
-    return io_fs.fileExists(path);
-}
-
 fn joinPath(buf: []u8, a: []const u8, b: []const u8) ![]const u8 {
     return std.fmt.bufPrint(buf, "{s}/{s}", .{ a, b });
 }
@@ -143,7 +139,7 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !He
     // Prefer processed DTM when present.
     var dtm_path_buf: [1024]u8 = undefined;
     const processed = try joinPath(&dtm_path_buf, world_dir, "dtm_processed.raw");
-    const raw_name = if (fileExists(processed)) "dtm_processed.raw" else "dtm.raw";
+    const raw_name = if (io_fs.fileExists(processed)) "dtm_processed.raw" else "dtm.raw";
     const dtm_path = try joinPath(&dtm_path_buf, world_dir, raw_name);
     const raw = try io_fs.readFileAll(allocator, dtm_path);
     defer allocator.free(raw);
@@ -173,7 +169,7 @@ pub fn loadFromWorldDir(allocator: std.mem.Allocator, world_dir: []const u8) !He
 pub fn loadSpawnPoints(allocator: std.mem.Allocator, world_dir: []const u8, out: []SpawnPoint) !usize {
     var path_buf: [1024]u8 = undefined;
     const path = try joinPath(&path_buf, world_dir, "spawnpoints.xml");
-    if (!fileExists(path)) return 0;
+    if (!io_fs.fileExists(path)) return 0;
     const xml = try io_fs.readFileAll(allocator, path);
     defer allocator.free(xml);
     return parseSpawnPoints(xml, out);
@@ -243,7 +239,7 @@ test "synthetic dtm center mapping" {
 
 test "load live Navezgane if present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
-    if (!fileExists(path ++ "/dtm.raw")) return error.SkipZigTest;
+    if (!io_fs.fileExists(path ++ "/dtm.raw")) return error.SkipZigTest;
     var hm = try loadFromWorldDir(std.testing.allocator, path);
     defer hm.deinit();
     try std.testing.expectEqual(@as(i32, 6144), hm.width);

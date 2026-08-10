@@ -1973,9 +1973,9 @@ const TurretCtx = struct {
     /// Per-slot powered flags, resolved once per tick from the power grid so
     /// each turret skips the O(node_n) isEntityPowered scan.
     powered: *const [max_entities]bool,
-    /// Last-hit owner client slot per zombie (parallel to dmg_fp), for kill
-    /// attribution: the turret that fired the final shot owns the kill.
-    owner_hit: []i16,
+    /// Deterministic last-hit token per zombie (parallel to dmg_fp). The high
+    /// half is turret slot + 1 and the low half is its owner client slot.
+    owner_hit: []u32,
 
     fn work(ctx: TurretCtx, begin: usize, end: usize) void {
         var i: usize = begin;
@@ -2016,14 +2016,25 @@ const TurretCtx = struct {
                 t.ammo -%= 1;
                 const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
-                // Last-hit owner: several turrets can fire at the same zombie
-                // in one tick, so the plain store would race. Atomic monotonic
-                // keeps it defined; the serial kill pass reads it after join.
-                @atomicStore(i16, &ctx.owner_hit[zi], t.owner_slot, .monotonic);
+                recordTurretOwner(&ctx.owner_hit[zi], s, t.owner_slot);
             }
         }
     }
 };
+
+fn recordTurretOwner(value: *u32, turret_slot: Slot, owner_slot: i16) void {
+    // Parallel execution has no meaningful wall-clock "last" worker. Match
+    // the serial ascending-slot pass instead: the highest firing turret slot
+    // wins, with owner packed into the same atomic value so it cannot tear
+    // away from the winning source.
+    const token = (@as(u32, turret_slot) + 1) << 16 | @as(u16, @bitCast(owner_slot));
+    _ = @atomicRmw(u32, value, .Max, token, .monotonic);
+}
+
+fn turretOwner(value: u32) i16 {
+    if (value == 0) return -1;
+    return @bitCast(@as(u16, @truncate(value)));
+}
 
 pub const TurretTick = struct {
     kills: u32 = 0,
@@ -2057,7 +2068,7 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (!node.powered or node.entity_id < 0) continue;
         if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
     }
-    var owner_hit: [max_entities]i16 = .{-1} ** max_entities;
+    var owner_hit: [max_entities]u32 = .{0} ** max_entities;
     const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .powered = &powered, .owner_hit = owner_hit[0..] };
     // Same small-population gate as systemZombieAi: pool sync costs more than
     // a serial sweep of 512 slots when few entities are alive.
@@ -2100,7 +2111,7 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             out.kills += 1;
             if (zid > 0 and out.killed_n < out.killed_ids.len) {
                 out.killed_ids[out.killed_n] = zid;
-                out.owner_slots[out.killed_n] = owner_hit[i];
+                out.owner_slots[out.killed_n] = turretOwner(owner_hit[i]);
                 out.killed_n += 1;
             }
             if (w.rollLootDrop(zid, drop_prob)) {
@@ -2800,6 +2811,27 @@ test "concurrent eat countdown saturates at zero" {
     go.store(true, .release);
     for (&threads) |*thread| thread.join();
     try std.testing.expectEqual(@as(i32, 0), @atomicLoad(i32, &value, .monotonic));
+}
+
+test "concurrent turret owner follows deterministic slot order" {
+    if (builtin.single_threaded) return;
+    var value: u32 = 0;
+    const Worker = struct {
+        fn run(v: *u32, source: Slot) void {
+            recordTurretOwner(v, source, @intCast(source));
+        }
+    };
+    var threads: [8]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (&threads, 0..) |*thread, i| {
+        thread.* = std.Thread.spawn(.{}, Worker.run, .{ &value, @as(Slot, @intCast(i)) }) catch |err| {
+            for (threads[0..spawned]) |*started| started.join();
+            return err;
+        };
+        spawned += 1;
+    }
+    for (&threads) |*thread| thread.join();
+    try std.testing.expectEqual(@as(i16, threads.len - 1), turretOwner(value));
 }
 
 test "system zombie wanders when no player sensed" {
