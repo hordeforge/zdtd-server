@@ -1801,11 +1801,26 @@ test "scenario vehicle enter drive and turret kills with power" {
         _ = g.sim.spawnZombie(tx + 2, ty, tz, 15);
         cap.clear();
         const kills_before = c.zombie_kills;
+        // trap_kill_xp_frac defaults to 0 (stock buffs.xml: no perk, no XP), so
+        // an unperked turret kill must not raise the owner's XP.
+        const xp_before = c.xp;
         var k2: u32 = 0;
         while (k2 < 50) : (k2 += 1) try g.step();
         try std.testing.expect(c.zombie_kills > kills_before);
+        try std.testing.expectEqual(xp_before, c.xp);
         const score_id2 = packages.idOf("NetPackageEntityAddScoreClient").?;
         try std.testing.expect(cap.findPkgIdEntity(score_id2, c.entity_id) != null);
+
+        // A perkAdvancedEngineering-equivalent rate (stock level 3 = .45) does
+        // credit the fraction, once a turret kills again under it.
+        g.sim.rules.progression.trap_kill_xp_frac = 0.45;
+        g.sim.turret[owned_t].ammo = 20;
+        g.sim.power.resolve();
+        _ = g.sim.spawnZombie(tx + 2, ty, tz, 15);
+        const xp_before2 = c.xp;
+        var k3: u32 = 0;
+        while (k3 < 50) : (k3 += 1) try g.step();
+        try std.testing.expect(c.xp > xp_before2);
     }
 
     const load = g.sim.power.addNode(.consumer, 1, 70, 1, 5).?;

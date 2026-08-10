@@ -2463,9 +2463,17 @@ and server-to-client XP/level pushes do not exist.
   `awardXp` levels correctly against its own curve, but it is a write-only
   counter: the value lives on the per-peer `Client` struct (never on the ECS
   entity), is never sent to the client, never saved, and is zeroed by
-  `clients[slot] = .{}` on any disconnect. The only award site is a zombie/animal
-  kill via C2S DamageEntity, 100 XP flat.
-  *Anchors:* `src/server/game.zig:3043-3062`, `:4960-4965`, `:290-293`
+  `clients[slot] = .{}` on any disconnect. Award amount now resolves
+  `entityclasses.xml` `ExperienceGain` per victim class (including the
+  `^xpNormal01`-style `<replace_properties>` ladder) instead of a flat 100; a
+  turret/trap kill additionally scales by `Rules.progression.trap_kill_xp_frac`
+  (0.0 default, matching stock's unperked default) since stock's own
+  `ElectricalTrapXP` scaling needs a per-player perk level zdtd does not yet
+  have. See [HARDCODE_AUDIT A34](reviews/HARDCODE_AUDIT.md) and
+  [ADR 0023](adr/0023-perk-attribute-system.md) for the full per-player fix.
+  *Anchors:* `src/server/game/player.zig` `killXpAward`/`xpGainFor`,
+  `src/server/game/step.zig` (turret path), `src/assets/entities.zig`
+  (`ExperienceGain` parse)
 
 - **XP curve numeric parity with stock** `PARTIAL`
   zdtd's `expForLevel(L) = exp_to_level * mult^(min(L,clamp)-1)`. Stock's

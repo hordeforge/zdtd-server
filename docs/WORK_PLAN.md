@@ -310,3 +310,149 @@ enforce anything to be worth building. A server that owns its inventory, refuses
 impossible requests, and hands an operator readable evidence has solved most of
 the problem; the enforcement ladder is the last and smallest part, and the one
 most likely to cause harm if rushed.
+
+---
+
+# Active program: perk and attribute progression (ADR 0023)
+
+Decision and rationale: [ADR 0023](adr/0023-perk-attribute-system.md). Forcing
+function: A34 (turret/trap kill XP) needed a per-player perk level and could
+only get a flat floor instead. `progression.xml` scope: 59 perks, 324
+`<level_requirements>` blocks, 517 `ProgressionLevel` requirement uses.
+
+Ordering is strict: T24 before T25 before T26 before T27. Each stores or reads
+state the next one needs.
+
+## T24. Persist per-player attribute and perk levels
+
+**Why:** nothing tracks a player's attribute or perk level today; the catalog
+loads but no instance state exists. Every task after this one needs it.
+
+**Change:** add an attribute-level array (one per `AttrDef`) and a perk-level
+array (one per `PerkDef`) to player state, plus spent and available skill-point
+counters. Persist through the existing player save path (`players.zsv` /
+ZPV3) rather than a parallel file: this is player state exactly like level and
+XP, which already live there. A fresh player gets all-zero levels; a save from
+before this change loads as all-zero, not as an error.
+
+**Files:** `src/ecs/components.zig` (or wherever player state structs live),
+`src/server/persist.zig`, `src/assets/progression.zig` (array sizing against
+the loaded catalog).
+
+**Grounding:** none needed; this is zdtd-owned persistence layout, like the
+existing ZPV3 fields.
+
+**Done when:** a player's attribute and perk levels round-trip through a save
+and restart at zero for a save written before this change.
+
+**Proof:** a save/load test asserting round-trip for non-zero levels, and a
+test loading a pre-change fixture save that asserts every level reads as zero
+rather than erroring.
+
+**Out of scope:** any way to change these levels yet. That is T27.
+
+---
+
+## T25. A scoped `ProgressionLevel` requirement evaluator
+
+**Why:** ADR 0023 decision 2. The only decision this system has to make is
+"can this attribute or perk go up one level", which only needs the
+`ProgressionLevel` requirement type, not stock's full requirement vocabulary.
+
+**Change:** parse `<level_requirements level="N">` blocks per perk/attribute
+(already partially reachable via the catalog loader) and evaluate only
+`ProgressionLevel` comparisons against the player's stored levels (T24). A
+`<level_requirements>` block containing any other requirement type fails
+closed: the level-up is refused, not approved by ignoring the requirement it
+does not understand. Log which requirement type was unrecognized so a gap is
+visible rather than silently wrong.
+
+**Files:** `src/assets/progression.zig`.
+
+**Grounding:** `progression.xml` `<level_requirements>` / `<requirement
+name="ProgressionLevel" .../>` shape; the file ships 324 such blocks to test
+against.
+
+**Done when:** a level-up request is approved only when every
+`ProgressionLevel` requirement in its block is satisfied, and refused (not
+approved) when a block contains an unrecognized requirement type.
+
+**Proof:** a table-driven test over a sample of the real `progression.xml`
+blocks (met, unmet, and one containing an unrecognized requirement type),
+asserting the evaluator's verdict against each by hand-checking the source
+attribute.
+
+**Out of scope:** any requirement type beyond `ProgressionLevel`. If a later
+gap needs one, it is a scoped addition to this evaluator, not a rewrite.
+
+---
+
+## T26. Generic passive-effect resolver, upgrade the A34 floor
+
+**Why:** ADR 0023 decision 3. A34 fixed one kill-XP call site with a flat
+`Rules` floor because no per-player resolver existed. The next perk-gated
+number should not repeat that.
+
+**Change:** `resolvePassiveEffect(player, effect_name, tags) f32` walks the
+player's leveled perks' `<passive_effect>` rows and aggregates them by
+operation: `base_set`/`perc_set` overwrite, `base_add`/`perc_add` sum. Same
+semantics `buffs.zig`'s `passiveValue` already implements for buff passives;
+match them exactly rather than reinventing the aggregation. Update A34's call
+site (`src/server/game/step.zig`) to call the resolver for
+`"ElectricalTrapXP"` and fall back to `Rules.progression.trap_kill_xp_frac`
+only when the player has no levels in a perk that grants it (a fresh player,
+or the perk system disabled by a mode).
+
+**Files:** `src/assets/progression.zig`, `src/server/game/step.zig`,
+`docs/reviews/HARDCODE_AUDIT.md` (A34 moves from "fixed with a floor" to
+"fixed per-player").
+
+**Grounding:** `progression.xml` `<passive_effect>` rows inside `<perk>`
+blocks; the aggregation rule already proven correct in `assets/buffs.zig`.
+
+**Done when:** a player with `perkAdvancedEngineering` at level 3 is credited
+45% of a turret kill's XP (the stock value at that level), and a player with no
+levels in it still gets the `Rules` floor, unchanged from A34.
+
+**Proof:** extend the A34 scenario (turret kill XP) with a case that sets the
+player's perk level directly (bypassing T25's requirement gate, since this
+test is about resolution, not eligibility) and asserts the stock fraction.
+
+**Out of scope:** resolving any effect other than proving the mechanism works
+for `ElectricalTrapXP`. Each further effect is a call site, not new resolver
+work.
+
+---
+
+## T27. C2S perk and attribute spend, behind the S2C push
+
+**Why:** ADR 0023 decision 4. Landing the spend request before the server can
+correctly echo state back would let a client believe a point was spent that
+the server dropped.
+
+**Change:** first, push attribute/perk state to the client via
+`buildPlayerStatsBody` (already exists) whenever a level-up or a spend changes
+it, matching the stock NED-dirty push pattern the codebase already uses
+elsewhere (`broadcastPlayerStats`). Only then accept a C2S request to spend an
+available skill point on an attribute or perk: validate against T25's
+evaluator and the available-point balance, apply, persist (T24), and push the
+result.
+
+**Files:** `src/server/c2s/*` (new or existing handler for the spend package),
+`src/server/game/player.zig`, `docs/GAP_ANALYSIS.md` (closes "Skill points
+granted per level" and the client/server progression-sync rows).
+
+**Grounding:** stock `EntitySetSkillLevelClient` / the C2S spend package name
+and shape (RE from the protocol docs); `buildPlayerStatsBody` for the existing
+push builder.
+
+**Done when:** a client can spend an available point on an eligible perk and
+see the result; an ineligible or over-budget request is rejected with no state
+change.
+
+**Proof:** a scenario spending a point on an eligible perk (state changes,
+push sent) and one attempting an ineligible spend (state unchanged, no
+points consumed).
+
+**Out of scope:** respec, book-granted level skips, any requirement type T25
+did not implement.

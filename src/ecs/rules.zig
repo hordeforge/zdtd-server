@@ -198,6 +198,14 @@ pub const Progression = struct {
     /// Pressed-against-cover range gate for block chew (m). Anti-kite: only when
     /// the zombie is within this range of its target and facing it.
     block_damage_range: f32 = 3.0,
+    /// Fraction of a turret/trap kill's XP the owner is credited (stock
+    /// ItemActionAttack.Hit / ProjectileMoveScript.checkCollision read the
+    /// PassiveEffects.ElectricalTrapXP passive; buffs.xml documents its
+    /// default as 0, unlocked only by perkAdvancedEngineering levels 1-5
+    /// at .15/.3/.45/.6/.75). zdtd has no perk/attribute system yet (planned:
+    /// docs/adr/0023-perk-attribute-system.md), so this is a flat floor rather
+    /// than a per-player perk lookup; 0.0 matches the stock no-perk default.
+    trap_kill_xp_frac: f32 = 0.0,
 };
 
 /// Placeholder group: added as constants move; no fields invented.
@@ -278,6 +286,7 @@ pub const ProgressionOverlay = struct {
     drowning_damage_per_second: ?f32 = null,
     radiation_damage_per_second: ?f32 = null,
     block_damage_range: ?f32 = null,
+    trap_kill_xp_frac: ?f32 = null,
 };
 
 pub const WorldGroupOverlay = struct {};

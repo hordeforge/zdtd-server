@@ -42,6 +42,55 @@ See [STATUS.md](../STATUS.md) and `git log` for the exact head.
 
 ---
 
+## Re-audit 2026-08-10 (kill-XP mechanism scaling)
+
+| ID | Finding | State |
+|---|---|---|
+| A34 | A turret/trap kill paid the owner the same flat entityclass XP a direct melee kill would. Stock scales trap-caused kill XP by `PassiveEffects.ElectricalTrapXP` (`ItemActionAttack.Hit` / `ProjectileMoveScript.checkCollision`, asm.il), whose default is **0%** (`buffs.xml:17001`: "% of trap kill XP that the player gets") and which only rises via `perkAdvancedEngineering` (Intellect, `progression.xml:3214`) at levels 1-5: .15/.3/.45/.6/.75. So an unperked player farmed full XP off an unattended turret, something stock explicitly prevents. | **Fixed with a floor**: `Rules.progression.trap_kill_xp_frac` (default 0.0, matching stock's no-perk default) scales the turret-kill XP award at `src/server/game/step.zig`. Not a full fix: zdtd has no per-player perk level to read yet, so every player gets the same floor regardless of their actual perk investment. Full fix is [ADR 0023](../adr/0023-perk-attribute-system.md) / [WORK_PLAN T26](../WORK_PLAN.md). |
+
+### Audit pattern: kill-XP credit varies by kill mechanism, not just by victim
+
+A34 was found by asking a question the existing audit passes had not asked:
+does a reward path depend on **how** something died, not just **what** died.
+Stock's `AddKillXP(killedEntity, itemUsed, xpModifier)` takes a per-mechanism
+modifier, and the four call sites found in the IL disagree with each other:
+
+| Kill mechanism | Stock call site | XP modifier |
+|---|---|---|
+| Direct player hit (melee/ranged) | `ItemActionAttack::Hit` | `1.0` (full) |
+| Turret bullet / dart-trap projectile | `ItemActionAttack::Hit` (turret-owned), `ProjectileMoveScript::checkCollision` | `ElectricalTrapXP` (0% default, perk-gated to 75%) |
+| Vehicle roadkill | `EntityVehicle::OnCollisionForward` | `0.5` (hardcoded stock literal, not perk-gated) |
+| Explosion | `Explosion::AttackEntites` | `1.0` (full) |
+| Buff/DoT death (bleed, fire, poison) | `EntityBuffs::OnDeath` | `1.0` if the DoT source was a player, `ElectricalTrapXP` if the DoT source was a trap |
+
+zdtd has exactly three `killXpAward` call sites
+(`src/server/c2s/misc.zig:356` direct DamageEntity kill, correctly at full
+credit; `src/server/c2s/blocks.zig:268` a falling-block-crush kill;
+`src/server/game/step.zig` the turret path, now fixed above). Two are
+unresolved, recorded here rather than asserted as bugs, since neither has an
+IL citation yet:
+
+- **Falling-block-crush kill XP** (`c2s/blocks.zig:268`): pays full credit.
+  Whether stock treats this as a direct kill (correct as-is) or routes it
+  through a different `AddKillXP` caller not yet found in this pass is
+  unresearched. Flag, do not assume.
+- **Vehicle roadkill and explosion kills have no XP path in zdtd at all.**
+  Neither mechanism calls `killXpAward` anywhere in the tree, so a player who
+  explodes or runs over a zombie currently gets zero XP rather than the
+  stock 1.0 / 0.5. This is a missing-feature gap, not a wrong-value one; file
+  separately from A34 if either mechanism is implemented.
+
+**Generalize this pattern to future audits:** whenever a reward, currency or
+score path reads an entity or item property to compute an amount, check
+whether stock's own computation of that amount branches on *how the request
+reached the server*, not only on the entity/item being acted on. `AddKillXP`'s
+`xpModifier` is one instance; `EconomicValue × BuyMarkup` (A29, trader pricing)
+is structurally the same shape (a base value scaled by a context-dependent
+multiplier zdtd must not treat as constant). A single flat award/price
+function serving several call sites is the shape to be suspicious of.
+
+---
+
 ## Re-audit 2026-08-08 (parity wave + Bucket B closure)
 
 Re-ran the audit search patterns against the current tree (`main` after the

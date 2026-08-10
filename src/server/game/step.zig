@@ -170,7 +170,15 @@ pub fn step(self: *Game) !void {
                 const oc = &self.clients[osz];
                 if (!oc.joined) continue;
                 systems.questOnZombieKilled(&self.sim, osz);
-                self.killXpAward(osz, self.xpGainFor(r.killed_ids[tk]));
+                // ItemActionAttack.Hit / ProjectileMoveScript.checkCollision scale a
+                // turret/trap kill's XP by PassiveEffects.ElectricalTrapXP rather than
+                // paying full credit like a direct player kill; stock's own default is
+                // 0 (buffs.xml), unlocked only by perkAdvancedEngineering. zdtd has no
+                // perk levels yet (docs/adr/0023-perk-attribute-system.md), so
+                // trap_kill_xp_frac is a flat floor rather than a per-player lookup.
+                const trap_xp = self.xpGainFor(r.killed_ids[tk]);
+                const trap_xp_scaled: u64 = @trunc(@as(f32, @floatFromInt(trap_xp)) * self.sim.rules.progression.trap_kill_xp_frac);
+                self.killXpAward(osz, trap_xp_scaled);
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{

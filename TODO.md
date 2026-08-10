@@ -102,6 +102,28 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Perk and attribute progression (ADR 0023)
+
+`progression.xml`'s catalog loads (attributes, perks, costs) but nothing
+tracks a player's level in any of them: no per-player state, no requirement
+evaluator, no passive-effect resolver. Found because A34 (turret kill XP)
+needed the last of those three and could only get a flat floor instead.
+Decision: [ADR 0023](docs/adr/0023-perk-attribute-system.md). Plan:
+[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T24-T27, strictly ordered.
+
+- [ ] T24: persist per-player attribute and perk levels plus a skill-point
+      balance through the existing player save (ZPV3). Everything below needs
+      this first.
+- [ ] T25: a `ProgressionLevel`-only requirement evaluator for
+      `<level_requirements>`; any other requirement type in a block fails the
+      level-up closed rather than approving it by ignoring what it can't check.
+- [ ] T26: a generic `resolvePassiveEffect(player, name, tags)` matching
+      `buffs.zig`'s aggregation rule, so A34's `ElectricalTrapXP` floor upgrades
+      to the real per-player value and the next perk-gated number is a call
+      site, not a new `Rules` field.
+- [ ] T27: C2S perk/attribute spend, landed only after the S2C push
+      (`buildPlayerStatsBody`) can echo the result correctly.
+
 ### Anti-cheat (authority first, then detection)
 
 EAC is off and clients are unmodified, so every defence is server side and
