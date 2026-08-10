@@ -300,7 +300,7 @@ markup ratios (A29) here (Bucket A).
 
 ### P1
 
-1. ~~**A10–A11**~~ **Done.** **A12** vehicle speed switch residuals remain.
+1. ~~**A10–A11**~~ **Done.** ~~**A12**~~ **Done:** `vehicleControl` uses `v.max_speed` (vehicles.xml `velocityMax`) when set, `vehicleKindDefaultSpeed` only as fallback (`systems.zig:1822`).
 2. ~~**B13**~~ **Done:** sleeper/turret/save cadences are `[stream]` keys.
 3. ~~**B22**~~ **Done:** `src/server/zdtd_config.zig` + `zdtd.toml.example` (stream/authority/feature/sim). ~~**B14–B17**~~ **Done:** AI timing/radii (30 tunables) are `[rules.ai]` - mode pack or `zdtd.toml` without forking `systems.zig`.
 4. **A07** biome default stack pins before XML (acceptable offline).
@@ -314,7 +314,7 @@ markup ratios (A29) here (Bucket A).
 2. ~~`zdtd.toml` loader for B01–B07 + feature.~~
 3. ~~A19 wallet → `[sim] trader_wallet_dukes` (done).~~
 4. Extend toml for AI bands / tick throttles / caps (B08–B14, draft `[net]`/`[ai]`/`[caps]`; unknown-key abort means the drafts need parser support first).
-5. ~~A11 AI floors.~~ A12 vehicle speeds from vehicles.xml only.
+5. ~~A11 AI floors.~~ ~~A12 vehicle speeds from vehicles.xml only.~~
 6. Drop recipe unlock extras when `source==xml` (A13).
 7. ~~Quest coin-reward rework (`sumCoinReward`, casinoCoin Item rewards) landed (A20).~~
 8. ~~**A29/A30:** price from `EconomicValue × BuyMarkup`/`OverrideBuyMarkup`; `reset_interval` wired into `traderRestock`.~~ Residual A29: `EconomicSellScale` and the quality-lerp terms still absent (sell prices approximate).

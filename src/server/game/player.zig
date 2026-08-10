@@ -67,6 +67,19 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
     } else |_| {}
 }
 
+/// entityclasses ExperienceGain for the just-killed entity (130 rabbit ..
+/// 2500 zombieBear; most zombies resolve through the `^xpNormal01`-style
+/// replace_properties ladder). Falls back to the flat zdtd floor when the
+/// class did not resolve one (offline/builtin catalog, or the slot already
+/// recycled).
+pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
+    if (self.sim.slotOfNetId(victim_nid)) |s| {
+        const g = self.sim.class_id[s].xp_gain;
+        if (g > 0) return @intFromFloat(g);
+    }
+    return 100;
+}
+
 /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md
 /// §2.3): the killer's XP is `base * (1 - 0.1 * MemberCountInRange)` where
 /// MemberCountInRange counts the other members within GameStats[54]

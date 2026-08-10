@@ -37,6 +37,10 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
+    /// most zombies resolve through the `^xpNormal01`-style replace_properties
+    /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
+    xp_gain: f32 = 0,
 };
 
 pub const EntityTable = struct {
@@ -207,6 +211,23 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         }
     }
 
+    // <replace_properties> name -> value map (chargedMoveSpeedPattern, the
+    // xpSlim01..xpStrongFeral03 XP ladder, ...). Plain <property> rows
+    // (ExperienceGain among them) reference these with a leading '^'.
+    var prop_vars: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer prop_vars.deinit(allocator);
+    if (std.mem.findPos(u8, clean, 0, "<replace_properties")) |rv| {
+        const rv_end = std.mem.findPos(u8, clean, rv, "</replace_properties>") orelse clean.len;
+        var rpi: usize = rv;
+        while (std.mem.findPos(u8, clean, rpi, "<property")) |ptag| {
+            rpi = ptag + 9;
+            if (ptag >= rv_end) break;
+            const pname = xml.attr(clean, ptag, "name") orelse continue;
+            const pval = xml.attr(clean, ptag, "value") orelse continue;
+            try prop_vars.put(allocator, try arena.dupe(u8, pname), try arena.dupe(u8, pval));
+        }
+    }
+
     var i: usize = 0;
     while (i < clean.len) {
         const tag = std.mem.findPos(u8, clean, i, "<entity_class") orelse break;
@@ -351,6 +372,20 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             }
         }
         const hand = resolveProp(&classes, name, "HandItem", 0) orelse "";
+        // ExperienceGain: either a literal ("500") or a '^' reference into
+        // <replace_properties> (the xpSlim01..xpStrongFeral03 ladder).
+        // Bounded: stock tops out at 2500 (zombieBear); reject a crafted
+        // value that would let one kill jump several levels.
+        var xp_gain: f32 = 0;
+        if (resolveProp(&classes, name, "ExperienceGain", 0)) |eg| {
+            const v: []const u8 = if (eg.len > 0 and eg[0] == '^')
+                (prop_vars.get(eg[1..]) orelse "")
+            else
+                eg;
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100_000) xp_gain = f;
+            }
+        }
         try list.append(allocator, .{
             .name = name,
             .hash = unity_hash.unityStringHash(name),
@@ -364,6 +399,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .wander_speed = wander,
             .time_stay = time_stay,
             .sight_range = sight,
+            .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
     }
@@ -415,6 +451,9 @@ test "load stock entityclasses when present" {
     // that class's LootList to the real loot.xml container.
     try std.testing.expectEqualStrings("zPackReg", boe.loot_list);
     try std.testing.expectEqual(@as(f32, 0.04), boe.loot_drop_prob);
+    // ExperienceGain resolves the '^xpNormal01' replace_properties reference
+    // (entityclasses.xml XP_ZOMBIE_TEMPLATE -> zombieTemplateMale -> zombieBoe).
+    try std.testing.expectEqual(@as(f32, 500), boe.xp_gain);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);

@@ -265,7 +265,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const dmg = self.sim.damageFrom(nid, amount, if (c.entity_id > 0) c.entity_id else -1);
             if (dmg.killed and !self.sim.mask[es].player) {
                 systems.questOnZombieKilled(&self.sim, c.slot);
-                self.killXpAward(c.slot, 100);
+                self.killXpAward(c.slot, self.xpGainFor(nid));
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
                 if (c.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{ .entity_id = c.entity_id, .zombie_kills = c.zombie_kills })) |ab| {

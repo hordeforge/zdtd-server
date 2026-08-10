@@ -75,6 +75,9 @@ pub const ClassId = struct {
     sight_range: f32 = 0,
     /// IsEnemyEntity: false on passive wildlife, so only predators chase.
     is_enemy: bool = true,
+    /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
+    /// then the caller's flat floor.
+    xp_gain: f32 = 0,
 };
 
 pub const AiState = enum(u8) {

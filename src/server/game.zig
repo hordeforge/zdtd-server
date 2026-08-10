@@ -1004,6 +1004,10 @@ pub const Game = struct {
         return game_player.killXpAward(self, killer_slot, base);
     }
 
+    pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
+        return game_player.xpGainFor(self, victim_nid);
+    }
+
     /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
     /// rules so broadcast and sendGameBudget share the same behaviour.
     /// `budget_ns==null` means no deadline (stream/broadcast). Returns
@@ -2016,6 +2020,7 @@ pub const Game = struct {
             .time_stay = d.time_stay,
             .sight_range = d.sight_range,
             .is_enemy = d.is_enemy,
+            .xp_gain = d.xp_gain,
         };
     }
 

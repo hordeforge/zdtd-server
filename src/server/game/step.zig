@@ -170,7 +170,7 @@ pub fn step(self: *Game) !void {
                 const oc = &self.clients[osz];
                 if (!oc.joined) continue;
                 systems.questOnZombieKilled(&self.sim, osz);
-                self.killXpAward(osz, 100);
+                self.killXpAward(osz, self.xpGainFor(r.killed_ids[tk]));
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
