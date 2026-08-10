@@ -176,14 +176,22 @@ pub fn savePlayers(self: *Game) !void {
             const rec_name = old_recs[off + 1 ..][0..nl];
             const had_prog_tail = zpvRecordHasProgTail(old_recs, off, old_version);
             off += rec_len;
-            var online = false;
+            // Drop an old on-disk record only when this save will re-write the
+            // client's state fresh. A joined client with no live sim slot yet
+            // (entity_id 0, or playerByPeer pending) must not lose its persisted
+            // record: matching "joined + name" alone used to classify such a
+            // client as online and silently erased the record, since the fresh
+            // loop below skips it. Match the write predicate exactly to avoid a
+            // lost-update window on a connected-but-not-spawned player.
+            var rewritten = false;
             for (&self.clients) |*cl| {
-                if (cl.joined and cl.name_len == nl and std.mem.eql(u8, cl.name[0..nl], rec_name)) {
-                    online = true;
-                    break;
-                }
+                if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
+                if (cl.name_len != nl or !std.mem.eql(u8, cl.name[0..nl], rec_name)) continue;
+                if (self.sim.playerByPeer(cl.slot) == null) continue;
+                rewritten = true;
+                break;
             }
-            if (online) continue;
+            if (rewritten) continue;
             try out.appendSlice(self.allocator, old_recs[rec_start..off]);
             // Upgrade a legacy record to the current v4 layout so the file
             // stays uniformly parseable under v4 semantics on the next pass:

@@ -192,6 +192,60 @@ test "players zpv3 round-trips level xp stats and buffs across restart" {
     }
 }
 
+test "players save keeps a joined-but-not-writable client record" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    // Seed a persisted record: a joined, spawned player with a real inventory
+    // item is saved so the on-disk file has a record for "Bot".
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        g.sim.inventory[ps] = .{};
+        g.sim.inventory[ps].slots[3] = .{ .item_id = 9, .count = 7, .quality = 5, .meta = 1 };
+        try g.savePlayers();
+    }
+
+    // Second save while the client is joined but has no writable sim state.
+    // Setting entity_id to 0 simulates the "joined but not yet spawned" window.
+    // Matching only "joined + name" classified this client as online and
+    // silently dropped the persisted record, since the fresh-write loop skips
+    // it; the carry-forward must keep the record because this save cannot.
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        g.clients[cl.slot].entity_id = 0;
+        try g.savePlayers();
+    }
+
+    // The persisted inventory must survive the carried-forward record.
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(u16, 9), g.sim.inventory[ps].slots[3].item_id);
+        try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[3].count);
+    }
+}
+
 test "players zpv3 restore skips a preceding record's progression tail" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
