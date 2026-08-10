@@ -275,7 +275,7 @@ pub fn loadFromPath(
                 // value that fails to parse leaves no radius effect rather
                 // than applying a buff at radius 0.
                 if (xml.attr(clean, pi, "value")) |v| {
-                    if (std.mem.indexOfScalar(u8, v, ',')) |comma| {
+                    if (std.mem.findScalar(u8, v, ',')) |comma| {
                         const nm = std.mem.trim(u8, v[0..comma], " ");
                         const rs = std.mem.trim(u8, v[comma + 1 ..], " ");
                         if (nm.len > 0) {
