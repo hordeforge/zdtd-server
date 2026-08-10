@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const util_log = @import("../util/log.zig");
 const guard_policy = @import("guard_policy.zig");
 const toml_bind = @import("../util/toml_bind.zig");
 const rules_mod = @import("../ecs/rules.zig");
@@ -270,11 +271,11 @@ pub const max_streamed_chunks_cap: usize = 169;
 /// Safe to call even when no zdtd.toml was loaded (no-op on already-valid defaults).
 pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.max_streamed_chunks == 0) {
-        std.debug.print("zdtd: max_streamed_chunks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: max_streamed_chunks=0 invalid; using 1\n", .{});
         opts.max_streamed_chunks = 1;
     }
     if (opts.max_streamed_chunks > max_streamed_chunks_cap) {
-        std.debug.print(
+        util_log.warn(
             "zdtd: max_streamed_chunks={d} exceeds compile cap {d}; clamping\n",
             .{ opts.max_streamed_chunks, max_streamed_chunks_cap },
         );
@@ -288,135 +289,135 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         max_radius_for_budget = next;
     }
     if (opts.chunk_stream_radius_min < 1) {
-        std.debug.print("zdtd: stream_radius_min={d} invalid; using 1\n", .{opts.chunk_stream_radius_min});
+        util_log.warn("zdtd: stream_radius_min={d} invalid; using 1\n", .{opts.chunk_stream_radius_min});
         opts.chunk_stream_radius_min = 1;
     }
     if (opts.chunk_stream_radius_min > max_radius_for_budget) {
-        std.debug.print(
+        util_log.warn(
             "zdtd: stream_radius_min={d} exceeds stream budget radius {d}; clamping\n",
             .{ opts.chunk_stream_radius_min, max_radius_for_budget },
         );
         opts.chunk_stream_radius_min = max_radius_for_budget;
     }
     if (opts.chunk_stream_radius_max > max_radius_for_budget) {
-        std.debug.print(
+        util_log.warn(
             "zdtd: stream_radius_max={d} exceeds stream budget radius {d}; clamping\n",
             .{ opts.chunk_stream_radius_max, max_radius_for_budget },
         );
         opts.chunk_stream_radius_max = max_radius_for_budget;
     }
     if (opts.chunk_stream_radius_max < opts.chunk_stream_radius_min) {
-        std.debug.print(
+        util_log.warn(
             "zdtd: stream_radius_max={d} < min={d}; raising max to min\n",
             .{ opts.chunk_stream_radius_max, opts.chunk_stream_radius_min },
         );
         opts.chunk_stream_radius_max = opts.chunk_stream_radius_min;
     }
     if (opts.chunk_adds_per_stream_tick == 0) {
-        std.debug.print("zdtd: chunk_adds_per_stream_tick=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: chunk_adds_per_stream_tick=0 invalid; using 1\n", .{});
         opts.chunk_adds_per_stream_tick = 1;
     }
     if (opts.chunk_stream_period_ticks == 0) {
-        std.debug.print("zdtd: chunk_stream_period_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: chunk_stream_period_ticks=0 invalid; using 1\n", .{});
         opts.chunk_stream_period_ticks = 1;
     }
     if (opts.motion_replicate_period_ticks == 0) {
-        std.debug.print("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
         opts.motion_replicate_period_ticks = 1;
     }
     if (opts.world_time_send_ticks == 0) {
-        std.debug.print("zdtd: world_time_send_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: world_time_send_ticks=0 invalid; using 1\n", .{});
         opts.world_time_send_ticks = 1;
     }
     if (opts.vehicle_pos_send_ticks == 0) {
-        std.debug.print("zdtd: vehicle_pos_send_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: vehicle_pos_send_ticks=0 invalid; using 1\n", .{});
         opts.vehicle_pos_send_ticks = 1;
     }
     if (opts.sleeper_tick_ticks == 0) {
-        std.debug.print("zdtd: sleeper_tick_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: sleeper_tick_ticks=0 invalid; using 1\n", .{});
         opts.sleeper_tick_ticks = 1;
     }
     if (opts.turret_sync_ticks == 0) {
-        std.debug.print("zdtd: turret_sync_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: turret_sync_ticks=0 invalid; using 1\n", .{});
         opts.turret_sync_ticks = 1;
     }
     if (opts.save_interval_ticks == 0) {
-        std.debug.print("zdtd: save_interval_ticks=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: save_interval_ticks=0 invalid; using 1\n", .{});
         opts.save_interval_ticks = 1;
     }
     if (opts.spawn_area_radius_max < 1) {
-        std.debug.print("zdtd: spawn_area_radius_max={d} invalid; using 1\n", .{opts.spawn_area_radius_max});
+        util_log.warn("zdtd: spawn_area_radius_max={d} invalid; using 1\n", .{opts.spawn_area_radius_max});
         opts.spawn_area_radius_max = 1;
     }
     if (opts.max_claimed_damage < 1) {
-        std.debug.print("zdtd: max_claimed_damage={d} invalid; using 1\n", .{opts.max_claimed_damage});
+        util_log.warn("zdtd: max_claimed_damage={d} invalid; using 1\n", .{opts.max_claimed_damage});
         opts.max_claimed_damage = 1;
     }
     if (!std.math.isFinite(opts.max_edit_range) or opts.max_edit_range <= 0) {
-        std.debug.print("zdtd: max_edit_range={d} invalid; using 1\n", .{opts.max_edit_range});
+        util_log.warn("zdtd: max_edit_range={d} invalid; using 1\n", .{opts.max_edit_range});
         opts.max_edit_range = 1;
     }
     if (!std.math.isFinite(opts.interest_range) or opts.interest_range <= 0) {
-        std.debug.print("zdtd: interest_range={d} invalid; using 1\n", .{opts.interest_range});
+        util_log.warn("zdtd: interest_range={d} invalid; using 1\n", .{opts.interest_range});
         opts.interest_range = 1;
     }
     if (@hasField(@TypeOf(opts.*), "max_horizontal_speed_mps") and
         (!std.math.isFinite(opts.max_horizontal_speed_mps) or opts.max_horizontal_speed_mps <= 0))
     {
-        std.debug.print(
+        util_log.warn(
             "zdtd: max_horizontal_speed_mps={d} invalid; using 1\n",
             .{opts.max_horizontal_speed_mps},
         );
         opts.max_horizontal_speed_mps = 1;
     }
     if (opts.peer_stale_ms == 0) {
-        std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
     }
     if (@hasField(@TypeOf(opts.*), "lock_stale_ns") and opts.lock_stale_ns == 0) {
-        std.debug.print("zdtd: lock_stale_ns=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: lock_stale_ns=0 invalid; using 1\n", .{});
         opts.lock_stale_ns = 1;
     }
     if (@hasField(@TypeOf(opts.*), "deco_objects_per_join") and opts.deco_objects_per_join == 0) {
-        std.debug.print("zdtd: deco_objects_per_join=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: deco_objects_per_join=0 invalid; using 1\n", .{});
         opts.deco_objects_per_join = 1;
     }
     // Anti-abuse rate limits: caps and bursts must stay >= 1 (a 0 cap would
     // permanently starve the bucket; a 0 burst would reject every combo).
     if (opts.inv_bucket_cap == 0) {
-        std.debug.print("zdtd: inv_bucket_cap=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: inv_bucket_cap=0 invalid; using 1\n", .{});
         opts.inv_bucket_cap = 1;
     }
     if (opts.inv_refill_ns == 0) {
-        std.debug.print("zdtd: inv_refill_ns=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: inv_refill_ns=0 invalid; using 1\n", .{});
         opts.inv_refill_ns = 1;
     }
     if (opts.block_bucket_cap == 0) {
-        std.debug.print("zdtd: block_bucket_cap=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: block_bucket_cap=0 invalid; using 1\n", .{});
         opts.block_bucket_cap = 1;
     }
     if (opts.block_refill_ns == 0) {
-        std.debug.print("zdtd: block_refill_ns=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: block_refill_ns=0 invalid; using 1\n", .{});
         opts.block_refill_ns = 1;
     }
     if (opts.damage_burst_max == 0) {
-        std.debug.print("zdtd: damage_burst_max=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: damage_burst_max=0 invalid; using 1\n", .{});
         opts.damage_burst_max = 1;
     }
     if (opts.trader_restock_cap == 0) {
-        std.debug.print("zdtd: trader_restock_cap=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: trader_restock_cap=0 invalid; using 1\n", .{});
         opts.trader_restock_cap = 1;
     }
     if (opts.trader_restock_refill == 0) {
-        std.debug.print("zdtd: trader_restock_refill=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: trader_restock_refill=0 invalid; using 1\n", .{});
         opts.trader_restock_refill = 1;
     }
     if (opts.trader_wallet_dukes < 0) {
-        std.debug.print("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
+        util_log.warn("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
         opts.trader_wallet_dukes = 0;
     }
     if (@hasField(@TypeOf(opts.*), "craft_max_times") and opts.craft_max_times == 0) {
-        std.debug.print("zdtd: craft_max_times=0 invalid; using 1\n", .{});
+        util_log.warn("zdtd: craft_max_times=0 invalid; using 1\n", .{});
         opts.craft_max_times = 1;
     }
     // A keystone claim area is centered on the block, so the side must be odd.
@@ -424,23 +425,23 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     // merged value is normalized here too (docs/GAME_OPTIONS.md LandClaimSize).
     if (@hasField(@TypeOf(opts.*), "land_claim_size") and opts.land_claim_size % 2 == 0) {
         const odd = if (opts.land_claim_size > 1) opts.land_claim_size - 1 else 1;
-        std.debug.print(
+        util_log.warn(
             "zdtd: land_claim_size={d} must be odd; using {d}\n",
             .{ opts.land_claim_size, odd },
         );
         opts.land_claim_size = odd;
     }
     if (opts.storm_frequency < 0) {
-        std.debug.print("zdtd: storm_frequency={d} invalid; using 0\n", .{opts.storm_frequency});
+        util_log.warn("zdtd: storm_frequency={d} invalid; using 0\n", .{opts.storm_frequency});
         opts.storm_frequency = 0;
     }
     if (@hasField(@TypeOf(opts.*), "plugin_budget")) {
         if (opts.plugin_budget.fuel == 0) {
-            std.debug.print("zdtd: plugin fuel=0 invalid; using 1\n", .{});
+            util_log.warn("zdtd: plugin fuel=0 invalid; using 1\n", .{});
             opts.plugin_budget.fuel = 1;
         }
         if (opts.plugin_budget.max_memory_pages == 0) {
-            std.debug.print("zdtd: plugin max_pages=0 invalid; using 1\n", .{});
+            util_log.warn("zdtd: plugin max_pages=0 invalid; using 1\n", .{});
             opts.plugin_budget.max_memory_pages = 1;
         }
     }

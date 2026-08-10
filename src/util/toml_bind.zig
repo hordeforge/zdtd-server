@@ -25,6 +25,7 @@
 //! preserve the previous zdtd.toml parser behaviour (docs/adr/0021).
 
 const std = @import("std");
+const util_log = @import("log.zig");
 
 /// Parse `src` into `dst`, setting only the fields the file mentions. String
 /// values (and only those) are duped through `a`; callers own the result via
@@ -117,14 +118,14 @@ fn keyIs(comptime Root: type, scope: []const u8, comptime canonical: []const u8,
 }
 
 fn unknownKey(comptime T: type, section: []const u8, key: []const u8) error{UnknownTomlKey} {
-    std.debug.print("zdtd: {s} unknown key [{s}].{s}\n", .{ label.of(T), section, key });
+    util_log.warn("zdtd: {s} unknown key [{s}].{s}\n", .{ label.of(T), section, key });
     return error.UnknownTomlKey;
 }
 
 fn bindKV(comptime T: type, dst: *T, a: std.mem.Allocator, section: []const u8, key: []const u8, val: []const u8) !void {
     if (section.len == 0) {
         if (!allowRoot(T)) {
-            std.debug.print("zdtd: {s} key '{s}' must be inside a known section\n", .{ label.of(T), key });
+            util_log.warn("zdtd: {s} key '{s}' must be inside a known section\n", .{ label.of(T), key });
             return error.UnknownTomlKey;
         }
         try bindKeys(T, T, dst, a, "root", key, val);
@@ -210,7 +211,7 @@ fn clamp(comptime Root: type, comptime fname: []const u8, v: anytype) @TypeOf(v)
     const r: [2]base = @field(Root.ranges, fname);
     if (v >= r[0] and v <= r[1]) return v;
     const c: base = @min(@max(v, r[0]), r[1]);
-    std.debug.print("zdtd: {s} {s}={d} out of range [{d}..{d}]; using {d}\n", .{ label.of(Root), fname, v, r[0], r[1], c });
+    util_log.warn("zdtd: {s} {s}={d} out of range [{d}..{d}]; using {d}\n", .{ label.of(Root), fname, v, r[0], r[1], c });
     return c;
 }
 

@@ -4,6 +4,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const util_log = @import("../util/log.zig");
 const assignids = @import("assignids_comptime.zig");
 
 pub const max_blocks: usize = 8192;
@@ -384,7 +385,7 @@ pub fn tryLoad(
     const cp = ".zdtd_cfg_cache/blocks.xml";
     {
         io_fs.writeFile(cp, merged) catch |err| {
-            std.debug.print("zdtd: write config cache {s} failed: {s}; using base path\n", .{ cp, @errorName(err) });
+            util_log.err("zdtd: write config cache {s} failed: {s}; using base path\n", .{ cp, @errorName(err) });
             return loadLogged(allocator, base, id_by_name, ctx);
         };
     }
@@ -395,7 +396,7 @@ fn loadLogged(allocator: std.mem.Allocator, path: []const u8, id_by_name: IdByNa
     return loadFromPath(allocator, path, id_by_name, ctx) catch |err| {
         switch (err) {
             error.FileNotFound => {},
-            else => std.debug.print("zdtd: load blocks.xml failed: {s} ({s})\n", .{ @errorName(err), path }),
+            else => util_log.err("zdtd: load blocks.xml failed: {s} ({s})\n", .{ @errorName(err), path }),
         }
         return null;
     };

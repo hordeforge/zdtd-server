@@ -39,7 +39,7 @@ const ecs = @import("../../ecs/root.zig");
 /// XML is loaded. Mirrors the blocks/items loaders above.
 fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result)).error_union.payload {
     return result catch |err| {
-        std.debug.print("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
+        util_log.err("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
         return null;
     };
 }
@@ -51,28 +51,28 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         util_log.info("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
     }
     if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path) catch |err| blk: {
-        std.debug.print("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
+        util_log.err("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |cat| {
         self.sim.setCatalog(cat);
     }
     // AssignIds + blocks.xml properties first so later catalogs can resolve ids.
     if (assets_maxdamage.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
-        std.debug.print("zdtd: blocks/AssignIds load failed: {s}\n", .{@errorName(err)});
+        util_log.err("zdtd: blocks/AssignIds load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |md| {
         self.maxdamage.deinit();
         self.maxdamage = md;
         self.maxdamage.tryMergeBundledAssignIds(allocator);
         self.maxdamage.resolveMaterialMaxDamage(allocator) catch |err| {
-            std.debug.print("zdtd: resolveMaterialMaxDamage failed: {s}\n", .{@errorName(err)});
+            util_log.err("zdtd: resolveMaterialMaxDamage failed: {s}\n", .{@errorName(err)});
         };
         if (self.world.prefabs) |*pf| {
             if (pf.prefabs_root.len > 0) {
                 var nim_path: [2048]u8 = undefined;
                 if (std.fmt.bufPrint(&nim_path, "{s}/POIs/abandoned_house_01.blocks.nim", .{pf.prefabs_root})) |p| {
                     self.maxdamage.mergeNim(allocator, p) catch |err| {
-                        std.debug.print("zdtd: mergeNim {s} failed: {s}\n", .{ p, @errorName(err) });
+                        util_log.err("zdtd: mergeNim {s} failed: {s}\n", .{ p, @errorName(err) });
                     };
                 } else |_| {}
             }
@@ -117,7 +117,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         if (self.maxdamage.id_by_name.count() > 0) {
             pf.setIdLookup(.{ .ctx = &self.maxdamage, .lookup = NimCtx.lookup, .multiblock = NimCtx.multiblock });
         } else {
-            std.debug.print("zdtd: warn: no AssignIds table, POI block ids stay prefab-local\n", .{});
+            util_log.warn("zdtd: no AssignIds table, POI block ids stay prefab-local\n", .{});
         }
     }
     {
@@ -130,7 +130,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
         if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch |err| blk: {
-            std.debug.print("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});
+            util_log.err("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});
             break :blk null;
         }) |bt| {
             self.blocks.deinit();
@@ -139,7 +139,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }
     }
     if (assets_items.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
-        std.debug.print("zdtd: item definitions load failed: {s}\n", .{@errorName(err)});
+        util_log.err("zdtd: item definitions load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |it| {
         self.items.deinit();
@@ -154,7 +154,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             });
         }
     } else if (self.stock_catalogs_requested) {
-        std.debug.print("zdtd: warn: items.xml failed to load; item-dependent actions fail closed\n", .{});
+        util_log.warn("zdtd: items.xml failed to load; item-dependent actions fail closed\n", .{});
     }
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
@@ -390,7 +390,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // Reload biomes.png with XML colors if map already loaded.
         if (opts.map_dir) |md| {
             const reloaded = biomes_mod.tryLoadWithColors(allocator, md, &self.biome_colors) catch |err| blk: {
-                std.debug.print("zdtd: biome map reload with XML colors failed: {s}\n", .{@errorName(err)});
+                util_log.err("zdtd: biome map reload with XML colors failed: {s}\n", .{@errorName(err)});
                 break :blk null;
             };
             if (reloaded) |new_biomes| {
@@ -473,39 +473,39 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     util_log.info("zdtd: power blocks registered={d}\n", .{self.power_registry.n});
     if (opts.game_dir != null or opts.config_dir != null) {
         if (self.maxdamage.power_class_by_name.count() == 0)
-            std.debug.print("zdtd: warn: blocks.xml Class map empty (power props missing)\n", .{});
+            util_log.warn("zdtd: blocks.xml Class map empty (power props missing)\n", .{});
         if (self.items.source != .xml)
-            std.debug.print("zdtd: warn: items table builtin despite game-dir (items.xml not loaded)\n", .{});
+            util_log.warn("zdtd: items table builtin despite game-dir (items.xml not loaded)\n", .{});
         if (self.recipes.source != .xml)
-            std.debug.print("zdtd: warn: recipes table builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: recipes table builtin despite game-dir\n", .{});
         if (self.entities.source != .xml)
-            std.debug.print("zdtd: warn: entities table builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: entities table builtin despite game-dir\n", .{});
         if (self.loot.source != .xml)
-            std.debug.print("zdtd: warn: loot table builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: loot table builtin despite game-dir\n", .{});
         if (self.entitygroups.source != .xml)
-            std.debug.print("zdtd: warn: entitygroups table builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: entitygroups table builtin despite game-dir\n", .{});
         if (self.blocks.source != .xml)
-            std.debug.print("zdtd: warn: blocks table builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: blocks table builtin despite game-dir\n", .{});
         if (self.sim.catalog.source != .stock_xml)
-            std.debug.print("zdtd: warn: quests catalog builtin despite game-dir\n", .{});
+            util_log.warn("zdtd: quests catalog builtin despite game-dir\n", .{});
         if (self.gamestages.source != .xml)
-            std.debug.print("zdtd: warn: gamestages table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: gamestages table empty despite game-dir\n", .{});
         if (self.traders.groups.len == 0)
-            std.debug.print("zdtd: warn: traders table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: traders table empty despite game-dir\n", .{});
         if (self.npc.entries.len == 0)
-            std.debug.print("zdtd: warn: npc table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: npc table empty despite game-dir\n", .{});
         if (self.painting.n == 0)
-            std.debug.print("zdtd: warn: painting table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: painting table empty despite game-dir\n", .{});
         if (self.spawning.rules.len == 0)
-            std.debug.print("zdtd: warn: spawning table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: spawning table empty despite game-dir\n", .{});
         if (self.buffs.defs.len == 0)
-            std.debug.print("zdtd: warn: buffs table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: buffs table empty despite game-dir\n", .{});
         if (!self.progression.loaded)
-            std.debug.print("zdtd: warn: progression table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: progression table empty despite game-dir\n", .{});
         if (self.vehicles.defs.len == 0)
-            std.debug.print("zdtd: warn: vehicles table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: vehicles table empty despite game-dir\n", .{});
         if (self.storage_pairs.pairs.len == 0)
-            std.debug.print("zdtd: warn: storage pairs table empty despite game-dir\n", .{});
+            util_log.warn("zdtd: storage pairs table empty despite game-dir\n", .{});
     }
     if (self.maxdamage.idByName("generatorbank")) |gid| {
         if (self.power_registry.lookup(gid)) |pr| {

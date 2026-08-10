@@ -7,6 +7,7 @@
 //! a seed without real I/O faults. `util.sim.disable` clears both counters.
 
 const std = @import("std");
+const util_log = @import("log.zig");
 
 /// Remaining synthetic write failures for DST fault injection (0 = off).
 var write_fail_remaining: std.atomic.Value(u32) = .init(0);
@@ -66,7 +67,7 @@ pub fn mkdirPath(rel: []const u8) void {
     // (permission, full disk) so later writes are not mysterious.
     std.Io.Dir.cwd().createDirPath(io, rel) catch |err| switch (err) {
         error.PathAlreadyExists => {},
-        else => std.debug.print("zdtd: mkdir '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
+        else => util_log.err("zdtd: mkdir '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
     };
 }
 
@@ -84,7 +85,7 @@ pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{rel_path}) catch return error.NameTooLong;
     errdefer std.Io.Dir.cwd().deleteFile(io, tmp_path) catch |err| switch (err) {
         error.FileNotFound => {},
-        else => std.debug.print("zdtd: cleanup temp '{s}' failed: {s}\n", .{ tmp_path, @errorName(err) }),
+        else => util_log.err("zdtd: cleanup temp '{s}' failed: {s}\n", .{ tmp_path, @errorName(err) }),
     };
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = data });
     try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
@@ -166,7 +167,7 @@ pub fn deleteFile(path: []const u8) void {
     const io = threaded.io();
     std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
         error.FileNotFound => {},
-        else => std.debug.print("zdtd: delete '{s}' failed: {s}\n", .{ path, @errorName(err) }),
+        else => util_log.err("zdtd: delete '{s}' failed: {s}\n", .{ path, @errorName(err) }),
     };
 }
 
@@ -180,7 +181,7 @@ pub fn removeDirTree(rel: []const u8) void {
     // A missing path is a no-op (deleteTree returns null), so only real
     // failures surface here.
     std.Io.Dir.cwd().deleteTree(io, rel) catch |err| {
-        std.debug.print("zdtd: remove tree '{s}' failed: {s}\n", .{ rel, @errorName(err) });
+        util_log.err("zdtd: remove tree '{s}' failed: {s}\n", .{ rel, @errorName(err) });
     };
 }
 
