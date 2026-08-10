@@ -157,8 +157,8 @@ reasoning as ADR 0023's requirement evaluator). Plan:
 - [ ] T36: `BlockTrigger` C2S is relayed to nearby peers with zero server
       validation; any peer can claim any trigger fired and the server never
       checks the prefab's actual wiring.
-- [ ] T37: bedroll ownership doesn't survive a restart (fields exist,
-      `persist.zig` never reads/writes them); piggyback T24's ZPV3 extension.
+- [x] T37: bedroll ownership persists (`players.zsv` bumped ZPV3 -> ZPV4,
+      version-gated field, old files upgrade in place on next save).
 
 Also corrected: T30 (drone AI) was grounded on the wrong research doc and
 undercounted the state machine at 6 states instead of the real 9 (missing

@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV3), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV4), entities.zen
 //! (ZENT1), claims.zlc (ZCL1), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -57,7 +57,15 @@ pub const Zpv2Drop = struct {
     removed: u32 = 0,
 };
 
-pub fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayersFile}!usize {
+/// `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll
+/// field), or 4 (ZPV4, tail's buff list followed unconditionally by a
+/// bedroll presence byte). The bedroll field is **not** detected by "more
+/// bytes remain in the file": that is ambiguous whenever another record
+/// follows this one, since the next record's own name_len byte would be
+/// misread as this record's bed_present. Only the file's own magic decides
+/// whether a bedroll field is present, the same way `prog` already gates the
+/// rest of the v3 tail.
+pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
     if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
@@ -68,7 +76,7 @@ pub fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayers
     const jn: usize = data[p];
     p += 1 + jn * 10;
     if (p > data.len) return error.CorruptPlayersFile;
-    if (v3) {
+    if (version >= 3) {
         if (p >= data.len) return error.CorruptPlayersFile;
         const prog = data[p];
         p += 1;
@@ -79,24 +87,53 @@ pub fn zpvRecordLen(data: []const u8, off: usize, v3: bool) error{CorruptPlayers
             p += 1;
             if (p + buff_n * 19 > data.len) return error.CorruptPlayersFile;
             p += buff_n * 19;
+            if (version >= 4) {
+                if (p >= data.len) return error.CorruptPlayersFile;
+                const bed_present = data[p];
+                p += 1;
+                if (bed_present == 1) {
+                    if (p + 12 > data.len) return error.CorruptPlayersFile;
+                    p += 12;
+                }
+            }
         }
     }
     return p - off;
+}
+
+/// True when `zpvRecordLen` would find `prog == 1` for this record, i.e. it
+/// has a progression tail (and therefore needs a bed_present byte appended to
+/// become v4-shaped). Callers must have already validated the record with
+/// `zpvRecordLen`, so no bound is re-checked here.
+fn zpvRecordHasProgTail(data: []const u8, off: usize, version: u8) bool {
+    if (version < 3) return false;
+    const nl: usize = data[off];
+    var p = off + 1 + nl + 16;
+    const inv_n: usize = data[p];
+    p += 1 + inv_n * 7;
+    const jn: usize = data[p];
+    p += 1 + jn * 10;
+    return data[p] == 1;
 }
 
 pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
 }
 
-/// Record layout (v3): magic ZPV3 | n:u32 | records…
+/// Record layout (v4): magic ZPV4 | n:u32 | records…
 /// each: name_len:u8 | name | x,y,z:f32 | coins:u32 |
 ///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16) |
 ///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8)
 ///   prog:u8 (1 = present) | level:u16 | xp:u64 | food/max/water/max:f32×4 |
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
-///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8)
-/// ZPV2 files (no progression tail) are still read. Merge-write: offline
-/// players' existing records are carried over, not erased.
+///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8) |
+///   bed_present:u8 (1 = present) | bed_present×(bed_x,bed_y,bed_z:i32)
+/// bed_present is v4-only; it is not written or read at all under an older
+/// magic, since "more bytes remain in the file" cannot distinguish "one more
+/// field of this record" from "the next record has begun" (zpvRecordLen).
+/// ZPV2 (no progression tail) and ZPV3 (tail, no bedroll) files are still
+/// read and upgrade in place on the next save. Merge-write: offline players'
+/// existing records are carried over, not erased.
 /// ADR 0011 sibling stores; item_id = ECS handle (ADR 0015).
 pub fn savePlayers(self: *Game) !void {
     var path_buf: [512]u8 = undefined;
@@ -108,12 +145,13 @@ pub fn savePlayers(self: *Game) !void {
     defer self.allocator.free(old_file);
     var old_recs: []const u8 = &.{};
     var old_count: u32 = 0;
-    var old_v3 = false;
+    var old_version: u8 = 4;
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
-        if (old_data.len < 8 or (!std.mem.eql(u8, old_data[0..4], "ZPV2") and !std.mem.eql(u8, old_data[0..4], "ZPV3")))
+        if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4'))
             return error.CorruptPlayersFile;
-        old_v3 = std.mem.eql(u8, old_data[0..4], "ZPV3");
+        old_version = old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -126,16 +164,17 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '3', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '4', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
         var off: usize = 0;
         while (ri < old_count) : (ri += 1) {
             const rec_start = off;
-            const rec_len = zpvRecordLen(old_recs, off, old_v3) catch return error.CorruptPlayersFile;
+            const rec_len = zpvRecordLen(old_recs, off, old_version) catch return error.CorruptPlayersFile;
             const nl: usize = old_recs[off];
             const rec_name = old_recs[off + 1 ..][0..nl];
+            const had_prog_tail = zpvRecordHasProgTail(old_recs, off, old_version);
             off += rec_len;
             var online = false;
             for (&self.clients) |*cl| {
@@ -146,10 +185,17 @@ pub fn savePlayers(self: *Game) !void {
             }
             if (online) continue;
             try out.appendSlice(self.allocator, old_recs[rec_start..off]);
-            // Upgrade a legacy ZPV2 record to the v3 layout (empty prog tail)
-            // so the file is uniformly ZPV3; without this the next merge
-            // pass misparses the tail-less records under v3 semantics.
-            if (!old_v3) try out.append(self.allocator, 0);
+            // Upgrade a legacy record to the current v4 layout so the file
+            // stays uniformly parseable under v4 semantics on the next pass:
+            // v2 -> v3 needs an empty prog byte (0, no tail at all); v3 (or an
+            // upgraded v2) needs a bed_present byte (0) appended only when it
+            // actually has a progression tail, since a tail-less record has
+            // nowhere for a bedroll field to attach.
+            if (old_version < 3) {
+                try out.append(self.allocator, 0);
+            } else if (old_version < 4 and had_prog_tail) {
+                try out.append(self.allocator, 0);
+            }
             written += 1;
         }
     }
@@ -240,6 +286,23 @@ pub fn savePlayers(self: *Game) !void {
                 }
             }
             rec[buff_n_pos] = buff_n;
+            // Bedroll (server-lifecycle.md section 6.1: PersistentPlayerData.Write
+            // carries the bedroll position as a first-class field). Presence byte
+            // matches the progression-tail convention above: cl.has_bed off ->
+            // 0 and no payload, so an unset bedroll costs one byte, not twelve.
+            if (o + 1 <= rec.len) {
+                if (cl.has_bed and o + 1 + 12 <= rec.len) {
+                    rec[o] = 1;
+                    o += 1;
+                    inline for (.{ cl.bed_x, cl.bed_y, cl.bed_z }) |v| {
+                        std.mem.writeInt(i32, rec[o..][0..4], v, .little);
+                        o += 4;
+                    }
+                } else {
+                    rec[o] = 0;
+                    o += 1;
+                }
+            }
         } else {
             rec[o] = 0; // truncated: mark no progression tail
             o += 1;
@@ -282,11 +345,14 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         return;
     };
     defer self.allocator.free(data);
-    if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or (data[3] != '2' and data[3] != '3')) {
+    if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
+        (data[3] != '2' and data[3] != '3' and data[3] != '4'))
+    {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const v3 = data[3] == '3';
+    const version: u8 = data[3] - '0';
+    const v3 = version >= 3;
     const n = std.mem.readInt(u32, data[4..8], .little);
     var off: usize = 8;
     var i: u32 = 0;
@@ -353,7 +419,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // consume it for non-matching records too so the scan stays
             // aligned with the next record.
             if (v3) {
-                off = rec_start + (zpvRecordLen(data, rec_start, true) catch |e| {
+                off = rec_start + (zpvRecordLen(data, rec_start, version) catch |e| {
                     std.debug.print("zdtd: restore player: corrupt tail at record {d}/{d} ({s})\n", .{ i, n, @errorName(e) });
                     return;
                 });
@@ -443,6 +509,24 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                                 .remove_on_death = bb[18] != 0,
                             };
                         }
+                    }
+                }
+                // Bedroll tail (see savePlayers / zpvRecordLen): gated on the
+                // file's own version, not "bytes remain" (ambiguous whenever
+                // another record follows this one in the file).
+                if (version == 4 and off < data.len) {
+                    const bed_present = data[off];
+                    off += 1;
+                    if (bed_present == 1 and off + 12 <= data.len) {
+                        c.has_bed = true;
+                        c.bed_x = std.mem.readInt(i32, data[off..][0..4], .little);
+                        off += 4;
+                        c.bed_y = std.mem.readInt(i32, data[off..][0..4], .little);
+                        off += 4;
+                        c.bed_z = std.mem.readInt(i32, data[off..][0..4], .little);
+                        off += 4;
+                    } else {
+                        c.has_bed = false;
                     }
                 }
             }
@@ -616,9 +700,10 @@ pub fn loadClaims(self: *Game) !void {
 
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
-    if (data.len < 8 or (!std.mem.eql(u8, data[0..4], "ZPV2") and !std.mem.eql(u8, data[0..4], "ZPV3")))
+    if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
+        (data[3] != '2' and data[3] != '3' and data[3] != '4'))
         return error.CorruptPlayersFile;
-    const v3 = std.mem.eql(u8, data[0..4], "ZPV3");
+    const version: u8 = data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -630,7 +715,7 @@ pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []cons
     var i: u32 = 0;
     while (i < n) : (i += 1) {
         const rec_start = off;
-        const rec_len = try zpvRecordLen(data, off, v3);
+        const rec_len = try zpvRecordLen(data, off, version);
         const nl: usize = data[off];
         const rec_name = data[off + 1 ..][0..nl];
         off += rec_len;

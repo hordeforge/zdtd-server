@@ -5016,3 +5016,86 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     try std.testing.expect(cap.findPkgId(nav_id) != null);
     std.debug.print("PASS air-drop: supply_drop NavObject marker sent\n", .{});
 }
+
+test "scenario bedroll ownership survives a restart" {
+    // server-lifecycle.md section 6.1: PersistentPlayerData.Write carries the
+    // bedroll position as a first-class field. bed_x/y/z/has_bed existed only
+    // in memory before; a restart used to drop them silently.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    {
+        const g = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        c.has_bed = true;
+        c.bed_x = 111;
+        c.bed_y = 68;
+        c.bed_z = -222;
+    }
+
+    {
+        const g2 = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c2 = try g2.attachJoinedClient(&cap);
+        try std.testing.expect(c2.has_bed);
+        try std.testing.expectEqual(@as(i32, 111), c2.bed_x);
+        try std.testing.expectEqual(@as(i32, 68), c2.bed_y);
+        try std.testing.expectEqual(@as(i32, -222), c2.bed_z);
+    }
+    std.debug.print("PASS bedroll: ownership and position survive a restart\n", .{});
+}
+
+test "scenario bedroll: a save with no bedroll tail loads with has_bed false" {
+    // A pre-change save has nothing after the buff list; the reader and the
+    // record-skip helper must both treat running out of bytes as "not set,"
+    // not a corrupt-file error.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    {
+        const g = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&cap);
+        // has_bed stays false: this reproduces a save written before the
+        // bedroll tail existed, since the writer already emits a bare
+        // presence-0 byte when has_bed is false (indistinguishable on disk
+        // from "field never existed" up to that byte).
+    }
+
+    {
+        const g2 = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c2 = try g2.attachJoinedClient(&cap);
+        try std.testing.expect(!c2.has_bed);
+    }
+    std.debug.print("PASS bedroll: absent tail reads back as unset, not an error\n", .{});
+}

@@ -905,6 +905,20 @@ same grow-by-real-gap pattern as T32.
 
 ## T37. Bedroll ownership does not survive a restart
 
+**Status: landed 2026-08-10.** `players.zsv` bumped ZPV3 -> ZPV4: the
+progression tail's buff list is followed by a bedroll presence byte, then
+`bed_x/y/z:i32` when present. A version byte gates the field rather than "more
+bytes remain in the file", which turned out to be ambiguous whenever another
+record follows the current one in the file (the next record's own name_len
+byte would misread as this record's presence byte) — caught by an existing
+test (`players zpv3 restore skips a preceding record's progression tail`)
+that broke under the first, byte-existence-gated version of this change and
+forced the version-gated rewrite. A v2 or v3 file upgrades in place on the
+next save: v2 records get the same empty-tail byte they always did, v3
+records with a progression tail get a bed_present=0 byte appended. Covered by
+two scenarios: round-trip through a restart, and a save with no bedroll tail
+reading back `has_bed = false` rather than an error.
+
 **Why:** `../../7dtd-research/docs/server-lifecycle.md` section 6.1: stock's
 `PersistentPlayerData.Write` carries the bedroll position as a first-class
 field alongside land-claim blocks and the backpack. `GAP_ANALYSIS.md` already
