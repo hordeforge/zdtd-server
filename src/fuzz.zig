@@ -1620,10 +1620,10 @@ fn fuzzPlayersSave(_: void, smith: *std.testing.Smith) !void {
     const len: usize = smith.slice(&storage);
     const input = storage[0..len];
 
-    if (persist.zpvRecordLen(input, 0, false)) |record_len| {
+    if (persist.zpvRecordLen(input, 0, 2)) |record_len| {
         try std.testing.expect(record_len <= input.len);
     } else |_| {}
-    if (persist.zpvRecordLen(input, 0, true)) |record_len| {
+    if (persist.zpvRecordLen(input, 0, 3)) |record_len| {
         try std.testing.expect(record_len <= input.len);
     } else |_| {}
 
@@ -1636,7 +1636,7 @@ fn fuzzPlayersSave(_: void, smith: *std.testing.Smith) !void {
     const count = std.mem.readInt(u32, blob[4..8], .little);
     var off: usize = 8;
     var i: u32 = 0;
-    while (i < count) : (i += 1) off += try persist.zpvRecordLen(blob, off, v3);
+    while (i < count) : (i += 1) off += try persist.zpvRecordLen(blob, off, if (v3) 3 else 2);
     try std.testing.expectEqual(blob.len, off);
 }
 
