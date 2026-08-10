@@ -42,6 +42,30 @@ See [STATUS.md](../STATUS.md) and `git log` for the exact head.
 
 ---
 
+## Re-audit 2026-08-10, third pass (fresh discovery, not the already-planned T-tasks)
+
+Prompted by feedback that the prior pass only implemented T34/T35/T37, which
+were already scoped in WORK_PLAN before the pass began. This one reads the
+"grab-bag" docs section by section (`dedicated-misc-systems.md`,
+`dedicated-leftovers.md` ("small dedicated systems each too small for its
+own doc", exactly where a missed item would hide) rather than triaging by
+title, and verifies each candidate against source before deciding it's real.
+
+| Finding | Verdict |
+|---|---|
+| `BlockRadiusEffect` (campfire/torch/candle proximity buffs, a radiated barrel's radius debuff) | **New gap, fixed.** See A36 below. |
+| `GameStageGroup` (sleeper volume gamestage-group resolution) | Already covered: `assets/gamestages.zig` cites the same IL address (`CleanName` ~1093513) and implements `TryGet`. Not a gap. |
+| `InventoryManager`/`LockEntry`/`ILockContext` (the anti-dupe transactional-inventory system) | Not a new gap: this is what [WORK_PLAN T18](../WORK_PLAN.md) already targets. Read as additional grounding for T18, not a separate finding. |
+| `PersistentPlayerName.SetCollisionSuffix` (duplicate login name disambiguation) | Already a **deliberate** divergence, not an oversight: [ADR 0017](../adr/0017-player-identity-login-name.md) states "operators resolve collisions with wipe/rename offline. Do not invent a second soft-id space in sim." Not a gap. |
+| `EntityBedrollPositionList` | Confirms T37 (bedroll persistence, landed this session) is a correct equivalent encoding: stock's `(0, int.MaxValue, 0)` sentinel vs. zdtd's explicit `has_bed` bool are behaviorally the same thing, not a divergence. |
+| Stock ban `AddBan`/`AdminBlacklist` (`{Name, UserIdentifier, BannedUntil, BanReason}`) | Initially suspected a missing ban-reason field after reading the wrong entry point (`admin_console.consoleKickBan`'s IP-ban helper); `src/server/admin_cmds.zig`'s `BanEntry {id, reason, expires_unix}` already matches. Corrected suspicion, not a gap; recorded so the false start doesn't get re-walked. |
+
+| ID | Finding | State |
+|---|---|---|
+| A36 | `ActiveRadiusEffects` (blocks.xml property, 10 shipped blocks: torches, campfires, candles, burning barrels, a radiated barrel) was entirely unparsed and unapplied. Stock's `EntityPlayerLocal.BlockRadiusEffectsTick`/`BlockRadiusEffectsApply` grants the named buff (`buffCampfireAOE`, "grants an insulation buff", i.e. warmth near a fire; `buffRadiation01` for the radiated barrel) to a player within radius who lacks it. Zero implementation anywhere in `src/`; zero mentions in GAP_ANALYSIS, WORK_PLAN, TODO, or this audit before now. | **Fixed for workstation-backed blocks** (campfire, burning barrel, the two fuel-gated `is_burning`-tracked cases, which happen to be the flagship "sit by the campfire" instance). `BlockDef.radius_effect_buff`/`radius_effect_radius_sq` parse `ActiveRadiusEffects="name,radius"`; `tickBlockRadiusEffects` iterates the existing workstation store (the same iteration `tickWorkstations`'s heat-map feed already uses) and grants via the existing `ecs.buff.add` + `relayBuff` primitives, no new server-buff-grant mechanism needed since `handleAddRemoveBuff` already established one. **Residual, not implemented:** always-on light sources with no fuel module (torch, candle, the radiated barrel) carry no workstation record to iterate; covering them needs a placed-block-by-position index that does not exist yet. [WORK_PLAN T38](../WORK_PLAN.md). |
+
+---
+
 ## Re-audit 2026-08-10, continued (combat-math sweep off the same pattern)
 
 Asked the audit-pattern question from the section below one level further:

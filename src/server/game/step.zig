@@ -146,6 +146,7 @@ pub fn step(self: *Game) !void {
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} broadcastDirtyWorkstations failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             };
+            self.tickBlockRadiusEffects();
         }
         const daylight = !self.sim.director.clock.isNight();
         _ = self.sim.power.tick(dt, daylight);

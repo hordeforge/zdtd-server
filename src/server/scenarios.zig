@@ -13,6 +13,7 @@ const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
+const blocks_mod = @import("../assets/blocks.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
@@ -5098,4 +5099,66 @@ test "scenario bedroll: a save with no bedroll tail loads with has_bed false" {
         try std.testing.expect(!c2.has_bed);
     }
     std.debug.print("PASS bedroll: absent tail reads back as unset, not an error\n", .{});
+}
+
+test "scenario a burning workstation grants its ActiveRadiusEffects buff to nearby players" {
+    // dedicated-misc-systems.md "BlockRadiusEffect": a burning campfire-class
+    // block grants its blocks.xml ActiveRadiusEffects buff to players within
+    // radius; a player outside it, or the same block unlit, gets nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Test-only block table: one campfire-class id (106, the convention the
+    // workstation persistence tests already use) carrying a radius effect.
+    // buffIsOnFire is a real entry in the builtin buff catalog (no game-dir
+    // in this scenario), so indexOfName resolves without a custom buff table.
+    const test_defs = [_]blocks_mod.BlockDef{.{
+        .id = 106,
+        .name = "campfire",
+        .radius_effect_buff = "buffIsOnFire",
+        .radius_effect_radius_sq = 4.0, // radius 2
+    }};
+    g.blocks = .{ .defs = test_defs[0..], .source = .xml };
+
+    const ws = g.workstations.getOrCreate(100, 70, 100).?;
+    ws.block_id = 106;
+    ws.is_burning = true;
+
+    var cap_near: ln_peer.Capture = .{};
+    const near = try g.attachJoinedClient(&cap_near);
+    const near_ps = g.sim.playerByPeer(near.slot).?;
+    g.sim.transform[near_ps] = .{ .x = 101, .y = 70, .z = 100 }; // 1 block away
+
+    var cap_far: ln_peer.Capture = .{};
+    const far = try g.attachJoinedClient(&cap_far);
+    const far_ps = g.sim.playerByPeer(far.slot).?;
+    g.sim.transform[far_ps] = .{ .x = 200, .y = 70, .z = 100 }; // well outside radius
+
+    g.tickBlockRadiusEffects();
+
+    const buf_id = g.buffs.indexOfName("buffIsOnFire").?;
+    try std.testing.expect(g.sim.buffs[near_ps].find(buf_id) != null);
+    try std.testing.expect(g.sim.buffs[far_ps].find(buf_id) == null);
+
+    // Unlit: the same block with is_burning=false grants nothing further, and
+    // the near player's existing buff is not this tick's concern (it expires
+    // on its own class duration; this tick simply does not refresh it).
+    ws.is_burning = false;
+    var cap_near2: ln_peer.Capture = .{};
+    const near2 = try g.attachJoinedClient(&cap_near2);
+    const near2_ps = g.sim.playerByPeer(near2.slot).?;
+    g.sim.transform[near2_ps] = .{ .x = 101, .y = 70, .z = 100 };
+    g.tickBlockRadiusEffects();
+    try std.testing.expect(g.sim.buffs[near2_ps].find(buf_id) == null);
+
+    std.debug.print("PASS block radius effect: burning campfire buffs nearby players, unlit does not\n", .{});
 }

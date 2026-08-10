@@ -944,3 +944,55 @@ a pre-change fixture save still loads (bedroll reads as unset, not an error).
 
 **Out of scope:** bedroll respawn logic itself, if already correct
 elsewhere; this task is only the persistence gap.
+
+---
+
+## T38. `ActiveRadiusEffects` for always-on light sources (torch, candle, radiated barrel)
+
+**Status: partially landed 2026-08-10.** Workstation-backed radius-effect
+blocks (campfire, burning barrel) work: see [HARDCODE_AUDIT A36](reviews/HARDCODE_AUDIT.md).
+This task is the residual: blocks that carry `ActiveRadiusEffects` but have
+no fuel module and therefore no workstation record.
+
+**Why:** `dedicated-misc-systems.md` "BlockRadiusEffect" describes the scan
+as walking `TileEntity` instances generically, not specifically workstations.
+A torch or candle has no fuel/craft state, so it never enters
+`self.workstations`, and `tickBlockRadiusEffects` (`src/server/game/craft.zig`)
+only iterates that store. Torches and candles are common, cheap, always-on
+light sources, likely more numerous in a real base than campfires, so this
+residual is not a small tail.
+
+**Change:** the real question this task has to answer is where the
+always-on radius-effect blocks get indexed by position at all, since nothing
+today tracks "which placed blocks carry a property" the way `workstations`,
+`containers`, and `vending` each index their own TE-backed subset. Options to
+weigh, not a foregone implementation:
+
+1. A new lightweight index (position -> block id) populated at block
+   place/break time, scoped to only the small set of ids that carry a radius
+   effect (10 in the shipped catalog) so it stays cheap regardless of world
+   size.
+2. Reuse chunk block-scan infrastructure already built for another purpose
+   (deco placement, stability) if one already walks placed blocks in a shape
+   this could piggyback on; check before building a fourth parallel index.
+
+**Files:** `src/server/game/craft.zig` (or a new module if the index doesn't
+belong there), `src/world/store.zig` or wherever block place/break already
+has a hook other indexes attach to.
+
+**Grounding:** `../../7dtd-research/docs/dedicated-misc-systems.md`
+"BlockRadiusEffect" section; the shipped `blocks.xml` `ActiveRadiusEffects`
+rows (torch_wall, candle-class blocks, barrelRadiated) already parsed by
+`assets/blocks.zig` (A36's landed half).
+
+**Done when:** a player standing near a placed, unpowered torch or candle
+gets `buffCampfireAOE`/`buffCandleAOE`, and a radiated barrel applies
+`buffRadiation01`, without a workstation record existing for any of them.
+
+**Proof:** a scenario placing a torch (no workstation entry) and asserting a
+nearby player gets the buff; a placement/removal test asserting the index
+stays correct across both.
+
+**Out of scope:** any radius-effect block not in the shipped catalog's 10;
+the workstation-backed half already landed and should not be touched by this
+task except to share its buff-grant call, not duplicate it.

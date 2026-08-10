@@ -15,6 +15,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
+const game_social = @import("social.zig");
 
 /// Vehicle tank cap (blocks/s drain scale) and the InvTx refuel pickup reach.
 pub const vehicle_fuel_max: f32 = 100;
@@ -203,4 +204,55 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         }
     }
     try replicate_te.broadcastDirtyWorkstations(self);
+}
+
+/// BlockRadiusEffect (dedicated-misc-systems.md; asm.il
+/// EntityPlayerLocal.BlockRadiusEffectsTick IL=83 / BlockRadiusEffectsApply
+/// IL=58): a burning workstation carrying blocks.xml ActiveRadiusEffects
+/// (campfire/burning-barrel warmth -> buffCampfireAOE) grants its buff to
+/// every player within radius, refreshing while they stay in range;
+/// ecs.buff.add already handles "already active" as a refresh, so nothing
+/// here needs an explicit already-has check. The S2C relay fires only on a
+/// fresh grant (.added), not on a refresh, since a duration-only refresh
+/// changes nothing the client needs to hear about again.
+///
+/// Always-on light sources with no fuel module (torch, candle, and a
+/// radiated barrel's buffRadiation01) are not covered here: they carry no
+/// workstation record to iterate, and this pass does not build the
+/// placed-block index a non-workstation version would need. See
+/// WORK_PLAN T38.
+pub fn tickBlockRadiusEffects(self: *Game) void {
+    for (self.workstations.items[0..], self.workstations.used[0..]) |*w, used| {
+        if (!used or !w.is_burning) continue;
+        const eff = self.blocks.radiusEffect(@intCast(w.block_id)) orelse continue;
+        const def_id = self.buffs.indexOfName(eff.buff) orelse continue;
+        const def = self.buffs.byId(def_id) orelse continue;
+        const wx: f32 = @floatFromInt(w.x);
+        const wy: f32 = @floatFromInt(w.y);
+        const wz: f32 = @floatFromInt(w.z);
+        for (&self.clients) |*cl| {
+            if (!cl.joined) continue;
+            const ps = self.sim.playerByPeer(cl.slot) orelse continue;
+            const t = self.sim.transform[ps];
+            const dx = t.x - wx;
+            const dy = t.y - wy;
+            const dz = t.z - wz;
+            if (dx * dx + dy * dy + dz * dz > eff.radius_sq) continue;
+            // buffsMut lazily sets mask[ps].buffs and zeroes the slot on
+            // first touch (world.zig), so there is nothing to pre-check here;
+            // gating on the mask first would skip every player who has never
+            // had a buff before, which is every fresh join.
+            const set = self.sim.buffsMut(ps);
+            const res = ecs.buff.add(set, .{
+                .def_id = def_id,
+                .duration = def.duration,
+                .stack_type = def.stack_type,
+                .update_rate_ticks = def.update_rate_ticks,
+                .remove_on_death = def.remove_on_death,
+            }, ecs.buff.duration_from_class, -1, w.x, w.y, w.z);
+            if (res == .added) {
+                game_social.relayBuff(self, cl.entity_id, def.name, true, -1, null) catch {};
+            }
+        }
+    }
 }

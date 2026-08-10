@@ -33,6 +33,16 @@ pub const BlockDef = struct {
     /// chemistryStation, cementMixer carry no list). Gates which recipes a
     /// workstation may queue (server authority, rule 17).
     crafting_areas: []const u8 = "",
+    /// ActiveRadiusEffects="buffName,radius" (dedicated-misc-systems.md
+    /// "BlockRadiusEffect"; asm.il EntityPlayerLocal.BlockRadiusEffectsTick
+    /// IL=83 / BlockRadiusEffectsApply IL=58): a nearby player without the
+    /// named buff gets it added while within `radius` of an active instance
+    /// of this block (campfire/torch/candle warmth, a radiated barrel's
+    /// buffRadiation01). Empty = no radius effect.
+    radius_effect_buff: []const u8 = "",
+    /// Squared radius for the radius-effect distance check (radius^2, so the
+    /// hot-path compare avoids a sqrt). 0 when radius_effect_buff is empty.
+    radius_effect_radius_sq: f32 = 0,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -107,6 +117,14 @@ pub const BlockTable = struct {
     pub fn hasFuelModule(self: *const BlockTable, id: u16) bool {
         if (self.byId(id)) |d| return d.has_fuel_module;
         return false;
+    }
+
+    /// ActiveRadiusEffects buff name and squared radius for a block, or null
+    /// when it carries none.
+    pub fn radiusEffect(self: *const BlockTable, id: u16) ?struct { buff: []const u8, radius_sq: f32 } {
+        const d = self.byId(id) orelse return null;
+        if (d.radius_effect_buff.len == 0) return null;
+        return .{ .buff = d.radius_effect_buff, .radius_sq = d.radius_effect_radius_sq };
     }
 
     /// True when the workstation may craft recipes of `area` (the recipe's
@@ -188,6 +206,8 @@ pub fn loadFromPath(
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
         crafting_areas: ?[]const u8 = null,
+        radius_effect_buff: ?[]const u8 = null,
+        radius_effect_radius_sq: f32 = 0,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -220,6 +240,8 @@ pub fn loadFromPath(
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
         var crafting_areas: ?[]const u8 = null;
+        var radius_effect_buff: ?[]const u8 = null;
+        var radius_effect_radius_sq: f32 = 0;
         const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -247,6 +269,24 @@ pub fn loadFromPath(
                 }
             } else if (std.mem.eql(u8, pname, "CraftingAreaRecipes")) {
                 crafting_areas = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "ActiveRadiusEffects")) {
+                // "buffName,radius" (comma pair, radius blocks). A crafted
+                // value that fails to parse leaves no radius effect rather
+                // than applying a buff at radius 0.
+                if (xml.attr(clean, pi, "value")) |v| {
+                    if (std.mem.indexOfScalar(u8, v, ',')) |comma| {
+                        const nm = std.mem.trim(u8, v[0..comma], " ");
+                        const rs = std.mem.trim(u8, v[comma + 1 ..], " ");
+                        if (nm.len > 0) {
+                            if (std.fmt.parseFloat(f32, rs) catch null) |r| {
+                                if (r > 0) {
+                                    radius_effect_buff = nm;
+                                    radius_effect_radius_sq = r * r;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             p = pi + 10;
         }
@@ -262,6 +302,8 @@ pub fn loadFromPath(
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
             .crafting_areas = if (crafting_areas) |ca| try arena.dupe(u8, ca) else "",
+            .radius_effect_buff = if (radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
+            .radius_effect_radius_sq = radius_effect_radius_sq,
         });
         i = bi + 7;
     }
@@ -316,6 +358,8 @@ pub fn loadFromPath(
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
             .crafting_areas = if (pb.crafting_areas) |ca| try arena.dupe(u8, ca) else "",
+            .radius_effect_buff = if (pb.radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
+            .radius_effect_radius_sq = pb.radius_effect_radius_sq,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -463,6 +507,52 @@ test "vending class and TraderID resolve with Extends inheritance" {
     try std.testing.expect(!t.allowsCraftArea(fire.id, "player"));
 }
 
+test "ActiveRadiusEffects parses the buff name and squared radius" {
+    // Shipped shape, verbatim value: <property name="ActiveRadiusEffects"
+    // value="buffCampfireAOE,2"/> on wall torches and lit campfires.
+    const src =
+        \\<blocks>
+        \\<block name="torch_wall">
+        \\  <property name="ActiveRadiusEffects" value="buffCampfireAOE,2"/>
+        \\</block>
+        \\<block name="barrelRadiated">
+        \\  <property name="ActiveRadiusEffects" value="buffRadiation01,2.5"/>
+        \\</block>
+        \\<block name="cntWoodCrateWood01">
+        \\  <property name="Class" value="Storage"/>
+        \\</block>
+        \\<block name="crafted_bad">
+        \\  <property name="ActiveRadiusEffects" value="notARealPair"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_radius_effect.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+
+    const torch = t.byName("torch_wall").?;
+    const eff = t.radiusEffect(torch.id).?;
+    try std.testing.expectEqualStrings("buffCampfireAOE", eff.buff);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), eff.radius_sq, 1e-4); // 2^2
+
+    const barrel = t.byName("barrelRadiated").?;
+    const beff = t.radiusEffect(barrel.id).?;
+    try std.testing.expectEqualStrings("buffRadiation01", beff.buff);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.25), beff.radius_sq, 1e-4); // 2.5^2
+
+    // No property at all: no radius effect.
+    const crate = t.byName("cntWoodCrateWood01").?;
+    try std.testing.expect(t.radiusEffect(crate.id) == null);
+
+    // Malformed value (no comma pair): fails closed to no radius effect
+    // rather than a buff applied at radius 0.
+    const bad = t.byName("crafted_bad").?;
+    try std.testing.expect(t.radiusEffect(bad.id) == null);
+}
+
 fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
     // Stable fixture ids (test-only; not the AssignIds table).
     const map = .{
@@ -475,6 +565,9 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "campfire", 106 },
         .{ "workbench", 107 },
         .{ "forge", 108 },
+        .{ "torch_wall", 109 },
+        .{ "barrelRadiated", 110 },
+        .{ "crafted_bad", 111 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

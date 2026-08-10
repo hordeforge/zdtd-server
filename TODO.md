@@ -159,6 +159,13 @@ reasoning as ADR 0023's requirement evaluator). Plan:
       checks the prefab's actual wiring.
 - [x] T37: bedroll ownership persists (`players.zsv` bumped ZPV3 -> ZPV4,
       version-gated field, old files upgrade in place on next save).
+- [~] T38: `ActiveRadiusEffects` (A36, fresh find from a genuine third-pass
+      sweep, not previously tracked anywhere). Campfire/torch/candle warmth
+      and a radiated barrel's proximity debuff were entirely unimplemented.
+      Landed for workstation-backed blocks (campfire, burning barrel) via the
+      existing buff-grant and workstation-iteration primitives. Open residual:
+      always-on light sources with no fuel module (torch, candle, the
+      radiated barrel) have no placed-block index to scan yet.
 
 Also corrected: T30 (drone AI) was grounded on the wrong research doc and
 undercounted the state machine at 6 states instead of the real 9 (missing
