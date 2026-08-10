@@ -335,6 +335,14 @@ ZPV3) rather than a parallel file: this is player state exactly like level and
 XP, which already live there. A fresh player gets all-zero levels; a save from
 before this change loads as all-zero, not as an error.
 
+Bring back a name-to-level lookup spanning both arrays
+(`attrByName`/`perkByName` shape, removed as dead code before this program
+gave them a caller): T25's evaluator has to resolve a `progression_name` that
+can name either an attribute or a perk (`progression.xml` `ProgressionLevel`
+requirements target both; measured, not assumed, see T25's grounding), so one
+caller-facing lookup by name is the right shape, not two typed ones the
+caller has to pick between.
+
 **Files:** `src/ecs/components.zig` (or wherever player state structs live),
 `src/server/persist.zig`, `src/assets/progression.zig` (array sizing against
 the loaded catalog).
@@ -353,74 +361,99 @@ rather than erroring.
 
 ---
 
-## T25. A scoped `ProgressionLevel` requirement evaluator
+## T25. A requirement evaluator for `ProgressionLevel` and `PlayerLevel`
 
 **Why:** ADR 0023 decision 2. The only decision this system has to make is
-"can this attribute or perk go up one level", which only needs the
-`ProgressionLevel` requirement type, not stock's full requirement vocabulary.
+"can this attribute or perk go up one level."
 
 **Change:** parse `<level_requirements level="N">` blocks per perk/attribute
-(already partially reachable via the catalog loader) and evaluate only
-`ProgressionLevel` comparisons against the player's stored levels (T24). A
-`<level_requirements>` block containing any other requirement type fails
-closed: the level-up is refused, not approved by ignoring the requirement it
-does not understand. Log which requirement type was unrecognized so a gap is
-visible rather than silently wrong.
+(already partially reachable via the catalog loader) and evaluate
+`ProgressionLevel` and `PlayerLevel` comparisons against the player's stored
+levels (T24) and character level respectively, across all six comparison
+operators the file uses (`GTE`, `GT`, `LTE`, `LT`, `EQ`, `Equals`; the last two
+are the same comparison spelled two ways). `ProgressionLevel`'s
+`progression_name` resolves through the unified lookup T24 added, since it can
+name an attribute or a perk. A `<level_requirements>` block containing any
+other requirement type, or a `progression_name` the lookup cannot resolve,
+fails closed: the level-up is refused, not approved by ignoring what it does
+not understand. Log which requirement type or name was unrecognized so a gap
+is visible rather than silently wrong.
+
+**Do not scope this down to `ProgressionLevel` alone.** Every attribute's
+`<level_requirements>` block in the shipped file is gated on `PlayerLevel`
+(51 of 324 blocks); an evaluator missing it can level a perk but can never
+level an attribute, which is not a smaller v1, it is a broken one.
 
 **Files:** `src/assets/progression.zig`.
 
-**Grounding:** `progression.xml` `<level_requirements>` / `<requirement
-name="ProgressionLevel" .../>` shape; the file ships 324 such blocks to test
-against.
+**Grounding:** `progression.xml` `<level_requirements>` blocks, counted against
+the shipped file rather than assumed: 324 blocks total, every `<requirement>`
+inside them is `ProgressionLevel` (273) or `PlayerLevel` (51), no other name
+appears there.
 
-**Done when:** a level-up request is approved only when every
-`ProgressionLevel` requirement in its block is satisfied, and refused (not
-approved) when a block contains an unrecognized requirement type.
+**Done when:** a level-up request is approved only when every requirement in
+its block is satisfied under the operator it specifies, and refused (not
+approved) when a block contains an unrecognized requirement type or target.
 
 **Proof:** a table-driven test over a sample of the real `progression.xml`
-blocks (met, unmet, and one containing an unrecognized requirement type),
-asserting the evaluator's verdict against each by hand-checking the source
-attribute.
+blocks covering both requirement types, at least one non-GTE operator, a
+`ProgressionLevel` targeting a perk name rather than an attribute, and one
+block containing an unrecognized requirement type, asserting the evaluator's
+verdict against each by hand-checking the source attribute.
 
-**Out of scope:** any requirement type beyond `ProgressionLevel`. If a later
-gap needs one, it is a scoped addition to this evaluator, not a rewrite.
+**Out of scope:** any requirement type beyond `ProgressionLevel` and
+`PlayerLevel`. If a later gap needs one, it is a scoped addition to this
+evaluator, not a rewrite.
 
 ---
 
-## T26. Generic passive-effect resolver, upgrade the A34 floor
+## T26. `resolveEffect`'s progression and buffs layers, upgrade the A34 floor
 
-**Why:** ADR 0023 decision 3. A34 fixed one kill-XP call site with a flat
-`Rules` floor because no per-player resolver existed. The next perk-gated
-number should not repeat that.
+**Why:** ADR 0023 decision 3, refined by [ADR 0024](adr/0024-passive-effect-stack-layers.md):
+A34 fixed one kill-XP call site with a flat `Rules` floor because no
+per-player resolver existed. Stock's own `EffectManager.GetValue` computes
+this class of number from an ordered stack of layers (item, equipment,
+progression, buffs are the ones that apply server-side); this task builds the
+function and its progression and buffs layers, not a perk-only reader that a
+later gap would have to route around.
 
-**Change:** `resolvePassiveEffect(player, effect_name, tags) f32` walks the
-player's leveled perks' `<passive_effect>` rows and aggregates them by
-operation: `base_set`/`perc_set` overwrite, `base_add`/`perc_add` sum. Same
-semantics `buffs.zig`'s `passiveValue` already implements for buff passives;
-match them exactly rather than reinventing the aggregation. Update A34's call
-site (`src/server/game/step.zig`) to call the resolver for
-`"ElectricalTrapXP"` and fall back to `Rules.progression.trap_kill_xp_frac`
-only when the player has no levels in a perk that grants it (a fresh player,
-or the perk system disabled by a mode).
+**Change:** `resolveEffect(entity, effect_name, tags, opts) f32`
+(`opts.progression`, `opts.buffs`, `opts.item`, `opts.equipment`, each
+`bool = false`) walks only the requested layers in stock's order and
+aggregates each the way `buffs.zig`'s `passiveValue` already does
+(`base_set`/`perc_set` overwrite, `base_add`/`perc_add` sum). The buffs layer
+calls `buffs.passiveValue` directly rather than reimplementing the
+aggregation; the progression layer walks the player's leveled perks'
+`<passive_effect>` rows with the same rule. `item` and `equipment` are
+implemented as no-op-returning-empty stubs in this task (real bodies land with
+T28, armor mitigation), so the signature does not have to
+change twice. Update A34's call site (`src/server/game/step.zig`) to call
+`resolveEffect(killer, "ElectricalTrapXP", .{}, .{ .progression = true })` and
+fall back to `Rules.progression.trap_kill_xp_frac` only when the player has no
+levels in a perk that grants it.
 
-**Files:** `src/assets/progression.zig`, `src/server/game/step.zig`,
-`docs/reviews/HARDCODE_AUDIT.md` (A34 moves from "fixed with a floor" to
-"fixed per-player").
+**Files:** `src/assets/progression.zig` (or a new shared module if the
+function needs to sit above both `progression.zig` and `buffs.zig`),
+`src/server/game/step.zig`, `docs/reviews/HARDCODE_AUDIT.md` (A34 moves from
+"fixed with a floor" to "fixed per-player").
 
 **Grounding:** `progression.xml` `<passive_effect>` rows inside `<perk>`
-blocks; the aggregation rule already proven correct in `assets/buffs.zig`.
+blocks; the aggregation rule already proven correct in `assets/buffs.zig`;
+the layer set and order in
+`../../7dtd-research/docs/minevents.md` section 7.0.
 
 **Done when:** a player with `perkAdvancedEngineering` at level 3 is credited
-45% of a turret kill's XP (the stock value at that level), and a player with no
-levels in it still gets the `Rules` floor, unchanged from A34.
+45% of a turret kill's XP (the stock value at that level), a player with no
+levels in it still gets the `Rules` floor unchanged from A34, and the `item`/
+`equipment` layer stubs exist with a signature T28 can fill without a
+breaking change.
 
 **Proof:** extend the A34 scenario (turret kill XP) with a case that sets the
 player's perk level directly (bypassing T25's requirement gate, since this
 test is about resolution, not eligibility) and asserts the stock fraction.
 
-**Out of scope:** resolving any effect other than proving the mechanism works
-for `ElectricalTrapXP`. Each further effect is a call site, not new resolver
-work.
+**Out of scope:** resolving any effect through the `item`/`equipment` layers.
+That is T28's body, this task's stub.
 
 ---
 
@@ -456,3 +489,400 @@ points consumed).
 
 **Out of scope:** respec, book-granted level skips, any requirement type T25
 did not implement.
+
+---
+
+## T28. Resolve armor mitigation from items.xml instead of a flat 10%/piece
+
+**Why:** [HARDCODE_AUDIT A35](reviews/HARDCODE_AUDIT.md). `armorMitigation`
+credits every equipped armor item the same flat 10%, capped at 50%, regardless
+of the item, its tier, or its quality, and does not distinguish physical from
+elemental damage. Stock ships the real numbers as `PhysicalDamageResist` /
+`ElementalDamageResist` passive_effect rows, 267 lines across the armor
+catalog. Unlike the perk-gated findings in this file, this one needs no
+per-player state: armor mitigation is intrinsic to the equipped item, so it is
+independent of ADR 0023 and can land before or after it.
+
+**Change:** fill the `item`/`equipment` layer bodies of T26's `resolveEffect`
+(stubbed there so the signature does not change twice; see
+[ADR 0024](adr/0024-passive-effect-stack-layers.md)) rather than writing a
+second, parallel resolver. Resolve `PhysicalDamageResist` and
+`ElementalDamageResist` per equipped armor item from its `tier` attribute
+(interpolated `lo,hi` across tiers 1-6) and its quality (the `-.2,.2` jitter
+row), sum across equipped pieces, and keep physical and elemental as separate
+totals so a damage type an armor set does not resist is not reduced by it.
+`Rules` gets no new floor here: this is Bucket A, stock ships the number, an
+unarmored player is representable as zero without a fallback.
+
+**Files:** `src/ecs/inventory.zig` (`armorMitigation` and its caller), the
+`resolveEffect` module T26 introduces.
+
+**Grounding:** `items.xml` armor catalog `PhysicalDamageResist` /
+`ElementalDamageResist` passive_effect rows (267 lines); the `tier="1,6"`
+interpolation shape already has precedent elsewhere in the assets loaders.
+
+**Done when:** two players wearing different-tier armor of the same slot take
+measurably different physical damage, and elemental damage ignores an
+armor set that carries no `ElementalDamageResist` row.
+
+**Proof:** a test over the real `items.xml` asserting the resolved
+mitigation for a low-tier and a high-tier sample of the same armor line, and a
+damage test asserting elemental damage is unaffected by a physical-only set.
+
+**Out of scope:** perk-based resistance bonuses (attribute passives that
+modify `PhysicalDamageResist`/`ElementalDamageResist` further); those are
+ADR 0023 territory once the resolver exists, and this task should not block
+on it.
+
+---
+
+## T29. Stealth, noise and smell
+
+**Why:** `../../7dtd-research/docs/stealth-smell.md` documents a
+server-authoritative per-tick system (ambient/held-light level, a noise-event
+queue with geometric decay, a smell radius driven by carried items, blood and
+wetness) that feeds sleeper-wake and zombie detection. `docs/GAP_ANALYSIS.md`
+correctly scores it MISSING, but no active task closes it: nothing in
+`src/` implements any of it. `rg -i "smell|PlayerStealth|NotifyNoise" src/`
+returns exactly two hits, both bare wire package-name string constants
+(`NetPackageEmitSmell`, `NetPackageEntityStealth` in `src/wire/packages.zig`)
+with no simulation behind either.
+
+**Change:** port the per-tick light/noise/smell computation server-side and
+wire it into the two systems that already consume detection state: sleeper
+wake (`src/world/sleepers.zig`) and zombie sense (`systems.senseDistSq` and
+the AI task gates, `src/ecs/systems.zig`). Do not invent a formula where the
+research doc does not give one; a component this consumer-facing (it changes
+whether a zombie notices a player) needs the real decay curve, not a
+plausible guess.
+
+**Files:** new `src/ecs/stealth.zig` (or similar), `src/world/sleepers.zig`,
+`src/ecs/systems.zig`, `src/wire/packages.zig` (the two package builders
+already stubbed by name).
+
+**Grounding:** `../../7dtd-research/docs/stealth-smell.md` in full; cross-check
+against `entity-ai.md` for how sense checks currently gate on it in stock.
+
+**Done when:** a crouched, unlit, quiet player is measurably harder for a
+nearby zombie to detect than a standing, lit, loud one, and a sleeper volume's
+wake roll reads the same noise/light state stock does.
+
+**Proof:** a scenario asserting a low-noise low-light player does not wake a
+sleeper volume within a radius that a loud one does.
+
+**Out of scope:** client-side stealth UI/HUD feedback (the meter itself is
+presentation); this task is the server-authoritative state and its effect on
+AI, not the client display of it.
+
+---
+
+## T30. Drone companion AI (`EntityDrone`)
+
+**Why:** `../../7dtd-research/docs/raycast-pathing.md` section 6b is the
+authoritative source for the drone state machine (`vehicles-drones-turrets.md`
+section 5 covers persistence/sync only, and defers the state machine itself
+to `raycast-pathing.md`, per that doc's own scope note). Verified: the real
+machine has **9** states, not 6, `Idle`/`Sentry`/`Follow`/`Heal`/`Attack`/
+`Shutdown` plus `NoClip` (collision-free reposition) and `Teleport` (a
+recovery hop when travel fails), with `None` as the unset sentinel. A port
+grounded only on the 6-state list would have no stuck-recovery path: a drone
+whose `Follow` travel fails would have nowhere to go. `docs/GAP_ANALYSIS.md`
+only surfaces this as an item inside the EAI-task-coverage list ("the three
+Drone tasks" absent) and lists `NetPackageDroneDataSync` /
+`DroneParticleEffect` as unhandled C2S; there is no first-class row and no
+active task.
+
+**Change:** port all 9 states, not the 6-state subset. Alongside the existing
+turret and vehicle systems (`systems.systemVehicles`, `systems.systemTurrets`
+are the shape to follow: same tick-phase structure, same owner-attribution
+pattern the turret kill-credit work already established). `Follow` mode needs
+the owner's position each tick; `Attack`/`Sentry` mode needs the same
+sense/target-acquisition shape zombie AI already has, reused rather than
+rebuilt; `Teleport` is the state that makes the rest robust against a stuck
+drone and should not be treated as optional polish.
+
+**Files:** new `src/ecs/drone.zig` (or fold into `systems.zig` if small
+enough once written), `src/ecs/schedule.zig` (a new phase entry, gated by
+`Rules.systems` per ADR 0021 so a mode can turn it off), `src/wire/packages.zig`
+(`NetPackageDroneDataSync` builder).
+
+**Grounding:** `../../7dtd-research/docs/raycast-pathing.md` section 6b (the
+state machine, including the state table and transition diagram) and
+`../../7dtd-research/docs/vehicles-drones-turrets.md` section 5
+(persistence/sync).
+
+**Done when:** a placed drone follows its owner, engages a nearby hostile in
+attack mode, and survives a server restart the way vehicles and turrets
+already do (`persist.zig` `saveEntities`/`loadEntities`; extend, do not
+duplicate).
+
+**Proof:** a scenario spawning a drone, moving the owner, and asserting the
+drone's position tracks; a second asserting it engages a spawned zombie
+within sensor range.
+
+**Out of scope:** the heal-beam's exact healing-rate tuning if the research
+doc does not state one; use a `Rules` floor per ADR 0021 decision 5 rather
+than inventing a stock-looking number.
+
+---
+
+## T31. Stop citing `game.zig` line numbers that do not exist
+
+**Why:** the `game.zig` decomposition (this doc's own T-series history, and
+several sessions of extraction into `src/server/game/*.zig` and
+`src/server/c2s/*.zig`) left `docs/GAP_ANALYSIS.md` citing 130 distinct
+`game.zig:NNNN` line numbers. `game.zig` is 2532 lines today; **100 of the
+130** exceed that, meaning most `game.zig` anchors in the gap inventory point
+past end-of-file. This is not a one-time cleanup: every further extraction
+will strand more of them, including anchors written today.
+
+**Change:** two parts.
+
+1. **One sweep now:** re-anchor the citations that exceeded the file length,
+   pointing each at the file and function that actually holds the logic
+   today (several are already known from this pass: "Autosave and shutdown
+   save" → `src/server/game/lifecycle.zig`; "questOnTraderOpen reached"
+   → `src/server/c2s/quest.zig:219` / `src/server/c2s/misc.zig:469`, and
+   `questOnTraderOpen` itself is `src/ecs/systems.zig:380`; "Vehicle, turret,
+   power... persistence" → `src/server/persist.zig` `saveEntities`/
+   `loadEntities`, `src/server/game/chunk_fill.zig` `scanChunkPower`).
+2. **Stop the recurrence:** prefer citing a function name (optionally with
+   the file the way the sweep above does) over a bare line number for any
+   citation likely to survive fewer than a few months, which in this
+   codebase has meant every `game.zig` citation so far. A `grep -n` for the
+   function name resolves regardless of where the file's been split; a line
+   number does not. Add a lint check if one is cheap: a citation matching
+   `game\.zig:\d+` where the number exceeds the file's current line count is
+   mechanically detectable and could join `scripts/lint-cycles.sh` /
+   `scripts/lint-architecture.sh` in `make check`.
+
+**Files:** `docs/GAP_ANALYSIS.md`, `scripts/` (if the lint is added).
+
+**Grounding:** none needed; this is doc hygiene, verified against the current
+tree (`wc -l src/server/game.zig`, cross-checked citation-by-citation).
+
+**Done when:** no `game.zig:NNNN` citation in `GAP_ANALYSIS.md` exceeds the
+file's current line count, and (if the lint lands) a citation that goes stale
+in the future fails `make check` instead of silently misleading the next
+reader.
+
+**Proof:** a one-line check (`grep -oE "game\.zig:[0-9]+" docs/GAP_ANALYSIS.md`
+against `wc -l src/server/game.zig`) reporting zero over-length citations. If
+the lint is added, a test fixture with one deliberately stale citation
+asserting the lint catches it.
+
+**Out of scope:** re-verifying the *behavioral* claim next to each anchor,
+only that the anchor points at code that exists. A wrong anchor next to a
+correct claim (found twice in this pass) is still worth fixing on sight if
+cheap, but re-auditing every claim is a separate, much larger task.
+
+---
+
+## T32. The GameEvent dispatch engine (scoped, per ADR 0025)
+
+**Why:** [ADR 0025](adr/0025-gameevent-scoped-interpreter.md). The entire
+`NetPackageGameEventRequest` handler is an echo (`src/server/c2s/misc.zig`
+calls `buildGameEventResponse(body)` and sends the input back); there is no
+sequence, phase, action, or requirement machinery anywhere in the tree.
+Blood-moon boss triggers, challenge redemption (T33), and quest `<action
+type=GameEvent>` elements all need this before they can do anything.
+
+**Change:** build the dispatch table ADR 0025 decides: sequence → phases →
+actions, parsed from `gameevents.xml`, walked in fixed order, every loop
+action capped by a hard host-enforced iteration bound. Implement the verb set
+the three named consumers actually need first (start with whichever of
+blood-moon boss setup or a single quest GameEvent action is cheapest to prove
+end-to-end); every other parsed verb fails closed (logged as unimplemented,
+sequence halts) rather than silently no-opping. Requirement gating routes
+through the same dispatch shape T25 builds for `progression.xml`, extended
+only where `gameevents.xml` needs a requirement type T25 did not cover.
+
+**Files:** new `src/ecs/game_event.zig` (or similar), `src/server/c2s/misc.zig`
+(replace the echo with real dispatch), `src/ecs/aidirector.zig` (blood-moon
+boss setup should feed through this rather than staying a separate path).
+
+**Grounding:** `../../7dtd-research/docs/game-events.md` in full, especially
+section 1 (architecture), section 4 (requirement gating), section 5 (decisions
+and loops), section 8 (dedicated relevance: `IsServer`-gated, near-zero idle
+cost with no running sequences).
+
+**Done when:** a `gameevents.xml` sequence with a verb in the implemented set
+runs end to end (phases advance, the action executes, the sequence
+completes), and one with an unimplemented verb halts with a logged reason
+rather than silently completing or hanging.
+
+**Proof:** a scenario driving one full sequence through the implemented verb
+set. A test asserting a loop action with an XML-authored huge iteration count
+stops at the host cap rather than the tick budget. A test asserting an
+unrecognized verb halts the sequence and logs, rather than skipping silently.
+
+**Out of scope:** the other ~120+ verbs stock ships (see ADR 0025's cost
+section); Twitch-triggered events (external service, already out of scope);
+client-side HUD/boss-bar presentation of a running sequence.
+
+---
+
+## T33. Challenge system
+
+**Why:** `../../7dtd-research/docs/quests-challenges.md` sections 6-9
+document a full engine (`ChallengeStates`, staged objective groups,
+daily/random rotation and tiering, 28 objective verbs, reward delivery through
+a GameEvent `RewardEvent`). `GAP_ANALYSIS.md` scores "Challenges system |
+MISSING" with no elaboration section (unlike quests, which has one) and no
+active task. Source confirms zero implementation: the only `challenge`-named
+things in the tree are an unrelated pre-auth handshake counter and a name
+filter for `challengegroup_reward_*` quest strings; `ChallengeJournal` is
+written as a permanently-empty stub (`src/wire/packages.zig`).
+
+**Change:** depends on T32 (reward delivery runs through a GameEvent action).
+Port `ChallengeStates`, the staged objective groups, and the rotation/tiering
+model; wire the objective verbs that actually appear in the shipped challenge
+catalog first, following the same fail-closed-on-unrecognized-verb rule as
+T32 rather than implementing all 28 speculatively.
+
+**Files:** new `src/ecs/challenge.zig` (or similar), `src/wire/packages.zig`
+(`ChallengeJournal` stops being a permanent empty stub), `src/server/c2s/*`
+(whichever C2S package requests/tracks challenge state).
+
+**Grounding:** `../../7dtd-research/docs/quests-challenges.md` sections 6-9 in
+full.
+
+**Done when:** a player can complete a challenge's staged objectives and
+receive its reward through T32's GameEvent path, and `ChallengeJournal`
+reflects real state instead of an empty record.
+
+**Proof:** a scenario driving a sample challenge through its stages to
+completion and asserting the reward lands.
+
+**Out of scope:** every objective verb the shipped catalog does not use.
+
+---
+
+## T34. Crafting never awards XP
+
+**Why:** `../../7dtd-research/docs/crafting-recipes.md` section 2: stock's
+`GiveExp(CraftCompleteData)` grants XP per craft from `CraftExpGain` or a
+derived ingredient-cost sum. `GAP_ANALYSIS.md` only notes the XML attribute
+isn't parsed; it doesn't state the consequence. Verified:
+`src/server/game/craft.zig`'s `tryCraftRecipe` consumes ingredients, deposits
+output, records the inventory ledger, and calls `questOnCraft`, but calls
+`awardXp` nowhere in the function. Crafting is XP-dead today, independent of
+the XML-parsing gap.
+
+**Change:** parse `CraftExpGain` (or derive it from ingredient cost when
+absent, matching stock) and call `awardXp` on successful craft in
+`tryCraftRecipe`, at the resolved amount, same party-split path
+`killXpAward` already uses if that split applies to non-kill XP in stock
+(verify against the research doc rather than assuming it does).
+
+**Files:** `src/assets/recipes.zig` (parse `CraftExpGain`),
+`src/server/game/craft.zig` (`tryCraftRecipe`).
+
+**Grounding:** `../../7dtd-research/docs/crafting-recipes.md` section 2.
+
+**Done when:** a successful craft measurably raises the crafter's XP.
+
+**Proof:** a test/scenario crafting a known recipe and asserting XP increases
+by the resolved amount.
+
+**Out of scope:** the ADR 0023/0024 perk-gated crafting bonuses (crafting
+tier passives etc.); this task is only the base XP grant.
+
+---
+
+## T35. Air-drop crates never get a compass marker
+
+**Why:** `../../7dtd-research/docs/map-objects.md` section 8: air-drop crates
+are stock's one server-push nav marker (`AIDirectorAirDropComponent.RefreshCrates`
+sends `NetPackageNavObject`); every other marker is client-derived.
+`src/server/game/tick.zig`'s `tickAirDrop` spawns the loot bag and broadcasts
+its spawn, but never calls the NavObject builder (`buildNavObjectAdd`, already
+used elsewhere for quest markers). A stock client gets no compass ping for an
+air drop it should see land.
+
+**Change:** send `NetPackageNavObject` for the crate alongside the existing
+loot-bag spawn broadcast in `tickAirDrop`, using the same builder
+`sendQuestNavObjects` already calls.
+
+**Files:** `src/server/game/tick.zig` (`tickAirDrop`).
+
+**Grounding:** `../../7dtd-research/docs/map-objects.md` section 8.
+
+**Done when:** an air-drop spawn sends a NavObject the client can render as a
+compass marker.
+
+**Proof:** a scenario triggering an air drop and asserting the capture
+contains a `NetPackageNavObject` for the crate's position.
+
+**Out of scope:** the marker's removal-on-loot timing if the research doc
+does not state one precisely; fail closed (never send a stale marker) over
+guessing a decay curve.
+
+---
+
+## T36. `BlockTrigger` has no server-side authority
+
+**Why:** `../../7dtd-research/docs/block-shapes.md` section 7: stock's
+`BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel
+system (latch state, AND/OR combine, `Block.OnTriggered` mutating switches,
+doors, lights, hazards, batched as `BlockChangeInfo`).
+`src/server/c2s/blocks.zig` handles `NetPackageBlockTrigger` by relaying the
+raw client bytes to nearby peers with `broadcastNear` and nothing else, no
+channel lookup, no latch, no server-applied mutation. `GAP_ANALYSIS.md`'s row
+("PARTIAL, BlockTrigger C2S handled") is accurate at packet-relay granularity
+but does not surface that a lever-to-door circuit is entirely client-simulated
+today: any peer can claim any trigger fired, and the server never checks.
+
+**Change:** parse `PrefabTriggerData` channel wiring at prefab load (the
+loader already resolves other prefab TE data), track latch state
+server-side, resolve AND/OR combine, and apply `Block.OnTriggered`'s
+mutation authoritatively before relaying the result, instead of relaying the
+unvalidated request.
+
+**Files:** `src/server/c2s/blocks.zig`, `src/world/prefabs.zig` (trigger
+wiring parse), a new component or table for channel/latch state.
+
+**Grounding:** `../../7dtd-research/docs/block-shapes.md` section 7.
+
+**Done when:** a trigger fire is validated against the prefab's actual
+wiring and latch state before the server applies or relays it; an
+out-of-wiring claim (a peer claiming a trigger id the POI does not have, or
+firing a latched-closed switch) is rejected.
+
+**Proof:** a scenario firing a real trigger from the loaded prefab's wiring
+(applies) and one firing a fabricated trigger id (rejected, no state change,
+no relay).
+
+**Out of scope:** every `Block.OnTriggered` mutation type stock supports;
+start with the switch/door pair the loaded POIs actually use, following the
+same grow-by-real-gap pattern as T32.
+
+---
+
+## T37. Bedroll ownership does not survive a restart
+
+**Why:** `../../7dtd-research/docs/server-lifecycle.md` section 6.1: stock's
+`PersistentPlayerData.Write` carries the bedroll position as a first-class
+field alongside land-claim blocks and the backpack. `GAP_ANALYSIS.md` already
+scores this accurately ("Bedroll / last logout pos | PARTIAL... bedroll
+ownership MISSING"), but no task closes it. `bed_x`/`bed_y`/`bed_z`/`has_bed`
+exist as in-memory-only fields (`src/server/game/types.zig`); `persist.zig`'s
+ZPV3 record never reads or writes them.
+
+**Change:** extend the ZPV3 tail with the bedroll fields, the same shape T24
+extends it with attribute/perk levels. Land whichever of the two lands
+first; the second should append to the same tail rather than each assuming
+it owns the last field.
+
+**Files:** `src/server/persist.zig` (`savePlayers`/`tryRestorePlayer`).
+
+**Grounding:** `../../7dtd-research/docs/server-lifecycle.md` section 6.1.
+
+**Done when:** a player's bedroll position and ownership round-trip through a
+save and restart.
+
+**Proof:** a save/load test asserting bedroll state survives a restart, and
+a pre-change fixture save still loads (bedroll reads as unset, not an error).
+
+**Out of scope:** bedroll respawn logic itself, if already correct
+elsewhere; this task is only the persistence gap.

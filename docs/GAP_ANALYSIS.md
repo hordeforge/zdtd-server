@@ -771,7 +771,8 @@ because the per-objective Write shapes are wrong.
   client-known names. The class is derived from the legacy QuestKind, not from the
   current phase's `nav_object` property, and the position is either the fabricated
   def coordinate or the world primary spawn.
-  *Anchors:* `src/server/game.zig:6245`, `:6257`, `asm.il:959379-959389`
+  *Anchors:* `src/server/game/join.zig:367` `sendQuestNavObjects`,
+  `asm.il:959379-959389`
 
 - **Client-known-name gate before writing a quest to the wire** `PARTIAL → CLOSED (2026-08-07)`
   `isStockClientQuestName` now accepts every stock quest-name family the
@@ -1126,8 +1127,10 @@ parsed, and quest offering is unwired.
   `questOnTraderOpen` is correct and wired into the `NetPackageTraderData` branch,
   but that branch is only reached when `body[8]` is not 0 or 1, which a stock
   push never satisfies. Works in zdtd's own scenario harness only.
-  *Anchors:* `src/ecs/systems.zig:335-350`, `src/server/game.zig:5362`,
-  `src/server/scenarios.zig:594-599`
+  *Anchors:* `src/ecs/systems.zig:380` `questOnTraderOpen`,
+  `src/server/c2s/quest.zig:219` and `src/server/c2s/misc.zig:469` (call
+  sites), `src/server/scenarios.zig` test "scenario stock fixture quests.xml
+  load"
 
 - **Trader dialog window, greeting, voice, radial commands** `PARTIAL (waived)`
   Talk/voice/radial dialogs (`XUiC_DialogWindowGroup`, `dialogs.xml`) are client
@@ -2868,16 +2871,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/game.zig:1534-1627`, `:1637-1645`,
   `src/wire/stock_deco.zig:98-141`, `src/world/deco_mirror.zig:1-22`
 
-- **Deco density (biomes.xml probabilities)** `PARTIAL`
-  zdtd samples only the biome's top-level `<decorations>` list and never evaluates
-  subbiome noise. Stock's `decorateChunkRandom` resolves each cell through
-  `GetBiomeOrSubAt` and samples that subbiome's `m_DistantDecoBlocks`. For
-  pine_forest the top-level rows are prob .001-.007 while the subbiome lists carry
-  treeJuniper4m .06, treeDeadTree01 .07, treeDeadPineLeaf .08. Live result:
-  `DecoUpdate objs=3 pkgs=1 r=6 mirrored=3` for an entire 13x13-chunk join window.
-  *Anchors:* `src/assets/biome_layers.zig:2`, `:415-435`,
-  `src/wire/stock_deco.zig:292-357`, `asm.il:1266039`, `asm.il:1303341`,
-  `Data/Config/biomes.xml:489-507`, `:261-267`, `server-orch.log:41`
+- **Deco density (biomes.xml probabilities)** `WORKS` (superseded 2026-08-08,
+  see work-log entry #18)
+  Was: zdtd sampled only the biome's top-level `<decorations>` list and never
+  evaluated subbiome noise, so pine_forest's dense subbiome rows
+  (treeJuniper4m .06, treeDeadTree01 .07, treeDeadPineLeaf .08) never fired and
+  a 13x13-chunk join window produced only 3 deco objects. `decoSpeciesAt` now
+  resolves each cell's subbiome through `subbiome_noise.zig` (a clean-room port
+  of stock's `GetBiomeOrSubAt`, ported PerlinNoise/GameRandom) and samples that
+  subbiome's own list, matching stock's `decorateChunkRandom`.
+  *Anchors:* `src/world/subbiome_noise.zig`, `src/server/game/deco.zig:19`,
+  `src/server/game/join.zig:55`, `Data/Config/biomes.xml:489-507`
 
 - **Deco rotation** `WORKS`
   Every DecoObject carries a `BiomeBlockDecoration::GetRandomRotation` roll
@@ -3619,7 +3623,8 @@ persists so little that a restart visibly damages a built base.
   generator/consumer/battery layout survives restart without saving the graph.
   Still missing: the wire **edges** between nodes (links are runtime state, not
   saved) and trader/NPC quest offer state.
-  *Anchors:* `src/server/game.zig` `saveEntities` / `loadEntities` / `scanChunkPower`
+  *Anchors:* `src/server/persist.zig` `saveEntities`/`loadEntities`,
+  `src/server/game/chunk_fill.zig` `scanChunkPower`
 
 - **Autosave and shutdown save** `WORKS`
   Every 100 ticks (5 s at 20 Hz) the tick flushes world chunks, containers and
@@ -3815,7 +3820,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | Server password | HAVE | LiteNet Connect key (`ConnectionRequestCheck`); rejectInvalidPassword `[0,0]` |
 | Encryption (`Encryption*`) | MISSING | optional platform RSA+AES residual (not ServerPassword; EAC-off OK) |
 | Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
-| Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; no whitelist file |
+| Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; `admins.zsv`/`whitelist.zsv`/`bans.zsv` persist beside `players.zsv` (this row was stale, see §12.1) |
 | `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
 | Reconnect resume | PARTIAL | players.zsv ZPV3 keyed **by login name** (ADR 0017), not by platform identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration (ZPV4 or flagged extension); tracked in §10 |
 | Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
@@ -3993,7 +3998,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
 #### Chat / UI / config
 | Package | Priority |
 |---|---|
-| `NetPackageChat` (vs SimpleChat) | P1 |
+| `NetPackageChat` (vs SimpleChat) | `WORKS` (this row was stale; `src/server/c2s/misc.zig` handles both `NetPackageChat` and `NetPackageSimpleChat` with recipient-list routing, chat-rate limiting, and a native/Wasm filter hook) |
 | `NetPackageGameMessage` / tips | P2 |
 | `NetPackageConfigFile` / id mapping blocks-items | HAVE (LoadLocal list) |
 | `NetPackageGameStats` | HAVE (full bPersistent blob; HUD day = WorldTime) |
@@ -4462,11 +4467,11 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
 | AIDirector / sleeper save blobs | MISSING (clock.zcl + weather.zwt ship; full AIDirector blob does not) |
 | Quest journal save | HAVE (players.zsv ZPV3) |
-| Vehicle / turret persistence | MISSING |
+| Vehicle / turret persistence | PARTIAL (`entities.zen`; wire edges between power nodes and quest-offer state are not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | MISSING |
 | Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
-| Ally relationships | MISSING (in-memory only; stock persists them in PersistentPlayerList) |
+| Ally relationships | PARTIAL (`src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
 | World clock | HAVE (`clock.zcl` ZCL1) |
 | Weather storm SM | HAVE (`weather.zwt` ZWTH1) |
 

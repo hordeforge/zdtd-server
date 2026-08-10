@@ -28,6 +28,8 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0021](0021-config-driven-game-modes.md) | Config-driven game modes: reflected binder, `Rules` struct, hooks for logic | accepted (extends 0010) |
 | [0022](0022-anti-cheat-architecture.md) | Anti-cheat: authority first; native gates, Wasm detectors, native policy | accepted |
 | [0023](0023-perk-attribute-system.md) | Perk/attribute progression: per-player levels, scoped requirement evaluator, generic passive-effect resolver | accepted |
+| [0024](0024-passive-effect-stack-layers.md) | Passive-effect stack: name the item/equipment/progression/buffs layers once, one resolver for all of them | accepted |
+| [0025](0025-gameevent-scoped-interpreter.md) | GameEvent sequence engine: a scoped, bounded dispatch table, not the full 132-verb VM | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),

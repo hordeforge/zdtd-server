@@ -42,6 +42,29 @@ See [STATUS.md](../STATUS.md) and `git log` for the exact head.
 
 ---
 
+## Re-audit 2026-08-10, continued (combat-math sweep off the same pattern)
+
+Asked the audit-pattern question from the section below one level further:
+not just reward paths, but any per-hit combat number that should read
+per-item or per-buff data and instead reads a made-up constant. One finding,
+independently fixable and **not** blocked on ADR 0023 (armor is item-intrinsic,
+no perk investment required to benefit from wearing it):
+
+| ID | Finding | State |
+|---|---|---|
+| A35 | `armorMitigation` (`src/ecs/inventory.zig`) pays every equipped armor piece a flat 10% mitigation, capped at 50%, regardless of which item, its tier, or its quality. Stock ships real per-item data: `items.xml` carries `PhysicalDamageResist` and `ElementalDamageResist` passive_effect rows on 267 lines across the armor catalog, each a `tier="1,6"` range (roughly 8% to 12.3% per piece before quality) plus a separate quality-jitter row (`-.2,.2`), split by damage type. A tier-6 quality steel chestpiece and a tier-1 primitive one currently mitigate identically, and elemental damage (fire, electric shock) is not distinguished from physical at all. | **Open**. Every combat hit against every player uses this number continuously, unlike a one-off kill-credit gap, so it is worth more than most single-row findings in this audit. |
+
+**Fix shape, not yet built:** resolve `PhysicalDamageResist` /
+`ElementalDamageResist` per equipped item from its tier and quality (the same
+`tier="lo,hi"` interpolation the loot/loot-quality work already does
+elsewhere in the codebase for other tiered passives), sum across equipped
+pieces, and split physical from elemental so an armor set is not credited
+against a damage type it does not resist. `Rules` stays the floor only for
+whatever stock genuinely leaves unstated (there is no such gap here; this is
+Bucket A, not Bucket B).
+
+---
+
 ## Re-audit 2026-08-10 (kill-XP mechanism scaling)
 
 | ID | Finding | State |

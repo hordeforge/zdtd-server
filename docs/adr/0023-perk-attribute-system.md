@@ -54,14 +54,39 @@ Stock's `<requirement>` vocabulary is large (`HasBuff`, `RandomRoll`,
 `CVarCompare`, `EntityTagCompare`, and more, used across buffs, quests and
 perks alike). Implementing all of it to unlock progression is the wrong slice.
 
-**v1 scope:** `<level_requirements>` blocks are evaluated **only** for their
-`ProgressionLevel` requirements (attribute-level and perk-level comparisons),
-since that covers gating a perk level-up or an attribute level-up, which is
-the only decision this system has to make. A requirement type the evaluator
-does not recognize inside a `<level_requirements>` block **fails closed**: the
-level-up is refused rather than guessed at. This mirrors the "prefer missing
-over fake" rule (AGENTS) and the fail-closed default the codebase already uses
-for unresolved XML references (T16's `Survival.ok()` guard is the same shape).
+**v1 scope, measured against the shipped file, not assumed:** every
+`<requirement>` inside every `<level_requirements>` block in `progression.xml`
+(324 blocks) is one of exactly two names: `ProgressionLevel` (273 uses) or
+`PlayerLevel` (51 uses). Nothing else appears there; the larger stock
+vocabulary (`HasBuff`, `RandomRoll`, `CVarCompare`, ...) shows up in `buffs.xml`
+and `quests.xml`, not here. Both are in scope for v1, because omitting
+`PlayerLevel` is not a smaller slice, it is a broken one: every attribute's
+`<level_requirements>` block (`attPerception` levels 1-10 in the shipped file)
+is gated on `PlayerLevel`, so an evaluator that only understood
+`ProgressionLevel` could level a perk but could never level an attribute at
+all, and most perks are themselves gated on an attribute level.
+
+`ProgressionLevel`'s `progression_name` attribute is **not** attribute-only: of
+96 distinct targets sampled, most are attribute names (`attIntellect`,
+`attPerception`, ...) but a meaningful share are perk names
+(`craftingArmor`, `craftingBlades`, ...), so a perk can gate on another perk's
+level, not only on an attribute's. The evaluator needs one name-to-level
+lookup spanning both tables, not two separately-typed lookups the caller has
+to know which to use. `assets/progression.zig` used to carry exactly that
+(`attrByName` / `perkByName`), removed as dead code before this ADR gave them
+a caller; T25 brings the shape back with one now that both tables produce
+levels to compare.
+
+Six comparison operators appear on these requirements: `GTE`, `GT`, `LTE`,
+`LT`, and equality spelled two ways, `EQ` and `Equals`. Both spellings parse to
+the same comparison; treating `Equals` as unrecognized would fail every
+attribute's final rank closed for no reason.
+
+A requirement type or `progression_name` target the evaluator cannot resolve
+**fails closed**: the level-up is refused rather than guessed at. This mirrors
+the "prefer missing over fake" rule (AGENTS) and the fail-closed default the
+codebase already uses for unresolved XML references (T16's `Survival.ok()`
+guard is the same shape).
 
 ### 3. A generic passive-effect resolver, not a second one-off `Rules` floor per gap
 
@@ -111,6 +136,12 @@ and building a missing system are different tasks with different risk.
 - One resolver, not N `Rules` fields, for every future perk-gated number.
 - Fail-closed unknown requirements mean an unimplemented requirement type is
   visible as "cannot level" rather than a silently wrong unlock.
+- The name-to-level lookup T25 needs (`ProgressionLevel`'s `progression_name`
+  target) is a second real consumer, not a hypothetical one: `items.xml`
+  `<property name="UnlockedBy" value="craftingRepairTools"/>` gates recipe
+  unlocks on a perk name the same way, and is currently unread anywhere in
+  `src/assets/recipes.zig`. Not this program's scope to fix, but the lookup
+  this ADR builds is exactly what fixing it would need.
 
 ### Negative / costs
 

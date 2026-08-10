@@ -114,15 +114,59 @@ Decision: [ADR 0023](docs/adr/0023-perk-attribute-system.md). Plan:
 - [ ] T24: persist per-player attribute and perk levels plus a skill-point
       balance through the existing player save (ZPV3). Everything below needs
       this first.
-- [ ] T25: a `ProgressionLevel`-only requirement evaluator for
-      `<level_requirements>`; any other requirement type in a block fails the
-      level-up closed rather than approving it by ignoring what it can't check.
-- [ ] T26: a generic `resolvePassiveEffect(player, name, tags)` matching
-      `buffs.zig`'s aggregation rule, so A34's `ElectricalTrapXP` floor upgrades
+- [ ] T25: a `ProgressionLevel`/`PlayerLevel` requirement evaluator for
+      `<level_requirements>` (measured against the shipped file: no other
+      requirement type appears there); any other requirement type in a block
+      fails the level-up closed rather than approving it by ignoring what it
+      can't check.
+- [ ] T26: `resolveEffect`'s progression and buffs layers (see
+      [ADR 0024](docs/adr/0024-passive-effect-stack-layers.md): stock computes
+      this class of number from an item/equipment/progression/buffs layer
+      stack, not a perk-only read), so A34's `ElectricalTrapXP` floor upgrades
       to the real per-player value and the next perk-gated number is a call
       site, not a new `Rules` field.
 - [ ] T27: C2S perk/attribute spend, landed only after the S2C push
       (`buildPlayerStatsBody`) can echo the result correctly.
+- [ ] T28: armor mitigation (`PhysicalDamageResist`/`ElementalDamageResist`,
+      A35) fills T26's item/equipment layer stubs instead of a parallel
+      resolver; independent of T24-T27, no per-player state needed.
+
+### GameEvent engine, challenges, and other research-vs-plan gaps
+
+A broader sweep of `../7dtd-research/docs/` (63 docs; the perk and anti-cheat
+programs above only came from a first triage) against `GAP_ANALYSIS.md` and
+this file. Decision for the largest item: [ADR 0025](docs/adr/0025-gameevent-scoped-interpreter.md)
+(a scoped dispatch engine, not stock's full ~132-verb set, per the same
+reasoning as ADR 0023's requirement evaluator). Plan:
+[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T32-T37.
+
+- [ ] T32: the GameEvent dispatch engine. Currently a pure echo
+      (`NetPackageGameEventRequest` → `buildGameEventResponse(body)`, sent back
+      unchanged); no sequence/phase/action machinery exists anywhere. Blocks
+      T33, blood-moon boss triggers, and quest `<action type=GameEvent>`
+      elements.
+- [ ] T33: the challenge system (needs T32). Scored MISSING with no
+      elaboration section; zero implementation, `ChallengeJournal` is a
+      permanent empty stub.
+- [ ] T34: crafting never awards XP. Confirmed in `craft.zig`: ingredients
+      consumed, output deposited, `questOnCraft` called, `awardXp` never
+      called.
+- [ ] T35: air-drop crates send no compass marker (`NetPackageNavObject`);
+      stock's one server-push nav marker case.
+- [ ] T36: `BlockTrigger` C2S is relayed to nearby peers with zero server
+      validation; any peer can claim any trigger fired and the server never
+      checks the prefab's actual wiring.
+- [ ] T37: bedroll ownership doesn't survive a restart (fields exist,
+      `persist.zig` never reads/writes them); piggyback T24's ZPV3 extension.
+
+Also corrected: T30 (drone AI) was grounded on the wrong research doc and
+undercounted the state machine at 6 states instead of the real 9 (missing
+`NoClip` and `Teleport`, the stuck-recovery states); fixed in WORK_PLAN.
+Four stale `GAP_ANALYSIS.md` rows found and fixed this pass (chat, ally
+persistence, whitelist, deco density all incorrectly read MISSING/PARTIAL
+against already-shipped code). `getsandboxoptions`/`gso` console verb is
+also unimplemented and uninventoried (sandbox-options.md §8.1); low value,
+not worth a task, noted here so it isn't lost.
 
 ### Anti-cheat (authority first, then detection)
 
