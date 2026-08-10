@@ -75,7 +75,7 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
 pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
     if (self.sim.slotOfNetId(victim_nid)) |s| {
         const g = self.sim.class_id[s].xp_gain;
-        if (g > 0) return @intFromFloat(g);
+        if (g > 0) return @trunc(g);
     }
     return 100;
 }

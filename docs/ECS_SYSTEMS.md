@@ -16,7 +16,6 @@ src/ecs/
   command.zig      fixed tick command buffer (cap 64; drain in schedule)
   observers.zig    on_spawn / on_death listeners (cap 4)
   sim_view.zig     narrow inv/transform mut surface
-  res.zig          Res/ResMut resource accessors
   snapshot.zig     deterministic sim census/director bytes for tests
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers

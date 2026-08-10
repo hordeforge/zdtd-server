@@ -26,7 +26,6 @@ pub const inv_ledger = @import("inv_ledger.zig");
 pub const query = @import("query.zig");
 pub const group = @import("group.zig");
 pub const command = @import("command.zig");
-pub const res = @import("res.zig");
 pub const snapshot = @import("snapshot.zig");
 pub const locals = @import("locals.zig");
 pub const schedule = @import("schedule.zig");
@@ -62,7 +61,6 @@ test {
     _ = query;
     _ = group;
     _ = command;
-    _ = res;
     _ = locals;
     _ = schedule;
     _ = jobs;

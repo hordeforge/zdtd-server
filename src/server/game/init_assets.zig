@@ -488,6 +488,24 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             std.debug.print("zdtd: warn: blocks table builtin despite game-dir\n", .{});
         if (self.sim.catalog.source != .stock_xml)
             std.debug.print("zdtd: warn: quests catalog builtin despite game-dir\n", .{});
+        if (self.gamestages.source != .xml)
+            std.debug.print("zdtd: warn: gamestages table empty despite game-dir\n", .{});
+        if (self.traders.groups.len == 0)
+            std.debug.print("zdtd: warn: traders table empty despite game-dir\n", .{});
+        if (self.npc.entries.len == 0)
+            std.debug.print("zdtd: warn: npc table empty despite game-dir\n", .{});
+        if (self.painting.n == 0)
+            std.debug.print("zdtd: warn: painting table empty despite game-dir\n", .{});
+        if (self.spawning.rules.len == 0)
+            std.debug.print("zdtd: warn: spawning table empty despite game-dir\n", .{});
+        if (self.buffs.defs.len == 0)
+            std.debug.print("zdtd: warn: buffs table empty despite game-dir\n", .{});
+        if (!self.progression.loaded)
+            std.debug.print("zdtd: warn: progression table empty despite game-dir\n", .{});
+        if (self.vehicles.defs.len == 0)
+            std.debug.print("zdtd: warn: vehicles table empty despite game-dir\n", .{});
+        if (self.storage_pairs.pairs.len == 0)
+            std.debug.print("zdtd: warn: storage pairs table empty despite game-dir\n", .{});
     }
     if (self.maxdamage.idByName("generatorbank")) |gid| {
         if (self.power_registry.lookup(gid)) |pr| {

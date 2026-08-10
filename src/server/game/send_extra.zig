@@ -7,6 +7,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const clock = @import("../../util/clock.zig");
+const game_net = @import("net.zig");
 
 pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
     return sendCompressed(self, peer, pkg_name, body, game_mod.window_retry_budget_ns, false) catch false;
@@ -52,6 +53,11 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} reliable window drop pkg={s} (framed) n={d}\n", .{ clock.wallStamp(&ts), pkg_name, n });
             }
+            // Same droppable rule as sendGameBudget: a droppable package
+            // (NetPackageChunk/SignDataResponse ride this compressed path)
+            // must not turn WindowFull into a hard error, or a single full
+            // window aborts the caller mid-join before the critical bundle sends.
+            if (!critical and game_net.isDroppablePackage(pkg_name)) return;
             return error.WindowFull;
         },
         else => return err,
