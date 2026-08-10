@@ -15,6 +15,11 @@ const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 
+fn sprintMagnitude(movement_state: u8, speed_forward: f32, speed_strafe: f32) f32 {
+    if (movement_state != 3) return 0;
+    return @max(@abs(speed_forward), @abs(speed_strafe));
+}
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageEntityPosAndRot")) {
@@ -143,7 +148,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
         // entity-ai.md SetMovementState); lapses on a stale timer.
-        c.sprint_speed = if (s.movement_state == 3) s.speed_forward else 0;
+        c.sprint_speed = sprintMagnitude(s.movement_state, s.speed_forward, s.speed_strafe);
         c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
         try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
         return true;
@@ -187,4 +192,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     return false;
+}
+
+test "sprint magnitude covers backward and strafe movement" {
+    try std.testing.expectEqual(@as(f32, 4), sprintMagnitude(3, -4, 0));
+    try std.testing.expectEqual(@as(f32, 3), sprintMagnitude(3, 0, -3));
+    try std.testing.expectEqual(@as(f32, 0), sprintMagnitude(2, 6, 6));
 }

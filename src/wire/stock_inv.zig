@@ -378,21 +378,22 @@ pub fn applyPlayerDataNetwork(
 ) binary.ReadError!struct { entity_id: i32, x: f32, y: f32, z: f32, inv_slots: u16 } {
     var r: binary.Reader = .{ .data = body };
     const head = try skipEcdNetworkWriteFalse(&r);
+    var next = inv.*;
 
     // PDF.Write remainder starts with toolbelt ItemStack list
     var tb: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
     const tb_n = try readItemStackList(&r, tb[0..]);
     var i: usize = 0;
     while (i < toolbelt_slots) : (i += 1) {
-        inv.slots[i] = if (i < tb_n) toEcs(tb[i], reverse, ctx) else .{};
+        next.slots[i] = if (i < tb_n) toEcs(tb[i], reverse, ctx) else .{};
     }
     const selected = try r.readByte(); // selectedInventorySlot
     if (selected < toolbelt_slots) {
-        _ = inv.setHolding(selected);
+        _ = next.setHolding(selected);
     }
 
     // Bag (always written in PDF)
-    try skipBagApply(&r, inv, reverse, ctx);
+    try skipBagApply(&r, &next, reverse, ctx);
 
     // dragAndDrop as 1-element list
     var drag: [1]StockSlot = .{.{}};
@@ -421,13 +422,14 @@ pub fn applyPlayerDataNetwork(
     _ = try r.readI32(); // score
 
     // Equipment.Write (v4): 12 ItemValues + 12 cosmetic i32 + unlocked list
-    try applyEquipmentWrite(&r, inv, reverse, ctx);
+    try applyEquipmentWrite(&r, &next, reverse, ctx);
 
     var filled: u16 = 0;
     i = 0;
     while (i < components.max_inv_slots) : (i += 1) {
-        if (inv.slots[i].count > 0 and inv.slots[i].item_id != 0) filled += 1;
+        if (next.slots[i].count > 0 and next.slots[i].item_id != 0) filled += 1;
     }
+    inv.* = next;
     return .{ .entity_id = head.entity_id, .x = head.x, .y = head.y, .z = head.z, .inv_slots = filled };
 }
 
@@ -1171,6 +1173,13 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     try std.testing.expectEqual(@as(u16, 1), inv.slots[components.inv_equip_start].count);
     try std.testing.expectEqual(@as(u16, 2), h.inv_slots); // toolbelt + equip
     try std.testing.expectEqual(@as(u16, 0), inv.holding); // selected slot 0
+
+    var unchanged: components.Inventory = .{};
+    unchanged.slots[0] = .{ .item_id = 7, .count = 9, .quality = 1 };
+    unchanged.holding = 0;
+    const before = unchanged;
+    try std.testing.expectError(error.EndOfStream, applyPlayerDataNetwork(w.written()[0 .. w.written().len - 1], &unchanged, null, null));
+    try std.testing.expectEqualDeep(before, unchanged);
 }
 
 test "empty item value is single zero byte" {

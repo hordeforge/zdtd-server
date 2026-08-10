@@ -148,7 +148,7 @@ pub const VendingStore = struct {
 
     // --- Persistence (vending.zvn, "ZVNM1") ---
     //
-    // World-owned vending machines must survive a restart (AGENTS rule 19): a
+    // World-owned vending machines must survive a restart (AGENTS rule 21): a
     // placed machine that lost its store would silently stop opening. Format is
     // containers.zct-shaped: magic | count | records, each record carrying the
     // full TraderData-ish state (stock rows, ownership, password, rental).

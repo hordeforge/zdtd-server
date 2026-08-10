@@ -31,7 +31,6 @@ const assets_progression = @import("../../assets/progression.zig");
 const assets_vehicles = @import("../../assets/vehicles.zig");
 const assets_storage_pairs = @import("../../assets/storage_pairs.zig");
 const ecs = @import("../../ecs/root.zig");
-const world_store = @import("../../world/store.zig");
 
 /// Report a catalog load failure and fall back to the builtin table.
 /// `tryLoad` returns null for "stock file absent" and an error for a real

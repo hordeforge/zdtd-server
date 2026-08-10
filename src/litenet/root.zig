@@ -4,7 +4,7 @@
 //! not import server, game packages, ecs, world, assets, or apm. Exception:
 //! `peer.Capture` (scenario / unit harness only) imports wire/frame so capture
 //! can decode package ids by name. Production send/recv paths stay wire-free.
-//! Sockets use `std.Io.net` + `std.posix.setsockopt` (AGENTS rule 24).
+//! Sockets use `std.Io.net` + `std.posix.setsockopt` (AGENTS rule 26).
 
 pub const server = @import("server.zig");
 pub const peer = @import("peer.zig");

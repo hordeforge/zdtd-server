@@ -8,7 +8,6 @@ const Game = @import("../game.zig").Game;
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const io_fs = @import("../../util/io_fs.zig");
-const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");

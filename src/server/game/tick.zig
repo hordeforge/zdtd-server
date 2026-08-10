@@ -105,23 +105,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.hp = @min(h.max_hp, @max(0, h.hp + hp_delta));
             self.sim.markDirty(ps, .{ .hp = true });
         }
-        if (h.food != food_was or h.water != water_was or hp_delta != 0) {
-            if (c.survival_sync_cd <= 0) {
-                c.survival_sync_cd = prog.survival_sync_seconds;
-                if (c.peer) |peer| {
-                    self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
-                        self.harness.counters.inc(.net_send_errors);
-                        const n = self.harness.counters.get(.net_send_errors);
-                        if (n == 1 or n % 100 == 0) {
-                            var ts: [19]u8 = undefined;
-                            std.debug.print("zdtd: {s} send survival stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
-                        }
-                    };
-                }
-            } else {
-                c.survival_sync_cd -= dt;
-            }
-        }
+        const survival_changed = h.food != food_was or h.water != water_was or hp_delta != 0;
         if (c.sprint_stale_cd > 0) {
             c.sprint_stale_cd -= dt;
             if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
@@ -138,18 +122,31 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         } else {
             h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
         }
-        if (h.stamina != stamina_was) {
+        const stamina_changed = h.stamina != stamina_was;
+        if (survival_changed or stamina_changed) {
             if (c.survival_sync_cd <= 0) {
                 c.survival_sync_cd = prog.survival_sync_seconds;
                 if (c.peer) |peer| {
-                    self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
-                        self.harness.counters.inc(.net_send_errors);
-                        const n = self.harness.counters.get(.net_send_errors);
-                        if (n == 1 or n % 100 == 0) {
-                            var ts: [19]u8 = undefined;
-                            std.debug.print("zdtd: {s} send stamina stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
-                        }
-                    };
+                    if (survival_changed) {
+                        self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            const n = self.harness.counters.get(.net_send_errors);
+                            if (n == 1 or n % 100 == 0) {
+                                var ts: [19]u8 = undefined;
+                                std.debug.print("zdtd: {s} send survival stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
+                            }
+                        };
+                    }
+                    if (stamina_changed) {
+                        self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            const n = self.harness.counters.get(.net_send_errors);
+                            if (n == 1 or n % 100 == 0) {
+                                var ts: [19]u8 = undefined;
+                                std.debug.print("zdtd: {s} send stamina stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
+                            }
+                        };
+                    }
                 }
             } else {
                 c.survival_sync_cd -= dt;
