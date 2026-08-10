@@ -63,8 +63,13 @@ pub fn sendGameCritical(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, 
 }
 
 pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
+    const owns_critical_budget = critical and peer.critical_budget_deadline_ns == 0;
+    if (owns_critical_budget) peer.critical_budget_deadline_ns = clock.monoNs() + budget_ns;
+    defer if (owns_critical_budget) {
+        peer.critical_budget_deadline_ns = 0;
+    };
     if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse")) {
-        if (self.trySendCompressed(peer, pkg_name, body)) return;
+        if (try @import("send_extra.zig").sendCompressed(self, peer, pkg_name, body, budget_ns, critical)) return;
     }
     const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
@@ -86,7 +91,10 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
             return;
         }
     }
-    const droppable = isDroppablePackage(pkg_name);
+    // A package may be replaceable during normal play but must-deliver in a
+    // join bundle. In particular, periodic WorldTime is droppable while the
+    // enter-bundle WorldTime has no client retry.
+    const droppable = !critical and isDroppablePackage(pkg_name);
     const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
         4000
     else if (droppable)
@@ -96,8 +104,10 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     var retry_budget = budget_ns;
     if (critical) {
         const now = clock.monoNs();
-        if (peer.critical_budget_deadline_ns < now) peer.critical_budget_deadline_ns = now + budget_ns;
-        retry_budget = @min(budget_ns, peer.critical_budget_deadline_ns -% now);
+        retry_budget = if (now >= peer.critical_budget_deadline_ns)
+            0
+        else
+            @min(budget_ns, peer.critical_budget_deadline_ns - now);
     }
     sendReliablePumped(self, peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
         error.WindowFull => {
@@ -115,11 +125,14 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
 
 /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
 /// rules so broadcast and sendGameBudget share the same behaviour.
-/// `budget_ns==null` means no deadline (stream/broadcast). Returns
-/// error.WindowFull on exhaustion; callers own drop counters/logs and the
+/// `budget_ns==null` is reserved for callers that already impose an outer
+/// deadline. Returns error.WindowFull on exhaustion; callers own drop counters/logs and the
 /// packages_broadcast count (via count_broadcast).
 pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
     const retry_deadline: u64 = if (budget_ns) |b| clock.monoNs() + b else 0;
+    const previous_send_deadline = peer.reliable_send_deadline_ns;
+    peer.reliable_send_deadline_ns = retry_deadline;
+    defer peer.reliable_send_deadline_ns = previous_send_deadline;
     var attempts: u32 = 0;
     while (attempts < max_attempts) : (attempts += 1) {
         peer.sendReliable(&self.net.sock, framed) catch |err| switch (err) {
@@ -159,7 +172,7 @@ pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8
 }
 
 pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-    sendReliablePumped(self, peer, "framed-stream", framed, null, 64, true) catch |err| switch (err) {
+    sendReliablePumped(self, peer, "framed-stream", framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
@@ -205,7 +218,7 @@ pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, w
             const dz = self.sim.transform[ps].z - wz;
             if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
         }
-        sendReliablePumped(self, p, name, framed, null, 64, true) catch |err| switch (err) {
+        sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
             error.WindowFull => {
                 self.harness.counters.inc(.reliable_window_drops);
                 const d = self.harness.counters.get(.reliable_window_drops);
@@ -249,7 +262,7 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         } else {
-            sendReliablePumped(self, p, name, framed, null, 64, true) catch |err| switch (err) {
+            sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
                 error.WindowFull => {
                     self.harness.counters.inc(.reliable_window_drops);
                     const d = self.harness.counters.get(.reliable_window_drops);

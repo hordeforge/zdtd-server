@@ -39,6 +39,26 @@ pub const Heightmap = struct {
     pub fn fillChunkHeights(self: *const Heightmap, cx: i32, cz: i32, out: *[256]u8, fallback: u8) void {
         const base_x = cx * 16;
         const base_z = cz * 16;
+        const dx = base_x + self.half_w;
+        const dz = base_z + self.half_h;
+        if (dx >= 0 and dz >= 0 and dx + 16 <= self.width and dz + 16 <= self.height) {
+            const V = @Vector(16, u16);
+            const shifts: V = @splat(8);
+            var lz: usize = 0;
+            while (lz < 16) : (lz += 1) {
+                const src_i: usize = @intCast((@as(i64, dz) + @as(i64, @intCast(lz))) * @as(i64, self.width) + dx);
+                const samples: V = self.samples[src_i..][0..16].*;
+                const heights: @Vector(16, u8) = @truncate(samples >> shifts);
+                out[lz * 16 ..][0..16].* = heights;
+            }
+            return;
+        }
+        self.fillChunkHeightsScalar(cx, cz, out, fallback);
+    }
+
+    fn fillChunkHeightsScalar(self: *const Heightmap, cx: i32, cz: i32, out: *[256]u8, fallback: u8) void {
+        const base_x = cx * 16;
+        const base_z = cz * 16;
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
@@ -233,6 +253,32 @@ test "synthetic dtm center mapping" {
     var plane: [256]u8 = undefined;
     hm.fillChunkHeights(0, 0, &plane, 64);
     try std.testing.expectEqual(@as(u8, 80), plane[0]); // lx=0,lz=0 → world 0,0
+}
+
+test "SIMD chunk heights match scalar for interior and edge chunks" {
+    const w: i32 = 48;
+    const h: i32 = 48;
+    const count: usize = @intCast(w * h);
+    const samples = try std.testing.allocator.alloc(u16, count);
+    defer std.testing.allocator.free(samples);
+    for (samples, 0..) |*sample, i| sample.* = @intCast((i * 977) % 65536);
+
+    const hm: Heightmap = .{
+        .width = w,
+        .height = h,
+        .samples = samples,
+        .allocator = std.testing.allocator,
+        .half_w = 24,
+        .half_h = 24,
+    };
+    const chunks = [_][2]i32{ .{ 0, 0 }, .{ -2, -2 } };
+    for (chunks) |chunk| {
+        var vectorized: [256]u8 = undefined;
+        var scalar: [256]u8 = undefined;
+        hm.fillChunkHeights(chunk[0], chunk[1], &vectorized, 63);
+        hm.fillChunkHeightsScalar(chunk[0], chunk[1], &scalar, 63);
+        try std.testing.expectEqualSlices(u8, &scalar, &vectorized);
+    }
 }
 
 test "load live Navezgane if present" {

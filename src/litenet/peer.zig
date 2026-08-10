@@ -149,11 +149,14 @@ pub const Peer = struct {
     pump_fn: ?*const fn (?*anyopaque) void = null,
     pump_ctx: ?*anyopaque = null,
     /// Join-critical sends share one reliable-window budget across the enter
-    /// bundle (set by the first critical send, re-armed on success, expired by
-    /// the deadline). A transiently busy peer ACKs within the budget and the
+    /// bundle (armed at the request boundary, or by a standalone critical send).
+    /// A transiently busy peer ACKs within the budget and the
     /// bundle goes through; a dead peer stalls the tick at most once per join
     /// instead of once per package (reap clears it at peer_stale_ms anyway).
     critical_budget_deadline_ns: u64 = 0,
+    /// Game-layer deadline for the reliable send currently being fragmented.
+    /// Fragment ACK pumping must not outlive sendReliablePumped's tick budget.
+    reliable_send_deadline_ns: u64 = 0,
 
     local_seq: u16 = 0,
     local_window_start: u16 = 0,
@@ -279,6 +282,7 @@ pub const Peer = struct {
                 }) catch |err| switch (err) {
                     error.WindowFull => {
                         if (attempts >= 4000) return error.WindowFull;
+                        if (self.reliable_send_deadline_ns != 0 and clock.monoNs() >= self.reliable_send_deadline_ns) return error.WindowFull;
                         try self.resendPending(sock);
                         if (self.pump_fn) |pf| pf(self.pump_ctx);
                         // Yield so the peer's ACK datagrams can land: 4000 spin

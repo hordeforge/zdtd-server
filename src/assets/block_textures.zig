@@ -41,7 +41,7 @@ pub fn parseTextureValue(s: []const u8) u64 {
         if (f > 255) return 0;
     }
     var f8: [6]u8 = undefined;
-    for (faces, 0..) |f, i| f8[i] = @truncate(f);
+    for (faces, 0..) |f, i| f8[i] = @intCast(f);
     return packFaces8(f8);
 }
 

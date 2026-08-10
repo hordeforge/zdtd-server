@@ -104,14 +104,16 @@ pub const Plugin = struct {
         var module = engine_ptr.compile(wasm_bytes) catch return error.ParseFailed;
         errdefer module.deinit();
         var linker = engine_ptr.linker();
+        errdefer linker.deinit();
         defineImports(&linker, ctx) catch return error.ImportForbidden;
-        const instance = linker.instantiate(&module, .{
+        var instance = linker.instantiate(&module, .{
             .fuel = .{ .limited = budget.fuel },
             .max_memory_pages = .{ .limited = budget.max_memory_pages },
         }) catch |err| {
             std.debug.print("zdtd: wasm instantiate failed: {s}\n", .{@errorName(err)});
             return error.InstantiateFailed;
         };
+        errdefer instance.deinit();
         var p = Plugin{
             .allocator = allocator,
             .engine = engine_ptr,

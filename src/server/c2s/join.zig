@@ -122,6 +122,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     // Send local ConfigFiles now so the wait can finish; then WorldInfo.
     if (std.mem.eql(u8, name, "NetPackageRequestToEnterGame")) {
         std.debug.print("zdtd: RequestToEnterGame entity={d}\n", .{c.entity_id});
+        // One deadline covers the whole must-deliver enter bundle. Clear it at
+        // the request boundary so later critical exchanges (sign data,
+        // PlayerId) receive their own bounded budget.
+        peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
+        defer peer.critical_budget_deadline_ns = 0;
         if (c.entity_id <= 0) {
             const surf_e = self.spawnSurface(sp.x, sp.z);
             c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf_e.x), @floatFromInt(surf_e.y), @floatFromInt(surf_e.z), @intCast(c.slot)) orelse return true;

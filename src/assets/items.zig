@@ -206,27 +206,30 @@ pub const ItemTable = struct {
     pub fn foodAmountFor(self: *const ItemTable, item_id: u16) f32 {
         if (self.byId(item_id)) |d| {
             if (d.food_amount > 0) return d.food_amount;
-            if (d.is_eat or (d.name.len >= 4 and std.mem.startsWith(u8, d.name, "food"))) return 15;
+            if (self.source == .builtin and
+                (d.is_eat or (d.name.len >= 4 and std.mem.startsWith(u8, d.name, "food")))) return 15;
         }
-        if (item_id == 2) return 15;
+        if (self.source == .builtin and item_id == 2) return 15;
         return 0;
     }
 
     pub fn foodHealthFor(self: *const ItemTable, item_id: u16) f32 {
         if (self.byId(item_id)) |d| {
             if (d.food_health > 0) return d.food_health;
-            if (item_id == 4 or std.mem.eql(u8, d.name, "medicine")) return 25;
-            if (d.is_eat) return 7;
+            if (self.source == .builtin) {
+                if (item_id == 4 or std.mem.eql(u8, d.name, "medicine")) return 25;
+                if (d.is_eat) return 7;
+            }
         }
-        if (item_id == 2) return 7;
-        if (item_id == 4) return 25;
+        if (self.source == .builtin and item_id == 2) return 7;
+        if (self.source == .builtin and item_id == 4) return 25;
         return 0;
     }
 
     pub fn waterAmountFor(self: *const ItemTable, item_id: u16) f32 {
         if (self.byId(item_id)) |d| {
             if (d.water_amount > 0) return d.water_amount;
-            if (d.name.len >= 5 and std.mem.startsWith(u8, d.name, "drink")) return 20;
+            if (self.source == .builtin and d.name.len >= 5 and std.mem.startsWith(u8, d.name, "drink")) return 20;
         }
         return 0;
     }
@@ -260,8 +263,10 @@ pub const ItemTable = struct {
         } else if (builtinStockName(item_id)) |sn| {
             if (self.byStockName(sn)) |t| return t;
         }
-        // Fallback: linear relative index (always parseable; may wrong icon).
-        return typeFromBuiltinId(item_id);
+        // The relative-id pin exists only for the no-game-dir fixture catalog.
+        // In XML mode an unresolved type would name the wrong stock item.
+        if (self.source == .builtin) return typeFromBuiltinId(item_id);
+        return 0;
     }
 
     /// Reverse: absolute stock type → ECS item_id (0 if unknown).
@@ -289,8 +294,8 @@ pub const ItemTable = struct {
         while (id <= 12) : (id += 1) {
             if (self.stockTypeFor(id) == stock_type) return id;
         }
-        // Fallback relative index when types were encoded as 65536+ecs_id
-        if (stock_type > items_start_here) {
+        // Relative ids are an offline fixture convention, never XML truth.
+        if (self.source == .builtin and stock_type > items_start_here) {
             const rel = stock_type - items_start_here;
             if (rel > 0 and rel < 100) return @intCast(rel);
         }
@@ -719,6 +724,24 @@ test "ecs offline inventory catalog mirrors builtins" {
 
 test "stock type first item is ItemsStartHere+1" {
     try std.testing.expectEqual(@as(i32, 65537), stock_first_item_type);
+}
+
+test "XML item table fails closed instead of using builtin balance or ids" {
+    const defs = [_]ItemDef{
+        .{ .id = 100, .name = "foodUnspecified", .is_eat = true },
+        .{ .id = 101, .name = "drinkUnspecified", .is_eat = true },
+    };
+    const t: ItemTable = .{ .defs = &defs, .source = .xml };
+
+    try std.testing.expectEqual(@as(f32, 0), t.foodAmountFor(100));
+    try std.testing.expectEqual(@as(f32, 0), t.foodHealthFor(100));
+    try std.testing.expectEqual(@as(f32, 0), t.waterAmountFor(101));
+    try std.testing.expectEqual(@as(i32, 0), t.stockTypeFor(99));
+    try std.testing.expectEqual(@as(u16, 0), t.ecsIdFromStockType(items_start_here + 99));
+
+    const builtin = ItemTable.builtin();
+    try std.testing.expectEqual(@as(i32, items_start_here + 7), builtin.stockTypeFor(7));
+    try std.testing.expectEqual(@as(f32, 15), builtin.foodAmountFor(2));
 }
 
 test "DistractionTags + Distraction* effects parse (stock decoy shape)" {

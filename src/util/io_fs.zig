@@ -109,7 +109,9 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        try names.append(allocator, try allocator.dupe(u8, entry.name));
+        const name = try allocator.dupe(u8, entry.name);
+        errdefer allocator.free(name);
+        try names.append(allocator, name);
     }
     std.mem.sort([]const u8, names.items, {}, struct {
         fn less(_: void, a: []const u8, b: []const u8) bool {
