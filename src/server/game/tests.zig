@@ -12,10 +12,6 @@ const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
-const witest = struct {
-    // local stub — Game tests only need a few wire helpers that are not
-    // available as a standalone wire/test_helpers.zig on this branch.
-};
 const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
 const wire_frame = @import("../../wire/frame.zig");

@@ -422,7 +422,8 @@ Stock loads vast XML (blocks, items, biomes, loot, entityclasses, prefabs). Clon
 | World | flat or single prefab island |
 | serverconfig | port, max players, world name, password |
 
-**Do not** require full Navezgane to validate wire. Use loadgen `make join` against your Zig process on 26902.
+**Do not** require full Navezgane to validate wire. Run `scripts/auto_join.sh`,
+which starts zdtd and points loadgen at the LiteNet port (`ServerPort + 2`).
 
 ---
 

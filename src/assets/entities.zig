@@ -153,8 +153,7 @@ fn parseBoolLoose(s: []const u8) bool {
     return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "True") or std.mem.eql(u8, s, "1");
 }
 
-fn inferKind(name: []const u8, tags: []const u8, is_animal: bool, is_enemy: bool) components.Kind {
-    _ = is_enemy;
+fn inferKind(name: []const u8, tags: []const u8, is_animal: bool) components.Kind {
     if (std.mem.startsWith(u8, name, "player") or std.mem.find(u8, tags, "player") != null) return .player;
     if (is_animal or std.mem.startsWith(u8, name, "animal") or std.mem.find(u8, tags, "animal") != null) return .animal;
     if (std.mem.startsWith(u8, name, "npcTrader") or std.mem.find(u8, name, "trader") != null) return .trader;
@@ -163,8 +162,7 @@ fn inferKind(name: []const u8, tags: []const u8, is_animal: bool, is_enemy: bool
 
 /// Fail-closed HP when MaxHealth is missing or non-numeric (buff-driven templates).
 /// Prefer entityclasses MaxHealth; these are last-resort kind floors only.
-fn defaultHp(kind: components.Kind, name: []const u8) f32 {
-    _ = name;
+fn defaultHp(kind: components.Kind) f32 {
     return switch (kind) {
         .player => 100,
         .trader => 9999,
@@ -283,10 +281,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
-        const kind = inferKind(name, tags, is_animal, is_enemy);
+        const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
-        var max_hp = defaultHp(kind, name);
+        var max_hp = defaultHp(kind);
         if (resolveProp(&classes, name, "MaxHealth", 0)) |mh| {
             if (xml.parseF32(mh)) |f| max_hp = f;
         } else if (resolveProp(&classes, name, "HandHealthMax", 0)) |mh| {

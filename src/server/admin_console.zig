@@ -261,8 +261,6 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         return;
     }
 
-    const player = self.sim.playerByPeer(c.slot);
-
     if (eqAny(verb, &.{ "help", "commands", "?" })) {
         // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist.
         out.line("zdtd console commands:");
@@ -276,22 +274,6 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         out.linef("Day {d}, {d:0>2}:{d:0>2}  (bloodmoon in {d} days)", .{
             clk.day, hh, mm, self.daysToBloodMoon(),
         });
-    } else if (eqAny(verb, &.{ "settime", "st" })) {
-        self.consoleSetTime(&it, &out);
-    } else if (eqAny(verb, &.{ "teleportplayer", "tp", "goto" })) {
-        self.consoleTeleport(player, &it, &out);
-    } else if (eqAny(verb, &.{ "spawnentity", "se" })) {
-        self.consoleSpawnEntity(player, &it, &out);
-    } else if (eqAny(verb, &.{"spawnairdrop"})) {
-        if (self.forceAirDrop()) out.line("air drop spawned") else out.line("no player to drop near");
-    } else if (eqAny(verb, &.{"storm"})) {
-        if (self.forceStorm()) out.line("storm forced") else out.line("no weather biomes");
-    } else if (eqAny(verb, &.{ "clearweather", "stormoff" })) {
-        if (self.clearStorm()) out.line("storm cleared") else out.line("no weather biomes");
-    } else if (eqAny(verb, &.{ "killall", "ka" })) {
-        out.linef("killed {d} zombies", .{self.consoleKillAll()});
-    } else if (eqAny(verb, &.{ "giveself", "give", "gi" })) {
-        self.consoleGiveSelf(player, &it, &out);
     } else if (eqAny(verb, &.{ "listplayers", "lp" })) {
         var i: usize = 0;
         for (&self.clients) |*cl| {
@@ -325,10 +307,6 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
             try self.broadcast("NetPackageChat", chat);
             out.line("sent");
         }
-    } else if (eqAny(verb, &.{"kick"})) {
-        self.consoleKickBan(it.next(), &out, false);
-    } else if (eqAny(verb, &.{"ban"})) {
-        self.consoleKickBan(it.next(), &out, true);
     } else if (eqAny(verb, &.{"version"})) {
         out.line("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)");
     } else if (eqAny(verb, &.{ "dm", "cm", "settempunit", "debugmenu" })) {

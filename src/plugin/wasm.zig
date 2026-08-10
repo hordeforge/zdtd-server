@@ -1,6 +1,7 @@
 //! Wasm plugin runtime (ADR 0020, zwasm v2): load a .wasm module, instantiate
 //! it under fuel and memory budgets, register the minimal host import table,
-//! and call the four hooks (on_enable, on_tick, on_player_join, on_shutdown).
+//! and call the optional guest hooks (`Hook`: lifecycle plus the verdict and
+//! text hooks documented in docs/PLUGIN_DEV.md).
 //! Data crosses as flat bytes in the guest's linear memory; no host pointer
 //! reaches a guest and WASI is deliberately not provided.
 //!

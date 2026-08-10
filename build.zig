@@ -54,7 +54,12 @@ pub fn build(b: *std.Build) void {
     // Wasm plugin runtime (ADR 0020, zwasm v2). Anything linking it needs
     // .use_llvm = true: Zig 0.16's self-hosted x86 backend fails on
     // R_X86_64_PC64 (PLUGIN_API.md "Known constraint").
-    const zwasm_dep = b.dependency("zwasm", .{ .target = target, .optimize = optimize });
+    const zwasm_dep = b.dependency("zwasm", .{
+        .target = target,
+        .optimize = optimize,
+        .wasi = .none,
+        .engine = .interp,
+    });
     root_mod.addImport("zwasm", zwasm_dep.module("zwasm"));
 
     const exe = b.addExecutable(.{

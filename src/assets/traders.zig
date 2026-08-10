@@ -550,13 +550,6 @@ test "trader table parses trader_info blocks with per-trader items and attrs" {
 }
 
 test "roll stays deterministic and honours count ranges and unique_only" {
-    var arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer {
-        arena_holder.deinit();
-        std.testing.allocator.destroy(arena_holder);
-    }
-    const arena = arena_holder.allocator();
     const refs = [_]ItemRef{
         .{ .name = "ammoA", .count_min = 40, .count_max = 150 },
         .{ .name = "ammoB", .count_min = 1, .count_max = 1 },
@@ -580,7 +573,6 @@ test "roll stays deterministic and honours count ranges and unique_only" {
         try std.testing.expectEqual(a.count, b.count);
         try std.testing.expectEqual(a.quality, b.quality);
     }
-    _ = arena;
 }
 
 test "unique_only group picks distinct refs" {

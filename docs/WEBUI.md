@@ -275,17 +275,19 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 - [ ] SSE/EventSource stream instead of poll (still snapshot-based)
 - [ ] Read-only public status page (separate secret or none; no cmds)
 
-## Zig module layout (proposed)
+## Zig module layout (as shipped)
 
 ```text
-src/server/webui.zig          # listener, router, auth
-src/server/webui_snap.zig     # WebSnapshot + cmd queue
-src/server/webui_html.zig     # HTML fragments (or templates/)
-web/static/htmx.min.js
-web/static/alpine.min.js
-web/static/app.css
-web/templates/shell.html      # optional file templates via io_fs at init
+src/server/webui.zig          # listener, router, auth, snapshot, cmd queue, fragments
+src/server/webui/shell.html   # page markup, @embedFile'd (AGENTS rule 12)
+src/server/webui/login.html
+src/server/webui/login_failed.html
+src/server/webui/login_lockout.html
 ```
+
+Markup is `@embedFile`d at comptime and templated by `__ZDTD_*__` placeholder
+substitution; nothing is read from disk at runtime. Vendor JS/CSS under
+`web/static/` stays a WU3 item (see the roadmap above), not a current path.
 
 Facades: `server/root.zig` exports webui init. **No** import of webui from
 `wire/` or `ecs/` (only `game.zig` fills snapshot + drains cmds).

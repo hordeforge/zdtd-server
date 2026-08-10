@@ -22,7 +22,7 @@ pub const session_token_hex_len: usize = 32;
 /// One roster row per client slot: a 64-slot server must not hide the players
 /// past the cap from the operator (both the HTML partial and the stats JSON
 /// render a full roster inside the 16 KiB body buffer).
-pub const max_players_snap: usize = @import("../litenet/server.zig").max_peers;
+pub const max_players_snap: usize = @import("../litenet/root.zig").max_peers;
 pub const max_name: usize = 32;
 /// Max admin line from web console POST /api/cmd.
 pub const max_cmd_line: usize = 256;
