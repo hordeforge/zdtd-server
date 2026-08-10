@@ -40,12 +40,12 @@ The operating principles behind every rule below. When in doubt, these decide.
    never a product; client tooling stays join / automation. **Hardcoding policy
    (ADR 0010):** stock content → game data (XML/AssignIds); server policy →
    config (`serverconfig` / `zdtd.toml`); sim/wire → Zig systems with
-   data-driven parameters + native plugins (ADR 0005). No script VM in core.
+   data-driven parameters + sandboxed Wasm plugins (ADR 0020).
 6. **Correctness and security first, then minimalism, then style.** Server is
    authoritative and validates at trust boundaries; make illegal states
    unrepresentable; apply YAGNI and **Zig Zen** (intent, edge cases, one obvious
    way, memory is a resource). Prefer idiomatic Zig **stdlib abstractions**
-   (`std.Io`, …) over shelling out or OS-specific syscall glue (rule 24).
+   (`std.Io`, …) over shelling out or OS-specific syscall glue (rule 26).
 7. **Hold the 20 TPS budget.** The 50 ms tick is the constraint. Validate with
    loadgen plus a real stock client (EAC off) plus zdtd apm dumps, not by unit
    tests alone.
@@ -54,8 +54,6 @@ The operating principles behind every rule below. When in doubt, these decide.
    serialized field order, or GC-friendly layouts into the sim - prefer
    idiomatic, measurable Zig forms (SoA, pools, serialize-once) and judge
    iteration by `apm` dumps, not by visual similarity to the RE source.
-9. **Never leave a broken build.** Keep `make check` green and tests passing;
-   no "fix later," no skipped assertions to land a feature.
 
 ## Owns / does not own
 
@@ -66,13 +64,6 @@ The operating principles behind every rule below. When in doubt, these decide.
 | Join / spawn / chunk / inv play path for stock client + bots | Shipping TFP content or assets (load from user `game-dir`) |
 | Native metrics (`src/apm/`) | **7dtd-apm** (Mono bridge; different process) |
 | SoA ECS + serialize-once interest | Copying stock Mono architecture line-for-line |
-
-## Explicit non-goals
-
-1. **Not mod-compatible.** No IModApi, Harmony, or `Mods/` loading.
-2. **Not a 7dtd-apm target.** Grow `src/apm/` only (counters, section latency, dump).
-3. **Not EAC-on.** EAC-off stock clients and loadgen bots only.
-4. **Not a content ship.** Runtime load of stock XML/maps from the operator's game install.
 
 ## Critical rules
 
@@ -99,9 +90,9 @@ The operating principles behind every rule below. When in doubt, these decide.
     hand-write a `std.mem.eql(u8, key, ...)` chain again (ADR 0021). Sim rule
     parameters belong in `ecs/rules.zig`, and a `Rules` value is a **floor**:
     where stock ships per-entity data, that data still wins.
-12. **Markup is not a string literal.** HTML, CSS and JS live in their own files
-    and reach the binary through `@embedFile` (`src/server/webui/`). Nothing is
-    read from disk at runtime.
+12. **Markup is not a string literal.** Webui pages live as `.html` files under
+    `src/server/webui/` (CSS/JS inline in the page) and reach the binary through
+    `@embedFile`. Nothing is read from disk at runtime.
 13. **Name for what it does.** A flag that only throttles streaming is not
     `world_enabled`. Confusing names are defects.
 14. **One stock package shape → one builder.** No second "almost stock" encoder.
@@ -160,22 +151,21 @@ The operating principles behind every rule below. When in doubt, these decide.
     feature. New wire/sim behavior gets a unit or `scenarios.zig` test when
     the path is non-trivial; join/spawn/chunk/inv changes need loadgen smoke
     when practical.
-26. **Stdlib abstractions, not OS-specific guts. No raw syscalls in new or
-    touched code.** Prefer the highest stable Zig 0.16 API that fits:
+26. **Stdlib abstractions, not OS-specific guts.** Prefer the highest stable
+    Zig 0.16 API that fits:
     `std.Io` / `Dir` / `File` / `Threaded`, `std.mem`, `std.fmt`, `std.Thread`
     (via `util/parallel`), etc. Zig does not use OOP abstract classes; **stdlib
     interfaces** (`std.Io` vtable) and thin helpers on top (`util/io_fs.zig`) are
     the idiomatic layer. Do **not** open-code `std.os.linux.*`, raw `std.posix`
     file loops, or `std.c` for ordinary FS. Ordinary FS is `util/io_fs` /
-    `std.Io` only. LiteNet UDP is `litenet/udp_socket.zig` (`std.Io.net`).
-    Admin/GSI/webui TCP is `util/tcp_listen.zig` (`IpAddress.listen` + poll
-    accept). Optional: webui HTTP body via `std.http.Server` (see
+    `std.Io` only. OS-specific socket and clock calls are confined to
+    `litenet/udp_socket.zig`, `util/tcp_listen.zig`, and `util/clock.zig`.
+    Optional: webui HTTP body via `std.http.Server` (see
     `docs/STD_ABSTRACTIONS.md`). Shelling out remains forbidden when an
     in-process API exists (workspace Native APIs rule). Follow
     [Zig Zen](https://ziglang.org/documentation/master/#Zen) when choosing among
     correct options.
-27. **Wire is the contract, not our internals. Do not repeat stock dedis perf mistakes.** What matters to the client is the binary wire, not how we iterate. Prefer SoA + pools + serialize-once over per-entity heap/AoS/Unity shapes; avoid GC pressure; keep the 20 TPS budget with measured `apm` dumps, not visual similarity to stock Mono.
-28. **Prefer typed tools over shell.** Use `ast-grep` for structural edits, `ripgrep` (`rg`) for fast text search, and `semcode` for semantic/cross-file search instead of bare `sed`/`grep` where one fits. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware searches.
+27. **Prefer typed tools over shell.** Use `ast-grep` for structural edits, `ripgrep` (`rg`) for fast text search, and `semcode` for semantic/cross-file search instead of bare `sed`/`grep` where one fits. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware searches.
 
 ## Commands
 
@@ -219,8 +209,8 @@ src/main.zig           CLI, DebugAllocator, construct Game, run loop
 src/protocol.zig       wire constants (challenge, tick rate; package ids live in wire/)
 src/server/game.zig    join SM; delegating façade - most paths live in game/*, c2s/*
 src/server/game/*      per-domain Game helpers (net, tick, world, player, join) - each takes *Game
-src/server/c2s/*       C2S handlers by domain (move, inv, quest, misc) - each exposes handle(*Game,*Client,*Peer,name,body) bool
-src/server/*           admin TCP, GSI, config, persist (players.zsv), chunk_stream, trade, scenarios, webui
+src/server/c2s/*       C2S handlers by domain (join, move, blocks, inv, quest, misc); each exposes handle(*Game,*Client,*Peer,name,body) anyerror!bool, routed by dispatch.zig
+src/server/*           admin TCP, GSI, config, persistence, scenarios, webui
 src/ecs/*              SoA world, systems, inventory, quests, interest
 src/world/*            chunks, TTS, prefabs, sleepers, containers, DTM, biomes
 src/wire/*             package bodies (stock_*), binary LE, frames
@@ -236,7 +226,6 @@ assets/fixtures/       offline XML and .wasm fixtures for tests
 modes/                 gamemode packs (`--mode <name>`)
 scripts/               release, lint and smoke gates called by the Makefile
 docs/                  STATUS, gaps, plan, APM, wire/map/system notes
-docs/reviews/          review findings: point-in-time snapshots, not inventories
 worlds/                local save overlays (ZCH3 `.zch`, player data)
 ```
 
@@ -244,7 +233,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 |---|---|---|
 | Stock package body layout | `wire/stock_*.zig`, `packages.zig` | `game.zig` open-coded writes |
 | C2S handlers | `server/c2s/*` (`handle` per domain, phase-gated) | `game.zig` large if/else chain |
-| Game helpers | `server/game/*` (`net`, `tick`, `world`, `player`, `join`), `server/persist.zig`, `server/chunk_stream.zig`, `server/trade.zig` | `game.zig` inline bodies |
+| Game helpers | `server/game/*` (`net`, `tick`, `world`, `player`, `join`, `chunk_stream`, `trader`), `server/persist.zig` | `game.zig` inline bodies |
 | Block/world mutation | `world/*`, `ecs` | LiteNet / package id tables |
 | Syscalls / sockets | `litenet/udp_socket.zig`, `util/tcp_listen.zig` (Io.net + thin posix) | package builders, ECS systems |
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
@@ -262,32 +251,6 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
   `scripts/lint-architecture.sh` (part of `make check`) fails the build on a
   forbidden `@import`. Adding one means changing the lint, which means arguing
   for the edge.
-
-## Docs map
-
-Full index: [`docs/INDEX.md`](docs/INDEX.md). **STATUS wins** if inventory docs lag.
-
-| Doc | Role |
-|---|---|
-| [`docs/STATUS.md`](docs/STATUS.md) | What works now (gates + shipped surface) |
-| [`TODO.md`](TODO.md) | Open backlog (shipped log below the fold) |
-| [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Full gap inventory vs stock |
-| [`docs/WORK_PLAN.md`](docs/WORK_PLAN.md) | Handoff-ready tasks: files, grounding, done-when, proof |
-| [`docs/adr/README.md`](docs/adr/README.md) | Decision records. Read the ADR before relitigating a decision |
-| [`docs/reviews/`](docs/reviews/) | Review findings. Snapshots: STATUS wins on conflict |
-| [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased plan (M7+; post-playable stack) |
-| [`docs/AUTHORITY.md`](docs/AUTHORITY.md) | Server-authoritative C2S gates + mode |
-| [`docs/APM.md`](docs/APM.md) | Native metrics harness |
-| [`docs/wire/PACKAGES.md`](docs/wire/PACKAGES.md) / [`docs/GAME_OPTIONS.md`](docs/GAME_OPTIONS.md) | Package catalog / serverconfig |
-| [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) | Sim architecture |
-| [`docs/SCALE.md`](docs/SCALE.md) | Scale (parked until M11) |
-| [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) | Envelope, join, goldens |
-
-Architecture and RE narratives stay under `../7dtd-research/docs`. Feature status and
-playability live in this tree (`STATUS` / `TODO` / gaps). Update those when the
-wire or play surface changes.
-
----
 
 ## Zig style
 
@@ -341,11 +304,6 @@ mapping captures, bit masks, buffer caps, and RE version pins are named module
   re-parse XML every tick.
 - `page_allocator` is not for tick or package work. Tests use
   `std.testing.allocator` (or `DebugAllocator`) so leaks fail CI.
-- Review prompts: [`docs/prompts/zig-idiomatic-review.md`](docs/prompts/zig-idiomatic-review.md)
-  (language/hot path), [`docs/prompts/abstractions-review.md`](docs/prompts/abstractions-review.md)
-  (when to build or delete helpers/layers),
-  [`docs/prompts/simd-review.md`](docs/prompts/simd-review.md) (SIMD on dense loops),
-  [`docs/prompts/ecs-soa-review.md`](docs/prompts/ecs-soa-review.md) (ECS ownership + SoA).
 
 ### Tick path (20 TPS / 50 ms)
 
@@ -423,7 +381,7 @@ heap), dealloc always succeeds (`defer`). Full review rubric:
 ### Testing and evidence
 
 - Unit `test` blocks at the **bottom** of the file that owns the logic.
-- Multi-system join / inventory / chunk paths: `server/scenarios.zig` (extend
+- Multi-system join / inventory / chunk paths: `src/server/scenarios.zig` (extend
   it) rather than duplicating harnesses.
 - Wire: golden layout tests (sizes, markers, known fixture mappings). Builders
   the stock client will `Read` need tests or an explicit join-path scenario.
@@ -437,56 +395,6 @@ heap), dealloc always succeeds (`defer`). Full review rubric:
   backstop, not a licence.
 - A test that leaves state behind is a test that fails on the second
   `make check`. If a scenario needs a world, give it one it removes.
-
-### Anti-patterns
-
-- Hard-coded package ids as "forever true" outside fixture maps
-- Hand-copied block/item/recipe/entity/loot tables that stock ships as assets
-  (load or comptime-generate from game files instead)
-- Guessed package layouts or join order without RE / golden evidence
-- Trusting C2S coords, inv blobs, or damage without validation
-- Sending play packages before join SM allows them; accepting illegal phase C2S
-- Self-echo of movement / full state the stock server would not send
-- Unbounded chunk/entity/stream queues or unchecked slot/coord indices
-- In-memory-only world edits that should hit ZCH3 `.zch` / player save
-- Unseeded or hidden RNG on loot/AI/director tick paths
-- Invented type-id or hash spaces parallel to stock catalogs
-- Truncated or zero-padded wire bodies when encode fails
-- Second encoder for the same stock package shape
-- `catch {}` on encode/decode without intentional drop + comment
-- Fake world/FX/journal content to silence client errors
-- Game assemblies or bulk IL committed here
-- Heap alloc / `dupe` / `allocPrint` / growing `ArrayList`/`HashMap` on tick or
-  per-packet encode/interest/stream paths
-- `page_allocator` on the tick path
-- Syscalls or XML parse inside package body builders
-- Raw `std.os.linux` / open-coded posix FS for ordinary files (use `std.Io` / `io_fs`)
-- Names broader or opposite to the real control
-- Manual cleanup in `catch` when `defer` / `errdefer` suffices
-- Wiring 7dtd-apm, Harmony, or ModAPI into this process
-- Client Harmony that invents S2C data zdtd should send
-- Skipping or weakening tests to land a change
-- Skipping STATUS/TODO updates when playability or wire surface changes
-
-### Review checklist (Zig changes)
-
-- [ ] Code sits in the correct layer (table above)
-- [ ] Naming matches table; new wire/tick constants are named
-- [ ] Allocators explicit; `defer` / `errdefer`
-- [ ] Hot path: no heap alloc / no growing lists; caller buffers + named caps
-- [ ] FS/I/O via `std.Io` / `io_fs` (no new raw linux/posix file syscalls)
-- [ ] Package body uses `binary` + buffer builder; ids via map
-- [ ] Layout matches RE or has a unit / scenario test
-- [ ] No incomplete stock packages sent; missing preferred over fake
-- [ ] Game asset data loaded or comptime-generated from install/fixtures, not hand-copied
-- [ ] C2S validated (phase, bounds, ownership); server applies results, not blobs
-- [ ] Interest correct; no bogus self-echo; stream caps named and enforced
-- [ ] Persist path used when the mutation must survive restart
-- [ ] Encode failure omits or uses stock empty form (no truncate/zero-pad guess)
-- [ ] Errors propagated or deliberately ignored with comment
-- [ ] Material net/sim cost has `apm` instrumentation when warranted
-- [ ] `make check` / `zig build test` green; join/spawn/chunk/inv → loadgen when possible
-- [ ] STATUS/TODO updated if feature surface or playability changed
 
 ## Stock-game research -> 7dtd-research
 
