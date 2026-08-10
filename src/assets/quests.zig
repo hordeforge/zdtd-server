@@ -28,11 +28,11 @@ pub fn configPathFromMapDir(map_dir: []const u8, buf: []u8) ?[]const u8 {
 }
 
 pub fn questsXmlPath(config_dir: []const u8, buf: []u8) ![]const u8 {
-    return try std.fmt.bufPrint(buf, "{s}/quests.xml", .{config_dir});
+    return std.fmt.bufPrint(buf, "{s}/quests.xml", .{config_dir});
 }
 
 fn dupe(arena: std.mem.Allocator, s: []const u8) ![]const u8 {
-    return try arena.dupe(u8, s);
+    return arena.dupe(u8, s);
 }
 
 fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind {
@@ -776,7 +776,7 @@ pub fn tryLoad(
     }.call;
     if (quests_path) |p| {
         if (!io_fs.fileExists(p)) return error.OpenFailed;
-        if (paths.override_dirs.len == 0) return try loadLogged(allocator, p);
+        if (paths.override_dirs.len == 0) return loadLogged(allocator, p);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
@@ -786,7 +786,7 @@ pub fn tryLoad(
         {
             try io_fs.writeFile(cp, merged);
         }
-        return try loadLogged(allocator, cp);
+        return loadLogged(allocator, cp);
     }
     if (paths.override_dirs.len > 0) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
@@ -796,20 +796,20 @@ pub fn tryLoad(
             {
                 try io_fs.writeFile(cp, merged);
             }
-            return try loadLogged(allocator, cp);
+            return loadLogged(allocator, cp);
         }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);
-        if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p);
     }
     if (game_dir) |gd| {
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/quests.xml", .{gd});
-        if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p);
     }
     if (map_dir) |md| {
         if (configPathFromMapDir(md, &path_buf)) |p| {
-            if (io_fs.fileExists(p)) return try loadLogged(allocator, p);
+            if (io_fs.fileExists(p)) return loadLogged(allocator, p);
         }
     }
     return null;

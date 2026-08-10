@@ -5,11 +5,9 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
-const wire_binary = @import("../../wire/binary.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
-const vending_mod = @import("../../world/vending.zig");
 
 pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
     const stock = self.sim.trader_stock[s];
@@ -49,41 +47,25 @@ pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
 }
 
 pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
-    var entries_buf: [ecs.components.max_stock]packages.stock_entity.TraderDataReadEntry = undefined;
-    var tr: wire_binary.Reader = .{ .data = td.trader_data };
-    const read = packages.stock_entity.readTraderDataBody(&tr, &entries_buf) catch return;
+    // TraderData ToServer is a client-side cache copy, not an authoritative
+    // transaction. Applying its stock or money lets any joined peer mint
+    // inventory and rewrite the shared trader economy. The typed trade path
+    // above is the only path that may mutate an entity trader.
     if (td.is_entity) {
         const ts = self.sim.slotOfNetId(td.entity_id) orelse return;
         if (!self.sim.mask[ts].trader_stock) return;
-        const st = &self.sim.trader_stock[ts];
-        var i: usize = 0;
-        while (i < read.n) : (i += 1) {
-            const src = entries_buf[i];
-            if (src.item.type_id == 0) {
-                st.entries[i] = .{};
-                continue;
-            }
-            const iname = self.items.nameByStockType(src.item.type_id) orelse continue;
-            const eid = self.items.ecsIdByName(iname);
-            if (eid == 0) continue;
-            st.entries[i] = .{ .item = eid, .count = src.item.count, .markup = src.markup, .price = st.entries[i].price, .sell = st.entries[i].sell };
-        }
-        while (i < st.entries.len) : (i += 1) st.entries[i] = .{};
-        if (read.money >= 0) st.wallet = read.money;
         if (c.peer) |p| try self.sendTraderSnapshot(p, ts);
         return;
     }
+
+    // Vending stock is likewise server-owned. Only acknowledge a nearby
+    // owner's copy-back and re-send the stored TE; never apply its item list
+    // or available-money field.
     const vm = self.vending.get(.{ .x = td.te_x, .y = td.te_y, .z = td.te_z }) orelse return;
-    var i: usize = 0;
-    while (i < read.n and i < vending_mod.max_vending_stock) : (i += 1) {
-        const src = entries_buf[i];
-        if (src.item.type_id == 0) {
-            vm.stock[i] = .{};
-            continue;
-        }
-        vm.stock[i] = .{ .type_id = src.item.type_id, .count = src.item.count, .markup = src.markup };
-    }
-    while (i < vending_mod.max_vending_stock) : (i += 1) vm.stock[i] = .{};
-    if (read.money >= 0) vm.available_money = read.money;
-    try replicate_te.sendVendingTe(self, c.peer.?, td.te_x, td.te_y, td.te_z);
+    const mine = c.puid_primary.get() orelse c.puid_native.get() orelse return;
+    if (!vm.owner.matches(mine)) return;
+    const ps = self.sim.playerByPeer(c.slot) orelse return;
+    const p = self.sim.transform[ps];
+    if (!self.withinEditReach(p.x, p.y, p.z, @floatFromInt(td.te_x), @floatFromInt(td.te_y), @floatFromInt(td.te_z))) return;
+    if (c.peer) |peer| try replicate_te.sendVendingTe(self, peer, td.te_x, td.te_y, td.te_z);
 }

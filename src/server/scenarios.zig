@@ -1596,6 +1596,8 @@ test "scenario explosion damages entities and credits the kill" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const zid = g.sim.spawnZombie(257, 70, 257, 30).?;
+    const tank_id = g.sim.spawnZombie(258, 70, 256, 500).?;
+    const far_id = g.sim.spawnZombie(276, 70, 256, 500).?;
 
     var body: [256]u8 = undefined;
     var w: @import("../wire/binary.zig").Writer = .{ .buf = &body };
@@ -1613,10 +1615,10 @@ test "scenario explosion damages entities and credits the kill" {
     try w.writeI16(0); // particleIndex
     try w.writeI16(10); // duration deci-seconds
     try w.writeI16(60); // blockRadius 3.0
-    try w.writeI16(120); // entityRadius 6.0
+    try w.writeI16(20_000); // forged entityRadius 1000.0; server caps to 6
     try w.writeI16(100); // blastPower
     try w.writeF32(50); // blockDamage
-    try w.writeF32(200); // entityDamage
+    try w.writeF32(65_535); // forged entityDamage; server caps to authority limit
     try w.writeI32(c.entity_id);
     try w.writeF32(0); // delay
     var fb: [512]u8 = undefined;
@@ -1625,6 +1627,10 @@ test "scenario explosion damages entities and credits the kill" {
 
     const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
     try std.testing.expect(g.sim.health[zs].hp <= 0); // close enough to die
+    const tank = g.sim.slotOfNetId(tank_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.health[tank].hp >= 300); // at most max_claimed_damage
+    const far = g.sim.slotOfNetId(far_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 500), g.sim.health[far].hp); // outside capped radius
     const score_id = packages.idOf("NetPackageEntityAddScoreClient").?;
     const sb = cap.findPkgIdEntity(score_id, c.entity_id) orelse return error.TestUnexpectedResult;
     var sr = binary.Reader{ .data = sb };
@@ -3919,12 +3925,11 @@ test "scenario vending rent state machine (loot-economy §6)" {
     );
 }
 
-test "scenario stock NetPackageTraderData ToServer CopyFrom (real-client trade)" {
+test "scenario TraderData copy-back cannot overwrite server economy" {
     // A real client sends its post-trade TraderData back over
     // NetPackageTraderData (isEntity | entityId/tePosition | hasTraderData |
-    // TraderData::Write). The stock server mirrors it (CopyFrom) onto the
-    // entity trader or vending TE; the wire carries no price, so price/sell
-    // stay server-owned. This is the real-client buy path (loot-economy §5).
+    // TraderData::Write). It is a client cache copy, so a modified client must
+    // not be able to replace shared trader or vending stock and money.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -3969,16 +3974,16 @@ test "scenario stock NetPackageTraderData ToServer CopyFrom (real-client trade)"
     const framed = try packages.framed(&frame_buf, "NetPackageTraderData", w.written());
     try g.injectFramed(c, framed);
 
-    // CopyFrom applied: count/markup/money from the client copy; price/sell
-    // survive as server-owned.
+    // The client copy is ignored; every server-owned field survives.
     const st = &g.sim.trader_stock[ts];
-    try std.testing.expectEqual(@as(u16, 3), st.entries[0].count);
-    try std.testing.expectEqual(@as(i8, -4), st.entries[0].markup);
+    try std.testing.expectEqual(@as(u16, 10), st.entries[0].count);
+    try std.testing.expectEqual(@as(i8, 0), st.entries[0].markup);
     try std.testing.expectEqual(@as(u16, 1), st.entries[0].price);
-    try std.testing.expectEqual(@as(i32, 4000), st.wallet);
+    try std.testing.expectEqual(@as(i32, 5000), st.wallet);
 
     // --- Vending machine CopyFrom (isEntity=false, tePosition) ---
     const vm = g.vending.getOrCreate(.{ .x = 10, .y = 70, .z = 20 }, 1, 5).?;
+    const vm_before = vm.*;
     var vbody: [512]u8 = undefined;
     var vw: binary.Writer = .{ .buf = &vbody };
     try vw.writeBool(false); // isEntity = false -> tePosition
@@ -3989,12 +3994,12 @@ test "scenario stock NetPackageTraderData ToServer CopyFrom (real-client trade)"
     try packages.stock_entity.writeTraderDataBody(&vw, .{ .trader_id = 5, .available_money = 3000, .entries = &[_]packages.stock_entity.TraderStockEntry{entry} });
     const vframed = try packages.framed(&frame_buf, "NetPackageTraderData", vw.written());
     try g.injectFramed(c, vframed);
-    try std.testing.expectEqual(@as(i32, wood_wire), vm.stock[0].type_id);
-    try std.testing.expectEqual(@as(i32, 3), vm.stock[0].count);
-    try std.testing.expectEqual(@as(i8, -4), vm.stock[0].markup);
-    try std.testing.expectEqual(@as(i32, 3000), vm.available_money);
+    try std.testing.expectEqual(vm_before.stock[0].type_id, vm.stock[0].type_id);
+    try std.testing.expectEqual(vm_before.stock[0].count, vm.stock[0].count);
+    try std.testing.expectEqual(vm_before.stock[0].markup, vm.stock[0].markup);
+    try std.testing.expectEqual(vm_before.available_money, vm.available_money);
 
-    std.debug.print("PASS traderdata-copyfrom: entity+vending CopyFrom count/markup/money ok\n", .{});
+    std.debug.print("PASS traderdata-authority: forged entity+vending copies ignored\n", .{});
 }
 
 test "scenario vending lock/password/allowed editing (owner-gated)" {

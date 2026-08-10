@@ -30,7 +30,7 @@ pub const CogInfo = struct {
     tile_n: u32 = 0,
 };
 
-pub const ParseError = error{ BadMagic, BadIfd, Unsupported };
+pub const ParseError = error{ BadMagic, BadIfd, BadInflate, Unsupported };
 
 /// Parse the first-64KiB header of a GLO-30 COG (full IFD level 0 only).
 pub fn parseCogHeader(head: []const u8) ParseError!CogInfo {
@@ -110,11 +110,11 @@ pub fn decodeTile(allocator: std.mem.Allocator, blob: []const u8, out: []f32) !v
     var decomp: std.compress.flate.Decompress = .init(&in, .zlib, &decomp_buf);
     var written: usize = 0;
     while (written < raw_len) {
-        const nread = decomp.reader.readSliceShort(raw[written..]) catch break;
+        const nread = decomp.reader.readSliceShort(raw[written..]) catch return error.BadInflate;
         if (nread == 0) break;
         written += nread;
     }
-    if (written < raw_len) return error.Unsupported;
+    if (written < raw_len) return error.BadInflate;
 
     // predictor 3 per row
     var y: u32 = 0;

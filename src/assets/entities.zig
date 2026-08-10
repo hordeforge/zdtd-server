@@ -167,7 +167,6 @@ fn defaultHp(kind: components.Kind) f32 {
         .player => 100,
         .trader => 9999,
         .animal => 30,
-        .zombie => 40,
         else => 40,
     };
 }

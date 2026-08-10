@@ -390,51 +390,60 @@ pub const Index = struct {
         var qd: QuestData = .{};
         var path_buf: [2048]u8 = undefined;
         if (self.findPrefabPath(name, ".xml", &path_buf)) |path| {
-            const raw = io_fs.readFileAll(self.allocator, path) catch null;
-            if (raw) |content| {
-                defer self.allocator.free(content);
-                if (xml_util.propertyValue(content, "QuestTags")) |v| {
-                    qd.tags = self.allocator.dupe(u8, v) catch "";
-                }
-                if (xml_util.propertyValue(content, "DifficultyTier")) |v| {
-                    qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
-                }
-                // Trader POIs: the NPC's local cell lives in the
-                // IndexedBlockOffsets class "Trader" entry, the class identity
-                // in ThemeTags ("traderBob" → npcTraderBob).
-                if (traderCellOf(content)) |cell| {
-                    qd.trader_x = cell[0];
-                    qd.trader_y = cell[1];
-                    qd.trader_z = cell[2];
-                }
-                if (xml_util.propertyValue(content, "ThemeTags")) |v| {
-                    if (std.mem.startsWith(u8, v, "trader") and v.len > 6) {
-                        qd.trader_tag = self.allocator.dupe(u8, v) catch "";
-                    }
-                }
-                // Trader compound area (NetPackageWorldAreas): the protect
-                // padding and the teleport volumes the client needs to build
-                // the safe zone and the closing-time teleport.
-                if (xml_util.propertyValue(content, "TraderArea")) |v| {
-                    qd.is_trader_area = std.mem.eql(u8, v, "True");
-                }
-                if (xml_util.propertyValue(content, "TraderAreaProtect")) |v| {
-                    if (parseVec3i(v)) |p| {
-                        qd.protect_padding = .{ @intCast(p[0]), @intCast(p[1]), @intCast(p[2]) };
-                    }
-                }
-                parseVolumeLists(
-                    xml_util.propertyValue(content, "TeleportVolumeStart") orelse "",
-                    xml_util.propertyValue(content, "TeleportVolumeSize") orelse "",
-                    &qd.teleport_start,
-                    &qd.teleport_size,
-                    &qd.teleport_n,
-                );
+            const raw = io_fs.readFileAll(self.allocator, path) catch |err| {
+                std.debug.print("zdtd: prefab quest metadata read failed {s}: {s}\n", .{ path, @errorName(err) });
+                return null;
+            };
+            defer self.allocator.free(raw);
+            if (xml_util.propertyValue(raw, "QuestTags")) |v| {
+                qd.tags = self.allocator.dupe(u8, v) catch |err| {
+                    std.debug.print("zdtd: prefab quest tags allocation failed {s}: {s}\n", .{ path, @errorName(err) });
+                    return null;
+                };
             }
+            if (xml_util.propertyValue(raw, "DifficultyTier")) |v| {
+                qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
+            }
+            // Trader POIs: the NPC's local cell lives in the
+            // IndexedBlockOffsets class "Trader" entry, the class identity
+            // in ThemeTags ("traderBob" → npcTraderBob).
+            if (traderCellOf(raw)) |cell| {
+                qd.trader_x = cell[0];
+                qd.trader_y = cell[1];
+                qd.trader_z = cell[2];
+            }
+            if (xml_util.propertyValue(raw, "ThemeTags")) |v| {
+                if (std.mem.startsWith(u8, v, "trader") and v.len > 6) {
+                    qd.trader_tag = self.allocator.dupe(u8, v) catch |err| {
+                        if (qd.tags.len != 0) self.allocator.free(qd.tags);
+                        std.debug.print("zdtd: prefab trader tag allocation failed {s}: {s}\n", .{ path, @errorName(err) });
+                        return null;
+                    };
+                }
+            }
+            // Trader compound area (NetPackageWorldAreas): the protect
+            // padding and the teleport volumes the client needs to build
+            // the safe zone and the closing-time teleport.
+            if (xml_util.propertyValue(raw, "TraderArea")) |v| {
+                qd.is_trader_area = std.mem.eql(u8, v, "True");
+            }
+            if (xml_util.propertyValue(raw, "TraderAreaProtect")) |v| {
+                if (parseVec3i(v)) |p| {
+                    qd.protect_padding = .{ @intCast(p[0]), @intCast(p[1]), @intCast(p[2]) };
+                }
+            }
+            parseVolumeLists(
+                xml_util.propertyValue(raw, "TeleportVolumeStart") orelse "",
+                xml_util.propertyValue(raw, "TeleportVolumeSize") orelse "",
+                &qd.teleport_start,
+                &qd.teleport_size,
+                &qd.teleport_n,
+            );
         }
         self.quest_cache.put(name, qd) catch {
             if (qd.tags.len != 0) self.allocator.free(qd.tags);
             if (qd.trader_tag.len != 0) self.allocator.free(qd.trader_tag);
+            std.debug.print("zdtd: prefab quest metadata cache allocation failed for {s}\n", .{name});
             return null;
         };
         return self.quest_cache.get(name);

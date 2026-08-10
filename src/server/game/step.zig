@@ -96,8 +96,11 @@ pub fn step(self: *Game) !void {
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
         self.tickSurvival(dt);
         {
-            var bs: ecs.Slot = 0;
-            while (bs < ecs.max_entities) : (bs += 1) {
+            // This loop destroys consumed bags, so snapshot the dense group to
+            // preserve ascending traversal without scanning the full capacity.
+            var bags: [ecs.max_entities]ecs.Slot = undefined;
+            const bag_n = ecs.query.copyKindInto(&self.sim, .loot_bag, &bags);
+            for (bags[0..bag_n]) |bs| {
                 if (!self.sim.alive[bs] or !self.sim.mask[bs].loot_bag) continue;
                 const b = self.sim.loot_bag[bs];
                 if ((b.distraction_tags & 1) == 0 or b.distraction_eat_ticks > 0) continue;

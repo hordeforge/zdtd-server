@@ -120,6 +120,43 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Decode an XML attribute value into arena-owned storage. `xml.attr` returns
+/// the source spelling, but credentials and display names must use the value
+/// an XML reader exposes (for example, `a&amp;b` means `a&b`).
+fn decodeAttr(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
+    if (std.mem.findScalar(u8, raw, '&') == null) return try arena.dupe(u8, raw);
+
+    const out = try arena.alloc(u8, raw.len);
+    var src_i: usize = 0;
+    var out_i: usize = 0;
+    while (src_i < raw.len) {
+        if (raw[src_i] != '&') {
+            out[out_i] = raw[src_i];
+            src_i += 1;
+            out_i += 1;
+            continue;
+        }
+        const semi = std.mem.findScalarPos(u8, raw, src_i + 1, ';') orelse
+            return error.BadServerConfig;
+        const entity = raw[src_i + 1 .. semi];
+        const named: ?u21 = if (std.mem.eql(u8, entity, "amp")) '&' else if (std.mem.eql(u8, entity, "lt")) '<' else if (std.mem.eql(u8, entity, "gt")) '>' else if (std.mem.eql(u8, entity, "quot")) '"' else if (std.mem.eql(u8, entity, "apos")) '\'' else null;
+        const codepoint: u21 = named orelse blk: {
+            if (entity.len < 2 or entity[0] != '#') return error.BadServerConfig;
+            const hex = entity.len >= 3 and (entity[1] == 'x' or entity[1] == 'X');
+            const digits = entity[if (hex) 2 else 1..];
+            if (digits.len == 0) return error.BadServerConfig;
+            const value = std.fmt.parseInt(u21, digits, if (hex) 16 else 10) catch
+                return error.BadServerConfig;
+            break :blk value;
+        };
+        const encoded_n = std.unicode.utf8Encode(codepoint, out[out_i..]) catch
+            return error.BadServerConfig;
+        out_i += encoded_n;
+        src_i = semi + 1;
+    }
+    return out[0..out_i];
+}
+
 /// Property names zdtd applies (subset of stock ServerSettings). Stock extras are
 /// ignored without warning; near-miss typos of these names get a stderr hint.
 const known_serverconfig_names = [_][]const u8{
@@ -255,11 +292,11 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
         };
         cfg.max_players = if (n == 0) cfg.max_players else @min(n, 64);
     }
-    if (prop(raw, "GameName")) |v| cfg.world_name = try arena.dupe(u8, v);
-    if (prop(raw, "GameWorld")) |v| cfg.game_world = try arena.dupe(u8, v);
-    if (prop(raw, "SandboxCode")) |v| cfg.sandbox_code = try arena.dupe(u8, v);
-    if (prop(raw, "SandboxPreset")) |v| cfg.sandbox_preset = try arena.dupe(u8, v);
-    if (prop(raw, "ServerPassword")) |v| cfg.password = try arena.dupe(u8, v);
+    if (prop(raw, "GameName")) |v| cfg.world_name = try decodeAttr(arena, v);
+    if (prop(raw, "GameWorld")) |v| cfg.game_world = try decodeAttr(arena, v);
+    if (prop(raw, "SandboxCode")) |v| cfg.sandbox_code = try decodeAttr(arena, v);
+    if (prop(raw, "SandboxPreset")) |v| cfg.sandbox_preset = try decodeAttr(arena, v);
+    if (prop(raw, "ServerPassword")) |v| cfg.password = try decodeAttr(arena, v);
     if (prop(raw, "AdminPort")) |v| {
         cfg.admin_port = xml.parseU16(v) orelse blk: {
             std.debug.print("zdtd: serverconfig AdminPort '{s}' invalid; keeping {d}\n", .{ v, cfg.admin_port });
@@ -277,7 +314,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
         };
     }
     // Never trimmed and never logged: the value is the console credential.
-    if (prop(raw, "TelnetPassword")) |v| cfg.telnet_password = try arena.dupe(u8, v);
+    if (prop(raw, "TelnetPassword")) |v| cfg.telnet_password = try decodeAttr(arena, v);
     if (prop(raw, "TelnetFailedLoginLimit")) |v|
         cfg.telnet_failed_login_limit = clampU8Named("TelnetFailedLoginLimit", v, 1, 255, cfg.telnet_failed_login_limit);
     if (prop(raw, "TelnetFailedLoginsBlocktime")) |v|
@@ -397,6 +434,21 @@ test "parse config fixture" {
     try std.testing.expectEqual(@as(u8, 2), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u8, 3), cfg.player_killing_mode);
+}
+
+test "string properties decode XML attribute entities" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="GameName" value="Rock &amp; Roll &#x1F3B8;"/>
+        \\  <property name="ServerPassword" value="a&amp;b&lt;c&gt;d&quot;e&apos;f"/>
+        \\  <property name="TelnetPassword" value="pin&#35;42"/>
+        \\</ServerSettings>
+    ;
+    var cfg = try parse(std.testing.allocator, xml_src);
+    defer cfg.deinit();
+    try std.testing.expectEqualStrings("Rock & Roll 🎸", cfg.world_name);
+    try std.testing.expectEqualStrings("a&b<c>d\"e'f", cfg.password);
+    try std.testing.expectEqualStrings("pin#42", cfg.telnet_password);
 }
 
 test "property-prefixed elements do not override server settings" {

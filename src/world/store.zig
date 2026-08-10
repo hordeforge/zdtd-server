@@ -904,6 +904,7 @@ pub const World = struct {
     pub fn saveChunk(self: *World, c: *const Chunk) !void {
         var path_buf: [512]u8 = undefined;
         const path = try self.chunkPath(c.pos, &path_buf);
+        const key = c.pos.hash();
         const io_a = std.heap.page_allocator;
         const payload = try encodeChunk(c, io_a);
         if (self.asyncEnabled()) {
@@ -911,8 +912,11 @@ pub const World = struct {
                 defer io_a.free(payload);
                 return io_fs.writeFile(path, payload);
             };
-            self.flush.submit(c.pos.hash(), owned_path, payload) catch {
-                // Queue full or shut down: write inline rather than drop.
+            self.flush.submit(key, owned_path, payload) catch {
+                // Queue full or shut down: write inline rather than drop. An
+                // older snapshot for this key may still own the same `.tmp`
+                // path, so let it finish before publishing the newer image.
+                self.flush.waitKey(key);
                 defer io_a.free(owned_path);
                 defer io_a.free(payload);
                 _ = self.sync_fallbacks.fetchAdd(1, .monotonic);

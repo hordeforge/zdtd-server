@@ -3098,8 +3098,9 @@ pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, 
 /// Stock NetPackageTraderData ToServer header (asm.il 843046): the first byte
 /// is isEntity; then entityId (i32) or the TE position Vector3i (3 x i32);
 /// then hasTraderData; the TraderData::Write body follows when true. The real
-/// client sends its post-trade copy back here (loot-economy.md §5); the server
-/// mirrors it onto the trader / vending stock (TraderData.CopyFrom).
+/// client sends its post-trade cache copy back here (loot-economy.md §5). The
+/// server parses it for framing but does not treat its stock or money as
+/// authoritative.
 pub const TraderDataToServer = struct {
     is_entity: bool,
     entity_id: i32 = -1,

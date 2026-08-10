@@ -710,19 +710,16 @@ test "wasm plugin admin command hook handles ping/echo and falls through" {
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_admin_command)]);
 
     var out: [4096]u8 = undefined;
-    // ping -> pong
     {
         const rep = host.adminCommand("ping", &out);
         try std.testing.expect(rep != null);
         try std.testing.expectEqualStrings("pong\n", rep.?);
     }
-    // echo with args
     {
         const rep = host.adminCommand("echo hello world", &out);
         try std.testing.expect(rep != null);
         try std.testing.expectEqualStrings("hello world\n", rep.?);
     }
-    // unknown verb -> not handled
     {
         const rep = host.adminCommand("unknown_verb", &out);
         try std.testing.expect(rep == null);

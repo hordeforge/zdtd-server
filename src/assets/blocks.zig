@@ -147,7 +147,6 @@ pub const builtin_defs = [_]BlockDef{
 
 fn isSolidName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "air")) return false;
-    if (std.mem.eql(u8, name, "water")) return false;
     if (std.mem.startsWith(u8, name, "water")) return false;
     if (std.mem.startsWith(u8, name, "terrWater")) return false;
     return true;

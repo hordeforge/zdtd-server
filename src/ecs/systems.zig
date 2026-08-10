@@ -2,6 +2,7 @@
 //! Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
@@ -1641,9 +1642,7 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
         // The bag slot is shared: two zombies on different parallel workers can
         // chew the same item in one tick, so the countdown is an atomic RMW.
         ai.is_eating = true;
-        if (@atomicLoad(i32, &w.loot_bag[bs].distraction_eat_ticks, .monotonic) > 0) {
-            _ = @atomicRmw(i32, &w.loot_bag[bs].distraction_eat_ticks, .Sub, 1, .monotonic);
-        }
+        decrementIfPositive(&w.loot_bag[bs].distraction_eat_ticks);
         ai.state = .idle;
         return;
     }
@@ -1654,6 +1653,13 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
     ai.path_goal_z = w.transform[bs].z;
     ai.has_path = true;
     chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd * ai.active_scale, dt);
+}
+
+fn decrementIfPositive(value: *i32) void {
+    var current = @atomicLoad(i32, value, .monotonic);
+    while (current > 0) {
+        current = @cmpxchgWeak(i32, value, current, current - 1, .monotonic, .monotonic) orelse return;
+    }
 }
 
 /// EAIWander::Update: drift toward the Start-picked destination.
@@ -1675,9 +1681,10 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
 /// drops settle instantly, so the stock `!isCollided && requires_contact`
 /// gate is a no-op here (documented simplification: no per-drop physics).
 fn tickItemDistractions(w: *World) void {
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
-        if (!w.alive[i] or !w.mask[i].loot_bag or !w.mask[i].transform) continue;
+    // This pass never spawns or destroys, so use the maintained dense group.
+    // The common no-drop tick becomes O(1) instead of scanning every slot.
+    for (query.groupSlice(w, .loot_bag)) |i| {
+        if (!w.mask[i].loot_bag or !w.mask[i].transform) continue;
         const tags = w.loot_bag[i].distraction_tags;
         if (tags == 0) continue;
         var bag = &w.loot_bag[i];
@@ -1767,10 +1774,10 @@ pub fn systemDirector(w: *World, dt: f32) struct { spawned: u32, world_time: u64
 const gravity_accel: f32 = -9.81;
 
 pub fn systemVehicles(w: *World, dt: f32) void {
-    if (w.countKind(.vehicle) == 0) return;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
-        if (!w.alive[i] or !w.mask[i].vehicle or !w.mask[i].transform) continue;
+    // Vehicle physics does not change entity membership, so the dense group
+    // avoids a full-capacity scan on every tick, especially for parked fleets.
+    for (query.groupSlice(w, .vehicle)) |i| {
+        if (!w.mask[i].vehicle or !w.mask[i].transform) continue;
         var v = &w.vehicle[i];
 
         // Vertical physics: gravity accumulator + terrain-top clamp. Runs for
@@ -2765,6 +2772,34 @@ test "zombie chews an eat distraction until the item is eaten up" {
     try std.testing.expect(w.zombie_ai[zs].is_eating);
     try std.testing.expectEqual(@as(i32, 0), w.loot_bag[bs].distraction_eat_ticks);
     try std.testing.expect(w.alive[bs]);
+}
+
+test "concurrent eat countdown saturates at zero" {
+    if (builtin.single_threaded) return;
+    var value: i32 = 1;
+    var ready: std.atomic.Value(u8) = .init(0);
+    var go: std.atomic.Value(bool) = .init(false);
+    const Worker = struct {
+        fn run(v: *i32, r: *std.atomic.Value(u8), start: *std.atomic.Value(bool)) void {
+            _ = r.fetchAdd(1, .release);
+            while (!start.load(.acquire)) std.Thread.yield() catch {};
+            decrementIfPositive(v);
+        }
+    };
+    var threads: [8]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (&threads) |*thread| {
+        thread.* = std.Thread.spawn(.{}, Worker.run, .{ &value, &ready, &go }) catch |err| {
+            go.store(true, .release);
+            for (threads[0..spawned]) |*started| started.join();
+            return err;
+        };
+        spawned += 1;
+    }
+    while (ready.load(.acquire) != threads.len) std.Thread.yield() catch {};
+    go.store(true, .release);
+    for (&threads) |*thread| thread.join();
+    try std.testing.expectEqual(@as(i32, 0), @atomicLoad(i32, &value, .monotonic));
 }
 
 test "system zombie wanders when no player sensed" {
