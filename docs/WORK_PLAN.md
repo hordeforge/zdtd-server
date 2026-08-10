@@ -828,6 +828,14 @@ likewise out of scope here.
 
 ## T35. Air-drop crates never get a compass marker
 
+**Status: landed 2026-08-10.** `tickAirDrop` (`src/server/game/tick.zig`)
+broadcasts `NetPackageNavObject` with the shipped `nav_object_classes.xml`
+`supply_drop` class alongside the existing loot-bag spawn, entity_id tied to
+the bag's net id. Covered by scenario "air drop pushes a supply_drop
+NavObject marker". Residual: the marker has no removal companion
+(`NetPackageEntityMapMarkerRemove`) when the crate is looted or expires, so
+it outlives the loot; not implemented, noted rather than silently dropped.
+
 **Why:** `../../7dtd-research/docs/map-objects.md` section 8: air-drop crates
 are stock's one server-push nav marker (`AIDirectorAirDropComponent.RefreshCrates`
 sends `NetPackageNavObject`); every other marker is client-derived.

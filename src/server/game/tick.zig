@@ -179,6 +179,16 @@ pub fn tickAirDrop(self: *Game) void {
         if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag_nid| {
             self.fillLootBagFromTable(bag_nid, "supplyCrate", @intCast(bag_nid), self.lootStageForPlayer(cl.slot));
             self.broadcastLootSpawn(bag_nid) catch {};
+            // AIDirectorAirDropComponent.RefreshCrates (map-objects.md section
+            // 8): the one server-push nav marker case, everything else is
+            // client-derived. nav_object_classes.xml "supply_drop" is the
+            // shipped class name (map/compass/onscreen icon lookup; no display
+            // name needed). entity_id ties the marker to the bag so a future
+            // NetPackageEntityMapMarkerRemove on crate death has something to
+            // reference; not implemented yet, so the marker outlives the loot.
+            if (packages.buildNavObjectAdd(self.body_buf[8192..8704], "supply_drop", "", t.x, t.y + 2, t.z, @intCast(bag_nid))) |nb| {
+                self.broadcast("NetPackageNavObject", nb) catch {};
+            } else |_| {}
             std.debug.print("zdtd: air drop supply crate at ({d:.0},{d:.0}) hour={d}\n", .{ t.x, t.z, now });
         }
         return;

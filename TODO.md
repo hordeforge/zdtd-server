@@ -148,11 +148,12 @@ reasoning as ADR 0023's requirement evaluator). Plan:
 - [ ] T33: the challenge system (needs T32). Scored MISSING with no
       elaboration section; zero implementation, `ChallengeJournal` is a
       permanent empty stub.
-- [ ] T34: crafting never awards XP. Confirmed in `craft.zig`: ingredients
-      consumed, output deposited, `questOnCraft` called, `awardXp` never
-      called.
-- [ ] T35: air-drop crates send no compass marker (`NetPackageNavObject`);
-      stock's one server-push nav marker case.
+- [x] T34: crafting XP, re-scoped after checking the shipped `recipes.xml`
+      (17 of 639 recipes declare `craft_exp_gain`, all declare it `0`) and
+      landed against what's confirmed rather than the originally assumed
+      formula.
+- [x] T35: air-drop crates now push a `supply_drop` NavObject marker
+      alongside the loot-bag spawn.
 - [ ] T36: `BlockTrigger` C2S is relayed to nearby peers with zero server
       validation; any peer can claim any trigger fired and the server never
       checks the prefab's actual wiring.

@@ -4990,3 +4990,29 @@ test "scenario trader restock rebuilds the window lazily on open" {
     try std.testing.expectEqual(@as(u32, 1), g.sim.trader_stock[nts].last_restock_day);
     std.debug.print("PASS trader-restock: lazy window rebuild on open after reset_interval\n", .{});
 }
+
+test "scenario air drop pushes a supply_drop NavObject marker" {
+    // AIDirectorAirDropComponent.RefreshCrates (map-objects.md section 8): the
+    // one server-push nav marker case, sent alongside the loot-bag spawn.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.air_drop_interval_hours > 0);
+    g.next_air_drop_hour = 1; // already elapsed relative to worldHour()
+    cap.clear();
+    g.tickAirDrop();
+    const nav_id = packages.idOf("NetPackageNavObject").?;
+    try std.testing.expect(cap.findPkgId(nav_id) != null);
+    std.debug.print("PASS air-drop: supply_drop NavObject marker sent\n", .{});
+}
