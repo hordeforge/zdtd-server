@@ -2199,6 +2199,8 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
     try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion: reduce').matches") == null);
     try std.testing.expect(std.mem.find(u8, html, "JavaScript is required for live updates") != null);
+    try std.testing.expect(std.mem.find(u8, html, "'kick','kickall','ban'") != null);
+    try std.testing.expect(std.mem.find(u8, html, "its outcome is unknown") != null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
     try std.testing.expect(std.mem.find(u8, html, "s3cr3t") == null);
     try std.testing.expect(std.mem.find(u8, html, sess[0..]) != null);
@@ -2212,11 +2214,15 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.find(u8, ok, "name=\"token\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "type=\"password\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "maxlength=\"128\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "id=\"toggle-secret\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "token.type=shown?'password':'text'") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
     const bad = loginHintHtml(true);
     try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "aria-invalid=\"true\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-invalid") == null);
     try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);

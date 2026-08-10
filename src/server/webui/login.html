@@ -6,17 +6,17 @@
 *{box-sizing:border-box}body{font-family:var(--sans);margin:0;padding:clamp(1rem,5vw,2rem);line-height:1.5;color:var(--fg);background:var(--bg)}main{max-width:36rem}
 h1{font-size:var(--fs-title);margin:0;font-weight:600;letter-spacing:0.02em}.meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro);margin:0.15rem 0 1.25rem}
 code{background:var(--sunken);padding:0.15em 0.4em;border-radius:3px;font-family:var(--mono)}a{color:var(--acc);text-decoration:underline}
-label{display:block;font-weight:600;margin:1rem 0 0.35rem}input[type=password]{width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid var(--edge);border-radius:6px;background:var(--sunken);color:var(--fg);font-family:var(--mono);font-size:1rem}
-button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:var(--acc);color:#0a0c10;font-weight:600;cursor:pointer}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
+label{display:block;font-weight:600;margin:1rem 0 0.35rem}.secret-row{display:flex;align-items:stretch;gap:0.5rem;max-width:30rem}.secret-row input{flex:1;min-width:0}input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.5rem 0.65rem;border:1px solid var(--edge);border-radius:6px;background:var(--sunken);color:var(--fg);font-family:var(--mono);font-size:1rem}
+button{min-height:44px;min-width:5rem;margin-top:0.75rem;padding:0.5rem 1rem;border:0;border-radius:6px;background:var(--acc);color:#0a0c10;font-weight:600;cursor:pointer}.secret-row button{margin-top:0;border:1px solid var(--edge);background:transparent;color:var(--fg)}button:hover{filter:brightness(1.08)}button:active{filter:brightness(0.95)}
 a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(--warn);outline-offset:3px}
-@media(forced-colors:active){:root{--bg:Canvas;--sunken:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--edge:ButtonText;--warn:Highlight;--err:MarkText}body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
+@media(forced-colors:active){:root{--bg:Canvas;--sunken:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--edge:ButtonText;--warn:Highlight;--err:MarkText}body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],input[type=text],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}}
 </style></head>
 <body><main><h1>zdtd</h1><p class="meta">webui · sign in</p>
 <p>Sign in with the webui shared secret to set a session cookie.</p>
 <form method="post" action="/login">
 <label for="login-token">Shared secret</label>
-<input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-describedby="login-help" autofocus>
+<div class="secret-row"><input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-describedby="login-help" autofocus><button type="button" id="toggle-secret" aria-controls="login-token" aria-pressed="false">Show</button></div>
 <button type="submit">Sign in</button>
 </form>
 <p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main></body></html>
+<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>const token=document.getElementById('login-token');const toggle=document.getElementById('toggle-secret');toggle.addEventListener('click',()=>{const shown=token.type==='text';token.type=shown?'password':'text';toggle.textContent=shown?'Show':'Hide';toggle.setAttribute('aria-pressed',String(!shown));token.focus();});</script></body></html>
