@@ -102,6 +102,31 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Anti-cheat (authority first, then detection)
+
+EAC is off and clients are unmodified, so every defence is server side and
+ownership beats detection. Decision:
+[ADR 0022](docs/adr/0022-anti-cheat-architecture.md). Plan:
+[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T18-T23. Catalog, threat model and policy
+vocabulary reused from the design-only sibling `../7dtd-server-guard/docs/`.
+Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
+
+- [ ] T18: own the player inventory. ADR 0007's client-trusting C2S apply is the
+      largest cheat surface in the server (duplication, spawn-anything) and no
+      detector closes it honestly. Worth more than every task below.
+- [ ] T19: make `observe` mode honest. It counts movement rejects but still
+      applies the client position, so the name promises protection the code does
+      not provide.
+- [ ] T20: classify every detector by input authority and role; assert the
+      ceiling (`hard` requires every decision input server-derived) by test.
+- [ ] T21: guest detector feed (`on_evidence` Wasm hook), read-only events out,
+      `evidence.Event` in, severity capped by the host, never a gate.
+- [ ] T22: attribution (a finding another player induces never accrues against
+      the victim) and suppression (stalls, spawn, teleport, death, chunk
+      starvation, packet loss), so the anti-cheat cannot be used to grief.
+- [ ] T23: make the dry run produce a reviewable diff, so no enforcement rung is
+      ever enabled without a measured false-positive rate.
+
 ### Custom game modes (config-driven behaviour)
 
 **SHIPPED 2026-08-07** (ADR 0021, WORK_PLAN T11-T15). The TOML binder

@@ -26,6 +26,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0019](0019-validation-triad.md) | Validation triad: loadgen + stock client + zdtd apm | accepted |
 | [0020](0020-wasm-only-plugin-api.md) | Wasm-only plugin API | accepted |
 | [0021](0021-config-driven-game-modes.md) | Config-driven game modes: reflected binder, `Rules` struct, hooks for logic | accepted (extends 0010) |
+| [0022](0022-anti-cheat-architecture.md) | Anti-cheat: authority first; native gates, Wasm detectors, native policy | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
