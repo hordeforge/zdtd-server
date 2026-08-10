@@ -297,7 +297,7 @@ HTTP stack preference (in order):
 1. Zig 0.16 `std.http` / `std.Io` if adequate for small static + simple POST
 2. Thin internal server (accept + parse HTTP/1.1 subset) if std is awkward
 3. **Not** a second raw linux socket style copied from LiteNet unless forced;
-   prefer std abstractions (AGENTS rule 24)
+   prefer std abstractions (AGENTS rule 26)
 
 ## Config / CLI
 

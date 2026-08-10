@@ -379,7 +379,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] **Quest Craft/StayWithin**: `QuestKind`/`PhaseKind` + systems hooks; quests.xml classifiers; nav markers exhaust kinds
 - [x] Craft InvTx path + `questOnCraft` after successful recipe; stay tick on player move
 - [x] Agent prompt `docs/prompts/hardcoded-data-review.md` expanded (Bucket A/B, stock Config gap list, builtins, absolute paths, ids/enums)
-- [x] **Config XML overrides**: `--config-overrides DIR` (repeatable, filename order); xpath set/remove/append subset; `paths`+`xml_patch`+`io_fs` (`std.Io`, no raw syscalls); AGENTS rule 24
+- [x] **Config XML overrides**: `--config-overrides DIR` (repeatable, filename order); xpath set/remove/append subset; `paths`+`xml_patch`+`io_fs` (`std.Io`, no raw syscalls); AGENTS rule 26
 - [x] **Power from blocks.xml**: MaxFuel/OutputPerFuel/OutputPerCharge/OutputPerStack parsed in maxdamage; powerblocks.Resolved.applyToNode; place path applies props; electric tick fuel/SoC/timers; removed default_gen_fuel/battery_cap consts
 - [x] WORLDGEN on-the-fly stream design + TODO W0-W7
 - [x] Lock pos-key + stale timeout; solar day gate; persistent parallel pool (Io mutex/cond)

@@ -79,11 +79,13 @@ Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 
 ## Build
 
-Requires Linux and Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). The
-server's UDP, admin, WebUI, and clock paths currently use Linux APIs. Canonical
-validation and release builds use the exact compiler in `.zigversion`; `make check`
-enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck. `make release`
-additionally requires `sha256sum`.
+Requires Linux and Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). UDP
+and TCP setup use Zig 0.16 `std.Io.net`; non-blocking TCP I/O and clocks use
+thin POSIX calls contained in `src/util/` (see
+[`docs/STD_ABSTRACTIONS.md`](docs/STD_ABSTRACTIONS.md)). Canonical validation
+and release builds use the exact compiler in `.zigversion`; `make check`
+enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck.
+`make release` additionally requires `sha256sum`.
 
 One pinned dependency: the Wasm plugin runtime `zwasm` v2.4.1 (`build.zig.zon`,
 URL + hash). `zig build` fetches it into Zig's global cache on first use, so a

@@ -68,8 +68,7 @@ pub fn parseMapInfoSize(xml: []const u8) !struct { w: i32, h: i32 } {
     const key = "HeightMapSize";
     const ki = std.mem.find(u8, xml, key) orelse return error.NoHeightMapSize;
     const rest = xml[ki..];
-    const q1 = std.mem.find(u8, rest, "\"") orelse return error.BadMapInfo;
-    const after = rest[q1 + 1 ..];
+    if (std.mem.findScalar(u8, rest, '"') == null) return error.BadMapInfo;
     // may be Name" first if we hit wrong - find value=
     const vkey = "value=";
     const vi = std.mem.find(u8, rest, vkey) orelse return error.BadMapInfo;
@@ -90,7 +89,6 @@ pub fn parseMapInfoSize(xml: []const u8) !struct { w: i32, h: i32 } {
         h = h * 10 + (p[i] - '0');
     }
     if (i == h0 or w <= 0 or h <= 0) return error.BadMapInfo;
-    _ = after;
     return .{ .w = w, .h = h };
 }
 

@@ -1,7 +1,7 @@
 # Zig stdlib abstraction audit (zdtd)
 
 Living map of where we use high-level Zig 0.16 APIs vs thin posix.
-Policy: **AGENTS rule 24** (stdlib / `std.Io` over raw `std.os.linux`).
+Policy: **AGENTS rule 26** (stdlib / `std.Io` over raw `std.os.linux`).
 
 ## Target stack
 

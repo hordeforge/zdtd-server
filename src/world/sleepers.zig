@@ -82,10 +82,6 @@ pub const Store = struct {
     }
 };
 
-fn prop(body: []const u8, name: []const u8) ?[]const u8 {
-    return xml.propertyValue(body, name);
-}
-
 /// Split `a, b, c#d, e, f` on `#` into segments.
 fn nextSegment(s: []const u8, start: *usize) ?[]const u8 {
     if (start.* >= s.len) return null;
@@ -240,15 +236,15 @@ pub fn loadFromPrefabs(
             break :blk b;
         };
 
-        const size_s = prop(body, "SleeperVolumeSize") orelse continue;
-        const start_s = prop(body, "SleeperVolumeStart") orelse continue;
-        const group_s = prop(body, "SleeperVolumeGroup") orelse continue;
+        const size_s = xml.propertyValue(body, "SleeperVolumeSize") orelse continue;
+        const start_s = xml.propertyValue(body, "SleeperVolumeStart") orelse continue;
+        const group_s = xml.propertyValue(body, "SleeperVolumeGroup") orelse continue;
 
         // Prefab size for rotation (from decoration or PrefabSize prop).
         var psx = d.size_x;
         var psy = d.size_y;
         var psz = d.size_z;
-        if (prop(body, "PrefabSize")) |ps| {
+        if (xml.propertyValue(body, "PrefabSize")) |ps| {
             if (parseI32Csv3(ps)) |sz| {
                 psx = sz.x;
                 psy = sz.y;

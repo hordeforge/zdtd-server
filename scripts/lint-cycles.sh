@@ -3,8 +3,9 @@
 # src/server/ (the documented Game <-> game/* and Game <-> c2s delegation is
 # allowed; every other package must be a strict DAG).
 #
-# Method: DFS over @import edges with an on-stack mark. Packages are the
-# src/<pkg>/root.zig barrels plus the two top-level leaves (protocol, version).
+# Method: DFS over @import edges with an on-stack mark. Package edges are
+# collected recursively from every Zig source in src/<pkg>/ so leaf imports
+# cannot bypass the cycle check.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,10 +20,11 @@ declare -A EDGES
 
 pkg_edges() {
   local pkg="$1"
-  local file="src/${pkg}/root.zig"
-  [[ -f "$file" ]] || return 0
+  local dir="src/${pkg}"
+  [[ -d "$dir" ]] || return 0
   local imports
-  imports="$(rg -o '@import\("\.\./[a-z0-9_]+' "$file" 2>/dev/null | sed 's/.*\.\.\///' | sort -u || true)"
+  imports="$(rg -o '@import\("(\.\./)+[a-z0-9_]+' "$dir" --glob '*.zig' 2>/dev/null |
+    sed -E 's/.*@import\("(\.\.\/)+//' | sort -u || true)"
   for tgt in $imports; do
     tgt="${tgt%%/*}"
     if [[ "$tgt" != "$pkg" && -d "src/${tgt}" ]]; then
