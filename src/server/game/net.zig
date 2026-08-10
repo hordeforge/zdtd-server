@@ -15,6 +15,7 @@ const ln_packet = @import("../../litenet/packet.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
+const systems = @import("../../ecs/systems.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -341,7 +342,7 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
                 self.harness.counters.inc(.stale_peers_reaped);
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} peer reaped dead local_id={d} slot={d} entity={d}\n", .{ clock.wallStamp(&ts), p.local_id, c.slot, c.entity_id });
-                _ = @import("../../ecs/systems.zig").vehicleDetach(&self.sim, c.entity_id);
+                _ = systems.vehicleDetach(&self.sim, c.entity_id);
                 self.clearLocksForPeer(c.slot);
                 c.* = .{};
                 self.refreshInfoPlayers();

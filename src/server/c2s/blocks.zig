@@ -11,6 +11,7 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
+const replicate_te = @import("../replicate_te.zig");
 
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
@@ -155,9 +156,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.isStorageBlockId(place_id)) {
                 if (self.containers.get(.{ .x = b.x, .y = b.y, .z = b.z })) |cont| {
                     cont.block_id = place_id;
-                    try @import("../replicate_te.zig").broadcastStorageTe(self, cont);
+                    try replicate_te.broadcastStorageTe(self, cont);
                 } else if (self.containers.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, 8, @intCast(place_id))) |cont| {
-                    try @import("../replicate_te.zig").broadcastStorageTe(self, cont);
+                    try replicate_te.broadcastStorageTe(self, cont);
                 }
             } else if (self.storagePairId(place_id) == null) {
                 self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });

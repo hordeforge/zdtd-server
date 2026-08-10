@@ -92,6 +92,7 @@ const terrain_snapshot = @import("../world/terrain_snapshot.zig");
 const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
+const party = @import("../ecs/party.zig");
 const admin_mod = @import("admin.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const webui_mod = @import("webui.zig");
@@ -2523,7 +2524,7 @@ pub const Game = struct {
         return @import("game/social.zig").broadcastPartySnapshot(self, party_id, leader_index, voice, members, changed, action, disband);
     }
 
-    pub fn broadcastPartyRemoval(self: *Game, r: @import("../ecs/party.zig").Removal, action: u8) !void {
+    pub fn broadcastPartyRemoval(self: *Game, r: party.Removal, action: u8) !void {
         return @import("game/social.zig").broadcastPartyRemoval(self, r, action);
     }
 

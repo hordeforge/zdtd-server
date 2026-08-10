@@ -236,6 +236,28 @@ fn suggestFlag(name: []const u8) ?[]const u8 {
     return best;
 }
 
+/// `--mode NAME` (or `[mode] name`) with no matching pack. Modes resolve as
+/// `modes/<name>.toml` relative to the working directory, so list what is
+/// actually there: a wrong CWD and a typo look identical without it.
+fn fatalUnknownMode(allocator: std.mem.Allocator, name: []const u8) noreturn {
+    var buf: [256]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    if (io_fs.listFileNames(allocator, "modes")) |files| {
+        for (files) |f| {
+            const stem = if (std.mem.endsWith(u8, f, ".toml")) f[0 .. f.len - 5] else continue;
+            w.print("{s}{s}", .{ if (w.buffered().len == 0) "" else ", ", stem }) catch break;
+        }
+    } else |_| {}
+    const available = w.buffered();
+    if (available.len == 0) {
+        fatal("mode '{s}' not found (expected modes/{s}.toml under the working directory)", .{ name, name });
+    }
+    fatal(
+        "mode '{s}' not found (expected modes/{s}.toml under the working directory); available: {s}",
+        .{ name, name, available },
+    );
+}
+
 fn resolveWorldName(cli_name: ?[]const u8, config_name: []const u8) ?[]const u8 {
     if (cli_name) |name| return name;
     return if (config_name.len > 0) config_name else null;
@@ -469,7 +491,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 if (io_fs.dirExists(candidate)) {
                     map_dir = candidate;
                 } else if (world_name_cli) {
-                    usageError("world '{s}' not found under --game-dir '{s}/Data/Worlds'", .{ wn, root });
+                    // Missing directory, not a malformed option: exit 1 like the
+                    // sibling '--map'/'--game-dir' checks above (exit 2 is for
+                    // usage typos only).
+                    fatal("world '{s}' not found under --game-dir '{s}/Data/Worlds' (check --world-name)", .{ wn, root });
                 } else {
                     fatal("configured world '{s}' not found under '{s}/Data/Worlds'", .{ wn, root });
                 }
@@ -623,8 +648,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
             }
             fatal("invalid [mode] name '{s}' in zdtd.toml (use [A-Za-z0-9_] only)", .{mn});
         }
-        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| {
-            fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) });
+        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| switch (err) {
+            // Missing pack is the common operator mistake (typo, or running from
+            // the wrong CWD): name the path and what is actually there instead
+            // of leaking "FileNotFound".
+            error.FileNotFound => fatalUnknownMode(gpa, mn),
+            else => fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) }),
         };
         if (mode_owned) |*mp| {
             if (!std.mem.eql(u8, mp.name, mn)) {
