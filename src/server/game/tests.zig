@@ -94,7 +94,7 @@ test "zpv2DropName removes matching player record only" {
     try std.testing.expect(none.blob == null);
 }
 
-test "players zpv2 preserves inventory slot gaps across restart" {
+test "players zpv3 preserves every inventory slot across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -110,7 +110,8 @@ test "players zpv2 preserves inventory slot gaps across restart" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         g.sim.inventory[ps] = .{};
-        g.sim.inventory[ps].slots[7] = .{ .item_id = 2, .count = 3, .quality = 4, .meta = 5 };
+        const last = ecs.components.max_inv_slots - 1;
+        g.sim.inventory[ps].slots[last] = .{ .item_id = 2, .count = 3, .quality = 4, .meta = 5 };
         try g.savePlayers();
     }
 
@@ -124,10 +125,11 @@ test "players zpv2 preserves inventory slot gaps across restart" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[0].count);
-        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[7].item_id);
-        try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps].slots[7].count);
-        try std.testing.expectEqual(@as(u8, 4), g.sim.inventory[ps].slots[7].quality);
-        try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[7].meta);
+        const last = ecs.components.max_inv_slots - 1;
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[last].item_id);
+        try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps].slots[last].count);
+        try std.testing.expectEqual(@as(u8, 4), g.sim.inventory[ps].slots[last].quality);
+        try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[last].meta);
     }
 }
 

@@ -312,7 +312,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             std.debug.print("zdtd: restore player: truncated inventory at record {d}/{d}\n", .{ i, n });
             return;
         }
-        var inv: [32]ecs.components.InvSlot = undefined;
+        var inv: [ecs.components.max_inv_slots]ecs.components.InvSlot = undefined;
         var k: usize = 0;
         while (k < inv_n) : (k += 1) {
             const ib = data[off..][0..7];

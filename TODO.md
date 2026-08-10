@@ -5,14 +5,13 @@ blobs. Prefer leaving a gap open over shipping a fake.
 
 | Doc | Role |
 |---|---|
-| [docs/STATUS.md](docs/STATUS.md) | What works now (wins on conflict) |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
-| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7-M16 phases |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | 329 features scored WORKS/PARTIAL/MISSING with anchors |
-| [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks: what to change, how to prove it |
+| [docs/STATUS.md](docs/STATUS.md) | What works now (hub; wins on conflict) |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory · 329 features · **0 MISSING** |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phased milestones |
+| [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-08):** `make check` exit 0 · 975 unit tests · live stock-client gate **23/23** on a fresh world · playtest full suite green. The stock client renders and plays Navezgane end to end. Evidence: [docs/STATUS.md](docs/STATUS.md).
+**Gates (2026-08-09):** `make check` exit 0 · **991/991** tests · `lint-architecture: clean` · `game.zig` 2537 (≤2500 via 42 shards) · live stock-client gate **23/23**. GAP **0 MISSING**. Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
 
 ### Freeze (core playable)
 
