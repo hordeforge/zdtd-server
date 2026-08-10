@@ -168,6 +168,18 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     self.sim.inv_ledger.record(p, out_id, d, .craft);
     // Quest craft progress when objective matches recipe name.
     systems.questOnCraft(&self.sim, peer_slot, recipe.name);
+    // Craft-complete XP (EntityPlayerLocal.GiveExp(CraftCompleteData);
+    // crafting-recipes.md section 2). Only the recipes that declare
+    // craft_exp_gain grant anything: verified against the shipped V3.1.0
+    // recipes.xml that every declared value is 0 and 622 of 639 recipes
+    // declare nothing at all, so an undeclared recipe (-1 sentinel) stays at
+    // no grant rather than a guessed derivation. The stock diminishing-return
+    // divisor (per-recipe cumulative craft count) has no observable effect
+    // while every known value is 0 and is not implemented until a non-zero
+    // declared value exists to prove it against.
+    if (recipe.craft_exp_gain > 0) {
+        self.awardXp(peer_slot, @as(u64, @intCast(recipe.craft_exp_gain)) * n);
+    }
     return true;
 }
 

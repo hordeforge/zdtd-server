@@ -19,6 +19,15 @@ pub const RecipeDef = struct {
     craft_time: f32 = 1,
     always_unlocked: bool = false,
     craft_area: []const u8 = "",
+    /// recipes.xml craft_exp_gain: crafting XP granted on completion
+    /// (EntityPlayerLocal.GiveExp(CraftCompleteData); crafting-recipes.md
+    /// section 2). -1 = not declared. Verified against the shipped V3.1.0
+    /// recipes.xml: only 17 of 639 recipes declare it, and every declared
+    /// value is 0; the remaining 622 are left at -1 rather than a guessed
+    /// derivation (the doc's ingredient-cost fallback is an editor-only export
+    /// step, not something the dedicated server IL runs — items.xml ships zero
+    /// CraftComponentExp rows to derive from even if it did).
+    craft_exp_gain: i32 = -1,
     ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
     ingredient_n: u8 = 0,
 };
@@ -163,6 +172,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         if (xml.attr(clean, tag, "craft_area")) |ca| {
             def.craft_area = try arena.dupe(u8, ca);
         }
+        if (xml.attr(clean, tag, "craft_exp_gain")) |ceg| {
+            def.craft_exp_gain = xml.parseI32Prefix(ceg) orelse -1;
+        }
 
         var ii: usize = 0;
         while (ii < body.len and def.ingredient_n < max_ingredients) {
@@ -218,4 +230,26 @@ test "load stock recipes when present" {
     // forge clay recipe has ingredients
     const clay = t.byName("resourceClayLump");
     try std.testing.expect(clay != null);
+}
+
+test "craft_exp_gain parses the declared 0 and defaults undeclared to -1" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // resourceCoalBundle declares craft_exp_gain="0" in the shipped file, and
+    // (unlike resourceClayLump, which has two same-named <recipe> elements,
+    // one via workbench and one via forge) its name is unambiguous.
+    const coal = t.byName("resourceCoalBundle") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 0), coal.craft_exp_gain);
+    // Most recipes (622 of 639 in the shipped file) declare nothing; the
+    // fail-closed default must stay -1, not a guessed derivation.
+    var undeclared_found = false;
+    for (t.defs) |d| {
+        if (d.craft_exp_gain == -1) {
+            undeclared_found = true;
+            break;
+        }
+    }
+    try std.testing.expect(undeclared_found);
 }

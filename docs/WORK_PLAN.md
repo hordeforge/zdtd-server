@@ -758,35 +758,71 @@ completion and asserting the reward lands.
 
 ---
 
-## T34. Crafting never awards XP
+## T34. Crafting XP: verified near-zero in shipped data, not the bug it looked like
 
-**Why:** `../../7dtd-research/docs/crafting-recipes.md` section 2: stock's
-`GiveExp(CraftCompleteData)` grants XP per craft from `CraftExpGain` or a
-derived ingredient-cost sum. `GAP_ANALYSIS.md` only notes the XML attribute
-isn't parsed; it doesn't state the consequence. Verified:
-`src/server/game/craft.zig`'s `tryCraftRecipe` consumes ingredients, deposits
-output, records the inventory ledger, and calls `questOnCraft`, but calls
-`awardXp` nowhere in the function. Crafting is XP-dead today, independent of
-the XML-parsing gap.
+**Status: re-scoped 2026-08-10 after checking the shipped `recipes.xml`
+directly, rather than the research doc's prose alone.** The original framing
+("crafting never awards XP, real gap") turned out to be half right: the code
+gap is real, but implementing the formula as documented would not visibly
+change anything, because the number stock would grant is already zero for
+every recipe that states it.
 
-**Change:** parse `CraftExpGain` (or derive it from ingredient cost when
-absent, matching stock) and call `awardXp` on successful craft in
-`tryCraftRecipe`, at the resolved amount, same party-split path
-`killXpAward` already uses if that split applies to non-kill XP in stock
-(verify against the research doc rather than assuming it does).
+**What's confirmed:** `../../7dtd-research/docs/crafting-recipes.md` section 2
+documents `Progression.AddLevelExp(CraftExpGain / total, ...)`, where `total`
+is a cumulative per-recipe craft counter (diminishing returns on repeated
+crafts of the same recipe). `src/server/game/craft.zig`'s `tryCraft` (not
+`tryCraftRecipe`, which does not exist under that name; the internal helper is
+`fn tryCraftRecipe`) never calls `awardXp`, confirmed by reading the function.
 
-**Files:** `src/assets/recipes.zig` (parse `CraftExpGain`),
-`src/server/game/craft.zig` (`tryCraftRecipe`).
+**What changes the plan:** checked the shipped V3.1.0 `recipes.xml` directly.
+639 `<recipe>` elements total; only **17** declare `craft_exp_gain`, and
+**every one of the 17 is `0`**. The other 622 do not declare it at all. The
+research doc's "derived from ingredient `CraftComponentExp` when absent"
+clause describes an **editor-only export step**
+("The editor export twin... sums each ingredient's `ItemClass.CraftComponentExp`")
+— and `CraftComponentExp` has **zero occurrences** in the shipped `items.xml`,
+confirming that derivation bakes a value into the file at content-authoring
+time and does not run in the dedicated server's IL at all. Since the shipped
+file was evidently not re-baked for the 622 undeclared recipes, what the
+dedicated server actually grants for a craft of one of those is unresearched:
+plausibly the raw unparsed-attribute default (`-1`, per the doc's own XML-parse
+note) flows into `AddLevelExp` and gets clamped somewhere, but no clamp is
+documented for the lower bound, and guessing here risks *subtracting* XP on
+622 of 639 recipes, which would be a regression worse than granting nothing.
 
-**Grounding:** `../../7dtd-research/docs/crafting-recipes.md` section 2.
+**Change:** parse `craft_exp_gain` (present on 17 recipes, always `0` in the
+shipped file) and wire the plumbing (`AddLevelExp`-equivalent call,
+per-recipe craft counter, diminishing-returns division) so it is *correct* for
+whatever a modded or future recipe file declares — but do not invent a value
+for the 622 recipes that declare nothing. Fail closed there (grant 0, matching
+what the confirmed 17 already do), and log a note that these recipes have no
+stock-declared crafting XP rather than silently normalizing them to the same
+0 a reader can't distinguish from "unresearched."
 
-**Done when:** a successful craft measurably raises the crafter's XP.
+**Files:** `src/assets/recipes.zig` (parse `craft_exp_gain`, default absent to
+a sentinel distinct from an explicit `0`), `src/server/game/craft.zig`
+(`tryCraftRecipe`, the per-recipe craft counter and the grant call).
 
-**Proof:** a test/scenario crafting a known recipe and asserting XP increases
-by the resolved amount.
+**Grounding:** `../../7dtd-research/docs/crafting-recipes.md` section 2;
+`Data/Config/recipes.xml` (all 639 elements, the `craft_exp_gain` distribution
+above); `Data/Config/items.xml` (zero `CraftComponentExp` occurrences).
 
-**Out of scope:** the ADR 0023/0024 perk-gated crafting bonuses (crafting
-tier passives etc.); this task is only the base XP grant.
+**Done when:** the 17 recipes that declare `craft_exp_gain` grant exactly what
+they declare (0, today; correct behavior if a future/modded file sets a
+non-zero value), and the 622 that don't declare it grant 0 without a fabricated
+derivation.
+
+**Proof:** a test over the real `recipes.xml` asserting the parsed value for a
+sample of the 17 declaring recipes, and a scenario crafting an undeclared
+recipe asserting XP is unchanged (not silently non-zero from a guessed
+formula).
+
+**Out of scope:** resolving the undeclared-recipe question definitively —
+that needs an IL read of what `AddLevelExp` does with a negative or absent
+input, which is a research task (file it against
+`../../7dtd-research/docs/crafting-recipes.md` if picked up), not an
+implementation guess. The ADR 0023/0024 perk-gated crafting bonuses are
+likewise out of scope here.
 
 ---
 
