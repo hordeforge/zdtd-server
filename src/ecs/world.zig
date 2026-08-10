@@ -31,6 +31,85 @@ pub const CommandOp = command.Op;
 pub const TickLocals = locals_mod.TickLocals;
 pub const ObserverRegistry = observers_mod.Registry;
 
+/// Word-packed slot set whose `set`/`unset` are safe to call from pool worker
+/// threads (parallel AI marks dirty bits for knockback displacement).
+/// `std.StaticBitSet`'s plain word OR would tear when adjacent slot ranges
+/// share a 64-bit word, so every word is a fetchOr/fetchAnd target. Only
+/// set/unset ever run concurrently (workers); readers run on the tick thread
+/// after the parallel pass joins, so monotonic ordering is sufficient.
+pub const AtomicBits = struct {
+    const words_n = (max_entities + 63) / 64;
+
+    words: [words_n]std.atomic.Value(u64) = [_]std.atomic.Value(u64){.{ .raw = 0 }} ** words_n,
+
+    pub fn initEmpty() AtomicBits {
+        return .{};
+    }
+
+    fn wordBit(index: usize) struct { word: usize, bit: u64 } {
+        std.debug.assert(index < max_entities);
+        return .{ .word = index >> 6, .bit = @as(u64, 1) << @as(u6, @truncate(index)) };
+    }
+
+    pub fn set(self: *AtomicBits, index: usize) void {
+        const wb = wordBit(index);
+        _ = self.words[wb.word].fetchOr(wb.bit, .monotonic);
+    }
+
+    pub fn unset(self: *AtomicBits, index: usize) void {
+        const wb = wordBit(index);
+        _ = self.words[wb.word].fetchAnd(~wb.bit, .monotonic);
+    }
+
+    pub fn isSet(self: *const AtomicBits, index: usize) bool {
+        const wb = wordBit(index);
+        return (self.words[wb.word].load(.monotonic) & wb.bit) != 0;
+    }
+
+    pub fn count(self: *const AtomicBits) usize {
+        var total: usize = 0;
+        for (&self.words) |*word| total += @popCount(word.load(.monotonic));
+        return total;
+    }
+
+    /// Keep only slots also present in the StaticBitSet source. Main-thread
+    /// use only (replicate intersects its candidate copy against `alive_bits`).
+    /// Word-wise: the per-slot form ran `max_entities` atomic RMWs per tick.
+    pub fn intersectFromStatic(self: *AtomicBits, src: std.StaticBitSet(max_entities)) void {
+        for (&self.words, src.masks) |*w, m| _ = w.fetchAnd(m, .monotonic);
+    }
+
+    /// Replace contents with the StaticBitSet source. Main-thread use only
+    /// (replicate's heartbeat pass seeds candidates from `alive_bits`).
+    pub fn copyFromStatic(self: *AtomicBits, src: std.StaticBitSet(max_entities)) void {
+        for (&self.words, src.masks) |*w, m| w.store(m, .monotonic);
+    }
+
+    pub const Iterator = struct {
+        bits: *const AtomicBits,
+        word: usize = 0,
+        pending: u64 = 0,
+        base: usize = 0,
+
+        pub fn next(self: *Iterator) ?usize {
+            while (self.pending == 0) {
+                if (self.word >= words_n) return null;
+                self.pending = self.bits.words[self.word].load(.monotonic);
+                self.base = self.word << 6;
+                self.word += 1;
+            }
+            const tz = @ctz(self.pending);
+            self.pending &= self.pending - 1;
+            return self.base + @as(usize, tz);
+        }
+    };
+
+    pub fn iterator(self: *const AtomicBits, comptime opts: anytype) Iterator {
+        _ = opts;
+        return .{ .bits = self };
+    }
+};
+
 pub const EntityClass = struct {
     /// Class name for logging/debug. Must point to static/indefinite-lifetime
     /// data (comptime literal or binary-embedded table). Never assign an
@@ -128,7 +207,7 @@ pub const World = struct {
     /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
     /// per-tick replicate pass build its candidate set and clear the motion
     /// bits in O(changed) rather than O(max_entities).
-    dirty_bits: std.StaticBitSet(max_entities) = std.StaticBitSet(max_entities).initEmpty(),
+    dirty_bits: AtomicBits = AtomicBits.initEmpty(),
     /// O(1) NetId → Slot (0xFFFF = empty).
     net_to_slot: std.AutoHashMap(i32, Slot) = undefined,
     net_map_init: bool = false,
@@ -1367,4 +1446,46 @@ test "sweepCorpses never destroys more than it reports" {
     try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
     try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
     try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
+}
+
+test "AtomicBits concurrent set loses no bits" {
+    const builtin = @import("builtin");
+    if (builtin.single_threaded) return;
+    // Ranges deliberately misaligned to the 64-slot word grid (the 3/5/6/7
+    // worker splits in the parallel AI pass straddle words the same way), so
+    // two threads write the same u64 word. A plain `|=` tears; the atomic
+    // fetchOr must keep every bit.
+    const ranges = [_][2]usize{ .{ 0, 70 }, .{ 70, 150 }, .{ 150, 300 }, .{ 300, 512 } };
+    var bits = AtomicBits.initEmpty();
+    const ThreadCtx = struct {
+        bits: *AtomicBits,
+        begin: usize,
+        end: usize,
+        fn run(ctx: *const @This()) void {
+            var i = ctx.begin;
+            while (i < ctx.end) : (i += 1) ctx.bits.set(i);
+        }
+    };
+    var ctxs: [ranges.len]ThreadCtx = undefined;
+    var threads: [ranges.len]std.Thread = undefined;
+    var spawned: usize = 0;
+    var spawn_err: ?anyerror = null;
+    for (&threads, 0..) |*t, ti| {
+        ctxs[ti] = .{ .bits = &bits, .begin = ranges[ti][0], .end = ranges[ti][1] };
+        t.* = std.Thread.spawn(.{}, ThreadCtx.run, .{&ctxs[ti]}) catch |err| {
+            spawn_err = err;
+            break;
+        };
+        spawned += 1;
+    }
+    // ThreadCtx lives on this stack frame, so every thread that did start has
+    // to be joined before returning, including on the spawn-failure path.
+    for (threads[0..spawned]) |*t| t.join();
+    if (spawn_err) |err| {
+        std.debug.print("zdtd test: AtomicBits thread spawn failed: {s}\n", .{@errorName(err)});
+        return error.SkipZigTest;
+    }
+    var i: usize = 0;
+    while (i < max_entities) : (i += 1) try std.testing.expect(bits.isSet(i));
+    try std.testing.expectEqual(@as(usize, max_entities), bits.count());
 }

@@ -150,7 +150,8 @@ src/ecs/inventory.zig    systems + unit tests
 src/wire/stock_inv.zig   stock ItemValue/ItemStack/Bag/equip encode
 src/assets/items.zig     items.xml + stock type ids + builtin aliases
 src/wire/packages.zig    builders/parsers (+ native helpers)
-src/server/game.zig      package handlers + IdMapping join
+src/server/c2s/inv.zig   PlayerInventory / Bag / TE C2S handlers
+src/server/game/join.zig item IdMapping join send
 ```
 
 ## ItemActionEat (server)
@@ -165,4 +166,3 @@ Stock clients eat via local `ItemActionEat.consume` then C2S `NetPackagePlayerIn
 | Props | items.xml Action0 Class=Eat + `$foodAmountAdd` / `foodHealthAmount` / `$waterAmountAdd`; builtins food=15/7, medicine hp=25 |
 
 ECS: `Health.food` / `food_max` / `water` / `water_max` (player spawn 100).
-

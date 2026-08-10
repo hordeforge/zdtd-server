@@ -581,7 +581,8 @@ test "loadFromSlice survives malformed input" {
 }
 
 test "load stock gamestages when present" {
-    var t = loadFromPath(std.testing.allocator, stock_path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(stock_path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, stock_path);
     defer t.deinit();
     try std.testing.expect(t.spawners.len > 100);
     try std.testing.expect(t.groups.len > 100);

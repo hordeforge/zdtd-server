@@ -111,7 +111,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 if (c.peer) |peer| {
                     self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
                         self.harness.counters.inc(.net_send_errors);
-                        std.debug.print("zdtd: send survival stats failed: {s}\n", .{@errorName(err)});
+                        const n = self.harness.counters.get(.net_send_errors);
+                        if (n == 1 or n % 100 == 0) {
+                            var ts: [19]u8 = undefined;
+                            std.debug.print("zdtd: {s} send survival stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
+                        }
                     };
                 }
             } else {
@@ -140,7 +144,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 if (c.peer) |peer| {
                     self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
                         self.harness.counters.inc(.net_send_errors);
-                        std.debug.print("zdtd: send stamina stats failed: {s}\n", .{@errorName(err)});
+                        const n = self.harness.counters.get(.net_send_errors);
+                        if (n == 1 or n % 100 == 0) {
+                            var ts: [19]u8 = undefined;
+                            std.debug.print("zdtd: {s} send stamina stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
+                        }
                     };
                 }
             } else {
@@ -235,7 +243,7 @@ pub fn reapStaleLocks(self: *Game) void {
 
 pub fn reapStalePeers(self: *Game) void {
     const now = clock.monoNs();
-    const stale_ns: u64 = self.peer_stale_ms *% 1_000_000;
+    const stale_ns: u64 = self.peer_stale_ms *| 1_000_000;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!p.alive) {

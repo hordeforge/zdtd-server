@@ -173,6 +173,21 @@ pub const Store = struct {
         self.entries[hit.index] = .{};
     }
 
+    /// Erasure path (`wipeplayer`): drop every pair that references `id` on
+    /// either side, so the erased identity cannot survive in allies.zal.
+    /// Returns how many pairs were removed.
+    pub fn dropByIdentity(self: *Store, id: Id) u32 {
+        var dropped: u32 = 0;
+        for (&self.entries) |*e| {
+            if (!e.used) continue;
+            if (e.a.matches(id) or e.b.matches(id)) {
+                e.* = .{};
+                dropped += 1;
+            }
+        }
+        return dropped;
+    }
+
     pub fn count(self: *const Store) usize {
         var n: usize = 0;
         for (&self.entries) |*e| {
@@ -431,4 +446,27 @@ test "clearing a pair frees its slot" {
     try std.testing.expectEqual(@as(usize, 0), store.count());
     // Clearing an unknown pair is a no-op, not a crash.
     store.clear(a, b);
+}
+
+test "dropByIdentity erases every pair referencing the identity" {
+    var store: Store = .{};
+    const victim: Id = .{ .platform = "Steam", .id = "9001" };
+    const p1: Id = .{ .platform = "Steam", .id = "1001" };
+    const p2: Id = .{ .platform = "Steam", .id = "1002" };
+    const p3: Id = .{ .platform = "EOS", .id = "9001" }; // same id, other platform
+    try store.setStatus(victim, p1, .allies);
+    try store.setStatus(p2, victim, .outgoing_invite);
+    try store.setStatus(p3, p1, .allies); // untouched control pair
+    try std.testing.expectEqual(@as(usize, 3), store.count());
+
+    // Erasing the victim drops the two pairs it is in, on either side.
+    try std.testing.expectEqual(@as(u32, 2), store.dropByIdentity(victim));
+    try std.testing.expectEqual(@as(usize, 1), store.count());
+    // The control pair survives, and no pair still references the victim.
+    try std.testing.expectEqual(Status.allies, store.status(p3, p1));
+    try std.testing.expectEqual(Status.not_allied, store.status(victim, p1));
+    try std.testing.expectEqual(Status.not_allied, store.status(p2, victim));
+
+    // Re-erasing an identity with no pairs left is a no-op.
+    try std.testing.expectEqual(@as(u32, 0), store.dropByIdentity(victim));
 }

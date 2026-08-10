@@ -64,6 +64,9 @@ pub fn guidFromPos(pos: PosKey) [16]u8 {
 
 pub const ContainerStore = struct {
     items: [max_containers]Container = undefined,
+    /// Lookup key mirror of `items[i].pos`, written by getOrCreate. Only valid
+    /// where `used[i]`; the AoS `pos` stays authoritative for save/encode.
+    keys: [max_containers]PosKey = .{PosKey{ .x = 0, .y = 0, .z = 0 }} ** max_containers,
     used: [max_containers]bool = .{false} ** max_containers,
     n: usize = 0,
 
@@ -72,14 +75,14 @@ pub const ContainerStore = struct {
     }
 
     pub fn get(self: *ContainerStore, pos: PosKey) ?*Container {
-        // Stop after visiting every used slot: Container is ~1.5 KiB, so a
-        // full 256-slot sweep strides ~390 KiB of cache per lookup.
+        // Scan the 6 KiB key mirror, not the AoS: Container is ~500 B, so
+        // probing `items[i].pos` strided a quarter megabyte per lookup.
         var seen: usize = 0;
         var i: usize = 0;
         while (i < max_containers and seen < self.n) : (i += 1) {
             if (!self.used[i]) continue;
             seen += 1;
-            if (PosKey.eql(self.items[i].pos, pos)) return &self.items[i];
+            if (PosKey.eql(self.keys[i], pos)) return &self.items[i];
         }
         return null;
     }
@@ -90,6 +93,7 @@ pub const ContainerStore = struct {
         while (i < max_containers) : (i += 1) {
             if (self.used[i]) continue;
             self.used[i] = true;
+            self.keys[i] = pos;
             self.items[i] = .{
                 .pos = pos,
                 .block_id = block_id,
@@ -116,7 +120,7 @@ pub const ContainerStore = struct {
     pub fn remove(self: *ContainerStore, pos: PosKey) void {
         var i: usize = 0;
         while (i < max_containers) : (i += 1) {
-            if (self.used[i] and PosKey.eql(self.items[i].pos, pos)) {
+            if (self.used[i] and PosKey.eql(self.keys[i], pos)) {
                 self.used[i] = false;
                 self.items[i] = .{};
                 if (self.n > 0) self.n -= 1;

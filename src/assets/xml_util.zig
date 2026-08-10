@@ -1,6 +1,15 @@
 //! Tiny helpers for scanning stock 7DTD XML configs (no full DOM).
 
 const std = @import("std");
+const io_fs = @import("../util/io_fs.zig");
+
+/// Read a stock XML config and strip its comments in one step. Caller frees the
+/// result; the raw file bytes never escape, so callers cannot leak them.
+pub fn readCleanFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const raw = try io_fs.readFileAll(allocator, path);
+    defer allocator.free(raw);
+    return stripComments(allocator, raw);
+}
 
 /// Strip `<!-- ... -->` comments (including the format-doc block at top of quests.xml).
 pub fn stripComments(allocator: std.mem.Allocator, src: []const u8) ![]u8 {

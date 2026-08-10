@@ -158,6 +158,9 @@ pub const Writer = struct {
     /// .NET BinaryWriter.Write7BitEncodedInt
     pub fn write7BitEncodedInt(self: *Writer, value: u32) error{Overflow}!void {
         var v = value;
+        // Both truncations are provably lossless: the mask keeps the byte under
+        // 0x80 before the continuation bit, and the loop exits with v < 0x80.
+        // @truncate (not @intCast) keeps the wire encode path branch-free.
         while (v >= 0x80) {
             try self.writeByte(@truncate((v & 0x7F) | 0x80));
             v >>= 7;

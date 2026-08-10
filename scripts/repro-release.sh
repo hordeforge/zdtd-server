@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reproducibility gate: build the release configuration twice in independent
-# project-cache trees and require the resulting binaries to match byte-for-byte.
+# Reproducibility gate: build the release configuration from two independent
+# source and project-cache trees and require byte-identical binaries.
 # Automates docs/RELEASES.md step 6 (previously a manual release-gate step).
 # Invoked by `make repro` (release-check enforces the pinned toolchain first).
 set -euo pipefail
@@ -22,30 +22,48 @@ need_cmd sha256sum
 need_cmd rm
 need_cmd mkdir
 need_cmd cmp
+need_cmd mktemp
+need_cmd tar
 
-# Two scratch trees under zig-out (gitignored): each build gets its own project
-# cache and install prefix so the second build cannot reuse the first's outputs.
+# Separate source paths catch absolute-path leakage that two output prefixes
+# below one checkout cannot detect. Exclude build products and VCS metadata so
+# ambient incremental state cannot contaminate either input tree.
 # The global cache (~/.cache/zig) is intentionally shared: it holds only
 # immutable, content-addressed fetched packages (e.g. the pinned zwasm tarball),
 # so sharing it does not weaken the test.
-A=zig-out/repro-a
-B=zig-out/repro-b
-rm -rf "$A" "$B"
-mkdir -p "$A" "$B"
-trap 'rm -rf "$A" "$B"' EXIT
+# Scratch lives under zig-out (gitignored, disk-backed) rather than $TMPDIR:
+# /tmp is tmpfs on many hosts, and two ReleaseSafe trees plus their project
+# caches are gigabytes that must not land in RAM. The two paths still differ in
+# length, which is what makes absolute-path leakage detectable.
+mkdir -p "$ROOT/zig-out"
+scratch="$(mktemp -d "$ROOT/zig-out/zdtd-repro.XXXXXXXX")"
+trap 'rm -rf "$scratch"' EXIT
+A="$scratch/a"
+B="$scratch/longer-build-path-b"
+mkdir -p "$A/src" "$B/src"
+for tree in "$A/src" "$B/src"; do
+  tar -cf - build.zig build.zig.zon .zigversion src assets | tar -xf - -C "$tree"
+done
 
+# Both halves go through the same script `make release` uses, so this gate
+# cannot pass on a configuration (flags, locale, timezone, source epoch) that
+# differs from the one the shipped artifact is built with. RELEASE_TARGET is
+# inherited from the caller's environment; the script owns the default.
 build_release() {
-  "$ZIG" build \
-    -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline \
-    --cache-dir "$1/cache" \
-    --prefix-exe-dir "$1/out"
+  local tree="$1"
+  (
+    cd "$tree/src"
+    ZIG="$ZIG" bash "$ROOT/scripts/release-build.sh" \
+      --cache-dir "$tree/cache" \
+      --prefix "$tree/install"
+  )
 }
 
 build_release "$A"
 build_release "$B"
 
-ba="$A/out/zdtd"
-bb="$B/out/zdtd"
+ba="$A/install/bin/zdtd"
+bb="$B/install/bin/zdtd"
 test -f "$ba" || { echo "repro-release: $ba missing after build" >&2; exit 1; }
 test -f "$bb" || { echo "repro-release: $bb missing after build" >&2; exit 1; }
 

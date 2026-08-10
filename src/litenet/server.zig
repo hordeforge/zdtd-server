@@ -14,6 +14,9 @@ pub const Server = struct {
     next_local_id: i32 = 1,
     /// Stock ServerPassword: compared to LiteNet Connect key (NetDataWriter string in request Data).
     server_password: []const u8 = "",
+    /// Rejected ConnectRequests since start. Only the log is sampled off this;
+    /// the count itself stays exact so a brute force is still visible.
+    connect_rejects: u64 = 0,
 
     pub fn listen(self: *Server, port: u16) !void {
         self.port = try self.sock.openAndBind(port);
@@ -50,6 +53,12 @@ pub const Server = struct {
             // Stock ConnectionRequestCheck always: retransmits from an existing peer
             // must still present the ServerPassword (do not skip auth on retransmit).
             if (!packet.connectKeyMatches(req.data, self.server_password)) {
+                self.connect_rejects +|= 1;
+                // Sampled like the other hostile-input logs (game/net.zig
+                // logPayloadErr): this path is reachable by any unauthenticated
+                // source, and a password brute force would otherwise buy two
+                // blocking stderr writes per datagram on the tick thread.
+                const noisy = self.connect_rejects == 1 or self.connect_rejects % 100 == 0;
                 var rej_buf: [32]u8 = undefined;
                 const rej = try packet.writeDisconnect(
                     &rej_buf,
@@ -60,12 +69,15 @@ pub const Server = struct {
                 self.sock.sendTo(rej, &src) catch |err| {
                     // Reject still stands (no peer allocated); log so a silent
                     // UDP send failure is not mistaken for "client never tried".
-                    std.debug.print(
+                    if (noisy) std.debug.print(
                         "zdtd: connect reject send failed remote_peer_id={d}: {s}\n",
                         .{ req.peer_id, @errorName(err) },
                     );
                 };
-                std.debug.print("zdtd: connect rejected (bad password) remote_peer_id={d}\n", .{req.peer_id});
+                if (noisy) std.debug.print(
+                    "zdtd: connect rejected (bad password) remote_peer_id={d} n={d}\n",
+                    .{ req.peer_id, self.connect_rejects },
+                );
                 return .none;
             }
             // Retransmitted ConnectRequest from an already-accepted peer: only re-send Accept.

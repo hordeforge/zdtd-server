@@ -35,12 +35,9 @@ your .wasm                        zdtd
 ```
 
 Export only the hooks you need. A missing export means that hook is not
-registered, and costs nothing at runtime. Additional hooks: `on_admin_command`
-(`ptr,len,out_ptr,out_cap)->i32`, first handler with bytes wins; `on_chat`
-(`sender,msg_ptr,msg_len,out_ptr,out_cap)->i32`, <0 deny, 0 keep, >0 rewrite
-(first responder wins; bad UTF-8 rewrite is treated as deny); `on_player_login`
-(`name_ptr,name_len,out_ptr,out_cap)->i32`, runs after name sanitization and
-before the identity ban, first deny wins (traps = allow).
+registered, and costs nothing at runtime. Every signature is listed under
+[Hooks](#hooks) below; export a hook with the wrong signature and the call
+fails, which disables your module.
 
 ## Enabling a plugin
 
@@ -60,13 +57,31 @@ game events (death, kill, block damage, quest completion).
 
 ## Host imports
 
-The host provides exactly three functions, all in the `zdtd` namespace:
+The host provides exactly three functions, all in the `zdtd` module namespace.
+The import **field** names are bare (`log`, not `zdtd_log`); importing
+`zdtd.zdtd_log` fails to instantiate.
 
 | Import | Signature | Notes |
 |---|---|---|
-| `zdtd_log` | `(level: i32, ptr: i32, len: i32) -> ()` | Write `len` bytes at `ptr` to the server log; `level` 0..3 (debug/info/warn/err) |
-| `zdtd_tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
-| `zdtd_queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 on accept, 1 on malformed input |
+| `zdtd` . `log` | `(level: i32, ptr: i32, len: i32) -> ()` | Write `len` bytes at `ptr` to the server log; `level` 0..3 (debug/info/warn/err). Sanitized and truncated to 200 bytes |
+| `zdtd` . `tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
+| `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
+
+You choose the local symbol name; only the module and field names have to
+match. In C:
+
+```c
+__attribute__((import_module("zdtd"), import_name("log")))
+extern void zdtd_log(int level, int ptr, int len);
+__attribute__((import_module("zdtd"), import_name("tick")))
+extern long long zdtd_tick(void);
+__attribute__((import_module("zdtd"), import_name("queue")))
+extern int zdtd_queue(int ptr, int len);
+```
+
+In Rust the same table is `#[link(wasm_import_module = "zdtd")] extern "C" { fn
+log(level: i32, ptr: i32, len: i32); }`; in Zig, `extern "zdtd" fn log(i32, i32,
+i32) void;`.
 
 Every host call reads flat bytes from your linear memory at the offset and
 length you declare. There is no filesystem, no socket, no thread and no clock
@@ -92,10 +107,15 @@ directly: everything goes through this queue.
 
 These are enforced by the runtime, not by convention.
 
-1. **You get a fuel budget per call.** Every call runs under an instruction
-   budget. Exhaust it and the call ends with `OutOfFuel`, your plugin is
-   disabled, and the server logs which hook and module. An infinite loop costs
-   one tick's budget, not the server. This is verified, not aspirational.
+1. **You get one fuel budget for the whole instance, not per call.** Fuel is
+   armed once at instantiate (default 100 000 000) and decremented per
+   instruction for the life of the process; it is never re-armed between hooks.
+   Exhaust it and the call ends with `OutOfFuel`, your plugin is disabled, and
+   the server logs which hook and module. An infinite loop costs one tick, not
+   the server. This is verified, not aspirational. Budget accordingly: at
+   20 Hz, a plugin spending 10 000 fuel per tick exhausts the default budget in
+   about eight minutes, so `on_tick` work has to be genuinely small; an operator
+   can raise `[plugin] fuel` in zdtd.toml.
 2. **You get a linear-memory cap.** Ask for more and instantiation fails.
 3. **You only get the host functions your capabilities allow.** There is no
    filesystem, no socket, no thread and no clock beyond the tick time the host
@@ -121,14 +141,14 @@ the offset past the call.
 
 ## Hooks
 
-Observe / lifecycle hooks (all `void`):
+Observe / lifecycle hooks (all return `void`):
 
-| Export | When | Notes |
+| Export | Signature | When |
 |---|---|---|
-| `on_enable` | once, at enable | Register interest, read config, allocate |
-| `on_tick` | late in each tick, after sim and replicate | Keep it cheap; it runs 20 times a second |
-| `on_player_join` | a player's first join | Receives the peer slot and entity id |
-| `on_shutdown` | once, at shutdown | Flush anything you own |
+| `on_enable` | `() -> ()` | once, at enable: register interest, read config, allocate |
+| `on_tick` | `() -> ()` | late in each tick, after sim and replicate; keep it cheap, it runs 20 times a second |
+| `on_player_join` | `(peer_slot: i32, entity_id: i32) -> ()` | a player's first join |
+| `on_shutdown` | `() -> ()` | once, at shutdown: flush anything you own |
 
 Event hooks (T15, return a verdict):
 
@@ -146,12 +166,33 @@ default holds. Verdicts are taken in plugin load order, first non-zero wins;
 a plugin that traps or exhausts its fuel is disabled and reports keep, so one
 broken module cannot veto the game.
 
+Request/reply hooks (the host copies a payload into your memory and reads a
+reply back out of it):
+
+| Export | Signature | Return |
+|---|---|---|
+| `on_admin_command` | `(cmd_ptr, cmd_len, out_ptr, out_cap: i32) -> i32` | `>0` bytes of reply written at `out_ptr` (handled); `<=0` not handled, so the next plugin, then core's `unknown`, gets a turn |
+| `on_chat` | `(sender, msg_ptr, msg_len, out_ptr, out_cap: i32) -> i32` | `<0` deny the message; `0` keep it unchanged; `>0` bytes of the rewritten body at `out_ptr`. A rewrite that is not valid chat text is treated as deny |
+| `on_player_login` | `(peer_slot, name_ptr, name_len, out_ptr, out_cap: i32) -> i32` | `0` allow; non-zero deny, where the magnitude is the number of reason bytes written at `out_ptr` (`-4` and `4` both mean "deny, 4 bytes of reason"). A deny with 0 bytes reads back as "denied" |
+
+For all three the first plugin that responds wins, and a trap or fuel
+exhaustion disables that module while the request proceeds as if it had not
+been exported (login stays open, chat is kept, the command falls through).
+`on_player_login` runs after the name is sanitized and before the identity ban
+check.
+
+The payload the host hands you lives in your own linear memory, at an offset the
+host reserves from freshly grown pages, so it does not overlap your statics or
+stack. Do not retain either offset past the call.
+
 `on_tick` running at 20 Hz is the one to respect. A hook that burns its budget
 every tick will be disabled, which is the system working, but your plugin still
 stops.
 
 Fixtures exercising the full surface: `assets/fixtures/plugin_rules.c`
-(deny/double verdicts) and `assets/fixtures/plugin_trap.c` (trapping hook).
+(deny/double verdicts), `assets/fixtures/plugin_trap.c` (trapping hook),
+`plugin_admin.c`, `plugin_chat.c` and `plugin_login.c` (the request/reply
+hooks), plus `mods/example_chat_filter/` as a drop-in mod layout.
 
 ## Building one
 

@@ -38,9 +38,6 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
         if (eid == 0) continue;
         _ = self.sim.depositItem(slot, eid, stacks[i].count);
     }
-    if (self.sim.inventory[slot].countItem(1) == 0 and self.sim.inventory[slot].slots[0].count == 0) {
-        _ = self.sim.depositItem(slot, 1, 5);
-    }
 }
 
 pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {

@@ -259,7 +259,9 @@ pub const BanList = struct {
 /// ConsoleCmdBan list sub-command (asm.il 210188+).
 pub fn writeBanList(w: *std.Io.Writer, list: *const BanList) !void {
     try w.writeAll("Ban list entries:\n");
-    try w.writeAll("  Banned until - UserID (name) - Reason\n");
+    // Timestamps are UTC (formatUnix applies no zone offset); say so in the
+    // header, since an operator reading a bare stamp assumes local time.
+    try w.writeAll("  Banned until (UTC) - UserID (name) - Reason\n");
     for (list.entries[0..list.n]) |*e| {
         var tb: [24]u8 = undefined;
         try w.print("  {s} - {s} ({s}) - {s}\n", .{
@@ -597,7 +599,7 @@ test "ban list output matches stock header block" {
     _ = l.add("Bob", 1700000000, "");
     var buf: [512]u8 = undefined;
     const out = try render(&buf, writeBanList, .{&l});
-    try std.testing.expect(std.mem.startsWith(u8, out, "Ban list entries:\n  Banned until - UserID (name) - Reason\n"));
+    try std.testing.expect(std.mem.startsWith(u8, out, "Ban list entries:\n  Banned until (UTC) - UserID (name) - Reason\n"));
     try std.testing.expect(std.mem.find(u8, out, "2023-11-14 22:13:20 - Alice (Alice) - griefing\n") != null);
     // Stock prints "-unknown-" where a field is missing, never an empty column.
     try std.testing.expect(std.mem.find(u8, out, "- Bob (Bob) - -unknown-\n") != null);

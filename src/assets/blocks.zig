@@ -161,9 +161,7 @@ pub fn loadFromPath(
     id_by_name: IdByNameFn,
     ctx: ?*anyopaque,
 ) !BlockTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);

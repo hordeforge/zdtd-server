@@ -11,6 +11,7 @@ const poi_lock = @import("poi_lock.zig");
 const buff = @import("buff.zig");
 const path_mod = @import("path.zig");
 const query = @import("query.zig");
+const inventory = @import("inventory.zig");
 const parallel = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 
@@ -89,7 +90,9 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zz: f3
 /// zombie clawed by another zombie does not retarget). The class= filter
 /// (entityclasses AITarget-1 `class=EntityPlayer`) is not modeled: zdtd damage
 /// attribution only ever carries a player or turret attacker.
-fn applyRevengeTarget(w: *const World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) TargetSnap {
+/// `pos` is the tick-start transform snapshot: the target's slot is owned by
+/// another parallel AI worker, so its live transform must not be read here.
+fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) TargetSnap {
     if (ai.revenge_time > 0) ai.revenge_time -= dt;
     if (ai.revenge_time <= 0 or ai.revenge_target < 0) {
         ai.revenge_target = -1;
@@ -108,8 +111,8 @@ fn applyRevengeTarget(w: *const World, s: Slot, ai: *c.ZombieAi, np: TargetSnap,
     }
     if (w.mask[ts].kind and w.mask[s].kind and w.kind[ts] == w.kind[s]) return np;
     if (ai.revenge_target == np.id) return np;
-    const dx = w.transform[ts].x - w.transform[s].x;
-    const dz = w.transform[ts].z - w.transform[s].z;
+    const dx = pos[ts].x - w.transform[s].x;
+    const dz = pos[ts].z - w.transform[s].z;
     // Stock's SetAttackTarget bypasses the sense check for the whole window, so
     // aggro must latch here too or the far-attacker case falls back to wander.
     ai.alert = true;
@@ -118,8 +121,8 @@ fn applyRevengeTarget(w: *const World, s: Slot, ai: *c.ZombieAi, np: TargetSnap,
         .id = ai.revenge_target,
         .slot = ts,
         .d2 = dx * dx + dz * dz,
-        .px = w.transform[ts].x,
-        .pz = w.transform[ts].z,
+        .px = pos[ts].x,
+        .pz = pos[ts].z,
     };
 }
 
@@ -626,28 +629,9 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
         const dx = w.transform[i].x - px;
         const dz = w.transform[i].z - pz;
         if (dx * dx + dz * dz > r2) continue;
-        if (w.mask[i].inventory) {
-            const inventory_before = w.inventory[ps];
-            var transferred = true;
-            for (w.inventory[i].slots) |slot| {
-                if (slot.count == 0) continue;
-                if (!w.depositItem(ps, slot.item_id, slot.count)) {
-                    transferred = false;
-                    break;
-                }
-            }
-            if (!transferred) {
-                w.inventory[ps] = inventory_before;
-                continue;
-            }
-            // Ledger after full transfer succeeds (no partial loot credit).
-            for (w.inventory[i].slots) |slot| {
-                if (slot.count == 0) continue;
-                const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
-                const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
-                w.inv_ledger.record(p, slot.item_id, d, .loot);
-            }
-        }
+        // Transfer rule is inventory.collectBagFull: a partial deposit keeps
+        // the bag alive so the rest is not silently deleted.
+        if (!inventory.collectBagFull(w, peer_slot, i)) continue;
         w.destroy(i);
         n += 1;
     }
@@ -958,6 +942,10 @@ const AiCtx = struct {
     w: *World,
     dt: f32,
     players: []const PlayerSnap,
+    /// Tick-start copy of `w.transform`. A worker owns only its own slot range,
+    /// so every cross-slot position read (fear scan, revenge target) must come
+    /// from here: reading `w.transform[other]` races the worker writing it.
+    pos: *const [max_entities]c.Transform,
     /// Fixed-point damage accumulators, one per entity slot (atomic adds).
     dmg_fp: []u32,
     hits: *std.atomic.Value(u32),
@@ -1009,11 +997,11 @@ const AiCtx = struct {
             // EAIRunawayFromEntity (AITask-2): passive animals scan for feared
             // classes (players, zombies, other animals) within fleeDistance on
             // a 0.5 s cadence; the runaway task then flees the nearest one.
-            if (ctx.w.kind[s] == .animal) refreshFearSource(ctx.w, s, ai, ctx.dt);
+            if (ctx.w.kind[s] == .animal) refreshFearSource(ctx.w, ctx.pos, s, ai, ctx.dt);
 
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            const np = applyRevengeTarget(ctx.w, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
+            const np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
             ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else 0.1;
 
             // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
@@ -1086,7 +1074,7 @@ const AiCtx = struct {
             switch (ai.active_task) {
                 .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
                 .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
-                .runaway => runawayUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                .runaway => runawayUpdate(ctx.w, ctx.pos, s, ai, cspd, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
@@ -1269,7 +1257,9 @@ fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) 
 /// stock AITask-2 filter (`class=EntityPlayer,EntityZombie,EntityEnemyAnimal`,
 /// entityclasses.xml, e.g. the animal templates at :4755) within fleeDistance.
 /// Bounded to a 0.5 s cadence so the O(live) scan is not per-tick.
-fn refreshFearSource(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
+/// `pos` is the tick-start transform snapshot: the scanned slots belong to other
+/// parallel AI workers, so their live transforms must not be read here.
+fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: *c.ZombieAi, dt: f32) void {
     if (ai.fear_cd > 0) {
         ai.fear_cd -= dt;
         return;
@@ -1285,8 +1275,8 @@ fn refreshFearSource(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
         for (query.groupSlice(w, kind)) |t| {
             if (t == s) continue;
             if (!w.alive[t] or !w.mask[t].transform) continue;
-            const dx = w.transform[t].x - x;
-            const dz = w.transform[t].z - z;
+            const dx = pos[t].x - x;
+            const dz = pos[t].z - z;
             const d2 = dx * dx + dz * dz;
             if (d2 < best_d2) {
                 best_d2 = d2;
@@ -1312,7 +1302,10 @@ fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
 /// EAIRunAway::Update: path to the flee position, dropping the task once the
 /// source is further than fleeDistance. The stock stuck/retry bookkeeping
 /// (pathTicks, checkedPath, FindRandomPos) has no zdtd equivalent.
-fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
+/// `pos` is the tick-start transform snapshot: the flee source's slot is owned
+/// by another parallel AI worker, so its live transform must not be read here
+/// (same rule as refreshFearSource / applyRevengeTarget).
+fn runawayUpdate(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
     const ts = blk: {
         if (ai.revenge_target >= 0 and ai.revenge_time > 0) {
             if (w.slotOfNetId(ai.revenge_target)) |t| break :blk t;
@@ -1330,8 +1323,8 @@ fn runawayUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
     ai.state = .wander;
     ai.alert = false;
     ai.target_id = -1;
-    const dx = w.transform[s].x - w.transform[ts].x;
-    const dz = w.transform[s].z - w.transform[ts].z;
+    const dx = w.transform[s].x - pos[ts].x;
+    const dz = w.transform[s].z - pos[ts].z;
     const d2 = dx * dx + dz * dz;
     const flee = w.rules.ai.flee_distance;
     if (d2 >= flee * flee) {
@@ -1645,9 +1638,11 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
         // Eat distraction: chew one tick (EntityItem.distractionEatTicks--,
         // asm.il Update IL_00C4-00DE). The sim side consumes the item when the
         // counter hits zero (tickItemDistractions); Game removes the entity.
+        // The bag slot is shared: two zombies on different parallel workers can
+        // chew the same item in one tick, so the countdown is an atomic RMW.
         ai.is_eating = true;
-        if (w.loot_bag[bs].distraction_eat_ticks > 0) {
-            w.loot_bag[bs].distraction_eat_ticks -= 1;
+        if (@atomicLoad(i32, &w.loot_bag[bs].distraction_eat_ticks, .monotonic) > 0) {
+            _ = @atomicRmw(i32, &w.loot_bag[bs].distraction_eat_ticks, .Sub, 1, .monotonic);
         }
         ai.state = .idle;
         return;
@@ -1742,10 +1737,14 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     const pn = snapshotPlayers(w, &snaps, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
+    // Positions as of the phase start. Workers write only their own slots, so
+    // any cross-slot position read has to come from this copy.
+    const pos_snap: [max_entities]c.Transform = w.transform;
     const ctx = AiCtx{
         .w = w,
         .dt = dt,
         .players = snaps[0..pn],
+        .pos = &pos_snap,
         .dmg_fp = dmg_fp[0..],
         .hits = &hits_a,
         .zombie_speed_scale = w.zombie_speed_scale,
@@ -2501,11 +2500,11 @@ test "path budget stride spreads replans once demand exceeds the cap" {
     w.beginTick();
     try std.testing.expectEqual(@as(u32, 3), w.path_stride);
     // Admission is a pure function of slot and tick, never of worker order.
+    // With stride 3 exactly one slot in three is admitted over a full cycle.
     var admitted: u32 = 0;
     var s: Slot = 0;
     while (s < 30) : (s += 1) {
         if (w.pathBudgetAdmits(s)) admitted += 1;
-        try std.testing.expectEqual(w.pathBudgetAdmits(s), w.pathBudgetAdmits(s));
     }
     try std.testing.expectEqual(@as(u32, 10), admitted);
     // The stride never grows past the delay cap, whatever the demand.

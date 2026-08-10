@@ -66,32 +66,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         self.harness.counters.inc(.bounds_rejects);
                         return true;
                     }
-                    if (self.sim.mask[ps].inventory and self.sim.mask[bs].inventory) {
-                        // Same transfer rule as systems.collectLootNear: only a
-                        // full deposit destroys the bag; a partial one restores
-                        // the player inventory and keeps the bag alive so the
-                        // rest is not silently deleted.
-                        const inventory_before = self.sim.inventory[ps];
-                        var transferred = true;
-                        for (self.sim.inventory[bs].slots) |slot| {
-                            if (slot.count == 0 or slot.item_id == 0) continue;
-                            if (!self.sim.depositItem(ps, slot.item_id, slot.count)) {
-                                transferred = false;
-                                break;
-                            }
-                        }
-                        if (!transferred) {
-                            self.sim.inventory[ps] = inventory_before;
-                            return true;
-                        }
-                        for (self.sim.inventory[bs].slots) |slot| {
-                            if (slot.count == 0 or slot.item_id == 0) continue;
-                            const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
-                            const p: u16 = if (c.slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(c.slot);
-                            self.sim.inv_ledger.record(p, slot.item_id, d, .loot);
-                        }
-                        self.sim.markDirty(ps, .{ .inv = true });
-                    }
+                    // Full deposit only: a partial one restores the player
+                    // inventory and keeps the bag alive (ecs.inventory
+                    // collectBagFull, the one transfer rule shared with
+                    // systems.collectLootNear).
+                    if (!ecs.inventory.collectBagFull(&self.sim, c.slot, bs)) return true;
                 }
                 if (self.sim.alive[bs]) self.sim.destroy(bs);
                 if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {

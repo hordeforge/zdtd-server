@@ -63,24 +63,42 @@ const density_p: noise_mod.FbmParams = .{ .octaves = 4, .frequency = 0.02, .gain
 /// column has a defined height.
 pub const bedrock_h: i32 = 3;
 
-fn lerp(a: f32, b: f32, t: f32) f32 {
+fn lerp(comptime lanes: comptime_int, a: @Vector(lanes, f32), b: @Vector(lanes, f32), t: @Vector(lanes, f32)) @Vector(lanes, f32) {
     return a + (b - a) * t;
 }
 
-/// Trilinear blend of the 8 cell corners. Corner order is
-/// `x + z*2 + y*4` (x0z0y0, x1z0y0, x0z1y0, x1z1y0, then the same at y1) and
-/// the nesting is x, then z, then y.
+/// Trilinear blend of the 8 cell corners, evaluated for `lanes` X positions at
+/// once. Corner order is `x + z*2 + y*4` (x0z0y0, x1z0y0, x0z1y0, x1z1y0, then
+/// the same at y1) and the nesting is x, then z, then y.
 ///
 /// This must stay the ONLY trilinear evaluation in the file: the chunk fill and
 /// the `density()` oracle both call it, and changing the nesting in one place
-/// would break their bit-exactness (and with it the no-seam guarantee).
-fn trilerp(c: [8]f32, tx: f32, ty: f32, tz: f32) f32 {
-    const y0z0 = lerp(c[0], c[1], tx);
-    const y0z1 = lerp(c[2], c[3], tx);
-    const y1z0 = lerp(c[4], c[5], tx);
-    const y1z1 = lerp(c[6], c[7], tx);
-    return lerp(lerp(y0z0, y0z1, tz), lerp(y1z0, y1z1, tz), ty);
+/// would break their bit-exactness (and with it the no-seam guarantee). The
+/// chunk fill runs it at `lanes = cell_w` (one coarse cell row per call) and the
+/// oracle at `lanes = 1`; every lane executes the identical scalar op sequence
+/// on its own tx, so widening cannot move a bit.
+fn trilerp(comptime lanes: comptime_int, c: [8]f32, tx: @Vector(lanes, f32), ty: f32, tz: f32) @Vector(lanes, f32) {
+    const V = @Vector(lanes, f32);
+    const tzv: V = @splat(tz);
+    const tyv: V = @splat(ty);
+    const y0z0 = lerp(lanes, @splat(c[0]), @splat(c[1]), tx);
+    const y0z1 = lerp(lanes, @splat(c[2]), @splat(c[3]), tx);
+    const y1z0 = lerp(lanes, @splat(c[4]), @splat(c[5]), tx);
+    const y1z1 = lerp(lanes, @splat(c[6]), @splat(c[7]), tx);
+    return lerp(lanes, lerp(lanes, y0z0, y0z1, tzv), lerp(lanes, y1z0, y1z1, tzv), tyv);
 }
+
+/// Single-position `trilerp` (the oracle / height-scan shape).
+fn trilerp1(c: [8]f32, tx: f32, ty: f32, tz: f32) f32 {
+    return trilerp(1, c, .{tx}, ty, tz)[0];
+}
+
+/// Fractional X offsets inside a coarse cell: lane dx holds `dx / cell_w`.
+const tx_lanes: @Vector(cell_w, f32) = blk: {
+    var v: [cell_w]f32 = undefined;
+    for (&v, 0..) |*t, dx| t.* = @as(f32, @floatFromInt(dx)) / @as(f32, @floatFromInt(cell_w));
+    break :blk v;
+};
 
 /// `y_clamped_gradient` + weighted 3D fBm. Both terms are clamped to [-1,1]:
 /// fBm is not analytically bounded by 1, and the clamps are what make
@@ -145,7 +163,7 @@ const Sampler = struct {
 
     fn densityAt(self: *const Sampler, lx: i32, y: i32, lz: i32) f32 {
         const c = self.corners(@divFloor(lx, cell_w), @divFloor(y, cell_h), @divFloor(lz, cell_w));
-        return trilerp(
+        return trilerp1(
             c,
             @as(f32, @floatFromInt(@mod(lx, cell_w))) / @as(f32, @floatFromInt(cell_w)),
             @as(f32, @floatFromInt(@mod(y, cell_h))) / @as(f32, @floatFromInt(cell_h)),
@@ -243,16 +261,12 @@ pub const WorldGen = struct {
                 }
             }
         }
-        return trilerp(
+        return trilerp1(
             c,
             @as(f32, @floatFromInt(wx - ix * cell_w)) / @as(f32, @floatFromInt(cell_w)),
             @as(f32, @floatFromInt(wy - iy * cell_h)) / @as(f32, @floatFromInt(cell_h)),
             @as(f32, @floatFromInt(wz - iz * cell_w)) / @as(f32, @floatFromInt(cell_w)),
         );
-    }
-
-    fn isSolid(d: f32, y: i32) bool {
-        return d > 0 or y < bedrock_h;
     }
 
     /// Surface height at world block (wx, wz): topmost solid Y, matching stock
@@ -340,16 +354,28 @@ pub const WorldGen = struct {
                         while (dz < cell_w) : (dz += 1) {
                             const lz = ck * cell_w + dz;
                             const tz = @as(f32, @floatFromInt(dz)) / @as(f32, @floatFromInt(cell_w));
-                            var dx: i32 = 0;
-                            while (dx < cell_w) : (dx += 1) {
-                                const lx = ci * cell_w + dx;
-                                const tx = @as(f32, @floatFromInt(dx)) / @as(f32, @floatFromInt(cell_w));
-                                const col: usize = @intCast(lx + lz * chunk_size);
-                                const solid = isSolid(trilerp(c, tx, ty, tz), y);
-                                blocks[col + @as(usize, @intCast(y)) * 256] =
-                                    if (solid) assignids.terr_stone else assignids.air;
-                                if (solid and y > heights[col]) heights[col] = @intCast(y);
-                            }
+                            // The cell's X run is contiguous in the plane (index
+                            // is lx + lz*16 + y*256), so one vector trilerp fills
+                            // cell_w blocks with a single store.
+                            const d = trilerp(cell_w, c, tx_lanes, ty, tz);
+                            const solid: @Vector(cell_w, bool) = if (y < bedrock_h)
+                                @splat(true)
+                            else
+                                d > @as(@Vector(cell_w, f32), @splat(0));
+                            const col: usize = @intCast(ci * cell_w + lz * chunk_size);
+                            blocks[col + @as(usize, @intCast(y)) * 256 ..][0..cell_w].* = @select(
+                                u32,
+                                solid,
+                                @as(@Vector(cell_w, u32), @splat(assignids.terr_stone)),
+                                @as(@Vector(cell_w, u32), @splat(assignids.air)),
+                            );
+                            const hy: u8 = @intCast(y);
+                            // Column heights: vector max/select per X run, the
+                            // same lane shape as the solid store above. Scalar
+                            // equivalent: if (solid[dx] and hy > h) h = hy.
+                            const h_run: @Vector(cell_w, u8) = heights[col..][0..cell_w].*;
+                            const hyv: @Vector(cell_w, u8) = @splat(hy);
+                            heights[col..][0..cell_w].* = @select(u8, solid, @max(h_run, hyv), h_run);
                         }
                     }
                 }
@@ -430,6 +456,25 @@ test "worldgen generateChunkBlocks air above surface" {
     try std.testing.expect(blocks[@intCast(0 + 0 * 16 + @as(i32, h) * 256)] != assignids.air);
     if (h + 1 < 256) {
         try std.testing.expectEqual(@as(u32, assignids.air), blocks[@intCast(0 + 0 * 16 + @as(i32, h + 1) * 256)]);
+    }
+}
+
+test "trilerp lane width does not move a bit" {
+    // The chunk fill runs trilerp at cell_w lanes and the density oracle at 1.
+    // Bit-exact agreement is what keeps a fill identical to the oracle, so pin
+    // it directly instead of only through the solidity sign.
+    var prng = std.Random.DefaultPrng.init(0x5EED);
+    const rnd = prng.random();
+    var trial: usize = 0;
+    while (trial < 256) : (trial += 1) {
+        var c: [8]f32 = undefined;
+        for (&c) |*v| v.* = (rnd.float(f32) - 0.5) * 200.0;
+        const ty = rnd.float(f32);
+        const tz = rnd.float(f32);
+        const wide = trilerp(cell_w, c, tx_lanes, ty, tz);
+        inline for (0..cell_w) |dx| {
+            try std.testing.expectEqual(trilerp1(c, tx_lanes[dx], ty, tz), wide[dx]);
+        }
     }
 }
 
@@ -577,8 +622,11 @@ test "worldgen heightAt agrees with fillHeights" {
 test "biome field is deterministic, in range and region-contiguous" {
     var g = WorldGen.init(42);
     g.biome_n = 7;
-    // Same seed + coordinate → same biome.
-    try std.testing.expectEqual(g.biomeAt(100, 200), g.biomeAt(100, 200));
+    // Same seed + coordinate → same biome: two independent instances from the
+    // same seed must agree (a self-comparison would pass for any implementation).
+    var g2 = WorldGen.init(42);
+    g2.biome_n = 7;
+    try std.testing.expectEqual(g.biomeAt(100, 200), g2.biomeAt(100, 200));
     // In range.
     for ([_]f32{ -5000, -1, 0, 1, 5000 }) |x| {
         for ([_]f32{ -5000, 0, 5000 }) |z| {

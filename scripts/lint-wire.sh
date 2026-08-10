@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Wire / project lint for zdtd.
 # ast-grep has no Zig language support, so this uses ripgrep heuristics.
-# Exit 0 = clean. Exit 1 = findings. Exit 127 = missing tool.
+# Exit 0 = clean. Exit 1 = findings. Exit 2 = a check could not run. Exit 127 = missing tool.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,14 +18,28 @@ note() { printf '==> %s\n' "$*"; }
 hit() { printf '  FIND %s\n' "$*"; fail=1; }
 ok() { printf '  ok\n'; }
 
+# rg exits 1 for "no matches" (the clean case) and 2 for a real failure: a path
+# that does not exist, an unreadable file, a rejected pattern. Swallowing both
+# as "no hits" turns a broken check into a silent pass, so only exit 1 is
+# treated as clean.
+rg_hits() {
+  local out status=0
+  out="$(rg "$@")" || status=$?
+  if ((status > 1)); then
+    echo "lint-wire: rg failed (exit $status) for check: $*" >&2
+    exit 2
+  fi
+  printf '%s\n' "$out"
+}
+
 note "forbidden AI attribution in sources"
 attr_hits="$(
-  rg -n --glob '!research_inv/**' --glob '!.opencode/node_modules/**' --glob '!.zig-cache/**' --glob '!zig-out/**' \
+  rg_hits -n --glob '!research_inv/**' --glob '!.opencode/node_modules/**' --glob '!.zig-cache/**' --glob '!zig-out/**' \
     --glob '!scripts/lint-wire.sh' \
     -e 'Generated with Claude' \
     -e 'Co-Authored-By:.*(Claude|Anthropic|OpenAI|Grok|Cursor)' \
     -e 'as an AI' \
-    src docs AGENTS.md Makefile README.md TODO.md opencode.json scripts 2>/dev/null || true
+    src docs AGENTS.md Makefile README.md TODO.md scripts
 )"
 if [[ -n "$attr_hits" ]]; then
   printf '%s\n' "$attr_hits"
@@ -37,9 +51,9 @@ fi
 note "numeric package id as framePackage 3rd arg (prefer name map / variable)"
 # Bare decimal package id in production framing. Allow the frame.zig unit test (99).
 frame_hits="$(
-  rg -n --glob '*.zig' \
+  rg_hits -n --glob '*.zig' \
     'framePackage\([^,]+,\s*[^,]+,\s*[0-9]+' \
-    src 2>/dev/null || true
+    src
 )"
 found_frame=0
 while IFS= read -r line; do
@@ -57,11 +71,11 @@ fi
 
 note "package id equality against bare decimals (non-test assertions)"
 eq_hits="$(
-  rg -n --glob '*.zig' \
+  rg_hits -n --glob '*.zig' \
     -e '\.id\s*==\s*[0-9]+' \
     -e 'pkg_id\s*==\s*[0-9]+' \
     -e 'pkgId\s*==\s*[0-9]+' \
-    src 2>/dev/null || true
+    src
 )"
 found_eq=0
 while IFS= read -r line; do
@@ -82,12 +96,12 @@ fi
 
 note "fidelity smell phrases in wire/server"
 smell_hits="$(
-  rg -n --glob '*.zig' -i \
+  rg_hits -n --glob '*.zig' -i \
     -e 'almost stock' \
     -e 'fake terrain' \
     -e 'invent(ed)? world' \
     -e 'skip server-driven' \
-    src/wire src/server 2>/dev/null || true
+    src/wire src/server
 )"
 if [[ -n "$smell_hits" ]]; then
   printf '%s\n' "$smell_hits"

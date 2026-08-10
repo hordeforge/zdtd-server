@@ -12,7 +12,6 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
-const wire_binary = @import("../../wire/binary.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const c2s_text = @import("../c2s_text.zig");

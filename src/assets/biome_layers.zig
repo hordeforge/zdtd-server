@@ -262,28 +262,24 @@ pub const Table = struct {
         var y: i32 = h;
         for (layers, 0..) |layer, li| {
             if (y < 0) break;
+            // Each layer is a contiguous descending run of one id: write it as a
+            // span so the fill is a vector store, not 256 scalar ones.
             if (layer.depth == 0) {
                 // Fill until only fixed_after[li+1] blocks remain below.
                 const reserve: i32 = @intCast(fixed_after[li + 1]);
-                while (y >= reserve) : (y -= 1) {
-                    out[@intCast(y)] = layer.block_id;
-                    if (y == 0) {
-                        y = -1;
-                        break;
-                    }
+                if (y >= reserve) {
+                    @memset(out[@intCast(reserve)..@intCast(y + 1)], layer.block_id);
+                    y = reserve - 1;
                 }
             } else {
-                var left: u16 = layer.depth;
-                while (left > 0 and y >= 0) : (left -= 1) {
-                    out[@intCast(y)] = layer.block_id;
-                    y -= 1;
-                }
+                const n: i32 = @min(@as(i32, layer.depth), y + 1);
+                @memset(out[@intCast(y - n + 1)..@intCast(y + 1)], layer.block_id);
+                y -= n;
             }
         }
         // Any gap below (malformed XML): stone, y=0 bedrock if empty.
-        while (y >= 0) : (y -= 1) {
-            out[@intCast(y)] = if (y == 0) assignids.terr_bedrock else assignids.terr_stone;
-        }
+        if (y >= 1) @memset(out[1..@intCast(y + 1)], assignids.terr_stone);
+        if (y >= 0) out[0] = assignids.terr_bedrock;
         if (out[0] == 0) out[0] = assignids.terr_bedrock;
     }
 
@@ -619,9 +615,7 @@ pub fn loadFromPath(
     is_distant_deco: ?*const fn (?*anyopaque, []const u8) bool,
     ctx: ?*anyopaque,
 ) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -917,7 +911,8 @@ test "decorations parse without a distant-deco filter yields nothing" {
 
 test "load stock biomes.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/biomes.xml";
-    var t = loadFromPath(std.testing.allocator, p, testId, null, null) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p, testId, null, null);
     defer t.deinit();
     try std.testing.expect(t.loaded);
     const burnt = t.stackFor(9);

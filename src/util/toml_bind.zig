@@ -190,7 +190,13 @@ fn setField(comptime Root: type, comptime f: std.builtin.Type.StructField, dst: 
     const parsed = switch (@typeInfo(base)) {
         .bool => try parseBool(v),
         .int => try std.fmt.parseInt(base, v, 10),
-        .float => try std.fmt.parseFloat(base, v),
+        // "nan" and "inf" parse fine but are never a valid tunable: a NaN makes
+        // every comparison that reads the value false. Fail at startup instead.
+        .float => blk: {
+            const x = try std.fmt.parseFloat(base, v);
+            if (!std.math.isFinite(x)) return error.BadTomlFloat;
+            break :blk x;
+        },
         .@"enum" => try parseEnum(base, v),
         else => @compileError("toml_bind: unsupported field type " ++ @typeName(base) ++ " for key '" ++ f.name ++ "'"),
     };
@@ -321,6 +327,17 @@ test "bind clamps declared ranges and rejects overflow" {
         error.Overflow,
         bind(TestCfg, &c, "[nested]\ndepth = 300\n", std.testing.allocator),
     );
+}
+
+test "bind rejects non-finite floats" {
+    var c: TestCfg = .{};
+    for ([_][]const u8{ "nan", "inf", "-inf" }) |bad| {
+        var src_buf: [32]u8 = undefined;
+        const src = try std.fmt.bufPrint(&src_buf, "[group]\nratio = {s}\n", .{bad});
+        try std.testing.expectError(error.BadTomlFloat, bind(TestCfg, &c, src, std.testing.allocator));
+    }
+    try bind(TestCfg, &c, "[group]\nratio = 1.5\n", std.testing.allocator);
+    try std.testing.expectEqual(@as(f32, 1.5), c.group.ratio);
 }
 
 test "bind enum_by_name canonicalises and rejects unknowns" {

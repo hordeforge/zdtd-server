@@ -4,7 +4,6 @@
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const ecs = @import("../../ecs/root.zig");

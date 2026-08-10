@@ -6,8 +6,9 @@
 //   clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
 //     -o assets/fixtures/plugin_hello.wasm assets/fixtures/plugin_hello.c
 //
-// The zdtd host import table is: zdtd_log(level, ptr, len),
-// zdtd_tick() -> i64, zdtd_queue(ptr, len) -> i32.
+// The zdtd host import table is module "zdtd" with the bare field names
+// log(level, ptr, len), tick() -> i64 and queue(ptr, len) -> i32; the local C
+// symbol below can be called anything, only import_module/import_name matter.
 
 __attribute__((import_module("zdtd"), import_name("log")))
 extern void zdtd_log(int level, int ptr, int len);

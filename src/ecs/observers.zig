@@ -62,16 +62,6 @@ test "observers spawn death cap" {
 
     var spawn_n: u32 = 0;
     var death_n: u32 = 0;
-    const H = struct {
-        sn: *u32,
-        dn: *u32,
-        fn onSpawn(_: *World, _: Slot, _: NetId) void {}
-        fn onDeath(_: *World, _: Slot, _: NetId) void {}
-    };
-    _ = H;
-
-    const sn = &spawn_n;
-    const dn = &death_n;
     const Spawn = struct {
         var c: *u32 = undefined;
         fn f(_: *World, _: Slot, _: NetId) void {
@@ -84,8 +74,8 @@ test "observers spawn death cap" {
             c.* += 1;
         }
     };
-    Spawn.c = sn;
-    Death.c = dn;
+    Spawn.c = &spawn_n;
+    Death.c = &death_n;
 
     try std.testing.expect(w.observers.addSpawn(Spawn.f));
     try std.testing.expect(w.observers.addDeath(Death.f));

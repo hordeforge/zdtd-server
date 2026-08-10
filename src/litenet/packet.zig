@@ -3,6 +3,7 @@
 //! which differs from upstream LiteNetLib 1.x (no ReliableMerged slot; ConnectRequest=5).
 
 const std = @import("std");
+const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 
 pub const protocol_id: i32 = 13;
 pub const channeled_header_size: usize = 4;
@@ -124,20 +125,6 @@ pub fn writeNetString(buf: []u8, s: []const u8) ![]u8 {
 pub fn connectKeyMatches(data: []const u8, server_password: []const u8) bool {
     const key = readNetString(data) orelse return server_password.len == 0;
     return constantTimeEql(key, server_password);
-}
-
-fn constantTimeEql(a: []const u8, b: []const u8) bool {
-    // Length mismatch still fails, but always walk max(len) so remote timing
-    // primarily reflects payload size, not an early length branch.
-    var diff: u8 = if (a.len == b.len) 0 else 1;
-    const n = @max(a.len, b.len);
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const x: u8 = if (i < a.len) a[i] else 0;
-        const y: u8 = if (i < b.len) b[i] else 0;
-        diff |= x ^ y;
-    }
-    return diff == 0;
 }
 
 pub fn writeConnectAccept(buf: []u8, connect_time: i64, connect_num: u8, local_peer_id: i32) ![]u8 {

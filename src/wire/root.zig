@@ -39,5 +39,6 @@ test {
     _ = stock_te;
     _ = stock_sign;
     _ = stock_party;
+    _ = stock_xp;
     _ = te_types;
 }

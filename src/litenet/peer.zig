@@ -609,10 +609,8 @@ pub const Peer = struct {
 
     fn processAck(self: *Peer, raw: []const u8) void {
         // Stock ReliableChannel.ProcessAck: Size must match header + (windowSize-1)/8+2.
-        const expect = packet.channeled_header_size + ack_bitmap_bytes;
+        // Accept ≥ header; loadgen/stock both send full 13-byte acks.
         if (raw.len < packet.channeled_header_size + 1) return;
-
-        _ = expect; // accept ≥ header; loadgen/stock both send full 13-byte acks
         const ack_seq = std.mem.readInt(u16, raw[1..][0..2], .little);
         if (ack_seq >= packet.max_sequence) return;
         // Stock: RelativeSequenceNumber(localWindowStart, ackSeq) = local - ack ∈ [0, window).

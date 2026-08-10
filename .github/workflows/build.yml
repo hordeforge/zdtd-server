@@ -1,11 +1,13 @@
 name: Build
 
-# SonarQube Cloud analysis on the main branch and pull requests. Runs the
-# project validation gate first so the scanner only ever sees a tree that
-# builds and passes its tests; then SonarQube analyzes what its analyzers
-# support (the repo is Zig 0.16, which SonarQube has no official language
-# plugin for, so the analysis covers shell scripts, XML and repo-level
-# quality gates rather than Zig source diagnostics).
+# SonarQube Cloud analysis on the main branch and pull requests. SonarQube
+# analyzes what its analyzers support (the repo is Zig 0.16, which SonarQube has
+# no official language plugin for, so the analysis covers shell scripts, XML and
+# repo-level quality gates rather than Zig source diagnostics). The scan reads
+# the source tree only: it needs no build output, no toolchain and no lint
+# tools, so the correctness gate (make check) is left to ci.yml, which runs on
+# the same events and the same commit. Duplicating it here would cost a second
+# full Zig build + test + fuzz on every push and pull request.
 
 on:
   push:
@@ -25,44 +27,19 @@ concurrency:
 jobs:
   sonarqube:
     name: SonarQube
+    # SONAR_TOKEN is not exposed to pull requests from forks, so the scan step
+    # would fail there for a reason a contributor cannot fix. Skip instead.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # Shallow clones should be disabled for a better relevancy of analysis.
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install lint tools
-        run: |
-          set -euo pipefail
-          missing=()
-          command -v rg >/dev/null 2>&1 || missing+=(ripgrep)
-          command -v shellcheck >/dev/null 2>&1 || missing+=(shellcheck)
-          if ((${#missing[@]})); then
-            export DEBIAN_FRONTEND=noninteractive
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends "${missing[@]}"
-          fi
-
-      - name: Read toolchain pin
-        id: pin
-        run: |
-          set -euo pipefail
-          zig="$(bash scripts/zig-pin.sh)"
-          echo "zig=$zig" >> "$GITHUB_OUTPUT"
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          # Single source of truth: .zigversion (also enforced by make release-check).
-          version: ${{ steps.pin.outputs.zig }}
-
-      - name: Run validation gate
-        run: make check
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0

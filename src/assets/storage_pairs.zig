@@ -52,9 +52,7 @@ pub const Table = struct {
 };
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -112,7 +110,8 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 
 test "load storage pairs when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     try std.testing.expect(t.pairs.len >= 5);
     var found = false;

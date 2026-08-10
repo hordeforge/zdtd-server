@@ -65,10 +65,12 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
    artifact; publish a new patch version for a bad release.
 6. Verify reproducibility: run `make repro` (or
    `bash scripts/repro-release.sh`), which builds the source twice in separate
-   clean cache trees with `zig build -Doptimize=ReleaseSafe -Dstrip=true
-   -Dcpu=baseline` and requires both scratch-build binaries
-   (`zig-out/repro-a/out/zdtd` and `zig-out/repro-b/out/zdtd`, deleted on exit)
-   to have matching sha256.
+   source and cache trees, then requires both scratch-build binaries to have
+   matching sha256. Scratch trees are deleted on exit. Both halves go through
+   `scripts/release-build.sh`, the same script `make release` uses, so the gate
+   validates the exact configuration that ships: `-Doptimize=ReleaseSafe
+   -Dstrip=true -Dtarget=x86_64-linux-gnu -Dcpu=baseline` under a normalized
+   locale, timezone, and source epoch.
    The pinned `.zigversion` compiler, `-Dcpu=baseline`, and `strip` make the
    binary independent of build path, host CPU, and wall-clock time; a mismatch
    means a nondeterminism slipped in and must be fixed before tagging. CI runs

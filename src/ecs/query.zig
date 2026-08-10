@@ -78,24 +78,6 @@ pub fn each(
     }
 }
 
-/// Kind filter with packed column pointers.
-pub fn eachKind(
-    w: *World,
-    kind: Kind,
-    ctx: anytype,
-    comptime Packed: type,
-    comptime make: fn (*World, Slot) Packed,
-    comptime f: fn (@TypeOf(ctx), *World, Slot, Packed) void,
-) void {
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
-        if (!w.alive[i]) continue;
-        if (!w.mask[i].kind) continue;
-        if (w.kind[i] != kind) continue;
-        f(ctx, w, i, make(w, i));
-    }
-}
-
 /// Chunk-style parallel over kind: range-split slots via jobs/parallel when
 /// pool available; else serial. `work` must be thread-safe for disjoint slots.
 pub fn forEachParallelKind(

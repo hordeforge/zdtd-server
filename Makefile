@@ -11,6 +11,9 @@ SHELL := /bin/bash
 ZIG ?= zig
 # Debug for day-to-day; ReleaseSafe for operator-facing binaries.
 OPTIMIZE ?= Debug
+# The published artifact is named linux-x86_64 in CI, so do not let the
+# machine running `make release` silently choose a different target ABI.
+RELEASE_TARGET ?= x86_64-linux-gnu
 
 # Shared missing-compiler check (used by every target that invokes Zig).
 need-zig:
@@ -42,30 +45,45 @@ run: need-zig
 
 # Operator-facing binary: safety checks on, debug symbols stripped.
 # Depends on release-check so a version-drifted tree cannot produce a release binary.
-# -Dcpu=baseline: without it Zig targets the build host's CPU features, so the
-# artifact's bytes vary per build machine and can SIGILL on older operator CPUs.
+# The build configuration (optimize/strip/target/cpu plus the normalized locale,
+# timezone and source epoch) lives in scripts/release-build.sh, which
+# scripts/repro-release.sh also uses, so the reproducibility gate always
+# validates exactly what ships.
 # Writes zig-out/bin/zdtd.sha256 (hash of the binary only) and
 # zig-out/bin/buildinfo.txt (toolchain + version + dependency pin + binary
 # hash, timestamp-free so a same-source rebuild reproduces it byte-for-byte)
 # for artifact integrity and a minimal dependency bill of materials.
+# Copies LICENSE + THIRD_PARTY.md beside the binary: zwasm is Apache-2.0 and
+# statically linked, and section 4(a) requires recipients of the binary to get
+# the license text (THIRD_PARTY.md carries it). The example configs and the
+# mode packs ride along too: the server resolves modes/<name>.toml relative to
+# its CWD, so an artifact without them cannot honour [mode] name.
+# assignids_v314.embed.txt rides along flat beside the binary: without it a
+# --game-dir run with no .blocks.nim has no AssignIds map and silently falls
+# back to band defaults (src/assets/maxdamage.zig tryMergeBundledAssignIds).
 release: release-check need-zig need-release-tools
-	$(ZIG) build -Doptimize=ReleaseSafe -Dstrip=true -Dcpu=baseline
+	ZIG="$(ZIG)" RELEASE_TARGET="$(RELEASE_TARGET)" bash scripts/release-build.sh
 	@bin=zig-out/bin/zdtd; \
 	  test -f "$$bin" || { echo "zdtd: release build did not produce $$bin" >&2; exit 1; }; \
 	  (cd zig-out/bin && sha256sum zdtd > zdtd.sha256); \
 	  product="$$(sed -n 's/^pub const product = "\([^"]*\)";/\1/p' src/version.zig | head -n1)"; \
 	  wire="$$(sed -n 's/^pub const stock_wire = "\([^"]*\)";/\1/p' src/version.zig | head -n1)"; \
-	  dep_zwasm="$$(sed -n 's/^[[:space:]]*\.hash = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)"; \
+	  dep_bom="$$(bash scripts/dep-bom.sh)" || exit 1; \
 	  { \
 	    echo "product=$$product"; \
 	    echo "stock_wire=$$wire"; \
 	    echo "zig=$$("$(ZIG)" version)"; \
 	    echo "optimize=ReleaseSafe"; \
 	    echo "strip=true"; \
+	    echo "target=$(RELEASE_TARGET)"; \
 	    echo "cpu=baseline"; \
 	    echo "binary_sha256=$$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)"; \
-	    echo "dep_zwasm=$$dep_zwasm"; \
+	    echo "$$dep_bom"; \
 	  } > zig-out/bin/buildinfo.txt; \
+	  bash scripts/release-sbom.sh zig-out/bin/zdtd.cdx.json; \
+	  cp -f LICENSE THIRD_PARTY.md zdtd.toml.example serverconfig.example.xml zig-out/bin/; \
+	  cp -f src/assets/assignids_v314.embed.txt zig-out/bin/; \
+	  rm -rf zig-out/bin/modes && cp -r modes zig-out/bin/modes; \
 	  echo "zdtd: release ok $$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)  $$bin"
 
 lint: need-zig
@@ -81,6 +99,7 @@ lint: need-zig
 	shellcheck scripts/*.sh
 	$(ZIG) fmt --check build.zig src
 	bash scripts/lint-architecture.sh
+	bash scripts/lint-cycles.sh
 	bash scripts/lint-wire.sh
 
 fmt: need-zig
@@ -111,7 +130,7 @@ smoke: release
 # Depends on release-check so the pinned toolchain builds both halves.
 # Deliberately NOT part of `make check`: it costs two full ReleaseSafe builds.
 repro: release-check need-zig
-	bash scripts/repro-release.sh
+	RELEASE_TARGET="$(RELEASE_TARGET)" bash scripts/repro-release.sh
 
 clean:
 	rm -rf zig-out .zig-cache .zdtd_cfg_cache

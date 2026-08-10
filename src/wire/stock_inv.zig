@@ -1241,6 +1241,15 @@ test "holding item body layout" {
     try std.testing.expectEqual(@as(u8, 0), body[body.len - 1]); // holding index
 }
 
+/// Test reverse mapper: stock type 65536+id → id (matches typeFromBuiltinId).
+fn testRevItemId(_: ?*anyopaque, st: i32) u16 {
+    if (st >= items_start_here) {
+        const rel = st - items_start_here;
+        if (rel > 0 and rel < 100) return @intCast(rel);
+    }
+    return 0;
+}
+
 test "ecs starter kit encodes without overflow" {
     var buf: [8192]u8 = undefined;
     var inv: components.Inventory = .{};
@@ -1256,15 +1265,7 @@ test "ecs starter kit encodes without overflow" {
     try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[1..3], .little));
     // Round-trip apply so overflow-free encode still carries the three stacks.
     var inv2: components.Inventory = .{};
-    const rev = struct {
-        fn f(_: ?*anyopaque, st: i32) u16 {
-            if (st >= items_start_here) {
-                const rel = st - items_start_here;
-                if (rel > 0 and rel < 100) return @intCast(rel);
-            }
-            return 0;
-        }
-    }.f;
+    const rev = testRevItemId;
     try applyPlayerInventoryBody(body, &inv2, rev, null);
     var n8: u16 = 0;
     var n2: u16 = 0;
@@ -1289,16 +1290,7 @@ test "player inventory encode then apply roundtrip" {
     const body = try buildFromEcs(&buf, &inv);
 
     var inv2: components.Inventory = .{};
-    // reverse: stock type 65536+id → id (matches typeFromBuiltinId)
-    const rev = struct {
-        fn f(_: ?*anyopaque, st: i32) u16 {
-            if (st >= items_start_here) {
-                const rel = st - items_start_here;
-                if (rel > 0 and rel < 100) return @intCast(rel);
-            }
-            return 0;
-        }
-    }.f;
+    const rev = testRevItemId;
     try applyPlayerInventoryBody(body, &inv2, rev, null);
     try std.testing.expectEqual(@as(u16, 8), inv2.slots[0].item_id);
     try std.testing.expectEqual(@as(u16, 1), inv2.slots[0].count);
@@ -1328,15 +1320,7 @@ test "bag package roundtrip player bag slots" {
     inv.slots[11] = .{ .item_id = 3, .count = 30, .quality = 1 };
     const body = try buildBagPackage(&buf, 42, &inv, null, null, true);
     var inv2: components.Inventory = .{};
-    const rev = struct {
-        fn f(_: ?*anyopaque, st: i32) u16 {
-            if (st >= items_start_here) {
-                const rel = st - items_start_here;
-                if (rel > 0 and rel < 100) return @intCast(rel);
-            }
-            return 0;
-        }
-    }.f;
+    const rev = testRevItemId;
     const eid = try applyBagPackage(body, &inv2, rev, null, true);
     try std.testing.expectEqual(@as(i32, 42), eid);
     try std.testing.expectEqual(@as(u16, 7), inv2.slots[10].item_id);

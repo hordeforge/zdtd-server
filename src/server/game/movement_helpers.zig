@@ -44,12 +44,13 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     }
     const tick_s: f32 = @as(f32, @floatFromInt(protocol.tick_ns)) / 1_000_000_000.0;
     const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
-    const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, movement.max_horizontal_speed_mps);
+    const cap = self.max_horizontal_speed_mps;
+    const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, cap);
     if (!clamp.clamped) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }
     self.harness.counters.inc(.movement_rejects);
-    self.noteEvidence(c, peer.local_id, entity_id, .movement, .strong, .none, movement.max_horizontal_speed_mps, movement.max_horizontal_speed_mps);
+    self.noteEvidence(c, peer.local_id, entity_id, .movement, .strong, .none, cap, cap);
     const n = self.harness.counters.get(.movement_rejects);
     if (n == 1 or n % 100 == 0) {
         std.debug.print("zdtd: movement envelope reject n={d} local_id={d} entity={d}\n", .{ n, peer.local_id, entity_id });

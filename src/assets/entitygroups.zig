@@ -86,9 +86,7 @@ const builtin_groups = [_]Group{
 };
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -186,7 +184,8 @@ test "group pick same seed is stable" {
 
 test "load stock entitygroups when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entitygroups.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.groups.len > 10);
     try std.testing.expect(t.byName("ZombiesAll") != null);
@@ -196,7 +195,8 @@ test "load stock entitygroups when present" {
 
 test "stock entitygroups keeps the whole file, tail groups included" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entitygroups.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     // Stock ships 1875 groups; any cap below that silently drops the tail, and
     // the gamestage horde groups live in the tail.

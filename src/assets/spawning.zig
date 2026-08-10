@@ -199,7 +199,8 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 
 test "load spawning.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     try std.testing.expect(t.rules.len > 5);
     var buf: [32]Rule = undefined;
@@ -210,7 +211,8 @@ test "load spawning.xml when present" {
 
 test "stock entityspawners feed the gamestage scout thresholds" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     // SpawnScouts (asm.il ~415972) names these four by gamestage band.
     try std.testing.expectEqualStrings("ZombieScouts", t.spawnerByName("Scouts1").?.entitygroup);

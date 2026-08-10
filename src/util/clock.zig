@@ -68,6 +68,15 @@ pub fn wallSeconds() i64 {
     return @intCast(ts.sec);
 }
 
+/// Unix nanoseconds for externally correlated events such as APM snapshots.
+/// Elapsed-time measurements must continue to use monoNs().
+pub fn wallNs() u64 {
+    if (virtual_active.load(.acquire)) return virtual_ns.load(.acquire);
+    var ts: posix.timespec = undefined;
+    if (posix.system.clock_gettime(posix.CLOCK.REALTIME, &ts) != 0) return 0;
+    return @as(u64, @intCast(ts.sec)) *% std.time.ns_per_s +% @as(u64, @intCast(ts.nsec));
+}
+
 /// Wall-clock "YYYY-MM-DD HH:MM:SS" stamp for log/audit lines. Virtual-clock
 /// aware (derives from virtual mono ns when enabled) so deterministic runs and
 /// tests stay seed-stable. Not on the hot path (bufPrint + epoch math).
@@ -119,10 +128,12 @@ test "wallStamp formats and tracks the virtual clock" {
 test "monoNs advances" {
     disableVirtual();
     const a = monoNs();
-    var i: u32 = 0;
-    while (i < 10000) : (i += 1) {}
+    // A real 1 ms sleep must move the monotonic clock. An empty busy loop can
+    // finish inside one clock tick, so `b >= a` would also pass for a clock
+    // frozen at a constant value.
+    sleepNs(std.time.ns_per_ms);
     const b = monoNs();
-    try std.testing.expect(b >= a);
+    try std.testing.expect(b > a);
 }
 
 test "virtual clock is deterministic and sleep advances" {
@@ -160,4 +171,12 @@ test "virtual wallSeconds tracks mono and ignores host REALTIME" {
     // Sub-second mono does not advance wall seconds.
     setVirtualNs(42_999_999_999);
     try std.testing.expectEqual(@as(i64, 42), wallSeconds());
+}
+
+test "wallNs is epoch-correlatable and virtual-clock deterministic" {
+    defer disableVirtual();
+    enableVirtual(5_123_456_789);
+    try std.testing.expectEqual(@as(u64, 5_123_456_789), wallNs());
+    disableVirtual();
+    try std.testing.expect(wallNs() / std.time.ns_per_s >= 1_600_000_000);
 }

@@ -558,17 +558,8 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // wall volume count as byte 0
     try w.writeByte(0);
 
-    // bNetwork: write false instead of building insideDevices list? IL:
-    // if (!bNetwork) write sleeper...; if (!bNetwork) write trigger...
-    // wall volumes always
-    // then if (bNetwork) Write(false) else new List... for something at IL_042B
-    // IL_042B: ldarg.2 brfalse.s IL_0435
-    // IL_042E: Write(false)  -- when bNetwork, write false then fall into insideDevices path?
-    // Actually when bNetwork true: Write(false) then still builds insideDevices from list.
-    // Looking again IL_042B-0435:
-    //   if (bNetwork) Write(false);
-    //   new List... (always)
-    // insideDevices count as i16 then entries
+    // Network mode writes the branch flag, followed by the always-present
+    // insideDevices list. This terrain-only chunk has no inside devices.
     try w.writeBool(false); // the network branch bool before insideDevices
     try w.writeI16(0); // insideDevices count
 

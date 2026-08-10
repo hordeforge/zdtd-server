@@ -193,18 +193,30 @@ pub const Registry = struct {
         is_switch: bool,
         trigger_type: ?TriggerType,
     ) void {
-        if (r.n >= max_power_entries) return;
-        r.ids[r.n] = id;
-        r.kinds[r.n] = kind;
-        r.watts[r.n] = watts;
-        r.max_fuel[r.n] = max_fuel;
-        r.output_per_fuel[r.n] = opf;
-        r.output_per_charge[r.n] = opc;
-        r.output_per_stack[r.n] = ops;
-        r.is_trigger[r.n] = is_trigger;
-        r.is_switch[r.n] = is_switch;
-        r.trigger_type[r.n] = if (trigger_type) |t| @intFromEnum(t) else trigger_type_none;
-        r.n += 1;
+        var at = r.n;
+        if (r.n == max_power_entries) {
+            // Keep the lowest ids when the fixed registry is full. Class rows
+            // arrive from a hash map, so keeping the first 256 would make the
+            // simulated block set depend on unspecified hash iteration order.
+            at = 0;
+            var i: usize = 1;
+            while (i < r.n) : (i += 1) {
+                if (r.ids[i] > r.ids[at]) at = i;
+            }
+            if (id >= r.ids[at]) return;
+        } else {
+            r.n += 1;
+        }
+        r.ids[at] = id;
+        r.kinds[at] = kind;
+        r.watts[at] = watts;
+        r.max_fuel[at] = max_fuel;
+        r.output_per_fuel[at] = opf;
+        r.output_per_charge[at] = opc;
+        r.output_per_stack[at] = ops;
+        r.is_trigger[at] = is_trigger;
+        r.is_switch[at] = is_switch;
+        r.trigger_type[at] = if (trigger_type) |t| @intFromEnum(t) else trigger_type_none;
     }
 
     fn propsFromTable(table: anytype, name: []const u8) struct { f32, f32, f32, f32, f32 } {
@@ -255,7 +267,6 @@ pub const Registry = struct {
         if (@hasField(@TypeOf(table.*), "power_class_by_name")) {
             var it = table.power_class_by_name.iterator();
             while (it.next()) |e| {
-                if (r.n >= max_power_entries) break;
                 const name = e.key_ptr.*;
                 const cls = e.value_ptr.*;
                 const id = table.idByName(name) orelse continue;
@@ -453,6 +464,28 @@ test "registry carries switch columns through the id sort" {
     sw.applyToNode(&node);
     try std.testing.expect(node.is_switch);
     try std.testing.expect(!node.on);
+}
+
+test "registry cap selection is independent of insertion order" {
+    var ascending: Registry = .{};
+    var descending: Registry = .{};
+    const input_n = max_power_entries + 32;
+    var i: usize = 0;
+    while (i < input_n) : (i += 1) {
+        const lo: u16 = @intCast(i);
+        const hi: u16 = @intCast(input_n - 1 - i);
+        ascending.push(lo, .consumer, @floatFromInt(lo), 0, 0, 0, 0, false, false, null);
+        descending.push(hi, .consumer, @floatFromInt(hi), 0, 0, 0, 0, false, false, null);
+    }
+    ascending.sortById();
+    descending.sortById();
+    try std.testing.expectEqual(max_power_entries, ascending.n);
+    try std.testing.expectEqualSlices(u16, ascending.ids[0..ascending.n], descending.ids[0..descending.n]);
+    try std.testing.expectEqual(@as(u16, 0), ascending.ids[0]);
+    try std.testing.expectEqual(@as(u16, max_power_entries - 1), ascending.ids[ascending.n - 1]);
+    for (ascending.ids[0..ascending.n], ascending.watts[0..ascending.n]) |id, watts| {
+        try std.testing.expectEqual(@as(f32, @floatFromInt(id)), watts);
+    }
 }
 
 test "classIsTrigger and registry is_trigger on pressure plate" {

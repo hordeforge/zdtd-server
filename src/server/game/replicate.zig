@@ -62,13 +62,16 @@ pub fn replicate(self: *Game) !void {
     }
 
     const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
-    var candidates = self.sim.alive_bits;
+    var candidates: ecs.world.AtomicBits = .initEmpty();
     if (!heartbeat) {
         candidates = self.sim.dirty_bits;
         for (self.sim.kind_groups.slice(.zombie)) |s| candidates.set(s);
         for (self.sim.kind_groups.slice(.animal)) |s| candidates.set(s);
         for (self.sim.kind_groups.slice(.trader)) |s| candidates.set(s);
-        candidates.setIntersection(self.sim.alive_bits);
+        candidates.intersectFromStatic(self.sim.alive_bits);
+    } else {
+        // Heartbeat: every live entity is a candidate.
+        candidates.copyFromStatic(self.sim.alive_bits);
     }
 
     var cand_it = candidates.iterator(.{});

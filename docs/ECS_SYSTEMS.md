@@ -7,7 +7,7 @@ src/ecs/
   entity.zig       Slot / max_entities / NetId
   components.zig   plain data types + Mask
   world.zig        SoA columns + resources + spawn + locals + observers
-  systems.zig      mutations; tickAll → schedule.run
+  systems.zig      mutations; tickAll → schedule.run; quest phase-advance systems (questAccept*, questOn*)
   schedule.zig     Phase enum + ordered run (buffs…commands)
   locals.zig       TickLocals scratch (cleared beginTick)
   jobs.zig         thin forSlotRange over util/parallel
@@ -22,7 +22,6 @@ src/ecs/
   inventory.zig    armor mitigation + inventory helpers
   inv_ledger.zig   P4 inv cause ledger (fixed ring, no heap)
   party.zig        Party/PartyManager (membership, leader, voice lobby, shared kill XP)
-  quest_systems.zig  quest phase-advance systems (questAccept*, questOn*)
   rules.zig        Rules struct + overlay (ADR 0021 sim-rule surface)
   path.zig         greedy path helper (no navmesh yet)
   poi_lock.zig     quest POI lockout table (locked until unlock grace)

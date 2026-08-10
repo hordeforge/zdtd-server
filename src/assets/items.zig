@@ -321,6 +321,9 @@ fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!void
     var len = s.len;
     while (true) {
         if (pos.* >= buf.len) return error.Overflow;
+        // Low byte first; the | 0x80 below overwrites bit 7 with the
+        // continuation flag, so the discarded high bits shift down on the next
+        // iteration (same 7-bit length shape as the wire codec's writer).
         const b: u8 = @truncate(len);
         if (len < 0x80) {
             buf[pos.*] = b;
@@ -432,9 +435,7 @@ pub fn builtinStockName(item_id: u16) ?[]const u8 {
 /// Load items.xml: assign stock types like ItemClass.assignLeftOverItems
 /// (first free id = ItemsStartHere+1, then sequential in document order).
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -772,7 +773,8 @@ test "DistractionTags + Distraction* effects parse (stock decoy shape)" {
 
 test "load stock items.xml when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/items.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.stock_names.len > 100);
     try std.testing.expectEqual(@as(i32, 65537), t.byStockName("meleeToolRepairT0StoneAxe").?);
@@ -791,7 +793,8 @@ test "load stock items.xml when present" {
 
 test "stock items.xml Stacknumber default and Extends resolution" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     const stackOf = struct {
         fn f(tab: *const ItemTable, name: []const u8) u16 {

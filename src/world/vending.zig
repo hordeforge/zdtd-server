@@ -183,8 +183,7 @@ pub const VendingStore = struct {
         // The wire send path slices these fixed buffers by the declared lengths
         // (game.zig vendingOwnerId); a corrupt save claiming more than the
         // stored bytes must fail closed, not pass a bad UserRef on.
-        if (u.platform_len > max_platform_len or u.id_len > max_id_len) return false;
-        return true;
+        return u.platform_len <= max_platform_len and u.id_len <= max_id_len;
     }
 
     pub fn save(self: *const VendingStore, dir: []const u8) !void {

@@ -49,6 +49,10 @@ pub const Table = struct {
     loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
     /// block name → AssignIds runtime id (every dump row, not just MaxDamage hits).
     id_by_name: std.StringHashMapUnmanaged(u16) = .{},
+    /// Reverse of `id_by_name`, written by the same merge. Without it `idName`
+    /// walked all ~25k dump rows per call, on the per-packet block-edit and
+    /// craft-queue paths.
+    name_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
     /// block name → power watts (MaxPower for sources, else RequiredPower for
     /// consumers). From blocks.xml DynamicProperties, keyed by name like by_name.
     power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{},
@@ -97,6 +101,7 @@ pub const Table = struct {
             self.loot_list_by_name = .{};
             self.loot_list_by_id = .{};
             self.id_by_name = .{};
+            self.name_by_id = .{};
             self.power_watts_by_name = .{};
             self.power_class_by_name = .{};
             self.power_max_fuel_by_name = .{};
@@ -131,17 +136,13 @@ pub const Table = struct {
     }
 
     /// blocks.xml LootList for a block id (the loot.xml container it rolls on
-    /// first open). Id lookup first (dump/nim merge), then the name table.
+    /// first open). `loot_list_by_id` is filled for every AssignIds row whose
+    /// name carries a LootList (mergeAssignIdsDump, the sole writer of
+    /// `id_by_name`), so a miss here is authoritative: the old fallback walk
+    /// over `loot_list_by_name` could only rediscover rows already present,
+    /// at O(loot lists) hash probes per miss on the chunk-fill path.
     pub fn lootListFor(self: *const Table, block_id: u16) ?[]const u8 {
-        if (self.loot_list_by_id.get(block_id)) |ll| return ll;
-        // No reverse id→name map; walk the name table only when small.
-        var it = self.loot_list_by_name.iterator();
-        while (it.next()) |e| {
-            if (self.idByName(e.key_ptr.*)) |id| {
-                if (id == block_id) return e.value_ptr.*;
-            }
-        }
-        return null;
+        return self.loot_list_by_id.get(block_id);
     }
 
     /// Runtime AssignIds id for a stock block name (from dump / .nim), else null.
@@ -149,14 +150,9 @@ pub const Table = struct {
         return self.id_by_name.get(name);
     }
 
-    /// Reverse of idByName: the stock block name for an AssignIds id. Walks the
-    /// name table (no reverse index); used off the hot path (upgrade checks).
+    /// Reverse of idByName: the stock block name for an AssignIds id.
     pub fn idName(self: *const Table, id: u16) ?[]const u8 {
-        var it = self.id_by_name.iterator();
-        while (it.next()) |e| {
-            if (e.value_ptr.* == id) return e.key_ptr.*;
-        }
-        return null;
+        return self.name_by_id.get(id);
     }
 
     /// Rows in the loaded AssignIds map. Zero means no dump: callers that
@@ -247,10 +243,6 @@ pub const Table = struct {
         return ap.allocator();
     }
 
-    fn arenaAlloc(self: *Table, allocator: std.mem.Allocator) !std.mem.Allocator {
-        return self.ensureArena(allocator);
-    }
-
     fn markStorageIfKnown(self: *Table, arena: std.mem.Allocator, id: u16, name: []const u8) !void {
         if (self.storage_names.contains(name)) {
             try self.storage_ids.put(arena, id, {});
@@ -265,7 +257,7 @@ pub const Table = struct {
             else => return err,
         };
         defer nim.deinit();
-        const arena = try self.arenaAlloc(allocator);
+        const arena = try self.ensureArena(allocator);
         for (nim.names, 0..) |name, id| {
             if (name.len == 0) continue;
             // Prefab nim ids are local; only fill MaxDamage when they happen to match.
@@ -323,6 +315,10 @@ pub const Table = struct {
             try self.markStorageIfKnown(arena, id, name);
             const name_dup = try arena.dupe(u8, name);
             try self.id_by_name.put(arena, name_dup, id);
+            // First row wins, matching the old forward walk over a dump that
+            // assigns each id exactly one name.
+            const rev = try self.name_by_id.getOrPut(arena, id);
+            if (!rev.found_existing) rev.value_ptr.* = name_dup;
             if (self.loot_list_by_name.get(name)) |ll| {
                 try self.loot_list_by_id.put(arena, id, ll);
             }
@@ -331,11 +327,9 @@ pub const Table = struct {
 
     /// Load materials.xml MaxDamage table (material id → hp).
     pub fn mergeMaterialsXml(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
-        const raw = try io_fs.readFileAll(allocator, path);
-        defer allocator.free(raw);
-        const clean = try xml.stripComments(allocator, raw);
+        const clean = try xml.readCleanFile(allocator, path);
         defer allocator.free(clean);
-        const arena = try self.arenaAlloc(allocator);
+        const arena = try self.ensureArena(allocator);
         var i: usize = 0;
         while (i < clean.len) {
             const mi = std.mem.findPos(u8, clean, i, "<material ") orelse break;
@@ -362,7 +356,7 @@ pub const Table = struct {
 
     /// After materials + blocks Material refs + AssignIds: fill by_id for material-only blocks.
     pub fn resolveMaterialMaxDamage(self: *Table, allocator: std.mem.Allocator) !void {
-        const arena = try self.arenaAlloc(allocator);
+        const arena = try self.ensureArena(allocator);
         var it = self.block_material.iterator();
         while (it.next()) |e| {
             const bname = e.key_ptr.*;
@@ -386,9 +380,16 @@ pub const Table = struct {
         var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
         if (io_fs.readLinkAbsolute("/proc/self/exe", &exe_buf)) |exe| {
             if (std.fs.path.dirname(exe)) |bin_dir| {
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                // Release artifact layout: `make release` copies the dump flat
+                // beside the binary, so neither the cwd-relative repo paths above
+                // nor the zig-out/bin/../.. walk below can find it.
+                if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ bin_dir, bundled_assignids_name })) |p| {
+                    self.mergeAssignIdsDump(allocator, p) catch {};
+                    if (self.id_by_name.count() > 0) return;
+                } else |_| {}
                 if (std.fs.path.dirname(bin_dir)) |out_dir| {
                     if (std.fs.path.dirname(out_dir)) |root| {
-                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
                         if (std.fmt.bufPrint(&path_buf, "{s}/src/assets/{s}", .{ root, bundled_assignids_name })) |p| {
                             // Best-effort bundled dump; missing path is fine (logged inside on real I/O errors).
                             self.mergeAssignIdsDump(allocator, p) catch {};
@@ -503,9 +504,7 @@ fn bodyHasStorage(body: []const u8) bool {
 }
 
 pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -695,7 +694,8 @@ fn mergeMaterialsLogged(tbl: *Table, allocator: std.mem.Allocator, path: []const
 
 test "load blocks.xml MaxDamage when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.by_name.count() > 50);
     try std.testing.expectEqual(@as(u16, 7500), t.maxDamageByName("cntHardenedChestInsecure").?);
@@ -714,7 +714,8 @@ test "load blocks.xml MaxDamage when present" {
 
 test "blocks.xml LootList resolves per block after the AssignIds merge" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
     t.tryMergeBundledAssignIds(std.testing.allocator);
     // Direct property and Extends-inherited property both resolve to the
@@ -810,7 +811,8 @@ test "MultiBlockDim parse rejects malformed dims" {
 
 test "stock blocks.xml deco facts when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.isDistantDeco("treeOakSml01"));
     try std.testing.expect(t.isDistantDeco("treeDeadTree02"));
@@ -833,7 +835,8 @@ test "every placeable blocks.xml name resolves in the AssignIds dump" {
     // stock itself never assigns an id: shape groups (shapes="All") and
     // non-placeable blocks (CreativeMode None / player crafting collector).
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    var t = loadFromBlocksXml(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
     t.tryMergeBundledAssignIds(std.testing.allocator);
     if (t.idNameCount() == 0) return error.SkipZigTest;
@@ -842,9 +845,9 @@ test "every placeable blocks.xml name resolves in the AssignIds dump" {
     // (cntChickenCoop) are placeable-looking rows with no client AssignIds entry.
     const no_id = [_][]const u8{ "cntChickenCoop", "terrFertileGrassExample" };
 
-    const file = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    const file = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(file);
-    const raw = xml.stripComments(std.testing.allocator, file) catch return error.SkipZigTest;
+    const raw = try xml.stripComments(std.testing.allocator, file);
     defer std.testing.allocator.free(raw);
     var missing: usize = 0;
     var checked: usize = 0;

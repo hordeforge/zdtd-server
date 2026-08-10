@@ -73,18 +73,53 @@ if ! grep -q "binary_sha256=$sidecar_hash" zig-out/bin/buildinfo.txt; then
   echo "smoke-release: buildinfo.txt does not record binary_sha256=$sidecar_hash" >&2
   exit 1
 fi
+if ! grep -qx 'target=x86_64-linux-gnu' zig-out/bin/buildinfo.txt; then
+  echo "smoke-release: buildinfo.txt does not identify target=x86_64-linux-gnu" >&2
+  exit 1
+fi
 
-# Dependency bill of materials: buildinfo.txt must name the pinned zwasm
-# dependency hash from build.zig.zon so the artifact traces to its source.
-dep_zwasm="$(sed -n 's/^[[:space:]]*\.hash = "\([^"]*\)",/\1/p' build.zig.zon | head -n1)"
-if [[ -z "$dep_zwasm" ]]; then
-  echo "smoke-release: could not read zwasm dep hash from build.zig.zon" >&2
+# Attribution: the binary statically links Apache-2.0 zwasm, so the shipped
+# artifact must carry the license texts (make release copies them).
+for lic in LICENSE THIRD_PARTY.md; do
+  test -s "zig-out/bin/$lic" || {
+    echo "smoke-release: missing zig-out/bin/$lic beside the binary" >&2
+    exit 1
+  }
+done
+
+# Operator files: mode packs resolve as modes/<name>.toml from the server's CWD,
+# the example configs are the documented starting point, and the AssignIds dump
+# must sit flat beside the binary (maxdamage.zig tryMergeBundledAssignIds) or a
+# --game-dir run without .blocks.nim silently loses the block id map.
+for operator_file in zdtd.toml.example serverconfig.example.xml assignids_v314.embed.txt modes/default.toml; do
+  test -s "zig-out/bin/$operator_file" || {
+    echo "smoke-release: missing zig-out/bin/$operator_file in the release artifact" >&2
+    exit 1
+  }
+done
+
+# Dependency bill of materials: buildinfo.txt must name every pinned dependency
+# hash from build.zig.zon so the artifact traces to its sources.
+dep_bom="$(bash scripts/dep-bom.sh)"
+while IFS= read -r dep; do
+  if ! grep -qx "$dep" zig-out/bin/buildinfo.txt; then
+    echo "smoke-release: buildinfo.txt does not record $dep" >&2
+    exit 1
+  fi
+done <<< "$dep_bom"
+
+# Standard SBOM: scanners need a machine-readable inventory, not only the
+# human-oriented buildinfo lines. Verify that it names the pinned runtime and
+# its Zig content hash before publishing the artifact.
+sbom=zig-out/bin/zdtd.cdx.json
+test -s "$sbom" || {
+  echo "smoke-release: missing $sbom" >&2
   exit 1
-fi
-if ! grep -q "dep_zwasm=$dep_zwasm" zig-out/bin/buildinfo.txt; then
-  echo "smoke-release: buildinfo.txt does not record dep_zwasm=$dep_zwasm" >&2
-  exit 1
-fi
+}
+grep -q '"bomFormat": "CycloneDX"' "$sbom"
+grep -q '"name": "zwasm"' "$sbom"
+zwasm_hash="${dep_bom#dep_zwasm=}"
+grep -Fq "\"value\": \"$zwasm_hash\"" "$sbom"
 
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).

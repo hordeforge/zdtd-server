@@ -50,10 +50,9 @@ pub const Ledger = struct {
     pub fn recent(self: *const Ledger, out: []Event) usize {
         const n: usize = @min(out.len, @as(usize, self.len));
         if (n == 0) return 0;
-        const start: usize = if (self.len < capacity)
-            0
-        else
-            self.head;
+        const oldest: usize = if (self.len < capacity) 0 else self.head;
+        const skipped = @as(usize, self.len) - n;
+        const start = (oldest + skipped) % capacity;
         var i: usize = 0;
         while (i < n) : (i += 1) {
             out[i] = self.events[(start + i) % capacity];
@@ -96,4 +95,16 @@ test "empty last and recent" {
     led.record(1, 7, -2, .drop);
     try std.testing.expectEqual(Cause.drop, led.last().?.cause);
     try std.testing.expectEqual(@as(i16, -2), led.last().?.delta);
+}
+
+test "recent limited output returns newest events" {
+    var led: Ledger = .{};
+    var i: u16 = 0;
+    while (i < 6) : (i += 1) led.record(0, i, 1, .loot);
+
+    var buf: [3]Event = undefined;
+    const n = led.recent(&buf);
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expectEqual(@as(u16, 3), buf[0].item_id);
+    try std.testing.expectEqual(@as(u16, 5), buf[2].item_id);
 }

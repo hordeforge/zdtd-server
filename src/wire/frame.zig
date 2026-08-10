@@ -293,6 +293,8 @@ test "DeflateFramer keeps a body far larger than the frame buffer" {
 }
 
 /// Partly incompressible filler: one noisy byte in four, the rest constant.
+/// Wraps are deliberate: `@truncate(i)` folds a usize counter mod 2^32 before
+/// the hash multiply, and taking the top byte of `h` keeps the output noisy.
 fn bodyByte(i: usize) u8 {
     if (i % 4 != 0) return 0;
     const h: u32 = @as(u32, @truncate(i)) *% 2654435761;

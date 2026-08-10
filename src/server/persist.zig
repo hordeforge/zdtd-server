@@ -352,7 +352,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // ZPV3 records carry a progression tail after the journal;
             // consume it for non-matching records too so the scan stays
             // aligned with the next record.
-            if (v3) off = rec_start + (zpvRecordLen(data, rec_start, true) catch return);
+            if (v3) {
+                off = rec_start + (zpvRecordLen(data, rec_start, true) catch |e| {
+                    std.debug.print("zdtd: restore player: corrupt tail at record {d}/{d} ({s})\n", .{ i, n, @errorName(e) });
+                    return;
+                });
+            }
             continue;
         }
         const x: f32 = @bitCast(std.mem.readInt(u32, rest[0..4], .little));
@@ -451,33 +456,35 @@ pub fn saveEntities(self: *Game) !void {
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
     var buf: [ecs.max_entities * 32 + 8]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
-    w.writeBytes("ZENT") catch return;
-    w.writeU16(0) catch return; // count patched below
+    // Overflow must propagate (callers log persistence errors): a silent
+    // abort here would drop the vehicle/turret save without any signal.
+    try w.writeBytes("ZENT");
+    try w.writeU16(0); // count patched below
     var count: u16 = 0;
     var i: usize = 0;
     while (i < ecs.max_entities) : (i += 1) {
         if (!self.sim.alive[i] or !self.sim.mask[i].transform) continue;
         if (self.sim.kind[i] == .vehicle) {
             const v = self.sim.vehicle[i];
-            w.writeByte(1) catch return;
-            w.writeByte(@intFromEnum(v.kind)) catch return;
-            w.writeF32(self.sim.transform[i].x) catch return;
-            w.writeF32(self.sim.transform[i].y) catch return;
-            w.writeF32(self.sim.transform[i].z) catch return;
-            w.writeF32(self.sim.transform[i].yaw) catch return;
-            w.writeF32(v.fuel) catch return;
-            w.writeByte(v.seat_count) catch return;
-            w.writeF32(v.max_speed) catch return;
+            try w.writeByte(1);
+            try w.writeByte(@intFromEnum(v.kind));
+            try w.writeF32(self.sim.transform[i].x);
+            try w.writeF32(self.sim.transform[i].y);
+            try w.writeF32(self.sim.transform[i].z);
+            try w.writeF32(self.sim.transform[i].yaw);
+            try w.writeF32(v.fuel);
+            try w.writeByte(v.seat_count);
+            try w.writeF32(v.max_speed);
             count += 1;
         } else if (self.sim.kind[i] == .turret) {
             const t = self.sim.turret[i];
-            w.writeByte(2) catch return;
-            w.writeF32(self.sim.transform[i].x) catch return;
-            w.writeF32(self.sim.transform[i].y) catch return;
-            w.writeF32(self.sim.transform[i].z) catch return;
-            w.writeF32(t.range) catch return;
-            w.writeF32(t.damage) catch return;
-            w.writeU16(t.ammo) catch return;
+            try w.writeByte(2);
+            try w.writeF32(self.sim.transform[i].x);
+            try w.writeF32(self.sim.transform[i].y);
+            try w.writeF32(self.sim.transform[i].z);
+            try w.writeF32(t.range);
+            try w.writeF32(t.damage);
+            try w.writeU16(t.ammo);
             count += 1;
         }
     }

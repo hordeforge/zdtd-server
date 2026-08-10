@@ -85,9 +85,7 @@ pub const Table = struct {
     }
 
     pub fn mergeBlocksXml(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
-        const raw = try io_fs.readFileAll(allocator, path);
-        defer allocator.free(raw);
-        const clean = try xml.stripComments(allocator, raw);
+        const clean = try xml.readCleanFile(allocator, path);
         defer allocator.free(clean);
         var i: usize = 0;
         while (i < clean.len) {

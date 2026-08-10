@@ -4,6 +4,7 @@
 const std = @import("std");
 const tcp = @import("../util/tcp_listen.zig");
 const clock = @import("../util/clock.zig");
+const secret = @import("../util/secret.zig");
 
 pub const max_cmd: usize = 256;
 
@@ -26,20 +27,11 @@ pub const Auth = struct {
         return self.password.len > 0;
     }
 
-    /// Constant-time content compare (always walk max(len)) so remote timing
-    /// primarily reflects payload size, not an early length branch. Matches
-    /// LiteNet connect-key / webui secret compares.
+    /// Constant-time password compare, same helper as the LiteNet connect-key
+    /// and webui secret checks. An unset password accepts every line.
     pub fn matches(self: Auth, line: []const u8) bool {
         if (!self.enabled()) return true;
-        var diff: u8 = if (line.len == self.password.len) 0 else 1;
-        const n = @max(line.len, self.password.len);
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            const x: u8 = if (i < line.len) line[i] else 0;
-            const y: u8 = if (i < self.password.len) self.password[i] else 0;
-            diff |= x ^ y;
-        }
-        return diff == 0;
+        return secret.constantTimeEql(line, self.password);
     }
 };
 
@@ -74,6 +66,12 @@ pub const Server = struct {
     /// the command dispatcher; its lines are password attempts only.
     authed: [max_sessions]bool = .{false} ** max_sessions,
     fails: [max_sessions]u8 = .{0} ** max_sessions,
+    /// Failed attempts across every session since the last success or lockout.
+    /// The per-session counter resets whenever a socket closes, so on its own it
+    /// throttles nothing: a brute force just disconnects one attempt short of
+    /// `fail_limit` and reconnects. This one survives reconnects and arms the
+    /// same lockout, which is what actually bounds the guess rate.
+    fails_total: u32 = 0,
     /// Mono ns until which further password attempts are rejected (0 = unlocked).
     /// Armed when any session hits `auth.fail_limit` and `fail_block_minutes > 0`.
     login_lock_until_ns: u64 = 0,
@@ -105,6 +103,7 @@ pub const Server = struct {
         self.recv_lens = .{0} ** max_sessions;
         self.authed = .{false} ** max_sessions;
         self.fails = .{0} ** max_sessions;
+        self.fails_total = 0;
         self.login_lock_until_ns = 0;
         self.listener.deinit();
         self.port = 0;
@@ -189,6 +188,7 @@ pub const Server = struct {
         if (self.auth.matches(line)) {
             self.authed[i] = true;
             self.fails[i] = 0;
+            self.fails_total = 0;
             self.login_lock_until_ns = 0;
             // Log the success too: "who held a console session when X happened"
             // is unanswerable from failures alone, and the `audit source=admin`
@@ -200,12 +200,15 @@ pub const Server = struct {
             return true;
         }
         self.fails[i] +|= 1;
-        if (self.fails[i] >= self.auth.fail_limit) {
+        self.fails_total +|= 1;
+        if (self.fails[i] >= self.auth.fail_limit or self.fails_total >= self.auth.fail_limit) {
             const block_m = self.auth.fail_block_minutes;
             if (block_m > 0) {
                 const block_ns = @as(u64, block_m) *% 60 *% std.time.ns_per_s;
                 self.login_lock_until_ns = clock.monoNs() +% block_ns;
             }
+            // Start the next window clean; the lockout above is the throttle.
+            self.fails_total = 0;
             var ts: [19]u8 = undefined;
             std.debug.print(
                 "zdtd: {s} admin login failed session={d} attempts={d} closed block_min={d}\n",
@@ -435,6 +438,12 @@ pub const Command = union(enum) {
     listplayers,
     /// Stock `killall` (non-player AI).
     killall,
+    /// zdtd-only: force every storm-capable biome into an active storm.
+    storm,
+    /// zdtd-only: end any active storm (`clearweather` / `stormoff`).
+    clearweather,
+    /// zdtd-only: trigger an air drop immediately.
+    spawnairdrop,
     /// Stock `saveworld`.
     saveworld,
     /// Stock `shutdown` (graceful stop).
@@ -517,6 +526,10 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "listents") or std.mem.eql(u8, verb, "le")) return "listents";
     if (std.mem.eql(u8, verb, "listplayers") or std.mem.eql(u8, verb, "lp")) return "listplayers";
     if (std.mem.eql(u8, verb, "killall") or std.mem.eql(u8, verb, "ka")) return "killall";
+    if (std.mem.eql(u8, verb, "storm")) return "storm";
+    if (std.mem.eql(u8, verb, "clearweather") or std.mem.eql(u8, verb, "stormoff"))
+        return "clearweather|stormoff";
+    if (std.mem.eql(u8, verb, "spawnairdrop")) return "spawnairdrop";
     if (std.mem.eql(u8, verb, "saveworld") or std.mem.eql(u8, verb, "sa")) return "saveworld";
     if (std.mem.eql(u8, verb, "shutdown")) return "shutdown";
     if (std.mem.eql(u8, verb, "version")) return "version";
@@ -733,6 +746,10 @@ pub fn parseCommand(line: []const u8) Command {
     if (std.mem.eql(u8, cmd, "listents") or std.mem.eql(u8, cmd, "le")) return if (it.next() == null) .listents else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "listplayers") or std.mem.eql(u8, cmd, "lp")) return if (it.next() == null) .listplayers else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "killall") or std.mem.eql(u8, cmd, "ka")) return if (it.next() == null) .killall else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "storm")) return if (it.next() == null) .storm else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "clearweather") or std.mem.eql(u8, cmd, "stormoff"))
+        return if (it.next() == null) .clearweather else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "spawnairdrop")) return if (it.next() == null) .spawnairdrop else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "saveworld") or std.mem.eql(u8, cmd, "sa")) return if (it.next() == null) .saveworld else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "shutdown")) return if (it.next() == null) .shutdown else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "version")) return if (it.next() == null) .version else .{ .bad_args = cmd };
@@ -780,6 +797,15 @@ test "parse kill" {
     const c = parseCommand("kill 100");
     try std.testing.expect(c == .kill);
     try std.testing.expectEqual(@as(i32, 100), c.kill);
+}
+
+test "parse weather and airdrop verbs advertised by help" {
+    try std.testing.expect(parseCommand("storm") == .storm);
+    try std.testing.expect(parseCommand("clearweather") == .clearweather);
+    try std.testing.expect(parseCommand("stormoff") == .clearweather);
+    try std.testing.expect(parseCommand("spawnairdrop") == .spawnairdrop);
+    try std.testing.expect(parseCommand("storm now") == .bad_args);
+    try std.testing.expectEqualStrings("clearweather|stormoff", usageFor("stormoff").?);
 }
 
 test "parse inv" {
@@ -1110,6 +1136,28 @@ test "fail limit arms process-wide login lockout" {
     s.active = 2;
     try std.testing.expect(!s.authenticate(2, "hunter2"));
     try std.testing.expect(!s.authed[2]);
+}
+
+test "reconnecting does not reset the brute-force counter" {
+    // Attack shape: guess up to one short of fail_limit, drop the socket, come
+    // back on a fresh slot. Per-session `fails` is zero again each time, so only
+    // the cross-session counter can arm the lockout.
+    var s: Server = .{ .auth = .{ .password = "hunter2", .fail_limit = 4, .fail_block_minutes = 10 } };
+    // Connection 1: two guesses, then "disconnect" (fresh slot next round).
+    s.authed[0] = false;
+    s.fails[0] = 0;
+    s.active = 0;
+    try std.testing.expect(s.authenticate(0, "no"));
+    try std.testing.expect(s.authenticate(0, "no"));
+    try std.testing.expect(!s.loginLocked());
+    // Connection 2: per-session counter starts at zero again.
+    s.authed[1] = false;
+    s.fails[1] = 0;
+    s.active = 1;
+    try std.testing.expect(s.authenticate(1, "no"));
+    // 4th attempt overall trips the limit even though this session saw only 2.
+    try std.testing.expect(!s.authenticate(1, "no"));
+    try std.testing.expect(s.loginLocked());
 }
 
 test "acceptNew prefers unauthenticated victim when full" {

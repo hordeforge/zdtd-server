@@ -39,12 +39,15 @@ pub fn step(self: *Game) !void {
                 self.harness.counters.inc(.net_poll_errors);
                 if (util_sim.isEnabled()) {
                     var seed_buf: [32]u8 = undefined;
-                    std.debug.print("zdtd: net poll error: {s} ({s})\n", .{
+                    var ts: [19]u8 = undefined;
+                    std.debug.print("zdtd: {s} net poll error: {s} ({s})\n", .{
+                        clock.wallStamp(&ts),
                         @errorName(err),
                         util_sim.formatSeed(&seed_buf),
                     });
                 } else {
-                    std.debug.print("zdtd: net poll error: {s}\n", .{@errorName(err)});
+                    var ts: [19]u8 = undefined;
+                    std.debug.print("zdtd: {s} net poll error: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
                 }
                 return err;
             };
@@ -52,9 +55,10 @@ pub fn step(self: *Game) !void {
                 .none => break,
                 .connected => |p| self.onConnected(p) catch |e| {
                     self.harness.counters.inc(.join_fail);
+                    var ts: [19]u8 = undefined;
                     std.debug.print(
-                        "zdtd: onConnected failed local_id={d}: {s}\n",
-                        .{ p.local_id, @errorName(e) },
+                        "zdtd: {s} onConnected failed local_id={d}: {s}\n",
+                        .{ clock.wallStamp(&ts), p.local_id, @errorName(e) },
                     );
                 },
                 .data => |d| self.onData(d.peer, d.payload) catch |err| {
@@ -117,7 +121,8 @@ pub fn step(self: *Game) !void {
             if (self.last_bm_day != bm) {
                 if (self.last_bm_day >= 0) self.broadcastGameStats() catch |err| {
                     self.harness.counters.inc(.net_send_errors);
-                    std.debug.print("zdtd: broadcastGameStats failed: {s}\n", .{@errorName(err)});
+                    var ts: [19]u8 = undefined;
+                    std.debug.print("zdtd: {s} broadcastGameStats failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
                 };
                 self.last_bm_day = bm;
             }
@@ -135,7 +140,8 @@ pub fn step(self: *Game) !void {
         if (self.tick_n % self.sleeper_tick_ticks == 0) {
             self.tickWorkstations(@as(f32, @floatFromInt(self.sleeper_tick_ticks)) * 0.05) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} broadcastDirtyWorkstations failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             };
         }
         const daylight = !self.sim.director.clock.isNight();
@@ -261,6 +267,7 @@ pub fn step(self: *Game) !void {
             self.world.saveAll() catch |e| game_mod.logPersistErr(self, "save world", e);
         }
         self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
+        self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
         self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
         self.saveEntities() catch |e| game_mod.logPersistErr(self, "save entities", e);
@@ -298,13 +305,15 @@ pub fn step(self: *Game) !void {
         var report_ok = true;
         apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
             report_ok = false;
-            std.debug.print("zdtd: apm report failed: {s}\n", .{@errorName(err)});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} apm report failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
         };
         if (report_ok) {
             var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
             defer threaded.deinit();
             std.Io.File.stdout().writeStreamingAll(threaded.io(), report_writer.buffered()) catch |e| {
-                std.debug.print("zdtd: apm report write failed: {s}\n", .{@errorName(e)});
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} apm report write failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(e) });
             };
         }
     }

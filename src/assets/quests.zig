@@ -1021,23 +1021,29 @@ test "stock quests.xml template quests parse non-empty" {
     defer cat.deinit();
     // 67 stock quests use template=; the derived challenge rewards must carry
     // the template's objectives instead of parsing as empty defs.
-    const adv = cat.byName("challengegroup_reward_advanced_survival") orelse return;
-    try std.testing.expect(adv.objective_count >= 1);
-    try std.testing.expect(adv.reward_count >= 1);
-    const homestead = cat.byName("challengegroup_reward_homesteading") orelse return;
-    try std.testing.expect(homestead.objective_count >= 1);
+    const adv = cat.byName("challengegroup_reward_advanced_survival");
+    try std.testing.expect(adv != null);
+    const advanced_survival = adv.?;
+    try std.testing.expect(advanced_survival.objective_count >= 1);
+    try std.testing.expect(advanced_survival.reward_count >= 1);
+    const homestead = cat.byName("challengegroup_reward_homesteading");
+    try std.testing.expect(homestead != null);
+    const homesteading = homestead.?;
+    try std.testing.expect(homesteading.objective_count >= 1);
     // The merged body counts the template's objectives too: the wire
     // objective_count must be at least the template's (the client's inherited
     // QuestClass carries the template's full objective list, so a count of 1
     // would trip its ValidateSizeMarker on the join PDF).
-    try std.testing.expect(adv.objective_count >= homestead.objective_count);
+    try std.testing.expect(advanced_survival.objective_count >= homesteading.objective_count);
     // difficulty_tier resolves through the `<variable name="difficulty">`
     // override (template property carries param1="difficulty"): tier2_fetch
     // must report 2, not the template's 1.
-    const t2 = cat.byName("tier2_fetch") orelse return;
-    try std.testing.expectEqual(@as(u8, 2), t2.difficulty_tier);
-    const t1 = cat.byName("tier1_fetch") orelse return;
-    try std.testing.expectEqual(@as(u8, 1), t1.difficulty_tier);
+    const t2 = cat.byName("tier2_fetch");
+    try std.testing.expect(t2 != null);
+    try std.testing.expectEqual(@as(u8, 2), t2.?.difficulty_tier);
+    const t1 = cat.byName("tier1_fetch");
+    try std.testing.expect(t1 != null);
+    try std.testing.expectEqual(@as(u8, 1), t1.?.difficulty_tier);
 }
 
 test "quest actions parse types, phases and properties" {

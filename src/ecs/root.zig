@@ -37,27 +37,10 @@ pub const sim_view = @import("sim_view.zig");
 pub const World = world.World;
 pub const Slot = world.Slot;
 pub const Kind = components.Kind;
-pub const Mask = components.Mask;
 pub const max_entities = world.max_entities;
-pub const InvLedger = inv_ledger.Ledger;
-pub const InvCause = inv_ledger.Cause;
-pub const CommandBuffer = command.Buffer;
-pub const CommandOp = command.Op;
-pub const TickLocals = locals.TickLocals;
-pub const SimView = sim_view.SimView;
-pub const Phase = schedule.Phase;
 pub const TickResult = schedule.TickResult;
 
-pub const forEachAlive = query.forEachAlive;
-pub const forEachWith = query.forEachWith;
-pub const forEachKind = query.forEachKind;
-pub const forEachParallelKind = query.forEachParallelKind;
 pub const groupSlice = query.groupSlice;
-pub const forEachKindGroup = query.forEachKindGroup;
-pub const copyKindInto = query.copyKindInto;
-pub const each = query.each;
-pub const eachKind = query.eachKind;
-pub const maskMatches = query.maskMatches;
 
 test {
     _ = entity;
@@ -70,6 +53,7 @@ test {
     _ = electric;
     _ = powerblocks;
     _ = aidirector;
+    _ = party;
     _ = rules;
     _ = path;
     _ = interest;

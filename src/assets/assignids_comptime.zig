@@ -71,12 +71,9 @@ const pins = [_]Pin{
     .{ .id = cobblestone_shapes_cube, .name = "cobblestoneShapes:cube" },
 };
 
-fn readDump(allocator: std.mem.Allocator) ![]u8 {
-    return io_fs.readFileAll(allocator, dump_path);
-}
-
 test "assignids pins match bundled dump" {
-    const raw = readDump(std.testing.allocator) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(dump_path)) return error.SkipZigTest;
+    const raw = try io_fs.readFileAll(std.testing.allocator, dump_path);
     defer std.testing.allocator.free(raw);
     for (pins) |p| {
         var found = false;

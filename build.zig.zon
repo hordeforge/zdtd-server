@@ -14,6 +14,7 @@
         ".zigversion",
         "src",
         "assets/fixtures",
+        "modes",
         "scripts",
         "Makefile",
         "serverconfig.example.xml",
@@ -23,6 +24,7 @@
         "docs/RELEASES.md",
         "AGENTS.md",
         "LICENSE",
+        "THIRD_PARTY.md",
     },
     .fingerprint = 0x6b94e5abf1c7625d,
 }

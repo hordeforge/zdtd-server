@@ -103,6 +103,13 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < hay.len) {
         const pi = std.mem.findPos(u8, hay, i, "<property") orelse break;
+        const after_name = pi + "<property".len;
+        if (after_name < hay.len and !std.ascii.isWhitespace(hay[after_name]) and
+            hay[after_name] != '/' and hay[after_name] != '>')
+        {
+            i = after_name;
+            continue;
+        }
         const n = xml.attr(hay, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -180,6 +187,13 @@ fn warnNearMissPropertyNames(hay: []const u8) void {
     var i: usize = 0;
     while (i < hay.len) {
         const pi = std.mem.findPos(u8, hay, i, "<property") orelse break;
+        const after_name = pi + "<property".len;
+        if (after_name < hay.len and !std.ascii.isWhitespace(hay[after_name]) and
+            hay[after_name] != '/' and hay[after_name] != '>')
+        {
+            i = after_name;
+            continue;
+        }
         const n = xml.attr(hay, pi, "name") orelse {
             i = pi + 9;
             continue;
@@ -275,7 +289,9 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "PlayerKillingMode")) |v| cfg.player_killing_mode = clampU8Named("PlayerKillingMode", v, 0, 3, cfg.player_killing_mode);
     if (prop(raw, "DayNightLength")) |v| cfg.day_night_length = clampRangeNamed("DayNightLength", v, 10, 1200, cfg.day_night_length);
     if (prop(raw, "DayLightLength")) |v| cfg.day_light_length = clampU8Named("DayLightLength", v, 1, 23, cfg.day_light_length);
-    if (prop(raw, "MaxSpawnedZombies")) |v| cfg.max_spawned_zombies = clampRangeNamed("MaxSpawnedZombies", v, 1, 2048, cfg.max_spawned_zombies);
+    // 0 = no zombie spawns (Director.tick bails at the alive gate), same shape
+    // as MaxSpawnedAnimals; the mode-pack range agrees (src/server/mode.zig).
+    if (prop(raw, "MaxSpawnedZombies")) |v| cfg.max_spawned_zombies = clampRangeNamed("MaxSpawnedZombies", v, 0, 2048, cfg.max_spawned_zombies);
     if (prop(raw, "BloodMoonRange")) |v| cfg.blood_moon_range = clampU8Named("BloodMoonRange", v, 0, 15, cfg.blood_moon_range);
     if (prop(raw, "ZombieMove")) |v| cfg.zombie_move = clampU8Named("ZombieMove", v, 0, 4, cfg.zombie_move);
     if (prop(raw, "ZombieMoveNight")) |v| cfg.zombie_move_night = clampU8Named("ZombieMoveNight", v, 0, 4, cfg.zombie_move_night);
@@ -381,6 +397,19 @@ test "parse config fixture" {
     try std.testing.expectEqual(@as(u8, 2), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u8, 3), cfg.player_killing_mode);
+}
+
+test "property-prefixed elements do not override server settings" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <propertyOverride name="ServerPort" value="12345"/>
+        \\  <property name="ServerMaxPlayerCount" value="12"/>
+        \\</ServerSettings>
+    ;
+    var cfg = try parse(std.testing.allocator, xml_src);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 26902), cfg.port);
+    try std.testing.expectEqual(@as(u16, 12), cfg.max_players);
 }
 
 test "parse gameplay options with clamping" {

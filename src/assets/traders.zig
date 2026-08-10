@@ -334,20 +334,8 @@ fn parseRefsBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const
     return sl;
 }
 
-/// Parse one `<trader_items>` body into ItemRefs (group and name refs kept).
-fn parseTraderRefs(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
-    return parseRefsBody(arena, gpa, body);
-}
-
-/// Parse one `<trader_item_group>` body into ItemRefs.
-fn parseGroupBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
-    return parseRefsBody(arena, gpa, body);
-}
-
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -371,7 +359,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         const gt = std.mem.findPos(u8, clean, gi, ">") orelse break;
         const close = std.mem.findPos(u8, clean, gt, "</trader_item_group>") orelse break;
         const body = clean[gt + 1 .. close];
-        const refs = try parseGroupBody(arena, allocator, body);
+        const refs = try parseRefsBody(arena, allocator, body);
         const cnt = xml.attr(clean, gi, "count") orelse "";
         const count_all = std.mem.eql(u8, cnt, "all");
         const mm = parseMinMax(cnt, 1);
@@ -422,7 +410,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         var refs: []const ItemRef = &.{};
         if (!self_closing) {
             const close = std.mem.findPos(u8, clean, gt, "</trader_info>") orelse break;
-            refs = try parseTraderRefs(arena, allocator, clean[gt + 1 .. close]);
+            refs = try parseRefsBody(arena, allocator, clean[gt + 1 .. close]);
             i = close + "</trader_info>".len;
         }
         const open_time = xml.attr(clean, ti, "open_time") orelse "";
@@ -476,7 +464,8 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 
 test "trader table parses stock traderAlways and group refs with attrs" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.groups.len >= 5);
     try std.testing.expect(t.trader_always_refs.len >= 5);
@@ -508,7 +497,8 @@ test "trader table parses stock traderAlways and group refs with attrs" {
 
 test "trader table parses trader_info blocks with per-trader items and attrs" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     // The five NPC traders (joel=1 jen=2 bob=6 hugh=7 rekt=8) plus vending
     // (4,10) and player-owned/rentable (3,5) all exist as trader_info blocks.
@@ -656,7 +646,7 @@ test "trader_info scan survives adjacent blocks with no whitespace" {
         var refs: []const ItemRef = &.{};
         if (!self_closing) {
             const close = std.mem.findPos(u8, clean, gt, "</trader_info>") orelse break;
-            refs = try parseTraderRefs(arena, std.testing.allocator, clean[gt + 1 .. close]);
+            refs = try parseRefsBody(arena, std.testing.allocator, clean[gt + 1 .. close]);
             j = close + "</trader_info>".len;
         }
         try infos.append(std.testing.allocator, .{ .id = id, .refs = refs });

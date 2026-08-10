@@ -76,7 +76,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   POI reserved). SetCVar / ShowMessageWindow are client-owned and recorded;
   SpawnGSEnemy / GameEvent remain recorded-unfired until the spawn/event
   subsystems land.
-  The in-tree `sample_hello` plugin is enabled by default and can be disabled
+- The in-tree `sample_hello` plugin is enabled by default and can be disabled
   with the gamemode `enable_sample_plugin` setting. Out-of-tree packaging and
   a stable dynamic ABI are not supported yet. See `docs/PLUGIN_API.md`.
 - An optional Tracy profiling build emits one zone per apm profiler section plus
@@ -118,7 +118,22 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- A gamemode pack (`modes/<name>.toml`) now accepts the same value ranges as
+  `serverconfig.xml` for the keys both can set. Land-claim durability, claim
+  expiry days and claim size no longer take pack-only values the documented
+  range forbids, and `BlockDamageAI`/`BlockDamageAIBM` accept 0 from a pack.
+  `MaxSpawnedZombies` (and `max_spawned_zombies`) now accept 0 as "no zombie
+  spawns", which `modes/builder.toml` asks for; it used to clamp to 1.
+- An even `LandClaimSize` from a mode pack is forced odd like the
+  `serverconfig.xml` value, so the claim area the client draws matches the one
+  the server enforces.
+- `nan` and `inf` in `zdtd.toml` or a mode pack are rejected at startup instead
+  of being bound as a tunable that makes every comparison against it false.
 - Package and entity layouts were updated for the V3.1.0 b14 client wire.
+- Chunk resends now carry per-cell block damage in the wire damage channel
+  (u16 per cell, same sparse shape as the water channel), so a wall chewed by
+  zombies or a block mined by a player re-renders damaged instead of pristine
+  the next time the chunk is streamed.
 - Chunk persistence now retains full `BlockValue.rawData` in ZCH3.
 - POIs are built from the blocks they were authored with. Prefab block ids are
   prefab-local and are now translated by name through each prefab's
@@ -135,6 +150,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   neither can drain the entity table; the absolute PosAndRot arm preserves the
   stored yaw instead of fabricating north; turret kills roll `LootDropProb`
   like player kills (`World.rollLootDrop`).
+- Respawn no longer zeroes food and water: `respawnPlayer` mutates only the
+  hp fields and keeps food, water and stamina across death (seeding their
+  maxima when 0), matching stock behavior instead of landing on `food=0`,
+  `water=0`.
 - A stability removal now reports the recursed dependency chain as fallen
   (digging out a support column drops the structure above it), and the
   stability tests build their world with explicit air above the surface so

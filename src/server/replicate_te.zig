@@ -18,7 +18,6 @@ const ecs = @import("../ecs/root.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const vending_mod = @import("../world/vending.zig");
 const containers_mod = @import("../world/containers.zig");
-const world_store = @import("../world/store.zig");
 const assets_traders = @import("../assets/traders.zig");
 const io_fs = @import("../util/io_fs.zig");
 const game_trader = @import("game/trader.zig");

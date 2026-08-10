@@ -9,6 +9,7 @@ const packages = @import("../../wire/packages.zig");
 const biomes_mod = @import("../../world/biomes.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const util_sim = @import("../../util/sim.zig");
+const util_log = @import("../../util/log.zig");
 const assets_quests = @import("../../assets/quests.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
@@ -32,17 +33,35 @@ const assets_storage_pairs = @import("../../assets/storage_pairs.zig");
 const ecs = @import("../../ecs/root.zig");
 const world_store = @import("../../world/store.zig");
 
+/// Report a catalog load failure and fall back to the builtin table.
+/// `tryLoad` returns null for "stock file absent" and an error for a real
+/// parse/IO failure, so a bare `catch null` hides the second case: the server
+/// then runs forever on builtin defaults while the operator believes the stock
+/// XML is loaded. Mirrors the blocks/items loaders above.
+fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result)).error_union.payload {
+    return result catch |err| {
+        std.debug.print("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
+        return null;
+    };
+}
+
 pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.InitOptions) !void {
     const assets_paths = @import("../../assets/paths.zig");
     assets_paths.setOverrideDirs(opts.config_overrides);
     if (opts.config_overrides.len > 0) {
-        std.debug.print("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
+        util_log.info("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
     }
-    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path) catch null) |cat| {
+    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path) catch |err| blk: {
+        std.debug.print("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
+        break :blk null;
+    }) |cat| {
         self.sim.setCatalog(cat);
     }
     // AssignIds + blocks.xml properties first so later catalogs can resolve ids.
-    if (assets_maxdamage.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |md| {
+    if (assets_maxdamage.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
+        std.debug.print("zdtd: blocks/AssignIds load failed: {s}\n", .{@errorName(err)});
+        break :blk null;
+    }) |md| {
         self.maxdamage.deinit();
         self.maxdamage = md;
         self.maxdamage.tryMergeBundledAssignIds(allocator);
@@ -59,7 +78,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 } else |_| {}
             }
         }
-        std.debug.print("zdtd: maxdamage names={d} ids={d} assignids={d} storage={d}\n", .{
+        util_log.info("zdtd: maxdamage names={d} ids={d} assignids={d} storage={d}\n", .{
             self.maxdamage.by_name.count(),
             self.maxdamage.by_id.count(),
             self.maxdamage.id_by_name.count(),
@@ -67,7 +86,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         });
     } else {
         self.maxdamage.tryMergeBundledAssignIds(allocator);
-        std.debug.print("zdtd: assignids-only names={d}\n", .{self.maxdamage.id_by_name.count()});
+        util_log.info("zdtd: assignids-only names={d}\n", .{self.maxdamage.id_by_name.count()});
     }
     // A05: live terrain type ids from AssignIds (World.terrain_ids; pins remain offline defaults).
     {
@@ -111,33 +130,39 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-        if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
+        if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch |err| blk: {
+            std.debug.print("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});
+            break :blk null;
+        }) |bt| {
             self.blocks.deinit();
             self.blocks = bt;
-            std.debug.print("zdtd: blocks defs={d}\n", .{self.blocks.defs.len});
+            util_log.info("zdtd: blocks defs={d}\n", .{self.blocks.defs.len});
         }
     }
-    if (assets_items.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |it| {
+    if (assets_items.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
+        std.debug.print("zdtd: item definitions load failed: {s}\n", .{@errorName(err)});
+        break :blk null;
+    }) |it| {
         self.items.deinit();
         self.items = it;
-        std.debug.print("zdtd: items source={s} defs={d} stock_names={d}\n", .{
+        util_log.info("zdtd: items source={s} defs={d} stock_names={d}\n", .{
             @tagName(self.items.source), self.items.defs.len, self.items.stock_names.len,
         });
         if (self.items.byStockName("foodCanChili")) |st| {
             const eid = self.items.ecsIdFromStockType(st);
-            std.debug.print("zdtd: foodCanChili stock={d} ecs={d} isEat={}\n", .{
+            util_log.info("zdtd: foodCanChili stock={d} ecs={d} isEat={}\n", .{
                 st, eid, self.items.isEat(eid),
             });
         }
     } else if (self.stock_catalogs_requested) {
         std.debug.print("zdtd: warn: items.xml failed to load; item-dependent actions fail closed\n", .{});
     }
-    if (assets_signs.tryLoad(allocator, opts.game_dir) catch null) |sc| {
+    if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
         self.signs = sc;
-        std.debug.print("zdtd: sign libraries entries={d}\n", .{self.signs.entries.len});
+        util_log.info("zdtd: sign libraries entries={d}\n", .{self.signs.entries.len});
     }
-    if (assets_entities.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |et| {
+    if (logged("entityclasses.xml", assets_entities.tryLoad(allocator, opts.game_dir, opts.config_dir))) |et| {
         self.entities.deinit();
         self.entities = et;
         // Push defaults into class_table for spawn helpers.
@@ -169,7 +194,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .time_stay = adef.time_stay,
             .sight_range = adef.sight_range,
         });
-        std.debug.print("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
+        util_log.info("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
             self.entities.defs.len, zdef.name, zdef.hash,
         });
     }
@@ -186,22 +211,22 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .drop_prob = tdef.loot_drop_prob,
         });
     }
-    if (assets_recipes.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |rt| {
+    if (logged("recipes.xml", assets_recipes.tryLoad(allocator, opts.game_dir, opts.config_dir))) |rt| {
         self.recipes.deinit();
         self.recipes = rt;
-        std.debug.print("zdtd: recipes defs={d}\n", .{self.recipes.defs.len});
+        util_log.info("zdtd: recipes defs={d}\n", .{self.recipes.defs.len});
     }
-    if (assets_loot.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |lt| {
+    if (logged("loot.xml", assets_loot.tryLoad(allocator, opts.game_dir, opts.config_dir))) |lt| {
         self.loot.deinit();
         self.loot = lt;
-        std.debug.print("zdtd: loot groups={d} containers={d}\n", .{ self.loot.groups.len, self.loot.containers.len });
+        util_log.info("zdtd: loot groups={d} containers={d}\n", .{ self.loot.groups.len, self.loot.containers.len });
     }
     self.loot.abundance_pct = opts.loot_abundance; // LootAbundance applies to builtin or xml table
 
-    if (assets_entitygroups.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |gt| {
+    if (logged("entitygroups.xml", assets_entitygroups.tryLoad(allocator, opts.game_dir, opts.config_dir))) |gt| {
         self.entitygroups.deinit();
         self.entitygroups = gt;
-        std.debug.print("zdtd: entitygroups n={d}\n", .{self.entitygroups.groups.len});
+        util_log.info("zdtd: entitygroups n={d}\n", .{self.entitygroups.groups.len});
         // Fill zombie class slots 1 + 8..11 from weighted group picks so the
         // director can rotate varied classes (not always class_table[1]).
         var zslot: usize = 1;
@@ -229,7 +254,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // group. Stock throws XmlLoadException there (ParseSpawn, asm.il
     // ~1379646); zdtd warns and keeps the ladder so one bad row cannot
     // take the server down.
-    if (assets_gamestages.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |gst| {
+    if (logged("gamestages.xml", assets_gamestages.tryLoad(allocator, opts.game_dir, opts.config_dir))) |gst| {
         self.gamestages.deinit();
         self.gamestages = gst;
         var stage_n: usize = 0;
@@ -242,7 +267,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 }
             }
         }
-        std.debug.print(
+        util_log.info(
             "zdtd: gamestages spawners={d} stages={d} groups={d} unknown_entitygroups={d}\n",
             .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
         );
@@ -260,45 +285,45 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // finds the trader, not an empty building (needs prefabs + entities +
     // npc tables, hence after the loads above).
     self.spawnPoiTraders();
-    if (assets_painting.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
+    if (logged("painting.xml", assets_painting.tryLoad(allocator, opts.game_dir, opts.config_dir))) |pt| {
         self.painting.deinit();
         self.painting = pt;
-        std.debug.print("zdtd: painting entries={d}\n", .{self.painting.n});
+        util_log.info("zdtd: painting entries={d}\n", .{self.painting.n});
     }
-    if (assets_spawning.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |st| {
+    if (logged("spawning.xml", assets_spawning.tryLoad(allocator, opts.game_dir, opts.config_dir))) |st| {
         self.spawning.deinit();
         self.spawning = st;
-        std.debug.print("zdtd: spawning rules={d}\n", .{self.spawning.rules.len});
+        util_log.info("zdtd: spawning rules={d}\n", .{self.spawning.rules.len});
     }
-    if (assets_buffs.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |bt| {
+    if (logged("buffs.xml", assets_buffs.tryLoad(allocator, opts.game_dir, opts.config_dir))) |bt| {
         self.buffs.deinit();
         self.buffs = bt;
-        std.debug.print("zdtd: buffs defs={d}\n", .{self.buffs.defs.len});
+        util_log.info("zdtd: buffs defs={d}\n", .{self.buffs.defs.len});
     }
-    if (assets_progression.tryLoadTable(allocator, opts.game_dir, opts.config_dir) catch null) |pt| {
+    if (logged("progression.xml", assets_progression.tryLoadTable(allocator, opts.game_dir, opts.config_dir))) |pt| {
         self.progression_table.deinit();
         self.progression_table = pt;
         self.progression = pt.curve;
         if (pt.curve.loaded) {
-            std.debug.print("zdtd: progression max_level={d} exp_to_level={d} attrs={d} perks={d}\n", .{
+            util_log.info("zdtd: progression max_level={d} exp_to_level={d} attrs={d} perks={d}\n", .{
                 pt.curve.max_level,
                 pt.curve.exp_to_level,
                 pt.attributes.len,
                 pt.perks.len,
             });
         }
-    } else if (assets_progression.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |pc| {
+    } else if (logged("progression.xml", assets_progression.tryLoad(allocator, opts.game_dir, opts.config_dir))) |pc| {
         self.progression = pc;
         if (pc.loaded) {
-            std.debug.print("zdtd: progression max_level={d} exp_to_level={d}\n", .{ pc.max_level, pc.exp_to_level });
+            util_log.info("zdtd: progression max_level={d} exp_to_level={d}\n", .{ pc.max_level, pc.exp_to_level });
         }
     }
-    if (assets_vehicles.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |vt| {
+    if (logged("vehicles.xml", assets_vehicles.tryLoad(allocator, opts.game_dir, opts.config_dir))) |vt| {
         self.vehicles.deinit();
         self.vehicles = vt;
-        std.debug.print("zdtd: vehicles defs={d}\n", .{self.vehicles.defs.len});
+        util_log.info("zdtd: vehicles defs={d}\n", .{self.vehicles.defs.len});
     }
-    if (assets_storage_pairs.tryLoad(allocator, opts.game_dir, opts.config_dir) catch null) |sp| {
+    if (logged("blocks.xml storage pairs", assets_storage_pairs.tryLoad(allocator, opts.game_dir, opts.config_dir))) |sp| {
         self.storage_pairs.deinit();
         self.storage_pairs = sp;
         const IdCtx = struct {
@@ -310,7 +335,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
         self.storage_pairs.resolveIds(IdCtx.lookup, &id_ctx);
-        std.debug.print("zdtd: storage pairs={d}\n", .{self.storage_pairs.pairs.len});
+        util_log.info("zdtd: storage pairs={d}\n", .{self.storage_pairs.pairs.len});
     }
     // Wire spawning.xml groups into director (first matching biome rule).
     {
@@ -357,18 +382,24 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.sim.kill_verdict_ctx = self;
         self.sim.kill_verdict_fn = &game_mod.killVerdict;
         if (night_g.len > 0 or day_g.len > 0) {
-            std.debug.print("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
+            util_log.info("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
         }
     }
-    if (biomes_mod.tryLoadColorTable(allocator, opts.game_dir, opts.config_dir) catch null) |ct| {
+    if (logged("biomes.xml colors", biomes_mod.tryLoadColorTable(allocator, opts.game_dir, opts.config_dir))) |ct| {
         self.biome_colors.deinit();
         self.biome_colors = ct;
         // Reload biomes.png with XML colors if map already loaded.
         if (opts.map_dir) |md| {
-            if (self.world.biomes) |*old| old.deinit();
-            self.world.biomes = biomes_mod.tryLoadWithColors(allocator, md, &self.biome_colors) catch null;
+            const reloaded = biomes_mod.tryLoadWithColors(allocator, md, &self.biome_colors) catch |err| blk: {
+                std.debug.print("zdtd: biome map reload with XML colors failed: {s}\n", .{@errorName(err)});
+                break :blk null;
+            };
+            if (reloaded) |new_biomes| {
+                if (self.world.biomes) |*old| old.deinit();
+                self.world.biomes = new_biomes;
+            }
         }
-        std.debug.print("zdtd: biome colors n={d}\n", .{self.biome_colors.colors.len});
+        util_log.info("zdtd: biome colors n={d}\n", .{self.biome_colors.colors.len});
     }
     // biomes.xml layer stacks → terrain columns (AssignIds names).
     {
@@ -403,7 +434,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
-        if (assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, IdCtx.distantDeco, &id_ctx) catch null) |bl| {
+        if (logged("biomes.xml layers", assets_biome_layers.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, IdCtx.distantDeco, &id_ctx))) |bl| {
             self.world.biome_layers_table = bl;
             // The procedural generator picks up the loaded biome stacks (W3).
             self.world.syncWorldgenBiomes();
@@ -423,7 +454,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             });
             self.restoreWeather();
             const burnt = bl.stackFor(9);
-            std.debug.print("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
+            util_log.info("zdtd: biome layers default_n={d} burnt_n={d} burnt0={d} decos={s}\n", .{
                 bl.default_stack.n,
                 burnt.n,
                 if (burnt.n > 0) burnt.layers[0].block_id else 0,
@@ -433,14 +464,14 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // Clock restore is independent of the biome-layers load: a world
         // without stock biome data must still resume its saved day/time.
         self.restoreClock();
-        if (assets_block_textures.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch null) |bt| {
+        if (logged("blocks.xml textures", assets_block_textures.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx))) |bt| {
             self.block_textures.deinit();
             self.block_textures = bt;
-            std.debug.print("zdtd: block textures defaults={d}\n", .{self.block_textures.by_id.count()});
+            util_log.info("zdtd: block textures defaults={d}\n", .{self.block_textures.by_id.count()});
         }
     }
     self.power_registry = ecs.powerblocks.Registry.build(&self.maxdamage);
-    std.debug.print("zdtd: power blocks registered={d}\n", .{self.power_registry.n});
+    util_log.info("zdtd: power blocks registered={d}\n", .{self.power_registry.n});
     if (opts.game_dir != null or opts.config_dir != null) {
         if (self.maxdamage.power_class_by_name.count() == 0)
             std.debug.print("zdtd: warn: blocks.xml Class map empty (power props missing)\n", .{});
@@ -461,7 +492,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     }
     if (self.maxdamage.idByName("generatorbank")) |gid| {
         if (self.power_registry.lookup(gid)) |pr| {
-            std.debug.print("zdtd: power generatorbank watts={d} max_fuel={d} out_per_fuel={d}\n", .{
+            util_log.info("zdtd: power generatorbank watts={d} max_fuel={d} out_per_fuel={d}\n", .{
                 pr.watts, pr.max_fuel, pr.output_per_fuel,
             });
         }

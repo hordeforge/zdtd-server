@@ -45,11 +45,11 @@ pub const Sources = struct {
                 const wz = base_z + lz;
                 if (self.waterYNear(wx, wz, radius)) |wy| {
                     const idx: usize = @intCast(lx + lz * 16);
-                    // Pull surface down to water table if terrain is lower than a rim...
-                    // For lakes, lower surrounding terrain slightly above water, set water cells to wy.
-                    if (heights[idx] < wy) {
-                        // keep terrain; water fills air column conceptually
-                    } else if (heights[idx] <= wy + 2) {
+                    // Clamp near-rim terrain down to the water table; deeper
+                    // terrain keeps its height (water fills the air column).
+                    // `heights[idx] <= wy + 2` would overflow u8 at wy >= 254,
+                    // so compare the clamped delta instead.
+                    if (heights[idx] >= wy and heights[idx] - wy <= 2) {
                         heights[idx] = wy;
                     }
                 }

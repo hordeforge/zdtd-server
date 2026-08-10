@@ -102,9 +102,7 @@ fn firstF32(s: []const u8) f32 {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -179,7 +177,8 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 
 test "load vehicles.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/vehicles.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     try std.testing.expect(t.defs.len >= 4);
     const mb = t.byName("vehicleMinibike").?;
@@ -251,7 +250,8 @@ test "seat count edge cases: absent, non contiguous, self closing, over cap" {
 
 test "stock vehicles.xml seat counts match Vehicle::SetSeats" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/vehicles.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     // Base (unmodded) seats: Bicycle/Minibike/Motorcycle 1, Gyrocopter 2, Truck4x4 4.
     try std.testing.expectEqual(@as(u8, 1), t.byName("vehicleBicycle").?.seat_count);

@@ -91,19 +91,26 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
     var pkgs: [16]wire_frame.Package = undefined;
     const n = wire_frame.parseChannelPayload(stable, &pkgs);
     if (n == 0 and stable.len > 0) {
-        var hex: [24]u8 = undefined;
-        const show = @min(stable.len, 8);
-        var hi: usize = 0;
-        var bi: usize = 0;
-        while (bi < show and hi + 2 <= hex.len) : (bi += 1) {
-            const s = std.fmt.bufPrint(hex[hi..], "{x:0>2}", .{stable[bi]}) catch break;
-            hi += s.len;
-        }
-        if (stable.len >= 9) {
-            const psz = std.mem.readInt(i32, stable[1..5], .little);
-            std.debug.print("zdtd: unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{ stable.len, hex[0..hi], stable[0], psz, stable[5], stable[6], std.mem.readInt(u16, stable[7..9], .little) });
-        } else {
-            std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
+        // Same hostile-input sampling as logPayloadErr (game/net.zig): an
+        // unparseable payload is cheap to spray from any connected peer, and
+        // one blocking stderr write per packet would stall the tick thread.
+        self.harness.counters.inc(.c2s_malformed);
+        const malformed = self.harness.counters.get(.c2s_malformed);
+        if (malformed == 1 or malformed % 100 == 0) {
+            var hex: [24]u8 = undefined;
+            const show = @min(stable.len, 8);
+            var hi: usize = 0;
+            var bi: usize = 0;
+            while (bi < show and hi + 2 <= hex.len) : (bi += 1) {
+                const s = std.fmt.bufPrint(hex[hi..], "{x:0>2}", .{stable[bi]}) catch break;
+                hi += s.len;
+            }
+            if (stable.len >= 9) {
+                const psz = std.mem.readInt(i32, stable[1..5], .little);
+                std.debug.print("zdtd: unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{ stable.len, hex[0..hi], stable[0], psz, stable[5], stable[6], std.mem.readInt(u16, stable[7..9], .little) });
+            } else {
+                std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
+            }
         }
         if (stable.len >= 10) {
             var alt: [16]wire_frame.Package = undefined;

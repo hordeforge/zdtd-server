@@ -21,7 +21,7 @@ A native ABI could promise neither.
 | Piece | State |
 |---|---|
 | Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
-| Host function table and capability gating | **implemented**: `zdtd_log(level, ptr, len)`, `zdtd_tick() -> i64`, `zdtd_queue(ptr, len) -> i32` |
+| Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (8), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
@@ -29,7 +29,7 @@ A native ABI could promise neither.
 | Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
 | Admin commands from plugins | Wasm `on_admin_command(ptr,len,out_ptr,out_cap)->i32` and static `on_admin_command(cmd,out)`; first handler that returns >0 bytes wins; falls through to core `unknown` if none handle it (admin TCP auth still gates `runAdminLine`) |
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
-| Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny with reason in out; first deny wins (traps treated as allow) |
+| Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
 
 The static host stays because scenarios need to drive hooks without standing up

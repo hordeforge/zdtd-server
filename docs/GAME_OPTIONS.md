@@ -46,7 +46,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `PlayerKillingMode` | 3 | 0..3 | 0 drops player→player `DamageEntity` (PvP off) |
 | `DayNightLength` | 60 | 10..1200 | real minutes per full day → `WorldClock.seconds_per_hour` |
 | `DayLightLength` | 18 | 1..23 | daylight window; dawn 04:00, dusk = 4 + value |
-| `MaxSpawnedZombies` | 64 | 1..2048 | server-wide alive-zombie cap (`Director.max_alive`) |
+| `MaxSpawnedZombies` | 64 | 0..2048 | server-wide alive-zombie cap (`Director.max_alive`); 0 = no zombie spawns |
 | `MaxSpawnedAnimals` | 50 | 0..2048 | daytime wildlife cap + spawner (`Director.spawnAnimalsNearPlayers`) |
 | `ZombieMove` / `ZombieMoveNight` / `ZombieFeralMove` / `ZombieBMMove` | 0/3/3/3 | 0..4 | zombie speed per day/night/feral/blood-moon → `World.zombie_speed_scale` |
 | `EnemyDifficulty` | 0 | 0..1 | 1 = feral (always feral speed) |
@@ -99,7 +99,7 @@ startup so misspelled operator settings cannot silently use defaults.
 | Section | Keys (subset) | Effect |
 |---|---|---|
 | `[stream]` | `max_streamed_chunks`, `stream_radius_min/max`, `chunk_adds_per_stream_tick`, `chunk_stream_period_ticks`, `motion_replicate_period_ticks`, `world_time_send_ticks`, `vehicle_pos_send_ticks`, `sleeper_tick_ticks`, `turret_sync_ticks`, `save_interval_ticks`, `spawn_area_radius_max` | Chunk stream caps (clamped to compile cap 169) + broadcast/side-work cadences in ticks. `sleeper_tick_ticks` gates prefab sleeper volumes, airdrops and workstations; `turret_sync_ticks` gates turret state broadcasts; `save_interval_ticks` gates the periodic world flush |
-| `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_claimed_damage`, `peer_stale_ms`, `lock_stale_ms`, `join_rate_limit_ms`, `mode`, `guard_enforce`, `guard_dry_run`, `guard_quarantine`, `guard_load_shed`, `guard_window_ticks`, `guard_strong_distinct`, `guard_hard_repeat` | C2S range / interest / mode. `join_rate_limit_ms` (default 500) paces connection attempts per IP like stock's ~500 ms/IP flood gate; loopback is exempt so bots and tests share 127.0.0.1. `lock_stale_ms` (default 120 000 ms = 120 s) auto-releases a container/trade lock after the peer goes silent. The `guard_*` keys are the P4 guard policy (defaults log-only, dry-run on); see [AUTHORITY.md](AUTHORITY.md) |
+| `[authority]` | `interest_range_blocks`, `max_edit_range_blocks`, `max_horizontal_speed_mps`, `max_claimed_damage`, `peer_stale_ms`, `lock_stale_ms`, `join_rate_limit_ms`, `mode`, `guard_enforce`, `guard_dry_run`, `guard_quarantine`, `guard_load_shed`, `guard_window_ticks`, `guard_strong_distinct`, `guard_hard_repeat` | C2S range / interest / mode. `join_rate_limit_ms` (default 500) paces connection attempts per IP like stock's ~500 ms/IP flood gate; loopback is exempt so bots and tests share 127.0.0.1. `lock_stale_ms` (default 120 000 ms = 120 s) auto-releases a container/trade lock after the peer goes silent. The `guard_*` keys are the P4 guard policy (defaults log-only, dry-run on); see [AUTHORITY.md](AUTHORITY.md) |
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `deco_objects_per_join`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `deco_objects_per_join` (default 8192): cap on join-time deco objects sent in the burst. `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE.md` |
 | `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `storm_frequency` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. Defaults match the previous code constants |
@@ -203,7 +203,7 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 
 | Key | Effect on `InitOptions` |
 |---|---|
-| `max_spawned_zombies` | Director alive-zombie cap (1..2048) |
+| `max_spawned_zombies` | Director alive-zombie cap (0..2048; 0 = no zombie spawns) |
 | `blood_moon_frequency` (alias `bloodmoon_frequency`) | Blood moon every N days |
 | `game_difficulty` | 0..5 zombie hp scale |
 | `blood_moon_enemy_count` | zombies per blood-moon burst (0..60) |
@@ -253,12 +253,21 @@ operator host under the world directory and on the wire between client and serve
 | Store / surface | Contents | Retention / control |
 |---|---|---|
 | `<world>/players.zsv` | Login name, last position, coins, inventory stacks, quest journal, progression (level/XP/food/water/buffs); magic ZPV3 (ZPV2 still read) | Kept until `wipeplayer <name>` or the operator deletes the file/world |
+| `<world>/claims.zlc` | Land claim position + **owner login name** | Released by claim expiry (`land_claim_expiry_days`), keystone destruction, or `wipeplayer <name>` |
+| `<world>/allies.zal` | Ally pairs keyed by **platform identity** (e.g. Steam/EOS id) + status | Kept until the pair is removed in game or `wipeplayer <name>` erases both sides of the identity |
+| `<world>/bans.zsv` | Banned player id, ban expiry, operator-written reason | Kept until the ban expires or admin `ban remove <id>` |
+| `<world>/admins.zsv`, `<world>/whitelist.zsv` | Player id + permission level | Kept until the operator removes the entry |
 | In-memory ban table | IPv4 keys from admin `ban` | Process lifetime only (not written to disk) |
 | Admin TCP / WebUI | Player names, slots, inventory dump (`inv`) for ops | Loopback admin (no auth); WebUI requires secret, default off |
-| Process logs | Join/slot/entity ids, name **lengths**, reject reasons | Never full login names or WebUI/server passwords |
+| Process logs | Join/slot/entity ids, name **lengths**, reject reasons, command verbs | Never full login names, chat bodies, command arguments, or WebUI/server passwords |
 
-Admin: `wipeplayer <name>` kicks any online session with that name and removes
-matching records from `players.zsv`. Counts are logged; the name is not.
+Admin: `wipeplayer <name>` kicks any online session with that name, removes
+matching records from `players.zsv`, releases that owner's land claims so
+the name does not survive in `claims.zlc`, and erases the online identity's
+ally pairs so it does not survive in `allies.zal`. Counts are logged; the
+name is not.
+A ban entry for that player is deliberately kept: an erased record must not be
+a way to shed a ban. Remove it with `ban remove <name>` if that is intended.
 
 ## Missing world folder
 

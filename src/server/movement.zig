@@ -3,7 +3,9 @@
 
 const std = @import("std");
 
-/// Soft cap: sprint (~6 m/s) + vehicle-on-foot margin. Excess is clamped.
+/// Soft cap default: sprint (~6 m/s) + vehicle-on-foot margin. Excess is
+/// clamped. Policy, not stock data: the live value is the Game field fed from
+/// zdtd.toml [authority] max_horizontal_speed_mps; this is only its default.
 pub const max_horizontal_speed_mps: f32 = 20.0;
 /// Floor dt so a double-packet same tick does not divide by zero.
 pub const min_dt_s: f32 = 1.0 / 40.0;

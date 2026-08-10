@@ -73,9 +73,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !LevelCurve 
 }
 
 fn loadCurveOnly(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
     var c: LevelCurve = .{};
     const li = std.mem.find(u8, clean, "<level ") orelse return c;
@@ -89,9 +87,7 @@ fn loadCurveOnly(allocator: std.mem.Allocator, path: []const u8) !LevelCurve {
 }
 
 pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -193,7 +189,8 @@ pub fn tryLoadTable(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_
 
 test "load progression.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
-    var t = loadTableFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, p);
     defer t.deinit();
     try std.testing.expect(t.curve.loaded);
     try std.testing.expectEqual(@as(u16, 300), t.curve.max_level);

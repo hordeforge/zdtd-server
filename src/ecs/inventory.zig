@@ -48,10 +48,6 @@ pub const Result = struct {
     max_hp: f32 = 100,
 };
 
-fn maxStackFor(w: *const World, item_id: u16) u16 {
-    return w.maxStack(item_id);
-}
-
 /// Offline stack caps (no ItemTable). Delegates to `components.maxStackOffline`.
 /// Production wires `World.stack_fn` → items.stackFor.
 pub fn maxStackBuiltin(item_id: u16) u16 {
@@ -155,12 +151,41 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
-    const ok = w.inventory[ps].addItemStacked(item_id, count, maxStackFor(w, item_id));
+    const ok = w.inventory[ps].addItemStacked(item_id, count, w.maxStack(item_id));
     if (ok) {
         markInv(w, ps);
         recordInv(w, peer, item_id, @intCast(count), .give);
     }
     return ok;
+}
+
+/// Collect one loot bag entity (`bs`) into the player for `peer_slot`.
+/// All-or-nothing: a partial deposit restores the player inventory and the
+/// bag survives. Returns true when the bag may be destroyed: fully
+/// transferred, or it carried no inventory to move. The single transfer rule
+/// for loot bags, shared by the C2S collect handler and
+/// `systems.collectLootNear`; do not re-implement the deposit loop at call
+/// sites.
+pub fn collectBagFull(w: *World, peer_slot: usize, bs: Slot) bool {
+    const ps = w.playerByPeer(peer_slot) orelse return false;
+    if (!w.mask[bs].inventory) return true;
+    if (!w.mask[ps].inventory) return true;
+    const inventory_before = w.inventory[ps];
+    for (w.inventory[bs].slots) |slot| {
+        if (slot.count == 0 or slot.item_id == 0) continue;
+        if (!w.depositItem(ps, slot.item_id, slot.count)) {
+            w.inventory[ps] = inventory_before;
+            return false;
+        }
+    }
+    // Ledger after full transfer succeeds (no partial loot credit).
+    for (w.inventory[bs].slots) |slot| {
+        if (slot.count == 0 or slot.item_id == 0) continue;
+        const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
+        recordInv(w, peer_slot, slot.item_id, d, .loot);
+    }
+    markInv(w, ps);
+    return true;
 }
 
 pub fn setHolding(w: *World, peer: usize, slot: u16) bool {
@@ -183,7 +208,7 @@ pub fn move(w: *World, peer: usize, from: u16, to: u16, qty: u16) bool {
     // way, or a swap out of an equip slot parks a non-armor item there.
     const dst = w.inventory[ps].slots[to];
     if (from >= c.inv_equip_start and dst.count > 0 and !itemIsArmor(w, dst.item_id)) return false;
-    const ok = w.inventory[ps].moveSlot(from, to, qty, maxStackFor(w, item));
+    const ok = w.inventory[ps].moveSlot(from, to, qty, w.maxStack(item));
     if (ok) {
         markInv(w, ps);
         const d: i16 = if (qty == 0) 0 else @intCast(@min(qty, std.math.maxInt(i16)));
@@ -352,7 +377,7 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
     const holding_before = w.inventory[cs].holding;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
     // Preserve quality/meta (addItemStacked would reset to q1/meta0).
-    if (!w.inventory[ps].addSlotStacked(taken, maxStackFor(w, taken.item_id))) {
+    if (!w.inventory[ps].addSlotStacked(taken, w.maxStack(taken.item_id))) {
         restoreTaken(&w.inventory[cs], cont_slot, taken, holding_before);
         return false;
     }
@@ -385,7 +410,7 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
     const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(player_slot, if (qty == 0) w.inventory[ps].slots[player_slot].count else qty) orelse return false;
     // Preserve quality/meta when depositing into a container.
-    if (!w.inventory[cs].addSlotStacked(taken, maxStackFor(w, taken.item_id))) {
+    if (!w.inventory[cs].addSlotStacked(taken, w.maxStack(taken.item_id))) {
         restoreTaken(&w.inventory[ps], player_slot, taken, holding_before);
         return false;
     }

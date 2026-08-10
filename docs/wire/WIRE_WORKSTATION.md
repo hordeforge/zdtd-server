@@ -158,7 +158,7 @@ on the client path; zdtd keeps 255 on every broadcast.
 - `world/workstations.zig`: stock queue orientation, output-full stall,
   `cycleRecipeQueue` shape with leftover carry and `IsCrafting`, and a bounded
   craft-complete record list with an acknowledge-by-replace drain.
-- `server/game.zig`: C2S apply stores geometry, blobs, melt, `lastInput`,
+- `server/c2s/inv.zig`: C2S apply stores geometry, blobs, melt, `lastInput`,
   `block_id` and the acknowledged record list; the 2 Hz dirty broadcast and the
   lock-grant push both re-emit at the stored lengths.
 

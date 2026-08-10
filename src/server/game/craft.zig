@@ -39,10 +39,7 @@ pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32,
     const ps = self.sim.slotOfNetId(c.entity_id) orelse return false;
     if (!self.sim.mask[ps].transform) return false;
     const t = self.sim.transform[ps];
-    const dx = t.x - @as(f32, @floatFromInt(x));
-    const dy = t.y - @as(f32, @floatFromInt(y));
-    const dz = t.z - @as(f32, @floatFromInt(z));
-    if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return false;
+    if (!self.withinEditReach(t.x, t.y, t.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
     return self.sim.power.refuelAt(x, y, z, amount);
 }
 
@@ -56,10 +53,7 @@ pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, a
     const ps = self.sim.slotOfNetId(c.entity_id) orelse return false;
     if (!self.sim.mask[ps].transform) return false;
     const t = self.sim.transform[ps];
-    const dx = t.x - @as(f32, @floatFromInt(x));
-    const dy = t.y - @as(f32, @floatFromInt(y));
-    const dz = t.z - @as(f32, @floatFromInt(z));
-    if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) return false;
+    if (!self.withinEditReach(t.x, t.y, t.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
     var best: ?ecs.Slot = null;
     var best_d = vehicle_refuel_reach * vehicle_refuel_reach;
     for (ecs.groupSlice(&self.sim, .vehicle)) |vs| {

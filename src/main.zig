@@ -14,6 +14,8 @@ const zdtd_config = @import("server/zdtd_config.zig");
 const mode_mod = @import("server/mode.zig");
 const webui_mod = @import("server/webui.zig");
 const io_fs = @import("util/io_fs.zig");
+const log = @import("util/log.zig");
+const clock = @import("util/clock.zig");
 const version = @import("version.zig");
 
 const help_text =
@@ -100,17 +102,14 @@ fn splitPluginModules(allocator: std.mem.Allocator, raw: []const u8) []const []c
     return list;
 }
 
-/// Help and version go to stdout (not stderr) so operators can pipe them.
-fn printStdout(comptime fmt: []const u8, fmt_args: anytype) void {
-    var msg_buf: [4096]u8 = undefined;
-    const msg = std.fmt.bufPrint(&msg_buf, fmt, fmt_args) catch {
-        std.debug.print(fmt, fmt_args);
-        return;
-    };
+/// Command output (help, version, APM report) goes to stdout, not stderr, so
+/// operators can pipe it. Callers pass an already-built slice: no intermediate
+/// buffer, so a report longer than any fixed size still prints in full.
+fn writeStdout(msg: []const u8) void {
     var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
     defer threaded.deinit();
-    std.Io.File.stdout().writeStreamingAll(threaded.io(), msg) catch {
-        std.debug.print(fmt, fmt_args);
+    std.Io.File.stdout().writeStreamingAll(threaded.io(), msg) catch |err| {
+        fatal("cannot write stdout: {s}", .{@errorName(err)});
     };
 }
 
@@ -187,12 +186,6 @@ fn flagServerPort(flag: []const u8, s: []const u8) u16 {
         );
     }
     return @intCast(p);
-}
-
-/// Non-essential stderr (startup banners). Always print warnings via std.debug.print.
-fn infoLog(quiet: bool, comptime fmt: []const u8, fmt_args: anytype) void {
-    if (quiet) return;
-    std.debug.print(fmt, fmt_args);
 }
 
 /// Split `--name` / `--name=value` into (name, optional value).
@@ -363,11 +356,16 @@ pub fn main(init: std.process.Init.Minimal) !void {
             quiet = true;
         } else if (std.mem.eql(u8, name, "--version") or std.mem.eql(u8, name, "-V") or std.mem.eql(u8, name, "-v")) {
             if (inline_val != null) usageError("option '{s}' does not take a value", .{name});
-            printStdout("zdtd {s} (stock wire {s})\n", .{ version.product, version.stock_wire });
+            var ver_buf: [128]u8 = undefined;
+            writeStdout(std.fmt.bufPrint(
+                &ver_buf,
+                "zdtd {s} (stock wire {s})\n",
+                .{ version.product, version.stock_wire },
+            ) catch "zdtd\n");
             return;
         } else if (std.mem.eql(u8, name, "--help") or std.mem.eql(u8, name, "-h")) {
             if (inline_val != null) usageError("option '{s}' does not take a value", .{name});
-            printStdout("{s}", .{help_text});
+            writeStdout(help_text);
             return;
         } else if (std.mem.startsWith(u8, a, "-")) {
             if (suggestFlag(name)) |s| {
@@ -378,6 +376,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
             usageError("unexpected argument '{s}' (zdtd takes options only, not positionals)", .{a});
         }
     }
+
+    // Boot banners are emitted from inside Game.init too, so the flag has to be
+    // visible process-wide before any of them run.
+    log.setQuiet(quiet);
 
     if (map_dir != null and worldgen_seed != null) {
         usageError("options '--map' and '--worldgen-seed' select different terrain sources", .{});
@@ -601,7 +603,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         toml_owned = zdtd_config.loadFromPath(gpa, tp) catch |err| {
             fatal("cannot load zdtd.toml '{s}': {s}", .{ tp, @errorName(err) });
         };
-        infoLog(quiet, "zdtd: loaded {s}\n", .{tp});
+        log.info("zdtd: loaded {s}\n", .{tp});
     }
 
     // Mode pack: --mode NAME wins over zdtd.toml [mode] name. Optional.
@@ -616,8 +618,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer if (mode_owned) |*mp| mp.deinit();
     if (mode_name) |mn| {
         if (!mode_mod.isValidModeName(mn)) {
-            // Bad token shape is a usage error (exit 2), not a missing file.
-            usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+            if (mode_name_cli != null) {
+                usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+            }
+            fatal("invalid [mode] name '{s}' in zdtd.toml (use [A-Za-z0-9_] only)", .{mn});
         }
         mode_owned = mode_mod.loadByName(gpa, mn) catch |err| {
             fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) });
@@ -627,7 +631,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 fatal("mode file modes/{s}.toml declares name '{s}'", .{ mn, mp.name });
             }
             mode_mod.applyToInitOptions(mp, &init_opts);
-            infoLog(quiet, "zdtd: mode={s}\n", .{mp.name});
+            log.info("zdtd: mode={s}\n", .{mp.name});
         }
     }
 
@@ -703,7 +707,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         const hm = g.world.heightmap.?;
         const n_pref = if (g.world.prefabs) |*p| p.items.len else 0;
         const n_water = if (g.world.water) |*w| w.points.len else 0;
-        infoLog(quiet,
+        log.info(
             \\zdtd {s}
             \\  connect (client): {d}  (TCP info; client then UDP {d} = port+2)
             \\  save={s}
@@ -735,7 +739,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         });
     } else if (g.world.terrain_source == .proc) {
         const seed = if (g.world.worldgen) |wg| wg.seed else 0;
-        infoLog(quiet,
+        log.info(
             \\zdtd {s}
             \\  connect (client): {d}  (TCP info; client then UDP {d} = port+2) world={s}
             \\  terrain=proc seed={d} spawn=({d},{d},{d})
@@ -760,7 +764,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             packages.default_mappings.len,
         });
     } else {
-        infoLog(quiet,
+        log.info(
             \\zdtd {s}
             \\  connect (client): {d}  (TCP info; client then UDP {d} = port+2) world={s}
             \\  quests={s} defs={d} starter={s} (id={d})
@@ -783,6 +787,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (max_ticks == 0) {
         try g.run();
+        // Only reached on a clean exit (admin "shutdown" / running=false).
+        // The absence of this line after a stop is how an operator tells a
+        // killed/crashed process from a graceful one.
+        var ts: [19]u8 = undefined;
+        std.debug.print(
+            "zdtd: {s} shutdown complete tick={d} (saved; exited cleanly)\n",
+            .{ clock.wallStamp(&ts), g.tick_n },
+        );
     } else {
         var i: u64 = 0;
         while (i < max_ticks) : (i += 1) {
@@ -795,8 +807,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var w: std.Io.Writer = .fixed(&buf);
         apm.report.writeText(&snap, &w) catch |err|
             std.debug.print("zdtd: apm report truncated: {s}\n", .{@errorName(err)});
-        printStdout("{s}", .{w.buffered()});
-        if (once) infoLog(quiet, "zdtd --once complete\n", .{});
+        writeStdout(w.buffered());
+        if (once) log.info("zdtd --once complete\n", .{});
     }
 }
 
@@ -930,7 +942,9 @@ test "integration world persist + damage + packages" {
         g.deinit();
         gpa.destroy(g);
     }
-    try std.testing.expect(g.bindPort() != 0);
+    // Offline (port 0) games never bind a socket: the DST sim is sealed from
+    // the network stack, so the LiteNet port must stay 0.
+    try std.testing.expectEqual(@as(u16, 0), g.bindPort());
 
     try g.setBlock(10, 70, 10, world_store.block_stone);
     try g.world.saveAll();

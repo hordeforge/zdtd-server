@@ -18,6 +18,7 @@ const systems = @import("../../ecs/systems.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
+const clock = @import("../../util/clock.zig");
 const stock_te = packages.stock_te;
 const containers_mod = @import("../../world/containers.zig");
 const workstations_mod = @import("../../world/workstations.zig");
@@ -277,16 +278,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var v_allowed_plat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
             var v_allowed_id: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
             if (stock_te.parseVendingTeBody(body, &v_plat, &v_id, &v_pw, &v_allowed_plat, &v_allowed_id) catch |err| blk: {
-                std.debug.print("DBG vend parse err: {s}\n", .{@errorName(err)});
+                self.harness.counters.inc(.c2s_malformed);
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} vend parse err: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
                 break :blk null;
             }) |ve| {
                 const owner = self.sim.playerByPeer(c.slot) orelse return true;
                 const op = self.sim.transform[owner];
-                const tdx = @as(f32, @floatFromInt(ve.world_x)) - op.x;
-                const tdy = @as(f32, @floatFromInt(ve.world_y)) - op.y;
-                const tdz = @as(f32, @floatFromInt(ve.world_z)) - op.z;
-                const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
-                if (te_d2 > self.max_edit_range * self.max_edit_range) {
+                if (!self.withinEditReach(op.x, op.y, op.z, @floatFromInt(ve.world_x), @floatFromInt(ve.world_y), @floatFromInt(ve.world_z))) {
                     self.harness.counters.inc(.bounds_rejects);
                     return true;
                 }

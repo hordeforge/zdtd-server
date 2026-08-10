@@ -4,11 +4,20 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const io_fs = @import("../../util/io_fs.zig");
+const util_log = @import("../../util/log.zig");
+
+const block_meta_header_len = 4 + @sizeOf(u16);
+const block_raw_record_len = @sizeOf(u64) + @sizeOf(u32);
+const block_hp_count_len = @sizeOf(u16);
+const block_hp_record_len = @sizeOf(u64) + @sizeOf(u16);
+const block_meta_max_len = block_meta_header_len +
+    256 * block_raw_record_len + block_hp_count_len +
+    256 * block_hp_record_len;
 
 pub fn saveBlockMeta(self: *const Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
-    var buf: [4096]u8 = undefined;
+    var buf: [block_meta_max_len]u8 = undefined;
     var o: usize = 0;
     @memcpy(buf[0..4], "ZBM1");
     o = 4;
@@ -24,10 +33,10 @@ pub fn saveBlockMeta(self: *const Game) !void {
     std.mem.writeInt(u16, buf[o..][0..2], @intCast(raw_n), .little);
     o += 2;
     for (raw_ord[0..raw_n]) |idx| {
-        if (o + 12 > buf.len) break;
+        std.debug.assert(o + block_raw_record_len <= buf.len);
         std.mem.writeInt(u64, buf[o..][0..8], self.block_raw_key[idx], .little);
         std.mem.writeInt(u32, buf[o + 8 ..][0..4], self.block_raw[idx], .little);
-        o += 12;
+        o += block_raw_record_len;
     }
     if (o + 2 > buf.len) return error.WriteFailed;
     var hp_ord: [self.block_hp_key.len]u16 = undefined;
@@ -42,10 +51,10 @@ pub fn saveBlockMeta(self: *const Game) !void {
     std.mem.writeInt(u16, buf[o..][0..2], @intCast(hp_n), .little);
     o += 2;
     for (hp_ord[0..hp_n]) |idx| {
-        if (o + 10 > buf.len) break;
+        std.debug.assert(o + block_hp_record_len <= buf.len);
         std.mem.writeInt(u64, buf[o..][0..8], self.block_hp_key[idx], .little);
         std.mem.writeInt(u16, buf[o + 8 ..][0..2], self.block_hp[idx], .little);
-        o += 10;
+        o += block_hp_record_len;
     }
     try io_fs.writeFile(p, buf[0..o]);
 }
@@ -103,8 +112,12 @@ pub fn restoreWeather(self: *Game) void {
         return;
     };
     if (self.world.weather.decode(bytes, &self.world.biome_layers_table)) {
-        std.debug.print("zdtd: weather state restored ({d} biomes)\n", .{self.world.weather.n});
+        util_log.info("zdtd: weather state restored ({d} biomes)\n", .{self.world.weather.n});
     } else {
         std.debug.print("zdtd: weather.zwt unreadable or mismatched; keeping fresh roll\n", .{});
     }
+}
+
+test "block metadata buffer holds both stores at capacity" {
+    try std.testing.expectEqual(@as(usize, 5640), block_meta_max_len);
 }

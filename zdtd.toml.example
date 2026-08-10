@@ -24,10 +24,16 @@ stream_radius_max = 9
 [authority]
 interest_range_blocks = 160.0
 max_edit_range_blocks = 96.0
+# Movement anti-cheat envelope: max accepted horizontal speed in m/s. Raise it
+# for servers running faster vehicles or speed buffs, lower it to tighten the
+# clamp. Must be finite and > 0.
+# max_horizontal_speed_mps = 20.0
 max_claimed_damage = 200
 peer_stale_ms = 3000
 # Join rate-limit gap per IP (stock paces ~500 ms/IP; loopback is exempt).
 # join_rate_limit_ms = 500
+# Container/trade lock auto-release after the holding peer goes silent.
+# lock_stale_ms = 120000
 # mode = "correct"   # observe | permissive | correct
 
 # P4 guard policy (docs/AUTHORITY.md). Defaults are log-only: a tripped gate
@@ -54,6 +60,8 @@ deco_mirror = true
 # assigns block ids from our AssignIds dump instead of its own blocks.xml. Set
 # false for a modded client whose block set differs from ours.
 block_id_mapping = true
+# Cap on deco objects sent in the join burst (needs deco_trees = true).
+# deco_objects_per_join = 8192
 
 # Sim policy that is not stock serverconfig and not stock game data.
 [sim]

@@ -4,6 +4,7 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const io_fs = @import("../../util/io_fs.zig");
+const util_log = @import("../../util/log.zig");
 const logPersistErr = game_mod.logPersistErr;
 
 pub fn saveClock(self: *const Game) !void {
@@ -34,5 +35,5 @@ pub fn restoreClock(self: *Game) void {
     const wt = std.mem.readInt(u64, bytes[4..12], .little);
     self.sim.director.clock.day = @intCast(wt / 24000 + 1);
     self.sim.director.clock.hours = @as(f32, @floatFromInt(wt % 24000)) / 1000.0;
-    std.debug.print("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
+    util_log.info("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
 }

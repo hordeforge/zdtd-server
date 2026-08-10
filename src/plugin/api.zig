@@ -3,6 +3,7 @@
 //! native ABI. No dynlib, no stock IModApi.
 
 const std = @import("std");
+const util_log = @import("../util/log.zig");
 
 pub const PLUGIN_API_VERSION: u32 = 1;
 
@@ -31,7 +32,12 @@ fn defaultLog(level: LogLevel, msg: []const u8) void {
         .warn => "warn",
         .err => "err",
     };
-    std.debug.print("zdtd plugin [{s}]: {s}\n", .{ tag, msg });
+    // debug/info are boot chatter (`sample_hello enabled`); warn/err must
+    // survive `--quiet` like every other server warning.
+    switch (level) {
+        .debug, .info => util_log.info("zdtd plugin [{s}]: {s}\n", .{ tag, msg }),
+        .warn, .err => std.debug.print("zdtd plugin [{s}]: {s}\n", .{ tag, msg }),
+    }
 }
 
 /// Static plugin vtable. Null hooks are skipped (zero cost beyond a null check).

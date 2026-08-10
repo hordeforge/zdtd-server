@@ -84,6 +84,10 @@ pub const Plugin = struct {
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
     hook_present: [11]bool = .{false} ** 11,
+    /// Guest offset and size of the host's scratch region for the request/reply
+    /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
+    scratch_off: u32 = 0,
+    scratch_len: usize = 0,
 
     pub fn load(
         allocator: std.mem.Allocator,
@@ -208,6 +212,33 @@ pub const Plugin = struct {
         };
     }
 
+    /// Reserve `need` bytes of guest memory the host may write into, for the
+    /// hooks that pass a buffer in and take a reply out. The region is carved
+    /// from freshly grown pages rather than a fixed low offset: wasm-ld puts the
+    /// guest's static data at offset 1024 by default, so writing there would
+    /// corrupt the plugin's own globals. Memory only ever grows, so the offset
+    /// stays valid for later calls and is reserved once per size.
+    /// Null when the guest has no memory or growth is refused (page cap).
+    fn reserveScratch(self: *Plugin, mem: zwasm.Memory, need: usize) ?u32 {
+        if (self.scratch_len >= need and self.scratch_len != 0) return self.scratch_off;
+        const pages: u32 = @intCast((need + 65535) / 65536);
+        const old_pages = mem.grow(pages) orelse {
+            // Growth refused (the module's own max, or the page cap). Fall back
+            // to the low fixed region so a fixed-size module still gets its
+            // hooks called, accepting that it may overlap the guest's data.
+            const fallback_off: u32 = 1024;
+            if (fallback_off + need > mem.slice().len) return null;
+            self.scratch_off = fallback_off;
+            self.scratch_len = need;
+            return fallback_off;
+        };
+        const base: u64 = @as(u64, old_pages) * 65536;
+        if (base + need > std.math.maxInt(u32)) return null;
+        self.scratch_off = @intCast(base);
+        self.scratch_len = @as(usize, pages) * 65536;
+        return self.scratch_off;
+    }
+
     /// on_admin_command(cmd_ptr: i32, cmd_len: i32, out_ptr: i32, out_cap: i32) -> i32:
     /// bytes written, 0 not handled, <0 error. Handled means the host replies
     /// with the guest's buffer slice; not handled falls through to the next
@@ -217,27 +248,10 @@ pub const Plugin = struct {
         if (!self.hook_present[@intFromEnum(Hook.on_admin_command)]) return null;
         // Copy the command into the guest, call the hook, copy the reply back.
         const mem = self.instance.memory() orelse return null;
-        // Allocate guest scratch via a bump helper if the module exports it
-        // (`zdtd_alloc`), otherwise use the low end of linear memory with a
-        // bounds check — small cmds (<= 512 bytes) so we can reuse a fixed
-        // region without growing. Simpler: use host-provided buffers through
-        // the imported write path: pass ptr/len into the instance's memory and
-        // read the return length.
-        var guest_mem = mem.slice();
-        // Ensure we have space: guest must have at least cmd.len + out.len.
-        // Grow if needed (one page = 64k).
-        const need: usize = cmd.len + out.len + 16;
-        if (guest_mem.len < need) {
-            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
-            _ = mem.grow(pages) orelse return null;
-            guest_mem = mem.slice();
-        }
-        // Layout: [cmd_bytes][out_region]. Keep out_region at a page-aligned-ish
-        // offset to avoid overlap with guest stack if it grows from 0.
-        const cmd_off: u32 = 1024;
-        if (@as(usize, cmd_off) + cmd.len + out.len > guest_mem.len) return null;
+        // Layout in the reserved scratch: [cmd_bytes][out_region].
+        const cmd_off = self.reserveScratch(mem, cmd.len + out.len) orelse return null;
         const out_off: u32 = cmd_off + @as(u32, @intCast(cmd.len));
-        @memcpy(guest_mem[cmd_off..][0..cmd.len], cmd);
+        @memcpy(mem.slice()[cmd_off..][0..cmd.len], cmd);
         const written: i32 = self.instance.call(
             fn (i32, i32, i32, i32) i32,
             "on_admin_command",
@@ -263,17 +277,9 @@ pub const Plugin = struct {
         if (self.disabled) return null;
         if (!self.hook_present[@intFromEnum(Hook.on_chat)]) return null;
         const mem = self.instance.memory() orelse return null;
-        var guest_mem = mem.slice();
-        const need: usize = msg.len + out.len + 16;
-        if (guest_mem.len < need) {
-            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
-            _ = mem.grow(pages) orelse return null;
-            guest_mem = mem.slice();
-        }
-        const msg_off: u32 = 1024;
-        if (@as(usize, msg_off) + msg.len + out.len > guest_mem.len) return null;
+        const msg_off = self.reserveScratch(mem, msg.len + out.len) orelse return null;
         const out_off: u32 = msg_off + @as(u32, @intCast(msg.len));
-        @memcpy(guest_mem[msg_off..][0..msg.len], msg);
+        @memcpy(mem.slice()[msg_off..][0..msg.len], msg);
         const written: i32 = self.instance.call(
             fn (i32, i32, i32, i32, i32) i32,
             "on_chat",
@@ -298,17 +304,9 @@ pub const Plugin = struct {
         if (self.disabled) return null;
         if (!self.hook_present[@intFromEnum(Hook.on_player_login)]) return null;
         const mem = self.instance.memory() orelse return null;
-        var guest_mem = mem.slice();
-        const need: usize = name.len + out.len + 16;
-        if (guest_mem.len < need) {
-            const pages: u32 = @intCast((need - guest_mem.len + 65535) / 65536);
-            _ = mem.grow(pages) orelse return null;
-            guest_mem = mem.slice();
-        }
-        const name_off: u32 = 1024;
-        if (@as(usize, name_off) + name.len + out.len > guest_mem.len) return null;
+        const name_off = self.reserveScratch(mem, name.len + out.len) orelse return null;
         const out_off: u32 = name_off + @as(u32, @intCast(name.len));
-        @memcpy(guest_mem[name_off..][0..name.len], name);
+        @memcpy(mem.slice()[name_off..][0..name.len], name);
         const ret: i32 = self.instance.call(
             fn (i32, i32, i32, i32, i32) i32,
             "on_player_login",
@@ -320,9 +318,10 @@ pub const Plugin = struct {
         };
         if (ret == 0) return null;
         if (ret < 0) {
-            // Negative return is deny; out may be empty.
+            // Negative return is deny; out may be empty. `@abs` rather than
+            // `-ret`: a guest returning i32 minInt would overflow the negation.
             if (out.len == 0) return "";
-            const n: usize = @intCast(@min(@as(usize, @intCast(-ret)), out.len));
+            const n: usize = @min(@as(usize, @abs(ret)), out.len);
             const cur = mem.slice();
             @memcpy(out[0..n], cur[out_off..][0..n]);
             return out[0..n];
@@ -484,8 +483,9 @@ pub const WasmHost = struct {
     }
 };
 
-/// Host import table, all under the "zdtd" module namespace. The guest calls
-/// zdtd_log(level, ptr, len), zdtd_tick() -> i64, zdtd_queue(ptr, len) -> i32.
+/// Host import table, all under the "zdtd" module namespace. The import field
+/// names are bare: "log" (level, ptr, len), "tick" () -> i64 and "queue"
+/// (ptr, len) -> i32, so a guest imports zdtd.log, not zdtd.zdtd_log.
 /// Every host fn copies in/out of the guest's linear memory; a missing memory
 /// or an out-of-bounds range is a no-op for reads and an error for the guest.
 fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {

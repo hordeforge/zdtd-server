@@ -1,12 +1,17 @@
 //! Game-owned types extracted from game.zig: InitOptions, defaults, LandClaim, Client.
-//! Canonical definitions live here; game.zig re-exports for backward compat.
-//! Bodies are verbatim copies with doc comments preserved.
+//! Canonical definitions live here; game.zig re-exports them so existing
+//! `game.X` call sites keep working. The two exceptions are noted inline: the
+//! streamed-chunk cap comes from zdtd_config and the chat length from c2s_text,
+//! because the module that enforces the limit owns the value.
 
 const std = @import("std");
 const ln_peer = @import("../../litenet/peer.zig");
 const ecs = @import("../../ecs/root.zig");
 const guard_policy = @import("../guard_policy.zig");
 const server_config = @import("../config.zig");
+const zdtd_config = @import("../zdtd_config.zig");
+const c2s_text = @import("../c2s_text.zig");
+const movement = @import("../movement.zig");
 const plugin_mod = @import("../../plugin/root.zig");
 const packages = @import("../../wire/packages.zig");
 const platform_user = packages.platform_user;
@@ -24,8 +29,10 @@ pub const max_land_claims: usize = 1024;
 /// prior fixed value).
 pub const default_trader_wallet_dukes: i32 = 5000;
 
-// Compile-time array bound for Client.streamed (must cover max config).
-pub const max_streamed_chunks_cap: usize = 169;
+// Compile-time array bound for Client.streamed. The cap is the config clamp
+// (zdtd_config sanitizes max_streamed_chunks against it), so there is one
+// definition and the bound cannot drift from what config accepts.
+pub const max_streamed_chunks_cap: usize = zdtd_config.max_streamed_chunks_cap;
 
 /// Default stream/authority values (also InitOptions / Game field defaults).
 pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
@@ -47,9 +54,14 @@ pub const default_max_claimed_damage: i32 = 200;
 pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
 
-/// Max UTF-8 bytes in a player Global chat message (standalone value; canonical
-/// length also lives in c2s_text.max_chat_msg_len).
-pub const max_chat_msg_len: usize = 256;
+/// Movement anti-cheat envelope (zdtd.toml [authority] max_horizontal_speed_mps).
+/// zdtd policy, not stock data: no serverconfig property covers it, and the
+/// right cap depends on which vehicles/buffs a server runs.
+pub const default_max_horizontal_speed_mps: f32 = movement.max_horizontal_speed_mps;
+
+/// Max UTF-8 bytes in a player Global chat message. Canonical value lives with
+/// the text trust boundary that enforces it (c2s_text).
+pub const max_chat_msg_len: usize = c2s_text.max_chat_msg_len;
 
 /// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
 /// bucket shape, plus the damage-accept gap and burst cap.
@@ -222,6 +234,8 @@ pub const InitOptions = struct {
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
+    /// Movement envelope cap (zdtd.toml [authority] max_horizontal_speed_mps).
+    max_horizontal_speed_mps: f32 = default_max_horizontal_speed_mps,
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
     lock_stale_ns: u64 = default_lock_stale_ns,

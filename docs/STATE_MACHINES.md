@@ -52,16 +52,17 @@ stateDiagram-v2
 ```
 
 Notes: `WorldInfo` goes out at Entering, never in the spawn bundle (a second
-WorldInfo restarts the client's createWorld, `game.zig:3346`). The chunk
-streamer starts earlier, at WorldInitInfoRequest (`Client.world_ready`,
-`c2s/join.zig:181`); the spawn area is also streamed before the bundle while
+WorldInfo restarts the client's createWorld; `src/server/c2s/join.zig:137` is
+the one send site). The chunk streamer starts earlier, at WorldInitInfoRequest
+(`Client.world_ready`, `c2s/join.zig:179`); the spawn area is also streamed
+before the bundle while
 the client still waits on its spawn request. Death respawn re-enters Spawning
 while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
 instead of a second PlayerId.
 
-Owners: `src/server/c2s/join.zig` (7-package join SM), `src/server/game.zig:2600`
-(phase gate dispatch), `:3340` (sendJoinBundle, sets `Client.entered`),
-`src/server/phase_gate.zig:7`.
+Owners: `src/server/c2s/join.zig` (7-package join SM), `src/server/c2s/dispatch.zig`
+(phase gate dispatch), `src/server/game.zig` (sendJoinBundle, sets
+`Client.entered`), `src/server/phase_gate.zig` (`phaseOf` / `allowed` table).
 
 ## 2. Sim tick pipeline
 
@@ -84,7 +85,7 @@ stateDiagram-v2
 ```
 
 Owners: `src/ecs/schedule.zig:9` (`Phase`, `Rules.systems` per-phase gate),
-`src/server/game.zig:4598` (the `step()` body), `src/server/game/tick.zig`
+`src/server/game/step.zig` (the `step()` body), `src/server/game/tick.zig`
 (player survival / stamina; `buffs.xml` thresholds when the table is loaded,
 otherwise `Rules.progression`), `src/server/game/deco.zig` (deco mirror,
 `[feature] deco_mirror`).
@@ -137,14 +138,15 @@ stateDiagram-v2
 ```
 
 Owners: `src/ecs/quest.zig` (`QuestDef`, `PhaseSpec`, `RewardSpec`),
-`src/ecs/components.zig:319` (`QuestProgress`, `Journal`), `src/ecs/systems.zig:198`
-(`completeQuest`), `:390` (`questOnTraderOpen`), `:314` (`questAccept`),
-`src/server/game.zig:4832` (tick-end payout drain).
+`src/ecs/components.zig:349` (`QuestProgress`, `Journal`),
+`src/ecs/systems.zig:185` (`completeQuest`), `:377` (`questOnTraderOpen`),
+`:301` (`questAccept`), `src/server/game/step.zig` (tick-end payout drain).
 
 Shared quests: `QuestProgress.is_shared` latches when the owner's party is
 handed the quest (`server/game/social.zig:266` `shareQuestWithParty`); when the
 owner disconnects, the party gets `remove_quest` events so their mirrors clear
-(`game.zig:3152`). Rally markers: `rally_activated` latches per quest; a rally
+(`src/server/game/session_drop.zig` `dropClientSlot`). Rally markers:
+`rally_activated` latches per quest; a rally
 phase without a POI rect is scaffolding and auto-skips.
 
 POI lockout sub-machine (`src/ecs/poi_lock.zig`, the server half of
@@ -424,13 +426,14 @@ Owners: `src/ecs/party.zig:64` (`Manager`, `next_party_id` starts at 1),
 `:132` (`acceptInvite`), `:148` (`setLeader`), `:160` (`removePlayer`),
 `:190` (`autoJoin`), `src/server/game/social.zig:118` (`handlePartyActions`,
 validates member/leader identity before each mutation),
-`src/server/game.zig:3142` (disconnect removal + shared-quest cleanup).
+`src/server/game/session_drop.zig` (`dropClientSlot`: disconnect removal +
+shared-quest cleanup).
 
 Notes: `max_party_members = 8` (stock `IsFull` refuses), and a party of one
 is not kept (the last member's removal disbands it). `setVoiceLobby` is a
 wire round-trip only; zdtd owns no voice lobby. A shared quest latches
 `QuestProgress.is_shared` (`server/game/social.zig:266`) and the party gets
-`remove_quest` events when the owner disconnects (`game.zig:3150`).
+`remove_quest` events when the owner disconnects (`session_drop.zig`).
 
 ## 16. Vending rental
 
@@ -452,7 +455,7 @@ stateDiagram-v2
 Owners: `src/world/vending.zig:64` (`Vending.rental_end_day`), `:88`
 (`clear`, keeps pos / block_id / trader_id / stock),
 `src/server/c2s/quest.zig:252` (`NetPackagePlayerVendingMachine`: rent and
-clear, `CanRent` gates), `src/server/game.zig:4709` (day-roll expiry loop).
+clear, `CanRent` gates), `src/server/game/step.zig` (day-roll rental expiry).
 
 Notes: rentability comes from `trader_info rentable`; the request acts only
 on the sender's own identity and the owner may only clear their own machine;
@@ -511,17 +514,17 @@ stateDiagram-v2
 
 Owners: `src/server/guard_policy.zig:71` (`Policy` rungs and thresholds),
 `:114` (`PeerState`: strong_mask, hard_n, tripped, quarantine, kick_at_tick),
-`:152` (`evaluate`), `src/server/game.zig:2997` (`noteEvidence`), `:3065`
-(`applyQuarantine`), `:3094` (`armPolicyKick`), `src/server/game/tick.zig:240`
-(`reapPolicyKicks`), `src/server/game.zig:3177` (`quarantineDenies` at the C2S
-trust boundaries: damage / container / block).
+`:152` (`evaluate`), `src/server/game/guard.zig` (`noteEvidence`,
+`applyQuarantine`, `armPolicyKick`, and `quarantineDenies` at the C2S trust
+boundaries: damage / container / block), `src/server/game/tick.zig`
+(`reapPolicyKicks`).
 
 Notes: the window roll clears counters and the trip latch but deliberately
 keeps the quarantine bits (cleared by admin `guardclear` or the session
 ending). `bitsFor(surf)` sets only the abused surface (`.none` sets all
 three). Observe mode records and logs but never denies or drops (`would_kick`
 only). While load-shedding after a tick overrun, weak records are dropped
-before the policy runs (`game.zig:3013`).
+before the policy runs (`src/server/game/guard.zig` `noteEvidence`).
 
 ## 19. Chunk stream backpressure
 

@@ -9,6 +9,7 @@
 const std = @import("std");
 const http = std.http;
 const tcp = @import("../util/tcp_listen.zig");
+const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 const version = @import("../version.zig");
 const clock = @import("../util/clock.zig");
 
@@ -18,7 +19,10 @@ pub const max_secret: usize = 128;
 pub const min_secret: usize = 8;
 /// Hex length of HMAC-derived session token (cookie + CSRF; not the shared secret).
 pub const session_token_hex_len: usize = 32;
-pub const max_players_snap: usize = 16;
+/// One roster row per client slot: a 64-slot server must not hide the players
+/// past the cap from the operator (both the HTML partial and the stats JSON
+/// render a full roster inside the 16 KiB body buffer).
+pub const max_players_snap: usize = @import("../litenet/server.zig").max_peers;
 pub const max_name: usize = 32;
 /// Max admin line from web console POST /api/cmd.
 pub const max_cmd_line: usize = 256;
@@ -139,6 +143,10 @@ pub const Server = struct {
     secret_len: usize = 0,
     /// HMAC session material for cookie/CSRF (never the raw secret).
     session_token: [session_token_hex_len]u8 = undefined,
+    /// Monotonic deadline for the current browser session. The cookie's
+    /// Max-Age is not an authorization boundary because a stolen cookie can be
+    /// replayed by a non-browser client after that client-side deadline.
+    session_expires_ns: u64 = 0,
     client_fd: tcp.Handle = -1,
     /// Polls since accept; a client that never completes a request would hold
     /// the single slot forever (half-open TCP reads EAGAIN, never EOF).
@@ -209,6 +217,7 @@ pub const Server = struct {
         defer threaded.deinit();
         threaded.io().random(&nonce);
         fillSessionToken(cfg.secret, &nonce, &self.session_token);
+        self.session_expires_ns = 0;
         self.port = self.listener.port;
         self.bind_addr = addr_host;
         self.client_fd = -1;
@@ -224,6 +233,7 @@ pub const Server = struct {
         if (self.secret_len > 0) @memset(self.secret_buf[0..self.secret_len], 0);
         self.secret_len = 0;
         @memset(&self.session_token, 0);
+        self.session_expires_ns = 0;
     }
 
     fn secret(self: *const Server) []const u8 {
@@ -232,6 +242,22 @@ pub const Server = struct {
 
     fn sessionTok(self: *const Server) []const u8 {
         return self.session_token[0..];
+    }
+
+    fn sessionValid(self: *const Server) bool {
+        // Zero keeps isolated unit fixtures that install a token directly
+        // usable; production sessions always receive a deadline at login.
+        return self.session_expires_ns == 0 or clock.monoNs() < self.session_expires_ns;
+    }
+
+    fn rotateSession(self: *Server) void {
+        var nonce: [32]u8 = undefined;
+        defer @memset(&nonce, 0);
+        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer threaded.deinit();
+        threaded.io().random(&nonce);
+        fillSessionToken(self.secret(), &nonce, &self.session_token);
+        self.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
     }
 
     fn loginLocked(self: *const Server) bool {
@@ -426,7 +452,7 @@ pub const Server = struct {
         if (std.mem.eql(u8, path, "/login")) {
             if (method == .GET) {
                 // Already signed in (bookmark or reopened /login): go to dashboard.
-                if (requestAuthorizedHttp(&req, self.secret(), self.sessionTok())) {
+                if (requestAuthorizedHttp(&req, self.secret(), self.sessionTok(), self.sessionValid())) {
                     try self.httpRedirect(&req, "/");
                     return;
                 }
@@ -463,6 +489,7 @@ pub const Server = struct {
                 if (constantTimeEql(tok, self.secret())) {
                     self.login_fails = 0;
                     self.login_lock_until_ns = 0;
+                    self.rotateSession();
                     self.set_cookie = true;
                     // Successes are as load-bearing as failures for an audit
                     // trail: /api/cmd runs privileged console lines under this
@@ -485,7 +512,7 @@ pub const Server = struct {
             return;
         }
 
-        if (!requestAuthorizedHttp(&req, self.secret(), self.sessionTok())) {
+        if (!requestAuthorizedHttp(&req, self.secret(), self.sessionTok(), self.sessionValid())) {
             // Count only explicit credential presentations (not bare anonymous GET).
             const presented = headerFromReq(&req, "Authorization") != null or headerFromReq(&req, "X-Zdtd-Secret") != null;
             if (presented) {
@@ -883,12 +910,14 @@ fn headerFromReq(req: *const http.Server.Request, name: []const u8) ?[]const u8 
     return null;
 }
 
-fn requestAuthorizedHttp(req: *const http.Server.Request, secret: []const u8, session_token: []const u8) bool {
+fn requestAuthorizedHttp(req: *const http.Server.Request, secret: []const u8, session_token: []const u8, session_valid: bool) bool {
     if (secret.len == 0) return false;
     if (requestHeaderAuthorizedHttp(req, secret)) return true;
-    if (headerFromReq(req, "Cookie")) |ck| {
-        if (cookieValue(ck, "zdtd_webui")) |cv| {
-            if (constantTimeEql(cv, session_token)) return true;
+    if (session_valid) {
+        if (headerFromReq(req, "Cookie")) |ck| {
+            if (cookieValue(ck, "zdtd_webui")) |cv| {
+                if (constantTimeEql(cv, session_token)) return true;
+            }
         }
     }
     return false;
@@ -897,10 +926,8 @@ fn requestAuthorizedHttp(req: *const http.Server.Request, secret: []const u8, se
 fn requestHeaderAuthorizedHttp(req: *const http.Server.Request, secret: []const u8) bool {
     if (secret.len == 0) return false;
     if (headerFromReq(req, "Authorization")) |auth| {
-        const t = std.mem.trim(u8, auth, " \t");
-        if (std.mem.startsWith(u8, t, "Bearer ")) {
-            if (constantTimeEql(std.mem.trim(u8, t["Bearer ".len..], " \t"), secret)) return true;
-        }
+        if (bearerToken(auth)) |token|
+            if (constantTimeEql(token, secret)) return true;
     }
     if (headerFromReq(req, "X-Zdtd-Secret")) |v| {
         if (constantTimeEql(std.mem.trim(u8, v, " \t"), secret)) return true;
@@ -949,11 +976,6 @@ fn pathOnly(target: []const u8) []const u8 {
     if (target.len == 0) return "/";
     if (std.mem.findScalar(u8, target, '?')) |q| return target[0..q];
     return target;
-}
-
-fn contentLength(head: []const u8) ?usize {
-    const v = headerValue(head, "Content-Length") orelse return null;
-    return std.fmt.parseInt(usize, std.mem.trim(u8, v, " \t"), 10) catch null;
 }
 
 fn validatedContentLength(head: []const u8) !?usize {
@@ -1125,7 +1147,10 @@ fn renderCmdReply(buf: []u8, line: []const u8, reply: []const u8) ![]const u8 {
     // instead of the reply). The pre's text content is its accessible name.
     // class=err when the admin reply is a known failure string (still HTTP 200).
     if (adminReplyLooksFailed(reply)) {
-        try w.writeAll("<pre class=\"cmd-out err\" tabindex=\"0\" role=\"alert\"><span class=\"in\">&gt; ");
+        // The stable #cmd-out container becomes the alert after insertion.
+        // Keeping the role off this child avoids nested live regions and
+        // duplicate screen-reader announcements.
+        try w.writeAll("<pre class=\"cmd-out err\" tabindex=\"0\" data-command-error=\"true\"><span class=\"in\">&gt; ");
     } else {
         try w.writeAll("<pre class=\"cmd-out\" tabindex=\"0\"><span class=\"in\">&gt; ");
     }
@@ -1138,8 +1163,10 @@ fn renderCmdReply(buf: []u8, line: []const u8, reply: []const u8) ![]const u8 {
 
 fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
-    // The stable outer region owns focus so polling cannot discard it.
-    try w.writeAll("<pre class=\"cmd-log\">");
+    // The stable outer region owns focus so polling cannot discard it; tabindex
+    // here because this pre is the scroll container (max-height) and a
+    // keyboard-only operator must be able to scroll the history (WCAG 2.1.1).
+    try w.writeAll("<pre class=\"cmd-log\" tabindex=\"0\">");
     if (s.audit_n == 0) {
         try w.writeAll("<span class=\"meta\">No commands run yet. Enter a command above and choose Run.</span>");
     } else {
@@ -1170,14 +1197,8 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
 fn fillSessionToken(secret: []const u8, nonce: []const u8, out: *[session_token_hex_len]u8) void {
     var mac: [std.crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
     std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, nonce, secret);
-    const hex = "0123456789abcdef";
-    const n = session_token_hex_len / 2;
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const b = mac[i];
-        out[i * 2] = hex[b >> 4];
-        out[i * 2 + 1] = hex[b & 0xf];
-    }
+    // Leading half of the HMAC; the token is an opaque cookie, not a MAC to verify.
+    out.* = std.fmt.bytesToHex(mac[0 .. session_token_hex_len / 2].*, .lower);
 }
 
 fn isLoopbackIpv4(ip: u32) bool {
@@ -1199,15 +1220,21 @@ fn requestAuthorized(head: []const u8, secret: []const u8, session_token: []cons
 fn requestHeaderAuthorized(head: []const u8, secret: []const u8) bool {
     if (secret.len == 0) return false;
     if (headerValue(head, "Authorization")) |auth| {
-        const t = std.mem.trim(u8, auth, " \t");
-        if (std.mem.startsWith(u8, t, "Bearer ")) {
-            if (constantTimeEql(std.mem.trim(u8, t["Bearer ".len..], " \t"), secret)) return true;
-        }
+        if (bearerToken(auth)) |token|
+            if (constantTimeEql(token, secret)) return true;
     }
     if (headerValue(head, "X-Zdtd-Secret")) |v| {
         if (constantTimeEql(std.mem.trim(u8, v, " \t"), secret)) return true;
     }
     return false;
+}
+
+fn bearerToken(value: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t");
+    const separator = std.mem.findScalar(u8, trimmed, ' ') orelse return null;
+    if (!std.ascii.eqlIgnoreCase(trimmed[0..separator], "Bearer")) return null;
+    const token = std.mem.trim(u8, trimmed[separator + 1 ..], " \t");
+    return if (token.len == 0) null else token;
 }
 
 fn formatSessionCookie(buf: []u8, token: []const u8) error{Overflow}![]const u8 {
@@ -1240,20 +1267,6 @@ fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
         return std.mem.trim(u8, line[colon + 1 ..], " \t");
     }
     return null;
-}
-
-fn constantTimeEql(a: []const u8, b: []const u8) bool {
-    // Always walk max(len) so length mismatches do not early-return before
-    // content work (reduces online timing oracle on secret length).
-    var diff: u8 = if (a.len == b.len) 0 else 1;
-    const n = @max(a.len, b.len);
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const x: u8 = if (i < a.len) a[i] else 0;
-        const y: u8 = if (i < b.len) b[i] else 0;
-        diff |= x ^ y;
-    }
-    return diff == 0;
 }
 
 /// Cookie/header-safe secret: printable ASCII without whitespace, quotes, backslash, or `;`.
@@ -1902,6 +1915,12 @@ test "GET /login redirects when session cookie is already valid" {
     const resp = s.testResp();
     try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 303 ") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Location: /") != null);
+    // Browser Max-Age alone is not sufficient: a copied cookie replayed by a
+    // script must also fail at the server-side deadline.
+    s.session_expires_ns = clock.monoNs() -% 1;
+    try testServeHttp(&s, req);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") == null);
     // Anonymous GET /login still serves the form.
     try testServeHttp(&s, "GET /login HTTP/1.1\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
@@ -1949,6 +1968,10 @@ test "request header authorization requires a valid credential" {
     try std.testing.expect(!requestHeaderAuthorized(invalid, "s3cr3t"));
     const valid = "POST /api/cmd HTTP/1.1\r\nX-Zdtd-Secret: s3cr3t\r\n";
     try std.testing.expect(requestHeaderAuthorized(valid, "s3cr3t"));
+    const lowercase_scheme = "POST /api/cmd HTTP/1.1\r\nAuthorization: bearer s3cr3t\r\n";
+    try std.testing.expect(requestHeaderAuthorized(lowercase_scheme, "s3cr3t"));
+    const wrong_scheme = "POST /api/cmd HTTP/1.1\r\nAuthorization: Basic s3cr3t\r\n";
+    try std.testing.expect(!requestHeaderAuthorized(wrong_scheme, "s3cr3t"));
 }
 
 test "command content type accepts form parameters only" {
@@ -2090,12 +2113,11 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
 
     const path = pathOnly(head);
     try std.testing.expect(path.len <= @max(head.len, 1));
-    _ = contentLength(head);
     // Strict framing (duplicate Content-Length / Transfer-Encoding rejection)
-    // must not panic, and when it accepts a header block it must agree with
-    // the lenient parse used by the happy path.
+    // must not panic, and an accepted length must be within the header block it
+    // was parsed from.
     if (validatedContentLength(head)) |strict| {
-        try std.testing.expectEqual(contentLength(head), strict);
+        if (strict) |n| try std.testing.expect(std.fmt.count("{d}", .{n}) <= head.len);
     } else |_| {}
     _ = peekContentLength(head) catch {};
     _ = isFormContentType(headerValue(head, "Content-Type"));
@@ -2137,7 +2159,7 @@ test "renderShell exposes console names and status updates" {
     const html = try renderShell(&buf, sess[0..]);
     try std.testing.expect(std.mem.find(u8, html, "<label for=\"cmd-line\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "maxlength=\"256\" required") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-out\" role=\"status\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-out\" aria-live=\"polite\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "class=\"skip-link\"") != null);
     try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"auto-refresh\"") != null);
@@ -2147,6 +2169,7 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "window.confirm") != null);
+    try std.testing.expect(std.mem.find(u8, html, "line.split(/\\s+/,1)") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"status-heading\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Recent commands\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-colors:active") != null);
@@ -2156,16 +2179,19 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "border:1px solid var(--edge)") != null);
     try std.testing.expect(std.mem.find(u8, html, "text-decoration:underline") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('role',r.ok?'status':'alert')") != null);
+    try std.testing.expect(std.mem.find(u8, html, "commandFailed?'alert':'status'") != null);
     try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('aria-busy','true')") != null);
-    try std.testing.expect(std.mem.find(u8, html, "pre.cmd-out:focus-visible,#console-log:focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "pre.cmd-out:focus-visible,pre.cmd-log:focus-visible,#console-log:focus-visible") != null);
     try std.testing.expect(std.mem.find(u8, html, "list-style:none") != null);
     try std.testing.expect(std.mem.find(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-labelledby=\"status-heading\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading performance data") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading command history") != null);
     try std.testing.expect(std.mem.find(u8, html, "position:sticky") != null);
-    try std.testing.expect(std.mem.find(u8, html, "keepFocus") != null);
+    // Automatic polling must not replace a focused scroll region; explicit
+    // Refresh now and post-command refreshes may force a swap.
+    try std.testing.expect(std.mem.find(u8, html, "el.contains(document.activeElement)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "el._hxOnce=()=>swap(true)") != null);
     try std.testing.expect(std.mem.find(u8, html, "r.status===401") != null);
     try std.testing.expect(std.mem.find(u8, html, "let inFlight=false") != null);
     try std.testing.expect(std.mem.find(u8, html, "if(!el.hasAttribute('data-load-error'))") != null);
@@ -2201,7 +2227,11 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.find(u8, locked, "method=\"post\" action=\"/login\"") != null);
     // During lockout, controls are disabled so users cannot keep submitting failures.
     try std.testing.expect(std.mem.find(u8, locked, "disabled>") != null);
-    try std.testing.expect(std.mem.find(u8, locked, "tabindex=\"-1\" autofocus") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "tabindex=\"-1\"") != null);
+    // The countdown ticks inside role="alert"; without aria-live=off a screen
+    // reader interrupts itself once a second for the whole lockout.
+    try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\" aria-live=\"off\"") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "window.location.replace('/login')") != null);
 }
 
 test "command result marks known failures and is keyboard-scrollable" {
@@ -2214,7 +2244,8 @@ test "command result marks known failures and is keyboard-scrollable" {
     try std.testing.expect(std.mem.find(u8, reply, "class=\"cmd-out err\"") == null);
     const fail = try renderCmdReply(&buf, "frob", "unknown command 'frob'. 'help' for list.\n");
     try std.testing.expect(std.mem.find(u8, fail, "class=\"cmd-out err\"") != null);
-    try std.testing.expect(std.mem.find(u8, fail, "role=\"alert\"") != null);
+    try std.testing.expect(std.mem.find(u8, fail, "data-command-error=\"true\"") != null);
+    try std.testing.expect(std.mem.find(u8, fail, "role=\"alert\"") == null);
     try std.testing.expect(adminReplyLooksFailed("bad arguments to 'inv'. usage: inv <slot>\n"));
     try std.testing.expect(!adminReplyLooksFailed("kicked\n"));
     // Stock console error shapes must light the failure indicator too.
@@ -2234,7 +2265,9 @@ test "command result marks known failures and is keyboard-scrollable" {
     var s: Server = .{};
     var log_buf: [2048]u8 = undefined;
     const log = try renderConsoleLog(&log_buf, &s);
-    try std.testing.expect(std.mem.find(u8, log, "tabindex=\"0\"") == null);
+    // The pre is the scroll container, so it must be tabbable (WCAG 2.1.1).
+    try std.testing.expect(std.mem.find(u8, log, "<pre class=\"cmd-log\" tabindex=\"0\">") != null);
+    // The name lives on the stable outer region, not on the swapped-in partial.
     try std.testing.expect(std.mem.find(u8, log, "aria-label=\"Recent commands\"") == null);
     // Failure replies in the audit ring keep the same err styling as #cmd-out.
     s.pushAudit("> frob");
@@ -2247,7 +2280,9 @@ test "command result marks known failures and is keyboard-scrollable" {
     fillSessionToken("s3cr3t", &nonce, &sess);
     var shell_buf: [16 * 1024]u8 = undefined;
     const shell = try renderShell(&shell_buf, sess[0..]);
-    try std.testing.expect(std.mem.find(u8, shell, "id=\"console-log\" role=\"region\" aria-label=\"Recent commands\" tabindex=\"0\"") != null);
+    // role= so the aria-label is actually exposed (a bare div has no name),
+    // tabindex=-1 so the poll's focus restore has somewhere to land.
+    try std.testing.expect(std.mem.find(u8, shell, "id=\"console-log\" aria-label=\"Recent commands\" role=\"region\" tabindex=\"-1\"") != null);
 }
 
 test "renderStatus and renderApm use list markup for stat grids" {

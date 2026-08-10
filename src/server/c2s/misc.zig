@@ -42,13 +42,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.plugins.chatFilter(c.entity_id, ch.msg, &chat_buf)) |f| {
                 if (f.len == 0) return true;
                 if (!chatMsgOk(f)) return true;
-                @memcpy(chat_buf[0..f.len], f[0..f.len]);
-                chat_msg = chat_buf[0..f.len];
+                // f is a slice of chat_buf; copying it onto itself panics
+                // ("@memcpy arguments alias"), so use it directly.
+                chat_msg = f;
             } else if (self.wasm_plugins.chatFilter(c.entity_id, ch.msg, &wasm_buf)) |f| {
                 if (f.len == 0) return true;
                 if (!chatMsgOk(f)) return true;
-                @memcpy(chat_buf[0..f.len], f[0..f.len]);
-                chat_msg = chat_buf[0..f.len];
+                chat_msg = f;
             }
             const stock = packages.buildStockChat(
                 self.body_buf[0..512],
@@ -86,14 +86,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.plugins.chatFilter(c.entity_id, msg, &chat_buf2)) |f| {
                 if (f.len == 0) return true;
                 if (!chatMsgOk(f)) return true;
-                @memcpy(chat_buf2[0..f.len], f[0..f.len]);
-                chat_msg = chat_buf2[0..f.len];
+                // f is a slice of chat_buf2; copying it onto itself panics
+                // ("@memcpy arguments alias"), so use it directly.
+                chat_msg = f;
                 msg = chat_msg;
             } else if (self.wasm_plugins.chatFilter(c.entity_id, msg, &wasm_buf2)) |f| {
                 if (f.len == 0) return true;
                 if (!chatMsgOk(f)) return true;
-                @memcpy(chat_buf2[0..f.len], f[0..f.len]);
-                chat_msg = chat_buf2[0..f.len];
+                chat_msg = f;
                 msg = chat_msg;
             } else {
                 chat_msg = msg;

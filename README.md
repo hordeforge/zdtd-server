@@ -22,16 +22,6 @@ death/respawn, loot, craft/workstation, trade, persist; automated playtest
 **pass=83 fail=0** (20260804q; soft residuals in STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
-| Doc | Role |
-|---|---|
-| [docs/STATUS.md](docs/STATUS.md) | What works now |
-| [docs/INDEX.md](docs/INDEX.md) | Full doc map |
-| [docs/RELEASES.md](docs/RELEASES.md) | Version, compatibility, support, and release policy |
-| [CHANGELOG.md](CHANGELOG.md) | Consumer-visible changes and migrations |
-| [TODO.md](TODO.md) | Open backlog |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory |
-| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | M7–M16 (post-playable) |
-
 ```bash
 # Flat default world (builtin quest catalog)
 zig-out/bin/zdtd --port 27002 --world worlds/zdtd_default
@@ -77,6 +67,8 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 |---|---|
 | [`docs/STATUS.md`](docs/STATUS.md) | What works now (wins on conflict) |
 | [`docs/INDEX.md`](docs/INDEX.md) | Full doc map |
+| [`docs/RELEASES.md`](docs/RELEASES.md) | Version, compatibility, support, and release policy |
+| [`CHANGELOG.md`](CHANGELOG.md) | Consumer-visible changes and migrations |
 | [`TODO.md`](TODO.md) | Open backlog |
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
@@ -106,8 +98,8 @@ cd zdtd
 make                 # Debug binary → zig-out/bin/zdtd
 make test
 make check           # pin + lint + build + test + fuzz (serial; safe under -j)
-make release         # ReleaseSafe + strip + zig-out/bin/zdtd.sha256
-# or: zig build / zig build test (dev builds; make release adds -Dcpu=baseline + sha256)
+make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, modes/
+# or: zig build / zig build test (dev builds use the native host target)
 ```
 
 ## Layout

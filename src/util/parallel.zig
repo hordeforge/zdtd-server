@@ -254,7 +254,7 @@ pub fn forRanges(
         work(ctx_local, 0, total);
         return;
     }
-    global_pool.run(total, Wrapper.entry, @ptrCast(&ctx_local));
+    global_pool.run(total, Wrapper.entry, &ctx_local);
 }
 
 test "split ranges cover total" {

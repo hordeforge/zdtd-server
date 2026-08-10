@@ -57,7 +57,7 @@ pub fn adminReply(self: *Game, text: []const u8) void {
     if (self.admin_reply_sink) |sink| {
         const room = sink.len -% self.admin_reply_len;
         if (room == 0) return;
-        const n = @min(text.len, room);
+        const n = c2s_text.utf8TruncLen(text, room);
         @memcpy(sink[self.admin_reply_len..][0..n], text[0..n]);
         self.admin_reply_len += n;
     }
@@ -168,7 +168,9 @@ pub fn fillWebuiSnap(self: *Game) void {
     s.password_set = self.password.len > 0;
     s.wire_chunks = self.wire_chunks;
     const wn = self.world_name;
-    const ncopy = @min(wn.len, s.world_name.len);
+    // World names come from config/CLI and may be non-ASCII: cut on a codepoint
+    // boundary so the dashboard header is not mojibake.
+    const ncopy = c2s_text.utf8TruncLen(wn, s.world_name.len);
     @memcpy(s.world_name[0..ncopy], wn[0..ncopy]);
     s.world_name_len = @intCast(ncopy);
     var pi: usize = 0;
@@ -220,6 +222,19 @@ pub const ConsoleOut = struct {
     }
 };
 
+/// Bytes of a command verb kept in an audit line. Real verbs are short; the cap
+/// bounds what an unknown one can push into the operator log.
+pub const max_audit_verb_len: usize = 32;
+
+/// Copy a command verb into `dst` fit for a one-line audit record. The verb is
+/// caller-controlled (the F1 console verb arrives straight off the wire), and
+/// the audit trail is line-oriented stderr, so an embedded newline would let a
+/// client forge whole `audit source=…` lines. Reuses the C2S text sanitizer:
+/// drops C0/DEL and invalid UTF-8, truncates on a codepoint boundary.
+fn auditVerb(dst: []u8, verb: []const u8) usize {
+    return c2s_text.sanitizePlayerName(dst, verb);
+}
+
 /// In-game console (F1) command set, executed for the sending player.
 /// Reply is NetPackageConsoleCmdClient (output lines, bExecute=false).
 pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
@@ -230,7 +245,9 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
     self.harness.counters.inc(.player_console_commands);
     var ts: [19]u8 = undefined;
-    std.debug.print("zdtd: {s} audit source=player_console slot={d} command={s}\n", .{ clock.wallStamp(&ts), c.slot, cmd[0..verb_end] });
+    var vb: [max_audit_verb_len]u8 = undefined;
+    const vn = auditVerb(&vb, cmd[0..verb_end]);
+    std.debug.print("zdtd: {s} audit source=player_console slot={d} command={s}\n", .{ clock.wallStamp(&ts), c.slot, vb[0..vn] });
 
     var out: ConsoleOut = .{};
     var it = std.mem.tokenizeAny(u8, cmd, " ");
@@ -249,7 +266,7 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     if (eqAny(verb, &.{ "help", "commands", "?" })) {
         // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist.
         out.line("zdtd console commands:");
-        out.line(" gettime|gt  listplayers|lp  listents|le  version");
+        out.line(" gettime|gt  listplayers|lp  listplayerids|lpi  listents|le  version");
         out.line(" say|s <msg>");
         out.line(" dm|cm|settempunit|debugmenu (client-side)");
     } else if (eqAny(verb, &.{ "gettime", "gt" })) {
@@ -283,6 +300,16 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
             i += 1;
         }
         if (i == 0) out.line("no players");
+    } else if (eqAny(verb, &.{ "listplayerids", "lpi" })) {
+        // Same rows as the admin console (ConsoleCmdListPlayerIds); the player
+        // console allowlist permits it, so it must not fall through to unknown.
+        var i: usize = 0;
+        for (&self.clients) |*cl| {
+            if (!cl.joined) continue;
+            out.linef("{d}. id={d}, {s}", .{ i, cl.entity_id, cl.name[0..cl.name_len] });
+            i += 1;
+        }
+        out.linef("Total of {d} in the game", .{i});
     } else if (eqAny(verb, &.{ "listents", "le" })) {
         out.linef("zombies={d} animals={d} players={d}", .{
             self.sim.countKind(.zombie), self.sim.countKind(.animal), self.countJoined(),
@@ -552,7 +579,7 @@ pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
             }
             var tb: [24]u8 = undefined;
             var b: [256]u8 = undefined;
-            const s = std.fmt.bufPrint(&b, "{s} banned until {s}, reason: {s}.\n", .{
+            const s = std.fmt.bufPrint(&b, "{s} banned until {s} UTC, reason: {s}.\n", .{
                 id, admin_cmds.formatUnix(&tb, until), a.reason,
             }) catch return;
             self.adminReply(s);
@@ -794,7 +821,9 @@ pub fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const 
             .name => |nm| nm,
         },
     };
-    const n = @min(src.len, buf.len);
+    // The copy becomes the stored ban/permission key, so an over-long name is
+    // cut on a codepoint boundary rather than mid-sequence.
+    const n = c2s_text.utf8TruncLen(src, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     return buf[0..n];
 }
@@ -819,7 +848,9 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     const verb_end = std.mem.findAny(u8, trimmed, " \t") orelse trimmed.len;
     self.harness.counters.inc(.admin_commands);
     var ts: [19]u8 = undefined;
-    std.debug.print("zdtd: {s} audit source={s} command={s}\n", .{ clock.wallStamp(&ts), source, trimmed[0..verb_end] });
+    var vb: [max_audit_verb_len]u8 = undefined;
+    const vn = auditVerb(&vb, trimmed[0..verb_end]);
+    std.debug.print("zdtd: {s} audit source={s} command={s}\n", .{ clock.wallStamp(&ts), source, vb[0..vn] });
     const cmd = admin_mod.parseCommand(line);
     switch (cmd) {
         .help => |topic| {
@@ -1041,9 +1072,16 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             // Drop any online session with this login name first so the next
             // autosave cannot re-write the wiped players.zsv record.
             var kicked: u32 = 0;
+            // allies.zal is keyed by platform identity, not login name, so
+            // capture the identities before the drop clears the client and
+            // erase them there too (a wiped player must not survive as an
+            // ally partner). Offline players have no identity to match here.
+            var allies_dropped: u32 = 0;
             for (&self.clients, 0..) |*cl, i| {
                 if (!cl.joined or cl.name_len != nm.len) continue;
                 if (!std.mem.eql(u8, cl.name[0..cl.name_len], nm)) continue;
+                if (cl.puid_primary.get()) |id| allies_dropped += self.allies.dropByIdentity(id);
+                if (cl.puid_native.get()) |id| allies_dropped += self.allies.dropByIdentity(id);
                 self.dropClientSlot(i, "wipeplayer");
                 kicked += 1;
             }
@@ -1052,11 +1090,17 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 self.adminReply("wipe failed; see server log\n");
                 return;
             };
-            var lb: [72]u8 = undefined;
-            const s = std.fmt.bufPrint(&lb, "wiped records={d} kicked={d}\n", .{ removed, kicked }) catch "wiped\n";
+            // claims.zlc records the owner's login name: wiping players.zsv
+            // alone would leave that name on disk, so release those claims and
+            // rewrite the file now rather than waiting for the autosave.
+            const claims = self.dropClaimsForName(nm);
+            if (claims != 0) self.saveClaims() catch |e| logPersistErr(self, "save claims", e);
+            if (allies_dropped != 0) self.allies.save(self.world.world_dir, self.allocator) catch |e| logPersistErr(self, "save allies", e);
+            var lb: [96]u8 = undefined;
+            const s = std.fmt.bufPrint(&lb, "wiped records={d} claims={d} allies={d} kicked={d}\n", .{ removed, claims, allies_dropped, kicked }) catch "wiped\n";
             self.adminReply(s);
             // Count only; never print the login name to process logs.
-            std.debug.print("zdtd: wipeplayer records={d} kicked={d}\n", .{ removed, kicked });
+            std.debug.print("zdtd: wipeplayer records={d} claims={d} allies={d} kicked={d}\n", .{ removed, claims, allies_dropped, kicked });
         },
         .list, .listplayers => {
             // ConsoleCmdListPlayers::Execute (asm.il 231241) field order.
@@ -1159,6 +1203,9 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             const msg = std.fmt.bufPrint(&lb, "killed {d}\n", .{n + extra + swept}) catch "killed\n";
             self.adminReply(msg);
         },
+        .storm => self.adminReply(if (self.forceStorm()) "storm forced\n" else "no weather biomes\n"),
+        .clearweather => self.adminReply(if (self.clearStorm()) "storm cleared\n" else "no weather biomes\n"),
+        .spawnairdrop => self.adminReply(if (self.forceAirDrop()) "air drop spawned\n" else "no player to drop near\n"),
         .give => |g| {
             // Server-side inv writes get clobbered by the client's next C2S
             // PlayerInventory push. Stock-legal: drop a loot bag at the
@@ -1477,4 +1524,14 @@ pub fn adminReplyGuardPolicy(self: *Game) void {
         pos += line.len;
     }
     if (pos > 0) self.adminReply(qb[0..pos]);
+}
+
+test "auditVerb keeps an injected verb on one audit line" {
+    var buf: [max_audit_verb_len]u8 = undefined;
+    // A client-sent verb carrying CRLF would otherwise forge a second record.
+    const n = auditVerb(&buf, "help\r\nzdtd: audit source=admin command=ban");
+    try std.testing.expect(n <= max_audit_verb_len);
+    try std.testing.expect(std.mem.startsWith(u8, buf[0..n], "help"));
+    try std.testing.expect(std.mem.findScalar(u8, buf[0..n], '\n') == null);
+    try std.testing.expect(std.mem.findScalar(u8, buf[0..n], '\r') == null);
 }

@@ -63,9 +63,7 @@ fn parseHexColor(s: []const u8) ?u32 {
 
 /// Load biomemapcolor + biomemap id from biomes.xml.
 pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     const ap = try allocator.create(std.heap.ArenaAllocator);

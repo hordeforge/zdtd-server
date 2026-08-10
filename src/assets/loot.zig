@@ -142,8 +142,8 @@ pub const LootTable = struct {
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
         const p = self.entryProb(e, loot_stage);
         // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
-        // the NaN→int conversion in intFromFloat is undefined; fail closed to
-        // match the C# unchecked cast (NaN rounds to 0, i.e. never picked).
+        // the NaN→int conversion in `@round` traps; fail closed to match the C#
+        // unchecked cast (NaN rounds to 0, i.e. never picked).
         if (!std.math.isFinite(p)) return false;
         if (p >= 1.0) return true;
         if (p <= 0.0) return false;
@@ -667,17 +667,15 @@ test "builtin loot roll" {
 
 test "load stock loot when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.groups.len > 50);
     try std.testing.expect(t.containers.len > 20);
-    try std.testing.expect(t.containerByName("woodenChest") != null or t.containerByName("EntityLootContainerRegular") != null or t.groups.len > 0);
+    try std.testing.expect(t.containerByName("woodenChest") != null);
     var stacks: [max_roll_stacks]Stack = undefined;
-    // EntityLootContainerRegular may be group-only; roll woodenChest or first container
-    if (t.containerByName("woodenChest")) |_| {
-        const n = t.rollContainer("woodenChest", 1, 7, &stacks);
-        try std.testing.expect(n >= 1);
-    }
+    const n = t.rollContainer("woodenChest", 1, 7, &stacks);
+    try std.testing.expect(n >= 1);
 }
 
 test "loot prob templates gate entries by loot stage" {
@@ -846,7 +844,8 @@ test "count=all groups spawn every entry; force_prob gates independently" {
 
 test "stock groups parse past the old 32-entry cap (perkBooks)" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     // perkBooks has 133 entries; the cap must not truncate stock groups.
     if (t.groupByName("perkBooks")) |g| {
@@ -874,7 +873,8 @@ test "loot rolls stay deterministic for a given stage and seed" {
 
 test "stock loot prob templates load and band the real items" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.prob_templates.len > 10);
     // loot_settings ships five POI tiers.

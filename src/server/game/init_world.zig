@@ -9,6 +9,8 @@ const world_store = @import("../../world/store.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const ecs = @import("../../ecs/root.zig");
 const util_sim = @import("../../util/sim.zig");
+const util_log = @import("../../util/log.zig");
+const clock = @import("../../util/clock.zig");
 const replicate_te = @import("../replicate_te.zig");
 
 pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: game_mod.InitOptions, had_saved_entities: bool) !void {
@@ -59,7 +61,8 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                 }
             }
             if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items) catch |err| blk: {
-                std.debug.print("zdtd: sleeper load failed: {s}\n", .{@errorName(err)});
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} sleeper load failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
                 break :blk null;
             }) |sv| {
                 self.sleepers.deinit();
@@ -73,15 +76,17 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                     if (vol.group_n == 0) continue;
                     if (self.gamestages.sleeperEntityGroup(vol.groups[0].class_name, 1) != null) gs_ok += 1;
                 }
-                std.debug.print("zdtd: sleeper volumes={d} (prefabs_near={d}) gamestage_resolved={d}\n", .{ self.sleepers.volumes.len, refs.items.len, gs_ok });
+                util_log.info("zdtd: sleeper volumes={d} (prefabs_near={d}) gamestage_resolved={d}\n", .{ self.sleepers.volumes.len, refs.items.len, gs_ok });
             }
         }
     }
 
     // Stock: ServerPort = TCP info; LiteNet UDP = ServerPort+2 (NetworkServerLiteNetLib.GetServerPorts).
-    // port==0: ephemeral UDP only (tests), no TCP info listener.
+    // port==0: offline DST game - never bind a socket so the seeded sim is
+    // sealed from the network stack (poll sees WouldBlock; sends drop to the
+    // Capture). Production always binds LiteNet at ServerPort+2.
     const lite_port: u16 = if (port == 0) 0 else port +% 2;
-    try self.net.listen(lite_port);
+    if (lite_port != 0) try self.net.listen(lite_port);
     // ServerPassword is LiteNet Connect key (not Encryption* / not PlayerLogin).
     self.net.server_password = self.password;
     self.info_port = port;
@@ -93,7 +98,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         const seed = opts.worldgen_seed orelse util_sim.default_seed;
         util_sim.enableSeeded(util_sim.default_start_ns, seed);
         // DST replay key: the single value that reproduces this run.
-        std.debug.print("zdtd: DST run seed={d}\n", .{seed});
+        util_log.info("zdtd: DST run seed={d}\n", .{seed});
     }
     // A later init error (for example invalid WebUI configuration) must not
     // leak process-wide virtual time or forced-serial scheduling into the
@@ -117,7 +122,8 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,
         }) catch |err| {
-            std.debug.print("zdtd: warning: TCP server-info on {d} failed: {}\n", .{ port, err });
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} warning: TCP server-info on {d} failed: {}\n", .{ clock.wallStamp(&ts), port, err });
         };
     }
     self.loadAdminLists();
@@ -141,7 +147,8 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .difficulty = opts.game_difficulty,
         };
         self.admin.listen(opts.admin_port) catch |err| {
-            std.debug.print("zdtd: warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ opts.admin_port, err });
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} warning: admin TCP on 127.0.0.1:{d} failed: {}\n", .{ clock.wallStamp(&ts), opts.admin_port, err });
         };
         if (self.admin.port != 0) {
             std.debug.print(
@@ -161,7 +168,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .bind_host = opts.webui_bind,
             .secret = opts.webui_secret,
         }) catch |err| {
-            std.debug.print("zdtd: webui on {s}:{d} failed: {s}\n", .{
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} webui on {s}:{d} failed: {s}\n", .{
+                clock.wallStamp(&ts),
                 opts.webui_bind,
                 opts.webui_port,
                 @errorName(err),
@@ -169,7 +178,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             return err;
         };
         self.webui.setAdminHandler(self, Game.webuiAdminThunk);
-        std.debug.print("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
+        util_log.info("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
             opts.webui_bind,
             self.webui.port,
         });
@@ -215,10 +224,11 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                 cont.setSlot(1, .{ .item_id = 2, .count = 3, .quality = 1 }); // food
             }
         } else |err| {
-            std.debug.print("zdtd: seed chest block ({d},{d},{d}) failed: {s}\n", .{ cx, cy, cz, @errorName(err) });
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} seed chest block ({d},{d},{d}) failed: {s}\n", .{ clock.wallStamp(&ts), cx, cy, cz, @errorName(err) });
         }
     }
-    std.debug.print("zdtd: sim seed zombies z1={?} z2={?} sleeper={?} count={d} spawn=({d},{d},{d})\n", .{
+    util_log.info("zdtd: sim seed zombies z1={?} z2={?} sleeper={?} count={d} spawn=({d},{d},{d})\n", .{
         z1, z2, z3, self.sim.countKind(.zombie), sp.x, sp.y, sp.z,
     });
 

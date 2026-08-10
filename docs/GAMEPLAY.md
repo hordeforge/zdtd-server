@@ -33,9 +33,9 @@ flowchart TD
     J --> K[InventoryTransactionResponse]
 ```
 
-Anchors: `src/server/c2s/inv.zig:480` (craft op dispatch),
-`src/server/game.zig:3779` (`tryCraft`), `:3784` (`tryCraftRecipe`),
-`src/ecs/systems.zig:443` (`questOnCraft`). `times` is clamped to
+Anchors: `src/server/c2s/inv.zig:507` (craft op dispatch),
+`src/server/game/craft.zig` (`tryCraft` → `tryCraftRecipe`),
+`src/ecs/systems.zig:430` (`questOnCraft`). `times` is clamped to
 `craft_max_times`; zero means one. Any missing ingredient name or an output
 that fails to deposit restores the exact pre-craft bag.
 
@@ -78,10 +78,10 @@ flowchart TD
     U --> Q
 ```
 
-Anchors: `src/server/c2s/inv.zig:337` (workstation TE apply), `:350`
-(`getOrCreate`), `src/world/workstations.zig:236` (`handleRecipeQueue`), `:274`
-(`completeOneCraft`), `:285` (`addCraftComplete`), `:339`
-(`cycleRecipeQueue`), `:361` (`addOutput`), `src/server/game.zig:3884`
+Anchors: `src/server/c2s/inv.zig:341` (workstation TE apply), `:354`
+(`getOrCreate`), `src/world/workstations.zig:236` (`handleRecipeQueue`), `:276`
+(`completeOneCraft`), `:293` (`addCraftComplete`), `:339`
+(`cycleRecipeQueue`), `:361` (`addOutput`), `src/server/game/craft.zig:181`
 (`tickWorkstations`, also feeds the heat map).
 
 Notes: `max_crafts_per_tick = 64` bounds one tick; a non-finite or huge
@@ -283,15 +283,16 @@ flowchart TD
     N --> O[questTickGoto + questTickStayWithin]
 ```
 
-Anchors: `src/server/c2s/move.zig:20` (PosAndRot handler), `:107` (RelPos
-handler), `:172` (Teleport handler), `src/server/game.zig:1536`
-(`applyMovementEnvelope`), `src/server/movement.zig:39` (`clampHorizontal`),
-`src/server/game.zig:1503` (`noteAcceptedMove`, rebaselines and fires
-pressure plates), `:2956` (`rescueDeepVoid`), `src/server/c2s/move.zig:156`
-(`NetPackageEntitySpeeds` sprint state).
+Anchors: `src/server/c2s/move.zig:20` (PosAndRot handler), `:86` (RelPos
+handler), `:151` (Teleport handler), `src/server/game/movement_helpers.zig`
+(`applyMovementEnvelope`), `src/server/movement.zig:31` (`clampHorizontal`),
+`src/server/game/movement_helpers.zig` (`noteAcceptedMove`, rebaselines and
+fires pressure plates), `src/server/game/rescue.zig` (`rescueDeepVoid`),
+`src/server/c2s/move.zig:144` (`NetPackageEntitySpeeds` sprint state).
 
-Notes: the gate is `move_valid` false after spawn/teleport (`resetMoveEnvelopePeer`,
-`game.zig:1524`), so the first move after a sanctioned teleport always
+Notes: the gate is `move_valid` false after spawn/teleport
+(`resetMoveEnvelopePeer`, `src/server/game/movement_helpers.zig`), so the
+first move after a sanctioned teleport always
 rebaselines; dt is floored at 1/40 s and capped at 1 s so a single packet
 cannot jump the whole map. Observe mode counts the violation but still applies
 the client position.

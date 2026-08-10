@@ -142,7 +142,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // closing-time teleports from it.
         try self.sendWorldAreas(peer);
         const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
-        try self.sendGame(peer, "NetPackageWorldTime", wt);
+        try self.sendGameCritical(peer, "NetPackageWorldTime", wt);
         try self.sendGameStats(peer);
         // NetPackageWeather: only after client WeatherManager.InitPackages (post-enter).
         // Early send → NCSimple "parsed 2 vs expected 117" and disconnect.

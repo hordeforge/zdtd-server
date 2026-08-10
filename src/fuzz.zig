@@ -13,6 +13,8 @@ const stock_te = packages.stock_te;
 const stock_inv = packages.stock_inv;
 const stock_quest = packages.stock_quest;
 const stock_buff = packages.stock_buff;
+const stock_entity = packages.stock_entity;
+const stock_party = packages.stock_party;
 const admin = @import("server/admin.zig");
 const components = @import("ecs/components.zig");
 const toml_bind = @import("util/toml_bind.zig");
@@ -20,6 +22,7 @@ const mode_pack = @import("server/mode.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const serverconfig = @import("server/config.zig");
 const serverinfo = @import("server/serverinfo_tcp.zig");
+const persist = @import("server/persist.zig");
 const xml_util = @import("assets/xml_util.zig");
 const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
@@ -162,6 +165,12 @@ const package_corpus = [_][]const u8{
     &.{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     // trader trade minimal
     &.{ 1, 0, 0, 0, 1, 0, 1, 0, 0 },
+    // party action: invite | invited-by | invited | empty voice lobby
+    &.{ 0, 106, 0, 0, 0, 107, 0, 0, 0, 0 },
+    // party quest change: sender | objective | complete | quest code
+    &.{ 106, 0, 0, 0, 2, 1, 42, 0, 0, 0 },
+    // trader data ToServer: entity | id | has data | empty trader body
+    &.{ 1, 50, 0, 0, 0, 1 },
     // entity attach: type + rider + vehicle + slot
     &.{ 0, 106, 0, 0, 0, 1, 0, 0, 0, 0, 0 },
     // entity attach mount request: slot -1 (EntityVehicle::EnterVehicle)
@@ -225,9 +234,14 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseEntityAttach(input) catch null;
     _ = packages.parseLandClaimRepair(input) catch null;
     _ = packages.parseTraderTrade(input) catch null;
+    _ = packages.parsePartyQuestChange(input) catch null;
     _ = packages.parseVehicleControl(input) catch null;
     if (packages.parseVehicleDataSync(input)) |s| {
         try std.testing.expect(s.data.len + 12 <= input.len);
+    } else |_| {}
+    var voice_buf: [128]u8 = undefined;
+    if (stock_party.readActions(input, &voice_buf)) |action| {
+        try std.testing.expect(action.voice_lobby.len <= voice_buf.len);
     } else |_| {}
     var cmd_buf: [256]u8 = undefined;
     const cmd = packages.parseConsoleCmd(input, &cmd_buf);
@@ -267,6 +281,21 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     // past the fixed platform/id buffers, and a null identity is a valid value.
     var plat_buf: [platform_user.max_platform_len]u8 = undefined;
     var puid_buf: [platform_user.max_id_len]u8 = undefined;
+    if (packages.parseVendingMachineAccess(input, &plat_buf, &puid_buf)) |access| {
+        try std.testing.expect(access.user.platform.len <= plat_buf.len);
+        try std.testing.expect(access.user.id.len <= puid_buf.len);
+    } else |_| {}
+    if (packages.parseTraderDataToServer(input)) |td| {
+        try std.testing.expect(td.trader_data.len <= input.len);
+        if (td.has_trader_data) {
+            var tr: binary.Reader = .{ .data = td.trader_data };
+            var entries: [32]stock_entity.TraderDataReadEntry = undefined;
+            if (stock_entity.readTraderDataBody(&tr, &entries)) |parsed| {
+                try std.testing.expect(parsed.n <= entries.len);
+                try std.testing.expect(tr.pos <= td.trader_data.len);
+            } else |_| {}
+        }
+    } else |_| {}
     var pr: binary.Reader = .{ .data = input };
     if (platform_user.read(&pr, &plat_buf, &puid_buf)) |maybe| {
         if (maybe) |id| {
@@ -1571,6 +1600,44 @@ fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
             try std.testing.expect(st.count <= 65535);
         }
     }
+}
+
+const players_corpus = [_][]const u8{
+    "",
+    "ZPV2" ++ [_]u8{ 0, 0, 0, 0 },
+    "ZPV2" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ ([_]u8{0} ** 18),
+    "ZPV3" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ ([_]u8{0} ** 19),
+    "ZPV3" ++ [_]u8{ 0xff, 0xff, 0xff, 0xff },
+};
+
+test "fuzz players.zsv record parser" {
+    try std.testing.fuzz({}, fuzzPlayersSave, .{ .corpus = &players_corpus });
+}
+
+fn fuzzPlayersSave(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+
+    if (persist.zpvRecordLen(input, 0, false)) |record_len| {
+        try std.testing.expect(record_len <= input.len);
+    } else |_| {}
+    if (persist.zpvRecordLen(input, 0, true)) |record_len| {
+        try std.testing.expect(record_len <= input.len);
+    } else |_| {}
+
+    const dropped = persist.zpv2DropName(std.testing.allocator, input, "a") catch return;
+    defer if (dropped.blob) |blob| std.testing.allocator.free(blob);
+    const blob = dropped.blob orelse return;
+    try std.testing.expect(dropped.removed > 0);
+    try std.testing.expect(blob.len >= 8);
+    const v3 = std.mem.eql(u8, blob[0..4], "ZPV3");
+    const count = std.mem.readInt(u32, blob[4..8], .little);
+    var off: usize = 8;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) off += try persist.zpvRecordLen(blob, off, v3);
+    try std.testing.expectEqual(blob.len, off);
 }
 
 /// Minimal weather table so decode can accept a well-formed ZWTH1 payload.

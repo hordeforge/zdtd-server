@@ -297,6 +297,16 @@ test "land claim removed when keystone breaks and expires offline" {
     g.land_claims[0].owner_seen_day = 1;
     g.expireClaims();
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    // Erasure: a claim carries the owner's login name, so wipeplayer has to
+    // release it or the name outlives the players.zsv record in claims.zlc.
+    try std.testing.expect(g.land_claims[0].owner_name_len > 0);
+    var owner: [32]u8 = undefined;
+    const on = g.land_claims[0].owner_name_len;
+    @memcpy(owner[0..on], g.land_claims[0].owner_name[0..on]);
+    try std.testing.expectEqual(@as(u32, 0), g.dropClaimsForName("someone-else"));
+    try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    try std.testing.expectEqual(@as(u32, 1), g.dropClaimsForName(owner[0..on]));
+    try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
 }
 
 test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
@@ -421,8 +431,15 @@ test "offline steps replay same world_time for same seed" {
     const ts = clock.monoNs();
     var dir_a_buf: [128]u8 = undefined;
     var dir_b_buf: [128]u8 = undefined;
-    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_replay_a_{d}", .{ts}) catch ".";
-    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_replay_b_{d}", .{ts}) catch ".";
+    // The buffers hold far more than the fixed prefix plus a u64, so the
+    // formats cannot fail; unreachable keeps the paths from ever aliasing "."
+    // (which the teardown below would then delete).
+    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_replay_a_{d}", .{ts}) catch unreachable;
+    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_replay_b_{d}", .{ts}) catch unreachable;
+    // Unique names mean nothing reclaims these worlds otherwise: without the
+    // teardown every run leaves two more world dirs under .zdtd_cfg_cache.
+    defer io_fs.removeDirTree(dir_a);
+    defer io_fs.removeDirTree(dir_b);
     var t_a: u64 = 0;
     var t_b: u64 = 0;
     {
@@ -453,6 +470,65 @@ test "offline steps replay same world_time for same seed" {
         t_b = g.sim.director.clock.worldTimeBits();
     }
     try std.testing.expectEqual(t_a, t_b);
+}
+
+test "same seed replays identical outbound wire history (byte diff)" {
+    // Stronger than the world_time oracle above: a full recorded payload
+    // history (join bundle + 24 ticks through a Capture peer) must replay
+    // byte-for-byte from the seed, so a divergent second run can be diffed
+    // against the first instead of trusting one scalar.
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    // Unique dirs per invocation: offline games persist clock state and the
+    // cache dir is shared across concurrent test processes.
+    const ts = clock.monoNs();
+    var dir_a_buf: [128]u8 = undefined;
+    var dir_b_buf: [128]u8 = undefined;
+    // Cannot fail (fixed prefix plus a u64 into 128 bytes); unreachable keeps
+    // the paths from ever aliasing "." and being deleted by the teardown.
+    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_wire_a_{d}", .{ts}) catch unreachable;
+    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_wire_b_{d}", .{ts}) catch unreachable;
+    // Unique names mean nothing reclaims these worlds otherwise.
+    defer io_fs.removeDirTree(dir_a);
+    defer io_fs.removeDirTree(dir_b);
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
+            .worldgen_seed = 0xBAD_5EED,
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        _ = try g.attachJoinedClient(&cap_a);
+        var i: u32 = 0;
+        while (i < 24) : (i += 1) try g.step();
+    }
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
+            .worldgen_seed = 0xBAD_5EED,
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        _ = try g.attachJoinedClient(&cap_b);
+        var i: u32 = 0;
+        while (i < 24) : (i += 1) try g.step();
+    }
+    try std.testing.expectEqual(cap_a.n, cap_b.n);
+    var si: usize = 0;
+    while (si < cap_a.n) : (si += 1) {
+        try std.testing.expectEqual(cap_a.slots[si].len, cap_b.slots[si].len);
+        try std.testing.expectEqualSlices(
+            u8,
+            cap_a.slots[si].data[0..cap_a.slots[si].len],
+            cap_b.slots[si].data[0..cap_b.slots[si].len],
+        );
+    }
 }
 
 test "ban expiry under virtual wall is seed-stable" {
@@ -1350,8 +1426,10 @@ test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
 test "per-trader stock and hours come from trader_info + npc.xml" {
     const traders_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
     const npc_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/npc.xml";
-    const tt = assets_traders.loadFromPath(std.testing.allocator, traders_path) catch return error.SkipZigTest;
-    const nt = assets_npc.loadFromPath(std.testing.allocator, npc_path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(traders_path)) return error.SkipZigTest;
+    const tt = try assets_traders.loadFromPath(std.testing.allocator, traders_path);
+    if (!io_fs.fileExists(npc_path)) return error.SkipZigTest;
+    const nt = try assets_npc.loadFromPath(std.testing.allocator, npc_path);
 
     io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/trader_info_stock", 0, .{});

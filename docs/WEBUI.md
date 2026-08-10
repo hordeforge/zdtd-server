@@ -162,7 +162,7 @@ Reuse **exactly** `admin.zig` / `Game` console verbs so TCP and web stay one pat
 | Cmd | Web UI |
 |---|---|
 | `lp` / listplayers | Players table (auto) |
-| `wipeplayer <name>` | Erase `players.zsv` record + kick online (confirm dialog) |
+| `wipeplayer <name>` | Erase `players.zsv` record + release that owner's land claims + kick online (confirm dialog) |
 | `kick <name/id> [reason]` | Row button |
 | `give <slot> <item> <n>` | Form (name resolve via items table) |
 | `tp` / `tele` | Form or "TP to spawn" (admin accepts both) |

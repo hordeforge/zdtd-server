@@ -26,7 +26,9 @@ pub const Pack = struct {
     /// Clamp bounds that serverconfig applies at merge (docs/GAME_OPTIONS.md);
     /// now applied at parse so the stored pack value is already in range.
     pub const ranges = .{
-        .max_spawned_zombies = .{ 1, 2048 },
+        // 0 is a valid ceiling (Director.tick returns before every spawn
+        // branch), which is what modes/builder.toml asks for.
+        .max_spawned_zombies = .{ 0, 2048 },
         .game_difficulty = .{ 0, 5 },
         .blood_moon_enemy_count = .{ 0, 60 },
         .blood_moon_range = .{ 0, 15 },
@@ -41,15 +43,17 @@ pub const Pack = struct {
         .loot_abundance = .{ 1, 1000 },
         .xp_multiplier = .{ 1, 1000 },
         .block_damage_player = .{ 1, 1000 },
-        .block_damage_ai = .{ 1, 1000 },
-        .block_damage_ai_bm = .{ 1, 1000 },
+        .block_damage_ai = .{ 0, 1000 },
+        .block_damage_ai_bm = .{ 0, 1000 },
         .max_spawned_animals = .{ 0, 2048 },
         .air_drop_frequency = .{ 0, 8760 },
         .drop_on_death = .{ 0, 4 },
-        .land_claim_size = .{ 1, 256 },
-        .land_claim_online_durability_modifier = .{ 1, 1000 },
-        .land_claim_offline_durability_modifier = .{ 1, 1000 },
-        .land_claim_expiry_days = .{ 0, 3650 },
+        // 255 max and even sizes forced odd: zdtd_config.sanitizeInitOptions
+        // normalizes the merged value (a keystone area is centered on a block).
+        .land_claim_size = .{ 1, 255 },
+        .land_claim_online_durability_modifier = .{ 0, 64 },
+        .land_claim_offline_durability_modifier = .{ 0, 64 },
+        .land_claim_expiry_days = .{ 0, 365 },
         .loot_respawn_days = .{ 0, 365 },
     };
 

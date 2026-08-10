@@ -616,7 +616,7 @@ pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
     std.mem.writeInt(i32, map_buf[count_pos..][0..4], n, .little);
     if (n == 0) return;
     const body = packages.buildIdMappingBody(&self.body_buf, "items", w.written()) catch return;
-    try self.sendGame(peer, "NetPackageIdMapping", body);
+    try self.sendGameCritical(peer, "NetPackageIdMapping", body);
 }
 
 /// Holding-only S2C (valid direction for stock clients).

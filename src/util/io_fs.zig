@@ -50,14 +50,6 @@ fn consumeFault(counter: *std.atomic.Value(u32)) bool {
     }
 }
 
-fn consumeWriteFault() bool {
-    return consumeFault(&write_fail_remaining);
-}
-
-fn consumeReadFault() bool {
-    return consumeFault(&read_fail_remaining);
-}
-
 /// `std.Io.Threaded` bookkeeping only. Always page_allocator so concurrent
 /// callers (parallel chunk save, overlapping FS helpers) never share a
 /// DebugAllocator/GPA with Threaded.init. Payload/list buffers still use the
@@ -79,7 +71,7 @@ pub fn mkdirPath(rel: []const u8) void {
 }
 
 pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
-    if (consumeWriteFault()) return error.DiskQuota;
+    if (consumeFault(&write_fail_remaining)) return error.DiskQuota;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -129,7 +121,7 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
 
 /// Read entire file. Caller frees.
 pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    if (consumeReadFault()) return error.InputOutput;
+    if (consumeFault(&read_fail_remaining)) return error.InputOutput;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
@@ -138,7 +130,7 @@ pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 
 /// Read up to `buf.len` bytes into `buf`. Returns slice of bytes read.
 pub fn readFileInto(path: []const u8, buf: []u8) ![]u8 {
-    if (consumeReadFault()) return error.InputOutput;
+    if (consumeFault(&read_fail_remaining)) return error.InputOutput;
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();

@@ -35,6 +35,8 @@ pub const Stream = struct {
 pub const Authority = struct {
     interest_range_blocks: ?f32 = null,
     max_edit_range_blocks: ?f32 = null,
+    /// Movement anti-cheat envelope: max accepted horizontal speed in m/s.
+    max_horizontal_speed_mps: ?f32 = null,
     max_claimed_damage: ?i32 = null,
     peer_stale_ms: ?u64 = null,
     lock_stale_ms: ?u64 = null,
@@ -213,10 +215,13 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.save_interval_ticks) |v| opts.save_interval_ticks = v;
     if (f.authority.interest_range_blocks) |v| opts.interest_range = v;
     if (f.authority.max_edit_range_blocks) |v| opts.max_edit_range = v;
+    if (f.authority.max_horizontal_speed_mps) |v| {
+        if (@hasField(@TypeOf(opts.*), "max_horizontal_speed_mps")) opts.max_horizontal_speed_mps = v;
+    }
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
     if (f.authority.lock_stale_ms) |v| {
-        if (@hasField(@TypeOf(opts.*), "lock_stale_ns")) opts.lock_stale_ns = v *% 1_000_000;
+        if (@hasField(@TypeOf(opts.*), "lock_stale_ns")) opts.lock_stale_ns = v *| 1_000_000;
     }
     if (f.authority.join_rate_limit_ms) |v| {
         if (@hasField(@TypeOf(opts.*), "join_rate_limit_ms")) opts.join_rate_limit_ms = v;
@@ -257,7 +262,8 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.storm_frequency) |v| opts.storm_frequency = v;
 }
 
-/// Compile cap for Client.streamed[] (must match game.zig max_streamed_chunks_cap).
+/// Compile cap for Client.streamed[]: config owns the clamp, `server/game/types.zig`
+/// sizes the array from this constant.
 pub const max_streamed_chunks_cap: usize = 169;
 
 /// Clamp / repair InitOptions after config merge. Logs adjustments; never panics.
@@ -274,9 +280,30 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         );
         opts.max_streamed_chunks = max_streamed_chunks_cap;
     }
+    var max_radius_for_budget: i32 = 1;
+    while (true) {
+        const next = max_radius_for_budget + 1;
+        const side: usize = @intCast(2 * next + 1);
+        if (side * side > opts.max_streamed_chunks) break;
+        max_radius_for_budget = next;
+    }
     if (opts.chunk_stream_radius_min < 1) {
         std.debug.print("zdtd: stream_radius_min={d} invalid; using 1\n", .{opts.chunk_stream_radius_min});
         opts.chunk_stream_radius_min = 1;
+    }
+    if (opts.chunk_stream_radius_min > max_radius_for_budget) {
+        std.debug.print(
+            "zdtd: stream_radius_min={d} exceeds stream budget radius {d}; clamping\n",
+            .{ opts.chunk_stream_radius_min, max_radius_for_budget },
+        );
+        opts.chunk_stream_radius_min = max_radius_for_budget;
+    }
+    if (opts.chunk_stream_radius_max > max_radius_for_budget) {
+        std.debug.print(
+            "zdtd: stream_radius_max={d} exceeds stream budget radius {d}; clamping\n",
+            .{ opts.chunk_stream_radius_max, max_radius_for_budget },
+        );
+        opts.chunk_stream_radius_max = max_radius_for_budget;
     }
     if (opts.chunk_stream_radius_max < opts.chunk_stream_radius_min) {
         std.debug.print(
@@ -333,6 +360,15 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         std.debug.print("zdtd: interest_range={d} invalid; using 1\n", .{opts.interest_range});
         opts.interest_range = 1;
     }
+    if (@hasField(@TypeOf(opts.*), "max_horizontal_speed_mps") and
+        (!std.math.isFinite(opts.max_horizontal_speed_mps) or opts.max_horizontal_speed_mps <= 0))
+    {
+        std.debug.print(
+            "zdtd: max_horizontal_speed_mps={d} invalid; using 1\n",
+            .{opts.max_horizontal_speed_mps},
+        );
+        opts.max_horizontal_speed_mps = 1;
+    }
     if (opts.peer_stale_ms == 0) {
         std.debug.print("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
         opts.peer_stale_ms = 1;
@@ -378,6 +414,35 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.trader_wallet_dukes < 0) {
         std.debug.print("zdtd: trader_wallet_dukes={d} invalid; using 0\n", .{opts.trader_wallet_dukes});
         opts.trader_wallet_dukes = 0;
+    }
+    if (@hasField(@TypeOf(opts.*), "craft_max_times") and opts.craft_max_times == 0) {
+        std.debug.print("zdtd: craft_max_times=0 invalid; using 1\n", .{});
+        opts.craft_max_times = 1;
+    }
+    // A keystone claim area is centered on the block, so the side must be odd.
+    // serverconfig forces it at parse; a mode pack sets the same field, so the
+    // merged value is normalized here too (docs/GAME_OPTIONS.md LandClaimSize).
+    if (@hasField(@TypeOf(opts.*), "land_claim_size") and opts.land_claim_size % 2 == 0) {
+        const odd = if (opts.land_claim_size > 1) opts.land_claim_size - 1 else 1;
+        std.debug.print(
+            "zdtd: land_claim_size={d} must be odd; using {d}\n",
+            .{ opts.land_claim_size, odd },
+        );
+        opts.land_claim_size = odd;
+    }
+    if (opts.storm_frequency < 0) {
+        std.debug.print("zdtd: storm_frequency={d} invalid; using 0\n", .{opts.storm_frequency});
+        opts.storm_frequency = 0;
+    }
+    if (@hasField(@TypeOf(opts.*), "plugin_budget")) {
+        if (opts.plugin_budget.fuel == 0) {
+            std.debug.print("zdtd: plugin fuel=0 invalid; using 1\n", .{});
+            opts.plugin_budget.fuel = 1;
+        }
+        if (opts.plugin_budget.max_memory_pages == 0) {
+            std.debug.print("zdtd: plugin max_pages=0 invalid; using 1\n", .{});
+            opts.plugin_budget.max_memory_pages = 1;
+        }
     }
     opts.guard.clamp();
 }
@@ -473,8 +538,10 @@ const TestOpts = struct {
     spawn_area_radius_max: i32 = 8,
     interest_range: f32 = 160,
     max_edit_range: f32 = 96,
+    max_horizontal_speed_mps: f32 = 20,
     max_claimed_damage: i32 = 200,
     peer_stale_ms: u64 = 3000,
+    lock_stale_ns: u64 = 30_000_000_000,
     trader_wallet_dukes: i32 = 5000,
     min_chat_gap_ns: u64 = 200_000_000,
     inv_bucket_cap: u8 = 40,
@@ -485,7 +552,13 @@ const TestOpts = struct {
     damage_burst_max: u8 = 4,
     trader_restock_cap: u16 = 50,
     trader_restock_refill: u16 = 10,
+    craft_max_times: u16 = 20,
     storm_frequency: i32 = 100,
+    land_claim_size: u16 = 41,
+    plugin_budget: struct {
+        fuel: u64 = 100_000_000,
+        max_memory_pages: u64 = 1024,
+    } = .{},
     wire_chunks: bool = true,
     deco_trees: bool = true,
     deco_mirror: bool = true,
@@ -579,8 +652,8 @@ test "sanitizeInitOptions repairs bad radii" {
     };
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(@as(usize, 1), o.max_streamed_chunks);
-    try std.testing.expectEqual(@as(i32, 8), o.chunk_stream_radius_min);
-    try std.testing.expectEqual(@as(i32, 8), o.chunk_stream_radius_max);
+    try std.testing.expectEqual(@as(i32, 1), o.chunk_stream_radius_min);
+    try std.testing.expectEqual(@as(i32, 1), o.chunk_stream_radius_max);
     try std.testing.expectEqual(@as(f32, 1), o.interest_range);
 }
 
@@ -693,4 +766,71 @@ test "[sim] storm_frequency parses and merges" {
     var o2: TestOpts = .{};
     applyToInitOptions(&empty, &o2);
     try std.testing.expectEqual(@as(i32, 100), o2.storm_frequency);
+}
+
+test "[authority] max_horizontal_speed_mps parses, merges, and clamps" {
+    var f = try parse(
+        std.testing.allocator,
+        \\[authority]
+        \\max_horizontal_speed_mps = 12.5
+        \\
+        ,
+    );
+    defer f.deinit();
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), f.authority.max_horizontal_speed_mps.?, 0.01);
+    var o: TestOpts = .{};
+    applyToInitOptions(&f, &o);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), o.max_horizontal_speed_mps, 0.01);
+
+    // Non-finite / non-positive caps would let any move through unclamped.
+    var bad: TestOpts = .{ .max_horizontal_speed_mps = std.math.nan(f32) };
+    sanitizeInitOptions(&bad);
+    try std.testing.expectEqual(@as(f32, 1), bad.max_horizontal_speed_mps);
+    var zero: TestOpts = .{ .max_horizontal_speed_mps = 0 };
+    sanitizeInitOptions(&zero);
+    try std.testing.expectEqual(@as(f32, 1), zero.max_horizontal_speed_mps);
+}
+
+test "sanitizeInitOptions forces an odd land claim size" {
+    var o: TestOpts = .{ .land_claim_size = 40 };
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(u16, 39), o.land_claim_size);
+    var one: TestOpts = .{ .land_claim_size = 1 };
+    sanitizeInitOptions(&one);
+    try std.testing.expectEqual(@as(u16, 1), one.land_claim_size);
+}
+
+test "sanitizeInitOptions repairs disabled runtime budgets" {
+    var o: TestOpts = .{
+        .craft_max_times = 0,
+        .storm_frequency = -1,
+        .plugin_budget = .{ .fuel = 0, .max_memory_pages = 0 },
+    };
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(u16, 1), o.craft_max_times);
+    try std.testing.expectEqual(@as(i32, 0), o.storm_frequency);
+    try std.testing.expectEqual(@as(u64, 1), o.plugin_budget.fuel);
+    try std.testing.expectEqual(@as(u64, 1), o.plugin_budget.max_memory_pages);
+}
+
+test "millisecond timeouts saturate instead of wrapping" {
+    var f = try parse(
+        std.testing.allocator,
+        "[authority]\nlock_stale_ms = 18446744073709551615\n",
+    );
+    defer f.deinit();
+    var o: TestOpts = .{};
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(std.math.maxInt(u64), o.lock_stale_ns);
+}
+
+test "stream radii cannot overflow or exceed the streamed chunk budget" {
+    var o: TestOpts = .{
+        .max_streamed_chunks = 169,
+        .chunk_stream_radius_min = std.math.maxInt(i32),
+        .chunk_stream_radius_max = std.math.maxInt(i32),
+    };
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(i32, 6), o.chunk_stream_radius_min);
+    try std.testing.expectEqual(@as(i32, 6), o.chunk_stream_radius_max);
 }

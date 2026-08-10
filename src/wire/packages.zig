@@ -1180,30 +1180,11 @@ pub fn withBlockMeta(raw: u32, meta: u8) u32 {
     return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
 }
 
-pub const SetBlockOpts = struct {
-    damage: u16 = 0,
-    changed_by_entity: i32 = 0,
-    local_player_that_changed: i32 = 0,
-};
-
 /// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
+/// Id-only: rotation and meta bits are zero, so this is safe for fresh placement
+/// and wrong for echoing a mutated block. Those callers want buildSetBlockBodyRaw.
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
-    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{});
-}
-
-pub fn buildSetBlockBodyFull(
-    buf: []u8,
-    x: i32,
-    y: i32,
-    z: i32,
-    block_id: u16,
-    changed_by_entity: i32,
-    local_player_that_changed: i32,
-) ![]u8 {
-    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{
-        .changed_by_entity = changed_by_entity,
-        .local_player_that_changed = local_player_that_changed,
-    });
+    return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), 0, 0, 0);
 }
 
 pub fn buildSetBlockBodyDamage(
@@ -1216,15 +1197,7 @@ pub fn buildSetBlockBodyDamage(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
-    return buildSetBlockBodyWithOpts(buf, x, y, z, @as(u32, block_id), .{
-        .damage = damage,
-        .changed_by_entity = changed_by_entity,
-        .local_player_that_changed = local_player_that_changed,
-    });
-}
-
-pub fn buildSetBlockBodyWithOpts(buf: []u8, x: i32, y: i32, z: i32, raw: u32, opts: SetBlockOpts) ![]u8 {
-    return buildSetBlockBodyRaw(buf, x, y, z, raw, opts.damage, opts.changed_by_entity, opts.local_player_that_changed);
+    return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), damage, changed_by_entity, local_player_that_changed);
 }
 
 /// Authoritative SetBlock carrying the whole BlockValue.rawData. Callers that
@@ -1352,7 +1325,7 @@ pub fn framed(buf: []u8, name: []const u8, body: []const u8) ![]u8 {
 
 test "setblock stock body roundtrip" {
     var buf: [64]u8 = undefined;
-    const body = try buildSetBlockBodyFull(&buf, -10, 61, 400, 13, 106, 106);
+    const body = try buildSetBlockBodyRaw(&buf, -10, 61, 400, 13, 0, 106, 106);
     try std.testing.expect(body.len > 20);
     try std.testing.expectEqual(@as(u8, 0), body[0]); // no user id
     const p = try parseSetBlockBody(body);

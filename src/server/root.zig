@@ -86,6 +86,7 @@ test {
     _ = mode;
     _ = admin;
     _ = admin_cmds;
+    _ = admin_console;
     _ = webui;
     _ = serverinfo_tcp;
     _ = scenarios;
@@ -112,6 +113,9 @@ test {
     _ = game_hooks;
     _ = game_deco;
     _ = game_loot;
+    _ = game_craft;
+    _ = game_chunk_stream;
+    _ = game_chunk_fill;
     _ = game_weather;
     _ = game_vehicle;
     _ = game_config_files;

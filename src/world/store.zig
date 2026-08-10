@@ -101,6 +101,9 @@ pub const Chunk = struct {
     /// Runtime-only: dominant biome, computed once per resident chunk (the
     /// biome map is static). Recomputing costs 256 map lookups per chunk send.
     biome_id: ?u8 = null,
+    /// `World.touch_seq` value of the last `getOrCreate` for this chunk; the
+    /// eviction victim is the smallest one. Runtime-only, never persisted.
+    last_touch: u64 = 0,
     allocator: ?std.mem.Allocator = null,
 
     pub fn generateFlat(pos: ChunkPos) Chunk {
@@ -434,6 +437,10 @@ pub const World = struct {
     /// Async submits that fell back to an inline write (queue full / shutdown).
     /// Atomic: saveChunk runs on parallel workers.
     sync_fallbacks: std.atomic.Value(u64) = .init(0),
+    /// Monotonic access stamp handed to `Chunk.last_touch` by `getOrCreate`,
+    /// so eviction can pick the coldest resident. Driven purely by access
+    /// order, which DST replay reproduces exactly.
+    touch_seq: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
         io_fs.mkdirPath(world_dir);
@@ -600,15 +607,23 @@ pub const World = struct {
     pub const max_resident_chunks: usize = 4096;
 
     fn evictOneChunk(self: *World, keep_key: u64) !void {
-        // Min key among residents (not HashMap walk order). Insert history
-        // would otherwise pick different victims for the same resident set,
-        // breaking DST replay under cap pressure.
+        // Coldest resident by `last_touch`, min key breaking ties (never the
+        // HashMap walk order: that would pick different victims for the same
+        // resident set, breaking DST replay under cap pressure). Keying on the
+        // key alone pins the 4096 lowest keys forever, so every access to a
+        // higher-key chunk pays a save + reload; with more in-view chunks than
+        // the cap that is disk I/O on the 50 ms tick, per access.
         var best_key: ?u64 = null;
+        var best_touch: u64 = 0;
         var it = self.chunks.iterator();
         while (it.next()) |e| {
             const k = e.key_ptr.*;
             if (k == keep_key) continue;
-            if (best_key == null or k < best_key.?) best_key = k;
+            const t = e.value_ptr.last_touch;
+            if (best_key == null or t < best_touch or (t == best_touch and k < best_key.?)) {
+                best_key = k;
+                best_touch = t;
+            }
         }
         const victim = best_key orelse return error.NoEvictionCandidate;
         const c = self.chunks.getPtr(victim) orelse return error.NoEvictionCandidate;
@@ -628,8 +643,12 @@ pub const World = struct {
             try self.evictOneChunk(k);
         }
         const gop = try self.chunks.getOrPut(k);
+        self.touch_seq += 1;
         if (!gop.found_existing) {
             gop.value_ptr.* = Chunk.generateFlat(pos);
+            // Stamped here, not at the tail: the load_state == .full path below
+            // returns early.
+            gop.value_ptr.last_touch = self.touch_seq;
             errdefer {
                 gop.value_ptr.deinitBlocks();
                 _ = self.chunks.remove(k);
@@ -714,6 +733,7 @@ pub const World = struct {
                 );
             };
         }
+        gop.value_ptr.last_touch = self.touch_seq;
         return gop.value_ptr;
     }
 
@@ -1210,23 +1230,34 @@ test "standableWorld crosses chunk borders and refuses a sealed column" {
     try std.testing.expectEqual(@as(?i32, null), try w.standableWorld(-1, -1, g + 1));
 }
 
-test "evictOneChunk picks min key (DST)" {
+test "evictOneChunk picks the coldest chunk, min key on ties (DST)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
-    // Insert in reverse key order so HashMap walk ≠ sorted order.
+    // Insert in reverse key order so HashMap walk ≠ sorted order. Chunk 1 is
+    // the lowest key but is re-touched, so the untouched chunk 3 loses.
     _ = try w.getOrCreate(.{ .x = 3, .z = 0 });
     _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
     _ = try w.getOrCreate(.{ .x = 2, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
     const keep = ChunkPos.hash(.{ .x = 2, .z = 0 });
     try w.evictOneChunk(keep);
-    // Min key among {1,2,3} excluding keep=2 is 1.
-    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 1, .z = 0 })) == null);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 3, .z = 0 })) == null);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 1, .z = 0 })) != null);
     try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 2, .z = 0 })) != null);
-    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 3, .z = 0 })) != null);
+    // Ties (equal stamps) still resolve by min key, not HashMap walk order.
+    var tied = try World.init(std.testing.allocator, dir);
+    defer tied.deinit();
+    _ = try tied.getOrCreate(.{ .x = 7, .z = 0 });
+    _ = try tied.getOrCreate(.{ .x = 6, .z = 0 });
+    _ = try tied.getOrCreate(.{ .x = 5, .z = 0 });
+    var it = tied.chunks.iterator();
+    while (it.next()) |e| e.value_ptr.last_touch = 0;
+    try tied.evictOneChunk(ChunkPos.hash(.{ .x = 7, .z = 0 }));
+    try std.testing.expect(tied.chunks.get(ChunkPos.hash(.{ .x = 5, .z = 0 })) == null);
 }
 
 test "paint clear on setBlock and ZCH3 texture density roundtrip" {

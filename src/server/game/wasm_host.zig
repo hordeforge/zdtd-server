@@ -6,13 +6,24 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const plugin_mod = @import("../../plugin/root.zig");
 const ecs = @import("../../ecs/root.zig");
+const c2s_text = @import("../c2s_text.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
+
+/// Bytes of guest text kept per `zdtd_log` call. Plugin hooks receive player
+/// names and chat bodies, so an unbounded guest string could dump payloads of
+/// player data into the operator log; the cap bounds one line's exposure.
+pub const max_wasm_log_len: usize = 200;
 
 pub fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
     _ = ctx;
     const tag = wasm_log_level_tags[@min(@as(usize, level), wasm_log_level_tags.len - 1)];
-    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, msg });
+    // Guest-controlled bytes: C0/DEL would let a plugin forge whole log lines
+    // (the operator audit trail is line-oriented stderr), so reuse the C2S text
+    // sanitizer, which also drops invalid UTF-8 and truncates on a codepoint.
+    var line: [max_wasm_log_len]u8 = undefined;
+    const n = c2s_text.sanitizePlayerName(&line, msg);
+    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, line[0..n] });
 }
 
 pub fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
@@ -44,7 +55,10 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
     }
     const op = parsePluginCommand(cmd) orelse {
         const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
-        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{cmd[0..verb_end]});
+        // Guest-controlled bytes: same one-line rule as wasmLog above.
+        var vb: [64]u8 = undefined;
+        const vn = c2s_text.sanitizePlayerName(&vb, cmd[0..verb_end]);
+        std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{vb[0..vn]});
         return;
     };
     _ = g.sim.commands.push(op);

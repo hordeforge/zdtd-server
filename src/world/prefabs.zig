@@ -299,7 +299,10 @@ pub const Index = struct {
         var unknown: u32 = 0;
         // Local type per cell for the multi-block pass: the remap below replaces
         // the types with runtime ids, which index a different id space.
-        var local_types = self.allocator.alloc(u16, tb.types.len) catch return;
+        var local_types = self.allocator.alloc(u16, tb.types.len) catch {
+            std.debug.print("zdtd: prefab {s}: local type table alloc failed, ids stay prefab-local\n", .{name});
+            return;
+        };
         defer self.allocator.free(local_types);
         for (tb.types, 0..) |*raw, i| {
             const typ: u16 = @truncate(raw.* & tts.type_mask);

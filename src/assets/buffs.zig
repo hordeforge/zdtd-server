@@ -199,9 +199,7 @@ fn firstF32(s: []const u8) f32 {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -511,7 +509,8 @@ test "parsed buff fields: stack, duration, update rate, remove_on_death" {
 
 test "load buffs.xml when present" {
     const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
-    var t = loadFromPath(std.testing.allocator, p) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
     try std.testing.expect(t.defs.len > 10);
     try std.testing.expect(t.passive_pool.len > 0);

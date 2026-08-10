@@ -439,6 +439,7 @@ pub const Game = struct {
     max_claimed_damage: i32 = default_max_claimed_damage,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
+    max_horizontal_speed_mps: f32 = game_types.default_max_horizontal_speed_mps,
     peer_stale_ms: u64 = default_peer_stale_ms,
     lock_stale_ns: u64 = default_lock_stale_ns,
     join_rate_limit_ms: u64 = default_join_rate_limit_ms,
@@ -532,6 +533,7 @@ pub const Game = struct {
             .max_claimed_damage = opts.max_claimed_damage,
             .max_edit_range = opts.max_edit_range,
             .interest_range = opts.interest_range,
+            .max_horizontal_speed_mps = opts.max_horizontal_speed_mps,
             .peer_stale_ms = opts.peer_stale_ms,
             .lock_stale_ns = opts.lock_stale_ns,
             .join_rate_limit_ms = opts.join_rate_limit_ms,
@@ -586,27 +588,7 @@ pub const Game = struct {
             self.admin.deinit();
             self.info_tcp.stop();
             self.net.deinit();
-            self.sim.deinit();
-            self.blocks.deinit();
-            self.items.deinit();
-            self.signs.deinit();
-            self.entities.deinit();
-            self.recipes.deinit();
-            self.loot.deinit();
-            self.entitygroups.deinit();
-            self.gamestages.deinit();
-            self.maxdamage.deinit();
-            self.block_textures.deinit();
-            self.painting.deinit();
-            self.spawning.deinit();
-            self.buffs.deinit();
-            self.progression_table.deinit();
-            self.vehicles.deinit();
-            self.storage_pairs.deinit();
-            self.biome_colors.deinit();
-            self.traders.deinit();
-            self.npc.deinit();
-            self.sleepers.deinit();
+            @import("game/lifecycle.zig").deinitStores(self);
             self.world.deinit();
         }
         // [perf] async_chunk_flush. Offline Game (port 0) runs force-serial, so
@@ -859,22 +841,22 @@ pub const Game = struct {
         return @import("game/lifecycle.zig").deinit(self);
     }
     pub fn infoPort(self: *const Game) u16 {
-        return @import("game/lifecycle.zig").infoPort(self);
+        return self.info_port;
     }
     pub fn refreshInfoPlayers(self: *Game) void {
         return @import("game/lifecycle.zig").refreshInfoPlayers(self);
     }
     pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
-        return @import("game/lifecycle.zig").playersPath(self, buf);
+        return persist.playersPath(self, buf);
     }
     pub fn savePlayers(self: *Game) !void {
-        return @import("game/lifecycle.zig").savePlayers(self);
+        return persist.savePlayers(self);
     }
     pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
-        return @import("game/lifecycle.zig").wipePlayerRecordsByName(self, name);
+        return persist.wipePlayerRecordsByName(self, name);
     }
     pub fn tryRestorePlayer(self: *Game, c: *Client) void {
-        return @import("game/lifecycle.zig").tryRestorePlayer(self, c);
+        return persist.tryRestorePlayer(self, c);
     }
 
     pub fn pollAdmin(self: *Game) void {
@@ -1114,6 +1096,10 @@ pub const Game = struct {
 
     pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.removeClaimAt(self, x, y, z);
+    }
+
+    pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
+        return game_world.dropClaimsForName(self, name);
     }
 
     pub fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {
@@ -1405,11 +1391,13 @@ pub const Game = struct {
         if (!self.block_id_mapping) return;
         const nameid = packages.stock_nameid;
         if (self.maxdamage.idNameCount() == 0) {
-            std.debug.print("zdtd: blocks IdMapping skipped (no AssignIds dump loaded)\n", .{});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} blocks IdMapping skipped (no AssignIds dump loaded)\n", .{clock.wallStamp(&ts)});
             return;
         }
         const summary = nameid.measure(self.maxdamage.idNameIterator(), &self.nameid_seen) catch |err| {
-            std.debug.print("zdtd: blocks IdMapping skipped ({s}); client keeps local ids\n", .{@errorName(err)});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} blocks IdMapping skipped ({s}); client keeps local ids\n", .{ clock.wallStamp(&ts), @errorName(err) });
             return;
         };
 
@@ -1424,7 +1412,8 @@ pub const Game = struct {
         // are sent after this returns).
         var fr: wire_frame.DeflateFramer = undefined;
         fr.begin(&self.body_buf, &self.deflate_window, 0, packages.idOf("NetPackageIdMapping").?, body_len) catch |err| {
-            std.debug.print("zdtd: blocks IdMapping frame init failed: {s}\n", .{@errorName(err)});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} blocks IdMapping frame init failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             return;
         };
         const w = fr.writer();
@@ -1436,18 +1425,21 @@ pub const Game = struct {
             break :blk true;
         };
         if (!ok) {
+            var ts: [19]u8 = undefined;
             std.debug.print(
-                "zdtd: blocks IdMapping does not fit body_buf ({d} raw bytes); client keeps local ids\n",
-                .{summary.bytes},
+                "zdtd: {s} blocks IdMapping does not fit body_buf ({d} raw bytes); client keeps local ids\n",
+                .{ clock.wallStamp(&ts), summary.bytes },
             );
             return;
         }
         const framed = fr.finish() catch |err| {
-            std.debug.print("zdtd: blocks IdMapping deflate failed: {s}\n", .{@errorName(err)});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} blocks IdMapping deflate failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             return;
         };
         self.sendFramedReliable(peer, "NetPackageIdMapping", framed, critical_retry_budget_ns, true) catch |err| {
-            std.debug.print("zdtd: blocks IdMapping send failed: {s}\n", .{@errorName(err)});
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} blocks IdMapping send failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             return err;
         };
         std.debug.print(
@@ -2469,9 +2461,10 @@ pub const Game = struct {
                 const overruns = self.harness.counters.get(.tick_overruns);
                 if (overruns == 1 or overruns % 100 == 0) {
                     const late_us = (now -% next_t) / 1000;
+                    var ts: [19]u8 = undefined;
                     std.debug.print(
-                        "zdtd: tick overrun n={d} late_us={d} (budget={d}us)\n",
-                        .{ overruns, late_us, tick_ns / 1000 },
+                        "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
+                        .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
                     );
                 }
             }

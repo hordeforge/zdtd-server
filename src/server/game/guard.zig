@@ -7,7 +7,6 @@ const Client = game_mod.Client;
 const evidence_mod = @import("../evidence.zig");
 const guard_policy = @import("../guard_policy.zig");
 const packages = @import("../../wire/packages.zig");
-const vending_mod = @import("../../world/vending.zig");
 
 pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
     if (self.loadShedding() and (sev == .info or sev == .soft)) {

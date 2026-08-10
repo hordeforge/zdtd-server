@@ -1,11 +1,9 @@
-//! Lifecycle helpers — deinit, info port, player persist shims.
-//! Extracted verbatim from game.zig to save ~55 lines of inline bodies.
+//! Shutdown ordering for Game: flush every store, then tear down subsystems.
+//! Player persistence lives in server/persist.zig; callers go there directly.
 
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
-const Client = game_mod.Client;
 const apm = @import("../../apm/root.zig");
-const persist = @import("../persist.zig");
 const util_sim = @import("../../util/sim.zig");
 
 pub fn deinit(self: *Game) void {
@@ -30,6 +28,19 @@ pub fn deinit(self: *Game) void {
     self.land_claims_n = 0;
     self.plugins.shutdown();
     self.wasm_plugins.shutdown();
+    deinitStores(self);
+    self.admin.deinit();
+    self.webui.deinit();
+    self.info_tcp.stop();
+    self.world.deinit();
+    self.net.deinit();
+    if (leave_sim) util_sim.disable();
+}
+
+/// Sim plus every asset store, in construction-reverse order. Shared by `deinit`
+/// and the `createWithOptions` errdefer so a newly added store cannot be freed
+/// on one path and leaked on the other.
+pub fn deinitStores(self: *Game) void {
     self.sim.deinit();
     self.blocks.deinit();
     self.items.deinit();
@@ -51,34 +62,8 @@ pub fn deinit(self: *Game) void {
     self.traders.deinit();
     self.npc.deinit();
     self.sleepers.deinit();
-    self.admin.deinit();
-    self.webui.deinit();
-    self.info_tcp.stop();
-    self.world.deinit();
-    self.net.deinit();
-    if (leave_sim) util_sim.disable();
-}
-
-pub fn infoPort(self: *const Game) u16 {
-    return self.info_port;
 }
 
 pub fn refreshInfoPlayers(self: *Game) void {
     self.info_tcp.setPlayers(@intCast(self.countJoined()));
-}
-
-pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
-    return persist.playersPath(self, buf);
-}
-
-pub fn savePlayers(self: *Game) !void {
-    return persist.savePlayers(self);
-}
-
-pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
-    return persist.wipePlayerRecordsByName(self, name);
-}
-
-pub fn tryRestorePlayer(self: *Game, c: *Client) void {
-    return persist.tryRestorePlayer(self, c);
 }

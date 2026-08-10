@@ -73,6 +73,27 @@ pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
     }
 }
 
+/// Release every claim recorded against `name` and report how many went. The
+/// claim record stores the owner's login name (claims.zlc), so `wipeplayer`
+/// wiping players.zsv alone would leave that name on disk, still tied to world
+/// coordinates. Same release semantics as expireClaims: the keystone stops
+/// protecting, nobody inherits it.
+pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
+    var dropped: u32 = 0;
+    var i: usize = 0;
+    while (i < self.land_claims_n) {
+        const claim = &self.land_claims[i];
+        if (claim.owner_name_len == name.len and std.mem.eql(u8, claim.owner_name[0..claim.owner_name_len], name)) {
+            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
+            self.land_claims_n -= 1;
+            dropped += 1;
+        } else {
+            i += 1;
+        }
+    }
+    return dropped;
+}
+
 /// Mark every claim owned by `entity` online/offline and refresh the seen
 /// day when coming online (expiry base).
 pub fn markClaimsForEntity(self: *Game, entity: i32, online: bool) void {

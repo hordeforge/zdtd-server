@@ -23,7 +23,10 @@ pub const Snapshot = struct {
     ops: ?OpsGauges = null,
 
     pub fn captureWall(self: *Snapshot) void {
-        self.wall_ns = clock.monoNs();
+        // This value crosses the process boundary in text/JSON reports and
+        // must align with server logs and collector clocks. Profiling uses the
+        // monotonic clock separately in profiler.zig.
+        self.wall_ns = clock.wallNs();
     }
 };
 
@@ -69,14 +72,14 @@ pub fn writeText(s: *const Snapshot, w: *std.Io.Writer) !void {
     try w.print("zdtd-apm snapshot wall_ns={d}\n", .{s.wall_ns});
     try w.print("counters:\n", .{});
     inline for (@typeInfo(metrics.CounterId).@"enum".fields) |f| {
-        if (comptime f.name[0] == '_') {} else {
+        if (comptime f.name[0] != '_') {
             const id: metrics.CounterId = @enumFromInt(f.value);
             try w.print("  {s}={d}\n", .{ f.name, s.counters.get(id) });
         }
     }
     try w.print("sections (count mean_ns p50_ns p99_ns max_ns):\n", .{});
     inline for (@typeInfo(profiler.Section).@"enum".fields) |f| {
-        if (comptime f.name[0] == '_') {} else {
+        if (comptime f.name[0] != '_') {
             const sec: profiler.Section = @enumFromInt(f.value);
             const h = s.profiler.histOf(sec);
             if (h.count != 0) {
@@ -93,7 +96,7 @@ pub fn writeJsonLine(s: *const Snapshot, w: *std.Io.Writer) !void {
     try w.print("{{\"type\":\"zdtd_apm\",\"wall_ns\":{d},\"counters\":{{", .{s.wall_ns});
     var first = true;
     inline for (@typeInfo(metrics.CounterId).@"enum".fields) |f| {
-        if (comptime f.name[0] == '_') {} else {
+        if (comptime f.name[0] != '_') {
             const id: metrics.CounterId = @enumFromInt(f.value);
             if (!first) try w.print(",", .{});
             first = false;
@@ -103,7 +106,7 @@ pub fn writeJsonLine(s: *const Snapshot, w: *std.Io.Writer) !void {
     try w.print("}},\"sections\":{{", .{});
     first = true;
     inline for (@typeInfo(profiler.Section).@"enum".fields) |f| {
-        if (comptime f.name[0] == '_') {} else {
+        if (comptime f.name[0] != '_') {
             const sec: profiler.Section = @enumFromInt(f.value);
             const h = s.profiler.histOf(sec);
             if (h.count != 0) {
@@ -158,6 +161,14 @@ test "report json includes ops when set" {
     try std.testing.expect(std.mem.find(u8, line, "\"type\":\"zdtd_apm\"") != null);
     try std.testing.expect(std.mem.find(u8, line, "\"ops\":{\"tick\":42") != null);
     try std.testing.expect(std.mem.find(u8, line, "\"joined\":2") != null);
+}
+
+test "report timestamp is Unix time rather than process monotonic time" {
+    defer clock.disableVirtual();
+    clock.enableVirtual(7_123_456_789);
+    var s: Snapshot = .{};
+    s.captureWall();
+    try std.testing.expectEqual(@as(u64, 7_123_456_789), s.wall_ns);
 }
 
 test "text and json dumps fit their comptime bounds at max values" {

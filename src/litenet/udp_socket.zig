@@ -82,8 +82,10 @@ pub const Socket = struct {
     }
 
     /// Non-blocking receive. On empty queue returns error.WouldBlock.
+    /// Unbound socket (offline DST games never open one): also WouldBlock, so
+    /// the poll loop sees a sealed network instead of a hard socket error.
     pub fn recvFrom(self: *Socket, buf: []u8, from_out: *IpAddress) !usize {
-        const s = self.sock orelse return error.RecvFailed;
+        const s = self.sock orelse return error.WouldBlock;
         const msg = s.receiveTimeout(self.io_impl.io(), buf, .{
             .duration = .{ .raw = .zero, .clock = .awake },
         }) catch |err| switch (err) {
@@ -94,8 +96,11 @@ pub const Socket = struct {
         return msg.data.len;
     }
 
+    /// Unbound socket (offline DST games): drop silently and report success so
+    /// the seeded sim never touches the network stack and outbound payloads
+    /// still flow to the test Capture. Production sockets always bind first.
     pub fn sendTo(self: *Socket, data: []const u8, dest: *const IpAddress) !void {
-        const s = self.sock orelse return error.SendFailed;
+        const s = self.sock orelse return;
         s.send(self.io_impl.io(), dest, data) catch return error.SendFailed;
     }
 };
@@ -154,4 +159,15 @@ test "openAndBind dual-stack round-trips a loopback datagram" {
         const n2 = try s.recvFrom(&rx, &from);
         try std.testing.expectEqual(@as(usize, 2), n2);
     }
+}
+
+test "unbound socket is sealed: recv WouldBlock, send drops" {
+    // Offline DST games never bind; the sim must see a quiet network and
+    // outbound payloads must still succeed (they flow to the test Capture).
+    var s: Socket = .{};
+    defer s.close();
+    var rx: [64]u8 = undefined;
+    var from: IpAddress = undefined;
+    try std.testing.expectError(error.WouldBlock, s.recvFrom(&rx, &from));
+    try s.sendTo("dropped", &.{ .ip4 = .loopback(1) });
 }

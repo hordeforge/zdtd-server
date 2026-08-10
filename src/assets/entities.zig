@@ -136,10 +136,6 @@ const RawClass = struct {
     props: std.StringHashMapUnmanaged([]const u8),
 };
 
-fn propOf(map: *const std.StringHashMapUnmanaged([]const u8), key: []const u8) ?[]const u8 {
-    return map.get(key);
-}
-
 fn resolveProp(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
@@ -148,7 +144,7 @@ fn resolveProp(
 ) ?[]const u8 {
     if (depth > 24) return null;
     const rc = classes.get(name) orelse return null;
-    if (propOf(&rc.props, key)) |v| return v;
+    if (rc.props.get(key)) |v| return v;
     if (rc.extends) |ex| return resolveProp(classes, ex, key, depth + 1);
     return null;
 }
@@ -179,9 +175,7 @@ fn defaultHp(kind: components.Kind, name: []const u8) f32 {
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable {
-    const raw = try io_fs.readFileAll(allocator, path);
-    defer allocator.free(raw);
-    const clean = try xml.stripComments(allocator, raw);
+    const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
     var arena_holder = try allocator.create(std.heap.ArenaAllocator);
@@ -412,7 +406,8 @@ test "unity hash matches known playerMale" {
 
 test "load stock entityclasses when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
-    var t = loadFromPath(std.testing.allocator, path) catch return error.SkipZigTest;
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     try std.testing.expect(t.defs.len > 100);
     const boe = t.byName("zombieBoe") orelse return error.TestExpectedEqual;
