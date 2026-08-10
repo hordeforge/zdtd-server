@@ -3289,7 +3289,7 @@ persists so little that a restart visibly damages a built base.
   `writeConnectAccept` emits the 15-byte stock layout. Proven live: the stock
   client connects and reaches Playing (gate 23/23).
   *Anchors:* `src/litenet/packet.zig:76-95`, `:141-152`,
-  `~/.cache/zdtd-playtest/report-1785987487.json`
+  `~/.cache/7dtd-playtest/report-1785987487.json`
 
 - **ServerPassword as LiteNet connect key** `WORKS`
   `connectKeyMatches` reads the NetDataWriter string from the request data and
@@ -3704,7 +3704,7 @@ pass. Everything below is a limit on the evidence, not a defect list.
 
 ### No blood moon has ever been reached in a playtest
 
-No run in `~/.cache/zdtd-playtest` has actually reached a blood moon. The
+No run in `~/.cache/7dtd-playtest` has actually reached a blood moon. The
 `combat/blood_moon_music` case only asserts that the client clock reached night;
 the host telnet sends `settime 22000`, which zdtd parses as **day** 22000. The
 client log contains only the pre-connect GameStat dump

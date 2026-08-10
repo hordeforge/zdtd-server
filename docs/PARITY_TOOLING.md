@@ -78,4 +78,4 @@ already in-repo: `NetPackageVoiceChat` removed; `NetPackagePartyActions` and
 4. `parity_diff.py --coverage` to confirm no new unhandled dir=1 package.
 5. Refresh `assets/fixtures/parity_v3x.json` to the new baseline.
 6. `make -C ../7dtd-playtest playtest-core` for the live in-client gate
-   (or `ZDTD_PLAYTEST_SUITE=smoke,core` with connect's pair launch).
+   (or `PLAYTEST_SUITE=smoke,core` with connect's pair launch).

@@ -40,7 +40,7 @@ the client.
 |---|---|---|
 | Connect + auto-join | `7dtd-connect` | IP join, skip intro/news/Discord/EULA, boot uncap |
 | Spawn heartbeat | `SpawnStateHeartbeat.cs` | Overlay gates (CGO, fixedSize, xuiReady) |
-| Hardcoded play driver | `PlayTestDriver.cs` | 11 steps when `ZDTD_PLAYTEST=1` |
+| Hardcoded play driver | `PlayTestDriver.cs` | 11 steps when `PLAYTEST=1` |
 | Pair launch | `restart_pair.sh` | Kill Proton/wineserver, start zdtd + client |
 | One-shot join | `one_shot_join.sh` | Join cycle + log scrape + kill client |
 | Server admin TCP | zdtd `--admin-port` | `give`, `tele`, `kill`, `inv`, `spawnentity`, … |
@@ -53,7 +53,7 @@ spawned → look → move → inventory → ground → dig → stats → place
 → craft_open → quests → buffs → SUMMARY/DONE
 ```
 
-Log lines: `[zdtd-playtest] PASS|FAIL <name> …` then `SUMMARY` / `DONE`.
+Log lines: `[7dtd-playtest] PASS|FAIL <name> …` then `SUMMARY` / `DONE`.
 
 ### 2.3 Limits (why improve)
 
@@ -111,14 +111,14 @@ Log lines: `[zdtd-playtest] PASS|FAIL <name> …` then `SUMMARY` / `DONE`.
 ┌───────────────────────────┐     ┌──────────────────────────────┐
 │ Stock client (Proton)     │     │ zdtd --admin-port            │
 │  Mods/zdtd-connect        │     │  fixtures world / map        │
-│  Mods/zdtd-playtest  ◄────┼─────┤  give/tele/kill/spawn/inv    │
+│  Mods/7dtd-playtest  ◄────┼─────┤  give/tele/kill/spawn/inv    │
 │   scenario runner         │     │  optional playtest probes    │
 │   client oracles          │     └──────────────────────────────┘
 │  real GameManager/World   │
 └───────────────────────────┘
          │ structured logs
          ▼
-  [zdtd-playtest] JSONL events + SUMMARY
+  [7dtd-playtest] JSONL events + SUMMARY
 ```
 
 ### 4.1 Project split
@@ -137,7 +137,7 @@ Install both mods under the client `Mods/`:
 
 ```text
 $GAME/Mods/zdtd-connect/     # join
-$GAME/Mods/zdtd-playtest/    # scenarios when env armed
+$GAME/Mods/7dtd-playtest/    # scenarios when env armed
 ```
 
 Playtest **requires** connect for auto-join (or human F1 connect). It does not
@@ -176,13 +176,13 @@ admin for clearer process ownership and no extra client network surface.
 
 ```bash
 # Suite selection (examples)
-ZDTD_PLAYTEST=1                         # legacy: demo suite
-ZDTD_PLAYTEST_SUITE=smoke               # explicit
-ZDTD_PLAYTEST_SUITE=core,combat,craft   # multi
-ZDTD_PLAYTEST_TAGS=dig,place            # filter by tag
-ZDTD_PLAYTEST_TIMEOUT_SEC=600
-ZDTD_PLAYTEST_SEED=42
-ZDTD_PLAYTEST_REPORT=/tmp/playtest.jsonl  # if file write available under Proton: use log only by default
+PLAYTEST=1                         # legacy: demo suite
+PLAYTEST_SUITE=smoke               # explicit
+PLAYTEST_SUITE=core,combat,craft   # multi
+PLAYTEST_TAGS=dig,place            # filter by tag
+PLAYTEST_TIMEOUT_SEC=600
+PLAYTEST_SEED=42
+PLAYTEST_REPORT=/tmp/playtest.jsonl  # if file write available under Proton: use log only by default
 ```
 
 Prefer **log-only** results (always available under Proton). Optional host-side
@@ -236,7 +236,7 @@ Document each action as **setup** vs **under test**. Setup may teleport
 
 ### 5.4 Result event schema (JSONL in client log)
 
-One line per event, prefix `[zdtd-playtest] ` then JSON:
+One line per event, prefix `[7dtd-playtest] ` then JSON:
 
 ```json
 {"v":1,"t":"result","suite":"core","case":"dig_confirm","status":"pass","ms":1820,"detail":"was=12 now=0"}
@@ -249,9 +249,9 @@ One line per event, prefix `[zdtd-playtest] ` then JSON:
 Legacy human lines can remain as dual output for grepping:
 
 ```text
-[zdtd-playtest] PASS dig_confirm was=12 now=0
-[zdtd-playtest] SUMMARY pass=14 fail=1 total=15
-[zdtd-playtest] DONE
+[7dtd-playtest] PASS dig_confirm was=12 now=0
+[7dtd-playtest] SUMMARY pass=14 fail=1 total=15
+[7dtd-playtest] DONE
 ```
 
 Orchestrator exit code: **0** iff `fail==0` and `DONE` seen before timeout;
@@ -444,7 +444,7 @@ uv run playtest report path/to/client.log
 3. start zdtd: --admin-port, fixture world, map Navezgane, log path
 4. wait: server "tick=20Hz" or listen ready
 5. admin setup: settime day; optional tele pad prep
-6. launch client: ZDTD_CONNECT + ZDTD_PLAYTEST_SUITE=… via launch_client.sh
+6. launch client: ZDTD_CONNECT + PLAYTEST_SUITE=… via launch_client.sh
 7. watch: tail client log for JSONL / DONE; enforce suite timeout
 8. score: parse results; optional server log NRE/WRN scan; admin post-checks
 9. teardown: shutdown admin or kill; kill Proton stack; write report.json
@@ -539,7 +539,7 @@ with built zdtd; dig/place must **confirm** via `GetBlock` wait.
 The playtest **system** is done for Phase A when:
 
 1. `7dtd-connect` contains **no** gameplay driver.
-2. `ZDTD_PLAYTEST_SUITE=core make -C 7dtd-playtest playtest` (or uv CLI) returns exit 0 on a
+2. `PLAYTEST_SUITE=core make -C 7dtd-playtest playtest` (or uv CLI) returns exit 0 on a
    known-good zdtd, and exit 1 if dig echo is broken (mutation test: break
    SetBlock S2C temporarily and confirm fail).
 3. Every core case either waits on a real predicate or is labeled setup-only.
@@ -606,8 +606,8 @@ make -C 7dtd-playtest playtest-core
 make -C 7dtd-playtest playtest SUITE=core,combat,economy
 
 # Legacy-compatible
-ZDTD_PLAYTEST=1 7dtd-connect/scripts/restart_pair.sh /path/to/world
-# (after split: still works; playtest maps ZDTD_PLAYTEST=1 → suite demo)
+PLAYTEST=1 7dtd-connect/scripts/restart_pair.sh /path/to/world
+# (after split: still works; playtest maps PLAYTEST=1 → suite demo)
 ```
 
 ---
