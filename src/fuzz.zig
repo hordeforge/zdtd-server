@@ -127,6 +127,22 @@ fn fuzzChannelEnvelope(_: void, smith: *std.testing.Smith) !void {
     }
 }
 
+/// Outer TE header (handle | world xyz | block_id | pay_len) shared by the
+/// vending TE corpus seeds below; matches stock_te.zig's readOuterTeHeader.
+fn vend_te_header(pay_len: u32) [21]u8 {
+    var buf: [21]u8 = undefined;
+    buf[0] = 1; // handle
+    std.mem.writeInt(i32, buf[1..5], 0, .little); // world_x
+    std.mem.writeInt(i32, buf[5..9], 70, .little); // world_y
+    std.mem.writeInt(i32, buf[9..13], 0, .little); // world_z
+    std.mem.writeInt(i32, buf[13..17], 99, .little); // block_id
+    std.mem.writeInt(u32, buf[17..21], pay_len, .little); // pay_len
+    return buf;
+}
+
+/// Vending TE payload's chunkPos (xyz, ignored) + version=3 marker.
+const vend_te_chunk_and_ver = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0 };
+
 const package_corpus = [_][]const u8{
     "",
     &.{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
@@ -157,6 +173,21 @@ const package_corpus = [_][]const u8{
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     // workstation TE truncated after outer header
     &.{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // vending TE (type 7): outer header (handle | pos | block | pay_len) +
+    // chunkPos + ver=3 + unlocked + no owner + empty password +
+    // allowed_count=0 + rental_end_day=0
+    &(vend_te_header(27) ++ vend_te_chunk_and_ver ++
+        [_]u8{ 0, 0, 0 } ++ // is_locked | owner-null | empty password
+        [_]u8{ 0, 0, 0, 0 } ++ // allowed_count = 0
+        [_]u8{ 0, 0, 0, 0 }), // rental_end_day = 0
+    // vending TE: allowed_count claims 64 users but stream is truncated
+    // right after the count (pay_len covers up to the count, no further body).
+    &(vend_te_header(23) ++ vend_te_chunk_and_ver ++
+        [_]u8{ 0, 0, 0 } ++
+        [_]u8{ 64, 0, 0, 0 }),
+    // vending TE: bad version (must reject before touching owner/allowed).
+    &(vend_te_header(16) ++ [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++
+        [_]u8{ 9, 0, 0, 0 }),
     // console cmd: 7bit-len oversize
     &.{ 0x80, 0x80, 0x01, 'x' },
     // inv data request stock minimal
@@ -276,6 +307,29 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(trig.wire_n <= trig.wire_total);
     } else |_| {}
     _ = stock_te.parseWorkstationTeBody(input) catch null;
+
+    // Vending TE (NetPackageTileEntity type 7, C2S owner edits): a
+    // client-declared allowed-user count up to 64 must never overrun the
+    // fixed max_vending_allowed slots, and the identity buffers must stay
+    // sized exactly as server/c2s/inv.zig allocates them.
+    var vend_plat: [platform_user.max_platform_len]u8 = undefined;
+    var vend_id: [platform_user.max_id_len]u8 = undefined;
+    var vend_pw: [vending.max_password_hash]u8 = undefined;
+    var vend_allowed_plat: [vending.max_allowed_users * platform_user.max_platform_len]u8 = undefined;
+    var vend_allowed_id: [vending.max_allowed_users * platform_user.max_id_len]u8 = undefined;
+    if (stock_te.parseVendingTeBody(input, &vend_plat, &vend_id, &vend_pw, &vend_allowed_plat, &vend_allowed_id)) |ve| {
+        try std.testing.expect(ve.allowed_n <= stock_te.max_vending_allowed);
+        try std.testing.expect(ve.allowed_n <= vending.max_allowed_users);
+        try std.testing.expect(ve.password.len <= vend_pw.len);
+        if (ve.has_owner) {
+            try std.testing.expect(ve.owner.platform.len <= vend_plat.len);
+            try std.testing.expect(ve.owner.id.len <= vend_id.len);
+        }
+        for (ve.allowed[0..ve.allowed_n]) |uid| {
+            try std.testing.expect(uid.platform.len <= platform_user.max_platform_len);
+            try std.testing.expect(uid.id.len <= platform_user.max_id_len);
+        }
+    } else |_| {}
 
     // Identity-bearing bodies: a hostile login or ally request must never write
     // past the fixed platform/id buffers, and a null identity is a valid value.
