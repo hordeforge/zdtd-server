@@ -609,6 +609,11 @@ test {
     // Stateful peer fuzz targets (fragment reassembly, ack window) live in
     // peer.zig for private-fn access; reference pulls them into this build.
     _ = @import("litenet/peer.zig");
+    // Admin webui HTTP parsing fuzz target (path/cookie/form/header decoders
+    // over raw untrusted request bytes) lives in webui.zig for private-fn
+    // access; without this reference `zig build fuzz` never touches it (only
+    // the separate `zig build test`, rooted at main.zig, replays its corpus).
+    _ = @import("server/webui.zig");
 }
 
 const mode_corpus = [_][]const u8{
