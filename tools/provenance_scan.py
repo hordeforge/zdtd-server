@@ -70,6 +70,17 @@ def ledger_rows():
     return file_rows, const_rows
 
 
+AUDIT = os.path.join(ROOT, "docs", "archive", "HARDCODE_AUDIT_2026-08-08.md")
+
+
+def audit_finding_ids():
+    """Every A##/B## finding id the audit names, as the linkage gate."""
+    if not os.path.isfile(AUDIT):
+        return []
+    import re
+    return sorted(set(re.findall(r"\b[A-B]\d{2}\b", open(AUDIT, encoding="utf-8").read())))
+
+
 def main():
     files = src_files()
     parsed = ledger_rows()
@@ -77,6 +88,13 @@ def main():
         print(f"FAIL: {LEDGER} missing")
         return 1
     file_rows, const_rows = parsed
+    # 3. AUDIT LINKAGE: every finding id the audit names must appear in the ledger.
+    if os.path.isfile(AUDIT):
+        ledger_text = open(LEDGER, encoding="utf-8").read()
+        missing_findings = [f for f in audit_finding_ids() if f not in ledger_text]
+        if missing_findings:
+            print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
+            return 1
 
     missing = sorted(set(files) - set(file_rows))
     extra = sorted(set(file_rows) - set(files))

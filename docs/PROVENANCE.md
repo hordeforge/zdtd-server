@@ -347,6 +347,17 @@ what stock says and where the fix lands. Finding ids refer to
 | `server/movement.zig` envelope | 20 m/s soft cap | no stock key; sprint ~6 m/s + vehicle margin | P2 | audit B29; `[authority]` planned |
 | `game.zig:3307` spawn pad | `block_dirt` pin | `World.terrain_ids.dirt` after AssignIds merge | P2 | audit A36 |
 
+### 3.10b Older audit findings (prior passes; status)
+
+| Finding | Status |
+|---|---|
+| A05 terrain ids via `terrain_ids` | **Resolved** (live ids; residual pin uses tracked as A36/A38) |
+| A11 class_table speeds/damage from XML | Correct for filled rows (superseded by A35) |
+| A29 trader pricing | Buy side correct; sell side missing `EconomicSellScale` (A39) |
+| A22/A33 subbiome noise | A22 resolved; A33 perm literal tracked in `../7dtd-research` task |
+| A07/A13/A14/A18/A21/A24 | Carried open (prior passes) — tracked in GAP_ANALYSIS |
+| B08-B12, B23-B24 | Carried open (prior passes) — tracked in GAP_ANALYSIS |
+
 ### 3.10 Remaining audit findings (provenance status)
 
 | Finding | Location | Value | Stock source / status |
@@ -366,6 +377,10 @@ what stock says and where the fix lands. Finding ids refer to
 | Level curve, attribute/perk catalog (names, max levels, costs) | `progression.xml` via `src/assets/progression.zig` (A: stock file loaded at runtime) |
 | XP/level/gamestage math | RE: `../7dtd-research/docs/progression.md` (AddLevelExp → recursive level-up → skill points → RefreshPerks); `src/server/game/player.zig` |
 | Perk requirement graphs / effect application | **Not built yet**: planned as `docs/adr/0023-perk-attribute-system.md`; zdtd has no perk system, so no provenance claim is made until the ADR lands (rules.zig `Progression.*` are placeholders, WORK_PLAN T16) |
+
+| B38 | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | zdtd engineering (Z), documented as fixed-size architecture |
+| B39 | `game.zig:3969` + `game/sleeper.zig:13` | `sleeper_party_radius=100.0` duplicated | R: CalcGameStageAround radius (asm.il ~1093363); dedupe tracked P3 |
+| B40 | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig` `builtinStockName` | zdtd mirror; divergence caught by existing id tests |
 
 ## 4. Coverage and maintenance
 
