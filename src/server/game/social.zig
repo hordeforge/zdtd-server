@@ -141,6 +141,7 @@ pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
         2 => {
             if (!target_ok) return;
             const p = self.parties.partyByMember(me) orelse return;
+            if (p.leader() != me) return;
             if (!self.parties.setLeader(p.id, a.invited_entity)) return;
             try broadcastPartySnapshot(
                 self,
@@ -160,6 +161,8 @@ pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
         },
         4 => {
             if (!target_ok) return;
+            const p = self.parties.partyByMember(me) orelse return;
+            if (p.leader() != me or p.find(a.invited_entity) == null) return;
             if (self.parties.removePlayer(a.invited_entity)) |r| {
                 try broadcastPartyRemoval(self, r, a.action);
             }
