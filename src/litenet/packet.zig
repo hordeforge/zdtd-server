@@ -5,7 +5,8 @@
 const std = @import("std");
 const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 
-/// LiteNetLib protocol id 13 (game Managed LiteNetLib V3.1.0; packet.zig header).
+/// LiteNetLib protocol id 13 (game Managed LiteNetLib V3.1.0; Cecil-verified
+/// NetConstants.ProtocolId, pinned in ../../7dtd-research/docs/network.md).
 pub const protocol_id: i32 = 13;
 pub const channeled_header_size: usize = 4;
 /// FragmentId:u16 + FragmentPart:u16 + FragmentsTotal:u16 (after channeled header).
