@@ -27,7 +27,6 @@ Three buckets (from AGENTS.md rule 15 + the hardcode-audit method):
 
 Citation forms: `Data/Config/<file>.xml <element>` (stock data), `../7dtd-research/docs/<doc>.md §N` (RE narrative), `asm.il <offset>` (dump line). The stock pin is **V3.1.0 (b14)**; see `src/version.zig`.
 
-
 **Shard convention:** `src/server/game/*` files marked "extracted verbatim from
 game.zig" inherit the provenance of `src/server/game.zig` (the RE-built game
 server: join SM, tick, interest, combat, persistence). Their behavioral
