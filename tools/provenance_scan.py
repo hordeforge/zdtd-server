@@ -90,8 +90,14 @@ def main():
     file_rows, const_rows = parsed
     # 3. AUDIT LINKAGE: every finding id the audit names must appear in the ledger.
     if os.path.isfile(AUDIT):
+        import re as _re
         ledger_text = open(LEDGER, encoding="utf-8").read()
-        missing_findings = [f for f in audit_finding_ids() if f not in ledger_text]
+        # word-boundary match: a plain substring check would accept "B38" inside
+        # "B38x" and never catch a renamed/removed finding.
+        missing_findings = [
+            f for f in audit_finding_ids()
+            if not _re.search(r"\b" + _re.escape(f) + r"\b", ledger_text)
+        ]
         if missing_findings:
             print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
             return 1
