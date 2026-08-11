@@ -306,6 +306,17 @@ pace the wire are covered by their file's row in §2 and are not repeated here.
 | `world/stability.zig` | — | R | RE: stability.md (StabilityInitializer spread/clear, GetBlockStability BFS) |
 | `server/game/constants.zig` | caps | R | Game-wide caps; behavioral subset tracked in GAP_ANALYSIS (B31-B37) |
 
+### 3.8 Additional behavioral constants
+
+| Constant | Value | B | Stock source |
+|---|---|:-:|---|
+| `assets/gamestages.zig ticks_per_day` | 24000 | A | Stock sim day length (24000 ticks @ 20 TPS); gamestages.xml stage math uses it |
+| `ecs/electric.zig default_trigger_pulse_s` | 0.5 | R | Trigger pulse width (RE: PowerItemTypes; tile-entities-power.md) |
+| `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |
+| `world/weather.zig blood_moon_storm_push` | 5000 | R | Blood-moon storm push ticks (RE: weather-environment.md storm state machine) |
+| `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
+| `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
+
 ## 4. Coverage and maintenance
 
 - `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
