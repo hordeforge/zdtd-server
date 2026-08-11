@@ -2312,8 +2312,6 @@ pub const Game = struct {
         return game_chunk_stream.streamChunksForClient(self, c);
     }
 
-    /// Fan-out already-framed user payload to one peer (no re-encode). Soft-drops
-    /// WindowFull the same way as droppable streaming packages.
     /// Unreliable fan-out for the motion frames (PosAndRot / Speeds): fire and
     /// forget, never touches the reliable window. Oversized or failed sends are
     /// dropped (motion is replaced by the next tick's frame anyway).
@@ -2321,6 +2319,8 @@ pub const Game = struct {
         return game_net.sendFramedUnreliable(self, peer, framed);
     }
 
+    /// Fan-out already-framed user payload to one peer (no re-encode). Soft-drops
+    /// WindowFull the same way as droppable streaming packages.
     pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
         return game_net.sendFramedDroppable(self, peer, framed);
     }
