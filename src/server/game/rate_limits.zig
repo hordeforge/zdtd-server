@@ -6,34 +6,27 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const clock = @import("../../util/clock.zig");
 
-pub fn takeInvToken(self: *Game, c: *Client) bool {
+fn takeToken(tokens: *u8, refill_ns: *u64, cap: u8, refill_period_ns: u64) bool {
     const now = clock.monoNs();
-    if (c.inv_refill_ns == 0) {
-        c.inv_refill_ns = now;
-        c.inv_tokens = self.inv_bucket_cap;
+    if (refill_ns.* == 0) {
+        refill_ns.* = now;
+        tokens.* = cap;
     }
-    while (c.inv_tokens < self.inv_bucket_cap and now -% c.inv_refill_ns >= self.inv_refill_ns) {
-        c.inv_tokens += 1;
-        c.inv_refill_ns +%= self.inv_refill_ns;
+    while (tokens.* < cap and now -% refill_ns.* >= refill_period_ns) {
+        tokens.* += 1;
+        refill_ns.* +%= refill_period_ns;
     }
-    if (c.inv_tokens == 0) return false;
-    c.inv_tokens -= 1;
+    if (tokens.* == 0) return false;
+    tokens.* -= 1;
     return true;
 }
 
+pub fn takeInvToken(self: *Game, c: *Client) bool {
+    return takeToken(&c.inv_tokens, &c.inv_refill_ns, self.inv_bucket_cap, self.inv_refill_ns);
+}
+
 pub fn takeBlockToken(self: *Game, c: *Client) bool {
-    const now = clock.monoNs();
-    if (c.block_refill_ns == 0) {
-        c.block_refill_ns = now;
-        c.block_tokens = self.block_bucket_cap;
-    }
-    while (c.block_tokens < self.block_bucket_cap and now -% c.block_refill_ns >= self.block_refill_ns) {
-        c.block_tokens += 1;
-        c.block_refill_ns +%= self.block_refill_ns;
-    }
-    if (c.block_tokens == 0) return false;
-    c.block_tokens -= 1;
-    return true;
+    return takeToken(&c.block_tokens, &c.block_refill_ns, self.block_bucket_cap, self.block_refill_ns);
 }
 
 pub fn takeDamageToken(self: *Game, c: *Client) bool {
