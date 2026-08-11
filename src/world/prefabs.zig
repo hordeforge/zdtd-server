@@ -711,6 +711,9 @@ fn fillSizesFromTts(idx: *Index) !void {
     }
 }
 
+/// Local stock install; tests needing real POI/Parts data skip when absent.
+const stock_prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+
 test "parse decoration line" {
     const xml =
         \\<prefabs>
@@ -822,7 +825,7 @@ test "YOffset applies to the stamp origin but not to the terrain pad" {
 }
 
 test "stock cave_07 stamps its body below the declared ground" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_prefab_root;
     if (!io_fs.fileExists(root ++ "/POIs/cave_07.tts")) return error.SkipZigTest;
 
     const world_dir = "worlds/zdtd_yoffset_cave_test";
@@ -861,7 +864,7 @@ test "navezgane paints a real POI into its chunk" {
     // Regression: the client saw only terrain where abandoned_house_07 stands,
     // so a POI that the index lists must actually reach the paint callback.
     const world_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
-    const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const prefab_root = stock_prefab_root;
     if (!io_fs.fileExists(world_dir ++ "/prefabs.xml")) return error.SkipZigTest;
     if (!io_fs.fileExists(prefab_root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
 
@@ -888,7 +891,7 @@ test "navezgane paints a real POI into its chunk" {
 }
 
 test "prefab type ids remap through blocks.nim into runtime ids" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_prefab_root;
     if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
     var table = maxdamage.Table.empty();
     defer table.deinit();
@@ -958,7 +961,7 @@ test "prefab type ids remap through blocks.nim into runtime ids" {
 }
 
 test "quest data and part filter from the stock install" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_prefab_root;
     if (!io_fs.fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="AAA_utility_waterworks" position="0,0,0" rotation="0" /></prefabs>
@@ -979,7 +982,7 @@ test "quest data and part filter from the stock install" {
 }
 
 test "trader POI data: cell and class tag from the stock install" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_prefab_root;
     if (!io_fs.fileExists(root ++ "/POIs/trader_bob.xml")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="trader_bob" position="0,0,0" rotation="2" /></prefabs>
@@ -1021,7 +1024,7 @@ test "part decorations paint up to the volume cap" {
 }
 
 test "part decoration paints its blocks into the chunk" {
-    const prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const prefab_root = stock_prefab_root;
     if (!io_fs.fileExists(prefab_root ++ "/Parts/part_5m_water_tower.tts")) return error.SkipZigTest;
     var idx = try parseXml(std.testing.allocator,
         \\<prefabs><decoration type="model" name="part_5m_water_tower" position="100,60,100" rotation="0" /></prefabs>

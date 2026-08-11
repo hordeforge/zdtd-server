@@ -27,6 +27,14 @@ Three buckets (from AGENTS.md rule 15 + the hardcode-audit method):
 
 Citation forms: `Data/Config/<file>.xml <element>` (stock data), `../7dtd-research/docs/<doc>.md §N` (RE narrative), `asm.il <offset>` (dump line). The stock pin is **V3.1.0 (b14)**; see `src/version.zig`.
 
+
+**Shard convention:** `src/server/game/*` files marked "extracted verbatim from
+game.zig" inherit the provenance of `src/server/game.zig` (the RE-built game
+server: join SM, tick, interest, combat, persistence). Their behavioral
+constants are ledgered in §3; the file row's stock source is `game.zig` itself
+plus the RE docs it implements. `src/server/c2s/*` and `src/server/game/*`
+rows without an explicit research citation follow the same rule.
+
 ## 2. Coverage accounting
 
 Regenerate the file map and re-check coverage:
@@ -133,7 +141,7 @@ source; a file without a row, or a row without a bucket/source, fails the gate.
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
 | `src/server/config.zig` | Z | Minimal serverconfig.xml subset (port, max players, world name, password) |
 | `src/server/evidence.zig` | Z | P4 observe evidence: fixed ring of detector events (no secrets, no IP, no packets). Admin `evidence dump [path]` flushes the ring as JSONL via |
-| `src/server/game.zig` | R | Game server: join SM, tick, interest, combat, persistence. Simulation is an SoA ECS (`ecs.World` + systems) |
+| `src/server/game.zig` | R | Game server: join SM, tick, interest, combat, persistence. RE-derived: server-lifecycle.md (join SM), loop.md (tick), network.md (interest), combat-damage.md, save-persistence.md; simulation is an SoA ECS (`ecs.World` + systems) |
 | `src/server/game/bans.zig` | Z | Ban / rate-limit helpers extracted from game.zig |
 | `src/server/game/blockmeta.zig` | R | Sparse block meta + damage persist extracted from game.zig |
 | `src/server/game/chunk_fill.zig` | R | Chunk materialization and loot-fill senders, extracted verbatim from game.zig: sendSpawnChunk (resident-miss load + stock Chunk.write encode), |

@@ -243,25 +243,7 @@ pub const Chunk = struct {
     }
 
     fn ensureBlocks(self: *Chunk, allocator: std.mem.Allocator) !void {
-        if (self.blocks != null) return;
-        self.allocator = allocator;
-        const b = try allocator.alloc(u32, blocks_per_chunk);
-        @memset(b, block_air);
-        const st = biome_layers.defaultStack();
-        var col: [256]u16 = undefined;
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                const h = self.heightAt(lx, lz);
-                generateColumnIds(h, st, &col);
-                var y: i32 = 0;
-                while (y <= h and y < y_dim) : (y += 1) {
-                    b[blockIndex(lx, y, lz)] = col[@intCast(y)];
-                }
-            }
-        }
-        self.blocks = b;
+        try self.ensureBlocksWithStack(allocator, biome_layers.defaultStack());
     }
 
     /// Materialize full block plane with a biome stack (called from World.getOrCreate).

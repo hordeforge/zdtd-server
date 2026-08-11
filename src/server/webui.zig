@@ -736,16 +736,7 @@ pub const Server = struct {
         n += 1;
         hdrs[n] = .{ .name = "Cache-Control", .value = "no-store" };
         n += 1;
-        hdrs[n] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
-        n += 1;
-        hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
-        n += 1;
-        hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
-        n += 1;
-        hdrs[n] = .{ .name = "Content-Security-Policy", .value = csp_policy };
-        n += 1;
-        hdrs[n] = .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" };
-        n += 1;
+        appendSecurityHeaders(&hdrs, &n);
         hdrs[n] = .{ .name = "Connection", .value = "close" };
         n += 1;
         var cookie_val: [128]u8 = undefined;
@@ -776,16 +767,7 @@ pub const Server = struct {
         n += 1;
         hdrs[n] = .{ .name = "Connection", .value = "close" };
         n += 1;
-        hdrs[n] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
-        n += 1;
-        hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
-        n += 1;
-        hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
-        n += 1;
-        hdrs[n] = .{ .name = "Content-Security-Policy", .value = csp_policy };
-        n += 1;
-        hdrs[n] = .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" };
-        n += 1;
+        appendSecurityHeaders(&hdrs, &n);
         var cookie_val: [128]u8 = undefined;
         if (self.set_cookie) {
             const cv = try formatSessionCookie(&cookie_val, self.sessionTok());
@@ -865,6 +847,21 @@ pub const Server = struct {
 /// Inline CSS/JS dashboard; no third-party origins. form-action self for console POSTs.
 const csp_policy =
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+/// Shared hardening headers for httpRespond/httpRedirect (dynamic-array builders only;
+/// httpLogout/rawRespond construct their headers by other means).
+fn appendSecurityHeaders(hdrs: []http.Header, n: *usize) void {
+    hdrs[n.*] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
+    n.* += 1;
+    hdrs[n.*] = .{ .name = "X-Frame-Options", .value = "DENY" };
+    n.* += 1;
+    hdrs[n.*] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
+    n.* += 1;
+    hdrs[n.*] = .{ .name = "Content-Security-Policy", .value = csp_policy };
+    n.* += 1;
+    hdrs[n.*] = .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" };
+    n.* += 1;
+}
 
 /// Console lines must be single-line printable (no C0/DEL) so URL-decoded form
 /// bodies cannot inject multi-line admin input or log-break sequences.
