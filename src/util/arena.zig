@@ -11,8 +11,7 @@ pub fn newArenaHolder(allocator: std.mem.Allocator) !*std.heap.ArenaAllocator {
 
 pub fn ensureLazyArena(arena_ptr: *?*std.heap.ArenaAllocator, allocator: std.mem.Allocator) !std.mem.Allocator {
     if (arena_ptr.*) |ap| return ap.allocator();
-    const ap = try allocator.create(std.heap.ArenaAllocator);
-    ap.* = std.heap.ArenaAllocator.init(allocator);
+    const ap = try newArenaHolder(allocator);
     arena_ptr.* = ap;
     return ap.allocator();
 }
