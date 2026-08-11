@@ -670,10 +670,11 @@ pub fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt:
 }
 
 /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
-/// clamp to the same range the config loader uses, and write the sim/Game
-/// field the stats blob reads, so the client HUD follows. Unknown or
-/// startup-only prefs (ServerPort, world paths) return false and the caller
-/// keeps the honest read-only reply.
+/// clamp to this function's own range (independent of config.zig's startup
+/// ranges — they are not guaranteed to match), and write the sim/Game field
+/// the stats blob reads, so the client HUD follows. Unknown or startup-only
+/// prefs (ServerPort, world paths) return false and the caller keeps the
+/// honest read-only reply.
 pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
     const v = std.fmt.parseInt(i32, std.mem.trim(u8, value, " \t"), 10) catch return false;
     if (std.mem.eql(u8, name, "GameDifficulty")) {

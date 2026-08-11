@@ -334,10 +334,6 @@ pub const Manager = struct {
     ///   u32 rand_state               4
     ///   i64 last_update_world_time   8
     ///   u8 blood_moon_forced         1
-    ///
-    /// Decode validates against the same biome table that seeded the manager and
-    /// fails closed (manager untouched) on any corrupt or out-of-range field, so a
-    /// hand-edited or truncated file can never desync the client.
     pub fn encode(self: *const Manager, buf: []u8) ![]const u8 {
         const need = save_header_bytes + save_state_bytes * @as(usize, self.n);
         if (buf.len < need) return error.BufferTooSmall;

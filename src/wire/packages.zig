@@ -2188,7 +2188,6 @@ pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
     return w.written();
 }
 
-/// SimpleChat (legacy two strings). Prefer buildStockChat for stock clients.
 /// GameUtils/EKickReason (asm.il:1913681-1913720). Only the values zdtd emits:
 /// an operator `kick` and a server-side guard-policy decision. zdtd has no EAC
 /// integration, so the Eac* reasons are never sent.

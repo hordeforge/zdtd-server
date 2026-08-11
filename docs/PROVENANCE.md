@@ -47,7 +47,7 @@ python3 tools/provenance_scan.py      # file coverage + ledger well-formedness g
 ```
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 187/187 (100%).** Every row below carries a bucket and a
+- **File coverage: 188/188 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
@@ -58,8 +58,8 @@ Coverage targets, all enforced by the scan:
 | Bucket | Meaning | Count |
 |---|---|---|
 | **A** stock data | Loaded from the operator install (`Data/Config` / world assets / AssignIds); provenance = the stock file | 27 |
-| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 105 |
-| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 55 |
+| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 103 |
+| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 58 |
 
 ### File provenance map
 
@@ -406,7 +406,7 @@ authoritative (different numbering; archived as stale 2026-08-09).
 ## 4. Coverage and maintenance
 
 - **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **187/187 (100%)**; a new src file without a ledger
+  File coverage must stay **188/188 (100%)**; a new src file without a ledger
   row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
 - **Constants:** the ledger covers the behavioral values; the authoritative
   field-by-field provenance for the rules surface lives inline in
@@ -417,7 +417,7 @@ authoritative (different numbering; archived as stale 2026-08-09).
 - **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
   table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
 
-- `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
+- `python3 tools/provenance_scan.py` gates **file coverage 188/188** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
   file exists). Wire it into `make check` after the first green run.
 - After a game update: re-run `../../7dtd-research/tools/parity/drift-check.sh`,

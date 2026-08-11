@@ -74,7 +74,7 @@ pub const Transition = struct {
 };
 
 /// `AllyStore::ComputeTransition` (asm.il 885142). Defaults are "status
-/// unchanged, no events"; only the four listed edges do anything.
+/// unchanged, no events"; only the five listed edges do anything.
 pub fn computeTransition(old: Status, add_ally: bool) Transition {
     const unchanged: Transition = .{ .new_status = old, .event_source = .none, .event_target = .none };
     return switch (old) {

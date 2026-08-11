@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check lint fmt release-check release repro smoke clean need-zig need-release-tools
+.PHONY: all build test fuzz run check lint fmt release-check release repro smoke clean need-zig need-release-tools need-python3
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -26,6 +26,13 @@ need-zig:
 need-release-tools:
 	@command -v sha256sum >/dev/null || { \
 	  echo "zdtd: missing required release tool: sha256sum (GNU coreutils)" >&2; \
+	  exit 127; \
+	}
+
+# Required by `make check` for tools/provenance_scan.py (stdlib-only, no pip deps).
+need-python3:
+	@command -v python3 >/dev/null || { \
+	  echo "zdtd: missing required tool: python3 (for tools/provenance_scan.py)" >&2; \
 	  exit 127; \
 	}
 
@@ -117,6 +124,7 @@ release-check:
 check:
 	$(MAKE) release-check
 	$(MAKE) lint
+	$(MAKE) need-python3
 	python3 tools/provenance_scan.py
 	$(MAKE) build
 	$(MAKE) test

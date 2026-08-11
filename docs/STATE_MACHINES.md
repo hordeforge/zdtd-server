@@ -14,7 +14,7 @@ a diagram and a comment disagree.
 | 6 | Blood moon window | `ecs/aidirector.zig` `WorldClock` | [blood-moon](#6-blood-moon-window) |
 | 7 | Power grid | `ecs/powerblocks.zig` | [power](#7-power-grid) |
 | 8 | Sleeper volumes | `world/sleepers.zig` | [sleepers](#8-sleeper-volumes) |
-| 9 | Trader open / restock / wallet | `server/game/trader.zig`, `server/trade.zig`, `ecs/systems.zig` traderRestock | [trader](#9-trader-sm) |
+| 9 | Trader open / restock / wallet | `server/game/trader.zig`, `server/game/trader_wire.zig`, `ecs/systems.zig` traderRestock | [trader](#9-trader-sm) |
 | 10 | Vehicle multi-seat | `ecs/systems.zig` vehicleAttach/Detach | [vehicle](#10-vehicle-multi-seat) |
 | 11 | Ally status | `server/ally.zig` | [allies](#11-ally-status) |
 | 12 | Plugin lifecycle | `plugin/host.zig`, `plugin/wasm.zig` | [plugins](#12-plugin-lifecycle) |
