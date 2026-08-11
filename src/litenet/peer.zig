@@ -18,7 +18,11 @@ comptime {
 }
 /// One pending slot holds one MTU-sized channeled/fragment datagram.
 const pending_bytes: usize = packet.max_packet_size;
-const max_frag_parts: usize = 512;
+/// Exactly enough parts to cover max_payload; sized off max_fragment_user
+/// instead of a round number so it can't silently drift loose again (was a
+/// flat 512, ~22% more than max_payload ever needs — pure slack in a
+/// per-peer buffer that's held for every connected peer regardless of load).
+const max_frag_parts: usize = std.math.divCeil(usize, max_payload, packet.max_fragment_user) catch unreachable;
 const assemble_cap: usize = max_payload;
 /// Game: (windowSize-1)/8 + 2 = 9 bitmap payload bytes on Ack.
 const ack_bitmap_bytes: usize = (packet.window_size - 1) / 8 + 2;
