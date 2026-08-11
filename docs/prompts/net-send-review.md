@@ -34,9 +34,16 @@ a **prioritized fix list** (and optional patches).
 
 This is **not** the wire-layout review (golden tests own those bytes), **not**
 the join-SM phase review, **not** the idiomatic-Zig review
-(`zig-idiomatic-review.md`). Focus on: which packages are droppable vs
-must-deliver, how WindowFull is retried, how the enter bundle is sequenced, and
-whether a wedged peer can stall the 50 ms tick.
+(`zig-idiomatic-review.md`, general hot-path alloc and Zig style), **not** the
+abstraction lifecycle review (`abstractions-review.md`, whether the retry
+shape itself should exist), **not** the hardcoded-data audit
+(`hardcoded-data-review.md`, package/id hardcodes on the send path), **not**
+the 0.16 changelog conformance review (`zig-0.16-changelog-review.md`), **not**
+the language best-practices review (`zig-best-practices-review.md`), **not**
+the ECS/SoA review (`ecs-soa-review.md`), and **not** the SIMD pass
+(`simd-review.md`). Focus on: which packages are droppable vs must-deliver,
+how WindowFull is retried, how the enter bundle is sequenced, and whether a
+wedged peer can stall the 50 ms tick.
 
 ## Read first
 
