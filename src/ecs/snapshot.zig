@@ -43,7 +43,7 @@ pub fn writeCensus(w: *const World, buf: []u8) ![]const u8 {
     var i: u16 = 0;
     while (i < max_entities and listed < max_list) : (i += 1) {
         if (!w.alive[i] or !w.mask[i].network_id) continue;
-        if (pos + 8 > buf.len) break;
+        if (pos + 10 > buf.len) break;
         putU32(buf, &pos, @bitCast(w.network_id[i].id));
         putU32(buf, &pos, w.network_id[i].gen);
         putU16(buf, &pos, @intFromEnum(w.kind[i]));
