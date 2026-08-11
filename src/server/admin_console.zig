@@ -355,9 +355,18 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
         out.line("usage: tp <x> <y> <z>");
         return;
     }
-    const x = std.fmt.parseFloat(f32, xs.?) catch return;
-    const y = std.fmt.parseFloat(f32, ys.?) catch return;
-    const z = std.fmt.parseFloat(f32, zs.?) catch return;
+    const x = std.fmt.parseFloat(f32, xs.?) catch {
+        out.line("bad x");
+        return;
+    };
+    const y = std.fmt.parseFloat(f32, ys.?) catch {
+        out.line("bad y");
+        return;
+    };
+    const z = std.fmt.parseFloat(f32, zs.?) catch {
+        out.line("bad z");
+        return;
+    };
     if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(z)) {
         out.line("coordinates must be finite");
         return;
