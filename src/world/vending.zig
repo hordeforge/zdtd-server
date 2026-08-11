@@ -292,12 +292,14 @@ pub const VendingStore = struct {
             @memcpy(&v.password_hash, buf[o..][0..max_password_hash]);
             o += max_password_hash;
             if (o + 1 > len) return error.ReadFailed;
-            // Same clamp rule as stock_n: the skip loop below can parse more
-            // entries, but the stored count must never exceed the fixed array.
-            v.allowed_n = @min(buf[o], max_allowed_users);
+            // Same clamp rule as stock_n: the raw on-disk count drives how many
+            // records are read off the wire (o must land past all of them), but
+            // the stored count must never exceed the fixed array.
+            const raw_allowed_n = buf[o];
+            v.allowed_n = @min(raw_allowed_n, max_allowed_users);
             o += 1;
             var ai: usize = 0;
-            while (ai < v.allowed_n) : (ai += 1) {
+            while (ai < raw_allowed_n) : (ai += 1) {
                 if (ai >= max_allowed_users) {
                     var tmp: UserRef = .{};
                     if (!readUserRef(buf, &o, &tmp)) return error.ReadFailed;

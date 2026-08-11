@@ -73,9 +73,14 @@ pub fn loadBlockMeta(self: *Game) !void {
     o += 2;
     if (o + @as(usize, rn) * 12 > data.len) return error.ReadFailed;
     self.block_raw_n = @min(@as(usize, rn), self.block_raw_key.len);
-    for (0..self.block_raw_n) |i| {
-        self.block_raw_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
-        self.block_raw[i] = std.mem.readInt(u32, data[o + 8 ..][0..4], .little);
+    // Loop bound is the raw on-disk count, not the clamped one: `o` must land
+    // past every record the file actually has, even the ones dropped for
+    // exceeding the fixed array, or every field parsed after this desyncs.
+    for (0..rn) |i| {
+        if (i < self.block_raw_n) {
+            self.block_raw_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
+            self.block_raw[i] = std.mem.readInt(u32, data[o + 8 ..][0..4], .little);
+        }
         o += 12;
     }
     if (o + 2 > data.len) return error.ReadFailed;
@@ -83,9 +88,11 @@ pub fn loadBlockMeta(self: *Game) !void {
     o += 2;
     if (o + @as(usize, hn) * 10 > data.len) return error.ReadFailed;
     self.block_hp_n = @min(@as(usize, hn), self.block_hp_key.len);
-    for (0..self.block_hp_n) |i| {
-        self.block_hp_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
-        self.block_hp[i] = std.mem.readInt(u16, data[o + 8 ..][0..2], .little);
+    for (0..hn) |i| {
+        if (i < self.block_hp_n) {
+            self.block_hp_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
+            self.block_hp[i] = std.mem.readInt(u16, data[o + 8 ..][0..2], .little);
+        }
         o += 10;
     }
 }
