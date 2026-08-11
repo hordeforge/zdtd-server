@@ -355,6 +355,7 @@ stock source and the tracking item. Finding ids refer to the **live** audit
 | `ecs/rules.zig Progression.*` base depletion | policy tunables | stock survival damage from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT` | P3 | live A31 fixed (T16); base rates stay policy |
 | `world/tts.zig:418` filler skip | comptime pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump 2/3) | P3 | live A05/A06 class (Fixed); pin uses tracked |
 | `world/store.zig:310-313,370` no-blocks fallback | module pins | AssignIds terrain names | P3 | live A05 (Fixed); fallback pins tracked |
+| `litenet/packet.zig` max_packet_size | 1327 | game `NetConstants.MaxPacketSize` = 1432 (PossibleMtu last entry, RVA-decoded; network.md §4) | P2 | divergence: matches no stock MTU entry; conservative but breaks stock MTU negotiation shape |
 | `world/store.zig` sea_level | 64 (u8) | stock `WorldConstants.WaterLevel` = `Block.cWaterLevel` = **62.88** (IL: Block.cctor ldc.r4 62.88; pinned as `stock_facts.json behaviour.world_water_level`, machine-checked) | P3 | divergence: +1.12 and u8 cannot hold the fraction |
 
 **Resolved since the stale archive snapshot** (do not re-flag):

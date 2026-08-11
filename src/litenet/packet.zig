@@ -12,7 +12,12 @@ pub const channeled_header_size: usize = 4;
 /// FragmentId:u16 + FragmentPart:u16 + FragmentsTotal:u16 (after channeled header).
 pub const fragment_header_size: usize = 6;
 pub const fragmented_header_total: usize = channeled_header_size + fragment_header_size; // 10
-/// Game LiteNetLib NetConstants.MaxPacketSize (PossibleMtu last entry).
+/// DIVERGES from stock: game Managed LiteNetLib PossibleMtu=[1024,1164,1392,
+/// 1404,1424,1432], MaxPacketSize=1432 (RVA-decoded; pinned in
+/// ../../7dtd-research/docs/network.md). 1327 matches no stock entry - likely
+/// an older LiteNetLib list. Conservative (smaller than 1432), but the MTU
+/// negotiation with a stock client expects the stock list. Tracked in the
+/// provenance divergence register.
 pub const max_packet_size: usize = 1327;
 /// Max user bytes in one non-fragmented channeled datagram.
 pub const max_single_user: usize = max_packet_size - channeled_header_size;
