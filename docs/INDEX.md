@@ -32,7 +32,10 @@ New to the project, or picking up work:
 6. [RELEASES.md](RELEASES.md) version, compatibility, support, release policy.
 7. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
 8. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
-9. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
+9. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
+   the stock game (file map 187/187 + constants ledger; gated by
+   `tools/provenance_scan.py` in `make check`).
+10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
 
 ## Wire and play path
