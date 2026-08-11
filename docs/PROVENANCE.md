@@ -251,6 +251,12 @@ pace the wire are covered by their file's row in §2 and are not repeated here.
 
 ### 3.1 Sim rules (`src/ecs/rules.zig`)
 
+The complete rule surface (`Combat` / `Ai` / `Bloodmoon` / `Progression` /
+`WorldGroup`) carries **inline provenance on every field** in
+`src/ecs/rules.zig` (each field's comment names its stock source or marks it
+policy). The rows below highlight the fields that diverge from stock or are
+the system's load-bearing values; the inline comments are the authoritative
+field-by-field provenance.
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
 | `Combat.attack_damage` | 8.0 | A | **Floor**: `entityclasses.xml` HandItem → `items.xml` DamageEntity wins when non-zero |
