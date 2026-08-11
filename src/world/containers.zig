@@ -69,6 +69,8 @@ pub const ContainerStore = struct {
     keys: [max_containers]PosKey = .{PosKey{ .x = 0, .y = 0, .z = 0 }} ** max_containers,
     used: [max_containers]bool = .{false} ** max_containers,
     n: usize = 0,
+    /// Once: warn when getOrCreate drops a container because the table is full.
+    cap_warned: bool = false,
 
     pub fn deinit(self: *ContainerStore) void {
         self.* = .{};
@@ -102,6 +104,13 @@ pub const ContainerStore = struct {
             };
             self.n += 1;
             return &self.items[i];
+        }
+        if (!self.cap_warned) {
+            self.cap_warned = true;
+            std.debug.print(
+                "zdtd: container table full, dropping new container at ({d},{d},{d}) (max_containers={d})\n",
+                .{ pos.x, pos.y, pos.z, max_containers },
+            );
         }
         return null;
     }

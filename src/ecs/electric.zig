@@ -129,6 +129,8 @@ pub const PowerGrid = struct {
     next_id: u16 = 1,
     total_gen: f32 = 0,
     total_load: f32 = 0,
+    /// Once: warn when addNode drops a node because the table is full.
+    cap_warned: bool = false,
 
     pub fn clear(self: *PowerGrid) void {
         self.node_n = 0;
@@ -139,7 +141,16 @@ pub const PowerGrid = struct {
     }
 
     pub fn addNode(self: *PowerGrid, kind: NodeKind, x: i32, y: i32, z: i32, watts: f32) ?u16 {
-        if (self.node_n >= max_nodes) return null;
+        if (self.node_n >= max_nodes) {
+            if (!self.cap_warned) {
+                self.cap_warned = true;
+                std.debug.print(
+                    "zdtd: power grid full, dropping new node at ({d},{d},{d}) (max_nodes={d})\n",
+                    .{ x, y, z, max_nodes },
+                );
+            }
+            return null;
+        }
         const id = self.next_id;
         self.next_id +%= 1;
         // Fuel/capacity/burn left 0 unless caller applies stock props (powerblocks.Resolved).
