@@ -334,6 +334,18 @@ what stock says and where the fix lands. Finding ids refer to
 | `server/movement.zig` envelope | 20 m/s soft cap | no stock key; sprint ~6 m/s + vehicle margin | P2 | audit B29; `[authority]` planned |
 | `game.zig:3307` spawn pad | `block_dirt` pin | `World.terrain_ids.dirt` after AssignIds merge | P2 | audit A36 |
 
+### 3.10 Remaining audit findings (provenance status)
+
+| Finding | Location | Value | Stock source / status |
+|---|---|---|---|
+| A37 | `world/tts.zig:418` | filler skip pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump-verified 2/3); P3, behavior identical; resolve via idByName |
+| A38 | `world/store.zig:310-313,370` | `block_stone`/`block_dirt`/`block_air`/`block_water` module pins on no-blocks fallback | AssignIds terrain names; P3, identical; route through `World.terrain_ids` |
+| A40 | `ecs/world.zig:225` | builtin class_table row `zombieFeral` (hash = zombie hash) | **No stock class** (0 hits in entityclasses.xml; no stock group names it); unreachable today; P3 delete/repoint |
+| B32 | `game.zig:4170,4181` | loot container scan caps 32 / 48 | zdtd tick budget (Z); `[sim]` caps planned |
+| B33 | `world/workstations.zig:58-60` | `max_crafts_per_tick` 64 / `max_craft_backlog` 60 | zdtd engineering (Z) |
+| B35 | `ecs/poi_lock.zig:19,23,26` | `unlock_grace` 2000 / `max_locks` 64 / `max_questers` 8 | zdtd engineering (Z); grace timer is RE-derived (QuestLockInstance) |
+| B36 | `server/webui.zig:918` | `readiness_stale_ns` 30 s | zdtd ops (Z) |
+
 ## 4. Coverage and maintenance
 
 - `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
