@@ -327,6 +327,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 @intCast(@min(@max(parsed.item_count, 8), containers_mod.max_container_slots));
             const cont = self.containers.getOrCreate(pos, sc, parsed.block_id) orelse return true;
             stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
+            self.clampStackSlots(cont.slots[0..cont.slot_count]);
             // Echo stock TE to nearby clients.
             try replicate_te.broadcastStorageTe(self, cont);
             return true;
@@ -350,6 +351,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 replicate_te.applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
                 replicate_te.applyWsGroup(self, st.tools[0..], ws.tools[0..ws.tools_n]);
                 replicate_te.applyWsGroup(self, st.output[0..], ws.output[0..ws.output_n]);
+                self.clampStackSlots(st.fuel[0..]);
+                self.clampStackSlots(st.input[0..]);
+                self.clampStackSlots(st.tools[0..]);
+                self.clampStackSlots(st.output[0..]);
                 @memcpy(st.last_input[0..ws.last_input_blob_len], ws.last_input[0..ws.last_input_blob_len]);
                 st.last_input_blob_len = ws.last_input_blob_len;
                 // Trust boundary (GAP: workstation recipe validation): the

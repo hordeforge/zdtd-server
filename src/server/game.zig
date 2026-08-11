@@ -743,7 +743,13 @@ pub const Game = struct {
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
     pub fn clampInventoryStacks(self: *Game, inv: *ecs.components.Inventory) void {
-        for (&inv.slots) |*s| {
+        self.clampStackSlots(&inv.slots);
+    }
+
+    /// Same clamp as clampInventoryStacks, for any client-writable InvSlot group
+    /// (container/workstation TE bodies), not just the player Inventory shape.
+    pub fn clampStackSlots(self: *Game, slots: []ecs.components.InvSlot) void {
+        for (slots) |*s| {
             if (s.count == 0 or s.item_id == 0) continue;
             const max = itemStackFor(self, s.item_id);
             if (max > 0 and s.count > max) s.count = max;
