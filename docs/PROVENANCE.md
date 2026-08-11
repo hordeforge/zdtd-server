@@ -287,13 +287,17 @@ field-by-field provenance.
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
 | `bm_parties_cap` | 8 | R | Blood-moon party array cap (RE: aidirector.md) |
-| `wandering_horde_size` | 6 | R | Stock wandering horde size (RE: aidirector.md) |
-| `wandering_spawn_dist` | 92.0 | R | Wandering horde spawn radius (RE: aidirector.md) |
-| `wander_min_gap` / `wander_max_gap` | 12 s / 24 s | R | Wandering-horde scheduling window (RE: aidirector.md) |
+| `wandering_horde_size` | 6 | R | **Approximation**: stock per-horde size is gamestage-group driven (live-observed 2026-08-11: `Party of 1, GS 1 ... enemy max 5`); fixed 6 here (aidirector.md wandering section) |
+| `wandering_spawn_dist` | 92.0 | R | `AIDirectorHordeComponent.FindTargets` inline start offset `RandomOnUnitCircle * 92f` (IL_018B; aidirector.md placement constants) |
+| `wander_min_gap` / `wander_max_gap` | 12-24 in-game hours | R | `ChooseNextTime` `Random(12000, 24000)` world-time units (12-24 in-game hours; aidirector.md wandering schedule; live-verified 2026-08-11) |
 | `heat_cooldown_seconds` | 120 | Z | **Diverges**: stock `AIDirectorChunkData.FindBestEventAndReset` region cooldown is **240 s** (aidirector.md 2026-08-07; audit A41) |
 | `heat_neighbor_cooldown_seconds` | 60 | Z | **Diverges**: stock `StartCooldownOnNeighbors` 180 s / 720 s (aidirector.md; audit A41) |
 | `heat_spawn_threshold` | 25.0 | R | Heat threshold for spawner events (RE: aidirector.md chunk-data cooldowns) |
-| `default_max_alive_zombies` | 24 | A | Stock MaxSpawnedZombies default (serverconfig) |
+| `default_max_alive_zombies` | 24 | A | Stock MaxSpawnedZombies default (serverconfig). NOTE: stock applies CanSpawn priority multipliers (blood moon ×1.9, sleeper ×2.1, biome ×1.0; `AIDirector.CanSpawn` IL=10, aidirector.md/spawning.md, live-verified 2026-08-11); zdtd uses the flat cap - a simplification |
+| `WorldClock.hours` boot | 07:00 | R | Stock dedicated boot time, live-observed 2026-08-11 (`gettime` reads "Day 1, 07:00" on a fresh paused server) |
+| `WorldClock.isNight` dusk bound | `> dusk` | R | Stock `World.IsDark` IL=31: dark iff `hour < DawnHour \|\| hour > DuskHour` - the dusk hour itself is light (weather-environment.md) |
+| `WorldClock.bloodmoon_frequency` 0 | 0 = off | Z | **Diverges**: stock 0 config does NOT disable - the sandbox option default (7) applies (live-observed 2026-08-11; aidirector.md SetDay/CalcNextDay). zdtd 0-disables is deliberate policy |
+| `WorldClock.tick` | unconditional | Z | **Diverges**: stock dedicated pauses world time with zero players (live-observed 2026-08-11; server-lifecycle.md 5); zdtd advances always |
 
 ### 3.3 Entity HP (`src/assets/entities.zig`)
 
@@ -340,6 +344,7 @@ field-by-field provenance.
 | `world/weather.zig blood_moon_storm_push` | 5000 | R | Blood-moon storm push ticks (RE: weather-environment.md storm state machine) |
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
+| `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
 
 ### 3.9 Divergence register (provenance for the differences)
 

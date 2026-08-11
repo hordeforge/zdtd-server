@@ -162,6 +162,14 @@ pub fn worldHour(self: *const Game) u64 {
 }
 
 /// AirDropFrequency: spawn a supply crate near a player every N game-hours.
+/// DIVERGENCE (RE: aidirector.md airdrop schedule): stock schedules by
+/// DAY-COUNT + fixed time-of-day - `SandboxOptions.SetupAirDropTimeRanges`
+/// (IL=124) maps options 52/54 to Min/MaxDayCount + Min/MaxTimeOfDay (default
+/// 3/3 days, 12:00), and `calcNextAirdrop` (IL=39) picks
+/// `day + RandomRange(Min, Max+1) - 1` at that TOD. zdtd's "every N game-hours
+/// from the last drop" is a simplification. Also: stock AirDropFrequency=0 does
+/// NOT disable (the sandbox option default overrides the 0 pref; live
+/// getgamestat reads 3); zdtd's 0 = off is a deliberate policy difference.
 pub fn tickAirDrop(self: *Game) void {
     if (self.air_drop_interval_hours == 0) return;
     const now = self.worldHour();

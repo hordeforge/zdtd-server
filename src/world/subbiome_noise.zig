@@ -42,7 +42,9 @@ pub fn stableHash(s: []const u8) i32 {
 
 /// `.NET Framework Random` (GameRandom uses exactly this: MBIG=0x7FFFFFFF,
 /// MSEED=0x09A4EC86, 56-entry SeedArray, Knuth subtraction shuffle; the
-/// constants match the GameRandom class dump at asm.il 1010929).
+/// constants match the GameRandom class dump at asm.il 1010929, and the
+/// research pins the class + strict max-exclusivity in
+/// dedicated-misc-systems.md GameRandom).
 pub const DotNetRandom = struct {
     const mbig: i32 = std.math.maxInt(i32);
     const mseed: i32 = 0x09A4EC86;

@@ -3,18 +3,23 @@
 const std = @import("std");
 const ecs_world = @import("world.zig");
 
-/// Sim world clock. Starts day 1, 08:00 (stock boot time). seconds_per_hour
-/// is the sim's time scale default (30 s per in-game hour); stock
-/// serverconfig DayNightLength (default 60 min day) sets the real scale.
+/// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
+/// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
+/// seconds_per_hour is the sim's time scale default (30 s per in-game hour);
+/// stock serverconfig DayNightLength (default 60 min day) sets the real scale.
 pub const WorldClock = struct {
-    hours: f32 = 8.0,
+    hours: f32 = 7.0,
     day: u32 = 1,
     seconds_per_hour: f32 = 30.0,
-    /// Daylight window [dawn, dusk); night is outside it. From DayLightLength:
-    /// dawn fixed at 04:00, dusk = 4 + DayLightLength (stock keeps morning fixed).
+    /// Daylight window [dawn, dusk]; night is outside it (stock `World.IsDark`
+    /// IL=31: `hour < DawnHour || hour > DuskHour` - the dusk hour itself is
+    /// still light, weather-environment.md boundary derivation).
     dawn: f32 = 4.0,
     dusk: f32 = 22.0,
-    /// BloodMoonFrequency: blood moon every N days (0 disables).
+    /// BloodMoonFrequency: blood moon every N days. NOTE (live-observed
+    /// 2026-08-11): a stock 0 config does NOT disable - the sandbox option
+    /// default (7) applies; zdtd's 0-disables here is a deliberate policy
+    /// divergence (aidirector.md SetDay/CalcNextDay).
     bloodmoon_frequency: u32 = 7,
     /// BloodMoonRange: deterministic ±day jitter around each frequency multiple.
     bloodmoon_range: u8 = 0,
@@ -25,7 +30,8 @@ pub const WorldClock = struct {
     }
 
     pub fn setDayLightLength(self: *WorldClock, daylight_hours: u8) void {
-        // Stock GameUtils::CalcDuskDawnHours (asm.il 1926249): a DayLightLength
+        // Stock GameUtils::CalcDuskDawnHours (IL=45, weather-environment.md
+        // boundary derivation; asm.il 1926249): a DayLightLength
         // of 0 or 24 returns (dusk 22, dawn 4); otherwise dusk starts at 22,
         // clamps to DayLightLength when > 22, becomes 12 + DL/2 when < 18, and
         // dawn = clamp(dusk - DL, 0, 23).
@@ -44,6 +50,10 @@ pub const WorldClock = struct {
     }
 
     pub fn tick(self: *WorldClock, dt: f32) void {
+        // DIVERGENCE: stock dedicated pauses world time with zero connected
+        // players (live-observed 2026-08-11, server-lifecycle.md 5); zdtd
+        // advances unconditionally - a policy simplification, not a stock
+        // behavior.
         self.hours += dt / self.seconds_per_hour;
         while (self.hours >= 24.0) {
             self.hours -= 24.0;
@@ -52,13 +62,18 @@ pub const WorldClock = struct {
     }
 
     pub fn isNight(self: *const WorldClock) bool {
-        return self.hours < self.dawn or self.hours >= self.dusk;
+        // Stock World.IsDark IL=31: dark iff hour < DawnHour || hour > DuskHour
+        // (the dusk hour itself is still light). The `>` (not `>=`) matters at
+        // exactly 22:00.
+        return self.hours < self.dawn or self.hours > self.dusk;
     }
 
-    /// Stock GameUtils::IsBloodMoonTime (asm.il 1926341): the blood moon spans
+    /// Stock GameUtils::IsBloodMoonTime (IL=10 / asm.il 1926341,
+    /// aidirector.md): the blood moon spans
     /// dusk on the scheduled day through dawn of the next day, crossing the
     /// midnight rollover. True when the current day is the scheduled day and it
-    /// is at/after dusk, or the day after the scheduled day before dawn.
+    /// is at/after dusk (`hour >= duskHour`, the BM gate is INCLUSIVE of dusk,
+    /// unlike IsDark's `>`), or the day after the scheduled day before dawn.
     pub fn isBloodMoonNight(self: *const WorldClock) bool {
         if (self.bloodmoon_frequency == 0) return false;
         if (self.hours >= self.dusk) return self.isBloodMoonDay(self.day);
@@ -147,9 +162,12 @@ pub const bm_parties_cap: usize = 8;
 /// day 1 (worldTime > 28000).
 /// Wandering horde (RE: aidirector.md wandering-horde scheduling): a group
 /// of `wandering_horde_size` zombies spawns `wandering_spawn_dist` blocks out
-/// every wander_min_gap..wander_max_gap (ms of world time) once the world is
-/// past wander_start_after; stock serverconfig `ZombieBMMaxAlive` and the
-/// director's random-schedule pick bound the rest.
+/// every wander_min_gap..wander_max_gap (12-24 in-game hours of world time)
+/// once the world is past wander_start_after. `wandering_spawn_dist` 92 is
+/// the `FindTargets` inline start offset (`RandomOnUnitCircle * 92f`, IL_018B,
+/// aidirector.md placement constants); the per-horde size is gamestage-group
+/// driven in stock (live-observed 2026-08-11: "enemy max 5" for GS 1), so the
+/// fixed 6 here is an approximation.
 pub const wandering_horde_size: u32 = 6;
 pub const wandering_spawn_dist: f32 = 92.0;
 pub const wander_min_gap: u64 = 12_000;
