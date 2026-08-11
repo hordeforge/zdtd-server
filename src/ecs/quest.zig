@@ -182,6 +182,13 @@ pub const Catalog = struct {
     }
 
     pub fn byId(self: *const Catalog, id: u16) ?QuestDef {
+        // defs are appended in id order starting at 1 (see quests.zig
+        // parseCatalog's next_id and builtin_defs below), so id-1 is almost
+        // always the right slot; scan only on mismatch (modded/gappy catalogs).
+        if (id != 0) {
+            const guess = @as(usize, id - 1);
+            if (guess < self.defs.len and self.defs[guess].id == id) return self.defs[guess];
+        }
         for (self.defs) |d| if (d.id == id) return d;
         return null;
     }
