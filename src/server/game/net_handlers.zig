@@ -8,6 +8,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const packages = @import("../../wire/packages.zig");
+const constantTimeEql = @import("../../util/secret.zig").constantTimeEql;
 
 pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     const c = self.clientFor(peer) orelse {
@@ -52,7 +53,7 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
     self.harness.counters.add(.net_packets_in, 1);
     self.harness.counters.add(.net_bytes_in, payload.len);
     if (!c.authed_challenge) {
-        if (wire_frame.isChallenge(payload) and std.mem.eql(u8, payload[1..17], &c.challenge)) {
+        if (wire_frame.isChallenge(payload) and constantTimeEql(payload[1..17], &c.challenge)) {
             c.authed_challenge = true;
             peer.authenticated = true;
             const body = try packages.buildPackageIdsBody(&self.body_buf, .{}, &packages.default_mappings);
