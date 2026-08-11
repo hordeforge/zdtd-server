@@ -145,6 +145,26 @@ def main():
             print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
             return 1
 
+    # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-research/docs/<file>.md
+    #    reference in zdtd docs resolves to an existing research doc.
+    research_docs = os.path.join(ROOT, "..", "7dtd-research", "docs")
+    bad_cites = []
+    if os.path.isdir(research_docs):
+        for sub, _dirs, names in os.walk("docs"):
+            for name in names:
+                if not name.endswith(".md"):
+                    continue
+                text = open(os.path.join(sub, name), encoding="utf-8", errors="replace").read()
+                for m in re.finditer(r"(\.\./[^)\s]+?/7dtd-research/docs/[a-z0-9-]+\.md)", text):
+                    target = os.path.normpath(os.path.join(sub, m.group(1)))
+                    if not os.path.isfile(target):
+                        bad_cites.append(f"{os.path.join(sub, name)} -> {m.group(1)}")
+    if bad_cites:
+        print(f"FAIL: research-doc citations that do not resolve ({len(bad_cites)}):")
+        for c in sorted(set(bad_cites))[:10]:
+            print("  " + c)
+        return 1
+
     missing = sorted(set(files) - set(file_rows))
     extra = sorted(set(file_rows) - set(files))
     bad_bucket = [p for p, (b, _s) in file_rows.items() if b not in BUCKETS]
