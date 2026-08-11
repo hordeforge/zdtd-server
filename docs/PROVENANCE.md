@@ -346,6 +346,14 @@ what stock says and where the fix lands. Finding ids refer to
 | B35 | `ecs/poi_lock.zig:19,23,26` | `unlock_grace` 2000 / `max_locks` 64 / `max_questers` 8 | zdtd engineering (Z); grace timer is RE-derived (QuestLockInstance) |
 | B36 | `server/webui.zig:918` | `readiness_stale_ns` 30 s | zdtd ops (Z) |
 
+### 3.11 Perks and attributes (progression)
+
+| Item | Provenance |
+|---|---|
+| Level curve, attribute/perk catalog (names, max levels, costs) | `progression.xml` via `src/assets/progression.zig` (A: stock file loaded at runtime) |
+| XP/level/gamestage math | RE: `../7dtd-research/docs/progression.md` (AddLevelExp → recursive level-up → skill points → RefreshPerks); `src/server/game/player.zig` |
+| Perk requirement graphs / effect application | **Not built yet**: planned as `docs/adr/0023-perk-attribute-system.md`; zdtd has no perk system, so no provenance claim is made until the ADR lands (rules.zig `Progression.*` are placeholders, WORK_PLAN T16) |
+
 ## 4. Coverage and maintenance
 
 - `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
