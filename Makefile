@@ -117,6 +117,7 @@ release-check:
 check:
 	$(MAKE) release-check
 	$(MAKE) lint
+	python3 tools/provenance_scan.py
 	$(MAKE) build
 	$(MAKE) test
 	$(MAKE) fuzz
