@@ -317,6 +317,23 @@ pace the wire are covered by their file's row in §2 and are not repeated here.
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
 
+### 3.9 Divergence register (provenance for the differences)
+
+These are the places zdtd does **not** reproduce stock values today. Each row
+states the stock source and the tracking item, so a reader can tell exactly
+what stock says and where the fix lands. Finding ids refer to
+`archive/HARDCODE_AUDIT_2026-08-08.md`.
+
+| Location | zdtd value | Stock value (source) | Sev | Tracking |
+|---|---|---|---:|---|
+| `assets/entities.zig` default HP | 40 floor | `entityclasses.xml` HealthMax `base_set` + `replace_passive_effect` (zombieBoe 125±15%, feral 500 … infernal 1600) | P1 | audit A34; GAP_ANALYSIS |
+| `ecs/world.zig` class_table | 16 rows, ~6 reachable | `entityclasses.xml` per-class + `entitygroups.xml` ZombiesAll (29 members) | P2 | audit A35; GAP_ANALYSIS 1828 |
+| `ecs/aidirector.zig` heat cooldown | 120 s / 60 s | `AIDirectorChunkData` 240 s / 180-720 s (aidirector.md) | P2 | audit A41 |
+| `server/game/trader.zig` sell | econ × sell_markdown | stock `XUiM_Trader.GetSellPrice` = econ × EconomicSellScale × SellMarkdown (loot-economy.md §5) | P3 | audit A39 |
+| `ecs/rules.zig Progression.*` | invented numbers | stock survival from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT`/`StaminaChangeOT` | P1 | WORK_PLAN T16 |
+| `server/movement.zig` envelope | 20 m/s soft cap | no stock key; sprint ~6 m/s + vehicle margin | P2 | audit B29; `[authority]` planned |
+| `game.zig:3307` spawn pad | `block_dirt` pin | `World.terrain_ids.dirt` after AssignIds merge | P2 | audit A36 |
+
 ## 4. Coverage and maintenance
 
 - `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
