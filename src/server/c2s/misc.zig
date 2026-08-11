@@ -583,6 +583,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageWireActions")) {
+        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
+        // this broadcast out to every other peer for free (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         // Stock parent/child wiring (SetParent/RemoveParent) drives powered state.
         _ = self.sim.power.applyWireActionsStock(body);
         // Rebroadcast raw package so peers get the client-side wire visual.
@@ -590,6 +596,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageWireToolActions")) {
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         // Tool handshake carries one endpoint + player: visual only, no graph
         // mutation (mirrors stock ProcessPackage re-Setup+SendPackage to peers).
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);

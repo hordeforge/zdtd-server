@@ -21,6 +21,12 @@ const vending_mod = @import("../../world/vending.zig");
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageLandClaimRepair")) {
+        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
+        // this broadcast out to every connected peer for free (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         _ = packages.parseLandClaimRepair(body) catch return true;
         try self.broadcast("NetPackageLandClaimRepair", body);
         return true;

@@ -15,6 +15,12 @@ const replicate_te = @import("../replicate_te.zig");
 
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
+        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
+        // this broadcast out to every nearby peer for free (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         try self.broadcastNear("NetPackageBlockTrigger", body, self.sim.transform[ps].x, self.sim.transform[ps].z, self.interest_range);
         return true;
@@ -281,10 +287,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageItemActionEffects")) {
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         try self.broadcastExcept("NetPackageItemActionEffects", body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageCloseAllWindows")) {
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         try self.broadcastExcept("NetPackageCloseAllWindows", body, c.slot);
         return true;
     }
