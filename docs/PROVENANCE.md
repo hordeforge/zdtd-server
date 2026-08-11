@@ -222,7 +222,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/platform_user.zig` | R | PlatformUserIdentifierAbs wire codec (stock V3.1.0 b14). |
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
-| `src/wire/stock_chunk.zig` | R | Stock `Chunk.write(PooledBinaryWriter, bNetwork=true)` encoder. Derived on V3.0.1, verified against the V3.1.0 b14 client: the live join |
+| `src/wire/stock_chunk.zig` | R | Stock `Chunk.write(PooledBinaryWriter, bNetwork=true)` encoder. Derived on V3.0.1, verified against the V3.1.0 b14 client: the live join. Network-mode specifics re-confirmed 2026-08-12 against the byte-exact-verified `Chunk.write` IL=601 (save-region.md 2): stability channel skipped, topsoil 32 B raw, custom-data count network-filtered, sleeper/trigger skipped while wall volumes are ALWAYS written, trailing network flag false. TEs/entities count 0 (not yet implemented). |
 | `src/wire/stock_deco.zig` | R | Stock NetPackageDecoUpdate + DecoObject wire (derived V3.0.1, live on V3.1.0 b14). Client fixed-size worlds only show grass/trees from server deco pac |
 | `src/wire/stock_entity.zig` | R | Stock EntityCreationData + NetPackageEntitySpawn (networkWrite=true). |
 | `src/wire/stock_inv.zig` | R | Stock inventory wire (ItemValue/ItemStack/Bag/Equipment/NetPackagePlayerInventory). Derived on V3.0.1, carried to V3.1.0 b14; version-specific fields  |
