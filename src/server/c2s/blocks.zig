@@ -197,15 +197,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         const rad: i32 = @trunc(@max(1, @min(ex.radius, 6)));
+        const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @floor(ex.wx));
+        const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @floor(ex.wy));
+        const cz = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bz else @as(i32, @floor(ex.wz));
         if (self.sim.playerByPeer(c.slot)) |bi| {
             if (!self.sim.alive[bi] or self.sim.health[bi].hp <= 0) {
                 self.harness.counters.inc(.bounds_rejects);
                 return true;
             }
             const bp = self.sim.transform[bi];
-            const dx = ex.wx - bp.x;
-            const dy = ex.wy - bp.y;
-            const dz = ex.wz - bp.z;
+            // Reach-check the actual dig center (bx/by/bz overrides wx/wy/wz
+            // above), not the possibly-unrelated thrown/explosion position:
+            // otherwise a client can claim to be next to the blast but dig
+            // anywhere on the map via the block-position override.
+            const dx = @as(f32, @floatFromInt(cx)) - bp.x;
+            const dy = @as(f32, @floatFromInt(cy)) - bp.y;
+            const dz = @as(f32, @floatFromInt(cz)) - bp.z;
             const ex_d2 = dx * dx + dy * dy + dz * dz;
             if (ex_d2 > self.max_edit_range * self.max_edit_range) {
                 self.harness.counters.inc(.bounds_rejects);
@@ -213,9 +220,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 return true;
             }
         } else return true;
-        const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @floor(ex.wx));
-        const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @floor(ex.wy));
-        const cz = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bz else @as(i32, @floor(ex.wz));
         var dy: i32 = -rad;
         while (dy <= rad) : (dy += 1) {
             var dz: i32 = -rad;

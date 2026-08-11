@@ -717,6 +717,16 @@ fn readFiniteF32(r: *binary.Reader) binary.ReadError!f32 {
     return v;
 }
 
+/// Integer counterpart of readWorldF32: same range, so a small per-axis
+/// delta (block-dig radius etc.) added to it downstream cannot overflow i32.
+const world_coord_limit_i32: i32 = 1 << 24;
+
+fn readWorldI32(r: *binary.Reader) binary.ReadError!i32 {
+    const v = try r.readI32();
+    if (v > world_coord_limit_i32 or v < -world_coord_limit_i32) return error.Overflow;
+    return v;
+}
+
 pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -2689,9 +2699,9 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
     out.wx = try readWorldF32(&r);
     out.wy = try readWorldF32(&r);
     out.wz = try readWorldF32(&r);
-    out.bx = try r.readI32();
-    out.by = try r.readI32();
-    out.bz = try r.readI32();
+    out.bx = try readWorldI32(&r);
+    out.by = try readWorldI32(&r);
+    out.bz = try readWorldI32(&r);
     // quat 4xf32
     _ = try r.readF32();
     _ = try r.readF32();
