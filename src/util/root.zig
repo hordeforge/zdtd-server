@@ -5,6 +5,7 @@
 //! seeded RNG, optional range-parallel tick work, deterministic sim mode, and
 //! non-blocking TCP listen.
 
+pub const arena = @import("arena.zig");
 pub const io_fs = @import("io_fs.zig");
 pub const log = @import("log.zig");
 pub const parallel = @import("parallel.zig");
@@ -16,6 +17,7 @@ pub const tcp_listen = @import("tcp_listen.zig");
 pub const toml_bind = @import("toml_bind.zig");
 
 test {
+    _ = arena;
     _ = io_fs;
     _ = log;
     _ = parallel;

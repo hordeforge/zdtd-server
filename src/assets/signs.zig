@@ -4,6 +4,7 @@
 //! retrieve sign data" for missing library guids; full layer paint is later).
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const max_signs: usize = 4096;
@@ -104,8 +105,7 @@ fn parseI32Attr(open_tag: []const u8, key: []const u8, default: i32) i32 {
 
 /// Load all `*_signs.xml` under prefabs_root (e.g. Data/Prefabs).
 pub fn loadFromPrefabsRoot(allocator: std.mem.Allocator, prefabs_root: []const u8) !Catalog {
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

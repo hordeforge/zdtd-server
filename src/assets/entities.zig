@@ -1,6 +1,7 @@
 //! entityclasses.xml loader: name → Unity Mono hash, kind, HP, death loot list.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
@@ -179,8 +180,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

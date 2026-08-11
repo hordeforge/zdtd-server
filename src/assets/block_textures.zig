@@ -6,6 +6,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const arena_util = @import("../util/arena.zig");
 
 /// Pack 6 face indices with 8 bits each (TTS paint samples for ids ≤255).
 pub fn packFaces8(faces: [6]u8) u64 {
@@ -71,11 +72,7 @@ pub const Table = struct {
     }
 
     fn ensureArena(self: *Table, allocator: std.mem.Allocator) !std.mem.Allocator {
-        if (self.arena_ptr) |ap| return ap.allocator();
-        const ap = try allocator.create(std.heap.ArenaAllocator);
-        ap.* = std.heap.ArenaAllocator.init(allocator);
-        self.arena_ptr = ap;
-        return ap.allocator();
+        return arena_util.ensureLazyArena(&self.arena_ptr, allocator);
     }
 
     fn putNameTex(self: *Table, allocator: std.mem.Allocator, name: []const u8, tex: u64) !void {

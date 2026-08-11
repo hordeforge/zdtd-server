@@ -3,6 +3,7 @@
 //! rather than AssignIds. Import `assets/blocks_nim.zig` only (not world).
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const max_entries: usize = 4096;
@@ -54,8 +55,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
     const count = std.mem.readInt(u32, data[4..8], .little);
     if (count > max_entries) return error.TooMany;
 
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

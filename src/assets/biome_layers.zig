@@ -4,6 +4,7 @@
 //! ordinals.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("maxdamage.zig");
@@ -618,8 +619,7 @@ pub fn loadFromPath(
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

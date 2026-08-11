@@ -5,6 +5,7 @@
 //! journal can progress kills / goto / trader interact without a full POI graph.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("xml_util.zig");
 const quest = @import("../ecs/quest.zig");
@@ -542,8 +543,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
     const clean = try xml.stripComments(allocator, xml_src);
     defer allocator.free(clean);
 
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

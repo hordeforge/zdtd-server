@@ -1,6 +1,7 @@
 //! Minimal serverconfig.xml subset (port, max players, world name, password).
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 
@@ -270,8 +271,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     {
         return error.BadServerConfig;
     }
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

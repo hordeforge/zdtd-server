@@ -5,6 +5,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const arena_util = @import("../util/arena.zig");
 const blocks_nim = @import("blocks_nim.zig");
 
 /// Bundled V3.1.4 full client AssignIds dump (ZDTD_DUMP_BLOCK_IDS Postfix).
@@ -236,11 +237,7 @@ pub const Table = struct {
     }
 
     fn ensureArena(self: *Table, allocator: std.mem.Allocator) !std.mem.Allocator {
-        if (self.arena_ptr) |ap| return ap.allocator();
-        const ap = try allocator.create(std.heap.ArenaAllocator);
-        ap.* = std.heap.ArenaAllocator.init(allocator);
-        self.arena_ptr = ap;
-        return ap.allocator();
+        return arena_util.ensureLazyArena(&self.arena_ptr, allocator);
     }
 
     fn markStorageIfKnown(self: *Table, arena: std.mem.Allocator, id: u16, name: []const u8) !void {
@@ -507,8 +504,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
 
-    var arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
         allocator.destroy(arena_holder);

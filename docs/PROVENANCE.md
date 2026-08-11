@@ -204,6 +204,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/serverinfo_tcp.zig` | R | Stock ServerInformationTcpProvider: TCP on ServerPort serves GameServerInfo text. |
 | `src/server/webui.zig` | Z | Operator web UI HTTP listener (WU0–WU2: dashboard + console cmds). Loopback by default; shared secret required when enabled |
 | `src/server/zdtd_config.zig` | Z | zdtd.toml: operator tunables (Bucket B), not stock serverconfig. Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml > |
+| `src/util/arena.zig` | Z | Lazy/eager scratch-arena helpers shared by asset table loaders. |
 | `src/util/clock.zig` | Z | Monotonic nanoseconds and best-effort sleep. |
 | `src/util/io_fs.zig` | Z | Thin wrappers around Zig 0.16 `std.Io` for one-shot FS ops. Ordinary file/dir work goes through here or `std.Io` directly, never |
 | `src/util/log.zig` | Z | Logging for the zdtd process: boot banners, warnings and errors. |
