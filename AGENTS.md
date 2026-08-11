@@ -97,6 +97,11 @@ The operating principles behind every rule below. When in doubt, these decide.
     `world_enabled`. Confusing names are defects.
 14. **One stock package shape → one builder.** No second "almost stock" encoder.
 15. **Do not hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md).
+    Every src file must have a provenance row in [`docs/PROVENANCE.md`](docs/PROVENANCE.md)
+    (bucket A stock-data / R RE-cited / Z zdtd-owned + source). The
+    `tools/provenance_scan.py` gate in `make check` fails on a new file
+    without a row or a row without a bucket/source; add the row with the
+    change.
     Anything stock ships in `Data/Config`, prefabs, DTM, TTS, XML catalogs, or
     other install files must be **read from those assets** (runtime via
     `game-dir` / `assets/*`, or **comptime** embed/parse that generates tables).
