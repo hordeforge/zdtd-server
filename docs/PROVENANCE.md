@@ -250,7 +250,8 @@ Coverage targets, all enforced by the scan:
 | `src/world/tts.zig` | R | Stock prefab `.tts` block paint (Prefab.readBlockData, V3.x file version 19). |
 | `src/world/vending.zig` | Z | World-position keyed vending machine tile entities (TileEntityVendingMachine). |
 | `src/world/water.zig` | R | Stock water_info.xml point sources (used as local water-table hints) |
-| `src/world/weather.zig` | R | Stock WeatherManager storm / bloodMoon state machine, server side. |
+| `src/world/weather.zig` | R | Stock WeatherManager storm / bloodMoon state machine, server side. Live-verified 2026-08-12: stock `weather` telnet dump shows the 5-slot param vector (Temperature/Precipitation/CloudThickness/Wind/Fog) per biome, `default` group, no storms in the day-1 grace (worldTime < 22000), and `weather clouds N` drives forceClouds (value/100) -> GetCloudThickness. |
+| `src/world/weather.zig` storm schedule | R | `update_interval_ticks = 5` matches stock `BiomeWeather.ServerTimeUpdate` cadence; storm_state 0/1/2 (clear/stormbuild/storm) matches stock `BiomeWeather.stormState`. |
 | `src/world/workstations.zig` | Z | World-position keyed workstation state (forge/campfire/workbench TE 12). Slots mirror TileEntityWorkstation arrays; craft tick advances the queue |
 | `src/world/worldgen.zig` | R | On-the-fly procedural chunk generation (W0/W1/W2). Pure function of (seed, chunkX, chunkZ): no full-map bake, no global RNG |
 ## 3. Constants ledger (behavioral values)
