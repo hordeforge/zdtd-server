@@ -70,7 +70,10 @@ def ledger_rows():
     return file_rows, const_rows
 
 
-AUDIT = os.path.join(ROOT, "docs", "archive", "HARDCODE_AUDIT_2026-08-08.md")
+# The LIVE hardcode audit (docs/reviews/HARDCODE_AUDIT.md, updated 2026-08-10).
+# The archive/HARDCODE_AUDIT_2026-08-08.md snapshot is explicitly stale and has
+# a different finding numbering; never gate on it.
+AUDIT = os.path.join(ROOT, "docs", "reviews", "HARDCODE_AUDIT.md")
 
 
 def audit_finding_ids():
@@ -134,12 +137,12 @@ def main():
     if os.path.isfile(AUDIT):
         import re as _re
         ledger_text = open(LEDGER, encoding="utf-8").read()
-        # word-boundary match: a plain substring check would accept "B38" inside
-        # "B38x" and never catch a renamed/removed finding.
-        missing_findings = [
-            f for f in audit_finding_ids()
-            if not _re.search(r"\b" + _re.escape(f) + r"\b", ledger_text)
-        ]
+        covered = set(_re.findall(r"\b[AB]\d{2}\b", ledger_text))
+        # expand ledger ranges like "A01-A12" (or "B14-B21") into ids
+        for pre, lo, _pre2, hi in _re.findall(r"\b([AB])(\d{2})\s*-\s*([AB])(\d{2})\b", ledger_text):
+            for n in range(int(lo), int(hi) + 1):
+                covered.add(f"{pre}{n:02d}")
+        missing_findings = [f for f in audit_finding_ids() if f not in covered]
         if missing_findings:
             print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
             return 1

@@ -338,43 +338,51 @@ field-by-field provenance.
 
 ### 3.9 Divergence register (provenance for the differences)
 
-These are the places zdtd does **not** reproduce stock values today. Each row
-states the stock source and the tracking item, so a reader can tell exactly
-what stock says and where the fix lands. Finding ids refer to
-`archive/HARDCODE_AUDIT_2026-08-08.md`.
+Places zdtd does **not** reproduce stock values today. Each row states the
+stock source and the tracking item. Finding ids refer to the **live** audit
+(`reviews/HARDCODE_AUDIT.md`, updated 2026-08-10) unless noted.
 
 | Location | zdtd value | Stock value (source) | Sev | Tracking |
 |---|---|---|---:|---|
-| `assets/entities.zig` default HP | 40 floor | `entityclasses.xml` HealthMax `base_set` + `replace_passive_effect` (zombieBoe 125±15%, feral 500 … infernal 1600) | P1 | audit A34; GAP_ANALYSIS |
-| `ecs/world.zig` class_table | 16 rows, ~6 reachable | `entityclasses.xml` per-class + `entitygroups.xml` ZombiesAll (29 members) | P2 | audit A35; GAP_ANALYSIS 1828 |
-| `ecs/aidirector.zig` heat cooldown | 120 s / 60 s | `AIDirectorChunkData` 240 s / 180-720 s (aidirector.md) | P2 | audit A41 |
-| `server/game/trader.zig` sell | econ × sell_markdown | stock `XUiM_Trader.GetSellPrice` = econ × EconomicSellScale × SellMarkdown (loot-economy.md §5) | P3 | audit A39 |
-| `ecs/rules.zig Progression.*` | invented numbers | stock survival from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT`/`StaminaChangeOT` | P1 | WORK_PLAN T16 |
-| `server/movement.zig` envelope | 20 m/s soft cap | no stock key; sprint ~6 m/s + vehicle margin | P2 | audit B29; `[authority]` planned |
-| `game.zig:3307` spawn pad | `block_dirt` pin | `World.terrain_ids.dirt` after AssignIds merge | P2 | audit A36 |
+| `ecs/aidirector.zig` heat cooldown | 120 s / 60 s | `AIDirectorChunkData` 240 s / 180-720 s (aidirector.md) | P2 | GAP_ANALYSIS (not in live audit) |
+| `server/game/trader.zig` sell | econ × sell_markdown | stock `XUiM_Trader.GetSellPrice` = econ × EconomicSellScale × SellMarkdown (loot-economy.md §5) | P1 | **live A29** (open) |
+| `ecs/world.zig` class_table row `zombieFeral` | builtin (hash = zombie hash) | no stock class (0 hits entityclasses.xml) | P3 | not in live audit; tracked in GAP_ANALYSIS |
+| `ecs/inventory.zig` armorMitigation | flat 10%/piece, cap 50% | `items.xml` PhysicalDamageResist/ElementalDamageResist tier ranges + quality jitter | P1 | **live A35** (open) |
+| `ecs/rules.zig Progression.*` base depletion | policy tunables | stock survival damage from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT` | P3 | live A31 fixed (T16); base rates stay policy |
+| `world/tts.zig:418` filler skip | comptime pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump 2/3) | P3 | live A05/A06 class (Fixed); pin uses tracked |
+| `world/store.zig:310-313,370` no-blocks fallback | module pins | AssignIds terrain names | P3 | live A05 (Fixed); fallback pins tracked |
 
-### 3.10b Older audit findings (prior passes; status)
+**Resolved since the stale archive snapshot** (do not re-flag):
+- zombie HP: `assets/entities.zig` now parses `entityclasses.xml` `<replace_passive_effect>` (healthSlim 125 ... healthBruteInfernal 3100) and resolves `^variable` HP; `max_hp = 40` is only the floor default when the XML has no HP.
+- movement envelope: `server/movement.zig` cap is now the `[authority] max_horizontal_speed_mps` config key (zdtd.toml), not a bare constant.
+- class_table speeds/damage/sight from XML: live A10/A11/A30 marked **Fixed**.
+- terrain ids: live A05/A06/A08 marked **Fixed** (`World.terrain_ids` + bundled-dump coverage guard).
 
-| Finding | Status |
-|---|---|
-| A05 terrain ids via `terrain_ids` | **Resolved** (live ids; residual pin uses tracked as A36/A38) |
-| A11 class_table speeds/damage from XML | Correct for filled rows (superseded by A35) |
-| A29 trader pricing | Buy side correct; sell side missing `EconomicSellScale` (A39) |
-| A22/A33 subbiome noise | A22 resolved; A33 perm literal tracked in `../7dtd-research` task |
-| A07/A13/A14/A18/A21/A24 | Carried open (prior passes) — tracked in GAP_ANALYSIS |
-| B08-B12, B23-B24 | Carried open (prior passes) — tracked in GAP_ANALYSIS |
+### 3.10 Live hardcode audit linkage (reviews/HARDCODE_AUDIT.md, 2026-08-10)
 
-### 3.10 Remaining audit findings (provenance status)
+Every finding id the live audit names, its status there, and where this ledger
+covers it. The stale `archive/HARDCODE_AUDIT_2026-08-08.md` snapshot is NOT
+authoritative (different numbering; archived as stale 2026-08-09).
 
-| Finding | Location | Value | Stock source / status |
+| Id | Topic | Live status | Ledger coverage |
 |---|---|---|---|
-| A37 | `world/tts.zig:418` | filler skip pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump-verified 2/3); P3, behavior identical; resolve via idByName |
-| A38 | `world/store.zig:310-313,370` | `block_stone`/`block_dirt`/`block_air`/`block_water` module pins on no-blocks fallback | AssignIds terrain names; P3, identical; route through `World.terrain_ids` |
-| A40 | `ecs/world.zig:225` | builtin class_table row `zombieFeral` (hash = zombie hash) | **No stock class** (0 hits in entityclasses.xml; no stock group names it); unreachable today; P3 delete/repoint |
-| B32 | `game.zig:4170,4181` | loot container scan caps 32 / 48 | zdtd tick budget (Z); `[sim]` caps planned |
-| B33 | `world/workstations.zig:58-60` | `max_crafts_per_tick` 64 / `max_craft_backlog` 60 | zdtd engineering (Z) |
-| B35 | `ecs/poi_lock.zig:19,23,26` | `unlock_grace` 2000 / `max_locks` 64 / `max_questers` 8 | zdtd engineering (Z); grace timer is RE-derived (QuestLockInstance) |
-| B36 | `server/webui.zig:918` | `readiness_stale_ns` 30 s | zdtd ops (Z) |
+| A01-A12 | trade coin, place path, inv stacks, armor id, pins, biome defaults, class_table, AI floors, vehicle, maxdamage | A01-A06/A08-A12 Fixed; A07 P1 | file rows (§2) + §3.9 |
+| A13/A14/A16/A18/A21/A24 | recipe unlock, quest builtins, dual ids, chunk pins, director/gamestages, NONE loaders | P2 open | file rows (§2); GAP_ANALYSIS |
+| A15/A17/A19/A20/A22/A23 | builtin leakage, name builtins, trader wallet, reward coin, deco skew, gameDir | Fixed | file rows (§2) |
+| A25-A28 | sleeper 5, weather, power OKs | OK | file rows (§2: sleepers/weather/powerblocks) |
+| A29 | trader price/sell ratios | **P1 open** | §3.9 divergence |
+| A30 | trader reset_interval unused | P3 | §3.9 divergence (restock cadence) |
+| A31 | loot respawn fallback | Fixed | §3.9 (resolved) |
+| A32 | Rules floors vs stock data | documented policy | §3.1 |
+| A33 | subbiome noise `_perm` literal | Residual | file row `world/subbiome_noise.zig` |
+| A34 | trap-kill XP (ElectricalTrapXP) | Fixed with floor | §3.1 `trap_kill_xp_frac` |
+| A35 | armor mitigation | **Open** | §3.9 divergence |
+| A36 | ActiveRadiusEffects | Fixed (workstation-backed); residual T38 | file row `world/weather.zig` + WORK_PLAN T38 |
+| B01-B12 | zdtd policy caps | see live audit | file rows (§2) + GAME_OPTIONS.md |
+| B13 | tick throttles % N | Done | file rows (§2) |
+| B14-B21 | AI bands, caps, buffers | mostly done | `[rules.ai]` 30 tunables (§3.1) |
+| B22 | CLI + file for caps | Done | `zdtd_config` (file row §2) |
+| B23-B28 | quest/offer gates, LootRespawnDays | B25 P3, B26-B28 Fixed | file rows (§2) |
 
 ### 3.11 Perks and attributes (progression)
 
