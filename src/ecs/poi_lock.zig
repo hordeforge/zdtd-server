@@ -96,7 +96,21 @@ pub const Table = struct {
             }
             self.remove(i);
         }
-        if (self.n >= max_locks) return false;
+        if (self.n >= max_locks) {
+            // Table full for a *different* rect: reclaim the first expired
+            // entry rather than refusing new locks forever once every slot
+            // has been touched once (nothing else ever sweeps this table).
+            var reclaimed = false;
+            var i: usize = 0;
+            while (i < self.n) : (i += 1) {
+                if (self.entries[i].expired(world_time)) {
+                    self.remove(i);
+                    reclaimed = true;
+                    break;
+                }
+            }
+            if (!reclaimed) return false;
+        }
         self.entries[self.n] = .{ .rect = rect, .locked = true };
         self.entries[self.n].addQuester(entity_id);
         self.n += 1;
