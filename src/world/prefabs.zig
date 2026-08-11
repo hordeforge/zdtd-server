@@ -714,6 +714,21 @@ fn fillSizesFromTts(idx: *Index) !void {
 /// Local stock install; tests needing real POI/Parts data skip when absent.
 const stock_prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
 
+/// Test-only paint callback counting non-zero blocks written to a chunk.
+const TestPaintCount = struct {
+    n: usize = 0,
+    fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+        _ = wx;
+        _ = wy;
+        _ = wz;
+        _ = tex;
+        _ = dens;
+        if (raw == 0) return;
+        const c: *@This() = @ptrCast(@alignCast(ctx.?));
+        c.n += 1;
+    }
+};
+
 test "parse decoration line" {
     const xml =
         \\<prefabs>
@@ -871,22 +886,9 @@ test "navezgane paints a real POI into its chunk" {
     var idx = try loadFromWorldDir(std.testing.allocator, world_dir, prefab_root);
     defer idx.deinit();
 
-    const Count = struct {
-        n: usize = 0,
-        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
-            _ = wx;
-            _ = wy;
-            _ = wz;
-            _ = tex;
-            _ = dens;
-            if (raw == 0) return;
-            const c: *@This() = @ptrCast(@alignCast(ctx.?));
-            c.n += 1;
-        }
-    };
-    var c: Count = .{};
+    var c: TestPaintCount = .{};
     // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
-    idx.applyTtsPaintToChunk(-17, 28, 0, Count.put, &c);
+    idx.applyTtsPaintToChunk(-17, 28, 0, TestPaintCount.put, &c);
     try std.testing.expect(c.n > 0);
 }
 
@@ -1030,21 +1032,8 @@ test "part decoration paints its blocks into the chunk" {
         \\<prefabs><decoration type="model" name="part_5m_water_tower" position="100,60,100" rotation="0" /></prefabs>
     , prefab_root);
     defer idx.deinit();
-    const Count = struct {
-        n: usize = 0,
-        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
-            _ = wx;
-            _ = wy;
-            _ = wz;
-            _ = tex;
-            _ = dens;
-            if (raw == 0) return;
-            const c: *@This() = @ptrCast(@alignCast(ctx.?));
-            c.n += 1;
-        }
-    };
-    var c: Count = .{};
-    idx.applyTtsPaintToChunk(6, 6, 0, Count.put, &c); // chunk x96..112 overlaps the part
+    var c: TestPaintCount = .{};
+    idx.applyTtsPaintToChunk(6, 6, 0, TestPaintCount.put, &c); // chunk x96..112 overlaps the part
     try std.testing.expect(c.n > 0);
 }
 
