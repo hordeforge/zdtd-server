@@ -96,7 +96,7 @@ source; a file without a row, or a row without a bucket/source, fails the gate.
 | `src/ecs/group.zig` | Z | Cached per-Kind dense slot lists (entt-style non-owning groups). |
 | `src/ecs/interest.zig` | Z | Spatial interest: grid cells → nearby players for replication. M11: dirty gating helpers for serialize-once fan-out (encode once, memcpy per peer) |
 | `src/ecs/inv_ledger.zig` | Z | P4 inv cause ledger: fixed ring of recent inventory mutations (no heap) |
-| `src/ecs/inventory.zig` | R | Inventory systems: move/drop/hold/use/open-container transactions |
+| `src/ecs/inventory.zig` | R | Inventory systems: move/drop/hold/use/open-container transactions (RE: items.md inventory + protocol-packages.md InventoryTransaction wire; c2s/inv.zig handler) |
 | `src/ecs/jobs.zig` | Z | Thin jobs helper: run work over a slot range and wait. Wraps util/parallel (persistent pool). No heap; serial when pool unavailable |
 | `src/ecs/locals.zig` | Z | Named tick scratch on World. No file-static mutables for sim. Cleared once per tick via World.beginTick / schedule.run |
 | `src/ecs/observers.zig` | Z | Fixed on_spawn / on_death listener table. Cap 4. No heap. World fires via fireSpawn / fireDeath; listeners must not spawn/destroy |
@@ -118,7 +118,7 @@ source; a file without a row, or a row without a bucket/source, fails the gate.
 | `src/litenet/peer.zig` | R | Per-endpoint reliable-ordered channel (LiteNetLib-compatible subset). Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing |
 | `src/litenet/root.zig` | R | LiteNetLib-compatible UDP transport (peers, packets, std.Io.net UDP). |
 | `src/litenet/server.zig` | R | UDP LiteNetLib-compatible server (accept + reliable user data) |
-| `src/litenet/udp_socket.zig` | R | UDP socket via Zig 0.16 `std.Io.net` (no raw `std.os.linux` syscalls). Non-blocking poll: zero-duration Timeout → WouldBlock/Timeout |
+| `src/litenet/udp_socket.zig` | Z | UDP socket via Zig 0.16 `std.Io.net` (no raw `std.os.linux` syscalls). Non-blocking poll: zero-duration Timeout → WouldBlock/Timeout |
 | `src/main.zig` | Z | zdtd: Zig dedicated server for 7 Days to Die (client wire). Run `zdtd --help` for CLI options and precedence |
 | `src/plugin/api.zig` | Z | Static plugin hook types for in-tree test scaffolding only (ADR 0020). Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping |
 | `src/plugin/host.zig` | Z | Static plugin host: fixed table, ordered enable/tick/join/shutdown. No dynlib, no Wasm, no heap on the tick path |
@@ -126,7 +126,7 @@ source; a file without a row, or a row without a bucket/source, fails the gate.
 | `src/plugin/sample_hello.zig` | Z | In-tree sample static plugin: logs once on enable |
 | `src/plugin/wasm.zig` | Z | Wasm plugin runtime (ADR 0020, zwasm v2): load a .wasm module, instantiate it under fuel and memory budgets, register the minimal host import table, |
 | `src/protocol.zig` | R | Wire constants from ../../7dtd-research/docs/protocol.md (V3.x loadgen golden; wire pin V3.1.0). Package IDs are dynamic (PackageIds map); never hard- |
-| `src/server/admin.zig` | R | Minimal TCP admin console (telnet-like): one command line per connection. Listen/accept via `util/tcp_listen` (std.Io.net); no std.os.linux |
+| `src/server/admin.zig` | Z | Minimal TCP admin console transport (telnet-like): one command line per connection. Listen/accept via `util/tcp_listen` (std.Io.net); no std.os.linux |
 | `src/server/admin_cmds.zig` | R | Stock telnet console output shapes and the persistent operator lists. |
 | `src/server/admin_console.zig` | R | Operator console surface: admin TCP + webui command handling, the stock telnet reply shapes, persistent operator lists, and the guard/gamestage |
 | `src/server/ally.zig` | R | Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`). |
