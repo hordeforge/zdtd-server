@@ -31,6 +31,19 @@ CONST_ROW = re.compile(
 
 
 def src_files():
+    """Tracked src files only: CI has a clean checkout, so provenance coverage
+    is defined over committed code. Untracked in-progress files (e.g. a
+    concurrent agent's scratch) must not flake the gate locally."""
+    try:
+        import subprocess
+        listed = subprocess.run(
+            ["git", "-C", ROOT, "ls-files", "src/**/*.zig", "src/*.zig"],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        if listed:
+            return sorted(set(listed))
+    except Exception:
+        pass
     out = set()
     for dirpath, _dirs, names in os.walk(SRC):
         for n in names:
