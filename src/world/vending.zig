@@ -125,7 +125,10 @@ pub const VendingStore = struct {
         if (self.get(pos)) |v| return v;
         for (&self.items, 0..) |*v, i| {
             if (!self.used[i]) {
-                v.clear();
+                // Full reset: a freed slot may carry a previous machine's
+                // stock/ownership at a different position (clear() only
+                // wipes ownership for the ClearVendingMachine in-place op).
+                v.* = .{};
                 v.pos = pos;
                 v.block_id = block_id;
                 v.trader_id = trader_id;
@@ -154,8 +157,12 @@ pub const VendingStore = struct {
     // full TraderData-ish state (stock rows, ownership, password, rental).
 
     const magic = "ZVNM";
-    /// Worst case: 128 machines x (48 stock rows x 10 + fixed ~150) fits here.
-    const save_capacity: usize = 128 * (48 * 10 + 200);
+    /// Worst-case per-record size: pos/block/trader/money (24) + stock_n (1) +
+    /// stock rows (48*10) + is_locked (1) + owner UserRef (82) + password_len
+    /// (1) + password hash (64) + allowed_n (1) + allowed UserRefs (8*82) +
+    /// rental_end_day/rentable/next_auto_buy (13) = 1323 bytes.
+    const max_record_bytes: usize = 24 + 1 + max_vending_stock * 10 + 1 + 82 + 1 + max_password_hash + 1 + max_allowed_users * 82 + 13;
+    const save_capacity: usize = max_vending * max_record_bytes;
 
     fn writeUserRef(buf: []u8, o: *usize, u: UserRef) bool {
         if (o.* + 1 + max_platform_len + 1 + max_id_len > buf.len) return false;
