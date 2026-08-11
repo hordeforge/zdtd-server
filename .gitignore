@@ -57,3 +57,7 @@ package-lock.json
 
 # semcode index (rebuild with `semcode-index -s .`; not a product input)
 .semcode.db/
+
+# Python tooling (tools/*.py)
+__pycache__/
+*.pyc
