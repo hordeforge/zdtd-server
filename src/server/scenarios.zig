@@ -4141,7 +4141,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
     const gs = try packages.buildGameStatsBodyValues(&gs_buf, g.gameStatsValues());
     try std.testing.expect(std.mem.find(u8, gs, "AAAJABJACJADJARFBNC") != null);
 
-    // 0 disables storms (weather-env.md: World.StormFrequency == 0).
+    // 0 disables storms (weather-environment.md: World.StormFrequency == 0).
     const g2 = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .storm_frequency = 0, .config_dir = "assets/fixtures" });
     defer {
         g2.deinit();

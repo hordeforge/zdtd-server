@@ -151,7 +151,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect")) {
-        // Stock quit signal (extends PlayerData: entity id, netpackages.md).
+        // Stock quit signal (extends PlayerData: entity id, protocol-packages.md
+        // NetPackagePlayerDisconnect).
         // Take the same removal path as the transport peer-death poll, but
         // immediately and after saving, so a quit is never lost to the
         // autosave interval. Accept only the sender's own entity.
