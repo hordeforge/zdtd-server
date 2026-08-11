@@ -33,8 +33,10 @@ pub const TerrainSource = enum {
 pub const chunk_size: i32 = 16;
 /// Stock chunk Y dim 256 (WorldConstants ChunkBlockYDim; stock_facts block_y_dim).
 pub const y_dim: i32 = 256;
-/// Default empty-world height (zdtd constant). Stock ships WorldConstants.WaterLevel;
-/// its numeric is not corpus-pinned - verify against a stock world before treating 64 as stock.
+/// Default empty-world height (zdtd constant). Stock WorldConstants.WaterLevel =
+/// Block.cWaterLevel = **62.88** (IL: Block.cctor ldc.r4 62.88; WorldConstants cctor
+/// reads it). zdtd's u8 64 diverges by +1.12 and cannot hold the fraction - tracked
+/// in the divergence register.
 pub const sea_level: u8 = 64;
 // Stock AssignIds via bundled dump (never terrainFiller=2 as painted surface).
 // Module pins = offline/test defaults. Live server prefers World.terrain_ids

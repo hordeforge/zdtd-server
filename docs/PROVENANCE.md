@@ -355,6 +355,7 @@ stock source and the tracking item. Finding ids refer to the **live** audit
 | `ecs/rules.zig Progression.*` base depletion | policy tunables | stock survival damage from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT` | P3 | live A31 fixed (T16); base rates stay policy |
 | `world/tts.zig:418` filler skip | comptime pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump 2/3) | P3 | live A05/A06 class (Fixed); pin uses tracked |
 | `world/store.zig:310-313,370` no-blocks fallback | module pins | AssignIds terrain names | P3 | live A05 (Fixed); fallback pins tracked |
+| `world/store.zig` sea_level | 64 (u8) | stock `WorldConstants.WaterLevel` = `Block.cWaterLevel` = **62.88** (IL: Block.cctor ldc.r4 62.88) | P3 | divergence: +1.12 and u8 cannot hold the fraction |
 
 **Resolved since the stale archive snapshot** (do not re-flag):
 - zombie HP: `assets/entities.zig` now parses `entityclasses.xml` `<replace_passive_effect>` (healthSlim 125 ... healthBruteInfernal 3100) and resolves `^variable` HP; `max_hp = 40` is only the floor default when the XML has no HP.
