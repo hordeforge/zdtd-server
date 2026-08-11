@@ -178,8 +178,17 @@ def main():
             print("  " + c)
         return 1
 
+    # extra = ledger rows whose src file does not exist in the working tree at
+    # all (a genuinely stale row). Rows for untracked-but-present files (a
+    # concurrent agent mid-commit) are tolerated, matching the tracked-only
+    # treatment of the missing direction.
+    worktree_files = set(files)
+    for dirpath, _dirs, names in os.walk(SRC):
+        for n in names:
+            if n.endswith(".zig"):
+                worktree_files.add(os.path.relpath(os.path.join(dirpath, n), ROOT))
     missing = sorted(set(files) - set(file_rows))
-    extra = sorted(set(file_rows) - set(files))
+    extra = sorted(set(file_rows) - worktree_files)
     bad_bucket = [p for p, (b, _s) in file_rows.items() if b not in BUCKETS]
     empty_source = [p for p, (_b, s) in file_rows.items() if not s]
 
@@ -193,8 +202,9 @@ def main():
     if empty_source:
         failures.append(f"rows without source citation: {empty_source}")
 
-    cov = 100.0 * len(file_rows) / len(files) if files else 100.0
-    print(f"file coverage: {len(file_rows)}/{len(files)} = {cov:.1f}%")
+    covered = len(set(files) & set(file_rows))
+    cov = 100.0 * covered / len(files) if files else 100.0
+    print(f"file coverage: {covered}/{len(files)} = {cov:.1f}%")
 
     # Constants ledger well-formedness: anchor file must exist, bucket valid, source non-empty.
     bad_const = []
