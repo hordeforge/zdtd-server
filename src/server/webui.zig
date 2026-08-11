@@ -265,6 +265,19 @@ pub const Server = struct {
         return clock.monoNs() < self.login_lock_until_ns;
     }
 
+    /// Whole seconds until `login_lock_until_ns`, rounded up (never advertise
+    /// less wait than actually remains). 0 once unlocked. Used so a lockout
+    /// page loaded partway through the window (reload, second tab, the page's
+    /// own "Try signing in again" link) shows the real remaining wait instead
+    /// of restarting a fresh count from `login_lockout_ns` every time.
+    fn lockoutRemainingS(self: *const Server) u32 {
+        if (self.login_lock_until_ns == 0) return 0;
+        const now = clock.monoNs();
+        if (now >= self.login_lock_until_ns) return 0;
+        const remain_ns = self.login_lock_until_ns - now;
+        return @intCast((remain_ns + std.time.ns_per_s - 1) / std.time.ns_per_s);
+    }
+
     fn noteLoginFailure(self: *Server) void {
         self.login_fails +|= 1;
         if (self.login_fails >= login_fail_limit) {
@@ -458,8 +471,12 @@ pub const Server = struct {
                 }
                 // Show lockout on the form page so operators know why Sign in is refused.
                 if (self.loginLocked()) {
-                    try self.httpRespond(&req, .too_many_requests, "text/html; charset=utf-8", loginLockoutHtml(), &.{
-                        .{ .name = "Retry-After", .value = "30" },
+                    var lockout_buf: [4096]u8 = undefined;
+                    var retry_buf: [8]u8 = undefined;
+                    const remaining_s = self.lockoutRemainingS();
+                    const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
+                    try self.httpRespond(&req, .too_many_requests, "text/html; charset=utf-8", try renderLoginLockout(&lockout_buf, remaining_s), &.{
+                        .{ .name = "Retry-After", .value = retry_hdr },
                     });
                 } else {
                     try self.httpRespond(&req, .ok, "text/html; charset=utf-8", loginHintHtml(false), &.{});
@@ -472,8 +489,12 @@ pub const Server = struct {
                     return;
                 }
                 if (self.loginLocked()) {
-                    try self.httpRespond(&req, .too_many_requests, "text/html; charset=utf-8", loginLockoutHtml(), &.{
-                        .{ .name = "Retry-After", .value = "30" },
+                    var lockout_buf: [4096]u8 = undefined;
+                    var retry_buf: [8]u8 = undefined;
+                    const remaining_s = self.lockoutRemainingS();
+                    const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
+                    try self.httpRespond(&req, .too_many_requests, "text/html; charset=utf-8", try renderLoginLockout(&lockout_buf, remaining_s), &.{
+                        .{ .name = "Retry-After", .value = retry_hdr },
                     });
                     return;
                 }
@@ -517,8 +538,10 @@ pub const Server = struct {
             const presented = headerFromReq(&req, "Authorization") != null or headerFromReq(&req, "X-Zdtd-Secret") != null;
             if (presented) {
                 if (self.loginLocked()) {
+                    var retry_buf: [8]u8 = undefined;
+                    const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{self.lockoutRemainingS()}) catch "30";
                     try self.httpRespond(&req, .too_many_requests, "text/plain; charset=utf-8", "too many failed sign-ins; try again shortly\n", &.{
-                        .{ .name = "Retry-After", .value = "30" },
+                        .{ .name = "Retry-After", .value = retry_hdr },
                     });
                     return;
                 }
@@ -1300,8 +1323,19 @@ fn loginHintHtml(bad_token: bool) []const u8 {
 }
 
 /// Temporary lockout after too many failed sign-ins (same form chrome as login).
+/// Raw template (placeholder unsubstituted); structural tests read this.
 fn loginLockoutHtml() []const u8 {
     return login_lockout_html;
+}
+
+/// Lockout page with the actual remaining wait substituted in, so the visible
+/// countdown and the Retry-After header agree with `login_lock_until_ns`.
+fn renderLoginLockout(buf: []u8, remaining_s: u32) ![]const u8 {
+    var s_buf: [8]u8 = undefined;
+    const s = std.fmt.bufPrint(&s_buf, "{d}", .{remaining_s}) catch unreachable;
+    return renderTemplate(buf, login_lockout_html, &.{
+        .{ .key = "__ZDTD_RETRY_S__", .val = s },
+    });
 }
 
 const Subst = struct { key: []const u8, val: []const u8 };
@@ -1355,6 +1389,23 @@ test "renderTemplate leaves an unknown placeholder in place" {
     var buf: [64]u8 = undefined;
     const out = try renderTemplate(&buf, "a __ZDTD_NOPE__ b", &.{});
     try std.testing.expectEqualStrings("a __ZDTD_NOPE__ b", out);
+}
+
+test "renderLoginLockout substitutes the real remaining seconds" {
+    var buf: [4096]u8 = undefined;
+    const out = try renderLoginLockout(&buf, 7);
+    try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
+    try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\" aria-live=\"off\">7<") != null);
+    try std.testing.expect(std.mem.find(u8, out, "let remaining=7;") != null);
+}
+
+test "lockoutRemainingS counts down and clamps at zero" {
+    var s: Server = .{};
+    try std.testing.expectEqual(@as(u32, 0), s.lockoutRemainingS());
+    s.login_lock_until_ns = clock.monoNs() + 5 * std.time.ns_per_s;
+    try std.testing.expect(s.lockoutRemainingS() >= 4 and s.lockoutRemainingS() <= 5);
+    s.login_lock_until_ns = clock.monoNs() -% std.time.ns_per_s; // already past
+    try std.testing.expectEqual(@as(u32, 0), s.lockoutRemainingS());
 }
 
 /// `csrf_token` must be the HMAC session token (not the shared secret).

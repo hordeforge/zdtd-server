@@ -13,7 +13,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(-
 @media(forced-colors:active){:root{--bg:Canvas;--sunken:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--edge:ButtonText;--warn:Highlight;--err:MarkText}body{background:Canvas;color:CanvasText}a{color:LinkText}input[type=password],button{border:1px solid ButtonText}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid Highlight;outline-offset:3px}.err{color:MarkText;background:Mark}}
 </style></head>
 <body><main><h1>zdtd</h1><p class="meta">webui · sign in</p>
-<p id="login-err" class="err" role="alert" tabindex="-1">Too many failed sign-ins. Try again in <span id="retry-seconds" aria-live="off">30</span> seconds.</p>
+<p id="login-err" class="err" role="alert" tabindex="-1">Too many failed sign-ins. Try again in <span id="retry-seconds" aria-live="off">__ZDTD_RETRY_S__</span> seconds.</p>
 <form method="post" action="/login" aria-describedby="login-err">
 <label for="login-token">Shared secret</label>
 <input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-invalid="true" aria-describedby="login-err login-help" disabled>
@@ -22,5 +22,5 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(-
 <p><a href="/login">Try signing in again</a>. This page will refresh when the wait is over.</p>
 <p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main>
-<script>const message=document.getElementById('login-err');const seconds=document.getElementById('retry-seconds');message.focus();let remaining=30;const countdown=setInterval(()=>{remaining-=1;seconds.textContent=String(remaining);if(remaining<=0){clearInterval(countdown);window.location.replace('/login');}},1000);</script>
+<script>const message=document.getElementById('login-err');const seconds=document.getElementById('retry-seconds');message.focus();let remaining=__ZDTD_RETRY_S__;const countdown=setInterval(()=>{remaining-=1;seconds.textContent=String(remaining);if(remaining<=0){clearInterval(countdown);window.location.replace('/login');}},1000);</script>
 </body></html>
