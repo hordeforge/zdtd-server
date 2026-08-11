@@ -434,9 +434,6 @@ pub const World = struct {
         // Turrets own a consumer power node; drop it or it draws load forever.
         // By id: two turrets can share a cell, and removeAt would take the wrong one.
         if (self.mask[slot].turret) _ = self.power.removeById(self.turret[slot].power_node);
-        self.alive[slot] = false;
-        self.alive_bits.unset(slot);
-        self.freed_this_tick[slot] = true;
         self.mask[slot] = .{};
         self.dirty[slot] = .{};
         self.dirty_bits.unset(slot);
