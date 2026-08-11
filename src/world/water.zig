@@ -79,16 +79,13 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8) !Sources {
         const i = std.mem.find(u8, rest, "pos=\"") orelse break;
         var p = rest[i + 5 ..];
         search += i + 5;
-        // skip spaces
-        while (p.len > 0 and p[0] == ' ') p = p[1..];
+        p = std.mem.trimStart(u8, p, " ");
         const x = parseI32Prefix(p) orelse continue;
         const c1 = std.mem.findScalar(u8, p, ',') orelse continue;
-        p = p[c1 + 1 ..];
-        while (p.len > 0 and p[0] == ' ') p = p[1..];
+        p = std.mem.trimStart(u8, p[c1 + 1 ..], " ");
         const y = parseI32Prefix(p) orelse continue;
         const c2 = std.mem.findScalar(u8, p, ',') orelse continue;
-        p = p[c2 + 1 ..];
-        while (p.len > 0 and p[0] == ' ') p = p[1..];
+        p = std.mem.trimStart(u8, p[c2 + 1 ..], " ");
         const z = parseI32Prefix(p) orelse continue;
         pts[n] = .{ .x = x, .y = y, .z = z };
         n += 1;

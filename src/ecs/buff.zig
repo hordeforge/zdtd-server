@@ -57,8 +57,7 @@ pub fn add(
             // IL_013a: extend by whatever is left, floored at the class duration.
             .duration => {
                 const remaining = requested_duration - e.durationSeconds();
-                var max_secs = if (has_requested) requested_duration else def.duration;
-                if (remaining > max_secs) max_secs = remaining;
+                const max_secs = @max(if (has_requested) requested_duration else def.duration, remaining);
                 setDurationTicks(e, 0);
                 e.duration_max = max_secs;
             },

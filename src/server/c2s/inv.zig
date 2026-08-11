@@ -94,8 +94,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (sl.item_id == e.id) after_n += sl.count;
                 }
                 if (after_n >= e.n) continue;
-                var lost = e.n - after_n;
-                if (lost > units_left) lost = units_left;
+                const lost = @min(e.n - after_n, units_left);
                 var u: u32 = 0;
                 while (u < lost) : (u += 1) {
                     const props = eatProps(self, e.id);
@@ -107,8 +106,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
             // Path B: ECS aggregate drop vs baseline (only with known eat id).
             if (!ate_any and baseline_total > after_total and units_left > 0) {
-                var lost = baseline_total - after_total;
-                if (lost > units_left) lost = units_left;
+                const lost = @min(baseline_total - after_total, units_left);
                 var eid: u16 = first_eat_id;
                 if (eid == 0 and bn > 0) eid = before[0].id;
                 if (eid == 0 and body_eat.first_ecs != 0) eid = body_eat.first_ecs;
@@ -127,8 +125,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // Require a resolved eatable ecs id. Do not invent chili/beef/id=2 props
             // for unknown multi-unit losses (drop/trade false-eat under ADR 0007).
             if (!ate_any and c.last_eatable_units > body_eat.total and units_left > 0) {
-                var lost = c.last_eatable_units - body_eat.total;
-                if (lost > units_left) lost = units_left;
+                const lost = @min(c.last_eatable_units - body_eat.total, units_left);
                 var eid: u16 = body_eat.first_ecs;
                 if (eid == 0 and first_eat_id != 0) eid = first_eat_id;
                 if (eid == 0 and bn > 0) eid = before[0].id;

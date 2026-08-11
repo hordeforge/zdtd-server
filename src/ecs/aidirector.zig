@@ -38,9 +38,7 @@ pub const WorldClock = struct {
         var dusk: f32 = 22.0;
         if (dl > 22) dusk = @floatFromInt(dl);
         if (dl < 18) dusk = 12.0 + @as(f32, @floatFromInt(dl)) / 2.0;
-        var dawn: f32 = dusk - @as(f32, @floatFromInt(dl));
-        if (dawn < 0) dawn = 0;
-        if (dawn > 23) dawn = 23;
+        const dawn = std.math.clamp(dusk - @as(f32, @floatFromInt(dl)), 0, 23);
         self.dusk = dusk;
         self.dawn = dawn;
     }
