@@ -802,7 +802,7 @@ pub const World = struct {
     const dens_set_bytes: usize = (blocks_per_chunk + 7) / 8;
 
     /// Bounds-check a ZCH1/2/3 record for `pos` without mutating chunk state.
-    /// Used by loadChunk and fuzz harnesses for torn/corrupt save rejection.
+    /// Used by fuzz harnesses for torn/corrupt save rejection.
     pub fn validateChunkBytes(data: []const u8, pos: ChunkPos) !void {
         if (data.len < 12) return error.ReadFailed;
         if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {

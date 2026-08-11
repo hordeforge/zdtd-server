@@ -117,7 +117,9 @@ pub const Manager = struct {
     /// Console `clearweather`: end any active storm and push the next one a
     /// full in-game day out (the state machine resumes its own schedule after).
     pub fn clearStorm(self: *Manager, table: *const biome_layers.Table, world_time: i64) void {
-        _ = table; // every seeded state is storm-capable by construction here
+        _ = table; // storm-capability is already encoded in storm_world_time
+        // (null means storms disabled for this state, set at init); the null
+        // check below gates the loop instead of re-consulting table.
         const day_ticks: i64 = @as(i64, self.day_night_length) * 60 * self.time_of_day_inc_per_sec;
         var i: usize = 0;
         while (i < self.n) : (i += 1) {

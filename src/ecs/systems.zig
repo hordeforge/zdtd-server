@@ -766,12 +766,12 @@ pub fn traderRestock(w: *World) void {
 // coarse ZombieAi.state enum so downstream replication (game.zig EntitySpeeds/
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
-// Six real tasks: BreakBlock, DestroyArea, ApproachAndAttackTarget, Territorial,
-// ApproachSpot, Wander. Rest of stock EAI (Look, Dodge, Leap, RangedAttack, ...)
-// remains a gap (docs/GAP_ANALYSIS.md). BreakBlock/DestroyArea use mutex 0
-// so isBestTask allows them while Approach executes when path_blocked; movement
-// tasks still share bit 0. Collapsing executingTasks to one TaskId stays exact
-// for this set.
+// Nine real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
+// ApproachDistraction, Territorial, ApproachSpot, Look, Wander. Rest of stock EAI
+// (Dodge, Leap, RangedAttack, ...) remains a gap (docs/GAP_ANALYSIS.md).
+// BreakBlock/DestroyArea use mutex 0 so isBestTask allows them while Approach
+// executes when path_blocked; movement tasks still share bit 0. Collapsing
+// executingTasks to one TaskId stays exact for this set.
 //
 /// Comptime task table. Priority ascending == array order == stock XML AITask
 /// order == EAIManager::ParseTasks insertion order (asm.il:430620). Values

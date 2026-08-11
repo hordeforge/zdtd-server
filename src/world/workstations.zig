@@ -515,7 +515,8 @@ pub const WorkstationStore = struct {
     }
 
     /// Decode a ZWS1 buffer (magic | count | records). Corrupt records fail
-    /// loudly; a truncated lastInput/recipe blob reads only what is present.
+    /// loudly; a truncated or oversized lastInput/recipe blob is a hard error
+    /// (error.Truncated / error.BadRecord), never a partial read.
     pub fn loadFromSlice(self: *WorkstationStore, buf: []const u8) !void {
         if (buf.len < 6 or !std.mem.eql(u8, buf[0..4], "ZWS1")) return error.ReadFailed;
         const count = std.mem.readInt(u16, buf[4..6], .little);

@@ -326,7 +326,8 @@ pub const Index = struct {
         // 3422): the prefab file stores only the parent cell, so beds, tables,
         // double doors and gun safes rendered as a single walk-through cell.
         // Same offset list and child encoding as the deco mirror (blocks.xml
-        // MultiBlockDim, centered x/z, up in y). Children only fill air cells.
+        // MultiBlockDim, centered x/z, up in y). Children overwrite whatever
+        // the box cells already held (see AddAllChildBlocks note below).
         if (self.id_lookup) |lu| {
             const mb = lu.multiblock orelse return;
             // OOM here would silently drop every multi-block child for the POI.

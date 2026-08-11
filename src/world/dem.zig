@@ -150,8 +150,9 @@ pub const Anchor = struct {
     lon: f64,
 };
 
-/// Elevation (meters) → 7DTD block y. Sea level 60; 12m per block band above
-/// keeps Everest (~8850m) inside 0..255: y = 60 + elev/12 clamped.
+/// Elevation (meters) → 7DTD block y. Sea level 60, 12m per block band above;
+/// y = 60 + elev/12 clamped to [1, 250] (the clamp, not the 12m scale, is what
+/// keeps extremes like Everest ~8850m in range).
 pub fn elevToBlockY(elev_m: f32) u8 {
     if (std.math.isNan(elev_m)) return 60;
     const y = 60.0 + elev_m / 12.0;
