@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` is **0 MISSING** feature rows (all
-gameplay `WORKS` or explicitly waived `PARTIAL (waived)` with RE cite).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 329 features: 134 `WORKS`,
+142 `PARTIAL`, 53 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and

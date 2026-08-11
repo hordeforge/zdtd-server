@@ -19,7 +19,7 @@ That is **not** sibling `7dtd-apm` (stock Mono dedi).
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
 death/respawn, loot, craft/workstation, trade, persist; automated playtest
-**pass=83 fail=0** (20260804q; soft residuals in STATUS).
+**80-81 of 83 cases PASS** (2026-08-06; two known residual timing cases, see STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 ```bash

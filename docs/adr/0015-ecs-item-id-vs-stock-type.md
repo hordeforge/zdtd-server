@@ -19,7 +19,7 @@ wrong stock types cause dupe/ghost stacks and join PDF desync.
 ## Decision
 
 1. **Production authority** is stock names + AssignIds / `items.xml` order via
-   `ItemTable` (`idByName`, `stockTypeFor`, reverse map on C2S). Numeric wire
+   `ItemTable` (`ecsIdByName`, `stockTypeFor`, reverse map on C2S). Numeric wire
    types are never hard-coded as permanent outside fixtures.
 2. **ECS `item_id` is a local handle**, not a second catalog of game content:
    - With game-dir loaded: reverse map stock absolute type ↔ ECS id through the

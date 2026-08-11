@@ -82,7 +82,7 @@ Runtime selection is closed: **zwasm v2**, verified under Zig 0.16 on
 
 T9 landed 2026-08-06: `src/plugin/wasm.zig` loads `[plugin] modules` from
 zdtd.toml at init (zwasm v2 runtime, no WASI), registers the host import table
-(`zdtd_log` / `zdtd_tick` / `zdtd_queue`), and runs every hook under fuel and
+under the `zdtd` module namespace (`log` / `tick` / `queue`), and runs every hook under fuel and
 memory budgets (a looping module is disabled within one tick). The T15 event
 hooks (on_player_death / on_entity_killed / on_block_damage / on_quest_complete)
 and the admin/chat/login seams shipped 2026-08-07. Plugin authors write against
