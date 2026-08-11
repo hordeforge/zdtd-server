@@ -17,7 +17,9 @@ value-coverage gate scans the whole tree (test/fuzz/harness scaffolding
 excluded): each constant carries an inline provenance comment (stock source,
 RE cite, or explicit zdtd-owned marker). The 27 highlighted rows below are the
 behavioral values that diverge or carry the system's load; the gate covers
-everything else.
+everything else. Struct-field defaults carry block-level inline provenance
+(rules.zig per-field; LevelCurve/PerkDef/WorldClock/QuestDef/Turret blocks
+annotated); layout/position/id fields are structural and covered by the file row.
 
 Three buckets (from AGENTS.md rule 15 + the hardcode-audit method):
 

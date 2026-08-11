@@ -45,6 +45,9 @@ pub const PhaseSpec = struct {
     required: u16 = 1,
 };
 
+/// Quest catalog row defaults before quests.xml loads (stock XML wins at
+/// runtime). reward_coin / difficulty_tier / target_count mirror the stock
+/// quest template fields.
 pub const QuestDef = struct {
     id: u16,
     kind: QuestKind,

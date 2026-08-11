@@ -287,6 +287,9 @@ pub const Vehicle = struct {
     }
 };
 
+/// zdtd sim defaults for the Turret component. Stock turret stats ship in
+/// items.xml (turret item PassiveEffects: range, damage, magazine); not parsed
+/// today - divergence potential, tracked with the A-bucket loader gaps.
 pub const Turret = struct {
     range: f32 = 24,
     damage: f32 = 12,

@@ -3,6 +3,9 @@
 const std = @import("std");
 const ecs_world = @import("world.zig");
 
+/// Sim world clock. Starts day 1, 08:00 (stock boot time). seconds_per_hour
+/// is the sim's time scale default (30 s per in-game hour); stock
+/// serverconfig DayNightLength (default 60 min day) sets the real scale.
 pub const WorldClock = struct {
     hours: f32 = 8.0,
     day: u32 = 1,

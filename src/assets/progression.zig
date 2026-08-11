@@ -9,6 +9,10 @@ const paths = @import("paths.zig");
 pub const max_attrs: usize = 16;
 pub const max_perks: usize = 512;
 
+/// Level-curve defaults used before progression.xml loads (stock XML wins at
+/// runtime; assets/progression.zig parses the shipped curve). These mirror the
+/// stock geometric curve: 300 max level, 10k base XP, x1.05 multiplier, 1 skill
+/// point per level, cost clamp at level 60.
 pub const LevelCurve = struct {
     max_level: u16 = 300,
     exp_to_level: u32 = 10000,
@@ -38,6 +42,8 @@ pub const AttrDef = struct {
     cost_mult: f32 = 1.14,
 };
 
+/// Perk catalog row; max_level default 5 before progression.xml loads (stock
+/// XML ships per-perk max levels via <perk max_level="...">).
 pub const PerkDef = struct {
     name: []const u8 = "",
     max_level: u8 = 5,
