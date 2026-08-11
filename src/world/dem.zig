@@ -14,6 +14,7 @@ const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const cog_header_len: usize = 64 * 1024;
+/// Copernicus GLO-30 COG decode tile edge, 1024 px (dem.zig header).
 pub const tile_px: u32 = 1024;
 pub const grid_px: u32 = 3600; // 1 degree at ~30m
 pub const tiles_per_side: u32 = 4; // ceil(3600/1024)

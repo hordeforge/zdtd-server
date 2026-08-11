@@ -29,8 +29,12 @@ pub const TerrainSource = enum {
     proc,
 };
 
+/// Stock chunk X/Z span, 16 blocks (WorldConstants; stock_facts block_x/z_dim).
 pub const chunk_size: i32 = 16;
+/// Stock chunk Y dim 256 (WorldConstants ChunkBlockYDim; stock_facts block_y_dim).
 pub const y_dim: i32 = 256;
+/// Default empty-world height (zdtd constant). Stock ships WorldConstants.WaterLevel;
+/// its numeric is not corpus-pinned - verify against a stock world before treating 64 as stock.
 pub const sea_level: u8 = 64;
 // Stock AssignIds via bundled dump (never terrainFiller=2 as painted surface).
 // Module pins = offline/test defaults. Live server prefers World.terrain_ids

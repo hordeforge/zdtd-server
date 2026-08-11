@@ -22,14 +22,17 @@ pub const terr_snow: u16 = 12;
 pub const terr_topsoil: u16 = 13;
 pub const terr_destroyed_stone: u16 = 14;
 pub const terr_destroyed_grass: u16 = 30; // not 15 (that is terrDestroyedWoodDebris)
+// Water block id (ZDTD dump, 2026-07-22).
 pub const water: u16 = 240;
 
+// Deco tree pins (ZDTD dump, 2026-07-22).
 pub const tree_dead_pine_leaf: u16 = 24612;
 pub const plant_shrub: u16 = 24619;
 pub const tree_dead_02: u16 = 24626;
 pub const tree_oak_sml: u16 = 24629;
 pub const tree_winter_evergreen: u16 = 24651;
 
+// Container + shape pins (ZDTD dump, 2026-07-22).
 pub const cnt_desk_safe: u16 = 18515;
 pub const cnt_hardened_chest_insecure: u16 = 18650;
 pub const cnt_wooden_chest_closed: u16 = 18671;

@@ -18,8 +18,11 @@
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 
+/// TTS block-paint blockId bitfield: child flag (RE: tts.zig header, Prefab.readBlockData).
 pub const child_bit: u32 = 0x4000_0000;
+/// TTS block-paint blockId bitfield: decal flag (RE: tts.zig header).
 pub const decal_bit: u32 = 0x8000_0000;
+/// TTS block-paint blockId bitfield: type mask (RE: tts.zig header).
 pub const type_mask: u32 = 0xFFFF;
 /// First file version written with the current `BlockValue` bit layout; older
 /// files carry `BlockValueV3` and go through `convertOldRawData` first.

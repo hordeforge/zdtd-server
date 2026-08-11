@@ -30,7 +30,9 @@ const noise_mod = @import("noise.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 
+/// Stock chunk X/Z span, 16 blocks (WorldConstants; stock_facts block_x/z_dim).
 pub const chunk_size: i32 = 16;
+/// Stock chunk Y dim 256 (WorldConstants ChunkBlockYDim; stock_facts block_y_dim).
 pub const y_dim: i32 = 256;
 
 /// Sea / base height band for the 2D shaping stack (single-biome).

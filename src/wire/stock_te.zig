@@ -343,6 +343,7 @@ pub fn applyParsedToContainer(
 // grid. currentMeltTimesLeft is indexed directly at the received count
 // (TileEntityWorkstation::read asm.il ~1332790, IL_016e) with no bounds check.
 
+/// Stock TileEntityWorkstation save/wire version 50 (RE: protocol-packages.md §6.12 TE payload).
 pub const workstation_te_version: u8 = 50;
 /// RecipeQueueItem.Version (asm.il ~272640).
 const recipe_queue_item_version: u16 = 2;

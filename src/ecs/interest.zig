@@ -5,6 +5,7 @@
 const std = @import("std");
 const Dirty = @import("components.zig").Dirty;
 
+/// Spatial interest grid cell, 32 blocks (zdtd M11 interest; engineering).
 pub const cell_size: f32 = 32.0;
 
 /// Main-tick period for PosAndRot heartbeat when no dirty bits (paired with

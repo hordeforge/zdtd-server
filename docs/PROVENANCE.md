@@ -12,10 +12,12 @@ constant: the stock XML element or IL-verified RE doc it comes from.
 ## 1. Method and scope
 
 What counts: **every `src/**/*.zig` file** (file-level provenance) and **every
-behavioral constant** in the sim/server/world code (value-level provenance).
-Pure structural constants (array sizes, loop bounds, protocol widths, index
-arithmetic) are covered by their file's provenance row and are not separately
-ledgered. Wire codec constants are covered by the R rows + `wire/PACKAGES.md`.
+file-scope typed constant** in every src file (value-level provenance). The
+value-coverage gate scans the whole tree (test/fuzz/harness scaffolding
+excluded): each constant carries an inline provenance comment (stock source,
+RE cite, or explicit zdtd-owned marker). The 27 highlighted rows below are the
+behavioral values that diverge or carry the system's load; the gate covers
+everything else.
 
 Three buckets (from AGENTS.md rule 15 + the hardcode-audit method):
 
@@ -45,9 +47,9 @@ python3 tools/provenance_scan.py      # file coverage + ledger well-formedness g
 Coverage targets, all enforced by the scan:
 - **File coverage: 187/187 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
-- **Value coverage: 100%.** Every file-scope behavioral constant in the sim
-  files (ecs/, movement, guard_policy, weather, stability, gamestages, rules)
-  carries an inline provenance comment (or a ledger entry).
+- **Value coverage: 100%.** Every file-scope typed constant in **every** src
+  file (whole tree, test/fuzz/harness excluded) carries an inline provenance
+  comment or a ledger entry.
 - **Audit linkage: 100%.** Every A##/B## finding the hardcode audit names
   appears in this ledger.
 

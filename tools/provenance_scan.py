@@ -94,21 +94,19 @@ def main():
     # 3. VALUE COVERAGE: every file-scope behavioral constant in the sim files
     #    carries an inline provenance comment (same line or within the previous
     #    4 non-blank lines) or appears in the ledger.
-    BEHAVIORAL_FILES = [
-        "src/ecs/aidirector.zig", "src/ecs/buff.zig", "src/ecs/party.zig",
-        "src/ecs/poi_lock.zig", "src/ecs/electric.zig", "src/ecs/path.zig",
-        "src/ecs/quest.zig", "src/ecs/powerblocks.zig", "src/server/movement.zig",
-        "src/server/guard_policy.zig", "src/world/weather.zig",
-        "src/world/stability.zig", "src/assets/gamestages.zig", "src/ecs/rules.zig",
-    ]
+    # Whole-tree value coverage: every file-scope typed constant in every src
+    # file (test/fuzz/harness scaffolding excluded) carries an inline
+    # provenance comment (same line or within the previous 16 non-blank lines)
+    # or appears in the ledger.
+    EXCLUDE_FILES = {"tests.zig", "fuzz.zig", "scenarios.zig", "harness.zig", "sample_hello.zig"}
     CONST_RE = re.compile(
         r"^(\s{0,2})(pub\s+)?const\s+(\w+)\s*:\s*(f32|f64|u8|u16|u32|u64|i8|i16|i32|i64)\s*=\s*(\d)"
     )
     unannotated = []
-    for rel in BEHAVIORAL_FILES:
-        path = os.path.join(ROOT, rel)
-        if not os.path.isfile(path):
+    for rel in files:
+        if os.path.basename(rel) in EXCLUDE_FILES:
             continue
+        path = os.path.join(ROOT, rel)
         lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
         for i, line in enumerate(lines):
             m = CONST_RE.match(line)

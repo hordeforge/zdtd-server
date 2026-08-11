@@ -7,6 +7,7 @@ const max_entities = @import("world.zig").max_entities;
 const Kind = @import("components.zig").Kind;
 
 pub const magic: u32 = 0x5a445453; // "ZDTS"
+/// zdtd snapshot format version (debug/test format, not a stock save).
 pub const version: u16 = 1;
 
 fn putU32(b: []u8, p: *usize, v: u32) void {

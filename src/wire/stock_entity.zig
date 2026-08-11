@@ -96,6 +96,7 @@ pub const PlayerProfile = struct {
     eye_color: []const u8 = "",
 };
 
+/// Stock PlayerProfile v5 (RE: protocol.md §5 profile body).
 pub const player_profile_version: i32 = 5;
 
 /// Stock TraderData primary-inventory entry: ItemStack + runtime markup delta

@@ -855,6 +855,7 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 // PUID.ToStream (asm.il 31206): see wire/platform_user.zig.
 // AuthoredText.ToStream: bool present | text string | author PUID.
 
+/// Stock PersistentPlayerList entry reason enum: Login = 0 (RE: save-persistence.md).
 pub const persistent_reason_login: u8 = 0;
 
 /// Build NetPackagePersistentPlayerState body (reason=Login) so clients can map

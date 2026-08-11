@@ -6,8 +6,11 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
 
+/// Stock Quest.Write FileVersion 8 (RE: stock_quest.zig header; protocol-packages.md §6.18).
 pub const quest_file_version: u8 = 8;
+/// Stock QuestJournal.Write v5 (RE: protocol-packages.md quest journal body).
 pub const journal_version: u8 = 5;
+/// Objective block version marker (0 = versionless within Quest.Write; RE: Quest.Write structure).
 pub const objective_file_version: u8 = 0;
 /// Quest.PositionDataTypes (asm.il 983460-983475).
 pub const position_data_quest_giver: u8 = 0;

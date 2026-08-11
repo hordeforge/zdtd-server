@@ -5,6 +5,7 @@
 const std = @import("std");
 const util_log = @import("../util/log.zig");
 
+/// zdtd plugin API version (ADR 0020; engineering).
 pub const PLUGIN_API_VERSION: u32 = 1;
 
 pub const LogLevel = enum(u8) {
