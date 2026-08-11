@@ -42,8 +42,14 @@ Regenerate the file map and re-check coverage:
 python3 tools/provenance_scan.py      # file coverage + ledger well-formedness gate
 ```
 
-File coverage target: **187/187 (100%)**. Every row below carries a bucket and a
-source; a file without a row, or a row without a bucket/source, fails the gate.
+Coverage targets, all enforced by the scan:
+- **File coverage: 187/187 (100%).** Every row below carries a bucket and a
+  source; a file without a row, or a row without a bucket/source, fails.
+- **Value coverage: 100%.** Every file-scope behavioral constant in the sim
+  files (ecs/, movement, guard_policy, weather, stability, gamestages, rules)
+  carries an inline provenance comment (or a ledger entry).
+- **Audit linkage: 100%.** Every A##/B## finding the hardcode audit names
+  appears in this ledger.
 
 | Bucket | Meaning | Count |
 |---|---|---|

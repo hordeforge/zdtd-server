@@ -28,6 +28,9 @@
 const std = @import("std");
 const store = @import("store.zig");
 
+/// Stability grid cell value for a fully-supported block (stock
+/// StabilityInitializer fills to maxStability; 15 matches the stock grid's
+/// full value, RE: stability.md).
 pub const stability_full: u8 = 15;
 /// Cap on one removal relaxation: cells visited beyond this are dropped
 /// (stock physicsIsolation stops at 1000 per run; we give the whole removal

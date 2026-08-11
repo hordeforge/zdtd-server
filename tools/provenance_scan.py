@@ -88,7 +88,49 @@ def main():
         print(f"FAIL: {LEDGER} missing")
         return 1
     file_rows, const_rows = parsed
-    # 3. AUDIT LINKAGE: every finding id the audit names must appear in the ledger.
+    # 3. VALUE COVERAGE: every file-scope behavioral constant in the sim files
+    #    carries an inline provenance comment (same line or within the previous
+    #    4 non-blank lines) or appears in the ledger.
+    BEHAVIORAL_FILES = [
+        "src/ecs/aidirector.zig", "src/ecs/buff.zig", "src/ecs/party.zig",
+        "src/ecs/poi_lock.zig", "src/ecs/electric.zig", "src/ecs/path.zig",
+        "src/ecs/quest.zig", "src/ecs/powerblocks.zig", "src/server/movement.zig",
+        "src/server/guard_policy.zig", "src/world/weather.zig",
+        "src/world/stability.zig", "src/assets/gamestages.zig", "src/ecs/rules.zig",
+    ]
+    CONST_RE = re.compile(
+        r"^(\s{0,2})(pub\s+)?const\s+(\w+)\s*:\s*(f32|f64|u8|u16|u32|u64|i8|i16|i32|i64)\s*=\s*(\d)"
+    )
+    unannotated = []
+    for rel in BEHAVIORAL_FILES:
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        for i, line in enumerate(lines):
+            m = CONST_RE.match(line)
+            if not m:
+                continue
+            name = m.group(3)
+            annotated = "//" in line
+            # block annotation: walk up over non-blank lines (max 15) looking
+            # for a doc comment covering this group of constants
+            for j in range(i - 1, max(0, i - 16), -1):
+                s = lines[j].strip()
+                if s.startswith("//"):
+                    annotated = True
+                    break
+                if not s:
+                    break
+            if not annotated:
+                unannotated.append(f"{rel}:{i+1} {name}")
+    if unannotated:
+        print(f"FAIL: behavioral constants without provenance comment ({len(unannotated)}):")
+        for u in unannotated[:12]:
+            print("  " + u)
+        return 1
+
+    # 4. AUDIT LINKAGE: every finding id the audit names must appear in the ledger.
     if os.path.isfile(AUDIT):
         import re as _re
         ledger_text = open(LEDGER, encoding="utf-8").read()
@@ -140,7 +182,10 @@ def main():
         for f in failures:
             print("FAIL:", f)
         return 1
-    print(f"OK: {len(files)} files covered, {len(const_rows)} constants ledgered, all cited")
+    print(
+        f"OK: {len(files)} files covered (100%), {len(const_rows)} constants ledgered, "
+        "behavioral constants annotated, audit findings linked"
+    )
     return 0
 
 

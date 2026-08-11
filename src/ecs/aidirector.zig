@@ -144,6 +144,11 @@ pub const bm_parties_cap: usize = 8;
 /// worldTime + RandomRange(12000, 24000) ticks (12-24 in-game hours); the
 /// schedule is player-gated (no players -> re-choose) and only starts after
 /// day 1 (worldTime > 28000).
+/// Wandering horde (RE: aidirector.md wandering-horde scheduling): a group
+/// of `wandering_horde_size` zombies spawns `wandering_spawn_dist` blocks out
+/// every wander_min_gap..wander_max_gap (ms of world time) once the world is
+/// past wander_start_after; stock serverconfig `ZombieBMMaxAlive` and the
+/// director's random-schedule pick bound the rest.
 pub const wandering_horde_size: u32 = 6;
 pub const wandering_spawn_dist: f32 = 92.0;
 pub const wander_min_gap: u64 = 12_000;
