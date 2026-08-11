@@ -13,9 +13,11 @@ pub fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, 
     const surface: f32 = @floatFromInt(h_u16);
     const min_y = surface + 0.9;
     if (!(y < -1.0)) return null;
-    self.sim.setPos(entity_id, x, min_y, z, 0);
+    var yaw: f32 = 0;
+    if (self.sim.slotOfNetId(entity_id)) |si| yaw = self.sim.transform[si].yaw;
+    self.sim.setPos(entity_id, x, min_y, z, yaw);
     if (do_teleport) {
-        if (packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, min_y, z, 0, 0, 0, true)) |tb| {
+        if (packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, min_y, z, 0, yaw, 0, true)) |tb| {
             try self.sendGame(peer, "NetPackageEntityTeleport", tb);
         } else |_| {}
     }
