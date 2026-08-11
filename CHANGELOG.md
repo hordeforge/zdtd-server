@@ -115,6 +115,21 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   hardcoded map, accept the stock quest-name families (`intro_`, `test_`,
   `challengegroup_reward_`) alongside tiered `quest_` names, and are filtered
   by the requested tier with active quests excluded.
+- Campfires and burning barrels grant the stock insulation warmth buff
+  (`buffCampfireAOE`) to a player within radius (blocks.xml
+  `ActiveRadiusEffects`). Torches, candles and the radiated barrel have no
+  fuel-gated workstation record yet, so they remain unimplemented.
+- Air drops push a `supply_drop` NavObject marker when the crate spawns, so a
+  stock client gets a compass ping (`nav_object_classes.xml`). The marker has
+  no removal companion package yet when the crate is looted or expires.
+- Kill XP scales by entity class instead of a flat 100 per kill: the loader
+  resolves entityclasses.xml `ExperienceGain` through its `replace_properties`
+  chain, bounded to 2500 XP; an unresolved or missing value keeps the old flat
+  100.
+- Bedroll ownership persists across a restart. `players.zsv` bumps
+  ZPV3 -> ZPV4 (the progression tail's buff list is followed by a
+  `bed_present` byte and, when present, `bed_x`/`y`/`z`); ZPV2 and ZPV3 saves
+  still load.
 
 ### Fixed
 
@@ -226,6 +241,30 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   the Extends chain into a data-driven ladder, and SetBlock only accepts a
   block swap onto an occupied cell when the new id is the current block's
   upgrade target, so a forged SetBlock cannot swap in arbitrary block ids.
+- The join challenge comparison runs in constant time instead of
+  `std.mem.eql`'s early-out, closing a timing side-channel that could leak
+  challenge bytes one at a time.
+- The server no longer trusts a client's `NetPackageTraderData` copy-back for
+  trader stock or money; only the typed trade path may mutate an entity
+  trader, and the vending path re-sends the stored tile entity instead of
+  taking the client's item list or available-money field.
+- `serverconfig.xml` attribute values are XML-decoded before use, so a
+  `GameName` or `SandboxCode` containing an entity like `&amp;b` reaches the
+  wire as `&b` instead of the literal `&amp;b`.
+- Builtin item pins (fixture eat/drink amounts, stock-type fallback) are
+  gated on the builtin catalog and no longer leak into XML mode: a real
+  items.xml catalog no longer inherits a fixture's food value or an
+  unresolved type naming the wrong stock item.
+- `PlayerInventory` applies atomically: a body that fails partway (a short
+  bag section, a bad equipment write) leaves the inventory exactly as it was
+  instead of a half-applied mix of old and new fields.
+- Sprint stamina now drains on backward and strafing movement, not just
+  forward, so sprinting in those directions is no longer free.
+- Six broadcast-fanout C2S packages (BlockTrigger, WireActions,
+  WireToolActions, LandClaimRepair, ItemActionEffects, CloseAllWindows) are
+  now rate-gated on the same block/inventory tokens as SetBlock, closing an
+  unmetered bandwidth-amplification path where one client packet fanned out
+  to every nearby or connected peer.
 
 No zdtd version has been tagged or published yet. These entries describe the
 upcoming 0.1.0 development release.
