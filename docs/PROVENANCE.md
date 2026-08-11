@@ -346,6 +346,7 @@ field-by-field provenance.
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
 | `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
 | `game/sleeper.zig` sleeper spawn | no global cap | Z | **Diverges**: stock `SleeperVolume.UpdateSpawn` gates every restore on `AIDirector.CanSpawn(2.1f)` = `EnemyCount < MaxSpawnedZombies * 2.1` (spawning.md, live-verified 2026-08-11); zdtd's sleeper spawn bypasses the cap (the volume count is group/255-capped only). Wake/stage radius is a fixed 100 m (`sleeper_party_radius`) vs stock volume-box + party stage |
+| `ecs/systems.zig traderRestock` | day-based | Z | **Simplifies**: stock `TraderManager` restocks on a tick-based `ResetIntervalInTicks` with a boundary snap (loot-economy.md 3); zdtd restocks on a day counter (-1 never, 0 daily, N>0 every N days) |
 
 ### 3.9 Divergence register (provenance for the differences)
 
