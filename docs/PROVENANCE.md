@@ -330,7 +330,7 @@ field-by-field provenance.
 | `ecs/electric.zig` power tick | ~6.25 Hz | R | RE: tile-entities-power.md (PowerManager ~6.25 Hz root forest tick) |
 | `world/weather.zig` storm/blood-moon | — | R | RE: weather-environment.md (server-authoritative storm state machine) |
 | `ecs/poi_lock.zig` `unlock_grace` | 2000 | R | QuestEventManager `PrefabInstance.lockInstance` (QuestLockInstance, asm.il 1001892+) |
-| `ecs/party.zig` | max 8, shared XP | R | RE: parties-factions.md §2 (party max 8, `startingXP*(1-0.1*inRange)`) |
+| `ecs/party.zig` | max 8, flat XP | R | Party max 8 per parties-factions.md §2; NOTE the stock shared-XP reduction `startingXP*(1-0.1*inRange)` is NOT yet implemented - zdtd grants flat XP with the XPMultiplier only (partial) |
 | `world/stability.zig` | — | R | RE: stability.md (StabilityInitializer spread/clear, GetBlockStability BFS) |
 | `server/game/constants.zig` | caps | R | Game-wide caps; behavioral subset tracked in GAP_ANALYSIS (B31-B37) |
 
@@ -345,6 +345,7 @@ field-by-field provenance.
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
 | `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
+| `game/sleeper.zig` sleeper spawn | no global cap | Z | **Diverges**: stock `SleeperVolume.UpdateSpawn` gates every restore on `AIDirector.CanSpawn(2.1f)` = `EnemyCount < MaxSpawnedZombies * 2.1` (spawning.md, live-verified 2026-08-11); zdtd's sleeper spawn bypasses the cap (the volume count is group/255-capped only). Wake/stage radius is a fixed 100 m (`sleeper_party_radius`) vs stock volume-box + party stage |
 
 ### 3.9 Divergence register (provenance for the differences)
 

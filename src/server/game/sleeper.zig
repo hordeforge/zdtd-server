@@ -84,6 +84,10 @@ pub fn tickSleeperVolumes(self: *Game) void {
         var vol = &self.sleepers.volumes[vi];
         vol.triggered = true;
         self.sleepers.trigger_count += 1;
+        // DIVERGENCE: stock SleeperVolume.UpdateSpawn gates every restore on
+        // AIDirector.CanSpawn(2.1f) (EnemyCount < MaxSpawnedZombies * 2.1,
+        // spawning.md); zdtd spawns regardless of the global zombie cap - the
+        // volume count is group/255-capped only (ledger sleeper row).
 
         const grp = vol.groups[0];
         const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);
