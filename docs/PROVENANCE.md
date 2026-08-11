@@ -369,6 +369,18 @@ what stock says and where the fix lands. Finding ids refer to
 
 ## 4. Coverage and maintenance
 
+- **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
+  File coverage must stay **187/187 (100%)**; a new src file without a ledger
+  row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
+- **Constants:** the ledger covers the behavioral values; the authoritative
+  field-by-field provenance for the rules surface lives inline in
+  `src/ecs/rules.zig`.
+- **After a game update:** re-run `../../7dtd-research/tools/parity/drift-check.sh`,
+  then re-verify the R rows and the divergence register against the new pin
+  (see RE_GAP_CLOSURE §4).
+- **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
+  table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
+
 - `python3 tools/provenance_scan.py` gates **file coverage 187/187** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
   file exists). Wire it into `make check` after the first green run.
