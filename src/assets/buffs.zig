@@ -100,6 +100,9 @@ pub const Table = struct {
     defs: []const BuffDef = &.{},
     passive_pool: []const Passive = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
+    /// Lowercased name -> defs index, built once at load (XML tables only;
+    /// small builtin/empty tables fall back to the linear scan below).
+    name_index: std.StringHashMapUnmanaged(u16) = .{},
 
     pub fn empty() Table {
         return .{};
@@ -120,6 +123,11 @@ pub const Table = struct {
     /// Catalog index for a wire buff name. BuffManager::Buffs is a
     /// CaseInsensitiveStringDictionary (asm.il 733560), so lookup ignores case.
     pub fn indexOfName(self: *const Table, name: []const u8) ?u16 {
+        if (self.name_index.count() != 0 and name.len <= 63) {
+            var buf: [63]u8 = undefined;
+            const lower = std.ascii.lowerString(buf[0..name.len], name);
+            return self.name_index.get(lower);
+        }
         for (self.defs, 0..) |d, i| {
             if (std.ascii.eqlIgnoreCase(d.name, name)) return @intCast(i);
         }
@@ -335,7 +343,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         const tr = thr_ranges.items[di];
         defs[di].thresholds = thr_pool[tr[0] .. tr[0] + tr[1]];
     }
-    return .{ .defs = defs, .passive_pool = pool, .arena_ptr = arena_holder };
+    var name_index: std.StringHashMapUnmanaged(u16) = .{};
+    try name_index.ensureTotalCapacity(arena, @intCast(defs.len));
+    for (defs, 0..) |d, di| {
+        const lower = try arena.alloc(u8, d.name.len);
+        _ = std.ascii.lowerString(lower, d.name);
+        const gop = name_index.getOrPutAssumeCapacity(lower);
+        if (!gop.found_existing) gop.value_ptr.* = @intCast(di);
+    }
+
+    return .{ .defs = defs, .passive_pool = pool, .arena_ptr = arena_holder, .name_index = name_index };
 }
 
 /// Survival numbers stock ships as data, resolved out of the loaded table so
