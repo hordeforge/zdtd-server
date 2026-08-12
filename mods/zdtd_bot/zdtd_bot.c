@@ -742,7 +742,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       static const char *usage =
         "bot help\nbot status\nbot list\n"
         "bot spawn [name] [x z]\nbot remove <id|all>\n"
-        "bot count <n>\nbot skill <0-4>\n";
+        "bot count <n>\nbot skill <0-4> [id]\nbot cfg <id> <key> <val>\n";
       const char *u = usage;
       while (*u && rn < 599) reply_buf[rn++] = *u++;
     } else if (eq(sub, slen, "status", 6)) {
