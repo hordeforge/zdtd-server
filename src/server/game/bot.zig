@@ -79,6 +79,9 @@ pub const BotManager = struct {
     bots: [max_bots]Bot = [_]Bot{.{}} ** max_bots,
     /// Live bot count (spawn ++, remove / kill --). Indexes known_bots bits.
     n: usize = 0,
+    /// Remembered population floor (set by `bot count <n>`); tick tops up when
+    /// bots die so the floor is self-healing (BOTS_SPEC: keep n alive).
+    floor: u32 = 0,
 
     /// Allocate a live bot at (x, y, z). Returns its net id, or null when the
     /// table is full. The id comes from the shared sim counter (Game helper),
@@ -202,6 +205,7 @@ pub const BotManager = struct {
     /// 0 is a no-op. Clamped to max_bots; stops early when the table fills.
     pub fn applyCountFloor(self: *BotManager, g: *Game, n: u32) void {
         const target = @min(n, @as(u32, max_bots));
+        self.floor = target;
         // The population floor is two-way: remove extras when over target
         // (BOTS_SPEC `bot count` = "keep n alive"). `bot count 0` clears all.
         while (self.n > target) {
@@ -211,8 +215,16 @@ pub const BotManager = struct {
             self.bots[slot] = .{};
             self.n -|= 1;
         }
+        self.maintainFloor(g);
+    }
+
+    /// Spawn bots until the live count reaches the remembered floor. Called by
+    /// tick as well as applyCountFloor, so a bot killed in combat is replaced
+    /// automatically. No-op when no floor is set (`bot count` never used).
+    pub fn maintainFloor(self: *BotManager, g: *Game) void {
+        if (self.floor == 0) return;
         var spread: u32 = 1;
-        while (self.n < target) : (spread += 1) {
+        while (self.n < self.floor) : (spread += 1) {
             const ix: f32 = @as(f32, @floatFromInt(spread)) * bot_spawn_spread;
             const iz: f32 = @as(f32, @floatFromInt(spread % 3)) * bot_spawn_spread;
             if (self.spawn(g, ix, bot_spawn_y, iz, bot_max_hp) == null) break;
@@ -315,6 +327,8 @@ pub const BotManager = struct {
             stepMove(b, dt);
             b.y = g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z)));
         }
+        // Self-healing population floor: replace bots killed since the last tick.
+        self.maintainFloor(g);
     }
 
     /// Append Bot sense records after the host's ECS actor records (BOTS_SPEC

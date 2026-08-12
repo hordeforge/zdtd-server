@@ -5293,4 +5293,14 @@ test "scenario applyCountFloor tops up across repeated calls" {
     // `bot count 0` clears the floor entirely.
     _ = g.bots.handleCommand(g, "bot count 0");
     try std.testing.expectEqual(@as(usize, 0), g.bots.n);
+
+    // Self-healing floor: set a floor, kill a bot, and the next tick respawns
+    // it so the population returns to the remembered floor.
+    _ = g.bots.handleCommand(g, "bot count 2");
+    try std.testing.expectEqual(@as(usize, 2), g.bots.n);
+    const doomed = g.bots.bots[0].net_id;
+    try std.testing.expect(g.bots.damageBot(doomed, 1000)); // lethal
+    try std.testing.expectEqual(@as(usize, 1), g.bots.n);
+    g.bots.tick(g, 0.05);
+    try std.testing.expectEqual(@as(usize, 2), g.bots.n);
 }
