@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check lint fmt release-check release repro smoke clean need-zig need-release-tools need-python3
+.PHONY: all build test fuzz run check check-clean-build lint fmt release-check release repro smoke clean need-zig need-release-tools need-python3
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -40,6 +40,18 @@ all: build
 
 build: need-zig
 	$(ZIG) build -Doptimize=$(OPTIMIZE)
+
+# Clean-cache exe build gate. `zig build` with a warm cache can reuse stale
+# objects for untouched files, and `zig build test` does not analyze every
+# lazy path the exe graph does, so a latent exe compile error (e.g. a stale
+# field path after a struct refactor) can pass both. A fresh cache dir forces
+# the whole graph to recompile. Run before trusting a `make check` green with
+# a long-lived cache. Note: this is intentionally NOT in `check` - a WIP that
+# is mid-refactor goes red here, which is the point.
+check-clean-build: need-zig
+	rm -rf .zig-cache-check
+	$(ZIG) build -Doptimize=$(OPTIMIZE) --cache-dir .zig-cache-check
+	rm -rf .zig-cache-check
 
 test: need-zig
 	$(ZIG) build test -Doptimize=$(OPTIMIZE)
