@@ -182,6 +182,41 @@ hit, DM spawnpoints, `Difficulty`/`skill` scaling) is the behavioural reference
 and is re-expressed **inside the guest module**, exactly as the reference
 distils Q3/Doom 3.
 
+### 5.1 Brain behaviours implemented (module v1.2)
+
+All inference is deterministic: no wall-clock noise, only a per-slot LCG seeded
+from the net id and slot index (AZ 22). Improvements are cross-pollinated with
+`7dtd-clanker` in both directions.
+
+- **Skill-scaled aim error.** Each engagement a bot rolls a fixed angular
+  error from the per-slot LCG (`skill_aimerr`: ~0.28 rad at skill 0 down to
+  ~0.06 rad at skill 4), held for the engagement so aim settles rather than
+  jitters. Low-skill bots spray; high-skill bots are near-deadly.
+- **Lead-fire.** The guest estimates target velocity from its own sense
+  history and aims at a predicted position a time-of-flight ahead
+  (`BULLET_SPEED`); a stationary target yields lead 0 and degrades to direct
+  fire. No host/spec change required.
+- **Lost-sight combat memory.** A target behind LOS vanishes from the snapshot;
+  the bot retains `BOT_MEMORY_TICKS` (5 s) of the last-known position and
+  pursues it, then flushes and reverts to patrol.
+- **Dodge-on-hit.** The guest watches its own hp in the sense record; when it
+  drops, the bot enters a short evasive dodge (`DODGE_TICKS`: backpedal then a
+  hard strafe on a randomized direction) whose moves bypass command gating so
+  the host always sees the burst (cross-pollinated from clanker `Bot.OnDamaged`).
+- **Reaction gate + fire throttle.** A fresh target is not engaged until a
+  skill-scaled reaction delay elapses; shots are gated by a burst cadence.
+- **Skill/distance hit accuracy.** A shot only lands when a deterministic roll
+  beats `skill_hit_chance(skill, dist)` (cross-pollinated from clanker
+  `TryShootBurst` spread/difficulty), so low-skill bots miss.
+- **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
+  `BACKPEDAL_RANGE`; low-health, low-skill bots retreat and hold fire
+  (`HP_RETREAT_FRAC`, cross-pollinated from clanker `BotBrain.Backpedal` /
+  `BotCharacter.WantsToRetreat`).
+- **Strafe-orbit vs chase** with skill>=3 bots flipping strafe direction on a
+  deterministic cadence.
+- **Command gating.** `bot move`/`bot look` only re-emit on change (or first
+  contact), cooperating with the host's stream/move caps (AD 20, AZ 20).
+
 ---
 
 ## 6. Admin commands (in the plugin, not core)

@@ -67,13 +67,15 @@ static void e_int(long long v) {
   }
 }
 static void e_flt(float v) {
-  // Two-decimal rendering; enough for debug and commands we send.
+  // Two-decimal rendering; enough for debug and commands we send. Sign is
+  // emitted first, then |v| is split: (long long) truncates toward zero, which
+  // would silently drop the sign of -0.42 and mislead the host's parseFloat.
+  if (v < 0.f) { if (out_n < OUT_CAP - 1) out[out_n++] = '-'; v = -v; }
   long long whole = (long long)v;
-  int frac = (int)((v - (float)whole) * 100.0f + (v < 0 ? -0.5f : 0.5f));
+  int frac = (int)((v - (float)whole) * 100.0f + 0.5f);
   if (frac == 100) { whole += 1; frac = 0; }
   e_int(whole);
   e(".");
-  if (frac < 0) frac = -frac;
   if (frac < 10) e("0");
   e_int(frac);
 }
@@ -195,6 +197,8 @@ static float bot_tvz[MAX_BOTS];
 static int   bot_strafe_p[MAX_BOTS];// strafe phase flip latch (skill>=3)
 static int   bot_lock[MAX_BOTS];    // net id of target pursued via memory (-1 = none)
 static int   bot_memage[MAX_BOTS];  // ticks since we last saw the locked target
+static float bot_last_hp[MAX_BOTS]; // own hp from the previous sense pass (hit detect)
+static int   bot_dodge[MAX_BOTS];   // ticks left in an evasive dodge (0 = none)
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -222,6 +226,8 @@ static void bot_init(void) {
     bot_strafe_p[i] = 0;
     bot_lock[i] = -1;
     bot_memage[i] = 0;
+    bot_last_hp[i] = 0.f;
+    bot_dodge[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -323,6 +329,11 @@ static int move_dirty(int bslot, float mx, float mz) {
 // Cross-pollinated from 7dtd-clanker BotCharacter.WantsToRetreat: below this
 // health fraction a low-skill bot retreats and holds fire (self-preservation).
 #define HP_RETREAT_FRAC 0.35f
+// Cross-pollinated from 7dtd-clanker Bot.OnDamaged (dodge-on-hit): ticks of an
+// evasive dodge after the bot's own hp drops; the first `DODGE_BACK_TICKS` are
+// a backpedal, the rest a direction-flipped strafe. 10 ticks = 0.5 s.
+#define DODGE_TICKS 10
+#define DODGE_BACK_TICKS 4
 // Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
 #define BOT_MAX_HP 100.f
 
@@ -368,9 +379,21 @@ static void brain_tick(void) {
       bot_strafe_p[bslot] = 0;
       bot_lock[bslot] = -1;
       bot_memage[bslot] = 0;
+      bot_last_hp[bslot] = rec_hp(bi);
+      bot_dodge[bslot] = 0;
     }
     const int skill = bot_skill[bslot];
     const float vision = skill_vision(skill);
+
+    // Dodge-on-hit (cross-pollinated from 7dtd-clanker Bot.OnDamaged): if our
+    // own hp dropped since the last sense pass we were damaged, trigger a short
+    // evasive dodge and randomize the strafe direction. Pure guest-side: the
+    // sense record already carries our hp, so no host/spec change is needed.
+    if (bot_last_hp[bslot] > rec_hp(bi)) {
+      bot_dodge[bslot] = DODGE_TICKS;
+      bot_strafe_p[bslot] = rng_f01(&bot_rng[bslot]) < 0.5f ? 0 : 1;
+    }
+    bot_last_hp[bslot] = rec_hp(bi);
 
     // Pick the nearest hostile candidate within vision (players/zombies/other
     // bots, not ourselves).
@@ -496,21 +519,40 @@ static void brain_tick(void) {
         sdir = (bi & 1) ? 1 : -1;
       }
       const float s = (float)sdir;
-      if (retreating || dist < BACKPEDAL_RANGE) {
-        // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
-        mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
-        mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
-        mspd = 3.f;
-      } else {
-        // Strafe-orbit: mix toward the target and step perpendicular.
-        mdest_x = bx + (tx - bx) * 0.3f + oxn * s * 1.0f;
-        mdest_z = bz + (tz - bz) * 0.3f + ozn * s * 1.0f;
-        mspd = 3.f;
-      }
-      if (move_dirty(bslot, mdest_x, mdest_z)) {
+      const int dodging = bot_dodge[bslot] > 0;
+      if (dodging) {
+        // Dodge-on-hit: forced evasive move that bypasses command gating so the
+        // host always sees the burst. First DODGE_BACK_TICKS backpedal, then a
+        // hard strafe on the randomized direction (cross-pollinated from
+        // clanker Bot.OnDamaged).
+        if (bot_dodge[bslot] > DODGE_TICKS - DODGE_BACK_TICKS) {
+          mdest_x = bx - txn * 2.2f + oxn * s * 1.6f;
+          mdest_z = bz - tzn * 2.2f + ozn * s * 1.6f;
+        } else {
+          mdest_x = bx + (tx - bx) * 0.2f + oxn * s * 2.0f;
+          mdest_z = bz + (tz - bz) * 0.2f + ozn * s * 2.0f;
+        }
+        mspd = 4.f;
         queue_move(net, mdest_x, by, mdest_z, mspd);
         bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
         bot_move_sent[bslot] = 1;
+      } else {
+        if (retreating || dist < BACKPEDAL_RANGE) {
+          // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
+          mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
+          mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
+          mspd = 3.f;
+        } else {
+          // Strafe-orbit: mix toward the target and step perpendicular.
+          mdest_x = bx + (tx - bx) * 0.3f + oxn * s * 1.0f;
+          mdest_z = bz + (tz - bz) * 0.3f + ozn * s * 1.0f;
+          mspd = 3.f;
+        }
+        if (move_dirty(bslot, mdest_x, mdest_z)) {
+          queue_move(net, mdest_x, by, mdest_z, mspd);
+          bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
+          bot_move_sent[bslot] = 1;
+        }
       }
       // Cross-pollinated from clanker TryShootBurst: skill/distance accuracy —
       // only queue a shot if a deterministic roll lands, so low-skill bots miss.
@@ -531,6 +573,7 @@ static void brain_tick(void) {
       }
     }
     if (bot_throttle[bslot] > 0.f) bot_throttle[bslot] -= TICK_DT;
+    if (bot_dodge[bslot] > 0) bot_dodge[bslot]--;
   }
 }
 

@@ -809,12 +809,15 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         // `out` buffer per queue call, so storing a slice would alias.
         var queued: [8][64]u8 = undefined;
         var queued_n: usize = 0;
+        var queued_len: [8]usize = undefined;
         var hide_player: bool = false;
+        var bot_hp: f32 = 100;
 
         fn queueFn(_: *HostCtx, cmd: []const u8) void {
             if (queued_n >= queued.len) return;
             const n = @min(cmd.len, queued[queued_n].len);
             @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_len[queued_n] = n;
             queued_n += 1;
         }
         fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
@@ -846,8 +849,9 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(u32, out[8..12], 1, .little);
             std.mem.writeInt(i32, out[12..16], 0, .little);
             var n: u32 = 0;
-            // one bot at the origin (self)
-            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, 100.0, 0.0, -1);
+            // one bot at the origin (self); hp is mutable so the dodge phase
+            // can simulate the bot taking damage (100 -> 60).
+            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, bot_hp, 0.0, -1);
             n += 1;
             if (!hide_player) {
                 // a player at (10, 0, 10) unless hidden (LOS pull-down)
@@ -888,9 +892,10 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(Cap.queued_n >= 2);
     var saw_move = false;
     var saw_look = false;
-    for (Cap.queued[0..Cap.queued_n]) |*c| {
-        if (std.mem.startsWith(u8, c[0..], "bot move 1000")) saw_move = true;
-        if (std.mem.startsWith(u8, c[0..], "bot look 1000")) saw_look = true;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+        const s = c[0..Cap.queued_len[qi]];
+        if (std.mem.startsWith(u8, s, "bot move 1000")) saw_move = true;
+        if (std.mem.startsWith(u8, s, "bot look 1000")) saw_look = true;
     }
     try std.testing.expect(saw_move);
     try std.testing.expect(saw_look);
@@ -906,10 +911,25 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     host.onTick();
     try std.testing.expect(Cap.queued_n >= 1);
     var found_pursue = false;
-    for (Cap.queued[0..Cap.queued_n]) |*c| {
-        if (std.mem.indexOf(u8, c[0..], "10.00 0.00 10.00") != null) found_pursue = true;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+        if (std.mem.indexOf(u8, c[0..Cap.queued_len[qi]], "10.00 0.00 10.00") != null) found_pursue = true;
     }
     try std.testing.expect(found_pursue);
+
+    // Tick 4 (dodge-on-hit): player visible again and the bot took damage
+    // (hp 100 -> 60). The brain must enter an evasive dodge and FORCE a move at
+    // the dodge speed (4.00 — no other branch uses it), bypassing command
+    // gating even though the scene is otherwise unchanged.
+    Cap.hide_player = false;
+    Cap.bot_hp = 60;
+    Cap.queued_n = 0;
+    host.onTick();
+    var found_dodge = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+        const s = c[0..Cap.queued_len[qi]];
+        if (std.mem.startsWith(u8, s, "bot move ") and std.mem.endsWith(u8, s, " 4.00")) found_dodge = true;
+    }
+    try std.testing.expect(found_dodge);
 
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
