@@ -340,6 +340,9 @@ static int move_dirty(int bslot, float mx, float mz) {
 // Cross-pollinated from 7dtd-clanker BotCharacter.WantsToRetreat: below this
 // health fraction a low-skill bot retreats and holds fire (self-preservation).
 #define HP_RETREAT_FRAC 0.35f
+// Any bot below this health fraction flees regardless of skill (clanker's
+// WantsToRetreat has no skill gate; only its self-preservation personality).
+#define HP_FLEE_FRAC 0.20f
 // Cross-pollinated from 7dtd-clanker Bot.OnDamaged (dodge-on-hit): ticks of an
 // evasive dodge after the bot's own hp drops; the first `DODGE_BACK_TICKS` are
 // a backpedal, the rest a direction-flipped strafe. 10 ticks = 0.5 s.
@@ -557,7 +560,10 @@ static void brain_tick(void) {
     // Cross-pollinated from 7dtd-clanker: low-health + low-skill bots retreat
     // (self-preservation, BotCharacter.WantsToRetreat) — hold fire and back off.
     const float hp_frac = rec_hp(bi) / BOT_MAX_HP;
-    const int retreating = (hp_frac < HP_RETREAT_FRAC && skill < 2);
+    // Retreat: nearly-dead bots of ANY skill flee and hold fire; low-skill
+    // bots also retreat at the softer HP_RETREAT_FRAC threshold (clanker
+    // WantsToRetreat parity).
+    const int retreating = (hp_frac < HP_FLEE_FRAC) || (hp_frac < HP_RETREAT_FRAC && skill < 2);
     float mdest_x, mdest_z, mspd;
     if (dist < attack_range) {
       int sdir;
@@ -672,7 +678,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.6 enabled");
+  e("zdtd_bot v1.7 enabled");
   flush(1);
 }
 

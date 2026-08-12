@@ -226,7 +226,8 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
 - **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
   `BACKPEDAL_RANGE`; low-health, low-skill bots retreat and hold fire
   (`HP_RETREAT_FRAC`, cross-pollinated from clanker `BotBrain.Backpedal` /
-  `BotCharacter.WantsToRetreat`).
+  `BotCharacter.WantsToRetreat`). Nearly-dead bots of ANY skill flee
+  (`HP_FLEE_FRAC` 0.20), matching clanker's skill-independent survival.
 - **Strafe-orbit vs chase** with skill>=3 bots flipping strafe direction on a
   deterministic cadence.
 - **Command gating.** `bot move`/`bot look` only re-emit on change (or first

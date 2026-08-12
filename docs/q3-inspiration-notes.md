@@ -63,7 +63,8 @@ boundary (ADR 0026).
   `HeadshotChance`/`HeadshotMultiplier`.
 - **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
   `BACKPEDAL_RANGE` (clanker `BotBrain.Backpedal`); low-health, low-skill bots
-  retreat and hold fire (`HP_RETREAT_FRAC`, clanker `BotCharacter.WantsToRetreat`).
+  retreat and hold fire (`HP_RETREAT_FRAC`, clanker `BotCharacter.WantsToRetreat`),
+  and nearly-dead bots of any skill flee (`HP_FLEE_FRAC` 0.20).
 - **Wander when idle.** With no candidate in vision (and no combat memory) the
   bot drifts toward a stored wander point instead of standing dead still, and
   faces its travel direction.

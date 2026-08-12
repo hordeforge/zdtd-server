@@ -989,6 +989,25 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     // Burst volley: at least two shots queued in the firing tick (skill 2 => 2).
     try std.testing.expect(burst_count >= 2);
 
+    // Tick (flee phase): a nearly-dead bot (hp 15, 0.15 < HP_FLEE_FRAC) of ANY
+    // skill (skill 4 was set earlier) must retreat and HOLD fire — no shoot is
+    // queued across several ticks, while it still moves (backpedal).
+    Cap.bot_hp = 15;
+    var flee_ticks: usize = 0;
+    var saw_flee_move = false;
+    var saw_flee_shoot = false;
+    while (flee_ticks < 4) : (flee_ticks += 1) {
+        Cap.queued_n = 0;
+        host.onTick();
+        for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+            const s = c[0..Cap.queued_len[qi]];
+            if (std.mem.startsWith(u8, s, "bot move ")) saw_flee_move = true;
+            if (std.mem.startsWith(u8, s, "bot shoot ")) saw_flee_shoot = true;
+        }
+    }
+    try std.testing.expect(saw_flee_move);
+    try std.testing.expect(!saw_flee_shoot);
+
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
