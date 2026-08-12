@@ -5239,3 +5239,51 @@ test "scenario bots are grounded to terrain height on spawn and move" {
         0.01,
     );
 }
+
+test "scenario bot count floor spawns bots and fillSense emits them" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // `bot count 2` (as the wasm guest re-queues it) spawns a 2-bot floor.
+    try std.testing.expect(g.bots.handleCommand(g, "bot count 2"));
+    try std.testing.expectEqual(@as(usize, 2), g.bots.n);
+
+    // The sense snapshot then carries both bots as kind==2 records.
+    var out: [256]u8 = undefined;
+    std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
+    std.mem.writeInt(u32, out[4..8], 0, .little);
+    var n: usize = 0;
+    g.bots.fillSense(&out, 16, 2, &n);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqual(@as(u8, 2), out[16 + 4]); // kind bot
+    try std.testing.expectEqual(@as(u8, 2), out[48 + 4]);
+}
+
+test "scenario applyCountFloor tops up across repeated calls" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    _ = g.bots.handleCommand(g, "bot count 3");
+    try std.testing.expectEqual(@as(usize, 3), g.bots.n);
+    _ = g.bots.handleCommand(g, "bot count 5");
+    try std.testing.expectEqual(@as(usize, 5), g.bots.n);
+}

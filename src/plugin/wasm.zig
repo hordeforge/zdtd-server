@@ -922,6 +922,14 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(srep != null);
     try std.testing.expect(std.mem.indexOf(u8, srep.?, "id=1000") != null);
 
+    // Roster integrity: the brain locked the player (2000) as its target, so
+    // `bot list` must show a valid, non-garbage target for bot 1000.
+    var list_out: [512]u8 = undefined;
+    const lrep = host.adminCommand("bot list", &list_out);
+    try std.testing.expect(lrep != null);
+    try std.testing.expect(std.mem.indexOf(u8, lrep.?, "id=1000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lrep.?, "target=2000") != null);
+
     // Tick 2 (identical scene): command gating suppresses redundant move/look.
     Cap.queued_n = 0;
     host.onTick();

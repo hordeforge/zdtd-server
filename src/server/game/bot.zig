@@ -72,8 +72,11 @@ pub const Bot = struct {
 pub const default_bot_name = "Bot";
 
 pub const BotManager = struct {
-    /// Fixed slot table; slots are recycled on remove (a zeroed slot is free).
-    bots: [max_bots]Bot = undefined,
+    /// Fixed slot table; slots are recycled on remove (an !alive slot is free).
+    /// MUST be zero-initialized: `spawn` scans `bots[slot].alive` to find a
+    /// free slot, and uninitialized memory (Debug allocator 0xAA) reads as
+    /// alive=true, making the table look full and `bot count` spawn too few.
+    bots: [max_bots]Bot = [_]Bot{.{}} ** max_bots,
     /// Live bot count (spawn ++, remove / kill --). Indexes known_bots bits.
     n: usize = 0,
 
