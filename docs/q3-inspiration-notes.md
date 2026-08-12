@@ -71,6 +71,10 @@ boundary (ADR 0026).
 - **Command gating / dedup.** `bot move`/`bot look` only re-emit when the value
   changed beyond a deadband (or none sent yet), cooperating with the host's
   stream/move caps (AD 20, AZ 20).
+- **Stuck detection.** A patrol bot that makes no progress for `STUCK_TICKS`
+  re-picks its wander point; a memory-pursue bot jukes its destination
+  perpendicularly to go around obstacles (clanker `_stuckSince` + `JumpOrStrafe`
+  parity).
 
 All of the above is deterministic: no wall-clock noise, only a per-slot LCG
 seeded from the net id and slot index (AZ 22).

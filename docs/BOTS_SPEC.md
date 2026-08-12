@@ -232,6 +232,10 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   deterministic cadence.
 - **Command gating.** `bot move`/`bot look` only re-emit on change (or first
   contact), cooperating with the host's stream/move caps (AD 20, AZ 20).
+- **Stuck detection.** A patrol bot that makes no progress for `STUCK_TICKS`
+  (1 s) re-picks its wander point, and a memory-pursue bot jukes its
+  destination perpendicularly to go around the obstacle (cross-pollinated from
+  clanker `_stuckSince` + `JumpOrStrafe`).
 
 ---
 

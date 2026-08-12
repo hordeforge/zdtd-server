@@ -1023,6 +1023,23 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(saw_flee_move);
     try std.testing.expect(!saw_flee_shoot);
 
+    // Stuck juke: with the player hidden and the bot unable to move (the canned
+    // host never integrates, so its position is static), the memory-pursue dest
+    // is juked perpendicularly after STUCK_TICKS and a NEW move (not the plain
+    // 10,10) is queued, instead of grinding forever.
+    Cap.hide_player = true;
+    var juked = false;
+    var k: usize = 0;
+    while (k < 26) : (k += 1) {
+        Cap.queued_n = 0;
+        host.onTick();
+        for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+            const s = c[0..Cap.queued_len[qi]];
+            if (std.mem.startsWith(u8, s, "bot move ") and std.mem.indexOf(u8, s, "10.00 0.00 10.00") == null) juked = true;
+        }
+    }
+    try std.testing.expect(juked);
+
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

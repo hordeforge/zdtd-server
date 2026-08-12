@@ -203,6 +203,9 @@ static int   bot_memage[MAX_BOTS];  // ticks since we last saw the locked target
 static float bot_last_hp[MAX_BOTS]; // own hp from the previous sense pass (hit detect)
 static int   bot_dodge[MAX_BOTS];   // ticks left in an evasive dodge (0 = none)
 static int   bot_seen[MAX_BOTS];    // scratch: roster slot present in this sense pass
+static float bot_last_x[MAX_BOTS];  // own position from the previous pass (stuck detect)
+static float bot_last_z[MAX_BOTS];
+static int   bot_stuck_ticks[MAX_BOTS];
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -234,6 +237,9 @@ static void bot_init(void) {
     bot_memage[i] = 0;
     bot_last_hp[i] = 0.f;
     bot_dodge[i] = 0;
+    bot_last_x[i] = 0.f;
+    bot_last_z[i] = 0.f;
+    bot_stuck_ticks[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -352,6 +358,10 @@ static int move_dirty(int bslot, float mx, float mz) {
 // a backpedal, the rest a direction-flipped strafe. 10 ticks = 0.5 s.
 #define DODGE_TICKS 10
 #define DODGE_BACK_TICKS 4
+// Ticks without any movement before a patrol bot re-picks its wander point
+// (or jukes a memory-pursue destination) — cross-pollinated from clanker's
+// stuck timer (`_stuckSince` + JumpOrStrafe). 20 ticks = 1 s.
+#define STUCK_TICKS 20
 // Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
 #define BOT_MAX_HP 100.f
 
@@ -437,6 +447,20 @@ static void brain_tick(void) {
     }
     bot_last_hp[bslot] = rec_hp(bi);
 
+    // Stuck detection: if our position hasn't changed for STUCK_TICKS, the
+    // wander/pursue branches re-pick (below) instead of grinding against an
+    // obstacle forever (clanker `_stuckSince` + JumpOrStrafe parity).
+    const float self_x = rec_x(bi), self_z = rec_z(bi);
+    const float moved2 = (self_x - bot_last_x[bslot]) * (self_x - bot_last_x[bslot]) +
+                         (self_z - bot_last_z[bslot]) * (self_z - bot_last_z[bslot]);
+    bot_last_x[bslot] = self_x;
+    bot_last_z[bslot] = self_z;
+    if (moved2 < 0.0001f) {
+      bot_stuck_ticks[bslot]++;
+    } else {
+      bot_stuck_ticks[bslot] = 0;
+    }
+
     // Pick the nearest hostile candidate within vision (players/zombies/other
     // bots, not ourselves). Players are preferred over zombies/bots at equal
     // distance (cross-pollinated from clanker BotBrain.FindTarget: EntityPlayer
@@ -481,12 +505,32 @@ static void brain_tick(void) {
       if (pursue) {
         bot_memage[bslot]++;
         want_x = bot_tpx[bslot]; want_z = bot_tpz[bslot];
+        if (bot_stuck_ticks[bslot] >= STUCK_TICKS) {
+          // Juke around the obstacle: offset the memory point perpendicularly
+          // so the bot tries to go around instead of grinding (clanker
+          // JumpOrStrafe parity).
+          float pdx = want_x - bx, pdz = want_z - bz;
+          float pl = sqrtf_impl(pdx * pdx + pdz * pdz);
+          if (pl > 0.1f) {
+            float ox2 = -pdz / pl, oz2 = pdx / pl;
+            float jd = (bi & 1) ? 3.f : -3.f;
+            want_x += ox2 * jd;
+            want_z += oz2 * jd;
+          }
+          bot_stuck_ticks[bslot] = 0;
+        }
         spd = (skill >= 2) ? 4.2f : 3.2f; // hunt speed
       } else {
         if (bot_lock[bslot] >= 0) { bot_lock[bslot] = -1; bot_memage[bslot] = 0; }
         if (bot_wander_x[bslot] == 0.f && bot_wander_z[bslot] == 0.f) {
           bot_wander_x[bslot] = bx + 10.f;
           bot_wander_z[bslot] = bz + 8.f;
+        }
+        if (bot_stuck_ticks[bslot] >= STUCK_TICKS) {
+          // Stuck patrol: pick a fresh wander point instead of grinding.
+          bot_wander_x[bslot] = bx + ((bi % 5) - 2) * 6.f;
+          bot_wander_z[bslot] = bz + 6.f;
+          bot_stuck_ticks[bslot] = 0;
         }
         want_x = bot_wander_x[bslot]; want_z = bot_wander_z[bslot];
         spd = 1.4f; // slow patrol
@@ -686,7 +730,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.9 enabled");
+  e("zdtd_bot v2.0 enabled");
   flush(1);
 }
 
