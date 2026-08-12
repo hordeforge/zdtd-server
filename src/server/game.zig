@@ -1845,7 +1845,17 @@ pub const Game = struct {
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
-            .air_drop_frequency = self.air_drop_interval_hours,
+            // Stock GameStat.AirDropFrequency is in DAYS (default 3/3 days;
+            // aidirector.md airdrop schedule); the config key + sim interval
+            // are in game hours (config.zig), so convert for the wire.
+            .air_drop_frequency = if (self.air_drop_interval_hours == 0)
+                0
+            else
+                @divTrunc(self.air_drop_interval_hours, 24),
+            // Stock TimeOfDayIncPerSec = world-time units per real second
+            // (24000-unit day; live-observed 6 at DayLightLength 18). Derive
+            // from the clock so the wire matches the sim's own rate.
+            .time_of_day_inc_per_sec = @trunc(24000.0 / (clk.seconds_per_hour * 24.0)),
             .storm_freq = self.storm_frequency,
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,
