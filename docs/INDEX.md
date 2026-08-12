@@ -35,8 +35,8 @@ New to the project, or picking up work:
 9. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
    the stock game (file map 187/187 + constants ledger; gated by
    `tools/provenance_scan.py` in `make check`). Re-run the review with
-   [PROVENANCE_REVIEW_PROMPT.md](PROVENANCE_REVIEW_PROMPT.md) (copy-paste
-   agent prompt: method, gates, honesty rules).
+   [provenance-review.md](provenance-review.md) (copy-paste agent prompt:
+   method, gates, honesty rules; picked up by `~/review-prompts`).
 10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
 

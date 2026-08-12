@@ -2,6 +2,9 @@
 
 **Hub:** [`INDEX.md`](INDEX.md). **Owns:** the copy-paste agent prompt for
 re-running the provenance review against the current research corpus.
+**Discovered by `~/review-prompts`:** the name ends in `-review.md`, so the
+review-loop tool picks it up when run with this repo as the working directory
+(a project-local prompt wins over a bundled one of the same name).
 
 Copy the block below into a fresh agent session to re-run the provenance review
 against the current research corpus. It encodes the method, the gates, and the
