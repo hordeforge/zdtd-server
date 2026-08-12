@@ -5180,7 +5180,10 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     }
 
     const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
-    const zid = g.sim.spawnZombie(12, 70, 12, 40).?;
+    // Spawn the zombie at the terrain surface too so the eye-line is flat and
+    // the wall cell is predictable.
+    const zy = g.groundHeight(12, 12);
+    const zid = g.sim.spawnZombie(12, zy, 12, 40).?;
     const zs = g.sim.slotOfNetId(zid).?;
 
     // Clear line: the shot lands and damages the zombie by bot_shoot_damage.
@@ -5189,17 +5192,50 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
 
     // Place a stone wall on the eye-line cell between the two and re-shoot:
     // the LOS gate must reject the shot (hp unchanged).
-    try g.world.setBlockWorld(10, 71, 10, world_store.block_stone);
+    try g.world.setBlockWorld(10, 66, 10, world_store.block_stone);
     const hp_before = g.sim.health[zs].hp;
     g.bots.shoot(g, bid, zid, false);
     try std.testing.expectEqual(hp_before, g.sim.health[zs].hp);
 
     // Clear the wall; a headshot through clear air lands with the multiplier.
-    try g.world.setBlockWorld(10, 71, 10, world_store.block_air);
+    try g.world.setBlockWorld(10, 66, 10, world_store.block_air);
     g.bots.shoot(g, bid, zid, true);
     try std.testing.expectApproxEqAbs(
         hp_before - game_bot.bot_shoot_damage * game_bot.bot_headshot_multiplier,
         g.sim.health[zs].hp,
+        0.01,
+    );
+}
+
+test "scenario bots are grounded to terrain height on spawn and move" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Spawn grounds the bot onto the terrain surface at (8, 8), not the passed
+    // flat y=70.
+    const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
+    const bs = g.bots.find(bid).?;
+    const gy = g.groundHeight(8, 8);
+    try std.testing.expectApproxEqAbs(gy, g.bots.bots[bs].y, 0.01);
+
+    // Moving keeps the bot on the terrain surface (re-grounded every tick).
+    g.bots.move(bid, 20, 70, 20, 4);
+    g.bots.tick(g, 0.05);
+    const b = &g.bots.bots[bs];
+    try std.testing.expectApproxEqAbs(
+        g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z))),
+        b.y,
         0.01,
     );
 }

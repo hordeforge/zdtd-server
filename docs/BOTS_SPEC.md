@@ -167,6 +167,9 @@ broadcast it — no self-echo, no redundant blobs.
   destroyed via `bot remove <id|all>` or death (a bot killed by `bot shoot`
   or ECS damage dies in place). Dead/removed bots are unspawned from every
   viewer's `known_bots` bitset by the bot replication path.
+- **Terrain:** bots are grounded onto the terrain surface on spawn and every
+  move tick (`Game.groundHeight`, chunk heightAt + 1), so they follow hills
+  instead of floating at a fixed spawn height on real maps.
 - **Replication:** bots replicate to clients through a **separate non-ECS
   path** in `src/server/game/replicate.zig` (spawn-on-approach / range-remove /
   PosAndRot fan-out against the same interest grid as ECS entities). Spawns use

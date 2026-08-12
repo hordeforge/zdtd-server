@@ -79,17 +79,21 @@ pub const BotManager = struct {
 
     /// Allocate a live bot at (x, y, z). Returns its net id, or null when the
     /// table is full. The id comes from the shared sim counter (Game helper),
-    /// so it never collides with ECS entity ids.
+    /// so it never collides with ECS entity ids. The bot is grounded onto the
+    /// terrain surface at (x, z) (`Game.groundHeight`) so it never spawns
+    /// floating in or above the ground on real maps.
     pub fn spawn(self: *BotManager, g: *Game, x: f32, y: f32, z: f32, hp: f32) ?i32 {
+        _ = y; // grounded onto the terrain surface below (see body)
         if (self.n >= max_bots) return null;
         var slot: usize = 0;
         while (slot < max_bots and self.bots[slot].alive) : (slot += 1) {}
         if (slot >= max_bots) return null;
         const id = g.allocBotNetId();
+        const gy = g.groundHeight(@intFromFloat(@floor(x)), @intFromFloat(@floor(z)));
         self.bots[slot] = .{
             .net_id = id,
             .x = x,
-            .y = y,
+            .y = gy,
             .z = z,
             .hp = @max(hp, 1),
             .alive = true,
@@ -290,12 +294,14 @@ pub const BotManager = struct {
     /// Integrate live bots' move intents. For each bot with move_active, step
     /// x/z toward the destination by at most speed*dt (never overshoot), snap y
     /// to the destination and clear the intent on arrival (horizontal distance
-    /// <= arrival_dist). No heap; the ECS is not touched (bots live here only).
+    /// <= arrival_dist). After each step the bot's y is re-grounded onto the
+    /// terrain surface so it follows hills instead of floating at a fixed
+    /// height. No heap; the ECS is not touched (bots live here only).
     pub fn tick(self: *BotManager, g: *Game, dt: f32) void {
-        _ = g;
         for (&self.bots) |*b| {
             if (!b.alive or !b.move_active) continue;
             stepMove(b, dt);
+            b.y = g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z)));
         }
     }
 

@@ -1205,6 +1205,11 @@ pub const Game = struct {
         return game_world.botLosClear(self, from, to);
     }
 
+    /// Ground/surface Y at world (x, z); bots stand here (spawn + move).
+    pub fn groundHeight(self: *Game, x: i32, z: i32) f32 {
+        return game_world.groundHeight(self, x, z);
+    }
+
     pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
         return game_world.setBlockHp(self, x, y, z, abs);
     }

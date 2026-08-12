@@ -11,6 +11,7 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
+const world_store = @import("../../world/store.zig");
 
 const max_land_claims = game_mod.max_land_claims;
 
@@ -272,4 +273,17 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
         if (self.world.isSolidWorld(ix, iy, iz) catch continue) return false;
     }
     return true;
+}
+
+/// Ground/surface Y a bot stands on at world (x, z) — chunk heightAt + 1,
+/// matching the Wasm `heightAtWorld` callback (hooks.zig). Materializes the
+/// chunk on demand; falls back to y=61 when the probe errors (same fallback as
+/// the Wasm hook). Backs bot spawn grounding and move-time y tracking so bots
+/// follow terrain instead of floating at a fixed spawn height.
+pub fn groundHeight(self: *Game, x: i32, z: i32) f32 {
+    const t = world_store.World.worldToChunk(x, z);
+    self.terrain_mu.lock();
+    defer self.terrain_mu.unlock();
+    const ch = self.world.getOrCreate(t.pos) catch return 61;
+    return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
 }
