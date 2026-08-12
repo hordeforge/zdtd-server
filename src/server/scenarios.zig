@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const game_mod = @import("game.zig");
+const game_bot = @import("game/bot.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
@@ -5161,4 +5162,44 @@ test "scenario a burning workstation grants its ActiveRadiusEffects buff to near
     try std.testing.expect(g.sim.buffs[near2_ps].find(buf_id) == null);
 
     std.debug.print("PASS block radius effect: burning campfire buffs nearby players, unlit does not\n", .{});
+}
+
+test "scenario bot shoot is LOS-gated by solid voxels" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
+    const zid = g.sim.spawnZombie(12, 70, 12, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+
+    // Clear line: the shot lands and damages the zombie by bot_shoot_damage.
+    g.bots.shoot(g, bid, zid, false);
+    try std.testing.expectApproxEqAbs(@as(f32, 40 - game_bot.bot_shoot_damage), g.sim.health[zs].hp, 0.01);
+
+    // Place a stone wall on the eye-line cell between the two and re-shoot:
+    // the LOS gate must reject the shot (hp unchanged).
+    try g.world.setBlockWorld(10, 71, 10, world_store.block_stone);
+    const hp_before = g.sim.health[zs].hp;
+    g.bots.shoot(g, bid, zid, false);
+    try std.testing.expectEqual(hp_before, g.sim.health[zs].hp);
+
+    // Clear the wall; a headshot through clear air lands with the multiplier.
+    try g.world.setBlockWorld(10, 71, 10, world_store.block_air);
+    g.bots.shoot(g, bid, zid, true);
+    try std.testing.expectApproxEqAbs(
+        hp_before - game_bot.bot_shoot_damage * game_bot.bot_headshot_multiplier,
+        g.sim.health[zs].hp,
+        0.01,
+    );
 }

@@ -132,14 +132,32 @@ pub const BotManager = struct {
         self.bots[s].yaw = yaw;
     }
 
-    /// `bot shoot <shooter> <target> [head]`: only a live bot may fire. A live
+    /// `bot shoot <shooter> <target> [head]`: only a live bot may fire, and only
+    /// when the shot is not blocked by solid voxels (BOTS_SPEC §4 host-LOS gate;
+    /// `Game.botLosClear` from the shooter's eye to the target's chest). A live
     /// bot target takes bot_shoot_damage (dies at hp <= 0); any other target
     /// resolves through the ECS damage path (guarded against absence). The
     /// optional `head` token applies the headshot multiplier (cross-pollinated
     /// from clanker TryShootBurst HeadshotMultiplier).
     pub fn shoot(self: *BotManager, g: *Game, shooter: i32, target: i32, head: bool) void {
-        if (self.find(shooter) == null) return;
+        const ss = self.find(shooter) orelse return;
         const dmg = bot_shoot_damage * (if (head) bot_headshot_multiplier else 1.0);
+
+        // Target position for the LOS check: a bot target or an ECS entity.
+        var tpos: [3]f32 = undefined;
+        if (self.find(target)) |ts| {
+            const b = &self.bots[ts];
+            tpos = .{ b.x, b.y, b.z };
+        } else if (g.sim.slotOfNetId(target)) |es| {
+            const t = g.sim.transform[es];
+            tpos = .{ t.x, t.y, t.z };
+        } else return;
+
+        const p = &self.bots[ss];
+        const eye: [3]f32 = .{ p.x, p.y + 1.45, p.z };
+        const chest: [3]f32 = .{ tpos[0], tpos[1] + 1.05, tpos[2] };
+        if (!g.botLosClear(eye, chest)) return;
+
         if (self.damageBot(target, dmg)) return;
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
         _ = g.sim.damage(target, dmg);

@@ -1200,6 +1200,11 @@ pub const Game = struct {
         return game_world.getBlockHp(self, x, y, z);
     }
 
+    /// Voxel line-of-sight gate for `bot shoot` (BOTS_SPEC §4 host-LOS).
+    pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
+        return game_world.botLosClear(self, from, to);
+    }
+
     pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
         return game_world.setBlockHp(self, x, y, z, abs);
     }
