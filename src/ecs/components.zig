@@ -10,6 +10,7 @@ pub const Kind = enum(u8) {
     turret,
     loot_bag,
     animal,
+    bot,
 };
 
 pub const Transform = struct {
@@ -235,6 +236,53 @@ pub const ZombieAi = struct {
         return self.path_wp[self.path_wp_i];
     }
 };
+
+/// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-clanker skill model
+/// (BotCharacter, BotAimAtEnemy, BotCheckAttack). The guest Wasm brain reads
+/// these (via the sense view where relevant) and answers back with intent; the
+/// host owns the entity. The `skill` 0..4 floor is a Rules value; per-bot
+/// overrides (bot cfg) land here and win. Aesop: the host never decides *what*
+/// to do, only whether the ask is legal.
+pub const BotDef = struct {
+    /// Display name (static/indefinite-lifetime slice; kept on the entity.
+    /// Never assign an arena/allocator-owned slice).
+    name: []const u8 = "Bot",
+    /// Difficulty 0..4 (0 bot, 1 easy, 2 normal, 3 hard, 4 nightmare).
+    skill: u8 = 2,
+    /// Seconds before the bot reacts to a newly seen threat (Q3 reaction gate).
+    reaction_s: f32 = 0.4,
+    /// Vision cone: metres of detection range.
+    vision_range: f32 = 40,
+    /// Vision cone: full angle (degrees) centered on facing.
+    vision_angle: f32 = 120,
+    /// Seconds between fire decisions (Q3 firethrottle).
+    fire_throttle_s: f32 = 0.3,
+    /// Chance (0..1) to strafe while attacking.
+    strafe_chance: f32 = 0.4,
+    /// Chance (0..1) to dodge on being hit.
+    dodge_chance: f32 = 0.3,
+    /// Aggression / self-preservation (0..1), as in BotCharacter.
+    aggression: f32 = 0.6,
+    self_preservation: f32 = 0.5,
+    /// The bot's current commanded/host-authorised target net id (-1 = none).
+    /// The guest passes targets via bot_shoot; the host records the last legal
+    /// one here so the sense view and admin listing can report it.
+    target_id: i32 = -1,
+};
+
+/// Default BotDef used by World.spawnBot (a Rules floor; per-bot overrides win).
+pub const BotDefDefault = BotDef{};
+
+/// Apply the Q3/Doom 3 skill preset (0 bot .. 4 nightmare) to a BotDef:
+/// reaction shrinks, vision and dodge grow with skill. Mirrors the reference
+/// Difficulty presets; does not touch aggression/self-preservation (left for
+/// the addon). Called at spawn; `bot cfg` overrides fields directly after.
+pub fn applySkillFloor(d: *BotDef) void {
+    d.skill = @min(d.skill, 4);
+    d.reaction_s = @max(0.08, 0.6 - 0.11 * @as(f32, @floatFromInt(d.skill)));
+    d.vision_range = 25 + 8 * @as(f32, @floatFromInt(d.skill));
+    d.dodge_chance = 0.2 + 0.11 * @as(f32, @floatFromInt(d.skill));
+}
 
 pub const VehicleKind = enum(u8) {
     bicycle = 0,
@@ -799,9 +847,10 @@ pub const Mask = packed struct(u32) {
     class_id: bool = false,
     loot_bag: bool = false,
     sleeper: bool = false,
+    bot: bool = false,
     dirty: bool = false,
     buffs: bool = false,
-    _pad: u13 = 0,
+    _pad: u12 = 0,
 };
 
 test "putInSlot rejects overflowing stack counts" {
