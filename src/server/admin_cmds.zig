@@ -101,6 +101,11 @@ pub fn writeGamePref(w: *std.Io.Writer, name: []const u8, value: []const u8) !vo
     try w.print("GamePref.{s} = {s}\n", .{ name, value });
 }
 
+/// ConsoleCmdGetGameStats (asm.il 224074): "GameStat.{0} = {1}".
+pub fn writeGameStat(w: *std.Io.Writer, name: []const u8, value: []const u8) !void {
+    try w.print("GameStat.{s} = {s}\n", .{ name, value });
+}
+
 /// ConsoleCmdChunkCache (asm.il 213107) tail: the two lines operator tools read.
 pub fn writeChunkCache(w: *std.Io.Writer, chunks: usize, bytes: u64) !void {
     try w.print("Chunks: {d}\n", .{chunks});
@@ -520,6 +525,10 @@ test "unknown command and gamepref match stock literals" {
     try std.testing.expectEqualStrings(
         "GamePref.ServerPort = 26902\n",
         try render(&buf, writeGamePref, .{ "ServerPort", "26902" }),
+    );
+    try std.testing.expectEqualStrings(
+        "GameStat.DayNightLength = 60\n",
+        try render(&buf, writeGameStat, .{ "DayNightLength", "60" }),
     );
 }
 

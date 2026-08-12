@@ -17,6 +17,7 @@ pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "evidence, ev", .description = "zdtd: recent authority reject evidence ring" },
     .{ .names = "gamestage", .description = "Show gamestage inputs for a player or all players" },
     .{ .names = "getgamepref, gg", .description = "Gets game preferences" },
+    .{ .names = "getgamestat, ggs", .description = "Gets game stats (the tracked subset)" },
     .{ .names = "gettime, gt", .description = "Get the current game time" },
     .{ .names = "give", .description = "zdtd: drop an item stack at a player's feet" },
     .{ .names = "clearweather, stormoff", .description = "zdtd: end any active storm; next storm a day out" },

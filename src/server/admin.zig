@@ -408,6 +408,9 @@ pub const Command = union(enum) {
     listplayerids,
     /// Stock `getgamepref` / `gg [filter]` (asm.il 220877).
     getgamepref: []const u8,
+    /// Stock `getgamestat` / `ggs [filter]` (ConsoleCmdGetGameStats, asm.il
+    /// 224074): the GameStats the sim tracks, as `GameStat.X = value`.
+    getgamestat: []const u8,
     /// Stock `setgamepref` / `sg <name> <value>` (asm.il 251176).
     setgamepref: struct { name: []const u8, value: []const u8 },
     /// Stock `chunkcache` / `cc` (asm.il 213107).
@@ -539,6 +542,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "admin")) return "admin <add|remove|list> <target> [level]";
     if (std.mem.eql(u8, verb, "whitelist")) return "whitelist <add|remove|list> <target>";
     if (std.mem.eql(u8, verb, "getgamepref") or std.mem.eql(u8, verb, "gg")) return "getgamepref [filter]";
+    if (std.mem.eql(u8, verb, "getgamestat") or std.mem.eql(u8, verb, "ggs")) return "getgamestat [filter]";
     if (std.mem.eql(u8, verb, "setgamepref") or std.mem.eql(u8, verb, "sg")) return "setgamepref <name> <value>";
     return null;
 }
@@ -634,6 +638,11 @@ pub fn parseCommand(line: []const u8) Command {
         const filter = it.next() orelse "";
         if (it.next() != null) return .{ .wrong_args = .{ .expected = "0 or 1", .found = argCount(line) } };
         return .{ .getgamepref = filter };
+    }
+    if (std.mem.eql(u8, cmd, "getgamestat") or std.mem.eql(u8, cmd, "ggs")) {
+        const filter = it.next() orelse "";
+        if (it.next() != null) return .{ .wrong_args = .{ .expected = "0 or 1", .found = argCount(line) } };
+        return .{ .getgamestat = filter };
     }
     if (std.mem.eql(u8, cmd, "setgamepref") or std.mem.eql(u8, cmd, "sg")) {
         const nm = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 0 } };
@@ -930,6 +939,7 @@ test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
     try std.testing.expectEqualStrings("status", usageFor("status").?);
     try std.testing.expectEqualStrings("getgamepref [filter]", usageFor("gg").?);
+    try std.testing.expectEqualStrings("getgamestat [filter]", usageFor("ggs").?);
     try std.testing.expectEqualStrings("ban <add|remove|list> <target> [duration] [unit] [reason]", usageFor("ban").?);
     try std.testing.expect(usageFor("frobnicate") == null);
 }
@@ -1030,6 +1040,8 @@ test "parse remaining stock read-only verbs" {
     try std.testing.expect(parseCommand("mem") == .mem);
     try std.testing.expectEqualStrings("", parseCommand("gg").getgamepref);
     try std.testing.expectEqualStrings("Server", parseCommand("getgamepref Server").getgamepref);
+    try std.testing.expectEqualStrings("", parseCommand("getgamestat").getgamestat);
+    try std.testing.expectEqualStrings("Day", parseCommand("ggs Day").getgamestat);
     const sp = parseCommand("sg ServerPort 26902");
     try std.testing.expectEqualStrings("ServerPort", sp.setgamepref.name);
     try std.testing.expectEqualStrings("26902", sp.setgamepref.value);

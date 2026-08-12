@@ -669,6 +669,63 @@ pub fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt:
     self.adminWrite(admin_cmds.writeGamePref, .{ name, v });
 }
 
+/// ConsoleCmdGetGameStats (asm.il 224074): the GameStats this sim tracks,
+/// printed as `GameStat.X = value` (stock console shape). Values come from
+/// gameStatsValues(), the same set the wire GameStats blob carries, so the
+/// console shows exactly what the client is told. Untracked stock stats are
+/// omitted; a missing stat is a finding to triage, not a value to invent.
+pub fn replyGameStats(self: *Game, filter: []const u8) void {
+    const v = self.gameStatsValues();
+    gameStat(self, filter, "GameState", "{d}", .{@as(i32, 1)});
+    gameStat(self, filter, "GameDifficulty", "{d}", .{v.game_difficulty});
+    gameStat(self, filter, "BloodMoonEnemyCount", "{d}", .{v.blood_moon_enemy_count});
+    gameStat(self, filter, "EnemyDifficulty", "{d}", .{v.enemy_difficulty});
+    gameStat(self, filter, "DayLightLength", "{d}", .{v.day_light_length});
+    gameStat(self, filter, "DayNightLength", "{d}", .{v.day_night_length});
+    gameStat(self, filter, "BloodMoonDay", "{d}", .{v.blood_moon_day});
+    gameStat(self, filter, "BloodMoonWarning", "{d}", .{v.blood_moon_warning});
+    gameStat(self, filter, "BlockDamagePlayer", "{d}", .{v.block_damage_player});
+    gameStat(self, filter, "BlockDamageAI", "{d}", .{v.block_damage_ai});
+    gameStat(self, filter, "BlockDamageAIBM", "{d}", .{v.block_damage_ai_bm});
+    gameStat(self, filter, "XPMultiplier", "{d}", .{v.xp_multiplier});
+    gameStat(self, filter, "PlayerKillingMode", "{d}", .{v.player_killing_mode});
+    gameStat(self, filter, "DropOnDeath", "{d}", .{v.drop_on_death});
+    gameStat(self, filter, "LandClaimSize", "{d}", .{v.land_claim_size});
+    gameStat(self, filter, "LandClaimOnlineDurabilityModifier", "{d}", .{v.land_claim_online_dur});
+    gameStat(self, filter, "LandClaimOfflineDurabilityModifier", "{d}", .{v.land_claim_offline_dur});
+    gameStat(self, filter, "AirDropFrequency", "{d}", .{v.air_drop_frequency});
+    gameStat(self, filter, "PartySharedKillRange", "{d}", .{v.party_shared_kill_range});
+    gameStat(self, filter, "ShowFriendPlayerOnMap", "{s}", .{boolWord(v.show_friend_player_on_map)});
+    gameStat(self, filter, "IsSpawnEnemies", "{s}", .{boolWord(v.is_spawn_enemies)});
+    gameStat(self, filter, "EnemySpawnMode", "{s}", .{boolWord(v.enemy_spawn_mode)});
+    gameStat(self, filter, "TimeOfDayIncPerSec", "{d}", .{v.time_of_day_inc_per_sec});
+    gameStat(self, filter, "DeathPenalty", "{d}", .{v.death_penalty});
+    gameStat(self, filter, "QuestProgressionDailyLimit", "{d}", .{v.quest_progression_daily_limit});
+    gameStat(self, filter, "StormFreq", "{d}", .{v.storm_freq});
+    gameStat(self, filter, "LootAbundance", "{d}", .{v.loot_abundance});
+    gameStat(self, filter, "LootRespawnDays", "{d}", .{v.loot_respawn_days});
+    gameStat(self, filter, "BedrollExpiryTime", "{d}", .{v.bedroll_expiry_time});
+    gameStat(self, filter, "LandClaimCount", "{d}", .{v.land_claim_count});
+    gameStat(self, filter, "LandClaimDeadZone", "{d}", .{v.land_claim_dead_zone});
+    gameStat(self, filter, "LandClaimExpiryTime", "{d}", .{v.land_claim_expiry_time});
+    gameStat(self, filter, "LandClaimDecayMode", "{d}", .{v.land_claim_decay_mode});
+    gameStat(self, filter, "LandClaimOfflineDelay", "{d}", .{v.land_claim_offline_delay});
+    gameStat(self, filter, "JarRefund", "{d}", .{v.jar_refund});
+    gameStat(self, filter, "SandboxPreset", "{s}", .{v.sandbox_preset});
+    gameStat(self, filter, "SandboxCode", "{s}", .{v.sandbox_code});
+}
+
+fn gameStat(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
+    if (filter.len != 0 and std.ascii.findIgnoreCase(name, filter) == null) return;
+    var vb: [96]u8 = undefined;
+    const val = std.fmt.bufPrint(&vb, fmt, args) catch return;
+    self.adminWrite(admin_cmds.writeGameStat, .{ name, val });
+}
+
+fn boolWord(b: bool) []const u8 {
+    return if (b) "True" else "False";
+}
+
 /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
 /// clamp to this function's own range (independent of config.zig's startup
 /// ranges — they are not guaranteed to match), and write the sim/Game field
@@ -1122,6 +1179,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             self.adminWrite(admin_cmds.writeTotal, .{n});
         },
         .getgamepref => |filter| self.replyGamePrefs(filter),
+        .getgamestat => |filter| self.replyGameStats(filter),
         .setgamepref => |sp| {
             // Runtime write for the GameStats-backed prefs: apply to the sim
             // and broadcast the new stats blob so client HUD values match.

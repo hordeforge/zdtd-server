@@ -947,6 +947,10 @@ pub const Game = struct {
         admin_console.replyGamePrefs(self, filter);
     }
 
+    pub fn replyGameStats(self: *Game, filter: []const u8) void {
+        admin_console.replyGameStats(self, filter);
+    }
+
     pub fn gamePref(self: *Game, filter: []const u8, name: []const u8, comptime fmt: []const u8, args: anytype) void {
         admin_console.gamePref(self, filter, name, fmt, args);
     }
