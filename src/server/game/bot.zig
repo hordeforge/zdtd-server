@@ -170,7 +170,9 @@ pub const BotManager = struct {
 
         if (self.damageBot(target, dmg)) return;
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
-        _ = g.sim.damage(target, dmg);
+        // damageFrom attributes the bot as the attacker (zombie revenge target,
+        // kill attribution) — `damage` would leave it unattributed.
+        _ = g.sim.damageFrom(target, dmg, shooter);
     }
 
     /// Apply damage to a live bot by net id (no-op if absent). Returns true when

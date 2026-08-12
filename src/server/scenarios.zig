@@ -5186,9 +5186,11 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     const zid = g.sim.spawnZombie(12, zy, 12, 40).?;
     const zs = g.sim.slotOfNetId(zid).?;
 
-    // Clear line: the shot lands and damages the zombie by bot_shoot_damage.
+    // Clear line: the shot lands and damages the zombie by bot_shoot_damage,
+    // and the bot is attributed as the attacker (zombie revenge target).
     g.bots.shoot(g, bid, zid, false);
     try std.testing.expectApproxEqAbs(@as(f32, 40 - game_bot.bot_shoot_damage), g.sim.health[zs].hp, 0.01);
+    try std.testing.expectEqual(bid, g.sim.zombie_ai[zs].revenge_target);
 
     // Place a stone wall on the eye-line cell between the two and re-shoot:
     // the LOS gate must reject the shot (hp unchanged).
