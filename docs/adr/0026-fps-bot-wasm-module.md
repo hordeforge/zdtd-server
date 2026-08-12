@@ -1,6 +1,9 @@
 # 0026. FPS bots as a Wasm module: a host sense/act boundary, not a core bot brain
 
-- **Status:** accepted
+- **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities —
+  decisions 1 and 3 below are superseded by the host-side `BotManager` in
+  `src/server/game/bot.zig`; the sense/command boundary, decisions 2 and 4,
+  stand unchanged)
 - **Date:** 2026-08-12
 - **Related:** [ADR 0020](0020-wasm-only-plugin-api.md) (Wasm is the only
   plugin format), [ADR 0004](0004-server-authoritative-c2s.md) (server is
@@ -61,17 +64,20 @@ the plugin-commanded responsibilities explicit and off the zombie path.
 
 ## Decision
 
-### 1. bots are a first-class sim entity kind, host-managed
+### 1. bots are a host-managed body, NOT an ECS entity
 
-Add `bot` to `components.Kind`. A bot is a player-mesh entity (name, position,
-health) that the host spawns, ticks, replicates and destroys exactly like other
-entities. It carries a `BotDef` column (per-bot skill parameters ported from
-the Q3/BotCharacter model: aim skill, reaction time, vision range/angle, fire
-throttle, strafe/dodge chance, aggression/self-preservation). The host applies
-the bot's *commanded intent* (position/velocity, facing, fire-request) each
-tick and broadcasts resulting state to clients — a bot never bypasses the move
-caps or the kill/verdict path. The client needs no mod: it sees a normal
-entity (same principle as the 7dtd-clanker's vanilla-client stance).
+Amended 2026-08-12: bots are deliberately **not** a `Kind` member and carry no
+ECS columns. A host-side `BotManager` (`src/server/game/bot.zig`, fixed 16-slot
+table) owns each bot's position, facing, health and move intent; the ECS owns
+players, zombies, traders, vehicles, turrets, loot bags and animals only. The
+guest brain is unchanged: it still talks only through `zdtd.sense` /
+`zdtd.queue`, and the host still applies the bot's *commanded intent* each tick
+and broadcasts resulting state to clients (a bot never bypasses move caps or
+the kill/verdict path — see decision 2/3 below). Bots allocate net ids from the
+shared sim counter (`Game.allocBotNetId`) and replicate through a dedicated
+non-ECS path in `src/server/game/replicate.zig` (player-mesh class, never
+leaking into other kinds). The client needs no mod: it sees a normal player-mesh
+entity.
 
 ### 2. a single read-only "sense" host import is added
 
@@ -87,21 +93,23 @@ gated, budgeted.
 
 ### 3. the SimCommand text set is extended (and the length bound raised)
 
-Extend `src/server/game/wasm_host.zig`'s `parsePluginCommand` and
-`src/ecs/command.zig` `Op` with bot verbs:
+Amended 2026-08-12: the bot verbs dispatch to the host `BotManager`
+(`BotManager.handleCommand`, called from `wasmQueue` when a queued command
+starts with `bot `), **not** the ECS command buffer. `parsePluginCommand` and
+`ecs/command.zig` `Op` keep only the ECS verbs `spawn` / `despawn` / `damage`;
 
-| Verb | Shape | Effect (applied by host on drain) |
+| Verb | Shape | Effect (applied by host) |
 |---|---|---|
-| `bot spawn <name> [x z]` | spawn a named bot | allocate slot, pick spawn point, replicate entity |
-| `bot remove <id\|all>` | despawn | destroy entity (kill verdict path, corpse/cleanup) |
-| `bot move <id> <x> <y> <z> <speed>` | commanded intent | clamp to move caps, set position/velocity for the tick |
+| `bot spawn <name> [x z]` | spawn a named bot | allocate a BotManager slot, replicate player-mesh entity |
+| `bot remove <id\|all>` | despawn | free the slot; the replication path unspawns it from every viewer |
+| `bot move <id> <x> <y> <z> <speed>` | commanded intent | clamp to move caps, integrate toward dest for the tick |
 | `bot look <id> <yaw>` | face | set facing (aim direction for fire) |
 | `bot shoot <id> <target_id>` | fire request | apply damage to target if LOS and in range |
-| `bot count <n>` | population floor | keep n bots alive (auto-respawn), like 7dtd-clanker TargetBotCount |
-| `bot cfg <id> <key> <val>` | per-bot skill override | mutate the BotDef column |
+| `bot count <n>` | population floor | spawn bots until the live count reaches n (like 7dtd-clanker TargetBotCount) |
+| `bot cfg <id> <key> <val>` | per-bot skill override | mutate the bot's `BotDef` config |
 
-The 128-byte queue bound is raised to a named cap that fits these commands and
-a small margin; the drain path remains allocation-free (fixed ops array).
+The 128-byte queue bound and the allocation-free hot path stand; the BotManager
+is a fixed array (no heap on the tick path).
 
 Spawn-point selection, move blocking, LOS and damage are **core, stock-legal
 operations** — never guest-side guesses.
@@ -124,7 +132,8 @@ command parser is added.
   with no host fork and no client mod.
 - The hot path stays allocation-bounded: the guest runs under the existing
   fuel/memory budget; sense crosses once per tick as a fixed-size view; bot
-  commands go through the fixed 64-slot command buffer.
+  commands dispatch straight to the fixed 16-slot BotManager (no ECS command
+  buffer involvement).
 - The Q3/Doom 3 skill model lives where it is a trade secret of the modder, not
   a permanent host API. Per-bot params in `BotDef` stay data (ADR 0010) and a
   `Rules` floor.
@@ -133,11 +142,12 @@ command parser is added.
 
 ### Negative / costs
 
-- Adding a `Kind` member touches every `switch (kind)` in the codebase; the
-  replication/verdict paths need a case (must not leak into other kinds).
 - The `sense` snapshot is a new permanent host import; per ADR 0020 everything
   permanent lands only with evidence, so it must ship with a fixture + test
   proving the fields round-trip.
+- A dedicated `BotManager` is a second entity pipeline beside the ECS
+  (lifecycle, replication, sense merge); the ECS does not see bots, so every
+  bot-aware path (sense, replication, admin) has to consult the manager.
 - Real collision/LOS handling lives in core, so a naive guest can still ask for
   illegal movement; the host must clamp, which is core work, not plugin math.
 

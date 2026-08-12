@@ -53,6 +53,11 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
         std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
         return;
     }
+    // `bot <verb>` commands are host-side BotManager calls (ADR 0026), not ECS
+    // ops: the BotManager owns spawn/move/look/shoot/remove/count and returns
+    // true for any command starting with `bot `. Everything else falls through
+    // to the ECS plugin verbs (spawn/despawn/damage).
+    if (g.bots.handleCommand(g, cmd)) return;
     const op = parsePluginCommand(cmd) orelse {
         const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
         // Guest-controlled bytes: same one-line rule as wasmLog above.
@@ -95,4 +100,49 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
         } };
     }
     return null;
+}
+
+/// Build a fixed-layout world snapshot for a `zdtd.sense` call (BOTS_SPEC §3).
+/// Header (16 bytes) then fixed 32-byte records; all little-endian. Returns
+/// bytes written; 0 when `out` cannot fit a header. No heap on the tick path.
+pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
+    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    if (out.len < 16) return 0;
+    const max_records = (out.len - 16) / 32;
+    std.mem.writeInt(u32, out[0..4], 0x3153425a, .little); // 'ZBS1'
+    std.mem.writeInt(u32, out[4..8], 0, .little); // count, filled below
+    std.mem.writeInt(u32, out[8..12], @truncate(g.tick_n), .little);
+    std.mem.writeInt(i32, out[12..16], 0, .little); // self_net_id
+    var n: usize = 0;
+    var s: ecs.Slot = 0;
+    while (s < ecs.max_entities and n < max_records) : (s += 1) {
+        if (!g.sim.alive[s] or !g.sim.mask[s].network_id) continue;
+        const k: u8 = switch (g.sim.kind[s]) {
+            .player => 0,
+            // Zombies and animals share the hostile bucket in the guest.
+            .zombie, .animal => 1,
+            // Non-combat world objects are not combat candidates; omit.
+            .trader, .vehicle, .turret, .loot_bag => continue,
+        };
+        const base = 16 + n * 32;
+        const r = out[base .. base + 32];
+        std.mem.writeInt(i32, r[0..4], g.sim.network_id[s].id, .little);
+        r[4] = k;
+        r[5] = 0; // self
+        r[6] = if (g.sim.health[s].hp > 0) 1 else 0; // alive
+        r[7] = 0; // pad
+        const t = &g.sim.transform[s];
+        std.mem.writeInt(u32, r[8..12], @bitCast(t.x), .little);
+        std.mem.writeInt(u32, r[12..16], @bitCast(t.y), .little);
+        std.mem.writeInt(u32, r[16..20], @bitCast(t.z), .little);
+        std.mem.writeInt(u32, r[20..24], @bitCast(g.sim.health[s].hp), .little);
+        std.mem.writeInt(u32, r[24..28], @bitCast(t.yaw), .little);
+        std.mem.writeInt(i32, r[28..32], -1, .little); // target_id
+        n += 1;
+    }
+    // Host-side bots (ADR 0026) are not ECS entities; append them after the
+    // ECS actor records as kind==2, sharing the same 32-byte record layout.
+    g.bots.fillSense(out, 16 + n * 32, max_records, &n);
+    std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
+    return 16 + n * 32;
 }

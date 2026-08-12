@@ -7,6 +7,7 @@
 const std = @import("std");
 const ln_peer = @import("../../litenet/peer.zig");
 const ecs = @import("../../ecs/root.zig");
+const bot_mod = @import("bot.zig");
 const guard_policy = @import("../guard_policy.zig");
 const server_config = @import("../config.zig");
 const zdtd_config = @import("../zdtd_config.zig");
@@ -337,6 +338,11 @@ pub const Client = struct {
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),
+    /// Host-side bot slots this client has received an EntitySpawn for. Bots
+    /// are not ECS entities, so they are tracked separately (bit index = bot
+    /// slot) and cleaned by the non-ECS bot replication path, never by the ECS
+    /// dead-entity reconcile in tick.clearDeadKnownEntities.
+    known_bots: std.StaticBitSet(bot_mod.max_bots) = std.StaticBitSet(bot_mod.max_bots).initEmpty(),
     /// Game payload arrived before challenge echo (stock/loadgen can race). Replay after auth.
     preauth_buf: [512]u8 = undefined,
     preauth_len: usize = 0,

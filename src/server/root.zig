@@ -52,6 +52,7 @@ pub const game_blockmeta = @import("game/blockmeta.zig");
 pub const game_clock_persist = @import("game/clock_persist.zig");
 pub const game_locks = @import("game/locks.zig");
 pub const game_bans = @import("game/bans.zig");
+pub const game_bot = @import("game/bot.zig");
 pub const game_trader_wire = @import("game/trader_wire.zig");
 pub const game_send_extra = @import("game/send_extra.zig");
 pub const game_rescue = @import("game/rescue.zig");
@@ -126,6 +127,7 @@ test {
     _ = game_clock_persist;
     _ = game_locks;
     _ = game_bans;
+    _ = game_bot;
     _ = game_trader_wire;
     _ = game_send_extra;
     _ = game_rescue;

@@ -2,9 +2,20 @@
 //
 // A WebAssembly plugin that commands player-mesh FPS bots through the host's
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
-// and move caps; this module owns the *brain* — target selection, aim/reaction,
-// fire throttling and strafe — distilled from the Quake 3 / Doom 3 bot model
-// as the 7dtd-clanker reference does (docs/q3-inspiration-notes.md).
+// and move caps; this module owns the *brain* — target selection, skill-scaled
+// aim error and hit accuracy, lead-fire prediction, reaction gate, fire
+// throttle, strafe/backpedal, low-health survival retreat and lost-sight
+// combat memory — distilled from the Quake 3 / Doom 3 bot model, cross-
+// pollinated with the 7dtd-clanker C# port (docs/q3-inspiration-notes.md,
+// BOTS_SPEC §5.1). All inference is deterministic (per-slot LCG, no wall-clock
+// noise).
+//
+// Improvements cross-pollinated FROM 7dtd-clanker/mod (BotBrain/BotCombat/Bot):
+//   - backpedal when an enemy is too close        (BotBrain.Backpedal)
+//   - skill- and distance-scaled hit accuracy     (TryShootBurst spread/difficulty)
+//   - low-health survival retreat / hold fire     (BotCharacter.WantsToRetreat)
+// Improvements this guest already carried that clanker borrowed back:
+//   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
 //
 // Host imports (module "zdtd", bare field names — PLUGIN_DEV.md):
 //   log(level, ptr, len)   write a log line
@@ -139,11 +150,10 @@ static int rec_kind(int i)       { return s8(REC_OFF(i) + 4); }
 static float rec_x(int i)        { return sf32(REC_OFF(i) + 8); }
 static float rec_y(int i)        { return sf32(REC_OFF(i) + 12); }
 static float rec_z(int i)        { return sf32(REC_OFF(i) + 16); }
-// Unused now, kept as documented sense-record accessors (rec_self/rec_hp/
-// rec_target document the full record layout for future guest logic).
+// Unused now, kept as documented sense-record accessors (rec_self/rec_target
+// document the full record layout for future guest logic).
 static int rec_self(int i) __attribute__((unused));
 static int rec_self(int i)       { return s8(REC_OFF(i) + 5); }
-static float rec_hp(int i) __attribute__((unused));
 static float rec_hp(int i)       { return sf32(REC_OFF(i) + 20); }
 static float rec_target(int i) __attribute__((unused));
 static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
@@ -169,6 +179,22 @@ static float bot_wander_x[MAX_BOTS];
 static float bot_wander_z[MAX_BOTS];
 static int bot_target[MAX_BOTS];
 static int bot_skill[MAX_BOTS];     // default skill applied to spawned bot cfg ops
+// Brain-quality state (ADR 0026 / docs/q3-inspiration-notes.md).
+static unsigned bot_rng[MAX_BOTS];  // deterministic per-slot LCG (no time noise)
+static float bot_aimerr[MAX_BOTS];  // skill-scaled aim error, rolled per engagement
+static float bot_last_yaw[MAX_BOTS];// last look we emitted (command gating)
+static int   bot_look_sent[MAX_BOTS];
+static float bot_last_mx[MAX_BOTS]; // last move destination we emitted
+static float bot_last_mz[MAX_BOTS];
+static int   bot_move_sent[MAX_BOTS];
+static int   bot_engage[MAX_BOTS];  // ticks with the current target (aim/strafe cadence)
+static float bot_tpx[MAX_BOTS];     // last seen target position + smoothed velocity
+static float bot_tpz[MAX_BOTS];     // for lead-fire prediction
+static float bot_tvx[MAX_BOTS];
+static float bot_tvz[MAX_BOTS];
+static int   bot_strafe_p[MAX_BOTS];// strafe phase flip latch (skill>=3)
+static int   bot_lock[MAX_BOTS];    // net id of target pursued via memory (-1 = none)
+static int   bot_memage[MAX_BOTS];  // ticks since we last saw the locked target
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -181,6 +207,21 @@ static void bot_init(void) {
     bot_wander_z[i] = 0.f;
     bot_target[i] = -1;
     bot_skill[i] = 2;
+    bot_rng[i] = 0u;
+    bot_aimerr[i] = 0.f;
+    bot_last_yaw[i] = 0.f;
+    bot_look_sent[i] = 0;
+    bot_last_mx[i] = 0.f;
+    bot_last_mz[i] = 0.f;
+    bot_move_sent[i] = 0;
+    bot_engage[i] = 0;
+    bot_tpx[i] = 0.f;
+    bot_tpz[i] = 0.f;
+    bot_tvx[i] = 0.f;
+    bot_tvz[i] = 0.f;
+    bot_strafe_p[i] = 0;
+    bot_lock[i] = -1;
+    bot_memage[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -198,7 +239,7 @@ static int bot_slot_alloc(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Brain (Q3 / Doom 3 inspired, distilled).
+// Brain (Q3 / Doom 3 inspired, distilled; cross-pollinated with 7dtd-clanker).
 // ---------------------------------------------------------------------------
 
 #define TICK_DT 0.05f            // one tick in seconds
@@ -238,6 +279,63 @@ static float skill_reaction(int skill) {
   float r = 0.6f - 0.11f * (float)skill;
   return r < 0.08f ? 0.08f : r;
 }
+// Skill-scaled one-sided aim error in radians: low skill sprays (~0.28 rad),
+// high skill is near-deadly (~0.06 rad). The error is rolled per engagement
+// and held, so a bot "settles" its aim rather than jittering every frame.
+static float skill_aimerr(int skill) { return 0.28f - 0.055f * (float)skill; }
+
+// Deterministic 32-bit LCG (Q3 bot uses per-bot state; we keep it seeded from
+// the slot/net id and never drive it with wall-clock noise, AZ 22).
+static unsigned rng_next(unsigned *s) {
+  *s = *s * 1103515245u + 12345u;
+  return *s;
+}
+static float rng_f01(unsigned *s) {
+  return (float)((rng_next(s) >> 8) & 0x00ffffffu) / 16777216.0f; // [0,1)
+}
+static float rng_sym(unsigned *s) { return 2.f * rng_f01(s) - 1.f; } // [-1,1)
+
+// Command gating (AD 20 / AZ 20: stream under caps). Only re-send a bot
+// look/move when the value changed beyond a deadband, or never yet sent (the
+// first emission always goes out so the first tick is visible/tests).
+static int look_dirty(int bslot, float yaw) {
+  if (!bot_look_sent[bslot]) return 1;
+  float d = yaw - bot_last_yaw[bslot];
+  while (d > 3.14159265f) d -= 6.2831853f;
+  while (d < -3.14159265f) d += 6.2831853f;
+  return d > 0.015f || d < -0.015f;
+}
+static int move_dirty(int bslot, float mx, float mz) {
+  if (!bot_move_sent[bslot]) return 1;
+  float dx = mx - bot_last_mx[bslot], dz = mz - bot_last_mz[bslot];
+  return dx * dx + dz * dz > 0.25f; // > ~half a block of change
+}
+// Assumed muzzle velocity (blocks/s) used for lead-fire. Tune to the weapon; a
+// stationary target always yields lead == 0 regardless of this value.
+#define BULLET_SPEED 40.f
+// How many ticks (20 TPS) a bot keeps pursuing a target's last-known position
+// after it leaves the host LOS-filtered sense view (5 s) before giving up and
+// reverting to wander. Q3 combat memory, distilled.
+#define BOT_MEMORY_TICKS 100
+// Cross-pollinated from 7dtd-clanker BotBrain.Backpedal: when an enemy closes
+// within this many blocks the bot backs away / circles instead of planting.
+#define BACKPEDAL_RANGE 6.f
+// Cross-pollinated from 7dtd-clanker BotCharacter.WantsToRetreat: below this
+// health fraction a low-skill bot retreats and holds fire (self-preservation).
+#define HP_RETREAT_FRAC 0.35f
+// Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
+#define BOT_MAX_HP 100.f
+
+// Skill- and distance-scaled hit probability (cross-pollinated from
+// 7dtd-clanker TryShootBurst: spread / AimJitterDegrees scaled down by skill).
+// Skill 0 ~34%, skill 4 ~94% at point blank; accuracy falls off with range.
+static float skill_hit_chance(int skill, float dist) {
+  float base = 0.34f + 0.15f * (float)skill;
+  if (base > 0.95f) base = 0.95f;
+  float dscale = 1.f - dist / 90.f;
+  if (dscale < 0.2f) dscale = 0.2f;
+  return base * dscale;
+}
 
 // One on_tick pass: sense, then drive every bot we see.
 static void brain_tick(void) {
@@ -259,6 +357,17 @@ static void brain_tick(void) {
       bot_target[bslot] = -1;
       bot_wander_x[bslot] = bx;
       bot_wander_z[bslot] = bz;
+      // Deterministic per-slot RNG seed (no wall-clock noise).
+      bot_rng[bslot] = (unsigned)net * 2654435761u + (unsigned)bslot * 97u + 1u;
+      bot_aimerr[bslot] = 0.f;
+      bot_look_sent[bslot] = 0;
+      bot_move_sent[bslot] = 0;
+      bot_engage[bslot] = 0;
+      bot_tpx[bslot] = bx; bot_tpz[bslot] = bz;
+      bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
+      bot_strafe_p[bslot] = 0;
+      bot_lock[bslot] = -1;
+      bot_memage[bslot] = 0;
     }
     const int skill = bot_skill[bslot];
     const float vision = skill_vision(skill);
@@ -277,56 +386,149 @@ static void brain_tick(void) {
     }
 
     if (ti < 0) {
-      // Wander slowly toward a stored point (avoid standing dead still).
-      if (bot_wander_x[bslot] == 0.f && bot_wander_z[bslot] == 0.f) {
-        bot_wander_x[bslot] = bx + 10.f;
-        bot_wander_z[bslot] = bz + 8.f;
+      // No host-visible threat. Prefer pursuing the last-known position of a
+      // recently-seen target (Q3 combat memory): the host hides entities behind
+      // LOS, so we keep closing on where it was instead of instantly forgetting
+      // and wandering.
+      float want_x, want_z;   // destination we head for
+      float spd;              // move speed
+      int pursue = (bot_lock[bslot] >= 0 && bot_memage[bslot] < BOT_MEMORY_TICKS);
+      if (pursue) {
+        bot_memage[bslot]++;
+        want_x = bot_tpx[bslot]; want_z = bot_tpz[bslot];
+        spd = (skill >= 2) ? 4.2f : 3.2f; // hunt speed
+      } else {
+        if (bot_lock[bslot] >= 0) { bot_lock[bslot] = -1; bot_memage[bslot] = 0; }
+        if (bot_wander_x[bslot] == 0.f && bot_wander_z[bslot] == 0.f) {
+          bot_wander_x[bslot] = bx + 10.f;
+          bot_wander_z[bslot] = bz + 8.f;
+        }
+        want_x = bot_wander_x[bslot]; want_z = bot_wander_z[bslot];
+        spd = 1.4f; // slow patrol
       }
-      float dx = bot_wander_x[bslot] - bx, dz = bot_wander_z[bslot] - bz;
-      if (dx * dx + dz * dz < 2.f) {
+      float wdx = want_x - bx, wdz = want_z - bz;
+      if (!pursue && wdx * wdx + wdz * wdz < 2.f) {
+        // Reached the wander point: pick a new one.
         bot_wander_x[bslot] = bx + ((bi % 5) - 2) * 6.f;
         bot_wander_z[bslot] = bz + 6.f;
+        want_x = bot_wander_x[bslot]; want_z = bot_wander_z[bslot];
+        wdx = want_x - bx; wdz = want_z - bz;
       }
-      queue_move(net, bot_wander_x[bslot], by, bot_wander_z[bslot], 1.4f);
-      bot_target[bslot] = -1;
+      float wyaw = atan2f_impl(wdz, wdx) + 1.570796f;
+      if (look_dirty(bslot, wyaw)) {
+        queue_look(net, wyaw);
+        bot_last_yaw[bslot] = wyaw; bot_look_sent[bslot] = 1;
+      }
+      if (move_dirty(bslot, want_x, want_z)) {
+        queue_move(net, want_x, by, want_z, spd);
+        bot_last_mx[bslot] = want_x;
+        bot_last_mz[bslot] = want_z;
+        bot_move_sent[bslot] = 1;
+      }
+      // Drop a stale combat lock (a new engagement resets motion history).
+      if (bot_target[bslot] != -1) {
+        bot_target[bslot] = -1;
+        bot_react[bslot] = 0.f;
+      }
       continue;
     }
 
     const int target_net = rec_net(ti);
+    const float tx = rec_x(ti), tz = rec_z(ti);
     if (bot_target[bslot] != target_net) {
+      // New target: reset reaction, aim error and motion history.
       bot_target[bslot] = target_net;
       bot_react[bslot] = skill_reaction(skill);
+      bot_engage[bslot] = 0;
+      bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
+      bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
+      bot_aimerr[bslot] = skill_aimerr(skill) * rng_sym(&bot_rng[bslot]);
+    } else {
+      // Same target: estimate its velocity from our own observation history
+      // (lead-fire). Kept entirely in the guest, so no host/spec change.
+      float vx = (tx - bot_tpx[bslot]) / TICK_DT;
+      float vz = (tz - bot_tpz[bslot]) / TICK_DT;
+      bot_tvx[bslot] = bot_tvx[bslot] * 0.7f + vx * 0.3f;
+      bot_tvz[bslot] = bot_tvz[bslot] * 0.7f + vz * 0.3f;
+      bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
+      bot_engage[bslot]++;
     }
+    // This target is currently visible: keep it locked in memory so the bot can
+    // pursue the last-known position if it later leaves the LOS-filtered sense
+    // view (see the wander branch).
+    bot_lock[bslot] = target_net;
+    bot_memage[bslot] = 0;
     if (bot_react[bslot] > 0.f) bot_react[bslot] -= TICK_DT;
 
-    const float tx = rec_x(ti), tz = rec_z(ti);
     const float dx = tx - bx, dz = tz - bz;
     const float dist = sqrtf_impl(dx * dx + dz * dz);
+    // Safely-unitized toward / perpendicular vectors (guard dist -> 0).
+    const float inv = dist > 0.001f ? 1.f / dist : 0.f;
+    const float txn = dx * inv, tzn = dz * inv;   // toward (unit)
+    const float oxn = -tzn, ozn = txn;            // perpendicular (unit)
 
-    // Face the target (host clamps look; we just send yaw).
-    float yaw = atan2f_impl(dz, dx) + 1.570796f; // +90°: yaw zero faces +X
-    queue_look(net, yaw);
+    // Lead the target: predict where it will be when the shot arrives.
+    float lead = dist / BULLET_SPEED;
+    float lx = tx + bot_tvx[bslot] * lead;
+    float lz = tz + bot_tvz[bslot] * lead;
 
-    // Strafe (perpendicular orbit) when close enough to attack.
+    // Face the predicted point plus our skill-scaled, per-engagement aim error.
+    float yaw = atan2f_impl(lz - bz, lx - bx) + 1.570796f + bot_aimerr[bslot];
+    if (look_dirty(bslot, yaw)) {
+      queue_look(net, yaw);
+      bot_last_yaw[bslot] = yaw; bot_look_sent[bslot] = 1;
+    }
+
     const float attack_range = (float)(skill >= 3 ? 30 : skill >= 1 ? 22 : 15);
+    // Cross-pollinated from 7dtd-clanker: low-health + low-skill bots retreat
+    // (self-preservation, BotCharacter.WantsToRetreat) — hold fire and back off.
+    const float hp_frac = rec_hp(bi) / BOT_MAX_HP;
+    const int retreating = (hp_frac < HP_RETREAT_FRAC && skill < 2);
+    float mdest_x, mdest_z, mspd;
     if (dist < attack_range) {
-      // Simple alternating strafe direction by slot parity.
-      float ox = -dz, oz = dx; // perpendicular
-      float s = (bi & 1) ? 1.f : -1.f;
-      float mx = bx + ox * 1.2f, mz = bz + oz * 1.2f;
-      // Stay close to target: mix toward target to avoid orbiting away.
-      mx = bx + (tx - bx) * 0.3f + s * ox * 1.0f;
-      mz = bz + (tz - bz) * 0.3f + s * oz * 1.0f;
-      queue_move(net, mx, by, mz, 3.f);
-      // Fire if reaction elapsed and throttle open.
-      if (bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
-        queue_shoot(net, target_net);
+      int sdir;
+      if (skill >= 3) {
+        // Higher-skill bots flip strafe direction on a deterministic cadence
+        // rather than fixed parity, so they are less trivially predictable.
+        if (bot_engage[bslot] % 16 == 0) bot_strafe_p[bslot] = !bot_strafe_p[bslot];
+        sdir = bot_strafe_p[bslot] ? 1 : -1;
+      } else {
+        sdir = (bi & 1) ? 1 : -1;
+      }
+      const float s = (float)sdir;
+      if (retreating || dist < BACKPEDAL_RANGE) {
+        // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
+        mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
+        mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
+        mspd = 3.f;
+      } else {
+        // Strafe-orbit: mix toward the target and step perpendicular.
+        mdest_x = bx + (tx - bx) * 0.3f + oxn * s * 1.0f;
+        mdest_z = bz + (tz - bz) * 0.3f + ozn * s * 1.0f;
+        mspd = 3.f;
+      }
+      if (move_dirty(bslot, mdest_x, mdest_z)) {
+        queue_move(net, mdest_x, by, mdest_z, mspd);
+        bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
+        bot_move_sent[bslot] = 1;
+      }
+      // Cross-pollinated from clanker TryShootBurst: skill/distance accuracy —
+      // only queue a shot if a deterministic roll lands, so low-skill bots miss.
+      if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
+        const float hc = skill_hit_chance(skill, dist);
+        if (rng_f01(&bot_rng[bslot]) < hc) queue_shoot(net, target_net);
         bot_throttle[bslot] = 0.25f + 0.2f * (float)(skill % 2); // burst-ish cadence
       }
     } else {
-      // Chase toward target.
-      float mx = bx + dx * 0.4f, mz = bz + dz * 0.4f;
-      queue_move(net, mx, by, mz, (skill >= 2) ? 4.2f : 3.2f);
+      // Chase toward the target's current ground position (lead is for aim).
+      mdest_x = bx + dx * 0.4f;
+      mdest_z = bz + dz * 0.4f;
+      mspd = (skill >= 2) ? 4.2f : 3.2f;
+      if (move_dirty(bslot, mdest_x, mdest_z)) {
+        queue_move(net, mdest_x, by, mdest_z, mspd);
+        bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
+        bot_move_sent[bslot] = 1;
+      }
     }
     if (bot_throttle[bslot] > 0.f) bot_throttle[bslot] -= TICK_DT;
   }
@@ -346,14 +548,12 @@ static float atan2f_impl(float y, float x) {
   // Coarse atan2 via a scaled octant approach; only used for facing (visual).
   float ax = x < 0.f ? -x : x;
   float ay = y < 0.f ? -y : y;
-  float a = (ax < ay) ? (3.14159265f * 0.25f) - 0.5f : 0.5f; // not exact
-  (void)a;
-  // Use a simple approximation: atan(y/x) within +/- pi/4, then quadrant.
+  // Linear approx of atan(y/x) within +/- pi/4, then quadrant.
   float base;
   if (ax < 1e-6f) {
     return (y >= 0.f) ? 1.570796f : -1.570796f;
   }
-  base = (ay / ax) * 0.785398f; // linear approx of atan for 0..1
+  base = (ay / ax) * 0.785398f;
   if (x < 0.f) base = 3.14159265f - base;
   if (y < 0.f) base = -base;
   return base;
@@ -366,7 +566,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.0 enabled");
+  e("zdtd_bot v1.2 enabled");
   flush(1);
 }
 

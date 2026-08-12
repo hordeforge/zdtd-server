@@ -8,6 +8,14 @@ const packages = @import("../../wire/packages.zig");
 const apm = @import("../../apm/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
+const gbot = @import("bot.zig");
+
+/// Display name for a bot spawn body; bots always carry a bounded name, so this
+/// is non-empty for live bots (fallback backstop only).
+fn botName(b: *const gbot.Bot) []const u8 {
+    if (b.name_len == 0) return gbot.default_bot_name;
+    return b.name[0..b.name_len];
+}
 
 pub fn replicate(self: *Game) !void {
     const sc = apm.profiler.scope(&self.harness.prof, .replicate);
@@ -220,6 +228,8 @@ pub fn replicate(self: *Game) !void {
         }
     }
 
+    try replicateBots(self, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+
     var dirty_now = self.sim.dirty_bits;
     var dirty_it = dirty_now.iterator(.{});
     while (dirty_it.next()) |j| {
@@ -227,4 +237,127 @@ pub fn replicate(self: *Game) !void {
         self.sim.syncDirtyBit(@intCast(j));
     }
     self.clearDeadKnownEntities();
+}
+
+/// Non-ECS bot replication (ADR 0026). Host-side bots are not ECS slots, so
+/// they get their own spawn-on-approach / range-remove / PosAndRot fan-out
+/// against the same observer grid computed for the ECS entities in replicate().
+/// Per-client knowledge is the Client.known_bots bitset (bit = bot slot); it is
+/// cleaned only here — never by the ECS dead-entity reconcile, which has no
+/// knowledge of bots (they are not in alive_bits).
+fn replicateBots(
+    self: *Game,
+    obs_cx: *const [game_mod.max_clients]i32,
+    obs_cz: *const [game_mod.max_clients]i32,
+    obs_ok: *const [game_mod.max_clients]bool,
+    obs_r: *const [game_mod.max_clients]i32,
+    active: game_mod.ObsMask,
+) !void {
+    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    for (&self.bots.bots, 0..) |*b, bi| {
+        if (!b.alive) {
+            // Dead/removed bot: unspawn it from every viewer that knows it.
+            // A removed slot carries net_id -1 (nothing left to send; just
+            // clear the bit so the slot can be reused without a stale spawn).
+            // Unlike ECS entities there is no separate dead-reconcile pass, so
+            // the bit is always cleared even when the send cannot complete.
+            for (&self.clients) |*cl| {
+                if (!cl.known_bots.isSet(bi)) continue;
+                if (b.net_id >= 0) {
+                    if (cl.peer) |peer| {
+                        if (packages.buildRemoveBodyReason(&self.body_buf, b.net_id, .unloaded)) |rb| {
+                            self.sendGame(peer, "NetPackageEntityRemove", rb) catch {
+                                self.harness.counters.inc(.net_send_errors);
+                            };
+                            self.harness.counters.inc(.packages_encoded);
+                        } else |_| {
+                            self.harness.counters.inc(.encode_errors);
+                        }
+                    }
+                }
+                cl.known_bots.unset(bi);
+            }
+            continue;
+        }
+        self.harness.counters.inc(.replicate_candidates);
+        const ecell = interest.cellOf(b.x, b.z);
+        const in_range = interest.observerMask(game_mod.max_clients, obs_cx, obs_cz, obs_r, active, ecell.cx, ecell.cz);
+
+        // Spawn-on-approach: the player-mesh body (hash 2001454542, the same
+        // class_table[0] default a bot used as an ECS entity).
+        var m = in_range;
+        while (m != 0) : (m &= m - 1) {
+            const ci = @ctz(m);
+            const cl = &self.clients[ci];
+            if (cl.known_bots.isSet(bi)) continue;
+            const peer = cl.peer orelse continue;
+            if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
+                .entity_id = b.net_id,
+                .entity_class = packages.stock_entity.class_player_male,
+                .x = b.x,
+                .y = b.y,
+                .z = b.z,
+                .yaw = b.yaw,
+                // The player-mesh class REQUIRES a player spawn info body; the
+                // bot carries an operator/console name for this field. Without
+                // it the builder refuses with MissingPlayerSpawnInfo, so a bot
+                // would never appear on clients.
+                .player = .{ .entity_name = botName(b) },
+                .is_sleeper = false,
+                .trader_data = null,
+            })) |spb| {
+                try self.sendGame(peer, "NetPackageEntitySpawn", spb);
+                cl.known_bots.set(bi);
+                self.harness.counters.inc(.replicate_fanouts);
+                self.harness.counters.inc(.packages_encoded);
+            } else |_| {
+                self.harness.counters.inc(.encode_errors);
+            }
+        }
+
+        // Range-remove: known but now out of the viewer's interest square.
+        for (&self.clients, 0..) |*cl, ci| {
+            if (!cl.known_bots.isSet(bi)) continue;
+            if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
+            const peer = cl.peer orelse continue;
+            if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
+            const rb = packages.buildRemoveBodyReason(&self.body_buf, b.net_id, .unloaded) catch {
+                self.harness.counters.inc(.encode_errors);
+                continue;
+            };
+            try self.sendGame(peer, "NetPackageEntityRemove", rb);
+            cl.known_bots.unset(bi);
+            self.harness.counters.inc(.packages_encoded);
+        }
+
+        // PosAndRot: a bot with a live move intent changes position every tick
+        // (move_active), otherwise the heartbeat covers a stationary one. Bots
+        // are not zombies, so no EntitySpeeds / AliveFlags.
+        if (!heartbeat and !b.move_active) continue;
+        if (in_range == 0) {
+            self.harness.counters.inc(.replicate_encodes_skipped);
+            continue;
+        }
+        const body = packages.buildPosAndRotBody(
+            self.body_buf[0..game_mod.speeds_body_off],
+            b.net_id,
+            b.x,
+            b.y,
+            b.z,
+            0,
+            b.yaw,
+            0,
+            true,
+        ) catch continue;
+        const pos_framed = packages.framed(&pos_frame_buf, "NetPackageEntityPosAndRot", body) catch continue;
+        self.harness.counters.inc(.packages_encoded);
+        var vm = in_range;
+        while (vm != 0) : (vm &= vm - 1) {
+            const ci = @ctz(vm);
+            const peer = self.clients[ci].peer orelse continue;
+            self.sendFramedUnreliable(peer, pos_framed);
+            self.harness.counters.inc(.replicate_fanouts);
+        }
+    }
 }

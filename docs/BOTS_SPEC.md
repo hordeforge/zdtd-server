@@ -150,20 +150,28 @@ broadcast it — no self-echo, no redundant blobs.
 
 ## 5. Bot entity model (host ownership)
 
-- **Kind:** add `bot` to `components.Kind`.
-- **Columns:** the bot shares the base entity columns (transform, health,
-  network id, alive mask) and gains a `BotDef` column: per-bot skill params
-  (aim skill, reaction time, vision range/angle, fire throttle, strafe/dodge
-  chance, aggression / self-preservation, rally point). A `Rules` value in
-  `ecs/rules.zig` is the floor; per-bot data overrides it (stock-fidelity
-  principle, ADR 0010).
-- **Lifecycle:** spawn via `bot spawn`, destroyed via `bot remove` or death
-  (kill verdict path; bots can die to players/zombies). Dead bot corpses follow
-  the normal corpse sweep.
-- **Replication:** bots replicate as ordinary entities to clients; the
-  wire builder already handles the kinds it knows — the new kind needs a case
-  so it is emitted as a player-mesh / SD entity the client can render, never
-  leaking into zombie/trader/vehicle paths.
+- **Not ECS:** bots are deliberately **not** ECS entities. The ECS owns
+  players, zombies, traders, vehicles, turrets, loot bags and animals only;
+  bots live in a host-side `BotManager` (`src/server/game/bot.zig`) with a
+  fixed 16-slot table. The only boundary between a bot and the sim is the Wasm
+  sense/command surface (`zdtd.sense` / `zdtd.queue`).
+- **Ids:** bots allocate net ids from the shared sim counter
+  (`Game.allocBotNetId` → `World.next_net_id`), so they never collide with ECS
+  entity ids.
+- **Config:** `BotDef` / `BotDefDefault` / `applySkillFloor` (Q3/Doom 3 skill
+  preset: aim skill, reaction time, vision range/angle, fire throttle,
+  strafe/dodge chance, aggression / self-preservation) are shared config in
+  `src/ecs/components.zig`, used by the BotManager. A `Rules` value is the
+  floor; per-bot data overrides it (stock-fidelity principle, ADR 0010).
+- **Lifecycle:** spawn via `bot spawn` / `bot count` (population floor),
+  destroyed via `bot remove <id|all>` or death (a bot killed by `bot shoot`
+  or ECS damage dies in place). Dead/removed bots are unspawned from every
+  viewer's `known_bots` bitset by the bot replication path.
+- **Replication:** bots replicate to clients through a **separate non-ECS
+  path** in `src/server/game/replicate.zig` (spawn-on-approach / range-remove /
+  PosAndRot fan-out against the same interest grid as ECS entities). Spawns use
+  the player-mesh class (hash 2001454542, the same class_table[0] default),
+  never leaking into zombie/trader/vehicle paths.
 - **Aim is a host concern for validity but a guest concern for choice:**
   the host rejects an out-of-range / LOS-blocked shot; the guest decides when
   to shoot.
@@ -205,8 +213,9 @@ which is honest: no bot addon, no bot commands.
   burns its budget every tick is disabled by the runtime — the system working,
   not a bug (PLUGIN_DEV.md).
 - **No heap in host hot path:** the sense view is written into a fixed guest
-  scratch region; bot commands go through the fixed 64-slot command buffer;
-  `BotDef` is a fixed-size SoA column. Nothing allocates on the tick path.
+  scratch region; bot commands dispatch straight to the host `BotManager`
+  (fixed 16-slot table, no command-buffer ops); nothing allocates on the tick
+  path.
 - **Stable order:** plugin `on_tick` runs late in the tick
   (`src/server/game/step.zig`); commands enqueued by the guest drain on a later
   tick (command semantics: applied after the snapshot it saw). The module must
@@ -216,20 +225,23 @@ which is honest: no bot addon, no bot commands.
 
 ## 8. Files (expected shape; exact edits per implementation plan)
 
-- `src/ecs/components.zig` — add `bot` to `Kind`; add `BotDef` component.
-- `src/ecs/world.zig` — add `BotDef` column + `spawnBot` / bot awareness in
-  spawn/despawn; the bot-in-tick code path.
-- `src/ecs/command.zig` — add bot ops to `Op`; drain cases.
-- `src/server/game/wasm_host.zig` — extend `parsePluginCommand`; raise the
-  length bound; wire `sense` back to a host snapshot builder.
+- `src/server/game/bot.zig` — the host-side `BotManager`: fixed 16-slot bot
+  table, `bot move/look/shoot/spawn/remove/count` parsing + dispatch, move
+  integration, and the sense `fillSense` record writer. No wire imports.
+- `src/server/game.zig` — owns a `BotManager` field, `allocBotNetId` (shared
+  sim id counter), and the `tickBots` delegate.
+- `src/server/game/wasm_host.zig` — `wasmQueue` routes `bot ...` commands to
+  the BotManager; `wasmSense` merges ECS actor records with the BotManager's
+  bots (kind 2) in one snapshot; `parsePluginCommand` keeps only the ECS verbs
+  (`spawn`/`despawn`/`damage`).
+- `src/server/game/replicate.zig` — the non-ECS bot replication path
+  (spawn-on-approach / range-remove / PosAndRot) plus per-client
+  `Client.known_bots` tracking.
 - `src/plugin/wasm.zig` — add the `zdtd.sense` import to `defineImports`;
   add a `sense` host-fn dispatch.
-- `src/server/game/replicate.zig` + `src/wire/stock_entity.zig` — a case for
-  the `bot` kind so it replicates as a client-visible entity.
-- `src/server/game/tick.zig` / movement path — apply bot commanded intent with
-  the player move envelope.
 - `mods/zdtd_bot/zdtd_bot.c` (+ `.wasm` output) — the guest brain (Q3/Doom 3
-  model). Build via the same clang→wasm32 path as `assets/fixtures/*.c`.
+  model), unchanged: it only talks through `zdtd.sense` / `zdtd.queue`. Build
+  via the same clang→wasm32 path as `assets/fixtures/*.c`.
 - `assets/fixtures/plugin_bot.c` / `.wasm` — a minimal bot host-surface
   fixture used by unit/scenario tests (sense round-trip, command parse).
 - `docs/BOTS_SPEC.md`, `docs/BOTS_PRD.md`, `docs/adr/0026-*.md`,

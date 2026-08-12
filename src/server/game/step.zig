@@ -95,6 +95,7 @@ pub fn step(self: *Game) !void {
         self.harness.counters.add(.path_replans, r.path_replans);
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
         self.tickSurvival(dt);
+        self.tickBots(dt);
         {
             // This loop destroys consumed bags, so snapshot the dense group to
             // preserve ascending traversal without scanning the full capacity.

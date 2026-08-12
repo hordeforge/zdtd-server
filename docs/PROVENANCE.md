@@ -152,6 +152,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/evidence.zig` | Z | P4 observe evidence: fixed ring of detector events (no secrets, no IP, no packets). Admin `evidence dump [path]` flushes the ring as JSONL via |
 | `src/server/game.zig` | R | Game server: join SM, tick, interest, combat, persistence. RE-derived: server-lifecycle.md (join SM), loop.md (tick), network.md (interest), combat-damage.md, save-persistence.md; simulation is an SoA ECS (`ecs.World` + systems) |
 | `src/server/game/bans.zig` | Z | Ban / rate-limit helpers extracted from game.zig |
+| `src/server/game/bot.zig` | Z | Host-side FPS BotManager (ADR 0026): fixed 16-slot bot table, move/look/shoot/spawn/remove/count verbs, move integration, sense fill. Bots are deliberately NOT ECS entities (zdtd architecture, 2026-08-12); the flat `bot_shoot_damage`/`bot_max_hp` values moved verbatim from the old `ecs/command.zig` host floor |
 | `src/server/game/blockmeta.zig` | R | Sparse block meta + damage persist extracted from game.zig |
 | `src/server/game/chunk_fill.zig` | R | Chunk materialization and loot-fill senders, extracted verbatim from game.zig: sendSpawnChunk (resident-miss load + stock Chunk.write encode), |
 | `src/server/game/chunk_stream.zig` | R | Chunk streaming senders, extracted verbatim from game.zig: the join spawn area burst (sendSpawnArea), the per-tick view-square stream with |

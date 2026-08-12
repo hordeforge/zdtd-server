@@ -53,6 +53,10 @@ pub const Budget = struct {
 /// only the import table; this struct is the host side of those calls.
 /// Callbacks receive the HostCtx back so the owner (game.zig) can recover its
 /// own state from `data`. This file never dereferences `data`; the owner casts.
+/// Ceiling on one `zdtd.sense` snapshot (BOTS_SPEC §3). The guest requests up
+/// to this much; the host never writes past it into the guest.
+pub const host_sense_max: usize = 2048;
+
 pub const HostCtx = struct {
     /// Owner state (a *Game in the server); cast by the callbacks the owner
     /// installs. Keeps this layer free of a Game dependency.
@@ -60,6 +64,10 @@ pub const HostCtx = struct {
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,
     queue_fn: *const fn (ctx: *HostCtx, cmd: []const u8) void,
+    /// Build a read-only world snapshot into `out`, returning bytes written.
+    /// 0 when the owner has no sense (a plain event plugin). Signature keeps
+    /// this layer free of a Game dependency; the owner casts via `data`.
+    sense_fn: ?*const fn (ctx: *HostCtx, out: []u8) usize = null,
 };
 
 pub const LoadError = error{
@@ -512,10 +520,25 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             hc.queue_fn(hc, cmd);
             return 0;
         }
+        fn sense(caller: *zwasm.Caller, ptr: i32, len: i32, token: i32) anyerror!i32 {
+            _ = token; // reserved for future per-slot reads; single snapshot today
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return 0;
+            if (ptr < 0 or len < 0) return 0;
+            const sf = hc.sense_fn orelse return 0;
+            var scratch: [host_sense_max:0]u8 = undefined;
+            const written = sf(hc, &scratch);
+            const guest_len: usize = @intCast(len);
+            const copy = @min(guest_len, @min(written, host_sense_max));
+            const dst = mem.sliceAt(@intCast(ptr), @intCast(copy)) catch return 0;
+            @memcpy(dst, scratch[0..copy]);
+            return @intCast(copy);
+        }
     };
     try linker.defineFuncCtx("zdtd", "log", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!void, H.log);
     try linker.defineFuncCtx("zdtd", "tick", ctx, fn (*zwasm.Caller) anyerror!i64, H.tick);
     try linker.defineFuncCtx("zdtd", "queue", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.queue);
+    try linker.defineFuncCtx("zdtd", "sense", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!i32, H.sense);
 }
 
 test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-built minimal wasm: (module (func (export "on_enable"))) — a no-op
@@ -773,5 +796,121 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     const reason = host.playerLoginDeny(1, "rejectme", &out).?;
     try std.testing.expectEqualStrings("nope", reason);
     try std.testing.expect(host.playerLoginDeny(1, "SurvivorBob", &out) == null);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
+    // Loads the real committed bot brain and drives it through the host sense
+    // import with a canned snapshot, proving the end-to-end sense→brain→queue
+    // pipe (BOTS_SPEC §3 / ADR 0026). The brain must NOT be modified; this is
+    // the host-side regression the uncommitted work dropped.
+    const Cap = struct {
+        // queueFn COPIES each command into owned bytes — the guest reuses one
+        // `out` buffer per queue call, so storing a slice would alias.
+        var queued: [8][64]u8 = undefined;
+        var queued_n: usize = 0;
+        var hide_player: bool = false;
+
+        fn queueFn(_: *HostCtx, cmd: []const u8) void {
+            if (queued_n >= queued.len) return;
+            const n = @min(cmd.len, queued[queued_n].len);
+            @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_n += 1;
+        }
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn writeRec(b: []u8, base: usize, net: i32, kind: u8, is_self: u8, alive: u8, x: f32, y: f32, z: f32, hp: f32, yaw: f32, target: i32) void {
+            const r = b[base .. base + 32];
+            std.mem.writeInt(i32, r[0..4], net, .little);
+            r[4] = kind;
+            r[5] = is_self;
+            r[6] = alive;
+            r[7] = 0; // pad
+            std.mem.writeInt(u32, r[8..12], @bitCast(x), .little);
+            std.mem.writeInt(u32, r[12..16], @bitCast(y), .little);
+            std.mem.writeInt(u32, r[16..20], @bitCast(z), .little);
+            std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
+            std.mem.writeInt(u32, r[24..28], @bitCast(yaw), .little);
+            std.mem.writeInt(i32, r[28..32], target, .little);
+        }
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            // header: magic 'ZBS1', count, tick 1, self 0
+            std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
+            if (hide_player) {
+                std.mem.writeInt(u32, out[4..8], 1, .little);
+            } else {
+                std.mem.writeInt(u32, out[4..8], 2, .little);
+            }
+            std.mem.writeInt(u32, out[8..12], 1, .little);
+            std.mem.writeInt(i32, out[12..16], 0, .little);
+            var n: u32 = 0;
+            // one bot at the origin (self)
+            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, 100.0, 0.0, -1);
+            n += 1;
+            if (!hide_player) {
+                // a player at (10, 0, 10) unless hidden (LOS pull-down)
+                writeRec(out, 16 + 32, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
+                n += 1;
+            }
+            return 16 + @as(usize, n) * 32;
+        }
+    };
+    Cap.queued_n = 0;
+    Cap.hide_player = false;
+
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_bot/zdtd_bot.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    // The bot module exports the lifecycle hooks we rely on.
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_enable)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_tick)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_admin_command)]);
+
+    // Admin command round-trip: bot help is handled by the brain, not the core.
+    var out: [4096]u8 = undefined;
+    const rep = host.adminCommand("bot help", &out);
+    try std.testing.expect(rep != null);
+    try std.testing.expect(std.mem.indexOf(u8, rep.?, "bot help") != null);
+
+    // Tick 1 (player visible): the brain aims and moves on the player.
+    Cap.queued_n = 0;
+    host.onTick();
+    try std.testing.expect(Cap.queued_n >= 2);
+    var saw_move = false;
+    var saw_look = false;
+    for (Cap.queued[0..Cap.queued_n]) |*c| {
+        if (std.mem.startsWith(u8, c[0..], "bot move 1000")) saw_move = true;
+        if (std.mem.startsWith(u8, c[0..], "bot look 1000")) saw_look = true;
+    }
+    try std.testing.expect(saw_move);
+    try std.testing.expect(saw_look);
+
+    // Tick 2 (identical scene): command gating suppresses redundant move/look.
+    Cap.queued_n = 0;
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 0), Cap.queued_n);
+
+    // Tick 3 (player hidden): the brain keeps hunting the last-known position.
+    Cap.hide_player = true;
+    Cap.queued_n = 0;
+    host.onTick();
+    try std.testing.expect(Cap.queued_n >= 1);
+    var found_pursue = false;
+    for (Cap.queued[0..Cap.queued_n]) |*c| {
+        if (std.mem.indexOf(u8, c[0..], "10.00 0.00 10.00") != null) found_pursue = true;
+    }
+    try std.testing.expect(found_pursue);
+
+    // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

@@ -20,6 +20,7 @@ const protocol = @import("../protocol.zig");
 const replicate_te = @import("replicate_te.zig");
 const game_net = @import("game/net.zig");
 const game_tick = @import("game/tick.zig");
+const game_bot = @import("game/bot.zig");
 const game_world = @import("game/world.zig");
 const game_player = @import("game/player.zig");
 const game_join = @import("game/join.zig");
@@ -193,6 +194,7 @@ pub const killVerdict = game_wasm_host.killVerdict;
 const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
+const wasmSense = game_wasm_host.wasmSense;
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
@@ -224,6 +226,11 @@ pub const Game = struct {
     /// Host callback context for Wasm guests; callbacks recover *Game from
     /// `data` and live in game.zig, so the plugin layer stays Game-free.
     wasm_ctx: plugin_mod.wasm.HostCtx = undefined,
+    /// Host-side FPS bots (ADR 0026). NOT ECS entities: the only boundary to
+    /// the sim is the Wasm sense/command surface (zdtd.sense / zdtd.queue).
+    /// Bots allocate net ids from the shared sim counter (allocBotNetId) and
+    /// replicate to clients through the non-ECS path in game/replicate.zig.
+    bots: game_bot.BotManager = .{},
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},
     /// P4 observe ring (admin `evidence` dumps JSONL lines).
@@ -548,6 +555,7 @@ pub const Game = struct {
                 .log_fn = &wasmLog,
                 .tick_fn = &wasmTick,
                 .queue_fn = &wasmQueue,
+                .sense_fn = &wasmSense,
             },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
@@ -1059,6 +1067,22 @@ pub const Game = struct {
     /// world clock already advanced.
     pub fn tickSurvival(self: *Game, dt: f32) void {
         return game_tick.tickSurvival(self, dt);
+    }
+
+    /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS
+    /// entities; the BotManager owns them and integrates their move intents
+    /// here. Replication streams their positions via the non-ECS path.
+    pub fn tickBots(self: *Game, dt: f32) void {
+        self.bots.tick(self, dt);
+    }
+
+    /// Allocate a globally-unique net id for a host-side bot. Drawn from the
+    /// same sim counter as ECS spawns (World.spawnBase increments next_net_id),
+    /// so bot ids never collide with player/zombie/... ids.
+    pub fn allocBotNetId(self: *Game) i32 {
+        const id = self.sim.next_net_id;
+        self.sim.next_net_id +%= 1;
+        return id;
     }
 
     pub fn worldHour(self: *const Game) u64 {

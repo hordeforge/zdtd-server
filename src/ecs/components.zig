@@ -10,7 +10,6 @@ pub const Kind = enum(u8) {
     turret,
     loot_bag,
     animal,
-    bot,
 };
 
 pub const Transform = struct {
@@ -240,12 +239,12 @@ pub const ZombieAi = struct {
 /// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-clanker skill model
 /// (BotCharacter, BotAimAtEnemy, BotCheckAttack). The guest Wasm brain reads
 /// these (via the sense view where relevant) and answers back with intent; the
-/// host owns the entity. The `skill` 0..4 floor is a Rules value; per-bot
+/// host owns the bot. The `skill` 0..4 floor is a Rules value; per-bot
 /// overrides (bot cfg) land here and win. Aesop: the host never decides *what*
 /// to do, only whether the ask is legal.
 pub const BotDef = struct {
-    /// Display name (static/indefinite-lifetime slice; kept on the entity.
-    /// Never assign an arena/allocator-owned slice).
+    /// Display name (static/indefinite-lifetime slice; never an
+    /// arena/allocator-owned slice).
     name: []const u8 = "Bot",
     /// Difficulty 0..4 (0 bot, 1 easy, 2 normal, 3 hard, 4 nightmare).
     skill: u8 = 2,
@@ -270,7 +269,7 @@ pub const BotDef = struct {
     target_id: i32 = -1,
 };
 
-/// Default BotDef used by World.spawnBot (a Rules floor; per-bot overrides win).
+/// Default BotDef used by BotManager.spawn (a Rules floor; per-bot overrides win).
 pub const BotDefDefault = BotDef{};
 
 /// Apply the Q3/Doom 3 skill preset (0 bot .. 4 nightmare) to a BotDef:
