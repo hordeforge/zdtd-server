@@ -904,6 +904,13 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(saw_move);
     try std.testing.expect(saw_look);
 
+    // Per-bot skill override: after tick 1 the roster knows bot 1000, so
+    // `bot skill 4 1000` must reply with the id it targeted.
+    var skill_out: [256]u8 = undefined;
+    const srep = host.adminCommand("bot skill 4 1000", &skill_out);
+    try std.testing.expect(srep != null);
+    try std.testing.expect(std.mem.indexOf(u8, srep.?, "id=1000") != null);
+
     // Tick 2 (identical scene): command gating suppresses redundant move/look.
     Cap.queued_n = 0;
     host.onTick();

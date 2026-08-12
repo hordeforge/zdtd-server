@@ -638,7 +638,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.4 enabled");
+  e("zdtd_bot v1.5 enabled");
   flush(1);
 }
 
@@ -754,13 +754,32 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       out_n = 0;
       rn += st(reply_buf + rn, 599 - rn, "removed\n");
     } else if (slen == 5 && sub[0]=='s' && sub[1]=='k' && sub[2]=='i' && sub[3]=='l' && sub[4]=='l') {
-      int v = (int)strtol_impl(arg);
+      // bot skill <0-4> [id]: set the default skill for future bots, or, with
+      // an id, only that bot (per-bot override, BOTS_SPEC `bot cfg` spirit).
+      char *sp3 = arg;
+      while (*sp3 == ' ' || *sp3 == '\t') sp3++;
+      long v = strtol_impl(sp3);
       if (v < 0) v = 0; if (v > 4) v = 4;
-      int i2;
-      for (i2 = 0; i2 < MAX_BOTS; ++i2) bot_skill[i2] = v; // affects new bots
-      rn += st(reply_buf + rn, 599 - rn, "bot skill ");
-      rn += e_to(reply_buf + rn, 599 - rn, v);
-      rn += st(reply_buf + rn, 599 - rn, "\n");
+      while (*sp3 && *sp3 != ' ' && *sp3 != '\t') sp3++;
+      while (*sp3 == ' ' || *sp3 == '\t') sp3++;
+      if (*sp3) {
+        long id = strtol_impl(sp3);
+        int i2;
+        for (i2 = 0; i2 < MAX_BOTS; ++i2) {
+          if (bot_net[i2] == (int)id) bot_skill[i2] = (int)v;
+        }
+        rn += st(reply_buf + rn, 599 - rn, "bot skill ");
+        rn += e_to(reply_buf + rn, 599 - rn, v);
+        rn += st(reply_buf + rn, 599 - rn, " id=");
+        rn += e_to(reply_buf + rn, 599 - rn, id);
+        rn += st(reply_buf + rn, 599 - rn, "\n");
+      } else {
+        int i2;
+        for (i2 = 0; i2 < MAX_BOTS; ++i2) bot_skill[i2] = (int)v; // new bots
+        rn += st(reply_buf + rn, 599 - rn, "bot skill ");
+        rn += e_to(reply_buf + rn, 599 - rn, v);
+        rn += st(reply_buf + rn, 599 - rn, "\n");
+      }
     } else {
       rn += st(reply_buf + rn, 599 - rn, "bot: unknown subcommand (try 'bot help')\n");
     }

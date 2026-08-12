@@ -242,7 +242,7 @@ core command table changes.
 | `bot spawn [name] [x z]` | spawn one bot (defaults to configured name/point) |
 | `bot remove <id\|all>` | despawn |
 | `bot count <n>` | keep n alive |
-| `bot skill <0-4>` | set default difficulty for future spawns |
+| `bot skill <0-4> [id]` | set default difficulty for future spawns, or (with an id) override that bot's skill |
 | `bot weapon <id\|mixed>` | loadout selection (if the guest carries weapon profiles) |
 
 When the module is not loaded, `bot ...` reports as unknown (falls through),
