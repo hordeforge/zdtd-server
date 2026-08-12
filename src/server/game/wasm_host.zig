@@ -142,7 +142,10 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     }
     // Host-side bots (ADR 0026) are not ECS entities; append them after the
     // ECS actor records as kind==2, sharing the same 32-byte record layout.
-    g.bots.fillSense(out, 16 + n * 32, max_records, &n);
+    // fillSense offsets by its own running `n` (which already counts the ECS
+    // actor records), so base must be the header end (16), NOT 16 + n*32 —
+    // the latter double-offsets the bot records past the copied region.
+    g.bots.fillSense(out, 16, max_records, &n);
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
     return 16 + n * 32;
 }

@@ -492,3 +492,23 @@ test "BotManager damageBot applies headshot multiplier and can kill" {
     // Unknown ids are a no-op.
     try std.testing.expect(!m.damageBot(999, bot_shoot_damage));
 }
+
+test "BotManager fillSense appends after existing ECS actor records" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.n = 1;
+    var out: [256]u8 = undefined;
+    @memset(&out, 0xAA); // host_buf-style unwritten tail (would leak as garbage)
+
+    // Two ECS actor records already occupy offsets 16 and 48; base is the
+    // header end (16) and `n` is the running record count. Regression: the bot
+    // must land at record index 2 (offset 80), NOT at a doubled offset (144),
+    // which would leave a garbage gap and push it past the copied region.
+    var n: usize = 2;
+    m.fillSense(&out, 16, 8, &n);
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expectEqual(@as(u8, 2), out[80 + 4]); // kind bot at the right slot
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, out[80..84], .little));
+    // The gap record (offset 48+4, the pre-existing actor slot) is untouched.
+    try std.testing.expectEqual(@as(u8, 0xAA), out[48 + 4]);
+}

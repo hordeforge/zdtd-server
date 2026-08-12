@@ -200,6 +200,7 @@ static int   bot_lock[MAX_BOTS];    // net id of target pursued via memory (-1 =
 static int   bot_memage[MAX_BOTS];  // ticks since we last saw the locked target
 static float bot_last_hp[MAX_BOTS]; // own hp from the previous sense pass (hit detect)
 static int   bot_dodge[MAX_BOTS];   // ticks left in an evasive dodge (0 = none)
+static int   bot_seen[MAX_BOTS];    // scratch: roster slot present in this sense pass
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -371,6 +372,19 @@ static float skill_fov(int skill) { return 1.57f + 0.35f * (float)skill; }
 static void brain_tick(void) {
   const int n = sense_refresh();
   if (n <= 0) return;
+
+  // Roster hygiene: a slot whose bot is no longer in the sense view (died or
+  // was despawned) is freed so `bot list`/`status` never show stale entries.
+  int ri;
+  for (ri = 0; ri < MAX_BOTS; ++ri) bot_seen[ri] = 0;
+  for (ri = 0; ri < n; ++ri) {
+    if (rec_kind(ri) != KIND_BOT) continue;
+    const int s2 = bot_find(rec_net(ri));
+    if (s2 >= 0) bot_seen[s2] = 1;
+  }
+  for (ri = 0; ri < MAX_BOTS; ++ri) {
+    if (bot_net[ri] >= 0 && !bot_seen[ri]) bot_net[ri] = -1;
+  }
 
   int bi;
   for (bi = 0; bi < n; ++bi) {
@@ -745,8 +759,8 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       {
         const char *p = "bot count ";
         out_n = 0;
-        while (*p && out_n < 250) out[out_n++] = *p++;
-        while (*arg && out_n < 250) out[out_n++] = *arg++;
+        while (*p && out_n < OUT_CAP - 1) out[out_n++] = *p++;
+        while (*arg && out_n < OUT_CAP - 1) out[out_n++] = *arg++;
         out[out_n] = 0;
         zdtd_queue((int)(long)&out[0], out_n);
         out_n = 0;
@@ -757,8 +771,8 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       static const char *sp = "bot spawn ";
       const char *pp = sp;
       out_n = 0;
-      while (*pp && out_n < 250) out[out_n++] = *pp++;
-      while (*arg && out_n < 250) out[out_n++] = *arg++;
+      while (*pp && out_n < OUT_CAP - 1) out[out_n++] = *pp++;
+      while (*arg && out_n < OUT_CAP - 1) out[out_n++] = *arg++;
       out[out_n] = 0;
       zdtd_queue((int)(long)&out[0], out_n);
       out_n = 0;
@@ -767,8 +781,8 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       static const char *rp = "bot remove ";
       const char *pp = rp;
       out_n = 0;
-      while (*pp && out_n < 250) out[out_n++] = *pp++;
-      while (*arg && out_n < 250) out[out_n++] = *arg++;
+      while (*pp && out_n < OUT_CAP - 1) out[out_n++] = *pp++;
+      while (*arg && out_n < OUT_CAP - 1) out[out_n++] = *arg++;
       out[out_n] = 0;
       zdtd_queue((int)(long)&out[0], out_n);
       out_n = 0;
