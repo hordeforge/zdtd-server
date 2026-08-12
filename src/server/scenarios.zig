@@ -5306,3 +5306,35 @@ test "scenario applyCountFloor tops up across repeated calls" {
     g.bots.tick(g, 0.05);
     try std.testing.expectEqual(@as(usize, 2), g.bots.n);
 }
+
+test "scenario bots collide with walls and slide instead of phasing through" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Bot at (8,_,8) heading east through (10,_,8); a wall blocks the path at
+    // the bot's actual standing height (body cells floor(y) and +1).
+    const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
+    const bs = g.bots.find(bid).?;
+    const by = g.bots.bots[bs].y;
+    const wy: i32 = @intFromFloat(@floor(by));
+    try g.world.setBlockWorld(10, wy, 8, world_store.block_stone);
+    try g.world.setBlockWorld(10, wy + 1, 8, world_store.block_stone);
+
+    g.bots.move(bid, 20, by, 8, 4);
+    var i: usize = 0;
+    while (i < 60) : (i += 1) g.bots.tick(g, 0.05); // up to 3 s of movement
+    const b = &g.bots.bots[bs];
+    try std.testing.expect(b.x < 10.0); // never crossed the wall
+    // Still trying to move (intent not cleared just because it is blocked).
+    try std.testing.expect(b.move_active);
+}

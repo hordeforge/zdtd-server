@@ -326,8 +326,9 @@ pub const BotManager = struct {
     pub fn tick(self: *BotManager, g: *Game, dt: f32) void {
         for (&self.bots) |*b| {
             if (!b.alive or !b.move_active) continue;
-            stepMove(b, dt);
-            b.y = g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z)));
+            // Wall-aware step: bots cannot phase through solid blocks; they
+            // slide along walls. Terrain height is applied inside the step.
+            stepMoveCollide(b, g, dt);
         }
         // Self-healing population floor: replace bots killed since the last tick.
         self.maintainFloor(g);
@@ -386,6 +387,67 @@ fn stepMove(b: *Bot, dt: f32) void {
         b.z += dz * inv;
     }
     b.y = b.dest_y;
+}
+
+/// True when a solid block occupies the bot's standing cells at (x, y, z):
+/// the cell the feet sit in and the one above (head). Terrain itself is not a
+/// wall here — the caller grounds y onto the surface first — so only true
+/// obstacles (walls, cliffs' faces) block.
+fn botSolidAt(g: *Game, x: f32, y: f32, z: f32) bool {
+    const ix: i32 = @intFromFloat(@floor(x));
+    const iy: i32 = @intFromFloat(@floor(y));
+    const iz: i32 = @intFromFloat(@floor(z));
+    if (g.world.isSolidWorld(ix, iy, iz) catch false) return true;
+    if (g.world.isSolidWorld(ix, iy + 1, iz) catch false) return true;
+    return false;
+}
+
+/// stepMove with wall collision: the bot does not enter a solid cell. When the
+/// direct step is blocked it slides along the free axis (x-only then z-only),
+/// so it follows walls instead of phasing through them or stopping dead.
+/// Max climbable step (blocks) per move tick. Ground snap is fine for gentle
+/// terrain; steeper rises are obstacles the bot cannot walk up (a cliff/wall).
+const max_step_up: f32 = 1.5;
+
+/// stepMove with wall/cliff collision: the bot does not enter a solid cell at
+/// its body height, and does not climb terrain more than `max_step_up` above
+/// its current feet. When the direct step is blocked it slides along the free
+/// axis (x-only then z-only), so it follows walls instead of phasing through
+/// them or stopping dead. Ground height is re-snapped afterwards.
+fn stepMoveCollide(b: *Bot, g: *Game, dt: f32) void {
+    const ox = b.x;
+    const oz = b.z;
+    const dx = b.dest_x - ox;
+    const dz = b.dest_z - oz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 <= arrival_dist * arrival_dist) {
+        b.x = b.dest_x;
+        b.y = b.dest_y;
+        b.z = b.dest_z;
+        b.move_active = false;
+        return;
+    }
+    const dist = @sqrt(d2);
+    const step_dist = b.speed * dt;
+    const nx = if (step_dist >= dist) b.dest_x else ox + dx * (step_dist / dist);
+    const nz = if (step_dist >= dist) b.dest_z else oz + dz * (step_dist / dist);
+
+    const new_ground = g.groundHeight(@intFromFloat(@floor(nx)), @intFromFloat(@floor(nz)));
+    const step_up = new_ground - b.y;
+    const blocked = (step_up > max_step_up) or botSolidAt(g, nx, b.y, nz);
+    if (!blocked) {
+        b.x = nx;
+        b.z = nz;
+    } else {
+        // Slide along the free axis.
+        const xg = g.groundHeight(@intFromFloat(@floor(nx)), @intFromFloat(@floor(oz)));
+        const zg = g.groundHeight(@intFromFloat(@floor(ox)), @intFromFloat(@floor(nz)));
+        const x_free = (xg - b.y <= max_step_up) and !botSolidAt(g, nx, b.y, oz);
+        const z_free = (zg - b.y <= max_step_up) and !botSolidAt(g, ox, b.y, nz);
+        if (x_free) b.x = nx;
+        if (z_free) b.z = nz;
+    }
+    b.y = g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z)));
 }
 
 test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {
