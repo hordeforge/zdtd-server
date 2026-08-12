@@ -140,7 +140,7 @@ Existing verbs are unchanged (`spawn`, `despawn`, `damage`). New bot verbs:
 | `bot look <id> <yaw>` | intent | set facing (drives which way the bot "aims") | id unknown |
 | `bot shoot <id> <target_id> [head]` | fire request | if the target is alive, in range and host-LOS-clear, apply weapon damage to it (existing damage/verdict path); the optional `head` token applies the 2x headshot multiplier (cross-pollinated from clanker `TryShootBurst`) | id/target known but LOS blocked or out of range |
 | `bot count <n>` | population floor | keep `n` alive; auto-respawn to floor (clamped to MaxBots) | n>MaxBots (clamped) |
-| `bot cfg <id> <key> <val>` | per-bot override | mutate the `BotDef` column (e.g. `skill 3`, `vision 40`, `reaction 0.35`) | unknown key (logged, ignored) |
+| `bot cfg <id> <key> <val>` | per-bot override | `vision` / `reaction` overrides on that bot (0 resets to the skill-derived default) | unknown key (rejected) |
 
 The host treats a bot move exactly like a client move for authority (ADR 0004):
 clamp, reject, apply the **resulting** state, and let interest replication

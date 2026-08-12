@@ -182,6 +182,8 @@ static float bot_wander_x[MAX_BOTS];
 static float bot_wander_z[MAX_BOTS];
 static int bot_target[MAX_BOTS];
 static int bot_skill[MAX_BOTS];     // default skill applied to spawned bot cfg ops
+static float bot_vision[MAX_BOTS];  // per-bot vision override (0 = skill default)
+static float bot_reaction[MAX_BOTS];// per-bot reaction override (0 = skill default)
 // Brain-quality state (ADR 0026 / docs/q3-inspiration-notes.md).
 static unsigned bot_rng[MAX_BOTS];  // deterministic per-slot LCG (no time noise)
 static float bot_aimerr[MAX_BOTS];  // skill-scaled aim error, rolled per engagement
@@ -213,6 +215,8 @@ static void bot_init(void) {
     bot_wander_z[i] = 0.f;
     bot_target[i] = -1;
     bot_skill[i] = 2;
+    bot_vision[i] = 0.f;
+    bot_reaction[i] = 0.f;
     bot_rng[i] = 0u;
     bot_aimerr[i] = 0.f;
     bot_last_yaw[i] = 0.f;
@@ -419,7 +423,9 @@ static void brain_tick(void) {
       bot_dodge[bslot] = 0;
     }
     const int skill = bot_skill[bslot];
-    const float vision = skill_vision(skill);
+    // Per-bot `bot cfg` overrides win over the skill-derived defaults.
+    const float vision = bot_vision[bslot] > 0.f ? bot_vision[bslot] : skill_vision(skill);
+    const float reaction = bot_reaction[bslot] > 0.f ? bot_reaction[bslot] : skill_reaction(skill);
 
     // Dodge-on-hit (cross-pollinated from 7dtd-clanker Bot.OnDamaged): if our
     // own hp dropped since the last sense pass we were damaged, trigger a short
@@ -515,7 +521,7 @@ static void brain_tick(void) {
     if (bot_target[bslot] != target_net) {
       // New target: reset reaction, aim error and motion history.
       bot_target[bslot] = target_net;
-      bot_react[bslot] = skill_reaction(skill);
+      bot_react[bslot] = reaction;
       bot_engage[bslot] = 0;
       bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
       bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
@@ -678,7 +684,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.7 enabled");
+  e("zdtd_bot v1.8 enabled");
   flush(1);
 }
 
@@ -820,6 +826,43 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
         rn += e_to(reply_buf + rn, 599 - rn, v);
         rn += st(reply_buf + rn, 599 - rn, "\n");
       }
+    } else if (slen == 3 && sub[0]=='c' && sub[1]=='f' && sub[2]=='g') {
+      // bot cfg <id> <key> <val> — per-bot overrides (BOTS_SPEC `bot cfg`).
+      // keys: vision | reaction (0 resets to the skill-derived default).
+      char *sp4 = arg;
+      while (*sp4 == ' ' || *sp4 == '\t') sp4++;
+      long id = strtol_impl(sp4);
+      while (*sp4 && *sp4 != ' ' && *sp4 != '\t') sp4++;
+      while (*sp4 == ' ' || *sp4 == '\t') sp4++;
+      char *key = sp4;
+      while (*sp4 && *sp4 != ' ' && *sp4 != '\t') sp4++;
+      int keylen = (int)(sp4 - key);
+      while (*sp4 == ' ' || *sp4 == '\t') sp4++;
+      float val = 0.f;
+      {
+        // parse float from sp4 (simple sign+digits+dot).
+        const char *p2 = sp4;
+        float acc = 0.f; int neg = 0; int frac = 0; float div = 1.f;
+        if (*p2 == '-') { neg = 1; p2++; }
+        while (*p2 >= '0' && *p2 <= '9') { acc = acc * 10.f + (float)(*p2 - '0'); p2++; }
+        if (*p2 == '.') { p2++; while (*p2 >= '0' && *p2 <= '9') { acc = acc * 10.f + (float)(*p2 - '0'); div *= 10.f; p2++; } frac = 1; }
+        val = acc / (frac ? div : 1.f);
+        if (neg) val = -val;
+      }
+      int si;
+      int cfg_ok = 1;
+      for (si = 0; si < MAX_BOTS; ++si) {
+        if (bot_net[si] != (int)id) continue;
+        if (keylen == 6 && key[0]=='v' && key[1]=='i' && key[2]=='s' && key[3]=='i' && key[4]=='o' && key[5]=='n') {
+          bot_vision[si] = val < 0.f ? 0.f : val;
+        } else if (keylen == 8 && key[0]=='r' && key[1]=='e' && key[2]=='a' && key[3]=='c' && key[4]=='t' && key[5]=='i' && key[6]=='o' && key[7]=='n') {
+          bot_reaction[si] = val < 0.f ? 0.f : val;
+        } else {
+          cfg_ok = 0;
+        }
+      }
+      if (cfg_ok) rn += st(reply_buf + rn, 599 - rn, "bot cfg set\n");
+      else rn += st(reply_buf + rn, 599 - rn, "bot cfg: unknown key (vision|reaction)\n");
     } else {
       rn += st(reply_buf + rn, 599 - rn, "bot: unknown subcommand (try 'bot help')\n");
     }

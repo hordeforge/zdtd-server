@@ -930,6 +930,21 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(std.mem.indexOf(u8, lrep.?, "id=1000") != null);
     try std.testing.expect(std.mem.indexOf(u8, lrep.?, "target=2000") != null);
 
+    // Per-bot `bot cfg` overrides parse and reply; unknown keys are rejected.
+    // vision/reaction are reset to the skill default (0) right after so the
+    // later phases still engage the player at range 14.
+    var cfg_out: [256]u8 = undefined;
+    const c1 = host.adminCommand("bot cfg 1000 vision 5", &cfg_out);
+    try std.testing.expect(c1 != null and std.mem.indexOf(u8, c1.?, "cfg set") != null);
+    const c2 = host.adminCommand("bot cfg 1000 reaction 1", &cfg_out);
+    try std.testing.expect(c2 != null and std.mem.indexOf(u8, c2.?, "cfg set") != null);
+    const c3 = host.adminCommand("bot cfg 1000 bogus 1", &cfg_out);
+    try std.testing.expect(c3 != null and std.mem.indexOf(u8, c3.?, "unknown key") != null);
+    const c4 = host.adminCommand("bot cfg 1000 vision 0", &cfg_out);
+    try std.testing.expect(c4 != null and std.mem.indexOf(u8, c4.?, "cfg set") != null);
+    const c5 = host.adminCommand("bot cfg 1000 reaction 0", &cfg_out);
+    try std.testing.expect(c5 != null and std.mem.indexOf(u8, c5.?, "cfg set") != null);
+
     // Tick 2 (identical scene): command gating suppresses redundant move/look.
     Cap.queued_n = 0;
     host.onTick();
