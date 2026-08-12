@@ -408,16 +408,21 @@ static void brain_tick(void) {
     bot_last_hp[bslot] = rec_hp(bi);
 
     // Pick the nearest hostile candidate within vision (players/zombies/other
-    // bots, not ourselves).
+    // bots, not ourselves). Players are preferred over zombies/bots at equal
+    // distance (cross-pollinated from clanker BotBrain.FindTarget: EntityPlayer
+    // score * 0.82, other bots * 0.9 — squared here since we compare d2).
     int ti = -1;
-    float best_d = vision * vision;
+    float best_s = vision * vision;
     int j;
     for (j = 0; j < n; ++j) {
       if (j == bi) continue;
       if (!rec_kind_alive(j)) continue;
       const float dx = rec_x(j) - bx, dz = rec_z(j) - bz;
       const float d2 = dx * dx + dz * dz;
-      if (d2 < best_d) { best_d = d2; ti = j; }
+      float score = d2;
+      if (rec_kind(j) == KIND_PLAYER) score *= 0.67f;   // 0.82^2
+      else if (rec_kind(j) == KIND_BOT) score *= 0.81f; // 0.9^2
+      if (score < best_s) { best_s = score; ti = j; }
     }
 
     if (ti < 0) {

@@ -192,6 +192,10 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   error from the per-slot LCG (`skill_aimerr`: ~0.28 rad at skill 0 down to
   ~0.06 rad at skill 4), held for the engagement so aim settles rather than
   jitters. Low-skill bots spray; high-skill bots are near-deadly.
+- **Target selection.** Nearest alive non-self candidate within vision wins, but
+  players are preferred over zombies/other bots at equal distance (player score
+  `* 0.82`, other bot `* 0.9`, squared for the d2 comparison — cross-pollinated
+  from clanker `BotBrain.FindTarget`).
 - **Lead-fire.** The guest estimates target velocity from its own sense
   history and aims at a predicted position a time-of-flight ahead
   (`BULLET_SPEED`); a stationary target yields lead 0 and degrades to direct

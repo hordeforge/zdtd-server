@@ -811,6 +811,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         var queued_n: usize = 0;
         var queued_len: [8]usize = undefined;
         var hide_player: bool = false;
+        var show_zombie: bool = false;
         var bot_hp: f32 = 100;
 
         fn queueFn(_: *HostCtx, cmd: []const u8) void {
@@ -841,11 +842,8 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         fn senseFn(_: *HostCtx, out: []u8) usize {
             // header: magic 'ZBS1', count, tick 1, self 0
             std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
-            if (hide_player) {
-                std.mem.writeInt(u32, out[4..8], 1, .little);
-            } else {
-                std.mem.writeInt(u32, out[4..8], 2, .little);
-            }
+            const count: u32 = if (hide_player) 1 else (if (show_zombie) 3 else 2);
+            std.mem.writeInt(u32, out[4..8], count, .little);
             std.mem.writeInt(u32, out[8..12], 1, .little);
             std.mem.writeInt(i32, out[12..16], 0, .little);
             var n: u32 = 0;
@@ -856,6 +854,12 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             if (!hide_player) {
                 // a player at (10, 0, 10) unless hidden (LOS pull-down)
                 writeRec(out, 16 + 32, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
+                n += 1;
+            }
+            if (show_zombie) {
+                // a zombie CLOSER to the bot (9,10) than the player (10,10);
+                // player-preference targeting must still pick the player.
+                writeRec(out, 16 + 64, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
                 n += 1;
             }
             return 16 + @as(usize, n) * 32;
@@ -932,9 +936,12 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(found_dodge);
 
     // Tick 5+ (fire phase): the static scene stays (bot hp 60, no further
-    // damage), so the dodge expires and the reaction gate runs down. The brain
-    // must eventually queue `bot shoot 1000 2000` (optionally flagged `head`),
-    // proving the fire path works end-to-end through the host.
+    // damage), so the dodge expires and the reaction gate runs down. A zombie
+    // appears CLOSER to the bot than the player, so player-preference targeting
+    // must still make the brain fire at the player (2000). The brain must queue
+    // `bot shoot 1000 2000` (optionally flagged `head`), proving both the fire
+    // path and the target preference work end-to-end.
+    Cap.show_zombie = true;
     var found_shoot = false;
     var fire_ticks: usize = 0;
     while (fire_ticks < 16 and !found_shoot) : (fire_ticks += 1) {

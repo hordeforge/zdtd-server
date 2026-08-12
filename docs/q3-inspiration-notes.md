@@ -24,9 +24,10 @@ boundary (ADR 0026).
   delay scales inversely with skill.
 - **Fire throttle.** Holding fire is gated by a burst cadence rather than a
   per-frame check, so a bot cannot machine-gun every tick.
-- **Target selection.** Nearest *alive* non-self candidate within vision wins
-  (players, zombies and other bots are all targetable), mirroring the
-  proximity-priority model of `BotFindEnemy`.
+- **Target selection.** Nearest *alive* non-self candidate within vision wins,
+  but players are preferred over zombies/other bots at equal distance
+  (cross-pollinated from clanker `BotBrain.FindTarget`: player score `* 0.82`,
+  other bot `* 0.9`), mirroring the proximity-priority model of `BotFindEnemy`.
 - **Strafe-orbit vs chase.** When an enemy is inside attack range the bot
   sidesteps on a perpendicular orbit (alternating by slot parity); outside that
   range it closes distance. This is the Q3 strafe-chase duality, but computed
