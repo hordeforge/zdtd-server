@@ -202,6 +202,15 @@ pub const BotManager = struct {
     /// 0 is a no-op. Clamped to max_bots; stops early when the table fills.
     pub fn applyCountFloor(self: *BotManager, g: *Game, n: u32) void {
         const target = @min(n, @as(u32, max_bots));
+        // The population floor is two-way: remove extras when over target
+        // (BOTS_SPEC `bot count` = "keep n alive"). `bot count 0` clears all.
+        while (self.n > target) {
+            var slot: usize = 0;
+            while (slot < max_bots and !self.bots[slot].alive) : (slot += 1) {}
+            if (slot >= max_bots) break;
+            self.bots[slot] = .{};
+            self.n -|= 1;
+        }
         var spread: u32 = 1;
         while (self.n < target) : (spread += 1) {
             const ix: f32 = @as(f32, @floatFromInt(spread)) * bot_spawn_spread;

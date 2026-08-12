@@ -5286,4 +5286,11 @@ test "scenario applyCountFloor tops up across repeated calls" {
     try std.testing.expectEqual(@as(usize, 3), g.bots.n);
     _ = g.bots.handleCommand(g, "bot count 5");
     try std.testing.expectEqual(@as(usize, 5), g.bots.n);
+
+    // Two-way floor: reducing the target removes extras (`bot count 2`).
+    _ = g.bots.handleCommand(g, "bot count 2");
+    try std.testing.expectEqual(@as(usize, 2), g.bots.n);
+    // `bot count 0` clears the floor entirely.
+    _ = g.bots.handleCommand(g, "bot count 0");
+    try std.testing.expectEqual(@as(usize, 0), g.bots.n);
 }
