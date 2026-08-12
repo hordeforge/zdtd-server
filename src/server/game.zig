@@ -1845,6 +1845,7 @@ pub const Game = struct {
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
+            .land_claim_expiry_time = self.land_claim_expiry_days,
             // Stock GameStat.AirDropFrequency is in DAYS (default 3/3 days;
             // aidirector.md airdrop schedule); the config key + sim interval
             // are in game hours (config.zig), so convert for the wire.
