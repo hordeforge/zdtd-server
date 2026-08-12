@@ -34,7 +34,9 @@ New to the project, or picking up work:
 8. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
 9. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
    the stock game (file map 187/187 + constants ledger; gated by
-   `tools/provenance_scan.py` in `make check`).
+   `tools/provenance_scan.py` in `make check`). Re-run the review with
+   [PROVENANCE_REVIEW_PROMPT.md](PROVENANCE_REVIEW_PROMPT.md) (copy-paste
+   agent prompt: method, gates, honesty rules).
 10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
 
