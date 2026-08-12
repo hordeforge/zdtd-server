@@ -195,7 +195,10 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
 - **Target selection.** Nearest alive non-self candidate within vision wins, but
   players are preferred over zombies/other bots at equal distance (player score
   `* 0.82`, other bot `* 0.9`, squared for the d2 comparison — cross-pollinated
-  from clanker `BotBrain.FindTarget`).
+  from clanker `BotBrain.FindTarget`). Candidates beyond a skill-scaled FOV cone
+  (`skill_fov`, ~90 deg at skill 0 to ~170 deg at skill 4) are not acquired
+  unless they are within `CLOSE_SPOT_RANGE` blocks, mirroring clanker's
+  `VisionAngle`.
 - **Lead-fire.** The guest estimates target velocity from its own sense
   history and aims at a predicted position a time-of-flight ahead
   (`BULLET_SPEED`); a stationary target yields lead 0 and degrades to direct

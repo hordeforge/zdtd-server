@@ -30,6 +30,9 @@ boundary (ADR 0026).
   but players are preferred over zombies/other bots at equal distance
   (cross-pollinated from clanker `BotBrain.FindTarget`: player score `* 0.82`,
   other bot `* 0.9`), mirroring the proximity-priority model of `BotFindEnemy`.
+  Candidates beyond a skill-scaled FOV cone (`skill_fov`, ~90 deg at skill 0 to
+  ~170 deg at skill 4) are not acquired unless very close, mirroring clanker's
+  `VisionAngle` (wide FOV for FPS feel, close targets always spotted).
 - **Strafe-orbit vs chase.** When an enemy is inside attack range the bot
   sidesteps on a perpendicular orbit (alternating by slot parity); outside that
   range it closes distance. This is the Q3 strafe-chase duality, but computed

@@ -157,6 +157,7 @@ static float rec_z(int i)        { return sf32(REC_OFF(i) + 16); }
 static int rec_self(int i) __attribute__((unused));
 static int rec_self(int i)       { return s8(REC_OFF(i) + 5); }
 static float rec_hp(int i)       { return sf32(REC_OFF(i) + 20); }
+static float rec_yaw(int i)      { return sf32(REC_OFF(i) + 24); }
 static float rec_target(int i) __attribute__((unused));
 static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
 
@@ -359,6 +360,12 @@ static float skill_hit_chance(int skill, float dist) {
 // Skill-scaled headshot chance (cross-pollinated from clanker TryShootBurst:
 // cfg.HeadshotChance). Skill 0 ~5%, skill 4 ~25%.
 static float skill_headshot(int skill) { return 0.05f + 0.05f * (float)skill; }
+// Skill-scaled vision cone in radians (cross-pollinated from clanker
+// BotBrain.FindTarget VisionAngle): skill 0 ~90 deg, skill 4 ~170 deg. The
+// guest reads its own yaw from the sense record; a candidate beyond the cone
+// is not acquired unless it is within CLOSE_SPOT_RANGE blocks.
+static float skill_fov(int skill) { return 1.57f + 0.35f * (float)skill; }
+#define CLOSE_SPOT_RANGE 7.f
 
 // One on_tick pass: sense, then drive every bot we see.
 static void brain_tick(void) {
@@ -411,6 +418,11 @@ static void brain_tick(void) {
     // bots, not ourselves). Players are preferred over zombies/bots at equal
     // distance (cross-pollinated from clanker BotBrain.FindTarget: EntityPlayer
     // score * 0.82, other bots * 0.9 — squared here since we compare d2).
+    // A candidate beyond the skill-scaled FOV cone is not acquired unless it
+    // is very close (clanker: close targets always spotted).
+    const float fov_half = skill_fov(skill) * 0.5f;
+    const float face = rec_yaw(bi) - 1.570796f; // yaw zero faces +X (same as atan2)
+    const float close2 = CLOSE_SPOT_RANGE * CLOSE_SPOT_RANGE;
     int ti = -1;
     float best_s = vision * vision;
     int j;
@@ -419,6 +431,14 @@ static void brain_tick(void) {
       if (!rec_kind_alive(j)) continue;
       const float dx = rec_x(j) - bx, dz = rec_z(j) - bz;
       const float d2 = dx * dx + dz * dz;
+      if (d2 > close2) {
+        // Cone check: angular offset between facing and the candidate.
+        float ang = atan2f_impl(dz, dx) - face;
+        while (ang > 3.14159265f) ang -= 6.2831853f;
+        while (ang < -3.14159265f) ang += 6.2831853f;
+        if (ang < 0.f) ang = -ang;
+        if (ang > fov_half) continue;
+      }
       float score = d2;
       if (rec_kind(j) == KIND_PLAYER) score *= 0.67f;   // 0.82^2
       else if (rec_kind(j) == KIND_BOT) score *= 0.81f; // 0.9^2
@@ -638,7 +658,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.5 enabled");
+  e("zdtd_bot v1.6 enabled");
   flush(1);
 }
 

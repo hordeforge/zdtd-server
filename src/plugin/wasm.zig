@@ -812,6 +812,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         var queued_len: [8]usize = undefined;
         var hide_player: bool = false;
         var show_zombie: bool = false;
+        var show_flanker: bool = false;
         var bot_hp: f32 = 100;
 
         fn queueFn(_: *HostCtx, cmd: []const u8) void {
@@ -842,14 +843,18 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         fn senseFn(_: *HostCtx, out: []u8) usize {
             // header: magic 'ZBS1', count, tick 1, self 0
             std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
-            const count: u32 = if (hide_player) 1 else (if (show_zombie) 3 else 2);
+            const count: u32 = if (hide_player)
+                1
+            else
+                (if (show_zombie) @as(u32, 3) else @as(u32, 2)) + (if (show_flanker) @as(u32, 1) else 0);
             std.mem.writeInt(u32, out[4..8], count, .little);
             std.mem.writeInt(u32, out[8..12], 1, .little);
             std.mem.writeInt(i32, out[12..16], 0, .little);
             var n: u32 = 0;
-            // one bot at the origin (self); hp is mutable so the dodge phase
-            // can simulate the bot taking damage (100 -> 60).
-            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, bot_hp, 0.0, -1);
+            // one bot at the origin (self), facing +45deg toward the visible
+            // player (yaw = atan2(10,10)+90deg); hp is mutable so the dodge
+            // phase can simulate the bot taking damage (100 -> 60).
+            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, bot_hp, 2.356, -1);
             n += 1;
             if (!hide_player) {
                 // a player at (10, 0, 10) unless hidden (LOS pull-down)
@@ -860,6 +865,12 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
                 // a zombie CLOSER to the bot (9,10) than the player (10,10);
                 // player-preference targeting must still pick the player.
                 writeRec(out, 16 + 64, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
+                n += 1;
+            }
+            if (show_flanker) {
+                // a player BEHIND the bot (facing +X, yaw 0) and closer than the
+                // visible player: the FOV cone must exclude it.
+                writeRec(out, 16 + @as(usize, n) * 32, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
                 n += 1;
             }
             return 16 + @as(usize, n) * 32;
@@ -949,6 +960,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     // `bot shoot 1000 2000` (optionally flagged `head`), proving both the fire
     // path and the target preference work end-to-end.
     Cap.show_zombie = true;
+    Cap.show_flanker = true; // closer player behind the bot: FOV must exclude it
     var found_shoot = false;
     var burst_count: usize = 0;
     var fire_ticks: usize = 0;
