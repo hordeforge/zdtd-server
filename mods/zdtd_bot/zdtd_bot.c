@@ -571,19 +571,24 @@ static void brain_tick(void) {
           bot_move_sent[bslot] = 1;
         }
       }
-      // Cross-pollinated from clanker TryShootBurst: skill/distance accuracy —
-      // only queue a shot if a deterministic roll lands, so low-skill bots miss.
-      // A second skill-scaled roll decides headshot (host applies the 2x body).
+      // Cross-pollinated from clanker TryShootBurst: a burst volley (2 shots at
+      // skill < 3, 3 at skill >= 3), each with its own skill/distance hit roll
+      // and a skill-scaled headshot roll — low-skill bots miss a lot, high-skill
+      // bots land burst damage. The host applies damage per `bot shoot`.
       if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
-        const float hc = skill_hit_chance(skill, dist);
-        if (rng_f01(&bot_rng[bslot]) < hc) {
-          if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
-            queue_shoot_head(net, target_net);
-          } else {
-            queue_shoot(net, target_net);
+        const int burst = (skill >= 3) ? 3 : 2;
+        int k;
+        for (k = 0; k < burst; ++k) {
+          const float hc = skill_hit_chance(skill, dist);
+          if (rng_f01(&bot_rng[bslot]) < hc) {
+            if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
+              queue_shoot_head(net, target_net);
+            } else {
+              queue_shoot(net, target_net);
+            }
           }
         }
-        bot_throttle[bslot] = 0.25f + 0.2f * (float)(skill % 2); // burst-ish cadence
+        bot_throttle[bslot] = 0.25f + 0.2f * (float)(skill % 2); // burst pause
       }
     } else {
       // Chase toward the target's current ground position (lead is for aim).
@@ -633,7 +638,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.3 enabled");
+  e("zdtd_bot v1.4 enabled");
   flush(1);
 }
 

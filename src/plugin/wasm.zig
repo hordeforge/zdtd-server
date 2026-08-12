@@ -943,16 +943,24 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     // path and the target preference work end-to-end.
     Cap.show_zombie = true;
     var found_shoot = false;
+    var burst_count: usize = 0;
     var fire_ticks: usize = 0;
     while (fire_ticks < 16 and !found_shoot) : (fire_ticks += 1) {
         Cap.queued_n = 0;
         host.onTick();
+        var tick_shoots: usize = 0;
         for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
             const s = c[0..Cap.queued_len[qi]];
-            if (std.mem.startsWith(u8, s, "bot shoot 1000 2000")) found_shoot = true;
+            if (std.mem.startsWith(u8, s, "bot shoot 1000 2000")) {
+                found_shoot = true;
+                tick_shoots += 1;
+            }
         }
+        burst_count = tick_shoots;
     }
     try std.testing.expect(found_shoot);
+    // Burst volley: at least two shots queued in the firing tick (skill 2 => 2).
+    try std.testing.expect(burst_count >= 2);
 
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());

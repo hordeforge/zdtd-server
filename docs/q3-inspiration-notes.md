@@ -23,7 +23,9 @@ boundary (ADR 0026).
   elapses after first sight (Q3's `BotCheckAttack`-style readiness gate). The
   delay scales inversely with skill.
 - **Fire throttle.** Holding fire is gated by a burst cadence rather than a
-  per-frame check, so a bot cannot machine-gun every tick.
+  per-frame check, so a bot cannot machine-gun every tick. Each fire window
+  queues a 2-3 shot burst volley (higher skill, more shots), every shot with
+  its own hit and headshot roll — mirroring clanker `Weapon.BurstMin/BurstMax`.
 - **Target selection.** Nearest *alive* non-self candidate within vision wins,
   but players are preferred over zombies/other bots at equal distance
   (cross-pollinated from clanker `BotBrain.FindTarget`: player score `* 0.82`,

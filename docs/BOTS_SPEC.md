@@ -209,6 +209,9 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   the host always sees the burst (cross-pollinated from clanker `Bot.OnDamaged`).
 - **Reaction gate + fire throttle.** A fresh target is not engaged until a
   skill-scaled reaction delay elapses; shots are gated by a burst cadence.
+- **Burst volley.** Each fire window queues a 2-shot (skill < 3) or 3-shot
+  (skill >= 3) burst, every shot with its own hit and headshot roll
+  (cross-pollinated from clanker `Weapon.BurstMin/BurstMax`).
 - **Skill/distance hit accuracy.** A shot only lands when a deterministic roll
   beats `skill_hit_chance(skill, dist)` (cross-pollinated from clanker
   `TryShootBurst` spread/difficulty), so low-skill bots miss. A second
