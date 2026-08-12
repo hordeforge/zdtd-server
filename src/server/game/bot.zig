@@ -18,6 +18,9 @@ pub const max_bots: usize = 16;
 /// Flat damage a successful `bot shoot` applies to its target (ADR 0026 host
 /// floor; the guest already gated the shot on accuracy).
 pub const bot_shoot_damage: f32 = 12.0;
+/// Headshot damage multiplier (cross-pollinated from clanker TryShootBurst
+/// HeadshotMultiplier); applied when the guest flags `bot shoot ... head`.
+pub const bot_headshot_multiplier: f32 = 2.0;
 /// Default bot max HP (ADR 0026; the brain normalizes hurt against 100).
 pub const bot_max_hp: f32 = 100;
 
@@ -129,22 +132,31 @@ pub const BotManager = struct {
         self.bots[s].yaw = yaw;
     }
 
-    /// `bot shoot <shooter> <target>`: only a live bot may fire. A live bot
-    /// target takes the flat bot_shoot_damage (dies at hp <= 0); any other
-    /// target resolves through the ECS damage path (guarded against absence).
-    pub fn shoot(self: *BotManager, g: *Game, shooter: i32, target: i32) void {
+    /// `bot shoot <shooter> <target> [head]`: only a live bot may fire. A live
+    /// bot target takes bot_shoot_damage (dies at hp <= 0); any other target
+    /// resolves through the ECS damage path (guarded against absence). The
+    /// optional `head` token applies the headshot multiplier (cross-pollinated
+    /// from clanker TryShootBurst HeadshotMultiplier).
+    pub fn shoot(self: *BotManager, g: *Game, shooter: i32, target: i32, head: bool) void {
         if (self.find(shooter) == null) return;
-        if (self.find(target)) |ts| {
-            const b = &self.bots[ts];
-            b.hp -= bot_shoot_damage;
-            if (b.hp <= 0) {
-                b.alive = false;
-                self.n -|= 1;
-            }
-            return;
-        }
+        const dmg = bot_shoot_damage * (if (head) bot_headshot_multiplier else 1.0);
+        if (self.damageBot(target, dmg)) return;
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
-        _ = g.sim.damage(target, bot_shoot_damage);
+        _ = g.sim.damage(target, dmg);
+    }
+
+    /// Apply damage to a live bot by net id (no-op if absent). Returns true when
+    /// the target was a bot. Split out so the damage math is unit-testable
+    /// without constructing a Game.
+    pub fn damageBot(self: *BotManager, target: i32, dmg: f32) bool {
+        const ts = self.find(target) orelse return false;
+        const b = &self.bots[ts];
+        b.hp -= dmg;
+        if (b.hp <= 0) {
+            b.alive = false;
+            self.n -|= 1;
+        }
+        return true;
     }
 
     /// Despawn one bot by net id (no-op for unknown ids).
@@ -224,8 +236,17 @@ pub const BotManager = struct {
         if (std.mem.eql(u8, sub, "shoot")) {
             const id = it.next() orelse return true;
             const target = it.next() orelse return true;
-            if (it.next() != null) return true;
-            self.shoot(g, std.fmt.parseInt(i32, id, 10) catch return true, std.fmt.parseInt(i32, target, 10) catch return true);
+            // optional trailing "head" token (headshot flag from the guest).
+            var head = false;
+            if (it.next()) |t| {
+                if (std.mem.eql(u8, t, "head")) {
+                    head = true;
+                } else {
+                    return true; // unexpected trailing token
+                }
+                if (it.next() != null) return true;
+            }
+            self.shoot(g, std.fmt.parseInt(i32, id, 10) catch return true, std.fmt.parseInt(i32, target, 10) catch return true, head);
             return true;
         }
         if (std.mem.eql(u8, sub, "remove")) {
@@ -420,4 +441,27 @@ test "BotManager fillSense writes the fixed 32-byte sense layout" {
     n = 0;
     m.fillSense(&out, 16, 2, &n);
     try std.testing.expectEqual(@as(usize, 1), n);
+}
+
+test "BotManager damageBot applies headshot multiplier and can kill" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .x = 0, .y = 70, .z = 0, .hp = 20, .alive = true };
+    m.bots[1] = .{ .net_id = 11, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.n = 2;
+
+    // Plain shot: 100 - 12 = 88.
+    try std.testing.expect(m.damageBot(11, bot_shoot_damage));
+    try std.testing.expectApproxEqAbs(@as(f32, 88), m.bots[1].hp, 0.01);
+
+    // Headshot (multiplier 2x): 88 - 24 = 64.
+    try std.testing.expect(m.damageBot(11, bot_shoot_damage * bot_headshot_multiplier));
+    try std.testing.expectApproxEqAbs(@as(f32, 64), m.bots[1].hp, 0.01);
+
+    // Lethal headshot kills the 40 hp bot and drops the live count.
+    try std.testing.expect(m.damageBot(10, bot_shoot_damage * bot_headshot_multiplier));
+    try std.testing.expect(!m.bots[0].alive);
+    try std.testing.expectEqual(@as(usize, 1), m.n);
+
+    // Unknown ids are a no-op.
+    try std.testing.expect(!m.damageBot(999, bot_shoot_damage));
 }

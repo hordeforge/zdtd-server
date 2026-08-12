@@ -278,6 +278,15 @@ static void queue_shoot(int id, int target) {
   zdtd_queue((int)(long)&out[0], out_n);
   out_n = 0;
 }
+// Headshot variant: "bot shoot <id> <target> head" (cross-pollinated from
+// clanker TryShootBurst HeadshotChance/HeadshotMultiplier). The host applies
+// the headshot multiplier when the trailing token is present.
+static void queue_shoot_head(int id, int target) {
+  out_n = 0;
+  e("bot shoot "); e_int(id); e(" "); e_int(target); e(" head");
+  zdtd_queue((int)(long)&out[0], out_n);
+  out_n = 0;
+}
 
 // Skill-scaled reaction and vision (Q3 skill 0..4).
 static float skill_vision(int skill) { return 25.f + 8.f * (float)skill; }
@@ -347,6 +356,9 @@ static float skill_hit_chance(int skill, float dist) {
   if (dscale < 0.2f) dscale = 0.2f;
   return base * dscale;
 }
+// Skill-scaled headshot chance (cross-pollinated from clanker TryShootBurst:
+// cfg.HeadshotChance). Skill 0 ~5%, skill 4 ~25%.
+static float skill_headshot(int skill) { return 0.05f + 0.05f * (float)skill; }
 
 // One on_tick pass: sense, then drive every bot we see.
 static void brain_tick(void) {
@@ -556,9 +568,16 @@ static void brain_tick(void) {
       }
       // Cross-pollinated from clanker TryShootBurst: skill/distance accuracy —
       // only queue a shot if a deterministic roll lands, so low-skill bots miss.
+      // A second skill-scaled roll decides headshot (host applies the 2x body).
       if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
         const float hc = skill_hit_chance(skill, dist);
-        if (rng_f01(&bot_rng[bslot]) < hc) queue_shoot(net, target_net);
+        if (rng_f01(&bot_rng[bslot]) < hc) {
+          if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
+            queue_shoot_head(net, target_net);
+          } else {
+            queue_shoot(net, target_net);
+          }
+        }
         bot_throttle[bslot] = 0.25f + 0.2f * (float)(skill % 2); // burst-ish cadence
       }
     } else {
@@ -609,7 +628,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.2 enabled");
+  e("zdtd_bot v1.3 enabled");
   flush(1);
 }
 

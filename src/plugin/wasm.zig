@@ -931,6 +931,22 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     }
     try std.testing.expect(found_dodge);
 
+    // Tick 5+ (fire phase): the static scene stays (bot hp 60, no further
+    // damage), so the dodge expires and the reaction gate runs down. The brain
+    // must eventually queue `bot shoot 1000 2000` (optionally flagged `head`),
+    // proving the fire path works end-to-end through the host.
+    var found_shoot = false;
+    var fire_ticks: usize = 0;
+    while (fire_ticks < 16 and !found_shoot) : (fire_ticks += 1) {
+        Cap.queued_n = 0;
+        host.onTick();
+        for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+            const s = c[0..Cap.queued_len[qi]];
+            if (std.mem.startsWith(u8, s, "bot shoot 1000 2000")) found_shoot = true;
+        }
+    }
+    try std.testing.expect(found_shoot);
+
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

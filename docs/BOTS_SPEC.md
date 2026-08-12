@@ -138,7 +138,7 @@ Existing verbs are unchanged (`spawn`, `despawn`, `damage`). New bot verbs:
 | `bot remove <id\|all>` | despawn | destroy via the normal kill/cleanup path | id unknown |
 | `bot move <id> <x> <y> <z> <speed>` | intent | clamp to the player move caps (same envelope as client C2S), set the bot's position/velocity for this tick; reject out-of-bounds coords | id unknown, coords NaN/out-of-bounds, speed<=0 |
 | `bot look <id> <yaw>` | intent | set facing (drives which way the bot "aims") | id unknown |
-| `bot shoot <id> <target_id>` | fire request | if the target is alive, in range and host-LOS-clear, apply weapon damage to it (existing damage/verdict path); else no-op | id/target known but LOS blocked or out of range |
+| `bot shoot <id> <target_id> [head]` | fire request | if the target is alive, in range and host-LOS-clear, apply weapon damage to it (existing damage/verdict path); the optional `head` token applies the 2x headshot multiplier (cross-pollinated from clanker `TryShootBurst`) | id/target known but LOS blocked or out of range |
 | `bot count <n>` | population floor | keep `n` alive; auto-respawn to floor (clamped to MaxBots) | n>MaxBots (clamped) |
 | `bot cfg <id> <key> <val>` | per-bot override | mutate the `BotDef` column (e.g. `skill 3`, `vision 40`, `reaction 0.35`) | unknown key (logged, ignored) |
 
@@ -207,7 +207,9 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   skill-scaled reaction delay elapses; shots are gated by a burst cadence.
 - **Skill/distance hit accuracy.** A shot only lands when a deterministic roll
   beats `skill_hit_chance(skill, dist)` (cross-pollinated from clanker
-  `TryShootBurst` spread/difficulty), so low-skill bots miss.
+  `TryShootBurst` spread/difficulty), so low-skill bots miss. A second
+  skill-scaled roll flags a headshot (`skill_headshot`, ~5% at skill 0 to ~25%
+  at skill 4), and the host applies the 2x `bot_headshot_multiplier`.
 - **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
   `BACKPEDAL_RANGE`; low-health, low-skill bots retreat and hold fire
   (`HP_RETREAT_FRAC`, cross-pollinated from clanker `BotBrain.Backpedal` /

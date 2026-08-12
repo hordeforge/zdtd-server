@@ -51,7 +51,10 @@ boundary (ADR 0026).
   a patch; the wasm guest infers it from its own hp).
 - **Skill/distance hit accuracy.** A shot only lands when a deterministic roll
   beats `skill_hit_chance(skill, dist)`, cross-pollinated from clanker
-  `TryShootBurst` (spread scaled down by difficulty), so low-skill bots miss.
+  `TryShootBurst` (spread scaled down by difficulty), so low-skill bots miss. A
+  second skill-scaled roll flags a headshot (`skill_headshot`), and the host
+  applies the 2x `bot_headshot_multiplier` — mirroring clanker
+  `HeadshotChance`/`HeadshotMultiplier`.
 - **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
   `BACKPEDAL_RANGE` (clanker `BotBrain.Backpedal`); low-health, low-skill bots
   retreat and hold fire (`HP_RETREAT_FRAC`, clanker `BotCharacter.WantsToRetreat`).
