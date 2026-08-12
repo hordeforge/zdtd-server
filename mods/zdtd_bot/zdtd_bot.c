@@ -452,8 +452,10 @@ static void brain_tick(void) {
     for (j = 0; j < n; ++j) {
       if (j == bi) continue;
       if (!rec_kind_alive(j)) continue;
-      const float dx = rec_x(j) - bx, dz = rec_z(j) - bz;
-      const float d2 = dx * dx + dz * dz;
+      const float dx = rec_x(j) - bx, dy = rec_y(j) - by, dz = rec_z(j) - bz;
+      // 3D distance (clanker FindTarget uses Vector3.Distance): a target far
+      // above/below the bot is outside vision just like one far horizontally.
+      const float d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > close2) {
         // Cone check: angular offset between facing and the candidate.
         float ang = atan2f_impl(dz, dx) - face;
@@ -684,7 +686,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v1.8 enabled");
+  e("zdtd_bot v1.9 enabled");
   flush(1);
 }
 
