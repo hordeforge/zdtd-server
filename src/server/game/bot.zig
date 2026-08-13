@@ -16,13 +16,34 @@ const Game = game_mod.Game;
 /// Fixed bot capacity (ADR 0026 MaxBots-style cap; bounded array, no heap).
 pub const max_bots: usize = 16;
 /// Flat damage a successful `bot shoot` applies to its target (ADR 0026 host
-/// floor; the guest already gated the shot on accuracy).
+/// floor; the guest already gated the shot on accuracy). Kept as the pistol
+/// floor; per-weapon damage overrides it when a Bot carries a weapon (cross-
+/// pollinated from clanker WeaponProfile).
 pub const bot_shoot_damage: f32 = 12.0;
 /// Headshot damage multiplier (cross-pollinated from clanker TryShootBurst
 /// HeadshotMultiplier); applied when the guest flags `bot shoot ... head`.
 pub const bot_headshot_multiplier: f32 = 2.0;
 /// Default bot max HP (ADR 0026; the brain normalizes hurt against 100).
 pub const bot_max_hp: f32 = 100;
+
+/// Per-bot weapon profile (cross-pollinated from clanker WeaponProfile.ForGun).
+/// Host-enforced damage/range so mixed-loadout bots actually feel different.
+pub const BotWeapon = struct {
+    damage: f32 = 16,
+    range: f32 = 40,
+    pellets: u8 = 1,
+    // short gun id tag for logs/list (clanker's GunId, truncated)
+    tag: [12]u8 = .{0} ** 12,
+    tag_len: usize = 0,
+};
+pub const bot_weapon_pistol: BotWeapon = .{ .damage = 16, .range = 40, .pellets = 1, .tag = .{ 'p', 'i', 's', 't', 'o', 'l', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
+pub const bot_weapon_shotgun: BotWeapon = .{ .damage = 14, .range = 22, .pellets = 8, .tag = .{ 's', 'h', 'o', 't', 'g', 'u', 'n', 0, 0, 0, 0, 0 }, .tag_len = 7 };
+pub const bot_weapon_auto: BotWeapon = .{ .damage = 9, .range = 22, .pellets = 6, .tag = .{ 'a', 'u', 't', 'o', 0, 0, 0, 0, 0, 0, 0, 0 }, .tag_len = 4 };
+pub const bot_weapon_ak: BotWeapon = .{ .damage = 16, .range = 55, .pellets = 1, .tag = .{ 'a', 'k', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .tag_len = 2 };
+pub const bot_weapon_sniper: BotWeapon = .{ .damage = 42, .range = 90, .pellets = 1, .tag = .{ 's', 'n', 'i', 'p', 'e', 'r', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
+pub const bot_weapon_smg: BotWeapon = .{ .damage = 9, .range = 35, .pellets = 1, .tag = .{ 's', 'm', 'g', 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .tag_len = 3 };
+pub const bot_weapon_magnum: BotWeapon = .{ .damage = 34, .range = 45, .pellets = 1, .tag = .{ 'm', 'a', 'g', 'n', 'u', 'm', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
+pub const bot_loadout_pool: [6]BotWeapon = .{ bot_weapon_pistol, bot_weapon_shotgun, bot_weapon_ak, bot_weapon_sniper, bot_weapon_auto, bot_weapon_smg };
 
 /// Flat XZ spawn spread used by `bot count` / `bot spawn` fallback so the
 /// floor bots do not stack on one cell.
@@ -53,6 +74,8 @@ pub const Bot = struct {
     speed: f32 = 0,
     move_active: bool = false,
     strafe_p: bool = false,
+    /// Per-bot weapon (clanker WeaponProfile diversity, host-enforced)
+    weapon: BotWeapon = bot_weapon_pistol,
     /// Operator/console display name (bounded, no heap). The stock client needs
     /// an entity_name in the player-mesh spawn body, so bots carry one.
     name: [24]u8 = .{0} ** 24,
@@ -96,6 +119,10 @@ pub const BotManager = struct {
         if (slot >= max_bots) return null;
         const id = g.allocBotNetId();
         const gy = g.groundHeight(@intFromFloat(@floor(x)), @intFromFloat(@floor(z)));
+        // Deterministic mixed-loadout pick from pool (clanker LoadoutPool parity)
+        var prng: u32 = @as(u32, @bitCast(id)) *% 2654435761 +% @as(u32, @truncate(@as(u64, @bitCast(g.tick_n))));
+        prng = prng *% 1103515245 +% 12345;
+        const widx: usize = @intCast((prng >> 8 & 0x00ffffff) % bot_loadout_pool.len);
         self.bots[slot] = .{
             .net_id = id,
             .x = x,
@@ -103,6 +130,7 @@ pub const BotManager = struct {
             .z = z,
             .hp = @max(hp, 1),
             .alive = true,
+            .weapon = bot_loadout_pool[widx],
         };
         self.bots[slot].setName(default_bot_name);
         self.n += 1;
@@ -145,13 +173,14 @@ pub const BotManager = struct {
     /// `bot shoot <shooter> <target> [head]`: only a live bot may fire, and only
     /// when the shot is not blocked by solid voxels (BOTS_SPEC §4 host-LOS gate;
     /// `Game.botLosClear` from the shooter's eye to the target's chest). A live
-    /// bot target takes bot_shoot_damage (dies at hp <= 0); any other target
+    /// bot target takes weapon damage (dies at hp <= 0); any other target
     /// resolves through the ECS damage path (guarded against absence). The
     /// optional `head` token applies the headshot multiplier (cross-pollinated
     /// from clanker TryShootBurst HeadshotMultiplier).
     pub fn shoot(self: *BotManager, g: *Game, shooter: i32, target: i32, head: bool) void {
         const ss = self.find(shooter) orelse return;
-        const dmg = bot_shoot_damage * (if (head) bot_headshot_multiplier else 1.0);
+        const weap = self.bots[ss].weapon;
+        const dmg = weap.damage * (if (head) bot_headshot_multiplier else 1.0);
 
         // Target position for the LOS check: a bot target or an ECS entity.
         var tpos: [3]f32 = undefined;
@@ -164,6 +193,12 @@ pub const BotManager = struct {
         } else return;
 
         const p = &self.bots[ss];
+        // Host-enforced weapon range (clanker WeaponProfile.Range parity)
+        const dx = tpos[0] - p.x;
+        const dz = tpos[2] - p.z;
+        const dy = (tpos[1] + 1.05) - (p.y + 1.45);
+        const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > weap.range + 2.0) return;
         const eye: [3]f32 = .{ p.x, p.y + 1.45, p.z };
         const chest: [3]f32 = .{ tpos[0], tpos[1] + 1.05, tpos[2] };
         if (!g.botLosClear(eye, chest)) return;

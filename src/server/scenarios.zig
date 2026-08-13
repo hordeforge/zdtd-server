@@ -5183,13 +5183,15 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     // Spawn the zombie at the terrain surface too so the eye-line is flat and
     // the wall cell is predictable.
     const zy = g.groundHeight(12, 12);
-    const zid = g.sim.spawnZombie(12, zy, 12, 40).?;
+    const zid = g.sim.spawnZombie(12, zy, 12, 100).?;
     const zs = g.sim.slotOfNetId(zid).?;
 
-    // Clear line: the shot lands and damages the zombie by bot_shoot_damage,
-    // and the bot is attributed as the attacker (zombie revenge target).
+    // Clear line: the shot lands and damages the zombie by the bot's weapon damage
+    // (cross-pollinated from clanker WeaponProfile: mixed loadout), and the bot
+    // is attributed as the attacker (zombie revenge target).
+    const weap_dmg = g.bots.bots[g.bots.find(bid).?].weapon.damage;
     g.bots.shoot(g, bid, zid, false);
-    try std.testing.expectApproxEqAbs(@as(f32, 40 - game_bot.bot_shoot_damage), g.sim.health[zs].hp, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 100 - weap_dmg), g.sim.health[zs].hp, 0.01);
     try std.testing.expectEqual(bid, g.sim.zombie_ai[zs].revenge_target);
 
     // Place a stone wall on the eye-line cell between the two and re-shoot:
@@ -5203,7 +5205,7 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     try g.world.setBlockWorld(10, 66, 10, world_store.block_air);
     g.bots.shoot(g, bid, zid, true);
     try std.testing.expectApproxEqAbs(
-        hp_before - game_bot.bot_shoot_damage * game_bot.bot_headshot_multiplier,
+        hp_before - weap_dmg * game_bot.bot_headshot_multiplier,
         g.sim.health[zs].hp,
         0.01,
     );
