@@ -63,6 +63,12 @@ const sense_kind_bot: u8 = 2;
 pub const max_sense_events: usize = 8;
 /// Sense event kind for a damage event (BOTS_SPEC §3: 3 = damage).
 pub const sense_kind_damage: u8 = 3;
+/// Sense event kind for a bot-info record (BOTS_SPEC §3: 4 = bot info). The
+/// host writes one per live bot each sense pass so the guest can adapt to the
+/// bot's host-assigned weapon (range/burst/lead) without a record-layout bump.
+pub const sense_kind_bot_info: u8 = 4;
+/// Max bot-info records in the sense trailer (one per live bot; cap = slots).
+pub const max_sense_info: usize = max_bots;
 /// Sense event record byte size (BOTS_SPEC §3): kind u8 + 3 pad, attacker i32,
 /// victim i32, amount f32 — packed, little-endian.
 pub const sense_event_len: usize = 16;
@@ -102,6 +108,9 @@ pub const Bot = struct {
     /// reads it indirectly via the damage-event sense trailer (retaliation;
     /// clanker `Bot.OnDamaged` aggro-swap parity).
     last_attacker: i32 = -1,
+    /// Index into `bot_loadout_pool` (sent to the guest as a kind-4 bot-info
+    /// sense record so the brain can adapt range/burst/lead to the weapon).
+    weapon_id: u8 = 0,
 
     /// Set the display name, copying at most name.len-1 bytes (NUL-terminated).
     /// An empty name falls back to the default "Bot".
@@ -158,6 +167,7 @@ pub const BotManager = struct {
             .hp = @max(hp, 1),
             .alive = true,
             .weapon = bot_loadout_pool[widx],
+            .weapon_id = @intCast(widx),
         };
         self.bots[slot].setName(default_bot_name);
         self.n += 1;
@@ -285,6 +295,28 @@ pub const BotManager = struct {
             written += 1;
         }
         self.ev_n = 0;
+        return written;
+    }
+
+    /// Write one kind-4 bot-info record per live bot into the sense trailer
+    /// starting at byte `base` (before the damage events). Returns the number
+    /// written (<= `cap`). The guest builds its per-bot weapon map from these
+    /// (BOTS_SPEC §3) so the brain adapts range/burst/lead to the host-assigned
+    /// loadout. No heap; stops early when `out` cannot fit the next record.
+    pub fn fillSenseBotInfo(self: *BotManager, out: []u8, base: usize, cap: usize) usize {
+        var written: usize = 0;
+        for (&self.bots) |*b| {
+            if (written >= cap) break;
+            if (!b.alive) continue;
+            const rec = base + written * sense_event_len;
+            if (rec + sense_event_len > out.len) break;
+            const r = out[rec .. rec + sense_event_len];
+            @memset(r, 0);
+            r[0] = sense_kind_bot_info;
+            r[1] = b.weapon_id;
+            std.mem.writeInt(i32, r[4..8], b.net_id, .little);
+            written += 1;
+        }
         return written;
     }
 
@@ -729,12 +761,46 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     // The buffer is cleared: a second drain writes nothing.
     try std.testing.expectEqual(@as(usize, 0), m.drainSenseEvents(&out, 16, max_sense_events));
 
-    // Cap: at most max_sense_events are written and the tail is untouched.
-    m.ev_n = max_sense_events + 4;
+    // Cap: at most `cap` events are written and the tail is untouched. Fill
+    // the buffer through damageFrom (which itself caps at max_sense_events).
+    m.bots[0] = .{ .net_id = 10, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.n = 1;
+    for (0..max_sense_events) |i| {
+        try std.testing.expect(m.damageFrom(10, 1, @intCast(i)));
+    }
+    try std.testing.expectEqual(@as(usize, max_sense_events), m.ev_n);
+    // Overflow events are dropped (the array is full, not grown).
+    try std.testing.expect(m.damageFrom(10, 1, 99));
+    try std.testing.expectEqual(@as(usize, max_sense_events), m.ev_n);
     var out2: [512]u8 = [_]u8{0xBB} ** 512;
     const capped = m.drainSenseEvents(&out2, 16, max_sense_events);
     try std.testing.expectEqual(@as(usize, max_sense_events), capped);
     try std.testing.expectEqual(@as(u8, 0xBB), out2[16 + max_sense_events * sense_event_len]);
+}
+
+test "BotManager fillSenseBotInfo writes one kind-4 record per live bot" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 100, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true, .weapon_id = 3 };
+    m.bots[1] = .{ .net_id = 101, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true, .weapon_id = 1 };
+    m.bots[2] = .{ .net_id = 102, .x = 0, .y = 70, .z = 0, .hp = 0, .alive = false }; // skipped
+    m.n = 2;
+
+    var out: [128]u8 = [_]u8{0xAA} ** 128;
+    const written = m.fillSenseBotInfo(&out, 16, max_sense_info);
+    try std.testing.expectEqual(@as(usize, 2), written);
+
+    const rec0 = out[16..32];
+    try std.testing.expectEqual(@as(u8, 4), rec0[0]); // kind bot-info
+    try std.testing.expectEqual(@as(u8, 3), rec0[1]); // weapon_id sniper
+    try std.testing.expectEqual(@as(i32, 100), std.mem.readInt(i32, rec0[4..8], .little));
+    const rec1 = out[32..48];
+    try std.testing.expectEqual(@as(u8, 1), rec1[1]); // weapon_id shotgun
+    try std.testing.expectEqual(@as(i32, 101), std.mem.readInt(i32, rec1[4..8], .little));
+
+    // Cap respected; tail untouched.
+    var out2: [128]u8 = [_]u8{0xBB} ** 128;
+    try std.testing.expectEqual(@as(usize, 1), m.fillSenseBotInfo(&out2, 16, 1));
+    try std.testing.expectEqual(@as(u8, 0xBB), out2[32]);
 }
 
 test "BotManager fillSense appends after existing ECS actor records" {

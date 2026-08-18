@@ -841,8 +841,8 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(i32, r[28..32], target, .little);
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
-            // header: magic 'ZBS1', count, tick 1, self 0
-            std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
+            // header: magic 'ZBS2', count, tick 1, self 0
+            std.mem.writeInt(u32, out[0..4], 0x3253425a, .little);
             const count: u32 = if (hide_player)
                 1
             else

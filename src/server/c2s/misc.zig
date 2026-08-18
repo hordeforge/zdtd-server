@@ -276,7 +276,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // pass and retaliates (clanker OnDamaged parity). Death / knock-
                 // back / unspawn: BotManager owns hp; the replicate pass
                 // unspawns dead bots and the population floor self-heals.
-                self.bots.damageFrom(d.entity_id, bamount, self.sim.network_id[actor_slot].id);
+                _ = self.bots.damageFrom(d.entity_id, bamount, self.sim.network_id[actor_slot].id);
             }
             return true;
         };

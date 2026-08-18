@@ -5244,6 +5244,60 @@ test "scenario bots are grounded to terrain height on spawn and move" {
     );
 }
 
+test "scenario a player can damage a bot and the bot records the attacker" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // The joined client owns a live player entity with a transform (needed by
+    // the C2S damage handler before it resolves the target).
+    const actor_slot = g.sim.playerByPeer(c.slot).?;
+    try std.testing.expect(g.sim.alive[actor_slot]);
+    try std.testing.expect(g.sim.mask[actor_slot].transform);
+
+    // A bot close to the player so the interest-range gate passes.
+    const ap = g.sim.transform[actor_slot];
+    const bid = g.bots.spawn(g, ap.x + 2, 70, ap.z, 100).?;
+    const bs = g.bots.find(bid).?;
+
+    // A normal attack: the bot's hp drops by the capped claimed strength and
+    // the player's net id is recorded for the guest's retaliation (damage
+    // event + last_attacker).
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const dmg = try packages.buildDamageBody(&body, bid, 0, 0, 20, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+    try std.testing.expectApproxEqAbs(@as(f32, 100 - 20), g.bots.bots[bs].hp, 0.01);
+    try std.testing.expectEqual(c.entity_id, g.bots.bots[bs].last_attacker);
+    try std.testing.expectEqual(@as(usize, 1), g.bots.ev_n);
+    try std.testing.expectEqual(c.entity_id, g.bots.events[0].attacker);
+    try std.testing.expectEqual(bid, g.bots.events[0].victim);
+
+    // A lethal hit kills the bot (the replicate pass unspawns it; the floor
+    // self-heals on tick) and still records the event.
+    const dmg2 = try packages.buildDamageBody(&body, bid, 0, 0, 200, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg2));
+    try std.testing.expect(!g.bots.bots[bs].alive);
+    try std.testing.expectEqual(@as(usize, 2), g.bots.ev_n);
+
+    // A forged far-away/unknown target id damages nothing (no extra event).
+    const dmg3 = try packages.buildDamageBody(&body, 999999, 0, 0, 50, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg3));
+    try std.testing.expectEqual(@as(usize, 2), g.bots.ev_n);
+}
+
 test "scenario bot count floor spawns bots and fillSense emits them" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5264,7 +5318,7 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
 
     // The sense snapshot then carries both bots as kind==2 records.
     var out: [256]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], 0x3153425a, .little);
+    std.mem.writeInt(u32, out[0..4], 0x3253425a, .little); // 'ZBS2'
     std.mem.writeInt(u32, out[4..8], 0, .little);
     var n: usize = 0;
     g.bots.fillSense(&out, 16, 2, &n);

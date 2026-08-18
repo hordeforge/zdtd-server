@@ -88,16 +88,15 @@ parsing):
 
 ```
 snapshot_header {
-  u32 magic;          // 'ZBS1' - versioned; a mismatch means "ignore this tick"
-  u32 count;          // number of sense records that follow
+  u32 magic;          // 'ZBS2' - versioned; a mismatch means "ignore this tick"
+  u32 count;          // number of entity records that follow
   u32 tick;           // host tick (mirrors zdtd.tick)
   i32 self_net_id;    // the calling bot's own net id, or -1
-  i32 pad;
-  // records follow at a fixed stride
+  // entity records follow at a fixed stride
 }
 bot_sense_record {
   i32 net_id;         // -1 for a bot-specific stat row
-  u8  kind;           // 0 player, 1 zombie, 2 bot, ...
+  u8  kind;           // 0 player, 1 zombie, 2 bot
   u8  is_self;        // 1 if this is the requesting bot
   u8  alive;          // 1
   u8  pad;
@@ -108,10 +107,38 @@ bot_sense_record {
 }
 ```
 
-The host caps `count` at a named limit (e.g. 64) so the buffer size is bounded
-and the guest cannot demand unbounded world dumps. The host decides *which*
-entities are visible (view distance from the bot; a named cap). Do **not**
-retain the offset past the call — copy what you need (ADR 0020).
+After the entity records the host MAY append an **event trailer** (v2, magic
+`ZBS2`): zero or more fixed 16-byte event records. The guest derives the event
+count from the snapshot length (`(len - 16 - count*32) / 16`); a guest that
+does not understand events simply stops parsing at the record stride. Two
+kinds exist:
+
+```
+sense_event {
+  u8  kind;           // 3 = damage event, 4 = bot-info record
+  u8  pad[3];         // for kind 4, byte 1 = weapon_id (loadout-pool index)
+  i32 field_a;        // damage: attacker net id | bot-info: bot net id
+  i32 field_b;        // damage: victim net id | bot-info: 0
+  f32 amount;         // damage: damage applied | bot-info: 0
+}
+```
+
+- **Kind 3 (damage):** someone attributed a hit on a live bot. The host writes
+  one per attributed hit (`BotManager.damageFrom`, from both the C2S player
+  damage path and `bot shoot`) and drains the buffer on the next sense call.
+  The guest uses them for retaliation (§5.1), never for authority — the host
+  already applied the damage.
+- **Kind 4 (bot info):** the host writes one per live bot each sense pass,
+  before the damage events, carrying the bot's host-assigned `weapon_id`
+  (index into `bot_loadout_pool` in `src/server/game/bot.zig`). The guest
+  builds its per-bot weapon map from these so the brain can adapt engagement
+  range, burst size and lead to the weapon (§5.1).
+
+The host caps `count` at a named limit so the record set plus the event
+trailer fit the guest's fixed scratch buffer (the plugin host reserves room for
+`max_sense_events` before counting records). The host decides *which* entities
+are visible (view distance from the bot; a named cap). Do **not** retain the
+offset past the call — copy what you need (ADR 0020).
 
 The `token` argument is reserved for future reverse-direction reads (e.g. ask
 for a specific entity or a point query); v1 callers pass `0`.
@@ -140,7 +167,7 @@ Existing verbs are unchanged (`spawn`, `despawn`, `damage`). New bot verbs:
 | `bot look <id> <yaw>` | intent | set facing (drives which way the bot "aims") | id unknown |
 | `bot shoot <id> <target_id> [head]` | fire request | if the target is alive, in range and host-LOS-clear, apply weapon damage to it (existing damage/verdict path); the optional `head` token applies the 2x headshot multiplier (cross-pollinated from clanker `TryShootBurst`) | id/target known but LOS blocked or out of range |
 | `bot count <n>` | population floor | keep `n` alive; auto-respawn to floor (clamped to MaxBots) | n>MaxBots (clamped) |
-| `bot cfg <id> <key> <val>` | per-bot override | `vision` / `reaction` overrides on that bot (0 resets to the skill-derived default) | unknown key (rejected) |
+| `bot cfg <id> <key> <val>` | per-bot override | `vision` / `reaction` overrides on that bot (0 resets to the skill-derived default); personality keys `agg` / `selfpres` / `venge` / `camp` / `alert` (0..1, negative resets to the deterministic skill/net default) | unknown key (rejected) |
 
 The host treats a bot move exactly like a client move for authority (ADR 0004):
 clamp, reject, apply the **resulting** state, and let interest replication
@@ -164,9 +191,13 @@ broadcast it — no self-echo, no redundant blobs.
   `src/ecs/components.zig`, used by the BotManager. A `Rules` value is the
   floor; per-bot data overrides it (stock-fidelity principle, ADR 0010).
 - **Lifecycle:** spawn via `bot spawn` / `bot count` (population floor),
-  destroyed via `bot remove <id|all>` or death (a bot killed by `bot shoot`
-  or ECS damage dies in place). Dead/removed bots are unspawned from every
-  viewer's `known_bots` bitset by the bot replication path.
+  destroyed via `bot remove <id|all>` or death. **Players can kill bots:** the
+  C2S `NetPackageDamageEntity` handler resolves a non-ECS target through
+  `BotManager.damageFrom` with the same trust gates as ECS targets (actor
+  validated, claimed strength capped, interest-range gated); the hit is
+  attributed to the player so the guest can retaliate. A bot killed by `bot
+  shoot` or player damage dies in place. Dead/removed bots are unspawned from
+  every viewer's `known_bots` bitset by the bot replication path.
 - **Terrain:** bots are grounded onto the terrain surface on spawn and every
   move tick (`Game.groundHeight`, chunk heightAt + 1), so they follow hills
   instead of floating at a fixed spawn height on real maps.
@@ -213,6 +244,41 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   drops, the bot enters a short evasive dodge (`DODGE_TICKS`: backpedal then a
   hard strafe on a randomized direction) whose moves bypass command gating so
   the host always sees the burst (cross-pollinated from clanker `Bot.OnDamaged`).
+- **Retaliation (grudge).** The host attributes every hit on a live bot as a
+  damage event in the sense trailer; the victim bot sets a grudge on the
+  attacker (decaying after `GRUDGE_TICKS` = 15 s at mid-point vengefulness)
+  and the grudged net id out-scores equally-distant threats during target
+  selection, so the bot turns on whoever shot it. Being hit also halves any
+  pending reaction gate ("quicker when shot") and a heavy hit (>25 damage)
+  staggers the dodge longer. Cross-pollinated from clanker `Bot.OnDamaged`
+  (aggro swap `Rng01() < 0.65f`, `ReactionTime * 0.5`).
+- **Wounded preference.** A hurt candidate out-scores a healthy one at the
+  same range (`score += hp * 0.02`, clanker `BotBrain.FindTarget` parity), so
+  bots finish off the wounded instead of flitting to a fresh target.
+- **Per-bot personalities (Q3 `BotCharacter` subset).** Each bot rolls
+  aggression, self-preservation, vengefulness, camper and alertness
+  deterministically from (skill, net id) at spawn (stable per bot, no
+  wall-clock noise) and they are overridable via `bot cfg`:
+  - *Aggression* gates how far a bot will chase (`26 + agg*30` blocks; a
+    grudged target is always chased) and whether it fights on while hurt
+    (retreat threshold `0.20 + selfpres*0.25` only applies when `agg < 0.7`).
+  - *Self-preservation* raises the retreat threshold (clanker
+    `WantsToRetreat`: `hp < 0.35 + SelfPreservation*0.18`).
+  - *Vengefulness* scales grudge duration (`GRUDGE_TICKS * (0.5 + venge)`) and
+    the grudge score bias (`0.85 - 0.35*venge`).
+  - *Camper* periodically holds position and sweeps the facing (~5 s) when
+    healthy instead of roaming (clanker `WantsToCamp`).
+  - *Alertness* scales vision range (`0.8 + 0.4*alert`) and reaction time
+    (`1.2 - 0.4*alert`).
+- **Weapon-aware tactics (clanker `WeaponProfile` parity).** The host picks
+  each bot's loadout at spawn and exposes it via the kind-4 bot-info sense
+  record; the brain adapts: *engagement range* follows the weapon
+  (`weapon_range * (0.85 + 0.05*skill)`, always under the host's enforced
+  range so ordered shots are not rejected), *burst size* follows the weapon
+  (sniper/shotgun 1, pistol 2, ak 3, smg/auto 4), *lead scale* follows the
+  weapon (precision weapons lead fully, spread weapons barely), and
+  *long-range weapons keep their distance* (backpedal below half the weapon
+  range). Sniper bots hang back and one-shot; shotgun bots close and blast.
 - **Reaction gate + fire throttle.** A fresh target is not engaged until a
   skill-scaled reaction delay elapses; shots are gated by a burst cadence.
 - **Burst volley.** Each fire window queues a 2-shot (skill < 3) or 3-shot
@@ -287,7 +353,8 @@ which is honest: no bot addon, no bot commands.
   sim id counter), and the `tickBots` delegate.
 - `src/server/game/wasm_host.zig` — `wasmQueue` routes `bot ...` commands to
   the BotManager; `wasmSense` merges ECS actor records with the BotManager's
-  bots (kind 2) in one snapshot; `parsePluginCommand` keeps only the ECS verbs
+  bots (kind 2) and the damage-event trailer (kind 3) in one snapshot;
+  `parsePluginCommand` keeps only the ECS verbs
   (`spawn`/`despawn`/`damage`).
 - `src/server/game/replicate.zig` — the non-ECS bot replication path
   (spawn-on-approach / range-remove / PosAndRot) plus per-client

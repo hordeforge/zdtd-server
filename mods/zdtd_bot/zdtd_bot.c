@@ -16,6 +16,12 @@
 //   - low-health survival retreat / hold fire     (BotCharacter.WantsToRetreat)
 //   - retaliation on being hit: aggro swap to the attacker + quicker reaction
 //     and a bounded revenge memory (grudge)       (Bot.OnDamaged)
+//   - per-bot personalities (aggression, self-preservation, vengefulness,
+//     camper, alertness) rolled deterministically from skill + net id and
+//     overridable via `bot cfg`                    (BotCharacter DB)
+//   - weapon-aware tactics: the host's per-bot loadout (kind-4 bot-info sense
+//     record) drives engagement range, burst size, lead scale and keep-range
+//     backpedal                                (WeaponProfile parity)
 // Improvements this guest already carried that clanker borrowed back:
 //   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
 //
@@ -190,6 +196,7 @@ static int sense_ev(void) {
   return (sense_n - used) / EV_STRIDE;
 }
 #define EV_OFF(i) (16 + sense_recs * REC_STRIDE + (i) * EV_STRIDE)
+static int ev_kind(int i)   { return s8(EV_OFF(i) + 0); }
 static int ev_attacker(int i) { return s32(EV_OFF(i) + 4); }
 static int ev_victim(int i)   { return s32(EV_OFF(i) + 8); }
 static float ev_amount(int i) { return sf32(EV_OFF(i) + 12); }
@@ -234,6 +241,19 @@ static int   bot_stuck_ticks[MAX_BOTS];
 // hit us and how long we hold the grudge (Q3 vengefulness).
 static int   bot_grudge[MAX_BOTS];      // net id we want revenge on (-1 = none)
 static int   bot_grudge_ticks[MAX_BOTS];// remaining ticks of the grudge
+// Per-bot personality (Q3 BotCharacter subset, cross-pollinated FROM
+// 7dtd-clanker BotCharacter): aggression, self-preservation, vengefulness,
+// camper, alertness — rolled deterministically from (skill, net id) at slot
+// alloc, overridable per-bot via `bot cfg` (negative value resets).
+static float bot_agg[MAX_BOTS];
+static float bot_selfpres[MAX_BOTS];
+static float bot_venge[MAX_BOTS];
+static float bot_camp[MAX_BOTS];
+static float bot_alert[MAX_BOTS];
+static int   bot_camp_ticks[MAX_BOTS];  // remaining ticks of a camp hold
+// Host-assigned weapon (kind-4 bot-info sense record): the brain adapts
+// engagement range, burst size and lead to the weapon (clanker WeaponProfile).
+static int   bot_weapon_id[MAX_BOTS];
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -270,8 +290,80 @@ static void bot_init(void) {
     bot_stuck_ticks[i] = 0;
     bot_grudge[i] = -1;
     bot_grudge_ticks[i] = 0;
+    bot_agg[i] = 0.f;
+    bot_selfpres[i] = 0.f;
+    bot_venge[i] = 0.f;
+    bot_camp[i] = 0.f;
+    bot_alert[i] = 0.f;
+    bot_camp_ticks[i] = 0;
+    bot_weapon_id[i] = 0; // pistol until the first bot-info record arrives
   }
   bot_count_static = 0;
+}
+
+// Weapon profiles (pool index matches the host's `bot_loadout_pool` order in
+// src/server/game/bot.zig: pistol 0, shotgun 1, ak 2, sniper 3, auto 4, smg 5).
+// Engagement range stays under the host-enforced weapon range (+2) so a shot
+// the brain orders is not rejected as out-of-range (clanker WeaponProfile).
+static float weapon_range(int w) {
+  switch (w) {
+    case 1: return 20.f;  // shotgun
+    case 4: return 20.f;  // auto
+    case 5: return 30.f;  // smg
+    case 0: return 36.f;  // pistol
+    case 2: return 50.f;  // ak
+    default: return 75.f; // sniper
+  }
+}
+// Burst size by weapon (clanker WeaponProfile BurstMin/BurstMax).
+static int weapon_burst(int w) {
+  switch (w) {
+    case 3: return 1; // sniper: one shot, big damage
+    case 1: return 1; // shotgun: one shell (host applies pellets)
+    case 0: return 2; // pistol
+    case 2: return 3; // ak
+    default: return 4; // smg / auto
+  }
+}
+// Lead scale by weapon: precision weapons lead fully, spread weapons lead
+// little (clanker LeadAimPoint leadScale: longer-ranged weapons lead more).
+static float weapon_lead(int w) {
+  switch (w) {
+    case 1: return 0.2f; // shotgun (spread)
+    case 4: return 0.5f; // auto
+    case 5: return 0.6f; // smg
+    case 0: return 0.8f; // pistol
+    default: return 1.f; // ak / sniper
+  }
+}
+
+static float clampf01(float v) {
+  return v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+}
+
+// Deterministic per-bot personality default from (skill, net id) — the same
+// call shape is used at slot alloc and on `bot cfg` reset, so no RNG state is
+// consumed. Mirrors the clanker BotCharacter DB (Aggression/SelfPreservation/
+// Vengefulness/Camper/Alertness) with skill scaling + a stable per-id jitter.
+static float pers_default(int skill, int net, int which) {
+  unsigned h = (unsigned)net * 2654435761u + (unsigned)which * 97u + 1u;
+  h = h * 1103515245u + 12345u;
+  const float r = (float)((h >> 8) & 0x00ffffffu) / 16777216.0f;
+  const float s = (float)skill;
+  switch (which) {
+    case 0: return clampf01(0.35f + 0.10f * s + (r - 0.5f) * 0.4f);
+    case 1: return clampf01(0.55f - 0.07f * s + (r - 0.5f) * 0.3f);
+    case 2: return clampf01(0.40f + 0.10f * s + (r - 0.5f) * 0.4f);
+    case 3: return clampf01(0.15f + 0.08f * s + (r - 0.5f) * 0.4f);
+    default: return clampf01(0.40f + 0.12f * s + (r - 0.5f) * 0.3f);
+  }
+}
+static void pers_apply_default(int bslot, int skill, int net) {
+  bot_agg[bslot] = pers_default(skill, net, 0);
+  bot_selfpres[bslot] = pers_default(skill, net, 1);
+  bot_venge[bslot] = pers_default(skill, net, 2);
+  bot_camp[bslot] = pers_default(skill, net, 3);
+  bot_alert[bslot] = pers_default(skill, net, 4);
 }
 
 // Index of the roster entry for a net id, or -1.
@@ -378,10 +470,13 @@ static int move_dirty(int bslot, float mx, float mz) {
 // within this many blocks the bot backs away / circles instead of planting.
 #define BACKPEDAL_RANGE 6.f
 // Cross-pollinated from 7dtd-clanker BotCharacter.WantsToRetreat: below this
-// health fraction a low-skill bot retreats and holds fire (self-preservation).
+// health fraction a careful bot retreats and holds fire (self-preservation).
+// The mid-point personality threshold (self-preservation 0.5) lands here; the
+// per-bot formula is `0.20 + selfpres * 0.25`, gated by aggression < 0.7.
 #define HP_RETREAT_FRAC 0.35f
-// Any bot below this health fraction flees regardless of skill (clanker's
-// WantsToRetreat has no skill gate; only its self-preservation personality).
+// Any bot below this health fraction flees regardless of skill or personality
+// (clanker's WantsToRetreat has no skill gate; only its self-preservation
+// personality).
 #define HP_FLEE_FRAC 0.20f
 // Cross-pollinated from 7dtd-clanker Bot.OnDamaged (dodge-on-hit): ticks of an
 // evasive dodge after the bot's own hp drops; the first `DODGE_BACK_TICKS` are
@@ -395,11 +490,13 @@ static int move_dirty(int bslot, float mx, float mz) {
 // Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
 #define BOT_MAX_HP 100.f
 // Retaliation (cross-pollinated from 7dtd-clanker Bot.OnDamaged): how many
-// ticks we remember who shot us (300 ticks = 15 s of Q3 vengefulness), the
-// target-selection score multiplier applied to the grudged net id, and the
-// aggro-swap roll chance when hit (clanker: `Rng01() < 0.65f`).
+// ticks we remember who shot us (300 ticks = 15 s at vengefulness 0.5, the
+// mid-point personality; per-bot ticks = GRUDGE_TICKS * (0.5 + venge)) and the
+// mid-point target-selection score multiplier for the grudged net id
+// (per-bot score = 0.85 - 0.35 * venge). Vengefulness is the clanker
+// BotCharacter.Vengefulness personality.
 #define GRUDGE_TICKS 300
-#define GRUDGE_SCORE 0.6f
+#define GRUDGE_SCORE 0.67f
 
 // Skill- and distance-scaled hit probability (cross-pollinated from
 // 7dtd-clanker TryShootBurst: spread / AimJitterDegrees scaled down by skill).
@@ -446,6 +543,20 @@ static void brain_tick(void) {
     if (bot_net[ri] >= 0 && !bot_seen[ri]) bot_net[ri] = -1;
   }
 
+  // Weapon map: kind-4 bot-info records pair each bot's net id with its
+  // host-assigned loadout (BOTS_SPEC §3); the per-bot loop adapts
+  // range/burst/lead to it (clanker WeaponProfile parity).
+  {
+    int ei;
+    for (ei = 0; ei < sense_ev(); ++ei) {
+      if (ev_kind(ei) != 4) continue;
+      const int wid_net = s32(EV_OFF(ei) + 4);
+      const int wid = s8(EV_OFF(ei) + 1);
+      const int s3 = bot_find(wid_net);
+      if (s3 >= 0) bot_weapon_id[s3] = wid;
+    }
+  }
+
   int bi;
   for (bi = 0; bi < n; ++bi) {
     if (rec_kind(bi) != KIND_BOT) continue;
@@ -476,11 +587,17 @@ static void brain_tick(void) {
       bot_dodge[bslot] = 0;
       bot_grudge[bslot] = -1;
       bot_grudge_ticks[bslot] = 0;
+      // Per-bot personality defaults (skill + net id; deterministic).
+      pers_apply_default(bslot, bot_skill[bslot], net);
     }
     const int skill = bot_skill[bslot];
-    // Per-bot `bot cfg` overrides win over the skill-derived defaults.
-    const float vision = bot_vision[bslot] > 0.f ? bot_vision[bslot] : skill_vision(skill);
-    const float reaction = bot_reaction[bslot] > 0.f ? bot_reaction[bslot] : skill_reaction(skill);
+    // Per-bot `bot cfg` overrides win over the skill-derived defaults. The
+    // alertness personality scales both: alert bots see farther and react
+    // faster (clanker BotCharacter.Alertness parity).
+    const float vision = bot_vision[bslot] > 0.f ? bot_vision[bslot]
+                        : skill_vision(skill) * (0.8f + 0.4f * bot_alert[bslot]);
+    const float reaction = bot_reaction[bslot] > 0.f ? bot_reaction[bslot]
+                          : skill_reaction(skill) * (1.2f - 0.4f * bot_alert[bslot]);
 
     // Dodge-on-hit (cross-pollinated from 7dtd-clanker Bot.OnDamaged): if our
     // own hp dropped since the last sense pass we were damaged, trigger a short
@@ -497,17 +614,23 @@ static void brain_tick(void) {
     // sense trailer (BOTS_SPEC §3); a victim that is this bot sets a grudge on
     // the attacker. The grudge biases target selection below (GRUDGE_SCORE)
     // and decays after GRUDGE_TICKS. The dodge itself already fires from the
-    // hp drop above; this adds *who* to hit back.
+    // hp drop above; this adds *who* to hit back, and a heavy hit (sniper,
+    // headshot) staggers the dodge longer.
     {
       int ek;
       for (ek = 0; ek < sense_ev(); ++ek) {
+        if (ev_kind(ek) != KIND_EV_DAMAGE) continue;
         if (ev_victim(ek) != net) continue; // only events about me
         const int att = ev_attacker(ek);
         if (att >= 0 && att != net) {
           bot_grudge[bslot] = att;
-          bot_grudge_ticks[bslot] = GRUDGE_TICKS;
+          // Vengefulness scales how long the grudge lasts (clanker
+          // BotCharacter.Vengefulness; mid-point = GRUDGE_TICKS).
+          bot_grudge_ticks[bslot] = (int)(GRUDGE_TICKS * (0.5f + bot_venge[bslot]));
           // Quicker reaction when shot (clanker: ReactionTime * 0.5).
           if (bot_react[bslot] > 0.f) bot_react[bslot] *= 0.5f;
+          // Stagger: a hit above ~2x the pistol floor dazes longer.
+          if (ev_amount(ek) > 25.f) bot_dodge[bslot] += 5;
         }
       }
     }
@@ -551,6 +674,13 @@ static void brain_tick(void) {
       // 3D distance (clanker FindTarget uses Vector3.Distance): a target far
       // above/below the bot is outside vision just like one far horizontally.
       const float d2 = dx * dx + dy * dy + dz * dz;
+      // Aggression gates how far a bot will chase (clanker ShouldChase:
+      // Aggression < 0.35 => don't chase far). A grudged target is always
+      // chased — vengeance overrides caution.
+      if (rec_net(j) != bot_grudge[bslot]) {
+        const float chase_max = 26.f + bot_agg[bslot] * 30.f;
+        if (d2 > chase_max * chase_max) continue;
+      }
       if (d2 > close2) {
         // Cone check: angular offset between facing and the candidate.
         float ang = atan2f_impl(dz, dx) - face;
@@ -562,9 +692,16 @@ static void brain_tick(void) {
       float score = d2;
       if (rec_kind(j) == KIND_PLAYER) score *= 0.67f;   // 0.82^2
       else if (rec_kind(j) == KIND_BOT) score *= 0.81f; // 0.9^2
+      // Wounded preference (cross-pollinated from clanker BotBrain.FindTarget:
+      // `score -= (health/100) * -2f`): a hurt candidate out-scores a healthy
+      // one at the same range, so bots finish off the wounded instead of
+      // flitting to a fresh target (Q3 "finish the job").
+      score += rec_hp(j) * 0.02f;
       // Retaliation bias: the grudged net id out-scores equally-distant
       // threats so the bot turns on whoever shot it (clanker aggro swap).
-      if (rec_net(j) == bot_grudge[bslot]) score *= GRUDGE_SCORE;
+      // Vengefulness scales how strongly it out-scores (0.85 at venge 0 up
+      // to 0.50 at venge 1; mid-point ~GRUDGE_SCORE).
+      if (rec_net(j) == bot_grudge[bslot]) score *= (0.85f - 0.35f * bot_venge[bslot]);
       if (score < best_s) { best_s = score; ti = j; }
     }
 
@@ -596,6 +733,29 @@ static void brain_tick(void) {
         spd = (skill >= 2) ? 4.2f : 3.2f; // hunt speed
       } else {
         if (bot_lock[bslot] >= 0) { bot_lock[bslot] = -1; bot_memage[bslot] = 0; }
+        // Drop a stale combat lock while idle (a new engagement resets motion
+        // history); hoisted before the camp hold so a lingering reaction gate
+        // cannot delay the next shot after a camp.
+        if (bot_target[bslot] != -1) {
+          bot_target[bslot] = -1;
+          bot_react[bslot] = 0.f;
+        }
+        // Q3 camper / clanker WantsToCamp: a camper personality at healthy hp
+        // periodically holds position and sweeps the facing instead of roaming.
+        const float hp0 = rec_hp(bi) / BOT_MAX_HP;
+        if (bot_camp_ticks[bslot] <= 0 && bot_camp[bslot] > 0.45f && hp0 > 0.55f &&
+            rng_f01(&bot_rng[bslot]) < bot_camp[bslot] * 0.4f) {
+          bot_camp_ticks[bslot] = 100; // hold ~5 s
+        }
+        if (bot_camp_ticks[bslot] > 0) {
+          bot_camp_ticks[bslot]--;
+          const float cyaw = bot_last_yaw[bslot] + 0.05f; // slow sweep
+          if (look_dirty(bslot, cyaw)) {
+            queue_look(net, cyaw);
+            bot_last_yaw[bslot] = cyaw; bot_look_sent[bslot] = 1;
+          }
+          continue; // hold position; no move emission during the camp
+        }
         if (bot_wander_x[bslot] == 0.f && bot_wander_z[bslot] == 0.f) {
           bot_wander_x[bslot] = bx + 10.f;
           bot_wander_z[bslot] = bz + 8.f;
@@ -643,6 +803,7 @@ static void brain_tick(void) {
       bot_target[bslot] = target_net;
       bot_react[bslot] = reaction;
       bot_engage[bslot] = 0;
+      bot_camp_ticks[bslot] = 0; // contact ends a camp hold
       bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
       bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
       bot_aimerr[bslot] = skill_aimerr(skill) * rng_sym(&bot_rng[bslot]);
@@ -670,8 +831,11 @@ static void brain_tick(void) {
     const float txn = dx * inv, tzn = dz * inv;   // toward (unit)
     const float oxn = -tzn, ozn = txn;            // perpendicular (unit)
 
-    // Lead the target: predict where it will be when the shot arrives.
-    float lead = dist / BULLET_SPEED;
+    // Lead the target: predict where it will be when the shot arrives. The
+    // weapon scales the lead: precision weapons lead fully, spread weapons
+    // lead little (clanker LeadAimPoint leadScale).
+    const int w = bot_weapon_id[bslot];
+    float lead = dist / BULLET_SPEED * weapon_lead(w);
     float lx = tx + bot_tvx[bslot] * lead;
     float lz = tz + bot_tvz[bslot] * lead;
 
@@ -682,14 +846,25 @@ static void brain_tick(void) {
       bot_last_yaw[bslot] = yaw; bot_look_sent[bslot] = 1;
     }
 
-    const float attack_range = (float)(skill >= 3 ? 30 : skill >= 1 ? 22 : 15);
-    // Cross-pollinated from 7dtd-clanker: low-health + low-skill bots retreat
-    // (self-preservation, BotCharacter.WantsToRetreat) — hold fire and back off.
+    // Weapon-aware engagement range (clanker WeaponProfile.Range parity): the
+    // bot engages at the weapon's comfortable range (mildly skill-scaled)
+    // instead of a skill-only constant — a sniper bot keeps ~70 m, a shotgun
+    // bot closes to ~18 m. Stays under the host's enforced weapon range + 2 so
+    // an ordered shot is never rejected as out-of-range.
+    const float attack_range = weapon_range(w) * (0.85f + 0.05f * (float)skill);
+    // Long-range weapons keep their distance: below half the weapon range the
+    // bot backpedals instead of letting the target close (sniper/magnum tact).
+    const int keep_range = weapon_range(w) > 40.f && dist < weapon_range(w) * 0.5f;
+    // Cross-pollinated from 7dtd-clanker: low-health bots retreat
+    // (self-preservation, BotCharacter.WantsToRetreat) — hold fire and back
+    // off. Fleeing at HP_FLEE_FRAC is skill/personality-independent survival.
     const float hp_frac = rec_hp(bi) / BOT_MAX_HP;
-    // Retreat: nearly-dead bots of ANY skill flee and hold fire; low-skill
-    // bots also retreat at the softer HP_RETREAT_FRAC threshold (clanker
-    // WantsToRetreat parity).
-    const int retreating = (hp_frac < HP_FLEE_FRAC) || (hp_frac < HP_RETREAT_FRAC && skill < 2);
+    // Retreat threshold from self-preservation + aggression (clanker
+    // WantsToRetreat: `hp < 0.35 + SelfPreservation*0.18` for careful bots;
+    // high aggression fights on while hurt). Mid-point personality lands on
+    // the old skill<2 threshold (~0.35).
+    const float retreat_frac = 0.20f + bot_selfpres[bslot] * 0.25f;
+    const int retreating = (hp_frac < HP_FLEE_FRAC) || (hp_frac < retreat_frac && bot_agg[bslot] < 0.7f);
     float mdest_x, mdest_z, mspd;
     if (dist < attack_range) {
       int sdir;
@@ -720,7 +895,7 @@ static void brain_tick(void) {
         bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
         bot_move_sent[bslot] = 1;
       } else {
-        if (retreating || dist < BACKPEDAL_RANGE) {
+        if (retreating || dist < BACKPEDAL_RANGE || keep_range) {
           // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
           mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
           mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
@@ -737,12 +912,14 @@ static void brain_tick(void) {
           bot_move_sent[bslot] = 1;
         }
       }
-      // Cross-pollinated from clanker TryShootBurst: a burst volley (2 shots at
-      // skill < 3, 3 at skill >= 3), each with its own skill/distance hit roll
-      // and a skill-scaled headshot roll — low-skill bots miss a lot, high-skill
-      // bots land burst damage. The host applies damage per `bot shoot`.
+      // Cross-pollinated from clanker TryShootBurst: a burst volley whose size
+      // follows the weapon profile (clanker WeaponProfile BurstMin/BurstMax:
+      // sniper/shotgun 1, pistol 2, ak 3, smg/auto 4), each shot with its own
+      // skill/distance hit roll and a skill-scaled headshot roll — low-skill
+      // bots miss a lot, high-skill bots land burst damage. The host applies
+      // damage per `bot shoot`.
       if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
-        const int burst = (skill >= 3) ? 3 : 2;
+        const int burst = weapon_burst(w);
         int k;
         for (k = 0; k < burst; ++k) {
           const float hc = skill_hit_chance(skill, dist, net);
@@ -754,7 +931,10 @@ static void brain_tick(void) {
             }
           }
         }
-        bot_throttle[bslot] = 0.25f + 0.2f * (float)(skill % 2); // burst pause
+        // Burst pause: snipers re-chamber slowly, SMGs/autos cycle fast, the
+        // rest land on the skill cadence.
+        bot_throttle[bslot] = (w == 3) ? 0.6f
+                          : (w >= 4 ? 0.2f : 0.25f + 0.2f * (float)(skill % 2));
       }
     } else {
       // Chase toward the target's current ground position (lead is for aim).
@@ -804,7 +984,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v2.1 enabled");
+  e("zdtd_bot v2.3 enabled");
   flush(1);
 }
 
@@ -948,7 +1128,10 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       }
     } else if (slen == 3 && sub[0]=='c' && sub[1]=='f' && sub[2]=='g') {
       // bot cfg <id> <key> <val> — per-bot overrides (BOTS_SPEC `bot cfg`).
-      // keys: vision | reaction (0 resets to the skill-derived default).
+      // keys: vision | reaction | agg | selfpres | venge | camp | alert.
+      // vision/reaction: 0 resets to the skill-derived default. Personality
+      // keys (agg/selfpres/venge/camp/alert, 0..1): a negative value resets
+      // to the skill/net-derived default (pers_default).
       char *sp4 = arg;
       while (*sp4 == ' ' || *sp4 == '\t') sp4++;
       long id = strtol_impl(sp4);
@@ -977,12 +1160,24 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
           bot_vision[si] = val < 0.f ? 0.f : val;
         } else if (keylen == 8 && key[0]=='r' && key[1]=='e' && key[2]=='a' && key[3]=='c' && key[4]=='t' && key[5]=='i' && key[6]=='o' && key[7]=='n') {
           bot_reaction[si] = val < 0.f ? 0.f : val;
+        } else if (keylen == 3 && key[0]=='a' && key[1]=='g' && key[2]=='g') {
+          // Personality keys (clanker BotCharacter): 0..1, negative resets to
+          // the skill/net-derived default.
+          bot_agg[si] = val < 0.f ? pers_default(bot_skill[si], (int)id, 0) : clampf01(val);
+        } else if (keylen == 8 && key[0]=='s' && key[1]=='e' && key[2]=='l' && key[3]=='f' && key[4]=='p' && key[5]=='r' && key[6]=='e' && key[7]=='s') {
+          bot_selfpres[si] = val < 0.f ? pers_default(bot_skill[si], (int)id, 1) : clampf01(val);
+        } else if (keylen == 5 && key[0]=='v' && key[1]=='e' && key[2]=='n' && key[3]=='g' && key[4]=='e') {
+          bot_venge[si] = val < 0.f ? pers_default(bot_skill[si], (int)id, 2) : clampf01(val);
+        } else if (keylen == 4 && key[0]=='c' && key[1]=='a' && key[2]=='m' && key[3]=='p') {
+          bot_camp[si] = val < 0.f ? pers_default(bot_skill[si], (int)id, 3) : clampf01(val);
+        } else if (keylen == 5 && key[0]=='a' && key[1]=='l' && key[2]=='e' && key[3]=='r' && key[4]=='t') {
+          bot_alert[si] = val < 0.f ? pers_default(bot_skill[si], (int)id, 4) : clampf01(val);
         } else {
           cfg_ok = 0;
         }
       }
       if (cfg_ok) rn += st(reply_buf + rn, 599 - rn, "bot cfg set\n");
-      else rn += st(reply_buf + rn, 599 - rn, "bot cfg: unknown key (vision|reaction)\n");
+      else rn += st(reply_buf + rn, 599 - rn, "bot cfg: unknown key (vision|reaction|agg|selfpres|venge|camp|alert)\n");
     } else {
       rn += st(reply_buf + rn, 599 - rn, "bot: unknown subcommand (try 'bot help')\n");
     }
