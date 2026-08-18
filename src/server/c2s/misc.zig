@@ -254,7 +254,32 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
             return true;
         }
-        const target_slot = self.sim.slotOfNetId(d.entity_id) orelse return true;
+        const target_slot = if (self.sim.slotOfNetId(d.entity_id)) |ts| ts else {
+            // Host-side bot target (ADR 0026): bots are not ECS slots, so the
+            // ECS damage path cannot see them. Players may fight bots with the
+            // same trust gates as ECS targets: the actor is validated above,
+            // the claimed strength is capped, and a forged far-away id is
+            // range-gated to interest. No PvP gate (bots are NPCs), no armor
+            // mitigation, and no `fatal` honor (same as players).
+            if (self.bots.find(d.entity_id)) |bs| {
+                const b = &self.bots.bots[bs];
+                if (!self.sim.mask[actor_slot].transform) return true;
+                const ap = self.sim.transform[actor_slot];
+                const bdx = b.x - ap.x;
+                const bdz = b.z - ap.z;
+                if (bdx * bdx + bdz * bdz > self.interest_range * self.interest_range) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
+                const bamount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
+                // Attributed damage: the guest sees the event in its next sense
+                // pass and retaliates (clanker OnDamaged parity). Death / knock-
+                // back / unspawn: BotManager owns hp; the replicate pass
+                // unspawns dead bots and the population floor self-heals.
+                self.bots.damageFrom(d.entity_id, bamount, self.sim.network_id[actor_slot].id);
+            }
+            return true;
+        };
         if (!self.sim.alive[target_slot]) {
             self.harness.counters.inc(.bounds_rejects);
             self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);

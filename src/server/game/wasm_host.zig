@@ -103,13 +103,19 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
 }
 
 /// Build a fixed-layout world snapshot for a `zdtd.sense` call (BOTS_SPEC §3).
-/// Header (16 bytes) then fixed 32-byte records; all little-endian. Returns
-/// bytes written; 0 when `out` cannot fit a header. No heap on the tick path.
+/// Header (16 bytes) then fixed 32-byte entity records, then an optional
+/// 16-byte damage-event trailer; all little-endian. Returns bytes written; 0
+/// when `out` cannot fit a header. No heap on the tick path.
 pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
     if (out.len < 16) return 0;
-    const max_records = (out.len - 16) / 32;
-    std.mem.writeInt(u32, out[0..4], 0x3153425a, .little); // 'ZBS1'
+    // Reserve room for the damage-event trailer up front so a full record set
+    // still leaves space for events (the guest parses the trailer after the
+    // records; a truncated event tail would desync its offsets).
+    const bot_mod = @import("bot.zig");
+    const ev_reserve = bot_mod.max_sense_events * bot_mod.sense_event_len;
+    const max_records = if (out.len >= 16 + ev_reserve) (out.len - 16 - ev_reserve) / 32 else (out.len - 16) / 32;
+    std.mem.writeInt(u32, out[0..4], 0x3253425a, .little); // 'ZBS2' (v2: event trailer)
     std.mem.writeInt(u32, out[4..8], 0, .little); // count, filled below
     std.mem.writeInt(u32, out[8..12], @truncate(g.tick_n), .little);
     std.mem.writeInt(i32, out[12..16], 0, .little); // self_net_id
@@ -146,6 +152,13 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // actor records), so base must be the header end (16), NOT 16 + n*32 —
     // the latter double-offsets the bot records past the copied region.
     g.bots.fillSense(out, 16, max_records, &n);
+    // Damage-event trailer (BOTS_SPEC §3): attributed hits since the last
+    // sense pass. The guest keys on victim == its own bot net id to retaliate.
+    var ev_n: usize = 0;
+    const ev_base = 16 + n * 32;
+    if (ev_base + bot_mod.sense_event_len <= out.len) {
+        ev_n = g.bots.drainSenseEvents(out, ev_base, bot_mod.max_sense_events);
+    }
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
-    return 16 + n * 32;
+    return 16 + n * 32 + ev_n * bot_mod.sense_event_len;
 }

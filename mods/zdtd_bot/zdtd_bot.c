@@ -4,9 +4,9 @@
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
 // and move caps; this module owns the *brain* — target selection, skill-scaled
 // aim error and hit accuracy, lead-fire prediction, reaction gate, fire
-// throttle, strafe/backpedal, low-health survival retreat and lost-sight
-// combat memory — distilled from the Quake 3 / Doom 3 bot model, cross-
-// pollinated with the 7dtd-clanker C# port (docs/q3-inspiration-notes.md,
+// throttle, strafe/backpedal, low-health survival retreat, lost-sight combat
+// memory and hit retaliation — distilled from the Quake 3 / Doom 3 bot model,
+// cross-pollinated with the 7dtd-clanker C# port (docs/q3-inspiration-notes.md,
 // BOTS_SPEC §5.1). All inference is deterministic (per-slot LCG, no wall-clock
 // noise).
 //
@@ -14,6 +14,8 @@
 //   - backpedal when an enemy is too close        (BotBrain.Backpedal)
 //   - skill- and distance-scaled hit accuracy     (TryShootBurst spread/difficulty)
 //   - low-health survival retreat / hold fire     (BotCharacter.WantsToRetreat)
+//   - retaliation on being hit: aggro swap to the attacker + quicker reaction
+//     and a bounded revenge memory (grudge)       (Bot.OnDamaged)
 // Improvements this guest already carried that clanker borrowed back:
 //   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
 //
@@ -112,23 +114,29 @@ static int e_to(char *b, int cap, long long v) {
 // ---------------------------------------------------------------------------
 // Sense snapshot parsing.
 //
-// Layout (BOTS_SPEC §3, all little-endian): header 16 bytes then fixed-stride
-// 32-byte records. Parsed by explicit offsets so a C struct can never drift
-// from the Zig packed records.
-//   hdr: magic u32@0, count u32@4, tick u32@8, self_net_id i32@12
+// Layout (BOTS_SPEC §3, all little-endian): header 16 bytes, fixed-stride
+// 32-byte entity records, then an optional 16-byte damage-event trailer.
+// Parsed by explicit offsets so a C struct can never drift from the Zig
+// packed records.
+//   hdr: magic u32@0 ('ZBS2'), count u32@4, tick u32@8, self_net_id i32@12
 //   rec stride 32: net_id i32@0, kind u8@4, is_self u8@5, alive u8@6, pad@7,
 //                  x f32@8, y f32@12, z f32@16, hp f32@20, yaw f32@24,
 //                  target_id i32@28
+//   ev  stride 16: kind u8@0 (3 = damage), pad@1..3, attacker i32@4,
+//                  victim i32@8, amount f32@12
 // ---------------------------------------------------------------------------
 
 #define SENSE_CAP 2048
 static char sense[SENSE_CAP];
 static int sense_n = 0;
+static int sense_recs = 0; // record count from the header (event offsets base)
 
 #define REC_STRIDE 32
+#define EV_STRIDE 16
 #define KIND_PLAYER 0
 #define KIND_ZOMBIE 1
 #define KIND_BOT 2
+#define KIND_EV_DAMAGE 3
 
 static int s8(int off)          { return (unsigned char)sense[off]; }
 static int s32(int off) {
@@ -161,14 +169,30 @@ static float rec_yaw(int i)      { return sf32(REC_OFF(i) + 24); }
 static float rec_target(int i) __attribute__((unused));
 static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
 
-// Refresh the snapshot. Returns the number of records (0 on failure/empty).
+// Refresh the snapshot. Returns the number of entity records (0 on
+// failure/empty). The header's count is authoritative; the event trailer is
+// derived from the bytes that follow the records.
 static int sense_refresh(void) {
   sense_n = zdtd_sense((int)(long)&sense[0], SENSE_CAP, 0);
-  if (sense_n < 16) { sense_n = 0; return 0; }
+  if (sense_n < 16) { sense_n = 0; sense_recs = 0; return 0; }
+  if (s32(0) != 0x3253425a) { sense_n = 0; sense_recs = 0; return 0; } // 'ZBS2'
   const int n = s32(4);
   const int avail = (sense_n - 16) / REC_STRIDE;
-  return n < avail ? n : avail;
+  if (n > avail || n < 0) { sense_n = 0; sense_recs = 0; return 0; } // lies: drop
+  sense_recs = n;
+  return n;
 }
+// Number of damage-event records trailing the entity records.
+static int sense_ev(void) {
+  if (sense_n < 16) return 0;
+  const int used = 16 + sense_recs * REC_STRIDE;
+  if (sense_n - used < 0) return 0;
+  return (sense_n - used) / EV_STRIDE;
+}
+#define EV_OFF(i) (16 + sense_recs * REC_STRIDE + (i) * EV_STRIDE)
+static int ev_attacker(int i) { return s32(EV_OFF(i) + 4); }
+static int ev_victim(int i)   { return s32(EV_OFF(i) + 8); }
+static float ev_amount(int i) { return sf32(EV_OFF(i) + 12); }
 
 // ---------------------------------------------------------------------------
 // Bot roster state (fixed-size; no heap). Each slot is keyed by net id.
@@ -206,6 +230,10 @@ static int   bot_seen[MAX_BOTS];    // scratch: roster slot present in this sens
 static float bot_last_x[MAX_BOTS];  // own position from the previous pass (stuck detect)
 static float bot_last_z[MAX_BOTS];
 static int   bot_stuck_ticks[MAX_BOTS];
+// Retaliation (cross-pollinated FROM 7dtd-clanker Bot.OnDamaged): who last
+// hit us and how long we hold the grudge (Q3 vengefulness).
+static int   bot_grudge[MAX_BOTS];      // net id we want revenge on (-1 = none)
+static int   bot_grudge_ticks[MAX_BOTS];// remaining ticks of the grudge
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -240,6 +268,8 @@ static void bot_init(void) {
     bot_last_x[i] = 0.f;
     bot_last_z[i] = 0.f;
     bot_stuck_ticks[i] = 0;
+    bot_grudge[i] = -1;
+    bot_grudge_ticks[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -364,13 +394,26 @@ static int move_dirty(int bslot, float mx, float mz) {
 #define STUCK_TICKS 20
 // Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
 #define BOT_MAX_HP 100.f
+// Retaliation (cross-pollinated from 7dtd-clanker Bot.OnDamaged): how many
+// ticks we remember who shot us (300 ticks = 15 s of Q3 vengefulness), the
+// target-selection score multiplier applied to the grudged net id, and the
+// aggro-swap roll chance when hit (clanker: `Rng01() < 0.65f`).
+#define GRUDGE_TICKS 300
+#define GRUDGE_SCORE 0.6f
 
 // Skill- and distance-scaled hit probability (cross-pollinated from
 // 7dtd-clanker TryShootBurst: spread / AimJitterDegrees scaled down by skill).
-// Skill 0 ~34%, skill 4 ~94% at point blank; accuracy falls off with range.
-static float skill_hit_chance(int skill, float dist) {
-  float base = 0.34f + 0.15f * (float)skill;
+// A tiny per-bot trait jitter (net-id hash, ~±3 %) so two skill-2 bots don't
+// behave identically — mirrors clanker BotCharacter Camper/Aggression spread.
+static float bot_trait_jitter(int net) {
+  unsigned h = (unsigned)net * 2654435761u;
+  h = h * 1103515245u + 12345u;
+  return ((h >> 8 & 0x00ffffffu) / 16777216.f - 0.5f) * 0.06f;
+}
+static float skill_hit_chance(int skill, float dist, int net) {
+  float base = 0.34f + 0.15f * (float)skill + bot_trait_jitter(net);
   if (base > 0.95f) base = 0.95f;
+  if (base < 0.28f) base = 0.28f;
   float dscale = 1.f - dist / 90.f;
   if (dscale < 0.2f) dscale = 0.2f;
   return base * dscale;
@@ -431,6 +474,8 @@ static void brain_tick(void) {
       bot_memage[bslot] = 0;
       bot_last_hp[bslot] = rec_hp(bi);
       bot_dodge[bslot] = 0;
+      bot_grudge[bslot] = -1;
+      bot_grudge_ticks[bslot] = 0;
     }
     const int skill = bot_skill[bslot];
     // Per-bot `bot cfg` overrides win over the skill-derived defaults.
@@ -447,6 +492,26 @@ static void brain_tick(void) {
     }
     bot_last_hp[bslot] = rec_hp(bi);
 
+    // Retaliation (cross-pollinated FROM 7dtd-clanker Bot.OnDamaged: aggro
+    // swap on being hit — quicker reaction when shot). Damage events ride the
+    // sense trailer (BOTS_SPEC §3); a victim that is this bot sets a grudge on
+    // the attacker. The grudge biases target selection below (GRUDGE_SCORE)
+    // and decays after GRUDGE_TICKS. The dodge itself already fires from the
+    // hp drop above; this adds *who* to hit back.
+    {
+      int ek;
+      for (ek = 0; ek < sense_ev(); ++ek) {
+        if (ev_victim(ek) != net) continue; // only events about me
+        const int att = ev_attacker(ek);
+        if (att >= 0 && att != net) {
+          bot_grudge[bslot] = att;
+          bot_grudge_ticks[bslot] = GRUDGE_TICKS;
+          // Quicker reaction when shot (clanker: ReactionTime * 0.5).
+          if (bot_react[bslot] > 0.f) bot_react[bslot] *= 0.5f;
+        }
+      }
+    }
+
     // Stuck detection: if our position hasn't changed for STUCK_TICKS, the
     // wander/pursue branches re-pick (below) instead of grinding against an
     // obstacle forever (clanker `_stuckSince` + JumpOrStrafe parity).
@@ -459,6 +524,12 @@ static void brain_tick(void) {
       bot_stuck_ticks[bslot]++;
     } else {
       bot_stuck_ticks[bslot] = 0;
+    }
+
+    // Grudge decay: forget who shot us once the memory expires.
+    if (bot_grudge_ticks[bslot] > 0) {
+      bot_grudge_ticks[bslot]--;
+      if (bot_grudge_ticks[bslot] == 0) bot_grudge[bslot] = -1;
     }
 
     // Pick the nearest hostile candidate within vision (players/zombies/other
@@ -491,6 +562,9 @@ static void brain_tick(void) {
       float score = d2;
       if (rec_kind(j) == KIND_PLAYER) score *= 0.67f;   // 0.82^2
       else if (rec_kind(j) == KIND_BOT) score *= 0.81f; // 0.9^2
+      // Retaliation bias: the grudged net id out-scores equally-distant
+      // threats so the bot turns on whoever shot it (clanker aggro swap).
+      if (rec_net(j) == bot_grudge[bslot]) score *= GRUDGE_SCORE;
       if (score < best_s) { best_s = score; ti = j; }
     }
 
@@ -671,7 +745,7 @@ static void brain_tick(void) {
         const int burst = (skill >= 3) ? 3 : 2;
         int k;
         for (k = 0; k < burst; ++k) {
-          const float hc = skill_hit_chance(skill, dist);
+          const float hc = skill_hit_chance(skill, dist, net);
           if (rng_f01(&bot_rng[bslot]) < hc) {
             if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
               queue_shoot_head(net, target_net);
@@ -730,7 +804,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v2.0 enabled");
+  e("zdtd_bot v2.1 enabled");
   flush(1);
 }
 

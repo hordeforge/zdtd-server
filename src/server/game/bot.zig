@@ -57,6 +57,24 @@ const arrival_dist: f32 = 0.05;
 pub const sense_record_len: usize = 32;
 /// Sense kind value for a bot (BOTS_SPEC §3: 0 player, 1 zombie, 2 bot).
 const sense_kind_bot: u8 = 2;
+/// Damage-event records in the sense trailer cap (BOTS_SPEC §3): at most this
+/// many 16-byte events follow the entity records. Bounded so the guest's
+/// parsing stays fixed-size; overflow events are dropped (flavor, not fidelity).
+pub const max_sense_events: usize = 8;
+/// Sense event kind for a damage event (BOTS_SPEC §3: 3 = damage).
+pub const sense_kind_damage: u8 = 3;
+/// Sense event record byte size (BOTS_SPEC §3): kind u8 + 3 pad, attacker i32,
+/// victim i32, amount f32 — packed, little-endian.
+pub const sense_event_len: usize = 16;
+
+/// One sense damage event (BOTS_SPEC §3). Host-recorded whenever a live bot
+/// takes attributed damage, so the guest learns *who* hit it and can
+/// retaliate (clanker `Bot.OnDamaged` parity).
+pub const SenseEvent = struct {
+    attacker: i32 = -1,
+    victim: i32 = -1,
+    amount: f32 = 0,
+};
 
 /// One host-side bot. Pure data — the guest brain never touches this struct
 /// directly, only the sense snapshot and queued commands.
@@ -80,6 +98,10 @@ pub const Bot = struct {
     /// an entity_name in the player-mesh spawn body, so bots carry one.
     name: [24]u8 = .{0} ** 24,
     name_len: usize = 0,
+    /// Net id of the last entity that damaged this bot (-1 = none). The guest
+    /// reads it indirectly via the damage-event sense trailer (retaliation;
+    /// clanker `Bot.OnDamaged` aggro-swap parity).
+    last_attacker: i32 = -1,
 
     /// Set the display name, copying at most name.len-1 bytes (NUL-terminated).
     /// An empty name falls back to the default "Bot".
@@ -105,6 +127,11 @@ pub const BotManager = struct {
     /// Remembered population floor (set by `bot count <n>`); tick tops up when
     /// bots die so the floor is self-healing (BOTS_SPEC: keep n alive).
     floor: u32 = 0,
+    /// Damage events pending in the sense trailer (BOTS_SPEC §3). Recorded on
+    /// attributed damage to a live bot; drained (and cleared) by
+    /// `drainSenseEvents` each sense pass, so they are one-tick flavor.
+    events: [max_sense_events]SenseEvent = [_]SenseEvent{.{}} ** max_sense_events,
+    ev_n: usize = 0,
 
     /// Allocate a live bot at (x, y, z). Returns its net id, or null when the
     /// table is full. The id comes from the shared sim counter (Game helper),
@@ -203,7 +230,7 @@ pub const BotManager = struct {
         const chest: [3]f32 = .{ tpos[0], tpos[1] + 1.05, tpos[2] };
         if (!g.botLosClear(eye, chest)) return;
 
-        if (self.damageBot(target, dmg)) return;
+        if (self.damageFrom(target, dmg, shooter)) return;
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
         // damageFrom attributes the bot as the attacker (zombie revenge target,
         // kill attribution) — `damage` would leave it unattributed.
@@ -222,6 +249,43 @@ pub const BotManager = struct {
             self.n -|= 1;
         }
         return true;
+    }
+
+    /// Apply damage to a live bot by net id, attributed to `attacker`
+    /// (BOTS_SPEC §3 / ADR 0026: the host attributes every hit so the guest
+    /// can retaliate). No-op when the target is absent. Records a damage-event
+    /// sense record for the guest and sets the victim's `last_attacker`.
+    /// Players and bots both route here (C2S damage path + `shoot`).
+    pub fn damageFrom(self: *BotManager, target: i32, dmg: f32, attacker: i32) bool {
+        const ts = self.find(target) orelse return false;
+        if (self.ev_n < max_sense_events) {
+            self.events[self.ev_n] = .{ .attacker = attacker, .victim = target, .amount = dmg };
+            self.ev_n += 1;
+        }
+        self.bots[ts].last_attacker = attacker;
+        return self.damageBot(target, dmg);
+    }
+
+    /// Copy pending damage events into the sense snapshot trailer starting at
+    /// byte `base` (immediately after the entity records) and clear the buffer.
+    /// Returns the number of events written (<= `cap`). No heap; stops early
+    /// when `out` cannot fit the next event.
+    pub fn drainSenseEvents(self: *BotManager, out: []u8, base: usize, cap: usize) usize {
+        var written: usize = 0;
+        for (self.events[0..self.ev_n]) |ev| {
+            if (written >= cap) break;
+            const rec = base + written * sense_event_len;
+            if (rec + sense_event_len > out.len) break;
+            const r = out[rec .. rec + sense_event_len];
+            @memset(r, 0);
+            r[0] = sense_kind_damage;
+            std.mem.writeInt(i32, r[4..8], ev.attacker, .little);
+            std.mem.writeInt(i32, r[8..12], ev.victim, .little);
+            std.mem.writeInt(u32, r[12..16], @bitCast(ev.amount), .little);
+            written += 1;
+        }
+        self.ev_n = 0;
+        return written;
     }
 
     /// Despawn one bot by net id (no-op for unknown ids).
@@ -613,6 +677,64 @@ test "BotManager damageBot applies headshot multiplier and can kill" {
 
     // Unknown ids are a no-op.
     try std.testing.expect(!m.damageBot(999, bot_shoot_damage));
+}
+
+test "BotManager damageFrom attributes, records events, and can kill" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.bots[1] = .{ .net_id = 11, .x = 0, .y = 70, .z = 0, .hp = 30, .alive = true };
+    m.n = 2;
+
+    // Attributed hit: hp drops, last_attacker records the shooter, an event is queued.
+    try std.testing.expect(m.damageFrom(10, 12, 555));
+    try std.testing.expectApproxEqAbs(@as(f32, 88), m.bots[0].hp, 0.01);
+    try std.testing.expectEqual(@as(i32, 555), m.bots[0].last_attacker);
+    try std.testing.expectEqual(@as(usize, 1), m.ev_n);
+    try std.testing.expectEqual(@as(i32, 555), m.events[0].attacker);
+    try std.testing.expectEqual(@as(i32, 10), m.events[0].victim);
+    try std.testing.expectApproxEqAbs(@as(f32, 12), m.events[0].amount, 0.01);
+
+    // Unknown targets are no-ops (no event, no state).
+    try std.testing.expect(!m.damageFrom(999, 5, 555));
+    try std.testing.expectEqual(@as(usize, 1), m.ev_n);
+
+    // Lethal attributed hit kills and still events.
+    try std.testing.expect(m.damageFrom(11, 30, 555));
+    try std.testing.expect(!m.bots[1].alive);
+    try std.testing.expectEqual(@as(usize, 1), m.n);
+    try std.testing.expectEqual(@as(usize, 2), m.ev_n);
+}
+
+test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" {
+    var m: BotManager = .{};
+    m.events[0] = .{ .attacker = 7, .victim = 10, .amount = 12.5 };
+    m.events[1] = .{ .attacker = -1, .victim = 11, .amount = 42 };
+    m.ev_n = 2;
+
+    var out: [128]u8 = [_]u8{0xAA} ** 128;
+    const written = m.drainSenseEvents(&out, 16, max_sense_events);
+    try std.testing.expectEqual(@as(usize, 2), written);
+
+    const e0 = out[16..32];
+    try std.testing.expectEqual(@as(u8, 3), e0[0]); // kind damage
+    try std.testing.expectEqual(@as(u8, 0), e0[1]); // pad
+    try std.testing.expectEqual(@as(i32, 7), std.mem.readInt(i32, e0[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, e0[8..12], .little));
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), @as(f32, @bitCast(std.mem.readInt(u32, e0[12..16], .little))), 0.001);
+
+    const e1 = out[32..48];
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, e1[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 11), std.mem.readInt(i32, e1[8..12], .little));
+
+    // The buffer is cleared: a second drain writes nothing.
+    try std.testing.expectEqual(@as(usize, 0), m.drainSenseEvents(&out, 16, max_sense_events));
+
+    // Cap: at most max_sense_events are written and the tail is untouched.
+    m.ev_n = max_sense_events + 4;
+    var out2: [512]u8 = [_]u8{0xBB} ** 512;
+    const capped = m.drainSenseEvents(&out2, 16, max_sense_events);
+    try std.testing.expectEqual(@as(usize, max_sense_events), capped);
+    try std.testing.expectEqual(@as(u8, 0xBB), out2[16 + max_sense_events * sense_event_len]);
 }
 
 test "BotManager fillSense appends after existing ECS actor records" {
