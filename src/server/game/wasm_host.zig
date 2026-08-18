@@ -167,3 +167,32 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
     return 16 + n * 32 + (info_n + ev_n) * bot_mod.sense_event_len;
 }
+
+/// `zdtd.query(req_ptr, req_len, out_ptr, out_cap)` — reverse-direction point
+/// query (BOTS_SPEC §3; the sense `token` stays reserved). The guest writes a
+/// text request, the host writes a text response into the guest's out buffer
+/// and returns bytes written (0 = no answer). Requests are host-budgeted
+/// (small, text-parsed) and never mutate the sim.
+///
+///   "cover <x> <z> <tx> <tz>"  -> "<cx> <cz>" (a point near (x,z) not visible
+///                                 from (tx,tz)), or "" when none exists.
+pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {
+    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    var it = std.mem.tokenizeScalar(u8, req, ' ');
+    const verb = it.next() orelse return 0;
+    if (!std.mem.eql(u8, verb, "cover")) return 0;
+    const sx = it.next() orelse return 0;
+    const sz = it.next() orelse return 0;
+    const tx = it.next() orelse return 0;
+    const tz = it.next() orelse return 0;
+    if (it.next() != null) return 0;
+    const fx = std.fmt.parseFloat(f32, sx) catch return 0;
+    const fz = std.fmt.parseFloat(f32, sz) catch return 0;
+    const thx = std.fmt.parseFloat(f32, tx) catch return 0;
+    const thz = std.fmt.parseFloat(f32, tz) catch return 0;
+    const from: [3]f32 = .{ fx, g.groundHeight(@intFromFloat(@floor(fx)), @intFromFloat(@floor(fz))), fz };
+    const threat: [3]f32 = .{ thx, g.groundHeight(@intFromFloat(@floor(thx)), @intFromFloat(@floor(thz))), thz };
+    const cv = g.findCover(from, threat, 10.0) orelse return 0;
+    const s = std.fmt.bufPrint(out, "{d} {d}", .{ cv[0], cv[2] }) catch return 0;
+    return s.len;
+}

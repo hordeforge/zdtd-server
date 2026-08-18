@@ -195,6 +195,7 @@ const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
 const wasmSense = game_wasm_host.wasmSense;
+const wasmQuery = game_wasm_host.wasmQuery;
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
@@ -556,6 +557,7 @@ pub const Game = struct {
                 .tick_fn = &wasmTick,
                 .queue_fn = &wasmQueue,
                 .sense_fn = &wasmSense,
+                .query_fn = &wasmQuery,
             },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
@@ -1203,6 +1205,12 @@ pub const Game = struct {
     /// Voxel line-of-sight gate for `bot shoot` (BOTS_SPEC §4 host-LOS).
     pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
         return game_world.botLosClear(self, from, to);
+    }
+
+    /// Cover point not visible from `threat` (BOTS_SPEC §3 `zdtd.query`
+    /// "cover"); Doom 3 idAASFindCover / clanker `BotBrain.FindCover` port.
+    pub fn findCover(self: *Game, from: [3]f32, threat: [3]f32, dist: f32) ?[3]f32 {
+        return game_world.findCover(self, from, threat, dist);
     }
 
     /// Ground/surface Y at world (x, z); bots stand here (spawn + move).

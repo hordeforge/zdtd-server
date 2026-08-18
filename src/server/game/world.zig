@@ -287,3 +287,49 @@ pub fn groundHeight(self: *Game, x: i32, z: i32) f32 {
     const ch = self.world.getOrCreate(t.pos) catch return 61;
     return @as(f32, @floatFromInt(ch.heightAt(t.lx, t.lz))) + 1.0;
 }
+
+/// True when a solid block occupies the standing cells at `p`: the cell the
+/// feet sit in and the one above (head). Chunk-probe errors fail OPEN (treated
+/// as clear) so a cover search is not blocked by an unloaded chunk border.
+fn coverSolidAt(self: *Game, p: [3]f32) bool {
+    const ix: i32 = @intFromFloat(@floor(p[0]));
+    const iy: i32 = @intFromFloat(@floor(p[1]));
+    const iz: i32 = @intFromFloat(@floor(p[2]));
+    if (self.world.isSolidWorld(ix, iy, iz) catch false) return true;
+    if (self.world.isSolidWorld(ix, iy + 1, iz) catch false) return true;
+    return false;
+}
+
+/// A nearby point that is not visible from `threat` — Doom 3 idAASFindCover /
+/// clanker `BotBrain.FindCover` port for the `zdtd.query` "cover" verb
+/// (BOTS_SPEC §3). Samples 8 directions at `dist` (default 10 m), grounds each
+/// candidate, keeps the ones that are reachable (not solid at body height) and
+/// NOT LOS-clear from the threat's eye, and returns the valid candidate
+/// nearest to `from` (prefer nearer cover). Null when nothing qualifies.
+pub fn findCover(self: *Game, from: [3]f32, threat: [3]f32, dist: f32) ?[3]f32 {
+    var best: ?[3]f32 = null;
+    var best_score: f32 = -1;
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        const ang = @as(f32, @floatFromInt(i)) * std.math.pi / 4.0;
+        const cx = from[0] + @cos(ang) * dist;
+        const cz = from[2] + @sin(ang) * dist;
+        const cy = self.groundHeight(@intFromFloat(@floor(cx)), @intFromFloat(@floor(cz)));
+        const cand: [3]f32 = .{ cx, cy, cz };
+        // Reachable: not inside solid at feet/head height.
+        if (coverSolidAt(self, cand)) continue;
+        // Must actually hide: the line from the threat's eye to the
+        // candidate's chest is blocked (that is the point of cover).
+        const threat_eye: [3]f32 = .{ threat[0], threat[1] + 1.45, threat[2] };
+        const cand_chest: [3]f32 = .{ cx, cy + 1.05, cz };
+        if (botLosClear(self, threat_eye, cand_chest)) continue;
+        const ddx = cx - from[0];
+        const ddz = cz - from[2];
+        const score = 10.0 - @sqrt(ddx * ddx + ddz * ddz) * 0.2;
+        if (score > best_score) {
+            best_score = score;
+            best = cand;
+        }
+    }
+    return best;
+}

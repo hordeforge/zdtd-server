@@ -4,6 +4,7 @@
 const std = @import("std");
 const game_mod = @import("game.zig");
 const game_bot = @import("game/bot.zig");
+const game_wasm_host = @import("game/wasm_host.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
@@ -5296,6 +5297,50 @@ test "scenario a player can damage a bot and the bot records the attacker" {
     const dmg3 = try packages.buildDamageBody(&body, 999999, 0, 0, 50, false, c.entity_id);
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg3));
     try std.testing.expectEqual(@as(usize, 2), g.bots.ev_n);
+}
+
+test "scenario wasmQuery cover: none on open ground, found behind a wall" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var out: [64]u8 = undefined;
+
+    // Plumbing: unknown verbs and malformed queries answer nothing.
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "bogus", &out));
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "cover 0 0", &out));
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "cover x y 10 10", &out));
+
+    // Open ground: every candidate is LOS-clear from the threat, so no cover.
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "cover 0 0 10 10", &out));
+
+    // A wall at body height between the threat (10,10) and the south-west
+    // candidate (-7.07,-7.07) blocks that line: the query must now return a
+    // point, and it must be the hidden direction, not the open one.
+    const h = g.groundHeight(1, 1);
+    const hh: i32 = @intFromFloat(h);
+    try g.world.setBlockWorld(1, hh, 1, world_store.block_stone);
+    try g.world.setBlockWorld(1, hh + 1, 1, world_store.block_stone);
+    try g.world.setBlockWorld(1, hh + 2, 1, world_store.block_stone);
+    const n = game_wasm_host.wasmQuery(&g.wasm_ctx, "cover 0 0 10 10", &out);
+    try std.testing.expect(n >= 3);
+    // Response is "<cx> <cz>" — a two-float answer with a space separator.
+    const sep = std.mem.indexOfScalar(u8, out[0..n], ' ');
+    try std.testing.expect(sep != null);
+    const cx = std.fmt.parseFloat(f32, out[0..sep.?]) catch 0;
+    const cz = std.fmt.parseFloat(f32, out[sep.? + 1 .. n]) catch 0;
+    // The hidden candidate is the south-west one: both coords negative.
+    try std.testing.expect(cx < 0 and cz < 0);
 }
 
 test "scenario bot count floor spawns bots and fillSense emits them" {

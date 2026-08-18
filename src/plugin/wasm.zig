@@ -56,6 +56,9 @@ pub const Budget = struct {
 /// Ceiling on one `zdtd.sense` snapshot (BOTS_SPEC §3). The guest requests up
 /// to this much; the host never writes past it into the guest.
 pub const host_sense_max: usize = 2048;
+/// Ceiling on one `zdtd.query` response (BOTS_SPEC §3). The host never writes
+/// past this into the guest.
+pub const query_resp_max: usize = 64;
 
 pub const HostCtx = struct {
     /// Owner state (a *Game in the server); cast by the callbacks the owner
@@ -68,6 +71,11 @@ pub const HostCtx = struct {
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
     sense_fn: ?*const fn (ctx: *HostCtx, out: []u8) usize = null,
+    /// Reverse-direction point query (BOTS_SPEC §3): the guest writes a text
+    /// request (e.g. `cover x z tx tz`) and the host writes a text response,
+    /// returning bytes written (0 = no answer / unknown query). Null when the
+    /// owner has no query surface.
+    query_fn: ?*const fn (ctx: *HostCtx, req: []const u8, out: []u8) usize = null,
 };
 
 pub const LoadError = error{
@@ -534,11 +542,25 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             @memcpy(dst, scratch[0..copy]);
             return @intCast(copy);
         }
+        fn query(caller: *zwasm.Caller, req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return 0;
+            if (req_ptr < 0 or req_len < 0 or out_ptr < 0 or out_cap < 0) return 0;
+            const qf = hc.query_fn orelse return 0;
+            const req = mem.sliceAt(@intCast(req_ptr), @intCast(req_len)) catch return 0;
+            var resp: [query_resp_max:0]u8 = undefined;
+            const written = qf(hc, req, &resp);
+            const copy = @min(@as(usize, @intCast(out_cap)), written);
+            const dst = mem.sliceAt(@intCast(out_ptr), @intCast(copy)) catch return 0;
+            @memcpy(dst, resp[0..copy]);
+            return @intCast(copy);
+        }
     };
     try linker.defineFuncCtx("zdtd", "log", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!void, H.log);
     try linker.defineFuncCtx("zdtd", "tick", ctx, fn (*zwasm.Caller) anyerror!i64, H.tick);
     try linker.defineFuncCtx("zdtd", "queue", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.queue);
     try linker.defineFuncCtx("zdtd", "sense", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!i32, H.sense);
+    try linker.defineFuncCtx("zdtd", "query", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.query);
 }
 
 test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-built minimal wasm: (module (func (export "on_enable"))) — a no-op
@@ -813,6 +835,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         var hide_player: bool = false;
         var show_zombie: bool = false;
         var show_flanker: bool = false;
+        var with_trailer: bool = false;
         var bot_hp: f32 = 100;
 
         fn queueFn(_: *HostCtx, cmd: []const u8) void {
@@ -839,6 +862,15 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
             std.mem.writeInt(u32, r[24..28], @bitCast(yaw), .little);
             std.mem.writeInt(i32, r[28..32], target, .little);
+        }
+        // One 16-byte trailer record (BOTS_SPEC §3 event layout).
+        fn writeEv(b: []u8, base: usize, kind: u8, a: i32, c: i32, amount: f32) void {
+            const r = b[base .. base + 16];
+            @memset(r, 0);
+            r[0] = kind;
+            std.mem.writeInt(i32, r[4..8], a, .little);
+            std.mem.writeInt(i32, r[8..12], c, .little);
+            std.mem.writeInt(u32, r[12..16], @bitCast(amount), .little);
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
             // header: magic 'ZBS2', count, tick 1, self 0
@@ -872,6 +904,17 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
                 // visible player: the FOV cone must exclude it.
                 writeRec(out, 16 + @as(usize, n) * 32, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
                 n += 1;
+            }
+            if (with_trailer) {
+                // v2 event trailer: a kind-4 bot-info record (bot 1000 carries a
+                // sniper, weapon_id 3) followed by a kind-3 damage event (player
+                // 2000 hit bot 1000 for 42). The guest must keep parsing records
+                // at the 32-byte stride and derive the trailer from the length.
+                const eb = 16 + @as(usize, n) * 32;
+                writeEv(out, eb, 4, 1000, 0, 0);
+                out[eb + 1] = 3; // weapon_id sniper (loadout-pool index 3)
+                writeEv(out, eb + 16, 3, 2000, 1000, 42.0);
+                return 16 + @as(usize, n) * 32 + 32;
             }
             return 16 + @as(usize, n) * 32;
         }
@@ -1039,6 +1082,28 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         }
     }
     try std.testing.expect(juked);
+
+    // Trailer phase: a sense pass that ALSO carries kind-4 bot-info (sniper)
+    // and kind-3 damage-event records (player 2000 hit bot 1000 for 42) must
+    // not desync the brain's record offsets — it still tracks and drives on
+    // the player (the grudge keeps it locked), proving the v2 event trailer
+    // parses end-to-end (BOTS_SPEC §3).
+    Cap.with_trailer = true;
+    Cap.hide_player = false;
+    Cap.bot_hp = 58;
+    Cap.queued_n = 0;
+    host.onTick();
+    try std.testing.expect(Cap.queued_n >= 1);
+    var trailer_drove = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+        const s = c[0..Cap.queued_len[qi]];
+        if (std.mem.startsWith(u8, s, "bot look 1000") or std.mem.startsWith(u8, s, "bot move 1000")) trailer_drove = true;
+    }
+    try std.testing.expect(trailer_drove);
+    var list2_out: [512]u8 = undefined;
+    const l2 = host.adminCommand("bot list", &list2_out);
+    try std.testing.expect(l2 != null);
+    try std.testing.expect(std.mem.indexOf(u8, l2.?, "target=2000") != null); // grudge holds the player
 
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());

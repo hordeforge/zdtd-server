@@ -67,6 +67,7 @@ owns decisions.
 | `zdtd.tick` | `() -> i64` | existing; gives the guest tick number |
 | `zdtd.queue` | `(ptr, len) -> i32` | existing; raises its length bound (see §4) |
 | `zdtd.sense` | `(ptr, len, token) -> i32` | **new**; host fills a world view into guest memory, returns bytes written |
+| `zdtd.query` | `(req_ptr, req_len, out_ptr, out_cap) -> i32` | **new**; reverse-direction point query — the guest writes a text request, the host writes a text response, returns bytes written (0 = no answer) |
 
 `sense` is capability-gated: a module that does not import it cannot read the
 sim, and a module that does is still read-only (it cannot mutate anything
@@ -141,7 +142,14 @@ are visible (view distance from the bot; a named cap). Do **not** retain the
 offset past the call — copy what you need (ADR 0020).
 
 The `token` argument is reserved for future reverse-direction reads (e.g. ask
-for a specific entity or a point query); v1 callers pass `0`.
+for a specific entity or a point query); v1 callers pass `0`. Reverse-direction
+*queries* ship as the separate `zdtd.query` import: the guest writes a small
+text request into its own memory and the host answers in a response buffer.
+Requests are host-budgeted (bounded text, no sim mutation). Queries:
+
+| Request | Response | Meaning |
+|---|---|---|
+| `cover <x> <z> <tx> <tz>` | `<cx> <cz>` (or empty) | a point near (x,z) that is NOT visible from (tx,tz), or nothing when no cover exists (Doom 3 idAASFindCover / clanker `BotBrain.FindCover` port; used by the cover retreat, §5.1) |
 
 **Determinism:** the snapshot is built each `on_tick` from the current sim
 state, in stable order. The guest must not assume a stable ordering across
@@ -270,6 +278,12 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
     healthy instead of roaming (clanker `WantsToCamp`).
   - *Alertness* scales vision range (`0.8 + 0.4*alert`) and reaction time
     (`1.2 - 0.4*alert`).
+- **Cover-seeking retreat (Doom 3 `idAASFindCover` / clanker
+  `BotBrain.FindCover` port).** A retreating bot (low hp + careful personality,
+  or fleeing) asks `zdtd.query` `cover` for a point near it that is NOT visible
+  from its current threat, heads there (re-querying every ~0.4 s) and holds,
+  breaking LOS instead of backpedaling in the open. With no cover available it
+  falls back to the plain backpedal/circle.
 - **Weapon-aware tactics (clanker `WeaponProfile` parity).** The host picks
   each bot's loadout at spawn and exposes it via the kind-4 bot-info sense
   record; the brain adapts: *engagement range* follows the weapon

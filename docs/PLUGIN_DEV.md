@@ -57,8 +57,8 @@ game events (death, kill, block damage, quest completion).
 
 ## Host imports
 
-The host provides exactly three functions, all in the `zdtd` module namespace.
-The import **field** names are bare (`log`, not `zdtd_log`); importing
+The host provides five functions, all in the `zdtd` module namespace. The
+import **field** names are bare (`log`, not `zdtd_log`); importing
 `zdtd.zdtd_log` fails to instantiate.
 
 | Import | Signature | Notes |
@@ -66,6 +66,8 @@ The import **field** names are bare (`log`, not `zdtd_log`); importing
 | `zdtd` . `log` | `(level: i32, ptr: i32, len: i32) -> ()` | Write `len` bytes at `ptr` to the server log; `level` 0..3 (debug/info/warn/err). Sanitized and truncated to 200 bytes |
 | `zdtd` . `tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
 | `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
+| `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (BOTS_SPEC §3); returns bytes written (0 = no sense surface) |
+| `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query (BOTS_SPEC §3): write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer) |
 
 You choose the local symbol name; only the module and field names have to
 match. In C:
@@ -77,6 +79,10 @@ __attribute__((import_module("zdtd"), import_name("tick")))
 extern long long zdtd_tick(void);
 __attribute__((import_module("zdtd"), import_name("queue")))
 extern int zdtd_queue(int ptr, int len);
+__attribute__((import_module("zdtd"), import_name("sense")))
+extern int zdtd_sense(int ptr, int len, int token);
+__attribute__((import_module("zdtd"), import_name("query")))
+extern int zdtd_query(int req_ptr, int req_len, int out_ptr, int out_cap);
 ```
 
 In Rust the same table is `#[link(wasm_import_module = "zdtd")] extern "C" { fn

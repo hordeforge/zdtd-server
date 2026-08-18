@@ -22,6 +22,8 @@
 //   - weapon-aware tactics: the host's per-bot loadout (kind-4 bot-info sense
 //     record) drives engagement range, burst size, lead scale and keep-range
 //     backpedal                                (WeaponProfile parity)
+//   - cover-seeking retreat: a retreating bot asks `zdtd.query` for a point
+//     not visible from the threat and holds there                  (FindCover)
 // Improvements this guest already carried that clanker borrowed back:
 //   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
 //
@@ -46,6 +48,8 @@ __attribute__((import_module("zdtd"), import_name("queue")))
 extern int zdtd_queue(int ptr, int len);
 __attribute__((import_module("zdtd"), import_name("sense")))
 extern int zdtd_sense(int ptr, int len, int token);
+__attribute__((import_module("zdtd"), import_name("query")))
+extern int zdtd_query(int req_ptr, int req_len, int out_ptr, int out_cap);
 
 // ---------------------------------------------------------------------------
 // Output / log helpers (no libc: build bytes in a static buffer).
@@ -115,6 +119,68 @@ static int e_to(char *b, int cap, long long v) {
     while (n > 0 && w < cap) b[w++] = t[--n];
   }
   return w;
+}
+
+// Render a float with two decimals into a caller buffer (like e_flt but into
+// any buffer, for host query requests).
+static int f_to(char *b, int cap, float v) {
+  int n = 0;
+  if (v < 0.f) { if (n < cap) b[n++] = '-'; v = -v; }
+  long long whole = (long long)v;
+  int frac = (int)((v - (float)whole) * 100.0f + 0.5f);
+  if (frac == 100) { whole += 1; frac = 0; }
+  n += e_to(b + n, cap - n, whole);
+  if (n < cap) b[n++] = '.';
+  if (frac < 10 && n < cap) b[n++] = '0';
+  n += e_to(b + n, cap - n, frac);
+  return n;
+}
+// Parse a float (sign + digits + optional fraction); sets *end past it.
+static float parse_f(const char *p, const char **end) {
+  float acc = 0.f; int neg = 0; int frac = 0; float div = 1.f;
+  if (*p == '-') { neg = 1; p++; }
+  while (*p >= '0' && *p <= '9') { acc = acc * 10.f + (float)(*p - '0'); p++; }
+  if (*p == '.') {
+    p++;
+    while (*p >= '0' && *p <= '9') { acc = acc * 10.f + (float)(*p - '0'); div *= 10.f; p++; }
+    frac = 1;
+  }
+  if (frac) acc /= div;
+  if (neg) acc = -acc;
+  *end = p;
+  return acc;
+}
+
+// ---------------------------------------------------------------------------
+// Reverse-direction host queries (zdtd.query; BOTS_SPEC §3). The guest writes
+// a text request, the host answers with a text response. Used for cover
+// seeking (Doom 3 idAASFindCover / clanker BotBrain.FindCover port).
+// ---------------------------------------------------------------------------
+
+#define QRY_CAP 64
+static char qry_buf[QRY_CAP];
+
+static int st(char *b, int cap, const char *s); // (forward; body below)
+
+// Ask the host for a point near (bx,bz) that is NOT visible from (tx,tz).
+// Returns 1 with the point in *cx/*cz, or 0 when no cover exists.
+static int query_cover(float bx, float bz, float tx, float tz, float *cx, float *cz) {
+  char req[64];
+  int rn = 0;
+  rn += st(req, 64, "cover ");
+  rn += f_to(req + rn, 64 - rn, bx); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, bz); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, tx); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, tz);
+  const int qn = zdtd_query((int)(long)&req[0], rn, (int)(long)&qry_buf[0], QRY_CAP);
+  if (qn < 3) return 0;
+  const char *p = qry_buf;
+  const char *e = qry_buf;
+  *cx = parse_f(p, &e);
+  while (*e == ' ') e++;
+  if (!(*e >= '0' && *e <= '9') && *e != '-') return 0;
+  *cz = parse_f(e, &e);
+  return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +320,11 @@ static int   bot_camp_ticks[MAX_BOTS];  // remaining ticks of a camp hold
 // Host-assigned weapon (kind-4 bot-info sense record): the brain adapts
 // engagement range, burst size and lead to the weapon (clanker WeaponProfile).
 static int   bot_weapon_id[MAX_BOTS];
+// Cover-seeking retreat (Doom 3 idAASFindCover / clanker BotBrain.FindCover
+// port): the host-computed hide point (0,0 = none) and the re-query cooldown.
+static float bot_cover_x[MAX_BOTS];
+static float bot_cover_z[MAX_BOTS];
+static int   bot_cover_cd[MAX_BOTS];
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
 static void bot_init(void) {
@@ -297,6 +368,9 @@ static void bot_init(void) {
     bot_alert[i] = 0.f;
     bot_camp_ticks[i] = 0;
     bot_weapon_id[i] = 0; // pistol until the first bot-info record arrives
+    bot_cover_x[i] = 0.f;
+    bot_cover_z[i] = 0.f;
+    bot_cover_cd[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -804,6 +878,9 @@ static void brain_tick(void) {
       bot_react[bslot] = reaction;
       bot_engage[bslot] = 0;
       bot_camp_ticks[bslot] = 0; // contact ends a camp hold
+      bot_cover_x[bslot] = 0.f;  // a fresh engagement forgets the old hide point
+      bot_cover_z[bslot] = 0.f;
+      bot_cover_cd[bslot] = 0;
       bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
       bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
       bot_aimerr[bslot] = skill_aimerr(skill) * rng_sym(&bot_rng[bslot]);
@@ -896,10 +973,39 @@ static void brain_tick(void) {
         bot_move_sent[bslot] = 1;
       } else {
         if (retreating || dist < BACKPEDAL_RANGE || keep_range) {
-          // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
-          mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
-          mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
-          mspd = 3.f;
+          // A RETREATING bot first tries to break LOS at a host-computed cover
+          // point (Doom 3 idAASFindCover / clanker BotBrain.FindCover port):
+          // ask `zdtd.query` for a spot near us that is not visible from the
+          // threat, then head there and hold. No cover -> plain backpedal.
+          int has_cover = 0;
+          float cdx = 0.f, cdz = 0.f;
+          if (retreating) {
+            if (bot_cover_cd[bslot] > 0) bot_cover_cd[bslot]--;
+            if (bot_cover_cd[bslot] == 0) {
+              bot_cover_cd[bslot] = 8; // re-query every ~0.4 s
+              float qx, qz;
+              if (query_cover(bx, bz, tx, tz, &qx, &qz)) {
+                bot_cover_x[bslot] = qx;
+                bot_cover_z[bslot] = qz;
+              }
+            }
+            if (bot_cover_x[bslot] != 0.f || bot_cover_z[bslot] != 0.f) {
+              cdx = bot_cover_x[bslot] - bx;
+              cdz = bot_cover_z[bslot] - bz;
+              if (cdx * cdx + cdz * cdz > 1.5f) has_cover = 1;
+              else { bot_cover_x[bslot] = 0.f; bot_cover_z[bslot] = 0.f; } // arrived: hold
+            }
+          }
+          if (has_cover) {
+            mdest_x = bx + cdx * 0.6f;
+            mdest_z = bz + cdz * 0.6f;
+            mspd = 3.6f; // purposeful move to cover
+          } else {
+            // Cross-pollinated from clanker BotBrain.Backpedal: back away + circle.
+            mdest_x = bx - txn * 1.7f + oxn * s * 1.1f;
+            mdest_z = bz - tzn * 1.7f + ozn * s * 1.1f;
+            mspd = 3.f;
+          }
         } else {
           // Strafe-orbit: mix toward the target and step perpendicular.
           mdest_x = bx + (tx - bx) * 0.3f + oxn * s * 1.0f;
@@ -984,7 +1090,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v2.3 enabled");
+  e("zdtd_bot v2.4 enabled");
   flush(1);
 }
 
