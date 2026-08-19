@@ -211,6 +211,22 @@ pub const Progression = struct {
 /// Placeholder group: added as constants move; no fields invented.
 pub const WorldGroup = struct {};
 
+/// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
+/// horde spawn distance/size and the chunk-heat spawner constants (heat
+/// threshold, check/cooldown cadence, scout distance). Only constants the code
+/// actually reads are surfaced (YAGNI; `heat_feral_chance` and
+/// `heat_event_ticks` stay doc-only module consts in aidirector.zig until the
+/// feral roll / event duration are modelled). Provenance: PROVENANCE.md §3.7.
+pub const Director = struct {
+    wandering_horde_size: u32 = 6,
+    wandering_spawn_dist: f32 = 92.0,
+    heat_spawn_threshold: f32 = 25.0,
+    heat_check_seconds: f32 = 5.0,
+    heat_cooldown_seconds: f32 = 120.0,
+    heat_neighbor_cooldown_seconds: f32 = 60.0,
+    heat_scout_dist: f32 = 10.0,
+};
+
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -220,6 +236,7 @@ pub const Rules = struct {
     bloodmoon: Bloodmoon = .{},
     progression: Progression = .{},
     world: WorldGroup = .{},
+    director: Director = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -291,6 +308,17 @@ pub const ProgressionOverlay = struct {
 
 pub const WorldGroupOverlay = struct {};
 
+/// AIDirector overlay: `[rules.director]` binds these (binder-reflected).
+pub const DirectorOverlay = struct {
+    wandering_horde_size: ?u32 = null,
+    wandering_spawn_dist: ?f32 = null,
+    heat_spawn_threshold: ?f32 = null,
+    heat_check_seconds: ?f32 = null,
+    heat_cooldown_seconds: ?f32 = null,
+    heat_neighbor_cooldown_seconds: ?f32 = null,
+    heat_scout_dist: ?f32 = null,
+};
+
 pub const SystemsOverlay = struct {
     buffs: ?bool = null,
     director: ?bool = null,
@@ -313,6 +341,7 @@ pub const RulesOverlay = struct {
     bloodmoon: BloodmoonOverlay = .{},
     progression: ProgressionOverlay = .{},
     world: WorldGroupOverlay = .{},
+    director: DirectorOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.
@@ -351,12 +380,19 @@ test "RulesOverlay mirrors Rules field for field" {
         \\[bloodmoon]
         \\party_enemy_max = 40
         \\max_parties = 3
+        \\[director]
+        \\wandering_horde_size = 4
+        \\wandering_spawn_dist = 60.0
+        \\heat_spawn_threshold = 30.0
     , std.testing.allocator);
     try std.testing.expectEqual(@as(?f32, 12.0), o.combat.attack_damage);
     try std.testing.expectEqual(@as(?f32, null), o.combat.attack_range_sq);
     try std.testing.expectEqual(@as(?f32, 3600.0), o.ai.sense_dist_sq);
     try std.testing.expectEqual(@as(?u32, 40), o.bloodmoon.party_enemy_max);
     try std.testing.expectEqual(@as(?u32, 3), o.bloodmoon.max_parties);
+    try std.testing.expectEqual(@as(?u32, 4), o.director.wandering_horde_size);
+    try std.testing.expectEqual(@as(?f32, 60.0), o.director.wandering_spawn_dist);
+    try std.testing.expectEqual(@as(?f32, 30.0), o.director.heat_spawn_threshold);
 }
 
 test "mergeOverlay applies non-null subset in precedence order" {

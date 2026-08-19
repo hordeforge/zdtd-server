@@ -104,7 +104,7 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE.md` |
 | `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `storm_frequency` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. Defaults match the previous code constants |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
-| `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the mode pack so `zdtd.toml` wins; see the `[rules]` section below |
+| `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` / `[rules.director]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the mode pack so `zdtd.toml` wins; see the `[rules]` section below |
 | `[plugin]` | `modules`, `fuel`, `max_pages` | Comma-separated `.wasm` paths for the Wasm plugin runtime (ADR 0020, [PLUGIN_DEV.md](PLUGIN_DEV.md)); empty default = no Wasm plugins. `fuel` (default 100000000) is the per-instance fuel budget, armed once at instantiate and never re-armed (a module spending ~10k/tick silently disables after minutes; lower to bound a hostile guest). `max_pages` (default 1024) caps linear memory per instance |
 | `[quests]` | `objective_kinds`, `default_kill_count`, `kill_per_tier`, `goto_radius`, `stay_radius` | Quest data policy (ADR 0021): the objective `type=` → phase-kind mapping (comma-separated `Type=PhaseKind`, config rows win over the builtin stock table; a new stock objective type is a row here, not a code change), the kill-count default for objectives with no explicit `value` (`default + tier * per_tier`), and the goto/stay radius fallbacks when an objective omits its distance (the parsed `value` still wins). Provenance: PROVENANCE.md §3.7 |
 | `[bots]` | `shoot_damage`, `headshot_multiplier`, `spawn_spread`, `spawn_y`, `max_step_up` | Host-side FPS bot policy (ADR 0026): the `bot shoot` damage floor, the headshot multiplier (clanker parity), the `bot count`/`bot spawn` spawn spread + default Y, and the move step-up cap. `bot_max_hp` is fixed at 100 (wasm guest contract). Defaults match the pre-config constants |
@@ -193,6 +193,14 @@ test, so a retune cannot land silently).
 | `radiation_damage_per_second` | 8.0 | HP lost per real second inside a radiated biome (biomes.xml `<biomemap name="radiated"/>`; stock BiomeType.Radiated is deadly) |
 | `trap_kill_xp_frac` | 0.0 | **Floor**: fraction of a turret/trap kill's XP the owner is credited. Stock reads `PassiveEffects.ElectricalTrapXP` (default 0, unlocked by `perkAdvancedEngineering` levels 1-5 at .15/.3/.45/.6/.75); zdtd has no per-player perk level yet (planned: ADR 0023/0024), so this is a flat floor rather than a per-player lookup. 0.0 matches stock's unperked default |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
+| `[rules.director]` | | AIDirector policy (RE: aidirector.md; provenance PROVENANCE.md §3.7) |
+| `wandering_horde_size` | 6 | Zombies per wandering horde (stock is gamestage-group driven, live-observed "enemy max 5" at GS 1; the fixed 6 is the zdtd approximation) |
+| `wandering_spawn_dist` | 92.0 | Blocks out the horde spawns (stock `RandomOnUnitCircle * 92f`, IL_018B) |
+| `heat_spawn_threshold` | 25.0 | Chunk-heat activity at which a region spawns a scout party |
+| `heat_check_seconds` | 5.0 | Heat-region check cadence |
+| `heat_cooldown_seconds` | 120.0 | Region cooldown after a heat spawn |
+| `heat_neighbor_cooldown_seconds` | 60.0 | Shorter cooldown applied to the eight surrounding regions |
+| `heat_scout_dist` | 10.0 | Scout-party spawn distance from the hot region center (chunk-heat spawner 0/8/10 constants) |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
@@ -223,7 +231,7 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 | `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
 | `loot_respawn_days` | container re-roll interval (0..365) |
 | `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
-| `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]` (see above) |
+| `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]`, `[rules.director]` (see above) |
 
 Only the keys you set override; everything else falls through to
 `serverconfig.xml`, `zdtd.toml` and code defaults. A mode is a complete

@@ -1,6 +1,8 @@
 //! Lightweight AIDirector as ECS resource (world clock, horde, blood moon).
 
 const std = @import("std");
+const rules_mod = @import("rules.zig");
+const director_defaults: rules_mod.Director = .{};
 const ecs_world = @import("world.zig");
 
 /// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
@@ -167,9 +169,10 @@ pub const bm_parties_cap: usize = 8;
 /// the `FindTargets` inline start offset (`RandomOnUnitCircle * 92f`, IL_018B,
 /// aidirector.md placement constants); the per-horde size is gamestage-group
 /// driven in stock (live-observed 2026-08-11: "enemy max 5" for GS 1), so the
-/// fixed 6 here is an approximation.
-pub const wandering_horde_size: u32 = 6;
-pub const wandering_spawn_dist: f32 = 92.0;
+/// fixed 6 here is an approximation. Both are `[rules.director]` tunables
+/// (ADR 0021); these aliases are the builtin defaults (tests reference them).
+pub const wandering_horde_size: u32 = director_defaults.wandering_horde_size;
+pub const wandering_spawn_dist: f32 = director_defaults.wandering_spawn_dist;
 pub const wander_min_gap: u64 = 12_000;
 pub const wander_max_gap: u64 = 24_000;
 pub const wander_start_after: u64 = 28_000;
@@ -179,17 +182,18 @@ pub const wander_start_after: u64 = 28_000;
 /// HeatMapStrength) and expire over the event duration; a region crossing 25
 /// spawns a scout party (Scouts1/2/Feral/Radiated by gamestage) on the 5 s
 /// check, then cooldowns the region and its neighbors. Blood moons suppress
-/// new heat (NotifyActivity gate).
+/// new heat (NotifyActivity gate). The threshold / check / cooldown / scout
+/// distance are `[rules.director]` tunables; the aliases are the defaults.
 pub const heat_region_world: i32 = 16 * 5; // 5 chunks x 16 blocks
-pub const heat_spawn_threshold: f32 = 25.0;
-pub const heat_event_ticks: f32 = 720.0; // TileEntity heat event duration
-pub const heat_check_seconds: f32 = 5.0;
-pub const heat_cooldown_seconds: f32 = 120.0;
-pub const heat_neighbor_cooldown_seconds: f32 = 60.0;
-pub const heat_feral_chance: f32 = 0.2;
+pub const heat_spawn_threshold: f32 = director_defaults.heat_spawn_threshold;
+pub const heat_event_ticks: f32 = 720.0; // TileEntity heat event duration (doc-only; not modelled)
+pub const heat_check_seconds: f32 = director_defaults.heat_check_seconds;
+pub const heat_cooldown_seconds: f32 = director_defaults.heat_cooldown_seconds;
+pub const heat_neighbor_cooldown_seconds: f32 = director_defaults.heat_neighbor_cooldown_seconds;
+pub const heat_feral_chance: f32 = 0.2; // doc-only; the feral roll is not modelled
 pub const max_heat_regions: usize = 32;
 pub const heat_scout_count: u32 = 2;
-pub const heat_scout_dist: f32 = 10.0; // chunk-heat spawner 0/8/10 constants
+pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
 
 pub const HeatRegion = struct {
     key: i64 = 0,
@@ -721,10 +725,10 @@ pub const Director = struct {
         while (p < ecs_world.max_entities) : (p += 1) {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             var n: u32 = 0;
-            while (n < wandering_horde_size) : (n += 1) {
+            while (n < w.rules.director.wandering_horde_size) : (n += 1) {
                 const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(n)) * 1.0472;
-                const x = w.transform[p].x + @cos(ang) * wandering_spawn_dist;
-                const z = w.transform[p].z + @sin(ang) * wandering_spawn_dist;
+                const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
+                const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.transform[p].y;
                 const slot = self.spawnOneZombie(w, x, y, z, "", self.total_spawned +% n, true) orelse continue;
                 w.zombie_ai[slot].state = .chase;
@@ -794,25 +798,25 @@ pub const Director = struct {
         }
         self.heat_check_cd -= dt;
         if (self.heat_check_cd > 0) return;
-        self.heat_check_cd = heat_check_seconds;
+        self.heat_check_cd = w.rules.director.heat_check_seconds;
         if (self.bloodmoon_active) return;
         var ci: usize = 0;
         while (ci < self.heat_n) : (ci += 1) {
             const r = &self.heat[ci];
-            if (r.activity < heat_spawn_threshold or r.cooldown > 0) continue;
+            if (r.activity < w.rules.director.heat_spawn_threshold or r.cooldown > 0) continue;
             // FindBestEventAndReset + StartCooldownOnNeighbors; the 20 % feral
             // roll doubles the cooldown (deterministic, seeded stream).
             const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % 5 == 0;
             r.activity = 0;
-            r.cooldown = if (feral) heat_cooldown_seconds * 2.0 else heat_cooldown_seconds;
-            self.cooldownNeighbors(r.key);
+            r.cooldown = if (feral) w.rules.director.heat_cooldown_seconds * 2.0 else w.rules.director.heat_cooldown_seconds;
+            self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
             self.spawnHeatScouts(w, r.key);
         }
     }
 
     /// StartCooldownOnNeighbors: the eight surrounding regions get the shorter
     /// neighbor cooldown (or keep a longer existing one).
-    fn cooldownNeighbors(self: *Director, key: i64) void {
+    fn cooldownNeighbors(self: *Director, key: i64, neighbor_cd: f32) void {
         const rx: i64 = key >> 32;
         const rz: i64 = @as(i32, @bitCast(@as(u32, @truncate(@as(u64, @bitCast(key))))));
         for (self.heat[0..self.heat_n]) |*r| {
@@ -822,7 +826,7 @@ pub const Director = struct {
             const dz = nrz - rz;
             if (dx == 0 and dz == 0) continue;
             if (@abs(dx) > 1 or @abs(dz) > 1) continue;
-            if (r.cooldown < heat_neighbor_cooldown_seconds) r.cooldown = heat_neighbor_cooldown_seconds;
+            if (r.cooldown < neighbor_cd) r.cooldown = neighbor_cd;
         }
     }
 
@@ -835,8 +839,8 @@ pub const Director = struct {
         var n: u32 = 0;
         while (n < heat_scout_count) : (n += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
-            const x = center.x + @cos(ang) * heat_scout_dist;
-            const z = center.z + @sin(ang) * heat_scout_dist;
+            const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;
+            const z = center.z + @sin(ang) * w.rules.director.heat_scout_dist;
             const y = nearestPlayerY(w, x, z) orelse break;
             const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
             if (nearestPlayerSlot(w, x, z)) |ps| {
@@ -1207,6 +1211,29 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
     const dist = @sqrt(dx * dx + dz * dz);
     try std.testing.expect(dist > 70.0 and dist < 115.0);
     try std.testing.expect(w.zombie_ai[hs].state == .chase);
+}
+
+test "wandering horde size and distance follow [rules.director]" {
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.rules.director.wandering_horde_size = 3;
+    w.rules.director.wandering_spawn_dist = 40.0;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var d: Director = .{ .clock = .{ .day = 2, .hours = 10.0 } };
+    d.wandering_next = d.clock.worldTimeBits() + 1;
+    _ = d.tick(&w, 0.05);
+    var horde: u32 = 0;
+    var horde_slot: ?ecs_world.Slot = null;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
+        horde += 1;
+        horde_slot = s;
+    }
+    try std.testing.expect(horde >= 1 and horde <= 3); // config size, not 6
+    const hs = horde_slot orelse return error.TestUnexpectedResult;
+    const dist = @sqrt(w.transform[hs].x * w.transform[hs].x + w.transform[hs].z * w.transform[hs].z);
+    try std.testing.expect(dist > 30.0 and dist < 50.0); // config 40 m, not 92
 }
 
 test "wandering horde skips with no players and re-arms" {
