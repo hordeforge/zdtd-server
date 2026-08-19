@@ -132,6 +132,13 @@ pub const AuthorityModeName = enum {
     correct,
 };
 
+/// `[quests]` config section (binder-native scalar fields only). The
+/// objective-type mapping rides as a comma-separated `Type=PhaseKind` string
+/// because the binder is scalar-only; assets/quests.zig parses it.
+pub const Quests = struct {
+    objective_kinds: []const u8 = "",
+};
+
 pub const File = struct {
     pub const toml_label = "zdtd.toml";
     /// Accepted alternate spellings (kept from the pre-binder chains).
@@ -154,6 +161,10 @@ pub const File = struct {
     sim: Sim = .{},
     mode: Mode = .{},
     plugin: Plugin = .{},
+    /// Quest data policy: the objective `type=` -> phase-kind mapping is
+    /// config, not code (ADR 0021) — a new stock objective type is a row here,
+    /// `"Type=PhaseKind, ..."` (see assets/quests.zig parseObjectiveKinds).
+    quests: Quests = .{},
     /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
     /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
     rules: rules_mod.RulesOverlay = .{},
@@ -520,6 +531,18 @@ test "parse rules overlay sections" {
     try std.testing.expectEqual(@as(?f32, null), f.rules.combat.attack_range_sq);
     try std.testing.expectEqual(@as(?f32, 2500.0), f.rules.ai.sense_dist_sq);
     try std.testing.expectEqual(@as(?u32, 4), f.rules.bloodmoon.max_parties);
+}
+
+test "parse [quests] objective_kinds section" {
+    var f = try parse(std.testing.allocator,
+        \\[quests]
+        \\objective_kinds = "QuestItem=craft, NewKill=kill_zombies"
+    );
+    defer f.deinit();
+    try std.testing.expectEqualStrings(
+        "QuestItem=craft, NewKill=kill_zombies",
+        f.quests.objective_kinds,
+    );
 }
 
 /// Mirror of the server init-options shape the merge helpers write into.

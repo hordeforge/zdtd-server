@@ -19,6 +19,63 @@ pub const QuestKind = enum(u8) {
 /// Max phases per quest (stock CurrentPhase is uint8; real quests stay well under this).
 pub const max_phases: usize = 32;
 
+/// One objective-type -> executable phase-kind mapping. The mapping is
+/// game-data policy (ADR 0021: config, not parse arms), so when the game ships
+/// a new objective `type=` the operator adds a row in `[quests] objective_kinds`
+/// (zdtd.toml or a mode pack) — no code change. `obj_type` is the stock
+/// `type=` attribute verbatim.
+pub const ObjectiveKindMap = struct {
+    obj_type: []const u8,
+    kind: PhaseKind,
+};
+
+/// Builtin default mapping for the stock objective family — the 16 `type=`
+/// spellings the shipped `Data/Config/quests.xml` uses (facts of the stock
+/// game, like wire constants). Config entries override or extend these: the
+/// merged table the catalog carries scans config rows before these defaults.
+pub const builtin_objective_kinds = [_]ObjectiveKindMap{
+    .{ .obj_type = "RallyPoint", .kind = .rally },
+    .{ .obj_type = "ClearSleepers", .kind = .kill_zombies },
+    .{ .obj_type = "EntityKill", .kind = .kill_zombies },
+    .{ .obj_type = "AnimalKill", .kind = .kill_zombies },
+    .{ .obj_type = "FetchKeep", .kind = .fetch_item },
+    .{ .obj_type = "FetchFromContainer", .kind = .fetch_item },
+    .{ .obj_type = "FetchFromTreasure", .kind = .fetch_item },
+    .{ .obj_type = "TreasureChest", .kind = .fetch_item },
+    .{ .obj_type = "InteractWithNPC", .kind = .trader_interact },
+    .{ .obj_type = "ReturnToNPC", .kind = .trader_interact },
+    .{ .obj_type = "RandomGotoNPC", .kind = .trader_interact },
+    .{ .obj_type = "Craft", .kind = .craft },
+    .{ .obj_type = "CraftItem", .kind = .craft },
+    .{ .obj_type = "Recipe", .kind = .craft },
+    .{ .obj_type = "StayWithin", .kind = .stay_within },
+    .{ .obj_type = "StayWithinArea", .kind = .stay_within },
+    .{ .obj_type = "POIStayWithin", .kind = .stay_within },
+    .{ .obj_type = "POIBlockActivate", .kind = .block_activate },
+    .{ .obj_type = "BlockActivate", .kind = .block_activate },
+    .{ .obj_type = "Goto", .kind = .goto_point },
+    .{ .obj_type = "RandomPOIGoto", .kind = .goto_point },
+    .{ .obj_type = "ClosestPOIGoto", .kind = .goto_point },
+    .{ .obj_type = "RandomGoto", .kind = .goto_point },
+};
+
+/// Resolve an objective `type=` attribute to an executable phase kind.
+/// `table` is the catalog's merged mapping (config rows first, then the
+/// builtin defaults); the stock `Goto`/`RandomGoto` `id="trader"` special case
+/// is a hardcoded game fact and wins; an unknown type degrades to `.auto`
+/// scaffolding (fail-closed: the phase auto-completes rather than deadlocking
+/// the quest — see phaseIsScaffolding).
+pub fn kindForObjective(table: []const ObjectiveKindMap, obj_type: []const u8, obj_id: ?[]const u8) PhaseKind {
+    if (obj_id) |id| {
+        if ((std.mem.eql(u8, obj_type, "Goto") or std.mem.eql(u8, obj_type, "RandomGoto")) and
+            std.mem.eql(u8, id, "trader")) return .trader_interact;
+    }
+    for (table) |m| {
+        if (std.mem.eql(u8, m.obj_type, obj_type)) return m.kind;
+    }
+    return .auto;
+}
+
 /// Advancing objective kind driving a single quest phase.
 /// Mirrors the stock BaseObjective family collapsed to what the sim can execute.
 /// `rally` waits for the client's rally-marker activation, but only when the
@@ -167,6 +224,10 @@ pub const Catalog = struct {
     source: CatalogSource = .builtin,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     source_path: []const u8 = "",
+    /// Objective `type=` -> phase-kind mapping, config rows first (zdtd.toml /
+    /// mode pack `[quests] objective_kinds`) then the builtin stock defaults.
+    /// parseCatalog replaces the default with the merged table.
+    objective_kinds: []const ObjectiveKindMap = builtin_objective_kinds[0..],
 
     pub fn builtin() Catalog {
         return .{

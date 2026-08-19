@@ -36,69 +36,29 @@ fn dupe(arena: std.mem.Allocator, s: []const u8) ![]const u8 {
     return arena.dupe(u8, s);
 }
 
-fn classifyObjective(obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind {
-    if (std.mem.eql(u8, obj_type, "ClearSleepers")) return .kill_zombies;
-    if (std.mem.eql(u8, obj_type, "FetchKeep")) return .fetch_item;
-    if (std.mem.eql(u8, obj_type, "FetchFromContainer")) return .fetch_item;
-    if (std.mem.eql(u8, obj_type, "FetchFromTreasure")) return .fetch_item;
-    if (std.mem.eql(u8, obj_type, "TreasureChest")) return .fetch_item;
-    if (std.mem.eql(u8, obj_type, "InteractWithNPC")) return .fetch_trader;
-    if (std.mem.eql(u8, obj_type, "ReturnToNPC")) return .fetch_trader;
-    if (std.mem.eql(u8, obj_type, "Craft") or
-        std.mem.eql(u8, obj_type, "CraftItem") or
-        std.mem.eql(u8, obj_type, "Recipe")) return .craft;
-    if (std.mem.eql(u8, obj_type, "StayWithin") or
-        std.mem.eql(u8, obj_type, "StayWithinArea") or
-        std.mem.eql(u8, obj_type, "POIStayWithin")) return .stay_within;
-    if (std.mem.eql(u8, obj_type, "POIBlockActivate") or
-        std.mem.eql(u8, obj_type, "BlockActivate")) return .block_activate;
-    if (std.mem.eql(u8, obj_type, "Goto") or
-        std.mem.eql(u8, obj_type, "RandomPOIGoto") or
-        std.mem.eql(u8, obj_type, "ClosestPOIGoto") or
-        std.mem.eql(u8, obj_type, "RandomGotoNPC"))
-    {
-        if (obj_id) |id| {
-            if (std.mem.eql(u8, id, "trader")) return .fetch_trader;
-        }
-        return .goto_point;
-    }
-    return null;
+/// Map the phase kind of the quest's PRIMARY (highest-scored) objective to the
+/// legacy QuestKind used by phase-less defs and the wire. Unknown/rally primary
+/// objectives have no legacy kind (the caller falls back to goto_point).
+fn classifyObjective(table: []const quest.ObjectiveKindMap, obj_type: []const u8, obj_id: ?[]const u8) ?quest.QuestKind {
+    return switch (quest.kindForObjective(table, obj_type, obj_id)) {
+        .kill_zombies => .kill_zombies,
+        .goto_point => .goto_point,
+        .fetch_item => .fetch_item,
+        .trader_interact => .fetch_trader,
+        .craft => .craft,
+        .stay_within => .stay_within,
+        .block_activate => .block_activate,
+        .auto, .rally => null,
+    };
 }
 
-/// Map a stock objective type -> executable phase kind (see docs/GAP_ANALYSIS.md
-/// for the objective types that still collapse to `.auto`).
-fn classifyPhaseKind(obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind {
-    // ObjectiveRallyPoint (asm.il 1391077 resolves type="RallyPoint" by prefix).
-    if (std.mem.eql(u8, obj_type, "RallyPoint")) return .rally;
-    if (std.mem.eql(u8, obj_type, "ClearSleepers") or
-        std.mem.eql(u8, obj_type, "EntityKill") or
-        std.mem.eql(u8, obj_type, "AnimalKill")) return .kill_zombies;
-    if (std.mem.eql(u8, obj_type, "FetchKeep") or
-        std.mem.eql(u8, obj_type, "FetchFromContainer") or
-        std.mem.eql(u8, obj_type, "FetchFromTreasure") or
-        std.mem.eql(u8, obj_type, "TreasureChest")) return .fetch_item;
-    if (std.mem.eql(u8, obj_type, "InteractWithNPC") or
-        std.mem.eql(u8, obj_type, "ReturnToNPC") or
-        std.mem.eql(u8, obj_type, "RandomGotoNPC")) return .trader_interact;
-    if (std.mem.eql(u8, obj_type, "Craft") or
-        std.mem.eql(u8, obj_type, "CraftItem") or
-        std.mem.eql(u8, obj_type, "Recipe")) return .craft;
-    if (std.mem.eql(u8, obj_type, "StayWithin") or
-        std.mem.eql(u8, obj_type, "StayWithinArea") or
-        std.mem.eql(u8, obj_type, "POIStayWithin")) return .stay_within;
-    if (std.mem.eql(u8, obj_type, "POIBlockActivate") or
-        std.mem.eql(u8, obj_type, "BlockActivate")) return .block_activate;
-    if (std.mem.eql(u8, obj_type, "Goto") or
-        std.mem.eql(u8, obj_type, "RandomPOIGoto") or
-        std.mem.eql(u8, obj_type, "ClosestPOIGoto") or
-        std.mem.eql(u8, obj_type, "RandomGoto"))
-    {
-        if (obj_id) |id| {
-            if (std.mem.eql(u8, id, "trader")) return .trader_interact;
-        }
-        return .goto_point;
-    }
-    return .auto;
+/// Map a stock objective type -> executable phase kind (see
+/// docs/GAP_ANALYSIS.md for the objective types that still collapse to `.auto`).
+/// Data-driven: the catalog's `objective_kinds` table (config overrides +
+/// builtin stock defaults) decides, so a new stock `type=` needs a config row,
+/// not a code change. The `Goto id="trader"` special case is a stock fact.
+fn classifyPhaseKind(table: []const quest.ObjectiveKindMap, obj_type: []const u8, obj_id: ?[]const u8) quest.PhaseKind {
+    return quest.kindForObjective(table, obj_type, obj_id);
 }
 
 /// Extent (exclusive end) of the `<objective …>` element starting at `oi`.
@@ -156,7 +116,7 @@ fn objectiveScore(typ: []const u8, oid: ?[]const u8) i32 {
 }
 
 /// Prefer the "meat" objective over rally/stay/return scaffolding.
-fn pickPrimaryKind(body: []const u8) struct { kind: quest.QuestKind, target: u16 } {
+fn pickPrimaryKind(body: []const u8, kinds: []const quest.ObjectiveKindMap) struct { kind: quest.QuestKind, target: u16 } {
     var best_kind: quest.QuestKind = .goto_point;
     var best_score: i32 = -1;
     var best_target: u16 = 1;
@@ -172,7 +132,7 @@ fn pickPrimaryKind(body: []const u8) struct { kind: quest.QuestKind, target: u16
         // Same value/count/item_count target rule as buildPhaseGraph.
         const local_target = objectiveTarget(body, oi, objectiveElementEnd(body, oi));
 
-        const kind = classifyObjective(typ, oid) orelse {
+        const kind = classifyObjective(kinds, typ, oid) orelse {
             i = oi + 10;
             continue;
         };
@@ -199,7 +159,7 @@ const PhaseGraph = struct {
 /// QuestClass.HighestPhase (max objective `phase`) and per-phase advancing
 /// objective (Quest.refreshQuestCompletion). `tier` drives the kill-count boost
 /// for kill objectives with no explicit count.
-fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseGraph {
+fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: []const quest.ObjectiveKindMap) !PhaseGraph {
     const ObjInfo = struct {
         phase: u8,
         kind: quest.PhaseKind,
@@ -223,7 +183,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
         const typ = xml.attr(body, oi, "type") orelse continue;
         const oid = xml.attr(body, oi, "id");
         const phase = objectivePhase(body, oi, elem_end);
-        const kind = classifyPhaseKind(typ, oid);
+        const kind = classifyPhaseKind(kinds, typ, oid);
         var target = objectiveTarget(body, oi, elem_end);
         if (kind == .kill_zombies and target <= 1) target = @as(u16, 3) + @as(u16, tier) * 2;
         // Goto / StayWithin: the objective value is a float distance in metres
@@ -311,6 +271,7 @@ fn parseQuestDefBody(
     tag_category: ?[]const u8,
     body: []const u8,
     numeric_id: u16,
+    kinds: []const quest.ObjectiveKindMap,
 ) !?quest.QuestDef {
     const name_key = xml.propertyValue(body, "name_key") orelse tag_name_key;
     const title_src = name_key orelse qid;
@@ -322,7 +283,7 @@ fn parseQuestDefBody(
     const cat = xml.propertyValue(body, "category_key") orelse
         tag_category orelse "quest";
 
-    const primary = pickPrimaryKind(body);
+    const primary = pickPrimaryKind(body, kinds);
     var target = primary.target;
     // Kill objectives without an explicit count (stock ClearSleepers always
     // omits count: the target is the POI's sleeper volume, which stock counts
@@ -358,7 +319,7 @@ fn parseQuestDefBody(
     var action_specs: [quest.max_actions]quest.QuestActionSpec = [_]quest.QuestActionSpec{.{}} ** quest.max_actions;
     const act_count = parseActions(arena, body, &action_specs);
 
-    const graph = try buildPhaseGraph(arena, body, tier);
+    const graph = try buildPhaseGraph(arena, body, tier, kinds);
 
     return .{
         .id = numeric_id,
@@ -550,8 +511,49 @@ fn resolveDifficultyTier(body: []const u8, vars: []const QuestVar) u8 {
     return 0;
 }
 
+/// Runtime PhaseKind lookup by tag name (case-sensitive; the binder's enum
+/// path is comptime-only, so this is a small inline scan).
+fn phaseKindFromName(name: []const u8) ?quest.PhaseKind {
+    inline for (std.meta.fields(quest.PhaseKind)) |f| {
+        if (std.mem.eql(u8, name, f.name)) return @enumFromInt(f.value);
+    }
+    return null;
+}
+
+/// Parse the `[quests] objective_kinds` spec into an arena table with the
+/// builtin stock defaults appended: `"Type=Kind, Type2=Kind2"` where Kind is a
+/// PhaseKind tag name. Config rows are scanned first (they win on a matching
+/// type — ADR 0021 precedence); a new stock objective type needs a config row,
+/// not a code change. Malformed rows are logged and skipped.
+fn parseObjectiveKinds(arena: std.mem.Allocator, spec: ?[]const u8) ![]const quest.ObjectiveKindMap {
+    const s = spec orelse "";
+    var tmp: std.ArrayList(quest.ObjectiveKindMap) = .empty;
+    defer tmp.deinit(arena);
+    var i: usize = 0;
+    while (i < s.len) {
+        while (i < s.len and (s[i] == ' ' or s[i] == '\t' or s[i] == ',')) i += 1;
+        if (i >= s.len) break;
+        const eq = std.mem.indexOfScalarPos(u8, s, i, '=') orelse break;
+        const typ = std.mem.trim(u8, s[i..eq], " \t");
+        const end = std.mem.indexOfScalarPos(u8, s, eq + 1, ',') orelse s.len;
+        const kind_str = std.mem.trim(u8, s[eq + 1 .. end], " \t");
+        if (phaseKindFromName(kind_str)) |k| {
+            if (typ.len > 0) try tmp.append(arena, .{ .obj_type = try dupe(arena, typ), .kind = k });
+        } else {
+            std.debug.print("zdtd: quests objective_kinds: unknown kind '{s}' for '{s}'; skipped\n", .{ kind_str, typ });
+        }
+        i = end;
+    }
+    const out = try arena.alloc(quest.ObjectiveKindMap, tmp.items.len + quest.builtin_objective_kinds.len);
+    @memcpy(out[0..tmp.items.len], tmp.items);
+    @memcpy(out[tmp.items.len..], &quest.builtin_objective_kinds);
+    return out;
+}
+
 /// Parse catalog from quests.xml bytes (comments optional; stripped first).
-pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Catalog {
+/// `objective_kinds_spec` is the `[quests] objective_kinds` override string
+/// (null/empty = builtin stock mapping only).
+pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, objective_kinds_spec: ?[]const u8) !quest.Catalog {
     const clean = try xml.stripComments(allocator, xml_src);
     defer allocator.free(clean);
 
@@ -561,6 +563,9 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
         allocator.destroy(arena_holder);
     }
     const arena = arena_holder.allocator();
+
+    // Objective type -> phase kind mapping (config rows first, builtin after).
+    const kinds = try parseObjectiveKinds(arena, objective_kinds_spec);
 
     var starter_name: []const u8 = try dupe(arena, "quest_whiteRiverCitizen1");
     var max_tier: u8 = 6;
@@ -676,6 +681,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
             xml.attr(clean, qi, "category_key"),
             eff_body,
             next_id,
+            kinds,
         )) |def| {
             try defs_tmp.append(allocator, def);
             next_id +%= 1;
@@ -746,16 +752,17 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8) !quest.Ca
         .starter_name = starter_name,
         .max_tier = max_tier,
         .quests_per_tier = qpt,
+        .objective_kinds = kinds,
         .source = .stock_xml,
         .arena_ptr = arena_holder,
         .source_path = "",
     };
 }
 
-pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !quest.Catalog {
+pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, objective_kinds_spec: ?[]const u8) !quest.Catalog {
     const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
-    var cat = try parseCatalog(allocator, raw);
+    var cat = try parseCatalog(allocator, raw, objective_kinds_spec);
     errdefer cat.deinit();
     if (cat.arena_ptr) |ap| {
         cat.source_path = try ap.allocator().dupe(u8, path);
@@ -771,13 +778,14 @@ pub fn tryLoad(
     map_dir: ?[]const u8,
     config_dir: ?[]const u8,
     quests_path: ?[]const u8,
+    objective_kinds_spec: ?[]const u8,
 ) !?quest.Catalog {
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     // Parse/I/O failures must not look like "quests absent" (callers catch null).
     const loadLogged = struct {
-        fn call(alloc: std.mem.Allocator, p: []const u8) !?quest.Catalog {
-            return loadFromPath(alloc, p) catch |err| {
+        fn call(alloc: std.mem.Allocator, p: []const u8, spec: ?[]const u8) !?quest.Catalog {
+            return loadFromPath(alloc, p, spec) catch |err| {
                 std.debug.print(
                     "zdtd: load quests.xml failed: {s} ({s})\n",
                     .{ @errorName(err), p },
@@ -788,7 +796,7 @@ pub fn tryLoad(
     }.call;
     if (quests_path) |p| {
         if (!io_fs.fileExists(p)) return error.OpenFailed;
-        if (paths.override_dirs.len == 0) return loadLogged(allocator, p);
+        if (paths.override_dirs.len == 0) return loadLogged(allocator, p, objective_kinds_spec);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
@@ -798,7 +806,7 @@ pub fn tryLoad(
         {
             try io_fs.writeFile(cp, merged);
         }
-        return loadLogged(allocator, cp);
+        return loadLogged(allocator, cp, objective_kinds_spec);
     }
     if (paths.override_dirs.len > 0) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
@@ -808,20 +816,20 @@ pub fn tryLoad(
             {
                 try io_fs.writeFile(cp, merged);
             }
-            return loadLogged(allocator, cp);
+            return loadLogged(allocator, cp, objective_kinds_spec);
         }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);
-        if (io_fs.fileExists(p)) return loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
     }
     if (game_dir) |gd| {
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/quests.xml", .{gd});
-        if (io_fs.fileExists(p)) return loadLogged(allocator, p);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
     }
     if (map_dir) |md| {
         if (configPathFromMapDir(md, &path_buf)) |p| {
-            if (io_fs.fileExists(p)) return loadLogged(allocator, p);
+            if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
         }
     }
     return null;
@@ -864,7 +872,7 @@ test "parse fixture catalog" {
         \\  </quest_list>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     try std.testing.expectEqual(@as(usize, 3), cat.defs.len);
     try std.testing.expectEqualStrings("quest_starter", cat.starter_name);
@@ -909,7 +917,7 @@ test "rally point objective becomes a rally phase without stealing one" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const d = cat.byName("tier1_rally").?;
     try std.testing.expectEqual(@as(u8, 3), d.highest_phase);
@@ -923,7 +931,7 @@ test "rally point objective becomes a rally phase without stealing one" {
 test "load stock quests.xml when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
     if (!io_fs.fileExists(path)) return;
-    var cat = try loadFromPath(std.testing.allocator, path);
+    var cat = try loadFromPath(std.testing.allocator, path, null);
     defer cat.deinit();
     try std.testing.expect(cat.defs.len > 50);
     try std.testing.expectEqualStrings("quest_whiteRiverCitizen1", cat.starter_name);
@@ -945,7 +953,7 @@ test "quest template inheritance fills derived quests" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const b = cat.byName("tpl_base").?;
     try std.testing.expect(b.objective_count >= 1);
@@ -966,7 +974,7 @@ test "objective write kinds follow objective type" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const d = cat.byName("mixed").?;
     try std.testing.expectEqual(@as(usize, 3), d.objective_kinds.len);
@@ -988,12 +996,47 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const pay = cat.byName("payday").?;
     try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
     const free = cat.byName("freebie").?;
     try std.testing.expectEqual(@as(u32, 0), free.reward_coin);
+}
+
+test "objective-kinds mapping is data-driven (config spec overrides builtin)" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="q_unknown"><objective type="QuestItem" value="1"/></quest>
+        \\  <quest id="q_goto"><objective type="Goto" value="5"/></quest>
+        \\  <quest id="q_goto_trader"><objective type="Goto" id="trader" value="5"/></quest>
+        \\</quests>
+    ;
+    // No config: an unmapped stock type is .auto scaffolding (fail-closed),
+    // Goto maps to goto_point, and the id="trader" special case still wins.
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    defer cat.deinit();
+    try std.testing.expectEqual(quest.PhaseKind.auto, cat.byName("q_unknown").?.phases[0].kind);
+    try std.testing.expectEqual(quest.PhaseKind.goto_point, cat.byName("q_goto").?.phases[0].kind);
+    try std.testing.expectEqual(quest.PhaseKind.trader_interact, cat.byName("q_goto_trader").?.phases[0].kind);
+
+    // A config row maps a NEW stock type without any code change.
+    var cat2 = try parseCatalog(std.testing.allocator, fixture, "QuestItem=craft");
+    defer cat2.deinit();
+    try std.testing.expectEqual(quest.PhaseKind.craft, cat2.byName("q_unknown").?.phases[0].kind);
+
+    // Config rows override the builtin defaults (same precedence as rules);
+    // the hardcoded id="trader" game fact still beats the override.
+    var cat3 = try parseCatalog(std.testing.allocator, fixture, "Goto=block_activate, QuestItem=kill_zombies");
+    defer cat3.deinit();
+    try std.testing.expectEqual(quest.PhaseKind.block_activate, cat3.byName("q_goto").?.phases[0].kind);
+    try std.testing.expectEqual(quest.PhaseKind.kill_zombies, cat3.byName("q_unknown").?.phases[0].kind);
+    try std.testing.expectEqual(quest.PhaseKind.trader_interact, cat3.byName("q_goto_trader").?.phases[0].kind);
+
+    // Malformed rows are skipped, not fatal.
+    var cat4 = try parseCatalog(std.testing.allocator, fixture, "BogusKind=x,  =craft");
+    defer cat4.deinit();
+    try std.testing.expectEqual(quest.PhaseKind.auto, cat4.byName("q_unknown").?.phases[0].kind);
 }
 
 test "rewards parse kinds, item names and values in document order" {
@@ -1007,7 +1050,7 @@ test "rewards parse kinds, item names and values in document order" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const d = cat.byName("rich").?;
     try std.testing.expectEqual(@as(u8, 4), d.reward_n);
@@ -1029,7 +1072,7 @@ test "rewards parse kinds, item names and values in document order" {
 test "stock quests.xml template quests parse non-empty" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
     if (!io_fs.fileExists(path)) return;
-    var cat = try loadFromPath(std.testing.allocator, path);
+    var cat = try loadFromPath(std.testing.allocator, path, null);
     defer cat.deinit();
     // 67 stock quests use template=; the derived challenge rewards must carry
     // the template's objectives instead of parsing as empty defs.
@@ -1076,7 +1119,7 @@ test "quest actions parse types, phases and properties" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     const d = cat.byName("poi_quest").?;
     try std.testing.expectEqual(@as(u8, 3), d.action_n);
@@ -1109,7 +1152,7 @@ test "difficulty_tier resolves through template variable overrides" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture);
+    var cat = try parseCatalog(std.testing.allocator, fixture, null);
     defer cat.deinit();
     try std.testing.expectEqual(@as(u8, 1), cat.byName("tier1_fetch").?.difficulty_tier);
     try std.testing.expectEqual(@as(u8, 2), cat.byName("tier2_fetch").?.difficulty_tier);

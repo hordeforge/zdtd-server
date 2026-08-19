@@ -141,6 +141,9 @@ pub const InitOptions = struct {
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
     quests_path: ?[]const u8 = null,
+    /// `[quests] objective_kinds` override ("Type=PhaseKind, ..."); empty =
+    /// builtin stock mapping only. Loaded into the quest catalog at init.
+    quest_objective_kinds: []const u8 = "",
     view_radius: i32 = default_view_radius,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;

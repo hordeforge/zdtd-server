@@ -491,18 +491,20 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/assets/quests.zig` parseCatalog pre-scan + resolveBody,
   `Data/Config/quests.xml`
 
-- **Objective type to executable phase kind mapping** `PARTIAL`
-  Executes RallyPoint, ClearSleepers, EntityKill, AnimalKill, FetchKeep,
-  FetchFromContainer, FetchFromTreasure, TreasureChest, InteractWithNPC,
-  ReturnToNPC, RandomGotoNPC, Craft, CraftItem, Recipe, StayWithin,
-  StayWithinArea, Goto, RandomPOIGoto, ClosestPOIGoto, RandomGoto. Unmapped:
-  `POIStayWithin` (13 uses, the real spelling that the exact-match on
-  `StayWithin` misses) and `POIBlockActivate` (2 uses), plus the whole rest of the
-  `BaseObjective` family. Measured mitigation: 0 of 77 phases in the 26 real
-  graphs are `.auto`, because `POIStayWithin` always shares a phase with a
-  higher-scoring objective.
-  *Anchors:* `src/assets/quests.zig:70`, `:86`, `:131`,
-  `asm.il:1391050-1391068`, `asm.il:959583-983229`
+- **Objective type to executable phase kind mapping** `WORKS`
+  Data-driven since 2026-08-19: the mapping is the catalog's
+  `objective_kinds` table — `[quests] objective_kinds = "Type=PhaseKind, ..."`
+  in zdtd.toml / a mode pack (config rows win, then the builtin stock
+  defaults) — so a NEW stock objective type is a config row, not a code
+  change (scenario `objective-kinds mapping is data-driven`). The builtin
+  table covers all 16 stock types incl. `POIStayWithin` and
+  `POIBlockActivate`; unmapped types degrade to `.auto` scaffolding
+  (fail-closed: the phase auto-completes rather than deadlocking). The
+  `Goto id="trader"` special case is a hardcoded game fact and beats the
+  table. Measured: 0 of 77 phases in the 26 real graphs are `.auto`.
+  *Anchors:* `src/ecs/quest.zig` builtin_objective_kinds + kindForObjective,
+  `src/assets/quests.zig` parseObjectiveKinds, `src/server/zdtd_config.zig`
+  `[quests]`
 
 - **Requirement elements and quest_criteria / offer_criteria** `PARTIAL (waived)`
   Not parsed; shipped `quests.xml` contains 0 of each, so no player-visible

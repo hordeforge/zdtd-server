@@ -91,6 +91,9 @@ pub const Pack = struct {
     /// Sim rule overlay (ADR 0021 decision 3): `[rules.combat]` etc. merged
     /// into World.rules by main.zig before the zdtd.toml overlay.
     rules: rules_mod.RulesOverlay = .{},
+    /// Quest data policy: `[quests] objective_kinds` (mode-pack tier of the
+    /// objective-type -> phase-kind mapping; zdtd.toml wins over the pack).
+    quests: @import("zdtd_config.zig").Quests = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Pack) void {

@@ -684,6 +684,16 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
     if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
     init_opts.rules = rules_eff;
+    // Effective quest objective-kind mapping: mode pack < zdtd.toml (same
+    // precedence as rules); empty = builtin stock mapping.
+    var qkinds_eff: []const u8 = "";
+    if (mode_owned) |*mp| {
+        if (mp.quests.objective_kinds.len > 0) qkinds_eff = mp.quests.objective_kinds;
+    }
+    if (toml_owned) |*tf| {
+        if (tf.quests.objective_kinds.len > 0) qkinds_eff = tf.quests.objective_kinds;
+    }
+    init_opts.quest_objective_kinds = qkinds_eff;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
     zdtd_config.sanitizeInitOptions(&init_opts);
 
