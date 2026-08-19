@@ -159,7 +159,7 @@ const PhaseGraph = struct {
 /// QuestClass.HighestPhase (max objective `phase`) and per-phase advancing
 /// objective (Quest.refreshQuestCompletion). `tier` drives the kill-count boost
 /// for kill objectives with no explicit count.
-fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: []const quest.ObjectiveKindMap) !PhaseGraph {
+fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: []const quest.ObjectiveKindMap, policy: quest.QuestPolicy) !PhaseGraph {
     const ObjInfo = struct {
         phase: u8,
         kind: quest.PhaseKind,
@@ -185,7 +185,11 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         const phase = objectivePhase(body, oi, elem_end);
         const kind = classifyPhaseKind(kinds, typ, oid);
         var target = objectiveTarget(body, oi, elem_end);
-        if (kind == .kill_zombies and target <= 1) target = @as(u16, 3) + @as(u16, tier) * 2;
+        // Kill objective with no explicit count: the `[quests]` policy drives
+        // the default (ADR 0021; stock quests always ship a value, this is the
+        // fallback for modded/absent ones).
+        if (kind == .kill_zombies and target <= 1)
+            target = @as(u16, policy.default_kill_count) + @as(u16, tier) * @as(u16, policy.kill_per_tier);
         // Goto / StayWithin: the objective value is a float distance in metres
         // (stock ObjectiveGoto::distance, asm.il 966955-966966), not a count.
         // A goto/stay phase completes on arrival inside that radius, so the
@@ -272,6 +276,7 @@ fn parseQuestDefBody(
     body: []const u8,
     numeric_id: u16,
     kinds: []const quest.ObjectiveKindMap,
+    policy: quest.QuestPolicy,
 ) !?quest.QuestDef {
     const name_key = xml.propertyValue(body, "name_key") orelse tag_name_key;
     const title_src = name_key orelse qid;
@@ -288,10 +293,11 @@ fn parseQuestDefBody(
     // Kill objectives without an explicit count (stock ClearSleepers always
     // omits count: the target is the POI's sleeper volume, which stock counts
     // at runtime via QuestEvent_SleepersCleared, asm ObjectiveClearSleepers
-    // IL). zdtd approximates with a tier-scaled floor until the kill objective
-    // is driven by the bound POI's sleeper volume (audit B25).
+    // IL). zdtd approximates with the `[quests]` policy floor (ADR 0021) until
+    // the kill objective is driven by the bound POI's sleeper volume (audit
+    // B25). Provenance: PROVENANCE.md §3.7.
     if (primary.kind == .kill_zombies and target <= 1) {
-        target = @as(u16, 3) + @as(u16, tier) * 2;
+        target = @as(u16, policy.default_kill_count) + @as(u16, tier) * @as(u16, policy.kill_per_tier);
     }
 
     // Dukes: stock grants them as casinoCoin Item rewards (no Coin reward type
@@ -319,7 +325,7 @@ fn parseQuestDefBody(
     var action_specs: [quest.max_actions]quest.QuestActionSpec = [_]quest.QuestActionSpec{.{}} ** quest.max_actions;
     const act_count = parseActions(arena, body, &action_specs);
 
-    const graph = try buildPhaseGraph(arena, body, tier, kinds);
+    const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);
 
     return .{
         .id = numeric_id,
@@ -551,9 +557,9 @@ fn parseObjectiveKinds(arena: std.mem.Allocator, spec: ?[]const u8) ![]const que
 }
 
 /// Parse catalog from quests.xml bytes (comments optional; stripped first).
-/// `objective_kinds_spec` is the `[quests] objective_kinds` override string
-/// (null/empty = builtin stock mapping only).
-pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, objective_kinds_spec: ?[]const u8) !quest.Catalog {
+/// `policy` carries the `[quests]` tunables (objective-kind spec + the
+/// kill-count / goto / stay defaults; `QuestPolicy{}` = builtin stock values).
+pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, policy: quest.QuestPolicy) !quest.Catalog {
     const clean = try xml.stripComments(allocator, xml_src);
     defer allocator.free(clean);
 
@@ -565,7 +571,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, objective
     const arena = arena_holder.allocator();
 
     // Objective type -> phase kind mapping (config rows first, builtin after).
-    const kinds = try parseObjectiveKinds(arena, objective_kinds_spec);
+    const kinds = try parseObjectiveKinds(arena, policy.objective_kinds);
 
     var starter_name: []const u8 = try dupe(arena, "quest_whiteRiverCitizen1");
     var max_tier: u8 = 6;
@@ -682,6 +688,7 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, objective
             eff_body,
             next_id,
             kinds,
+            policy,
         )) |def| {
             try defs_tmp.append(allocator, def);
             next_id +%= 1;
@@ -753,16 +760,17 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, objective
         .max_tier = max_tier,
         .quests_per_tier = qpt,
         .objective_kinds = kinds,
+        .policy = policy,
         .source = .stock_xml,
         .arena_ptr = arena_holder,
         .source_path = "",
     };
 }
 
-pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, objective_kinds_spec: ?[]const u8) !quest.Catalog {
+pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, policy: quest.QuestPolicy) !quest.Catalog {
     const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
-    var cat = try parseCatalog(allocator, raw, objective_kinds_spec);
+    var cat = try parseCatalog(allocator, raw, policy);
     errdefer cat.deinit();
     if (cat.arena_ptr) |ap| {
         cat.source_path = try ap.allocator().dupe(u8, path);
@@ -778,14 +786,14 @@ pub fn tryLoad(
     map_dir: ?[]const u8,
     config_dir: ?[]const u8,
     quests_path: ?[]const u8,
-    objective_kinds_spec: ?[]const u8,
+    policy: quest.QuestPolicy,
 ) !?quest.Catalog {
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     // Parse/I/O failures must not look like "quests absent" (callers catch null).
     const loadLogged = struct {
-        fn call(alloc: std.mem.Allocator, p: []const u8, spec: ?[]const u8) !?quest.Catalog {
-            return loadFromPath(alloc, p, spec) catch |err| {
+        fn call(alloc: std.mem.Allocator, p: []const u8, pol: quest.QuestPolicy) !?quest.Catalog {
+            return loadFromPath(alloc, p, pol) catch |err| {
                 std.debug.print(
                     "zdtd: load quests.xml failed: {s} ({s})\n",
                     .{ @errorName(err), p },
@@ -796,7 +804,7 @@ pub fn tryLoad(
     }.call;
     if (quests_path) |p| {
         if (!io_fs.fileExists(p)) return error.OpenFailed;
-        if (paths.override_dirs.len == 0) return loadLogged(allocator, p, objective_kinds_spec);
+        if (paths.override_dirs.len == 0) return loadLogged(allocator, p, policy);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
@@ -806,7 +814,7 @@ pub fn tryLoad(
         {
             try io_fs.writeFile(cp, merged);
         }
-        return loadLogged(allocator, cp, objective_kinds_spec);
+        return loadLogged(allocator, cp, policy);
     }
     if (paths.override_dirs.len > 0) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
@@ -816,20 +824,20 @@ pub fn tryLoad(
             {
                 try io_fs.writeFile(cp, merged);
             }
-            return loadLogged(allocator, cp, objective_kinds_spec);
+            return loadLogged(allocator, cp, policy);
         }
     }
     if (config_dir) |cd| {
         const p = try questsXmlPath(cd, &path_buf);
-        if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p, policy);
     }
     if (game_dir) |gd| {
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Config/quests.xml", .{gd});
-        if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
+        if (io_fs.fileExists(p)) return loadLogged(allocator, p, policy);
     }
     if (map_dir) |md| {
         if (configPathFromMapDir(md, &path_buf)) |p| {
-            if (io_fs.fileExists(p)) return loadLogged(allocator, p, objective_kinds_spec);
+            if (io_fs.fileExists(p)) return loadLogged(allocator, p, policy);
         }
     }
     return null;
@@ -872,7 +880,7 @@ test "parse fixture catalog" {
         \\  </quest_list>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     try std.testing.expectEqual(@as(usize, 3), cat.defs.len);
     try std.testing.expectEqualStrings("quest_starter", cat.starter_name);
@@ -917,7 +925,7 @@ test "rally point objective becomes a rally phase without stealing one" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("tier1_rally").?;
     try std.testing.expectEqual(@as(u8, 3), d.highest_phase);
@@ -931,7 +939,7 @@ test "rally point objective becomes a rally phase without stealing one" {
 test "load stock quests.xml when present" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
     if (!io_fs.fileExists(path)) return;
-    var cat = try loadFromPath(std.testing.allocator, path, null);
+    var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();
     try std.testing.expect(cat.defs.len > 50);
     try std.testing.expectEqualStrings("quest_whiteRiverCitizen1", cat.starter_name);
@@ -953,7 +961,7 @@ test "quest template inheritance fills derived quests" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const b = cat.byName("tpl_base").?;
     try std.testing.expect(b.objective_count >= 1);
@@ -974,7 +982,7 @@ test "objective write kinds follow objective type" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("mixed").?;
     try std.testing.expectEqual(@as(usize, 3), d.objective_kinds.len);
@@ -996,7 +1004,7 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const pay = cat.byName("payday").?;
     try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
@@ -1014,29 +1022,51 @@ test "objective-kinds mapping is data-driven (config spec overrides builtin)" {
     ;
     // No config: an unmapped stock type is .auto scaffolding (fail-closed),
     // Goto maps to goto_point, and the id="trader" special case still wins.
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     try std.testing.expectEqual(quest.PhaseKind.auto, cat.byName("q_unknown").?.phases[0].kind);
     try std.testing.expectEqual(quest.PhaseKind.goto_point, cat.byName("q_goto").?.phases[0].kind);
     try std.testing.expectEqual(quest.PhaseKind.trader_interact, cat.byName("q_goto_trader").?.phases[0].kind);
 
     // A config row maps a NEW stock type without any code change.
-    var cat2 = try parseCatalog(std.testing.allocator, fixture, "QuestItem=craft");
+    var cat2 = try parseCatalog(std.testing.allocator, fixture, .{ .objective_kinds = "QuestItem=craft" });
     defer cat2.deinit();
     try std.testing.expectEqual(quest.PhaseKind.craft, cat2.byName("q_unknown").?.phases[0].kind);
 
     // Config rows override the builtin defaults (same precedence as rules);
     // the hardcoded id="trader" game fact still beats the override.
-    var cat3 = try parseCatalog(std.testing.allocator, fixture, "Goto=block_activate, QuestItem=kill_zombies");
+    var cat3 = try parseCatalog(std.testing.allocator, fixture, .{ .objective_kinds = "Goto=block_activate, QuestItem=kill_zombies" });
     defer cat3.deinit();
     try std.testing.expectEqual(quest.PhaseKind.block_activate, cat3.byName("q_goto").?.phases[0].kind);
     try std.testing.expectEqual(quest.PhaseKind.kill_zombies, cat3.byName("q_unknown").?.phases[0].kind);
     try std.testing.expectEqual(quest.PhaseKind.trader_interact, cat3.byName("q_goto_trader").?.phases[0].kind);
 
     // Malformed rows are skipped, not fatal.
-    var cat4 = try parseCatalog(std.testing.allocator, fixture, "BogusKind=x,  =craft");
+    var cat4 = try parseCatalog(std.testing.allocator, fixture, .{ .objective_kinds = "BogusKind=x,  =craft" });
     defer cat4.deinit();
     try std.testing.expectEqual(quest.PhaseKind.auto, cat4.byName("q_unknown").?.phases[0].kind);
+}
+
+test "quest policy tunables drive kill defaults at parse (ADR 0021)" {
+    const fixture =
+        \\<quests>
+        \\  <quest id="q_kill"><objective type="ClearSleepers" phase="1"/></quest>
+        \\  <quest id="q_kill_t1">
+        \\    <property name="difficulty_tier" value="1"/>
+        \\    <objective type="ClearSleepers" phase="1"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    // No explicit kill count: the `[quests]` policy fills the floor.
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{ .default_kill_count = 5, .kill_per_tier = 1 });
+    defer cat.deinit();
+    try std.testing.expectEqual(@as(u16, 5), cat.byName("q_kill").?.phases[0].required); // tier 0
+    try std.testing.expectEqual(@as(u16, 6), cat.byName("q_kill_t1").?.phases[0].required); // 5 + 1*1
+    // The builtin defaults stay when the policy is empty.
+    var cat2 = try parseCatalog(std.testing.allocator, fixture, .{});
+    defer cat2.deinit();
+    try std.testing.expectEqual(@as(u16, 3), cat2.byName("q_kill").?.phases[0].required);
+    try std.testing.expectEqual(@as(u16, 5), cat2.byName("q_kill_t1").?.phases[0].required); // 3 + 2*1
 }
 
 test "rewards parse kinds, item names and values in document order" {
@@ -1050,7 +1080,7 @@ test "rewards parse kinds, item names and values in document order" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("rich").?;
     try std.testing.expectEqual(@as(u8, 4), d.reward_n);
@@ -1072,7 +1102,7 @@ test "rewards parse kinds, item names and values in document order" {
 test "stock quests.xml template quests parse non-empty" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
     if (!io_fs.fileExists(path)) return;
-    var cat = try loadFromPath(std.testing.allocator, path, null);
+    var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();
     // 67 stock quests use template=; the derived challenge rewards must carry
     // the template's objectives instead of parsing as empty defs.
@@ -1119,7 +1149,7 @@ test "quest actions parse types, phases and properties" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("poi_quest").?;
     try std.testing.expectEqual(@as(u8, 3), d.action_n);
@@ -1152,7 +1182,7 @@ test "difficulty_tier resolves through template variable overrides" {
         \\  </quest>
         \\</quests>
     ;
-    var cat = try parseCatalog(std.testing.allocator, fixture, null);
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     try std.testing.expectEqual(@as(u8, 1), cat.byName("tier1_fetch").?.difficulty_tier);
     try std.testing.expectEqual(@as(u8, 2), cat.byName("tier2_fetch").?.difficulty_tier);

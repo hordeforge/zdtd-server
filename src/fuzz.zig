@@ -1031,7 +1031,7 @@ fn fuzzQuestCatalog(_: void, smith: *std.testing.Smith) !void {
     @disableInstrumentation();
     var storage: [8192]u8 = undefined;
     const len: usize = smith.slice(&storage);
-    var cat = quests_xml.parseCatalog(std.testing.allocator, storage[0..len], null) catch return;
+    var cat = quests_xml.parseCatalog(std.testing.allocator, storage[0..len], .{}) catch return;
     defer cat.deinit();
     // Arena-owned slices must stay within catalog lifetime; just bound counts.
     try std.testing.expect(cat.defs.len < 100_000);

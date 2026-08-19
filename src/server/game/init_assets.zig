@@ -50,7 +50,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     if (opts.config_overrides.len > 0) {
         util_log.info("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
     }
-    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, if (opts.quest_objective_kinds.len > 0) opts.quest_objective_kinds else null) catch |err| blk: {
+    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, opts.quest_policy) catch |err| blk: {
         util_log.err("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |cat| {

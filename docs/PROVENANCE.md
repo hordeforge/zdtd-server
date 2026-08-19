@@ -86,7 +86,7 @@ Coverage targets, all enforced by the scan:
 | `src/assets/painting.zig` | A | painting.xml: paint id (0–255) ↔ TextureId for chunk face paint |
 | `src/assets/paths.zig` | A | Resolve Data/Config XML paths, optional override patch dirs, generic tryLoad |
 | `src/assets/progression.zig` | A | progression.xml: level curve + attribute/perk catalog (names, max levels, costs). Full perk requirement graphs / effect application is progressive; ca |
-| `src/assets/quests.zig` | A | Load stock `Data/Config/quests.xml` into a playable Quest catalog. |
+| `src/assets/quests.zig` | A | Load stock `Data/Config/quests.xml` into a playable Quest catalog. Also parses the `[quests]` objective-kind spec + policy defaults (ADR 0021) into the catalog's `objective_kinds` / `policy` |
 | `src/assets/recipes.zig` | A | recipes.xml loader: craft outputs + ingredients for server craft queue |
 | `src/assets/root.zig` | A | Stock game config asset loaders (quests, blocks, items, …). |
 | `src/assets/signs.zig` | A | Prefab sign libraries (*_signs.xml under Data/Prefabs) for NetPackageSignDataResponse. Catalog data only; the wire encode lives in wire/stock_sign.zig |
@@ -115,7 +115,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/poi_lock.zig` | R | Quest POI lockout table: the server half of QuestEventManager's PrefabInstance.lockInstance (QuestLockInstance, asm.il 1001892-1002045) |
 | `src/ecs/powerblocks.zig` | R | Stock electrical block registry from blocks.xml Class + AssignIds. NodeKind mapping is RE (PowerItemTypes); names/ids/watts/fuel come from game data |
 | `src/ecs/query.zig` | Z | Dense SoA iteration helpers. No allocation; O(capacity) scans |
-| `src/ecs/quest.zig` | R | Quest catalog (shared resource) + definition types. Runtime journal/wallet live as SoA components; mutations are in systems.zig |
+| `src/ecs/quest.zig` | R | Quest catalog (shared resource) + definition types. Runtime journal/wallet live as SoA components; mutations are in systems.zig. Carries `builtin_objective_kinds` (stock objective-type mapping, §3.7) and `QuestPolicy` (zdtd-owned kill/radius defaults, §3.7) |
 | `src/ecs/root.zig` | Z | ECS package root: SoA world, components, systems, resources. |
 | `src/ecs/rules.zig` | R | Sim rule parameters (ADR 0021 decision 2): a game mode is mostly these numbers. Carried on `World.rules` (read as `w.rules.<group>.<field>`), set |
 | `src/ecs/schedule.zig` | Z | Explicit sim pipeline phases. Ordered only; parallel stays inside a phase (systemZombieAi / systemTurrets via util/parallel). No access-set scheduler |
@@ -346,6 +346,11 @@ field-by-field provenance.
 | `world/weather.zig blood_moon_storm_push` | 5000 | R | Blood-moon storm push ticks (RE: weather-environment.md storm state machine) |
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` | 32 / 16 / 8 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables) |
+| `ecs/quest.zig builtin_objective_kinds` | 23 rows | A | The stock objective `type=` family (RallyPoint, ClearSleepers, EntityKill, AnimalKill, Fetch\*, TreasureChest, InteractWithNPC, ReturnToNPC, RandomGotoNPC, Craft\*, StayWithin\*, POIStayWithin, \*BlockActivate, Goto\*) -> executable PhaseKind, mirrored from stock BaseObjective; overridable/extendable via `[quests] objective_kinds` (assets/quests.zig parseObjectiveKinds) so a new stock type is config, not code (ADR 0021). `Goto id="trader"` special case is a hardcoded game fact |
+| `ecs/quest.zig QuestPolicy` default_kill_count / kill_per_tier | 3 / 2 | Z | **zdtd-owned** approximation for kill objectives with no explicit count (stock ClearSleepers counts the POI sleeper volume at runtime, audit B25); phase target = `default + tier*kill_per_tier`. Config: `[quests]` |
+| `ecs/quest.zig QuestPolicy` goto_radius / stay_radius | 4.0 / 8.0 | Z | **zdtd-owned** fallbacks when an objective omits its distance (stock ObjectiveGoto::distance parsed from `value` wins when present). Config: `[quests]` |
+| `game.zig isStockClientQuestName` prefix gate | quest_/tier/intro_/test_/challengegroup_reward_/treasure_ | A | Stock client quest-name families (client catalog proxy; a stock_xml catalog passes by construction, audit B28) — code gate, not tunable |
+| `assets/quests.zig objectiveScore` | 10..100 | Z | Phase "meat" pick heuristic for shared phases (ClearSleepers 100 .. unknown 10) — not a stock table; only affects which objective drives a phase when several share it |
 | `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
 | `game/sleeper.zig` sleeper spawn | no global cap | Z | **Diverges**: stock `SleeperVolume.UpdateSpawn` gates every restore on `AIDirector.CanSpawn(2.1f)` = `EnemyCount < MaxSpawnedZombies * 2.1` (spawning.md, live-verified 2026-08-11); zdtd's sleeper spawn bypasses the cap (the volume count is group/255-capped only). Wake/stage radius is a fixed 100 m (`sleeper_party_radius`) vs stock volume-box + party stage |
 | `ecs/systems.zig traderRestock` | day-based | Z | **Simplifies**: stock `TraderManager` restocks on a tick-based `ResetIntervalInTicks` with a boundary snap (loot-economy.md 3); zdtd restocks on a day counter (-1 never, 0 daily, N>0 every N days) |

@@ -141,9 +141,10 @@ pub const InitOptions = struct {
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
     quests_path: ?[]const u8 = null,
-    /// `[quests] objective_kinds` override ("Type=PhaseKind, ..."); empty =
-    /// builtin stock mapping only. Loaded into the quest catalog at init.
-    quest_objective_kinds: []const u8 = "",
+    /// `[quests]` policy (ADR 0021): objective-kind spec + kill-count / goto /
+    /// stay defaults, merged from mode pack < zdtd.toml by main.zig. Loaded
+    /// into the quest catalog at init; `{}` = builtin stock values.
+    quest_policy: @import("../../ecs/quest.zig").QuestPolicy = .{},
     view_radius: i32 = default_view_radius,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;

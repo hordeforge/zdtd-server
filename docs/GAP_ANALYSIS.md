@@ -745,7 +745,10 @@ not a sleeper-volume clear), not completion blockers.
   (treasure digs) and a container-loot hook (FetchFromContainer), and the old
   "every zombie kill also advances fetch" hack is gone; goto/stay-within use
   the objective's parsed distance in metres (`PhaseSpec.radius`, stock
-  `ObjectiveGoto::distance`) instead of a hardcoded 4 m / `max(8, required)`.
+  `ObjectiveGoto::distance`) instead of a hardcoded 4 m / `max(8, required)`,
+  and the `[quests]` policy (QuestPolicy) configures the kill-count default
+  (`default_kill_count + tier * kill_per_tier`) and the goto/stay radius
+  fallbacks (ADR 0021; provenance PROVENANCE.md §3.7).
   ClearSleepers is an N-kills-anywhere counter rather than "clear this POI's
   sleeper volume" (the stock `QuestEvent_SleepersCleared` suppression of
   sleeper re-arm is the open part).

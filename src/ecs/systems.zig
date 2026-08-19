@@ -569,12 +569,12 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
             if (d.phases.len > 0) {
                 const spec = currentPhaseSpec(d, s) orelse continue;
                 if (spec.kind != .stay_within) continue;
-                // The objective's parsed distance in metres wins; the legacy
-                // `max(8, required)` fallback stays for unset phases.
-                break :blk if (spec.radius > 0) spec.radius else @max(8, @as(f32, @floatFromInt(spec.required)));
+                // The objective's parsed distance in metres wins; the
+                // `[quests]` policy stay_radius is the fallback (ADR 0021).
+                break :blk if (spec.radius > 0) spec.radius else @max(w.catalog.policy.stay_radius, @as(f32, @floatFromInt(spec.required)));
             }
             if (d.kind != .stay_within) continue;
-            break :blk @max(8, @as(f32, @floatFromInt(d.target_count)));
+            break :blk @max(w.catalog.policy.stay_radius, @as(f32, @floatFromInt(d.target_count)));
         };
         // POIStayWithin bounds the zone to the quest's POI rect (bound at
         // accept via nearestPoi): the player must be inside the building's
@@ -619,8 +619,9 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
             const spec = currentPhaseSpec(d, s) orelse continue;
             if (spec.kind != .goto_point) continue;
             // Arrival radius: the objective's parsed distance in metres (stock
-            // ObjectiveGoto::distance); unset phases use the 4 m sim default.
-            const radius: f32 = if (spec.radius > 0) spec.radius else 4.0;
+            // ObjectiveGoto::distance); the `[quests]` policy goto_radius is
+            // the fallback (ADR 0021).
+            const radius: f32 = if (spec.radius > 0) spec.radius else w.catalog.policy.goto_radius;
             const dx = px - gx;
             const dz = pz - gz;
             if (dx * dx + dz * dz < radius * radius) bumpPhase(w, ps, s, d, .goto_point, spec.required);
@@ -630,7 +631,8 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
         if (d.kind != .goto_point and !(d.kind == .fetch_trader and s.phase == 1)) continue;
         const dx = px - gx;
         const dz = pz - gz;
-        if (dx * dx + dz * dz < 16.0) {
+        const r_legacy = w.catalog.policy.goto_radius;
+        if (dx * dx + dz * dz < r_legacy * r_legacy) {
             if (d.kind == .fetch_trader and d.objective_count >= 2) {
                 s.phase = 2;
                 s.progress = 0;
@@ -3296,6 +3298,51 @@ test "goto quest binds the nearest real POI instead of an invented spot" {
     questTickGoto(&w, 0, 120, 70, 220);
     try std.testing.expect(!questHasActive(&w, 0, 40));
     try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
+}
+
+test "goto/stay default radii come from catalog.policy (ADR 0021)" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .goto_point, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 42,
+        .kind = .goto_point,
+        .name = "gr",
+        .title = "GR",
+        .tx = 10,
+        .ty = 70,
+        .tz = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+    }};
+    // Policy radius 12 m (no poi_fn: the goto target is the def spot 10,10).
+    w.catalog = .{ .defs = &defs, .starter_id = 42, .policy = .{ .goto_radius = 12 } };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 42));
+    // 11 m from (10,10): inside the 12 m policy radius -> completes; the
+    // builtin 4 m default would not have.
+    questTickGoto(&w, 0, 10, 70, -1);
+    try std.testing.expect(!questHasActive(&w, 0, 42));
+
+    // stay_within: the policy radius is the floor when no distance is parsed.
+    const stay_phases = [_]quest.PhaseSpec{.{ .kind = .stay_within, .required = 1 }};
+    const stay_defs = [_]quest.QuestDef{.{
+        .id = 43,
+        .kind = .stay_within,
+        .name = "sw",
+        .title = "SW",
+        .tx = 0,
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 1,
+        .phases = &stay_phases,
+        .highest_phase = 1,
+    }};
+    w.catalog = .{ .defs = &stay_defs, .starter_id = 43, .policy = .{ .stay_radius = 12 } };
+    try std.testing.expect(questAccept(&w, 0, 43));
+    questTickStayWithin(&w, 0, 10, 0); // 10 m from the target: inside 12 m
+    try std.testing.expect(!questHasActive(&w, 0, 43));
 }
 
 test "fetch_trader goto target stays the def spot, not a covering POI center" {

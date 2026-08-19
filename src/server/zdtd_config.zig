@@ -134,9 +134,14 @@ pub const AuthorityModeName = enum {
 
 /// `[quests]` config section (binder-native scalar fields only). The
 /// objective-type mapping rides as a comma-separated `Type=PhaseKind` string
-/// because the binder is scalar-only; assets/quests.zig parses it.
+/// because the binder is scalar-only; assets/quests.zig parses it. Optional
+/// numerics so main.zig can merge mode pack < zdtd.toml per field.
 pub const Quests = struct {
     objective_kinds: []const u8 = "",
+    default_kill_count: ?u8 = null,
+    kill_per_tier: ?u8 = null,
+    goto_radius: ?f32 = null,
+    stay_radius: ?f32 = null,
 };
 
 pub const File = struct {
@@ -537,12 +542,20 @@ test "parse [quests] objective_kinds section" {
     var f = try parse(std.testing.allocator,
         \\[quests]
         \\objective_kinds = "QuestItem=craft, NewKill=kill_zombies"
+        \\default_kill_count = 5
+        \\kill_per_tier = 1
+        \\goto_radius = 10.0
+        \\stay_radius = 12.0
     );
     defer f.deinit();
     try std.testing.expectEqualStrings(
         "QuestItem=craft, NewKill=kill_zombies",
         f.quests.objective_kinds,
     );
+    try std.testing.expectEqual(@as(?u8, 5), f.quests.default_kill_count);
+    try std.testing.expectEqual(@as(?u8, 1), f.quests.kill_per_tier);
+    try std.testing.expectEqual(@as(?f32, 10.0), f.quests.goto_radius);
+    try std.testing.expectEqual(@as(?f32, 12.0), f.quests.stay_radius);
 }
 
 /// Mirror of the server init-options shape the merge helpers write into.

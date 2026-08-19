@@ -684,16 +684,24 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
     if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
     init_opts.rules = rules_eff;
-    // Effective quest objective-kind mapping: mode pack < zdtd.toml (same
-    // precedence as rules); empty = builtin stock mapping.
-    var qkinds_eff: []const u8 = "";
+    // Effective quest policy: mode pack < zdtd.toml (same precedence as
+    // rules); defaults = builtin stock values (QuestPolicy{}).
+    var qpol: ecs_mod.quest.QuestPolicy = .{};
     if (mode_owned) |*mp| {
-        if (mp.quests.objective_kinds.len > 0) qkinds_eff = mp.quests.objective_kinds;
+        if (mp.quests.objective_kinds.len > 0) qpol.objective_kinds = mp.quests.objective_kinds;
+        if (mp.quests.default_kill_count) |v| qpol.default_kill_count = v;
+        if (mp.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
+        if (mp.quests.goto_radius) |v| qpol.goto_radius = v;
+        if (mp.quests.stay_radius) |v| qpol.stay_radius = v;
     }
     if (toml_owned) |*tf| {
-        if (tf.quests.objective_kinds.len > 0) qkinds_eff = tf.quests.objective_kinds;
+        if (tf.quests.objective_kinds.len > 0) qpol.objective_kinds = tf.quests.objective_kinds;
+        if (tf.quests.default_kill_count) |v| qpol.default_kill_count = v;
+        if (tf.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
+        if (tf.quests.goto_radius) |v| qpol.goto_radius = v;
+        if (tf.quests.stay_radius) |v| qpol.stay_radius = v;
     }
-    init_opts.quest_objective_kinds = qkinds_eff;
+    init_opts.quest_policy = qpol;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
     zdtd_config.sanitizeInitOptions(&init_opts);
 

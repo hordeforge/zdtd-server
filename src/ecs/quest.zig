@@ -19,11 +19,32 @@ pub const QuestKind = enum(u8) {
 /// Max phases per quest (stock CurrentPhase is uint8; real quests stay well under this).
 pub const max_phases: usize = 32;
 
-/// One objective-type -> executable phase-kind mapping. The mapping is
-/// game-data policy (ADR 0021: config, not parse arms), so when the game ships
-/// a new objective `type=` the operator adds a row in `[quests] objective_kinds`
-/// (zdtd.toml or a mode pack) — no code change. `obj_type` is the stock
-/// `type=` attribute verbatim.
+/// Quest sim-policy tunables (ADR 0021: server policy is config, not parse
+/// arms). Defaults for objectives whose XML omits a count/distance; the
+/// effective values come from `[quests]` (mode pack < zdtd.toml, merged in
+/// main.zig) and ride on the catalog (`w.catalog.policy`). Provenance:
+/// PROVENANCE.md §3.7 (the kill-count tier formula and radii defaults are
+/// zdtd-owned; stock objective `value`s always win when present).
+pub const QuestPolicy = struct {
+    /// `[quests] objective_kinds` spec ("Type=PhaseKind, ..."); null/empty =
+    /// builtin stock mapping only.
+    objective_kinds: ?[]const u8 = null,
+    /// Base kill count for a kill objective with no explicit `value`
+    /// (ClearSleepers/EntityKill without one). Phase target =
+    /// `default_kill_count + tier * kill_per_tier`.
+    default_kill_count: u8 = 3,
+    kill_per_tier: u8 = 2,
+    /// Arrival radius fallback (metres) for a goto phase whose objective has
+    /// no `value` distance (stock ObjectiveGoto::distance).
+    goto_radius: f32 = 4.0,
+    /// Stay radius fallback for a stay-within phase/objective with no parsed
+    /// distance (`max(stay_radius, required)` keeps the legacy behaviour).
+    stay_radius: f32 = 8.0,
+};
+
+/// Objective `type=` -> phase-kind mapping, config rows first (zdtd.toml /
+/// mode pack `[quests] objective_kinds`) then the builtin stock defaults.
+/// parseCatalog replaces the default with the merged table.
 pub const ObjectiveKindMap = struct {
     obj_type: []const u8,
     kind: PhaseKind,
@@ -228,6 +249,9 @@ pub const Catalog = struct {
     /// mode pack `[quests] objective_kinds`) then the builtin stock defaults.
     /// parseCatalog replaces the default with the merged table.
     objective_kinds: []const ObjectiveKindMap = builtin_objective_kinds[0..],
+    /// Effective quest sim-policy tunables (ADR 0021): kill-count defaults,
+    /// goto/stay radius fallbacks — merged from `[quests]` by main.zig.
+    policy: QuestPolicy = .{},
 
     pub fn builtin() Catalog {
         return .{
