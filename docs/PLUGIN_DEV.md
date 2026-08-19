@@ -135,6 +135,39 @@ These are enforced by the runtime, not by convention.
 5. **Sim hooks run on the tick thread, in a documented order.** Two servers with
    the same plugins and the same inputs step identically. Do not expect threads.
 
+## What belongs in a plugin (and what must stay native)
+
+**Principle (AGENTS.md rule 29):** anything that is discretionary behavior or
+server policy ships as a Wasm plugin by default. Prove the native exception.
+This is the general form of the bot rule (ADR 0026): a bot is a plugin because
+its brain is behavior, not server.
+
+**Belongs in a plugin (behavior / policy):**
+
+- Bots and bot brains (`mods/zdtd_bot` is the reference implementation).
+- Chat commands, filters, and moderation reactions (the `on_chat` hook and
+  `queue`).
+- Announcements, kill-feeds, scoreboards, stat hooks (the `on_player_death` /
+  `on_entity_killed` / `on_quest_complete` verdict hooks).
+- Custom game rules expressed as verdicts (deny a kill, alter quest rewards,
+  react to block damage).
+- Admin automation and operator tooling (`on_admin_command`).
+- Event-driven integrations (webhook-style observers, logging).
+
+**Must stay native Zig (the server itself):** wire encode/decode and package
+building, LiteNet framing, interest/replication and the chunk stream, ECS
+authority (inventory, blocks, quests, trading), world store and persistence,
+config loading (`serverconfig.xml` / `zdtd.toml`), the plugin runtime itself,
+and APM instrumentation. These run on the 20 TPS hot path, and the plugin
+boundary is deliberately narrow: plugins never touch wire bytes or sim memory
+directly, they only see `sense` snapshots, `query` answers, and the verbs
+`queue` accepts. A feature that must emit wire or mutate sim state directly is
+native by construction; a feature that *decides* about such things is a plugin.
+
+**When adding a feature, default to a plugin.** If it cannot be expressed over
+`sense`/`queue`/`query` + the hooks, either extend the boundary deliberately
+(an ADR-worthy decision) or document why the native placement is required.
+
 ## Data across the boundary
 
 Everything crosses as flat bytes in your module's linear memory. The host copies
