@@ -292,6 +292,13 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   from its current threat, heads there (re-querying every ~0.4 s) and holds,
   breaking LOS instead of backpedaling in the open. With no cover available it
   falls back to the plain backpedal/circle.
+- **Ammo pacing (Q3 bots managed ammo).** Each weapon has a magazine and a
+  reload time (`weapon_mag`/`weapon_reload`, matching clanker
+  `WeaponProfile.MagSize/ReloadSec`): every trigger pull consumes a round
+  whether it hits or misses, and an empty magazine starts a reload during
+  which the bot holds fire (and keeps strafing / seeking cover). Purely
+  guest-side pacing — the host applies damage per accepted `bot shoot` and
+  never sees a magazine.
 - **Weapon-aware tactics (clanker `WeaponProfile` parity).** The host picks
   each bot's loadout at spawn and exposes it via the kind-4 bot-info sense
   record; the brain adapts: *engagement range* follows the weapon

@@ -24,6 +24,9 @@
 //     backpedal                                (WeaponProfile parity)
 //   - cover-seeking retreat: a retreating bot asks `zdtd.query` for a point
 //     not visible from the threat and holds there                  (FindCover)
+//   - ammo pacing: per-weapon magazines and reload pauses — an empty mag
+//     starts a reload during which the bot holds fire and keeps strafing
+//                                                      (Q3 bots managed ammo)
 // Improvements this guest already carried that clanker borrowed back:
 //   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
 //
@@ -325,7 +328,15 @@ static int   bot_weapon_id[MAX_BOTS];
 static float bot_cover_x[MAX_BOTS];
 static float bot_cover_z[MAX_BOTS];
 static int   bot_cover_cd[MAX_BOTS];
+// Ammo / reload pacing (Q3 bots managed ammo). Purely guest-side: rounds left
+// in the magazine and ticks of the current reload; the host never sees ammo.
+static int   bot_ammo[MAX_BOTS];
+static int   bot_reload_ticks[MAX_BOTS];
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
+
+// (forward; bodies with the other weapon tables below — bot_init reads them)
+static int weapon_mag(int w);
+static float weapon_reload(int w);
 
 static void bot_init(void) {
   int i;
@@ -371,6 +382,8 @@ static void bot_init(void) {
     bot_cover_x[i] = 0.f;
     bot_cover_z[i] = 0.f;
     bot_cover_cd[i] = 0;
+    bot_ammo[i] = weapon_mag(0);   // pistol until the first info record lands
+    bot_reload_ticks[i] = 0;
   }
   bot_count_static = 0;
 }
@@ -408,6 +421,31 @@ static float weapon_lead(int w) {
     case 5: return 0.6f; // smg
     case 0: return 0.8f; // pistol
     default: return 1.f; // ak / sniper
+  }
+}
+// Magazine size and reload seconds by weapon (Q3 bots managed ammo; a visible
+// reload pause makes fights feel real — cross-pollinated to clanker
+// WeaponProfile MagSize/ReloadSec). The guest tracks per-bot ammo purely as
+// pacing: the host applies damage per accepted `bot shoot` and never sees a
+// magazine, so a bot "clicking empty" simply stops ordering shots.
+static int weapon_mag(int w) {
+  switch (w) {
+    case 3: return 5;   // sniper
+    case 1: return 6;   // shotgun shells
+    case 0: return 12;  // pistol
+    case 2: return 30;  // ak
+    case 5: return 32;  // smg
+    default: return 40; // auto
+  }
+}
+static float weapon_reload(int w) {
+  switch (w) {
+    case 0: return 1.2f; // pistol
+    case 5: return 1.8f; // smg
+    case 2: return 2.0f; // ak
+    case 4: return 2.2f; // auto
+    case 1: return 2.6f; // shotgun
+    default: return 2.5f; // sniper
   }
 }
 
@@ -465,6 +503,8 @@ static int rec_kind_alive(int i);
 static int st(char *b, int cap, const char *s);
 static int eq(char *s, int slen, const char *w, int wlen);
 static long strtol_impl(const char *s);
+static int weapon_mag(int w);
+static float weapon_reload(int w);
 
 // Build and queue "bot move id x y z speed".
 static void queue_move(int id, float x, float y, float z, float speed) {
@@ -619,7 +659,8 @@ static void brain_tick(void) {
 
   // Weapon map: kind-4 bot-info records pair each bot's net id with its
   // host-assigned loadout (BOTS_SPEC §3); the per-bot loop adapts
-  // range/burst/lead to it (clanker WeaponProfile parity).
+  // range/burst/lead to it (clanker WeaponProfile parity). A weapon change
+  // (including the first record after spawn) re-seats the magazine.
   {
     int ei;
     for (ei = 0; ei < sense_ev(); ++ei) {
@@ -627,7 +668,11 @@ static void brain_tick(void) {
       const int wid_net = s32(EV_OFF(ei) + 4);
       const int wid = s8(EV_OFF(ei) + 1);
       const int s3 = bot_find(wid_net);
-      if (s3 >= 0) bot_weapon_id[s3] = wid;
+      if (s3 >= 0 && bot_weapon_id[s3] != wid) {
+        bot_weapon_id[s3] = wid;
+        bot_ammo[s3] = weapon_mag(wid);
+        bot_reload_ticks[s3] = 0;
+      }
     }
   }
 
@@ -663,6 +708,8 @@ static void brain_tick(void) {
       bot_grudge_ticks[bslot] = 0;
       // Per-bot personality defaults (skill + net id; deterministic).
       pers_apply_default(bslot, bot_skill[bslot], net);
+      bot_ammo[bslot] = weapon_mag(0); // pistol until the info record lands
+      bot_reload_ticks[bslot] = 0;
     }
     const int skill = bot_skill[bslot];
     // Per-bot `bot cfg` overrides win over the skill-derived defaults. The
@@ -1024,23 +1071,42 @@ static void brain_tick(void) {
       // skill/distance hit roll and a skill-scaled headshot roll — low-skill
       // bots miss a lot, high-skill bots land burst damage. The host applies
       // damage per `bot shoot`.
+      //
+      // Ammo pacing (Q3 bots managed ammo): every trigger pull consumes a
+      // round whether it hits or misses; an empty magazine starts a reload
+      // (weapon_reload seconds) during which the bot holds fire and keeps
+      // strafing. Purely guest-side — the host never sees ammo.
       if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
-        const int burst = weapon_burst(w);
-        int k;
-        for (k = 0; k < burst; ++k) {
-          const float hc = skill_hit_chance(skill, dist, net);
-          if (rng_f01(&bot_rng[bslot]) < hc) {
-            if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
-              queue_shoot_head(net, target_net);
-            } else {
-              queue_shoot(net, target_net);
+        if (bot_reload_ticks[bslot] > 0) {
+          // Reloading: hold fire (movement continues via the branch above).
+        } else if (bot_ammo[bslot] <= 0) {
+          bot_reload_ticks[bslot] = (int)(weapon_reload(w) / TICK_DT);
+        } else {
+          const int burst = weapon_burst(w);
+          int k;
+          for (k = 0; k < burst; ++k) {
+            if (bot_ammo[bslot] <= 0) break; // empty mid-burst: reload next window
+            bot_ammo[bslot]--;
+            const float hc = skill_hit_chance(skill, dist, net);
+            if (rng_f01(&bot_rng[bslot]) < hc) {
+              if (rng_f01(&bot_rng[bslot]) < skill_headshot(skill)) {
+                queue_shoot_head(net, target_net);
+              } else {
+                queue_shoot(net, target_net);
+              }
             }
           }
+          // Burst pause: snipers re-chamber slowly, SMGs/autos cycle fast, the
+          // rest land on the skill cadence.
+          bot_throttle[bslot] = (w == 3) ? 0.6f
+                            : (w >= 4 ? 0.2f : 0.25f + 0.2f * (float)(skill % 2));
         }
-        // Burst pause: snipers re-chamber slowly, SMGs/autos cycle fast, the
-        // rest land on the skill cadence.
-        bot_throttle[bslot] = (w == 3) ? 0.6f
-                          : (w >= 4 ? 0.2f : 0.25f + 0.2f * (float)(skill % 2));
+      }
+      // Reload progress ticks down every engaged tick; on completion the
+      // magazine is re-seated (firing resumes at the next fire window).
+      if (bot_reload_ticks[bslot] > 0) {
+        bot_reload_ticks[bslot]--;
+        if (bot_reload_ticks[bslot] == 0) bot_ammo[bslot] = weapon_mag(w);
       }
     } else {
       // Chase toward the target's current ground position (lead is for aim).
@@ -1090,7 +1156,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v2.4 enabled");
+  e("zdtd_bot v2.5 enabled");
   flush(1);
 }
 

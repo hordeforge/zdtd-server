@@ -1105,6 +1105,36 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(l2 != null);
     try std.testing.expect(std.mem.indexOf(u8, l2.?, "target=2000") != null); // grudge holds the player
 
+    // Ammo/reload phase: the trailer gives bot 1000 a SNIPER (weapon_id 3,
+    // mag 5, burst 1, ~0.6 s between shots). Firing must run the mag dry and
+    // then hold fire through a reload gap (weapon_reload 2.5 s = 50 ticks)
+    // before resuming — proving ammo pacing end-to-end (BOTS_SPEC §5.1).
+    var shoot_ticks: [64]usize = undefined;
+    var shoot_n: usize = 0;
+    var t: usize = 0;
+    while (t < 200 and shoot_n < shoot_ticks.len) : (t += 1) {
+        Cap.queued_n = 0;
+        host.onTick();
+        for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
+            const s = c[0..Cap.queued_len[qi]];
+            if (std.mem.startsWith(u8, s, "bot shoot ")) {
+                if (shoot_n < shoot_ticks.len) shoot_ticks[shoot_n] = t;
+                shoot_n += 1;
+            }
+        }
+    }
+    // At least two shots (before AND after the reload).
+    try std.testing.expect(shoot_n >= 2);
+    // The reload window: a gap of at least ~2 s between shots (throttle alone
+    // is ~0.6 s; the 2.5 s reload is the only way to see a 45+ tick gap).
+    var max_gap: usize = 0;
+    var gi: usize = 1;
+    while (gi < shoot_n) : (gi += 1) {
+        const gap = shoot_ticks[gi] - shoot_ticks[gi - 1];
+        if (gap > max_gap) max_gap = gap;
+    }
+    try std.testing.expect(max_gap >= 45);
+
     // No module exhausted fuel or trapped through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
