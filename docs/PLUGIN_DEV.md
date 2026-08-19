@@ -168,6 +168,16 @@ native by construction; a feature that *decides* about such things is a plugin.
 `sense`/`queue`/`query` + the hooks, either extend the boundary deliberately
 (an ADR-worthy decision) or document why the native placement is required.
 
+**Reference modules shipped in this repo (production plugins, committed
+`.wasm`):**
+
+- `mods/zdtd_bot/zdtd_bot.wasm` — the bot brain (ADR 0026): sense → decide →
+  `bot <verb>` commands; the flagship plugin.
+- `mods/zdtd_killfeed/zdtd_killfeed.wasm` — a minimal event observer: logs
+  kills, player deaths and quest completions via the verdict hooks and keeps
+  every outcome (0). Use it as the template for announcements, kill-feeds,
+  scoreboards and integrations.
+
 ## Data across the boundary
 
 Everything crosses as flat bytes in your module's linear memory. The host copies

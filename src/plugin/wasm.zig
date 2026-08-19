@@ -821,6 +821,34 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
+test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
+    // The reference event-observer plugin (AGENTS.md rule 29, Wasm-first):
+    // loaded from the committed module, its verdict hooks must always keep
+    // (0) and the module must never trap/disable — a pure observer is a
+    // zero-risk addition (docs/PLUGIN_DEV.md "What belongs in a plugin").
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_killfeed/zdtd_killfeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_death)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_entity_killed)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_complete)]);
+    // Observer: keep every outcome (0), never deny/adjust.
+    try std.testing.expectEqual(@as(i32, 0), host.playerDeath(7));
+    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(8, 1));
+    try std.testing.expectEqual(@as(i32, 0), host.questComplete(9, 2));
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
 test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
     // Loads the real committed bot brain and drives it through the host sense
     // import with a canned snapshot, proving the end-to-end sense→brain→queue
