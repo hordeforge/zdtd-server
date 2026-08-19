@@ -601,6 +601,12 @@ pub const Game = struct {
         // AI path move probe: destination footing, or blocked.
         self.sim.step_ctx = self;
         self.sim.step_fn = &pathStepAt;
+        // Zombie AI bot targets (ADR 0026): bots are not ECS entities, so the
+        // AI reaches them through these Game-side hooks (snap + melee damage).
+        self.sim.bot_snap_ctx = self;
+        self.sim.bot_snap_fn = &botSnapAt;
+        self.sim.bot_damage_ctx = self;
+        self.sim.bot_damage_fn = &botDamageAt;
         self.sim.place_ctx = self;
         self.sim.place_fn = &placeBlockId;
         self.sim.fuel_value_ctx = self;
@@ -737,6 +743,17 @@ pub const Game = struct {
 
     pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
         return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz);
+    }
+
+    /// Zombie AI bot snap (ADR 0026): exact bot by net id, or nearest within
+    /// `range_sq` of (zx, zz). See game/hooks.zig for the BotManager scan.
+    pub fn botSnapAt(ctx: ?*anyopaque, zx: f32, zz: f32, range_sq: f32, exact: i32) ecs.BotSnap {
+        return game_hooks.botSnapAt(ctx, zx, zz, range_sq, exact);
+    }
+
+    /// Zombie melee on a host-side bot (ADR 0026); attributed via BotManager.
+    pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool {
+        return game_hooks.botDamageAt(ctx, bot_net, attacker_net, amount);
     }
 
     fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {

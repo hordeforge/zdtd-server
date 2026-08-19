@@ -82,6 +82,36 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zz: f3
     return .{ .id = best_id, .slot = best_slot, .d2 = best_d, .px = px, .pz = pz };
 }
 
+/// A target snap whose `slot` is the sentinel `max_entities` is a host-side
+/// bot (ADR 0026): bots are not ECS entities, so the zombie AI reaches them
+/// through the World's `bot_snap_fn` / `bot_damage_fn` hooks instead of a slot.
+fn targetExternal(np: TargetSnap) bool {
+    return np.slot >= max_entities;
+}
+
+/// Resolve a target net id to a live ECS slot, or to a live host-side bot via
+/// the bot hook (ADR 0026). Aggro-persistence gates use this so a bot target
+/// keeps the chase alive exactly like an ECS entity target.
+fn targetLive(w: *const World, net_id: i32) bool {
+    if (net_id < 0) return false;
+    if (w.slotOfNetId(net_id) != null) return true;
+    const f = w.bot_snap_fn orelse return false;
+    const b = f(w.bot_snap_ctx, 0, 0, 0, net_id);
+    return b.net_id == net_id;
+}
+
+/// Nearest live bot within `range_sq` of (zx, zz), or an empty snap (id -1).
+/// `exact >= 0` resolves that one net id instead (any range — revenge); the
+/// World's `bot_snap_fn` (Game side, BotManager) answers both. A null hook
+/// means no bots exist. Read-only against the BotManager, which is quiescent
+/// during the parallel AI pass (bots integrate after it in the tick).
+fn nearestBotSnap(w: *const World, zx: f32, zz: f32, range_sq: f32, exact: i32) TargetSnap {
+    const f = w.bot_snap_fn orelse return .{ .id = -1, .slot = max_entities, .d2 = 0, .px = zx, .pz = zz };
+    const b = f(w.bot_snap_ctx, zx, zz, range_sq, exact);
+    if (b.net_id < 0) return .{ .id = -1, .slot = max_entities, .d2 = 0, .px = zx, .pz = zz };
+    return .{ .id = b.net_id, .slot = max_entities, .d2 = b.d2, .px = b.x, .pz = b.z };
+}
+
 /// EAISetAsTargetIfHurt (asm.il:435831; CanExecute ends :436139, Start ends
 /// :436169) reduced to a target-selection override. Stock runs it as the head of
 /// the AITarget list, which resolves before the AITask list every tick; zdtd
@@ -101,9 +131,19 @@ fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s:
         return np;
     }
     const ts = w.slotOfNetId(ai.revenge_target) orelse {
-        ai.revenge_target = -1;
-        ai.revenge_time = 0;
-        return np;
+        // Host-side bot attacker (ADR 0026): bots are not ECS slots, so the
+        // revenge target resolves through the bot hook instead of dropping it.
+        // Stock's SetAttackTarget bypasses the sense check for the whole
+        // window, so a bot that shot the zombie is hunted regardless of range.
+        const bs = nearestBotSnap(w, w.transform[s].x, w.transform[s].z, 0, ai.revenge_target);
+        if (bs.id != ai.revenge_target) {
+            ai.revenge_target = -1;
+            ai.revenge_time = 0;
+            return np;
+        }
+        ai.alert = true;
+        ai.target_id = ai.revenge_target;
+        return bs;
     };
     if (!w.alive[ts] or !w.mask[ts].transform) {
         ai.revenge_target = -1;
@@ -837,7 +877,7 @@ fn isBestTask(self: Task, executing: c.TaskId) bool {
 /// (coarse `alert` flag only). Continue() defaults to CanExecute (asm.il:424569).
 fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     if (np_id >= 0 and np_d2 < sense_d2) return true;
-    return ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null;
+    return ai.alert and ai.target_id >= 0 and targetLive(w, ai.target_id);
 }
 
 /// EAIApproachSpot::CanExecute (asm.il:424093): director/AI set a spot to walk to.
@@ -859,7 +899,7 @@ fn approachDistractionCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: 
     // GetAttackTarget()!=null → false (asm.il CanExecute IL_001E-002E), and the
     // persistent aggro branch (alert + live target) counts as one too.
     const has_target = (np_id >= 0 and np_d2 < sense_d2) or
-        (ai.alert and ai.target_id >= 0 and w.slotOfNetId(ai.target_id) != null);
+        (ai.alert and ai.target_id >= 0 and targetLive(w, ai.target_id));
     if (has_target) return false;
     return true;
 }
@@ -1002,7 +1042,14 @@ const AiCtx = struct {
 
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            const np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
+            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
+            // Host-side bot as a secondary target (ADR 0026): with no player
+            // sensed (and no revenge latched), a zombie senses the nearest
+            // live bot within its own sight range and chases it. Bots are not
+            // ECS entities; the Game-side bot hook answers this.
+            if (np.id < 0) {
+                np = nearestBotSnap(ctx.w, ctx.w.transform[s].x, ctx.w.transform[s].z, senseDistSq(ctx.w, s), -1);
+            }
             ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else 0.1;
 
             // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
@@ -1468,15 +1515,20 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     if (np.d2 <= ctx.w.rules.combat.attack_range_sq) {
         ai.state = .attack;
         ai.clearPath();
-        if (ai.attack_cd <= 0 and ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player) {
-            // A35: the per-entity class stats carried by spawnZombieDef / the
-            // animal resolver win first; the class_table row is the fallback,
-            // then the Rules floor (ADR 0021 decision 5: entityclasses/items
-            // XML still wins). Matches the chase/wander chain above.
-            const pad: f32 = ctx.w.class_id[s].attack_damage;
-            const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
-            const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
-            _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
+        const pad: f32 = ctx.w.class_id[s].attack_damage;
+        const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
+        if (ai.attack_cd <= 0 and (targetExternal(np) or (ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player))) {
+            if (targetExternal(np)) {
+                // Host-side bot victim (ADR 0026): melee resolves through the
+                // bot damage hook so the bot records the zombie as attacker and
+                // emits a damage event for the guest's retaliation/dodge.
+                if (ctx.w.bot_damage_fn) |df| {
+                    _ = df(ctx.w.bot_damage_ctx, np.id, ctx.w.network_id[s].id, adm);
+                }
+            } else {
+                const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
+                _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
+            }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
             ctx.w.flags[s].bits |= 1;

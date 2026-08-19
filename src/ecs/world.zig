@@ -26,6 +26,16 @@ pub const Slot = ent.Slot;
 pub const NetId = ent.NetId;
 pub const Kind = c.Kind;
 pub const Mask = c.Mask;
+
+/// A host-side bot's world presence as seen by the zombie AI (ADR 0026).
+/// Bots are NOT ECS entities; `bot_snap_fn` fills this from the BotManager.
+/// `net_id < 0` means "no bot" (empty result).
+pub const BotSnap = struct {
+    net_id: i32 = -1,
+    x: f32 = 0,
+    z: f32 = 0,
+    d2: f32 = 0,
+};
 pub const CommandBuffer = command.Buffer;
 pub const CommandOp = command.Op;
 pub const TickLocals = locals_mod.TickLocals;
@@ -290,6 +300,18 @@ pub const World = struct {
     /// no plugins, today's behaviour exactly.
     kill_verdict_ctx: ?*anyopaque = null,
     kill_verdict_fn: ?*const fn (?*anyopaque, Kind, i32, i32) i32 = null,
+    /// Optional host-side bot snap for the zombie AI (ADR 0026). Bots are NOT
+    /// ECS entities, so the AI asks the Game through this hook instead of a
+    /// slot: `exact >= 0` resolves that one net id (any range — revenge);
+    /// `exact < 0` returns the nearest live bot within `range_sq` of (zx, zz)
+    /// (proximity aggro). Null hook → no bots (pure ECS server).
+    bot_snap_ctx: ?*anyopaque = null,
+    bot_snap_fn: ?*const fn (?*anyopaque, zx: f32, zz: f32, range_sq: f32, exact: i32) BotSnap = null,
+    /// Optional zombie melee damage to a host-side bot (ADR 0026). Returns
+    /// false when the bot is gone (the melee whiffs). Bots attribute the
+    /// attacker and emit a damage event for the guest's retaliation.
+    bot_damage_ctx: ?*anyopaque = null,
+    bot_damage_fn: ?*const fn (?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool = null,
     /// Optional POI footprint at a world XZ (Game wires the prefabs index).
     /// Unset → no POI data (tests / headless), so quests get no POI rect and
     /// their rally objectives stay scaffolding instead of stalling.

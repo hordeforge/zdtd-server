@@ -10,6 +10,7 @@
 pub const entity = @import("entity.zig");
 pub const components = @import("components.zig");
 pub const world = @import("world.zig");
+pub const BotSnap = world.BotSnap;
 pub const systems = @import("systems.zig");
 pub const quest = @import("quest.zig");
 pub const poi_lock = @import("poi_lock.zig");

@@ -5343,6 +5343,49 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     try std.testing.expect(cx < 0 and cz < 0);
 }
 
+test "scenario zombies aggro and melee bots (revenge + proximity)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A bot and a zombie close enough for the zombie to sense the bot. No
+    // players: the bot is the zombie's only target (ADR 0026 bot snap hook).
+    const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
+    const bs = g.bots.find(bid).?;
+    const zy = g.groundHeight(20, 20);
+    const zid = g.sim.spawnZombie(20, zy, 20, 100).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+
+    // Drive the sim AI (same order as step.zig: sim tickAll, then bots tick)
+    // until the zombie latches the bot as its target and closes to melee.
+    var ticks: usize = 0;
+    var latched = false;
+    var meleed = false;
+    while (ticks < 600 and !meleed) : (ticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+        g.bots.tick(g, 0.05);
+        if (g.sim.zombie_ai[zs].target_id == bid) latched = true;
+        if (g.bots.bots[bs].hp < 100) meleed = true;
+    }
+    try std.testing.expect(latched);
+    try std.testing.expect(meleed);
+    // The melee was attributed: the bot records the zombie attacker and emits
+    // a damage event for the guest's retaliation / dodge.
+    try std.testing.expectEqual(zid, g.bots.bots[bs].last_attacker);
+    try std.testing.expect(g.bots.ev_n >= 1);
+    try std.testing.expectEqual(zid, g.bots.events[g.bots.ev_n - 1].attacker);
+}
+
 test "scenario bot count floor spawns bots and fillSense emits them" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

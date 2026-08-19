@@ -112,6 +112,44 @@ pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i3
     return g.world.standableWorld(tx, tz, from_y) catch null;
 }
 
+/// Zombie AI bot snap (ADR 0026): `exact >= 0` resolves one live bot by net id
+/// (any range — revenge); `exact < 0` returns the nearest live bot within
+/// `range_sq` of (zx, zz) (proximity aggro). Returns net_id -1 when nothing
+/// qualifies. Read-only over the BotManager, which is quiescent during the
+/// parallel AI pass (bots integrate after it in the tick).
+pub fn botSnapAt(ctx: ?*anyopaque, zx: f32, zz: f32, range_sq: f32, exact: i32) ecs.BotSnap {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
+    var best_id: i32 = -1;
+    var best_x: f32 = 0;
+    var best_z: f32 = 0;
+    var best_d: f32 = if (range_sq >= 0) range_sq else std.math.inf(f32);
+    for (&g.bots.bots) |*b| {
+        if (!b.alive) continue;
+        if (exact >= 0) {
+            if (b.net_id == exact) return .{ .net_id = b.net_id, .x = b.x, .z = b.z };
+            continue;
+        }
+        const dx = b.x - zx;
+        const dz = b.z - zz;
+        const d = dx * dx + dz * dz;
+        if (d >= best_d) continue;
+        best_id = b.net_id;
+        best_x = b.x;
+        best_z = b.z;
+        best_d = d;
+    }
+    if (best_id < 0) return .{};
+    return .{ .net_id = best_id, .x = best_x, .z = best_z, .d2 = best_d };
+}
+
+/// Zombie melee on a host-side bot (ADR 0026): attributed damage so the bot
+/// records the zombie as attacker and emits a damage event for the guest's
+/// retaliation / dodge. False when the bot is gone (the melee whiffs).
+pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return false));
+    return g.bots.damageFrom(bot_net, amount, attacker_net);
+}
+
 pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const iname: ?[]const u8 = if (g.items.byId(item_id)) |d|

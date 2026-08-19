@@ -203,9 +203,17 @@ broadcast it — no self-echo, no redundant blobs.
   C2S `NetPackageDamageEntity` handler resolves a non-ECS target through
   `BotManager.damageFrom` with the same trust gates as ECS targets (actor
   validated, claimed strength capped, interest-range gated); the hit is
-  attributed to the player so the guest can retaliate. A bot killed by `bot
-  shoot` or player damage dies in place. Dead/removed bots are unspawned from
-  every viewer's `known_bots` bitset by the bot replication path.
+  attributed to the player so the guest can retaliate. **Zombies fight bots
+  too:** the zombie AI reaches bots through the World's `bot_snap_fn` /
+  `bot_damage_fn` hooks (wired by Game) — with no player sensed, a zombie
+  acquires the nearest live bot within its sight range (proximity aggro), and
+  a bot's shot sets the zombie's revenge target so it hunts the shooter even
+  at range; in melee the zombie applies its normal attack damage through
+  `BotManager.damageFrom`, so the bot records the zombie attacker and the
+  guest dodges/retaliates. Bots stay **out of the ECS** throughout: the hooks
+  are the only boundary. A bot killed by `bot shoot`, player damage or zombie
+  melee dies in place. Dead/removed bots are unspawned from every viewer's
+  `known_bots` bitset by the bot replication path.
 - **Terrain:** bots are grounded onto the terrain surface on spawn and every
   move tick (`Game.groundHeight`, chunk heightAt + 1), so they follow hills
   instead of floating at a fixed spawn height on real maps.
