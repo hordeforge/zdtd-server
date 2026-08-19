@@ -255,6 +255,8 @@ pub const InitOptions = struct {
     join_rate_limit_ms: u64 = default_join_rate_limit_ms,
     /// Max craft batch per InvTx request (zdtd.toml [sim] craft_max_times).
     craft_max_times: u16 = default_craft_max_times,
+    /// Sleeper wake/stage radius in m (zdtd.toml [sim] sleeper_party_radius).
+    sleeper_party_radius: f32 = 100.0,
     /// Anti-abuse rate limits (zdtd.toml [sim]): chat gap and inv/block token
     /// bucket shape, plus the damage-accept gap and burst cap.
     min_chat_gap_ns: u64 = default_min_chat_gap_ns,

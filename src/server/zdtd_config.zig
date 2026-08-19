@@ -100,6 +100,10 @@ pub const Sim = struct {
     trader_restock_refill: ?u16 = null,
     /// Max craft batch per InvTx request.
     craft_max_times: ?u16 = null,
+    /// Sleeper wake/stage radius (m): the `CalcGameStageAround` radius used to
+    /// stage sleeper-volume spawns (asm.il ~1093363). Stock uses the volume
+    /// box + party stage; zdtd's fixed-radius approximation is this knob.
+    sleeper_party_radius: ?f32 = null,
     /// Storm frequency percent (World::StormFrequency, stock GamePrefs default
     /// 100 = 1.0x; 0 disables storms). No V3.1.0 serverconfig key (world state,
     /// GameStats blob); this is the zdtd.toml surface.
@@ -290,6 +294,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.damage_burst_max) |v| opts.damage_burst_max = v;
     if (f.sim.trader_restock_cap) |v| opts.trader_restock_cap = v;
     if (f.sim.trader_restock_refill) |v| opts.trader_restock_refill = v;
+    if (f.sim.sleeper_party_radius) |v| opts.sleeper_party_radius = v;
     if (f.sim.storm_frequency) |v| opts.storm_frequency = v;
 }
 
@@ -621,6 +626,7 @@ const TestOpts = struct {
     trader_restock_cap: u16 = 50,
     trader_restock_refill: u16 = 10,
     craft_max_times: u16 = 20,
+    sleeper_party_radius: f32 = 100.0,
     storm_frequency: i32 = 100,
     land_claim_size: u16 = 41,
     plugin_budget: struct {
@@ -808,10 +814,12 @@ test "[sim] trader_wallet_dukes parses, merges, and clamps" {
     var f = try parse(std.testing.allocator,
         \\[sim]
         \\trader_wallet_dukes = 2500
+        \\sleeper_party_radius = 50.0
     );
     defer f.deinit();
     applyToInitOptions(&f, &o);
     try std.testing.expectEqual(@as(i32, 2500), o.trader_wallet_dukes);
+    try std.testing.expectEqual(@as(f32, 50.0), o.sleeper_party_radius);
 
     var neg = try parse(std.testing.allocator, "[sim]\ntrader_wallet_dukes = -5\n");
     defer neg.deinit();

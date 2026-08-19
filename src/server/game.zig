@@ -232,6 +232,9 @@ pub const Game = struct {
     /// Bots allocate net ids from the shared sim counter (allocBotNetId) and
     /// replicate to clients through the non-ECS path in game/replicate.zig.
     bots: game_bot.BotManager = .{},
+    /// Sleeper wake/stage radius (m) for `partyStageAround` staging
+    /// (`[sim] sleeper_party_radius`, default 100; see PROVENANCE.md §3.7).
+    sleeper_party_radius: f32 = 100.0,
     clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
     harness: apm.Harness = .{},
     /// P4 observe ring (admin `evidence` dumps JSONL lines).
@@ -583,6 +586,8 @@ pub const Game = struct {
         self.sim.rules = opts.rules;
         // Bot host policy (ADR 0026 / ADR 0021): `[bots]` from mode/toml.
         self.bots.cfg = opts.bot_config;
+        // Sleeper wake/stage radius (`[sim] sleeper_party_radius`).
+        self.sleeper_party_radius = opts.sleeper_party_radius;
         errdefer {
             // Network half first so fail-closed webui (after net/admin listen)
             // does not leak FDs in tests/library createWithOptions paths.
@@ -2328,9 +2333,6 @@ pub const Game = struct {
         }
         return self.entities.defaultZombie();
     }
-
-    /// GameStageDefinition::CalcGameStageAround radius (asm.il ~1093363).
-    const sleeper_party_radius: f32 = 100.0;
 
     pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         try game_loot.broadcastLootSpawn(self, net_id);

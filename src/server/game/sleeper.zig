@@ -9,8 +9,8 @@ const jobs = @import("../../ecs/jobs.zig");
 const rng_util = @import("../../util/rng.zig");
 
 // Mirrors Game internals needed by the sleeper loop; kept here to avoid
-// re-exporting private Game helpers via game.zig.
-const sleeper_party_radius: f32 = 100.0;
+// re-exporting private Game helpers via game.zig. The wake/stage radius is the
+// Game field (`[sim] sleeper_party_radius`, default 100; PROVENANCE.md §3.7).
 
 pub fn gatherPlayerPositions(self: *Game, px: *[game_mod.max_clients]f32, py: *[game_mod.max_clients]f32, pz: *[game_mod.max_clients]f32) usize {
     var pn: usize = 0;
@@ -93,7 +93,7 @@ pub fn tickSleeperVolumes(self: *Game) void {
         const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);
         const cx: f32 = @floatFromInt(@divTrunc(vol.x0 + vol.x1, 2));
         const cz: f32 = @floatFromInt(@divTrunc(vol.z0 + vol.z1, 2));
-        const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, sleeper_party_radius));
+        const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, self.sleeper_party_radius));
         const stage_spawn = self.gamestages.sleeperEntityGroup(grp.class_name, vol_stage);
         const def = self.resolveSleeperClass(grp.class_name, stage_spawn, seed);
         const count: u8 = if (stage_spawn) |sg|
