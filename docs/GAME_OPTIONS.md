@@ -194,6 +194,8 @@ test, so a retune cannot land silently).
 | `trap_kill_xp_frac` | 0.0 | **Floor**: fraction of a turret/trap kill's XP the owner is credited. Stock reads `PassiveEffects.ElectricalTrapXP` (default 0, unlocked by `perkAdvancedEngineering` levels 1-5 at .15/.3/.45/.6/.75); zdtd has no per-player perk level yet (planned: ADR 0023/0024), so this is a flat floor rather than a per-player lookup. 0.0 matches stock's unperked default |
 | `[rules.world]` | (empty) | Added as constants move; no fields invented |
 | `[rules.director]` | | AIDirector policy (RE: aidirector.md; provenance PROVENANCE.md §3.7) |
+| `wander_start_after` | 28000 | World tick after which wandering hordes can start (day 1 end) |
+| `wander_min_gap` / `wander_max_gap` | 12000 / 24000 | Horde schedule gap in world ticks (stock 12-24 in-game hours) |
 | `wandering_horde_size` | 6 | Zombies per wandering horde (stock is gamestage-group driven, live-observed "enemy max 5" at GS 1; the fixed 6 is the zdtd approximation) |
 | `wandering_spawn_dist` | 92.0 | Blocks out the horde spawns (stock `RandomOnUnitCircle * 92f`, IL_018B) |
 | `heat_spawn_threshold` | 25.0 | Chunk-heat activity at which a region spawns a scout party |

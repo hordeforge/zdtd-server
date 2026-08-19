@@ -212,12 +212,18 @@ pub const Progression = struct {
 pub const WorldGroup = struct {};
 
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
-/// horde spawn distance/size and the chunk-heat spawner constants (heat
-/// threshold, check/cooldown cadence, scout distance). Only constants the code
-/// actually reads are surfaced (YAGNI; `heat_feral_chance` and
-/// `heat_event_ticks` stay doc-only module consts in aidirector.zig until the
-/// feral roll / event duration are modelled). Provenance: PROVENANCE.md §3.7.
+/// horde schedule (start tick + min/max gap in world ticks) and spawn
+/// distance/size, plus the chunk-heat spawner constants (heat threshold,
+/// check/cooldown cadence, scout distance). Only constants the code actually
+/// reads are surfaced (YAGNI; `heat_feral_chance` and `heat_event_ticks` stay
+/// doc-only module consts in aidirector.zig until the feral roll / event
+/// duration are modelled). Provenance: PROVENANCE.md §3.7.
 pub const Director = struct {
+    /// Wandering hordes only start after this world tick (day 1 end ~28000).
+    wander_start_after: u64 = 28_000,
+    /// Horde schedule gap in world ticks (stock 12000-24000 = 12-24 game hours).
+    wander_min_gap: u64 = 12_000,
+    wander_max_gap: u64 = 24_000,
     wandering_horde_size: u32 = 6,
     wandering_spawn_dist: f32 = 92.0,
     heat_spawn_threshold: f32 = 25.0,
@@ -310,6 +316,9 @@ pub const WorldGroupOverlay = struct {};
 
 /// AIDirector overlay: `[rules.director]` binds these (binder-reflected).
 pub const DirectorOverlay = struct {
+    wander_start_after: ?u64 = null,
+    wander_min_gap: ?u64 = null,
+    wander_max_gap: ?u64 = null,
     wandering_horde_size: ?u32 = null,
     wandering_spawn_dist: ?f32 = null,
     heat_spawn_threshold: ?f32 = null,
@@ -384,6 +393,8 @@ test "RulesOverlay mirrors Rules field for field" {
         \\wandering_horde_size = 4
         \\wandering_spawn_dist = 60.0
         \\heat_spawn_threshold = 30.0
+        \\wander_min_gap = 1000
+        \\wander_start_after = 5000
     , std.testing.allocator);
     try std.testing.expectEqual(@as(?f32, 12.0), o.combat.attack_damage);
     try std.testing.expectEqual(@as(?f32, null), o.combat.attack_range_sq);
@@ -393,6 +404,8 @@ test "RulesOverlay mirrors Rules field for field" {
     try std.testing.expectEqual(@as(?u32, 4), o.director.wandering_horde_size);
     try std.testing.expectEqual(@as(?f32, 60.0), o.director.wandering_spawn_dist);
     try std.testing.expectEqual(@as(?f32, 30.0), o.director.heat_spawn_threshold);
+    try std.testing.expectEqual(@as(?u64, 1000), o.director.wander_min_gap);
+    try std.testing.expectEqual(@as(?u64, 5000), o.director.wander_start_after);
 }
 
 test "mergeOverlay applies non-null subset in precedence order" {

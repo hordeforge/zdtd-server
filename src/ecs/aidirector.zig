@@ -173,9 +173,9 @@ pub const bm_parties_cap: usize = 8;
 /// (ADR 0021); these aliases are the builtin defaults (tests reference them).
 pub const wandering_horde_size: u32 = director_defaults.wandering_horde_size;
 pub const wandering_spawn_dist: f32 = director_defaults.wandering_spawn_dist;
-pub const wander_min_gap: u64 = 12_000;
-pub const wander_max_gap: u64 = 24_000;
-pub const wander_start_after: u64 = 28_000;
+pub const wander_min_gap: u64 = director_defaults.wander_min_gap;
+pub const wander_max_gap: u64 = director_defaults.wander_max_gap;
+pub const wander_start_after: u64 = director_defaults.wander_start_after;
 
 /// AIDirectorChunkData heat map (asm.il 414504-415200): 5x5-chunk regions
 /// accumulate activity from heat blocks (forges/campfires, blocks.xml
@@ -392,10 +392,10 @@ pub const Director = struct {
         // of 6 at ~92 m every 12-24 in-game hours, player-gated.
         const wt = self.clock.worldTimeBits();
         if (self.wandering_next == 0) {
-            if (wt > wander_start_after) self.wandering_next = self.nextWanderingTime();
+            if (wt > w.rules.director.wander_start_after) self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
         } else if (wt >= self.wandering_next) {
             if (anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
-            self.wandering_next = self.nextWanderingTime();
+            self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
         }
         // Heat map: decay + the 5 s scout check (AIDirectorChunkEventComponent).
         self.tickHeat(w, dt);
@@ -706,12 +706,12 @@ pub const Director = struct {
     /// ChooseNextTime: now + RandomRange(12000, 24000). The roll is a
     /// deterministic mix of the day and the spawn counter (seeded sim, stable
     /// replays), standing in for the director GameRandom.
-    fn nextWanderingTime(self: *const Director) u64 {
+    fn nextWanderingTime(self: *const Director, min_gap: u64, max_gap: u64) u64 {
         const wt = self.clock.worldTimeBits();
-        const span = wander_max_gap - wander_min_gap + 1;
+        const span = max_gap - min_gap + 1;
         const day = wt / 24_000;
         const off = ((day *% 2654435761) +% (self.total_spawned *% 97)) % span;
-        return wt + wander_min_gap + off;
+        return wt + min_gap + off;
     }
 
     /// Spawn one wandering-horde group of 6 at ~92 m around the first online
