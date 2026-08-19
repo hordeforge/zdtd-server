@@ -37,6 +37,7 @@ Governs every rule below. When in doubt, these decide.
 | Join / spawn / chunk / inv play path for stock client + bots | Shipping TFP content/assets (load from user `game-dir`) |
 | Native metrics (`src/apm/`) | **7dtd-apm** (Mono bridge; different process) |
 | SoA ECS + serialize-once interest | Copying stock Mono architecture line-for-line |
+| Bot brains = **Wasm plugins only** (ADR 0026): target selection, aim, movement and combat decisions live in `mods/zdtd_bot` (the `.wasm` guest); the host `BotManager` is a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs) and must not grow native decision logic | Native bot AI in Zig |
 
 ## Critical rules
 
@@ -73,6 +74,7 @@ Governs every rule below. When in doubt, these decide.
 25. **Keep `make check` green.** No "fix later" or skipped asserts. New wire/sim → unit or `scenarios.zig` test if non-trivial; join/spawn/chunk/inv → loadgen smoke when practical.
 26. **Stdlib, not OS guts.** Prefer highest stable Zig 0.16 API: `std.Io`/`Dir`/`File`/`Threaded`, `std.mem`, `std.fmt`, `std.Thread` (via `util/parallel`), etc. No OOP abstract classes — **stdlib interfaces** (`std.Io` vtable) + thin helpers (`util/io_fs.zig`) are idiomatic. Don't open-code `std.os.linux.*`, raw `std.posix` file loops, or `std.c` for ordinary FS — use `util/io_fs`/`std.Io`. OS-specific socket/clock calls confined to `litenet/udp_socket.zig`, `util/tcp_listen.zig`, `util/clock.zig`. Optional webui HTTP body via `std.http.Server` (see `docs/STD_ABSTRACTIONS.md`). Don't shell out when in-process API exists (workspace Native APIs rule). Follow [Zig Zen](https://ziglang.org/documentation/master/#Zen).
 27. **Typed tools > shell.** Use `ast-grep` for structural edits, `ripgrep` (`rg`) for text search, `semcode` for semantic/cross-file search over bare `sed`/`grep`. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware search.
+28. **Bots stay Wasm plugins (ADR 0026).** All bot brain logic — target selection, aim, movement and combat decisions — lives in the `mods/zdtd_bot` guest; the host `BotManager` stays a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs + host policy knobs). Never port brain decisions into Zig, and never let the host drive bots without the module.
 
 ## Commands
 
