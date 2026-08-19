@@ -144,6 +144,17 @@ pub const Quests = struct {
     stay_radius: ?f32 = null,
 };
 
+/// `[bots]` config section: host-side FPS bot policy (ADR 0026 / ADR 0021).
+/// Binder-scalar optional fields; main.zig merges mode pack < zdtd.toml into
+/// the BotManager's BotHostConfig.
+pub const Bots = struct {
+    shoot_damage: ?f32 = null,
+    headshot_multiplier: ?f32 = null,
+    spawn_spread: ?f32 = null,
+    spawn_y: ?f32 = null,
+    max_step_up: ?f32 = null,
+};
+
 pub const File = struct {
     pub const toml_label = "zdtd.toml";
     /// Accepted alternate spellings (kept from the pre-binder chains).
@@ -170,6 +181,9 @@ pub const File = struct {
     /// config, not code (ADR 0021) — a new stock objective type is a row here,
     /// `"Type=PhaseKind, ..."` (see assets/quests.zig parseObjectiveKinds).
     quests: Quests = .{},
+    /// Host-side bot policy (ADR 0026): damage floor, headshot multiplier,
+    /// spawn spread/y and the move step-up cap.
+    bots: Bots = .{},
     /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
     /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
     rules: rules_mod.RulesOverlay = .{},
@@ -556,6 +570,23 @@ test "parse [quests] objective_kinds section" {
     try std.testing.expectEqual(@as(?u8, 1), f.quests.kill_per_tier);
     try std.testing.expectEqual(@as(?f32, 10.0), f.quests.goto_radius);
     try std.testing.expectEqual(@as(?f32, 12.0), f.quests.stay_radius);
+}
+
+test "parse [bots] section" {
+    var f = try parse(std.testing.allocator,
+        \\[bots]
+        \\shoot_damage = 20.0
+        \\headshot_multiplier = 3.0
+        \\spawn_spread = 4.0
+        \\spawn_y = 80.0
+        \\max_step_up = 2.0
+    );
+    defer f.deinit();
+    try std.testing.expectEqual(@as(?f32, 20.0), f.bots.shoot_damage);
+    try std.testing.expectEqual(@as(?f32, 3.0), f.bots.headshot_multiplier);
+    try std.testing.expectEqual(@as(?f32, 4.0), f.bots.spawn_spread);
+    try std.testing.expectEqual(@as(?f32, 80.0), f.bots.spawn_y);
+    try std.testing.expectEqual(@as(?f32, 2.0), f.bots.max_step_up);
 }
 
 /// Mirror of the server init-options shape the merge helpers write into.

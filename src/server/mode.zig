@@ -94,6 +94,8 @@ pub const Pack = struct {
     /// Quest data policy: `[quests] objective_kinds` (mode-pack tier of the
     /// objective-type -> phase-kind mapping; zdtd.toml wins over the pack).
     quests: @import("zdtd_config.zig").Quests = .{},
+    /// Host-side bot policy (mode-pack tier of `[bots]`; zdtd.toml wins).
+    bots: @import("zdtd_config.zig").Bots = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Pack) void {

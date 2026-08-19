@@ -5407,6 +5407,39 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     );
 }
 
+test "scenario bot host config flows from options (headshot multiplier)" {
+    // `[bots] headshot_multiplier` (merged into InitOptions.bot_config) must
+    // reach the BotManager and apply to headshot shots (ADR 0021 / ADR 0026).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .bot_config = .{ .headshot_multiplier = 3.0 },
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
+    const zy = g.groundHeight(12, 12);
+    const zid = g.sim.spawnZombie(12, zy, 12, 100).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    const weap_dmg = g.bots.bots[g.bots.find(bid).?].weapon.damage;
+    g.bots.shoot(g, bid, zid, true); // headshot
+    // 3x multiplier (config), not the 2x default.
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 100) - weap_dmg * 3.0,
+        g.sim.health[zs].hp,
+        0.01,
+    );
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

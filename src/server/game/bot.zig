@@ -15,15 +15,37 @@ const Game = game_mod.Game;
 
 /// Fixed bot capacity (ADR 0026 MaxBots-style cap; bounded array, no heap).
 pub const max_bots: usize = 16;
+/// Operator-facing bot-server policy (ADR 0021: config, not parse arms).
+/// Filled from `[bots]` in zdtd.toml / a mode pack (merged by main.zig);
+/// defaults match the pre-config behaviour exactly. Provenance: PROVENANCE.md
+/// §3.7 (zdtd-owned defaults; the headshot multiplier mirrors clanker
+/// `HeadshotMultiplier`, the damage floor the old `ecs/command.zig` host).
+/// `bot_max_hp` is deliberately NOT here: the wasm guest normalizes hurt
+/// against `BOT_MAX_HP` 100 (sense contract), so changing it would skew the
+/// guest's retreat/dodge thresholds without a sense-format change.
+pub const BotHostConfig = struct {
+    shoot_damage: f32 = 12.0,
+    headshot_multiplier: f32 = 2.0,
+    spawn_spread: f32 = 2.0,
+    spawn_y: f32 = 70,
+    max_step_up: f32 = 1.5,
+};
+
+/// Historic default config (pre-`[bots]` values; tests and docs reference it).
+pub const bot_host_defaults: BotHostConfig = .{};
+
 /// Flat damage a successful `bot shoot` applies to its target (ADR 0026 host
 /// floor; the guest already gated the shot on accuracy). Kept as the pistol
 /// floor; per-weapon damage overrides it when a Bot carries a weapon (cross-
-/// pollinated from clanker WeaponProfile).
-pub const bot_shoot_damage: f32 = 12.0;
+/// pollinated from clanker WeaponProfile). Config: `[bots] shoot_damage`.
+pub const bot_shoot_damage: f32 = bot_host_defaults.shoot_damage;
 /// Headshot damage multiplier (cross-pollinated from clanker TryShootBurst
 /// HeadshotMultiplier); applied when the guest flags `bot shoot ... head`.
-pub const bot_headshot_multiplier: f32 = 2.0;
+/// Config: `[bots] headshot_multiplier`.
+pub const bot_headshot_multiplier: f32 = bot_host_defaults.headshot_multiplier;
 /// Default bot max HP (ADR 0026; the brain normalizes hurt against 100).
+/// Guest contract — the wasm `BOT_MAX_HP` matches; not config (see
+/// BotHostConfig).
 pub const bot_max_hp: f32 = 100;
 
 /// Per-bot weapon profile (cross-pollinated from clanker WeaponProfile.ForGun).
@@ -46,10 +68,11 @@ pub const bot_weapon_magnum: BotWeapon = .{ .damage = 34, .range = 45, .pellets 
 pub const bot_loadout_pool: [6]BotWeapon = .{ bot_weapon_pistol, bot_weapon_shotgun, bot_weapon_ak, bot_weapon_sniper, bot_weapon_auto, bot_weapon_smg };
 
 /// Flat XZ spawn spread used by `bot count` / `bot spawn` fallback so the
-/// floor bots do not stack on one cell.
-const bot_spawn_spread: f32 = 2.0;
+/// floor bots do not stack on one cell. Config: `[bots] spawn_spread`.
+const bot_spawn_spread: f32 = bot_host_defaults.spawn_spread;
 /// Default bot spawn Y when the verb carries only [name] [x z] (flat ground).
-const bot_spawn_y: f32 = 70;
+/// Config: `[bots] spawn_y`.
+const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
 const arrival_dist: f32 = 0.05;
 
@@ -126,6 +149,8 @@ pub const Bot = struct {
 pub const default_bot_name = "Bot";
 
 pub const BotManager = struct {
+    /// Operator bot policy (`[bots]` config; defaults = historic behaviour).
+    cfg: BotHostConfig = .{},
     /// Fixed slot table; slots are recycled on remove (an !alive slot is free).
     /// MUST be zero-initialized: `spawn` scans `bots[slot].alive` to find a
     /// free slot, and uninitialized memory (Debug allocator 0xAA) reads as
@@ -217,7 +242,7 @@ pub const BotManager = struct {
     pub fn shoot(self: *BotManager, g: *Game, shooter: i32, target: i32, head: bool) void {
         const ss = self.find(shooter) orelse return;
         const weap = self.bots[ss].weapon;
-        const dmg = weap.damage * (if (head) bot_headshot_multiplier else 1.0);
+        const dmg = weap.damage * (if (head) self.cfg.headshot_multiplier else 1.0);
 
         // Target position for the LOS check: a bot target or an ECS entity.
         var tpos: [3]f32 = undefined;
@@ -358,9 +383,9 @@ pub const BotManager = struct {
         if (self.floor == 0) return;
         var spread: u32 = 1;
         while (self.n < self.floor) : (spread += 1) {
-            const ix: f32 = @as(f32, @floatFromInt(spread)) * bot_spawn_spread;
-            const iz: f32 = @as(f32, @floatFromInt(spread % 3)) * bot_spawn_spread;
-            if (self.spawn(g, ix, bot_spawn_y, iz, bot_max_hp) == null) break;
+            const ix: f32 = @as(f32, @floatFromInt(spread)) * self.cfg.spawn_spread;
+            const iz: f32 = @as(f32, @floatFromInt(spread % 3)) * self.cfg.spawn_spread;
+            if (self.spawn(g, ix, self.cfg.spawn_y, iz, bot_max_hp) == null) break;
         }
     }
 
@@ -386,7 +411,7 @@ pub const BotManager = struct {
             const x = std.fmt.parseFloat(f32, tokbuf[tn - 2]) catch return true;
             const z = std.fmt.parseFloat(f32, tokbuf[tn - 1]) catch return true;
             const name: []const u8 = if (tn == 3) tokbuf[0] else default_bot_name;
-            _ = self.spawnNamed(g, x, bot_spawn_y, z, bot_max_hp, name);
+            _ = self.spawnNamed(g, x, self.cfg.spawn_y, z, bot_max_hp, name);
             return true;
         }
         if (std.mem.eql(u8, sub, "move")) {
@@ -459,7 +484,7 @@ pub const BotManager = struct {
             if (!b.alive or !b.move_active) continue;
             // Wall-aware step: bots cannot phase through solid blocks; they
             // slide along walls. Terrain height is applied inside the step.
-            stepMoveCollide(b, g, dt);
+            stepMoveCollide(b, g, dt, self.cfg.max_step_up);
         }
         // Self-healing population floor: replace bots killed since the last tick.
         self.maintainFloor(g);
@@ -536,16 +561,13 @@ fn botSolidAt(g: *Game, x: f32, y: f32, z: f32) bool {
 /// stepMove with wall collision: the bot does not enter a solid cell. When the
 /// direct step is blocked it slides along the free axis (x-only then z-only),
 /// so it follows walls instead of phasing through them or stopping dead.
-/// Max climbable step (blocks) per move tick. Ground snap is fine for gentle
-/// terrain; steeper rises are obstacles the bot cannot walk up (a cliff/wall).
-const max_step_up: f32 = 1.5;
-
 /// stepMove with wall/cliff collision: the bot does not enter a solid cell at
 /// its body height, and does not climb terrain more than `max_step_up` above
-/// its current feet. When the direct step is blocked it slides along the free
-/// axis (x-only then z-only), so it follows walls instead of phasing through
-/// them or stopping dead. Ground height is re-snapped afterwards.
-fn stepMoveCollide(b: *Bot, g: *Game, dt: f32) void {
+/// its current feet (`[bots] max_step_up`, default 1.5). When the direct step
+/// is blocked it slides along the free axis (x-only then z-only), so it
+/// follows walls instead of phasing through them or stopping dead. Ground
+/// height is re-snapped afterwards.
+fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
     const ox = b.x;
     const oz = b.z;
     const dx = b.dest_x - ox;

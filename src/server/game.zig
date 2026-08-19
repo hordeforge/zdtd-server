@@ -581,6 +581,8 @@ pub const Game = struct {
         // Sim rules (ADR 0021): defaults overlaid by the mode pack then
         // zdtd.toml in main.zig; this is the single install point.
         self.sim.rules = opts.rules;
+        // Bot host policy (ADR 0026 / ADR 0021): `[bots]` from mode/toml.
+        self.bots.cfg = opts.bot_config;
         errdefer {
             // Network half first so fail-closed webui (after net/admin listen)
             // does not leak FDs in tests/library createWithOptions paths.

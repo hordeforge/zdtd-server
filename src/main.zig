@@ -702,6 +702,23 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.quests.stay_radius) |v| qpol.stay_radius = v;
     }
     init_opts.quest_policy = qpol;
+    // Effective bot host policy: mode pack < zdtd.toml (same precedence).
+    var bcfg: @import("server/game/bot.zig").BotHostConfig = .{};
+    if (mode_owned) |*mp| {
+        if (mp.bots.shoot_damage) |v| bcfg.shoot_damage = v;
+        if (mp.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
+        if (mp.bots.spawn_spread) |v| bcfg.spawn_spread = v;
+        if (mp.bots.spawn_y) |v| bcfg.spawn_y = v;
+        if (mp.bots.max_step_up) |v| bcfg.max_step_up = v;
+    }
+    if (toml_owned) |*tf| {
+        if (tf.bots.shoot_damage) |v| bcfg.shoot_damage = v;
+        if (tf.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
+        if (tf.bots.spawn_spread) |v| bcfg.spawn_spread = v;
+        if (tf.bots.spawn_y) |v| bcfg.spawn_y = v;
+        if (tf.bots.max_step_up) |v| bcfg.max_step_up = v;
+    }
+    init_opts.bot_config = bcfg;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
     zdtd_config.sanitizeInitOptions(&init_opts);
 
