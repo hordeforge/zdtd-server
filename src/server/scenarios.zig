@@ -3942,6 +3942,84 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     std.debug.print("PASS all-quest-kinds: kill/goto/fetch/trader/craft/stay/block/rally completed, coins +{d}\n", .{g.sim.wallet[ps].coins - coins0});
 }
 
+test "scenario every stock quest def completes (99-def sweep over real quests.xml)" {
+    // Load the real dedicated-server quests.xml and drive EVERY def to
+    // completion: accept, then apply each phase kind's real trigger until the
+    // quest completes (Auto) or parks ready_turn_in and a trader open finishes
+    // it. Proves no stock quest is stuck behind an unmapped/.auto phase or a
+    // missing trigger. Skipped when the stock game dir is absent.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A POI rect at the origin so POI-bound phases (goto/stay/rally) resolve.
+    const PoiRect = @import("../ecs/components.zig").PoiRect;
+    const poi_stub = struct {
+        fn f(_: ?*anyopaque, _: f32, _: f32) ?PoiRect {
+            return .{ .x = 0, .y = 70, .z = 0, .size_x = 16, .size_y = 8, .size_z = 16 };
+        }
+    }.f;
+    g.sim.poi_fn = poi_stub;
+    g.sim.nearest_poi_fn = poi_stub;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.sim.catalog.source == .stock_xml);
+    try std.testing.expect(g.sim.catalog.defs.len >= 90); // the real catalog
+
+    var completed: usize = 0;
+    var failed: [16][]const u8 = undefined;
+    var failed_n: usize = 0;
+    for (g.sim.catalog.defs) |d| {
+        if (d.id < 1 or d.name.len == 0) continue;
+        const accepted = systems.questAccept(&g.sim, c.slot, d.id);
+        // The starter is already active from the join auto-grant; drive it too.
+        if (!accepted and !systems.questHasActive(&g.sim, c.slot, d.id)) {
+            if (failed_n < failed.len) failed[failed_n] = d.name;
+            failed_n += 1;
+            continue;
+        }
+        var iter: usize = 0;
+        while (iter < 400) : (iter += 1) {
+            if (!systems.questHasActive(&g.sim, c.slot, d.id)) break;
+            systems.questOnZombieKilled(&g.sim, c.slot);
+            systems.questOnFetchItem(&g.sim, c.slot, 1);
+            systems.questOnCraft(&g.sim, c.slot, "sweep");
+            systems.questOnTraderOpen(&g.sim, c.slot);
+            systems.questTickGoto(&g.sim, c.slot, d.tx, d.ty, d.tz);
+            systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
+            systems.questTickStayWithin(&g.sim, c.slot, d.tx, d.tz);
+            systems.questTickStayWithin(&g.sim, c.slot, 8, 8);
+            if (systems.questFindActive(&g.sim, c.slot, d.id)) |q| {
+                _ = systems.questObjectiveEvent(&g.sim, c.slot, q.quest_code, .block_activate);
+                _ = systems.questOnRallyActivated(&g.sim, c.slot, q.quest_code);
+            }
+        }
+        if (systems.questHasActive(&g.sim, c.slot, d.id)) {
+            if (failed_n < failed.len) failed[failed_n] = d.name;
+            failed_n += 1;
+            continue;
+        }
+        completed += 1;
+    }
+    try std.testing.expect(completed >= 90);
+    std.debug.print("PASS stock-quest-sweep: {d}/{d} defs completed; failed=[", .{ completed, g.sim.catalog.defs.len });
+    for (failed[0..@min(failed_n, failed.len)]) |f| std.debug.print("{s} ", .{f});
+    std.debug.print("]\n", .{});
+}
+
 test "scenario vending rent state machine (loot-economy §6)" {
     // NetPackagePlayerVendingMachine (rent / clear) handled server-
     // authoritatively: only the sender's own identity may act, the rent costs

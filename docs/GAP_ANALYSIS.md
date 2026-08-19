@@ -445,12 +445,12 @@ area and the concrete work.
 
 ## 4. Quests
 
-**Headline.** zdtd loads the real `Data/Config/quests.xml` (99 defs, 6
-quest_lists) and hands the client a wire-correct starter quest, but 53 of the
-client-known quest defs come out empty because `template=` inheritance is not
-implemented, no trader-accepted quest is ever recorded server-side, and any
-journal write for a `tier1_*` quest will make the stock client mark it Failed
-because the per-objective Write shapes are wrong.
+**Headline.** Every quest the server knows how to accept can be completed:
+a sweep over the real `Data/Config/quests.xml` accepts each of the 99 defs and
+drives it through its phase graph to completion/turn-in at the real triggers
+(scenario `stock-quest-sweep`, 99/99). The remaining quest rows below are
+fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
+not a sleeper-volume clear), not completion blockers.
 
 **17 WORKS · 17 PARTIAL · 1 MISSING**
 
