@@ -376,7 +376,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
             if (was_zombie) {
                 systems.questOnZombieKilled(&self.sim, c.slot);
-                systems.questOnFetchItem(&self.sim, c.slot, 1);
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
                 self.killXpAward(c.slot, self.xpGainFor(d.entity_id));

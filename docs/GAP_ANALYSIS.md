@@ -523,14 +523,14 @@ because the per-objective Write shapes are wrong.
   `asm.il:1390421-1390429`
 
 - **Objective `value` / `count` / `item_count` to required count** `PARTIAL`
-  Two divergences. (1) `ParseObjective` reads only id, value, optional and phase;
-  zdtd honours a `count=` attribute stock ignores. (2) For the Goto family stock
+  (1) `ParseObjective` reads only id, value, optional and phase; zdtd honours a
+  `count=` attribute stock ignores. (2) 2026-08-19: for the Goto family stock
   parses `Value` as a float **distance in metres** into `ObjectiveGoto::distance`,
-  not a count; zdtd turns `quest_whiteRiverCitizen1`'s `value="5"` into
-  `PhaseSpec{trader_interact, required=5}`. Masked only because `bumpPhase` is
-  called with `n=spec.required` at the call sites.
-  *Anchors:* `src/assets/quests.zig:123`, `src/ecs/systems.zig:345`, `:516`,
-  `asm.il:1391090-1391107`, `asm.il:966955-966966`
+  and zdtd now carries that as `PhaseSpec.radius` (required stays 1; the goto
+  check uses the radius), instead of turning `value="5"` into a `required=5`
+  count that was masked by `bumpPhase(n=required)`.
+  *Anchors:* `src/assets/quests.zig:123`, `src/ecs/quest.zig` PhaseSpec,
+  `src/ecs/systems.zig:516`, `asm.il:1391090-1391107`, `asm.il:966955-966966`
 
 - **Phase graph construction** `PARTIAL`
   `buildPhaseGraph` mirrors `QuestClass.HighestPhase` and picks the
@@ -697,16 +697,15 @@ because the per-objective Write shapes are wrong.
   `src/wire/stock_quest.zig:559`
 
 - **NetPackageQuestObjectiveUpdate handling** `PARTIAL`
-  The stock body is parsed and then discarded (`_ = u;`). Only the legacy
-  zdtd-native `{def_id u16, op u8}` fallback does anything, and only for
-  `op==1`. 2026-08-07: `block_activated` now advances the quest's
-  `block_activate` phase (POIBlockActivate is real work, no longer auto
-  scaffolding; scenario `block-obj` proves the phase waits for the event and
-  advances on it). The `treasure_radius_break` / `treasure_complete` events
-  are still recorded-not-applied: the treasure phase completes through the
-  fetch path, and matching the client's treasure dig to the server journal
-  phase needs the same quest-sync RE as the S2C row.
-  *Anchors:* `src/server/game.zig:5314`, `src/wire/packages.zig:2742`
+  `block_activated` advances the quest's `block_activate` phase (POIBlockActivate
+  is real work, no longer auto scaffolding; scenario `block-obj` proves the phase
+  waits for the event and advances on it). 2026-08-19: `treasure_complete` now
+  advances the fetch phase, so treasure/fetch quests reach turn-in through their
+  real event (the kill-loot hack is gone); `treasure_radius_break` is
+  mid-dig progress and stays recorded-not-applied. Matching the client's
+  treasure dig to the server journal phase still needs the same quest-sync RE
+  as the S2C row.
+  *Anchors:* `src/server/c2s/quest.zig`, `src/wire/packages.zig:2742`
 
 - **S2C quest progress updates during a session** `BLOCKED (2026-08-07)`
   The stock journal is written only inside `NetPackagePlayerId`, i.e. at first
@@ -739,14 +738,19 @@ because the per-objective Write shapes are wrong.
   *Anchors:* `src/ecs/systems.zig:458`, `:234`, `:298`, `src/assets/quests.zig:313`
 
 - **Kill / fetch / goto / stay-within / craft progress hooks** `PARTIAL`
-  All five are wired. Two divergences: every zombie kill also calls
-  `questOnFetchItem(1)`, so a fetch quest completes by killing zombies; and
-  `questTickGoto` uses a hardcoded 4 m radius instead of the objective's parsed
-  distance, with stay-within using `max(8, required)` and `required` doubling as
-  a radius. ClearSleepers is an N-kills-anywhere counter rather than "clear this
-  POI's sleeper volume".
-  *Anchors:* `src/server/game.zig:4961`, `:2886`, `src/ecs/systems.zig:503`,
-  `:473`, `:388`, `src/assets/quests.zig:227`
+  All five are wired. 2026-08-19: fetch quests now complete through **real
+  triggers** — the client's `treasure_complete` QuestObjectiveUpdate event
+  (treasure digs) and a container-loot hook (FetchFromContainer), and the old
+  "every zombie kill also advances fetch" hack is gone; goto/stay-within use
+  the objective's parsed distance in metres (`PhaseSpec.radius`, stock
+  `ObjectiveGoto::distance`) instead of a hardcoded 4 m / `max(8, required)`.
+  ClearSleepers is an N-kills-anywhere counter rather than "clear this POI's
+  sleeper volume" (the stock `QuestEvent_SleepersCleared` suppression of
+  sleeper re-arm is the open part).
+  *Anchors:* `src/server/c2s/quest.zig` NetPackageQuestObjectiveUpdate,
+  `src/server/c2s/inv.zig` container branch, `src/ecs/systems.zig`
+  questTickGoto/questTickStayWithin, `src/assets/quests.zig` buildPhaseGraph,
+  scenario `all-quest-kinds`
 
 - **Starter quest granted at join** `PARTIAL → re-grant FIXED (2026-08-07)`
   `questAcceptStarter` now scans every journal slot for the starter (active or

@@ -328,6 +328,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const cont = self.containers.getOrCreate(pos, sc, parsed.block_id) orelse return true;
             stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
             self.clampStackSlots(cont.slots[0..cont.slot_count]);
+            // A player looting a container is the server-side trigger for
+            // FetchFromContainer quests (stock's quest object observes the
+            // container TE); advance fetch phases so they can reach turn-in.
+            systems.questOnFetchItem(&self.sim, c.slot, 1);
             // Echo stock TE to nearby clients.
             try replicate_te.broadcastStorageTe(self, cont);
             return true;

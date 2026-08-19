@@ -40,9 +40,13 @@ pub const PhaseKind = enum(u8) {
 /// One phase of the quest graph: the advancing objective kind + required count.
 /// Grounded in Quest.refreshQuestCompletion (asm.il 983645-983904): a phase
 /// completes when its tracked count objective reaches its required Value.
+/// `radius` (metres) carries the ObjectiveGoto/StayWithin distance — stock
+/// parses those `value`s as a float distance, not a count; 0 = the sim default
+/// (4 m goto, `max(8, required)` stay-within). Ignored by count kinds.
 pub const PhaseSpec = struct {
     kind: PhaseKind,
     required: u16 = 1,
+    radius: f32 = 0,
 };
 
 /// Quest catalog row defaults before quests.xml loads (stock XML wins at

@@ -569,7 +569,9 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
             if (d.phases.len > 0) {
                 const spec = currentPhaseSpec(d, s) orelse continue;
                 if (spec.kind != .stay_within) continue;
-                break :blk @max(8, @as(f32, @floatFromInt(spec.required)));
+                // The objective's parsed distance in metres wins; the legacy
+                // `max(8, required)` fallback stays for unset phases.
+                break :blk if (spec.radius > 0) spec.radius else @max(8, @as(f32, @floatFromInt(spec.required)));
             }
             if (d.kind != .stay_within) continue;
             break :blk @max(8, @as(f32, @floatFromInt(d.target_count)));
@@ -616,9 +618,12 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
         if (d.phases.len > 0) {
             const spec = currentPhaseSpec(d, s) orelse continue;
             if (spec.kind != .goto_point) continue;
+            // Arrival radius: the objective's parsed distance in metres (stock
+            // ObjectiveGoto::distance); unset phases use the 4 m sim default.
+            const radius: f32 = if (spec.radius > 0) spec.radius else 4.0;
             const dx = px - gx;
             const dz = pz - gz;
-            if (dx * dx + dz * dz < 16.0) bumpPhase(w, ps, s, d, .goto_point, spec.required);
+            if (dx * dx + dz * dz < radius * radius) bumpPhase(w, ps, s, d, .goto_point, spec.required);
             continue;
         }
         // fetch_trader starter uses Goto trader as phase 1.

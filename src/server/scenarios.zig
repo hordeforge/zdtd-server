@@ -3825,6 +3825,123 @@ test "scenario journal PDF carries max_journal quests (GAP 12)" {
     std.debug.print("PASS journal-pdf: {d} quests reach the join PDF (cap was 2)\n", .{qn});
 }
 
+test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/craft/stay/block/rally)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A POI rect at the origin so rally phases are real (not scaffolding) and
+    // goto/stay quests bind a target center instead of degrading.
+    const PoiRect = @import("../ecs/components.zig").PoiRect;
+    const poi_stub = struct {
+        fn f(_: ?*anyopaque, _: f32, _: f32) ?PoiRect {
+            return .{ .x = 0, .y = 70, .z = 0, .size_x = 16, .size_y = 8, .size_z = 16 };
+        }
+    }.f;
+    g.sim.poi_fn = poi_stub;
+    g.sim.nearest_poi_fn = poi_stub;
+
+    // Custom auto-complete catalog: one quest per executable PhaseKind. The
+    // starter id is absent so the join path grants nothing extra.
+    const defs = [_]quest_mod.QuestDef{
+        .{ .id = 1, .kind = .kill_zombies, .title = "Kill", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .kill_zombies, .required = 2 }}, .highest_phase = 1 },
+        .{ .id = 2, .kind = .goto_point, .title = "Goto", .tx = 10, .tz = 10, .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .goto_point, .required = 1, .radius = 5 }}, .highest_phase = 1 },
+        .{ .id = 3, .kind = .fetch_item, .title = "Fetch", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .fetch_item, .required = 1 }}, .highest_phase = 1 },
+        .{ .id = 4, .kind = .fetch_trader, .title = "Trader", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .trader_interact, .required = 1 }}, .highest_phase = 1 },
+        .{ .id = 5, .kind = .craft, .title = "Craft", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .craft, .required = 1 }}, .highest_phase = 1 },
+        .{ .id = 6, .kind = .stay_within, .title = "Stay", .tx = 0, .tz = 0, .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .stay_within, .required = 1, .radius = 8 }}, .highest_phase = 1 },
+        .{ .id = 7, .kind = .block_activate, .title = "Block", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .block_activate, .required = 1 }}, .highest_phase = 1 },
+        .{ .id = 8, .kind = .goto_point, .title = "Rally", .tx = 0, .tz = 0, .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .rally, .required = 1 }}, .highest_phase = 1 },
+    };
+    g.sim.catalog = .{ .defs = &defs, .starter_id = 99, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const coins0 = g.sim.wallet[ps].coins;
+    var body: [64]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+
+    // kill_zombies: the required kill count completes it (and only then).
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 1));
+    systems.questOnZombieKilled(&g.sim, c.slot);
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 1));
+    systems.questOnZombieKilled(&g.sim, c.slot);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
+
+    // goto_point: the parsed radius gates the arrival — outside does nothing,
+    // inside the target (the bound POI center 8,8) completes it.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 2));
+    systems.questTickGoto(&g.sim, c.slot, 0, 70, 0); // ~11 m from the target
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 2));
+    systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 2));
+
+    // fetch_item via the treasure_complete event — the wire the stock client
+    // sends when it digs the chest (NetPackageQuestObjectiveUpdate).
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 3));
+    const fq = systems.questFindActive(&g.sim, c.slot, 3).?;
+    const ub = try packages.buildQuestObjectiveUpdate(&body, .{
+        .sender_entity_id = c.entity_id,
+        .quest_code = fq.quest_code,
+        .event_type = .treasure_complete,
+    });
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", ub));
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+
+    // fetch_item via the direct hook (FetchFromContainer / container loot).
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 3));
+    systems.questOnFetchItem(&g.sim, c.slot, 1);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+
+    // trader_interact: a trader open completes it.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 4));
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 4));
+
+    // craft: crafting an item advances the phase.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 5));
+    systems.questOnCraft(&g.sim, c.slot, "testRecipe");
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 5));
+
+    // stay_within: the parsed radius gates it — outside does nothing, inside
+    // the bound POI center completes it.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 6));
+    systems.questTickStayWithin(&g.sim, c.slot, 20, 20); // ~17 m from 8,8
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 6));
+    systems.questTickStayWithin(&g.sim, c.slot, 8, 8);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 6));
+
+    // block_activate: the client's block-activated event advances it.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 7));
+    const bq = systems.questFindActive(&g.sim, c.slot, 7).?;
+    _ = systems.questObjectiveEvent(&g.sim, c.slot, bq.quest_code, .block_activate);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 7));
+
+    // rally: with a POI bound at accept the phase is real (not scaffolding);
+    // the rally-marker activation advances and completes it.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 8));
+    const rq = systems.questFindActive(&g.sim, c.slot, 8).?;
+    try std.testing.expect(rq.poi.valid());
+    try std.testing.expect(systems.questOnRallyActivated(&g.sim, c.slot, rq.quest_code));
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 8));
+
+    // Every completed quest paid its coin reward into the wallet: 8 defs, but
+    // the fetch quest is completed twice (event path + direct hook) = 9 pays.
+    try std.testing.expectEqual(coins0 + 9 * 10, g.sim.wallet[ps].coins);
+    std.debug.print("PASS all-quest-kinds: kill/goto/fetch/trader/craft/stay/block/rally completed, coins +{d}\n", .{g.sim.wallet[ps].coins - coins0});
+}
+
 test "scenario vending rent state machine (loot-economy §6)" {
     // NetPackagePlayerVendingMachine (rent / clear) handled server-
     // authoritatively: only the sender's own identity may act, the rent costs

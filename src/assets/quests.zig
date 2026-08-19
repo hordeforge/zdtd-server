@@ -205,6 +205,9 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
         kind: quest.PhaseKind,
         score: i32,
         target: u16,
+        /// ObjectiveGoto / StayWithin distance in metres (stock parses those
+        /// `value`s as a float distance, GAP objective-value row); 0 = unset.
+        radius: f32 = 0,
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
@@ -223,7 +226,16 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
         const kind = classifyPhaseKind(typ, oid);
         var target = objectiveTarget(body, oi, elem_end);
         if (kind == .kill_zombies and target <= 1) target = @as(u16, 3) + @as(u16, tier) * 2;
-        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target };
+        // Goto / StayWithin: the objective value is a float distance in metres
+        // (stock ObjectiveGoto::distance, asm.il 966955-966966), not a count.
+        // A goto/stay phase completes on arrival inside that radius, so the
+        // count requirement stays 1 and the radius is carried on the spec.
+        var radius: f32 = 0;
+        if (kind == .goto_point or kind == .stay_within) {
+            if (xml.attr(body, oi, "value")) |v| radius = std.fmt.parseFloat(f32, v) catch 0;
+            if (radius > 0) target = 1;
+        }
+        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius };
         obj_phase_bytes[n] = phase;
         // Objective Write subclass by type (stock CreateQuest). Everything not
         // listed writes the BaseObjective shape (FileVersion + CurrentValue).
@@ -249,7 +261,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8) !PhaseG
             if (o.phase != p or o.kind == .auto) continue;
             if (o.score > best_score) {
                 best_score = o.score;
-                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target };
+                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target, .radius = o.radius };
             }
         }
         specs[p - 1] = spec;

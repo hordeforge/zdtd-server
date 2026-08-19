@@ -127,13 +127,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (std.mem.eql(u8, name, "NetPackageQuestObjectiveUpdate")) {
         // Stock wire: treasure/block objective events mirror the client's
         // own quest progress into the server journal (so it persists and
-        // can coordinate). The block_activated event advances the quest's
-        // block_activate phase; the treasure events are recorded (the
-        // treasure phase completes through the fetch path). Also accept
-        // legacy zdtd-native {def_id u16, op u8} for unit fixtures.
+        // can coordinate). block_activated advances the block_activate
+        // phase; treasure_complete advances the fetch phase (the client dug
+        // the chest / finished the fetch), so a treasure/fetch quest reaches
+        // turn-in through its real event instead of the old kill-loot hack.
+        // treasure_radius_break is mid-dig progress — recorded, not applied.
+        // Also accept legacy zdtd-native {def_id u16, op u8} for unit fixtures.
         if (packages.parseQuestObjectiveUpdate(body)) |u| {
-            if (u.event_type == .block_activated) {
-                _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .block_activate);
+            switch (u.event_type) {
+                .block_activated => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .block_activate),
+                .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .fetch_item),
+                .treasure_radius_break => {},
             }
         } else |_| {
             if (packages.parseQuestOp(body)) |op| {
