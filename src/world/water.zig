@@ -32,11 +32,16 @@ pub const Sources = struct {
         return null;
     }
 
+    /// Worldgen carve radius (blocks) around a water source: heights within this
+    /// radius are lowered to the water surface so pools read as flat (zdtd-owned
+    /// worldgen, PROVENANCE.md 3.7; named constant, not anonymous).
+    const pool_carve_radius: i32 = 12;
+
     /// Carve/fill heights: ensure surface is not above water y within radius (pools).
     pub fn applyToChunkHeights(self: *const Sources, cx: i32, cz: i32, heights: *[256]u8) void {
         const base_x = cx * 16;
         const base_z = cz * 16;
-        const radius: i32 = 12;
+        const radius: i32 = pool_carve_radius;
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;

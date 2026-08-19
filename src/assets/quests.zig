@@ -937,7 +937,7 @@ test "rally point objective becomes a rally phase without stealing one" {
 }
 
 test "load stock quests.xml when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
     if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();

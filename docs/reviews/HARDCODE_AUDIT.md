@@ -419,6 +419,32 @@ markup ratios (A29) here (Bucket A).
 
 ---
 
+## Re-audit 2026-08-19 (five passes, post-config-wave)
+
+Ran the audit procedure repeatedly against `main` after the config wave
+(quests/bots/director/sleeper policy moved to `zdtd.toml` / `[rules.*]`).
+Method per pass: the hunt patterns from `docs/prompts/hardcoded-data-review.md`,
+then trace-before-classify on every hit.
+
+| Pass | Scan | Result |
+|---|---|---|
+| 1. Bucket B consts | `const [a-z_]+: (f32\|u32\|…) = <num>` across `src/` (non-test) | **Clean.** Residual literals are engineering/algorithm constants: tts/deco_mirror bit masks, dem/tile sizes, noise math, `electric.max_node_watts` (grid cap), `tcp_listen` poll slices, `worldgen` shaping (documented Z, §3.7). No operator-policy bare const remains |
+| 2. Bucket A ids | `assignids.*` pins, `place_*_block_id`, `coin_item_id`, `block_stone/dirt`, content enums | **Clean.** `blocks.zig`/`biome_layers.zig` pins are offline builtin defaults (XML path resolves; A05/A06/A07 documented); `inventory.place_wood/cobble` are offline-only with `itemToBlockResolved` on the production path (A02); `deco_mirror.zig:218` 24629 is test-only; `systems.trade` coin resolved by name, fail closed |
+| 3. Builtin leakage + absolute paths | `builtin` warn sites; `/home/`, `/Steam/steamapps` | **Clean.** Loud warns in place (items/recipes/entities/loot builtin-despit-game-dir, A15); all Steam paths are `test` blocks with `SkipZigTest`/`fileExists` guards. Tidied one stale test path (`quests.zig:940`, client dir → Dedicated Server) |
+| 4. Power + throttles | `default_gen_fuel`/`default_battery`/watts literals; `tick_n % N` | **Clean.** Power is XML-fed (`powerblocks.Resolved` ← blocks.xml MaxPower/MaxFuel/OutputPerFuel); no `default_gen_*` residual. Every tick cadence is a config field (`[stream]` / heartbeat); no bare `% N` left |
+| 5. Rules/OK re-check | AI timers, movement caps, apm, task delays | **Clean.** `execute_delay` base values are the stock task table (RE), scaled by `rules.ai.execute_delay_scale`; `max_horizontal_speed_mps` is `[authority]` config with clamp; APM is on-demand (no CLI-only knob); per-task delays are not anonymous floats |
+
+| ID | Finding | State |
+|---|---|---|
+| B38 | `world/water.zig` `radius: i32 = 12` (pool carve around water sources) was an anonymous local | **Fixed**: hoisted to named module const `pool_carve_radius` with a worldgen/provenance cite (P3, worldgen algorithm) |
+| P3 | `assets/quests.zig:940` test path pointed at the client install ("7 Days To Die", missing "Dedicated Server") | **Fixed**: corrected to the Dedicated Server path; the test was already skip-if-missing |
+
+Executive summary at this pin: **Bucket A 0 P0 / 0 P1 open** (A07 biome pre-XML
+defaults and A33 subbiome `_perm` literal remain the only open A rows, both
+P2/P3 documented); **Bucket B 0 open** beyond engineering caps documented as
+fixed-size architecture (max_entities, array caps, litenet windows, parallel
+worker count); OK list unchanged and re-verified. `make check` green.
+
 ## Doc cross-links
 
 | Doc | Role |
