@@ -137,10 +137,39 @@ These are enforced by the runtime, not by convention.
 
 ## What belongs in a plugin (and what must stay native)
 
-**Principle (AGENTS.md rule 29):** anything that is discretionary behavior or
-server policy ships as a Wasm plugin by default. Prove the native exception.
-This is the general form of the bot rule (ADR 0026): a bot is a plugin because
-its brain is behavior, not server.
+**Principle (AGENTS.md rule 29):** anything that is *technically* expressible
+over the plugin boundary ships as a Wasm plugin. "It is core" is not a reason
+to keep something native; prove that the boundary cannot carry it. When a
+feature needs an affordance the boundary lacks, extend the boundary (an
+ADR-worthy decision) rather than adding native behavior. This is the general
+form of the bot rule (ADR 0026): a bot is a plugin because its brain is
+behavior, not server.
+
+### Expressibility audit (native surface vs the boundary)
+
+| Native domain | Status | Boundary affordance |
+|---|---|---|
+| Chat filtering / commands / reactions | **Plugin already** | `on_chat` (rewrite/suppress, `c2s/misc.zig:42`) |
+| Kill / death / quest events | **Plugin already** | `on_entity_killed` / `on_player_death` / `on_quest_complete` verdicts; `mods/zdtd_killfeed` is the reference |
+| Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
+| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`) |
+| Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
+| Admin commands / tooling | **Plugin already** | `on_admin_command` |
+| Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
+| Bot brains | **Plugin already** | `mods/zdtd_bot` (ADR 0026) |
+| Player-damage policy (PvP / friendly-fire rules) | **Not yet** — technically expressible with one new verdict | Needs `on_player_damage`-style affordance; until then PvP gate is native authority |
+| Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
+| Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/zdtd_killfeed` logs both |
+| Announcements wired to more events (trader, vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
+| Wire encode/emit, LiteNet, chunk stream, interest/replication | **Cannot be a plugin** | Boundary never touches wire bytes or package layout (enforced) |
+| ECS sim mutation: inventory, blocks, quests, trading authority | **Cannot be a plugin** | Plugins mutate only via `queue` verbs the server already understands; no direct sim access |
+| World store, persistence (ZCH3/ZPV3/…), config loading | **Cannot be a plugin** | Filesystem/capability-gated; init-time, not tick |
+| Plugin runtime, APM instrumentation | **Cannot be a plugin** | They host the plugins / measure them |
+
+The audit's rule of thumb: a feature that *decides* is a plugin; a feature
+that *emits wire or mutates sim state directly* is native by construction.
+Anything in the "Not yet" rows is a boundary-extension candidate: implement
+the affordance, then move the behavior into a module.
 
 **Belongs in a plugin (behavior / policy):**
 

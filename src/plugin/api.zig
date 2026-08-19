@@ -49,6 +49,7 @@ pub const PluginVTable = struct {
     on_enable: ?*const fn (*const Host) void = null,
     on_tick: ?*const fn (*const Host) void = null,
     on_player_join: ?*const fn (*const Host, peer_slot: u16, entity_id: i32) void = null,
+    on_player_leave: ?*const fn (*const Host, peer_slot: u16, entity_id: i32) void = null,
     on_shutdown: ?*const fn (*const Host) void = null,
     on_player_death: ?*const fn (*const Host, victim: i32) i32 = null,
     on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,

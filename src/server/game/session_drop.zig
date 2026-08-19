@@ -8,6 +8,13 @@ const packages = @import("../../wire/packages.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
+    // Wasm-first (AGENTS rule 29): a joined player's disconnect is an event
+    // for plugins (announcements/observers), not native behavior. Mirrors the
+    // on_player_join notification; pre-join drops have no entity to report.
+    if (self.clients[slot].joined and self.clients[slot].entity_id > 0) {
+        self.plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
+        self.wasm_plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
+    }
     if (self.clients[slot].peer) |p| p.alive = false;
     self.unseatRider(self.clients[slot].entity_id) catch |err| {
         std.debug.print("zdtd: unseat on drop failed entity={d}: {s}\n", .{ self.clients[slot].entity_id, @errorName(err) });

@@ -5,6 +5,8 @@
 // to the server log and always keeps the stock outcome (returns 0).
 //
 // Hooks used (see docs/PLUGIN_DEV.md "Hooks"):
+//   on_player_join(slot: i32, entity_id: i32)
+//   on_player_leave(slot: i32, entity_id: i32)
 //   on_player_death(victim: i32) -> i32
 //   on_entity_killed(killed: i32, killer: i32) -> i32
 //   on_quest_complete(player: i32, quest_def: i32) -> i32
@@ -56,6 +58,18 @@ void on_enable(void) {
 void on_shutdown(void) {
   out_n = 0;
   e("zdtd_killfeed shutdown");
+  flush(1);
+}
+
+void on_player_join(int slot, int entity_id) {
+  out_n = 0;
+  e("join: slot="); e_int(slot); e(" entity="); e_int(entity_id);
+  flush(1);
+}
+
+void on_player_leave(int slot, int entity_id) {
+  out_n = 0;
+  e("leave: slot="); e_int(slot); e(" entity="); e_int(entity_id);
   flush(1);
 }
 

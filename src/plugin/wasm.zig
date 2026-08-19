@@ -23,11 +23,12 @@ pub const Hook = enum(u8) {
     on_admin_command = 8,
     on_chat = 9,
     on_player_login = 10,
+    on_player_leave = 11,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",  "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage", "on_quest_complete",
-        "on_admin_command", "on_chat",          "on_player_login",
+        "on_admin_command", "on_chat",          "on_player_login", "on_player_leave",
     };
 };
 
@@ -100,7 +101,7 @@ pub const Plugin = struct {
     name: []const u8,
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
-    hook_present: [11]bool = .{false} ** 11,
+    hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
     /// Guest offset and size of the host's scratch region for the request/reply
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
@@ -181,6 +182,20 @@ pub const Plugin = struct {
         self.instance.call(fn (i32, i32) void, "on_player_join", .{ slot, entity_id }) catch |err| {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_player_join disabled: {s}\n", .{ self.name, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
+
+    /// on_player_leave(slot: i32, entity_id: i32): the join hook's mirror,
+    /// fired when a joined client disconnects (Wasm-first: announcements and
+    /// observers react to leaves through a plugin, not native code).
+    pub fn callPlayerLeave(self: *Plugin, slot: i32, entity_id: i32) bool {
+        if (self.disabled) return false;
+        if (!self.hook_present[@intFromEnum(Hook.on_player_leave)]) return false;
+        self.instance.call(fn (i32, i32) void, "on_player_leave", .{ slot, entity_id }) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_player_leave disabled: {s}\n", .{ self.name, @errorName(err) });
             return false;
         };
         return true;
@@ -412,6 +427,10 @@ pub const WasmHost = struct {
 
     pub fn playerJoin(self: *WasmHost, slot: u16, entity_id: i32) void {
         for (0..self.n) |i| _ = self.slots[i].callPlayerJoin(@intCast(slot), entity_id);
+    }
+
+    pub fn playerLeave(self: *WasmHost, slot: u16, entity_id: i32) void {
+        for (0..self.n) |i| _ = self.slots[i].callPlayerLeave(@intCast(slot), entity_id);
     }
 
     /// Event-hook verdicts: first non-zero return across plugins in load order.
@@ -839,6 +858,8 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_join)]);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_leave)]);
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_death)]);
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_entity_killed)]);
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_complete)]);
@@ -846,6 +867,10 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     try std.testing.expectEqual(@as(i32, 0), host.playerDeath(7));
     try std.testing.expectEqual(@as(i32, 0), host.entityKilled(8, 1));
     try std.testing.expectEqual(@as(i32, 0), host.questComplete(9, 2));
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+    // Join/leave are void notifications: they never disable the module.
+    host.playerJoin(0, 10);
+    host.playerLeave(0, 10);
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

@@ -67,6 +67,14 @@ pub const PluginHost = struct {
         }
     }
 
+    pub fn playerLeave(self: *PluginHost, peer_slot: u16, entity_id: i32) void {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_player_leave) |f| f(&self.view, peer_slot, entity_id);
+        }
+    }
+
     /// Event-hook verdicts (T15): first non-zero return across enabled
     /// plugins. 0 keeps today's behaviour; a null hook is skipped.
     pub fn playerDeath(self: *PluginHost, victim: i32) i32 {
