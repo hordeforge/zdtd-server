@@ -142,12 +142,14 @@ pub fn botSnapAt(ctx: ?*anyopaque, zx: f32, zz: f32, range_sq: f32, exact: i32) 
     return .{ .net_id = best_id, .x = best_x, .z = best_z, .d2 = best_d };
 }
 
-/// Zombie melee on a host-side bot (ADR 0026): attributed damage so the bot
-/// records the zombie as attacker and emits a damage event for the guest's
+/// Zombie melee on a host-side bot (ADR 0026): accumulates as atomic
+/// fixed-point from the parallel AI workers (damageFromWorker); the main
+/// thread drains it into attributed damage after the pass joins, so the bot
+/// records the zombie attacker and emits a damage event for the guest's
 /// retaliation / dodge. False when the bot is gone (the melee whiffs).
 pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return false));
-    return g.bots.damageFrom(bot_net, amount, attacker_net);
+    return g.bots.damageFromWorker(bot_net, attacker_net, amount);
 }
 
 /// Quest-accept gate (AGENTS rule 29, Wasm-first): routes the sim's

@@ -189,3 +189,29 @@ Remaining boundary extensions (documented in PLUGIN_DEV "not yet" rows):
 guard/anti-cheat counters, trader/vehicle event hooks, and the review's own
 top-3 candidates (on_loot_roll, on_director_spawn, on_quest_accept /
 on_craft_request).
+
+## Pass 2026-08-20 (wasm code-path concurrency)
+
+Audited the plugin/bot code paths for thread safety. Plugin execution is
+single-threaded by design (all hooks on the main tick thread, documented
+order; PLUGIN_DEV "Rules you cannot get around" 5), so the guest itself is
+never concurrent. The risk surface is the host hooks the ECS parallel AI
+workers call:
+
+- bot_snap_fn: read-only over the BotManager; bot state is not written by
+  the main thread during the AI pass (bots integrate after it joins), so
+  worker reads are safe.
+- bot_damage_fn: **was a data race** — zombie melee on bots ran inside the
+  parallel workers and did non-atomic writes to BotManager.hp /
+  events[ev_n++] / last_attacker (two zombies hitting one bot in a tick
+  could race). Fixed with the ECS-style deferred fixed-point pattern:
+  workers atomicAdd into per-bot dmg_fp + atomicStore the last attacker
+  (damageFromWorker); the main thread drains into attributed damage
+  (drainWorkerDamage, called from tick, after the AI pass joins and before
+  the guest's next sense). Unit test covers accumulation, attribution,
+  lethality and idempotence.
+- wasmSense / wasmQueue / wasmQuery host fns: main thread only (plugin
+  hooks run after the parallel pass joins), and chunk reads inside
+  findCover/groundHeight take the existing terrain_mu lock.
+- Fuel budget: per-instance, armed once; calls are serialized on the main
+  thread, so no fuel race.

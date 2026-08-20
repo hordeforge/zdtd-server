@@ -151,6 +151,15 @@ pub const default_bot_name = "Bot";
 pub const BotManager = struct {
     /// Operator bot policy (`[bots]` config; defaults = historic behaviour).
     cfg: BotHostConfig = .{},
+    /// Deferred zombie-melee damage (ADR 0026 concurrency): the zombie AI
+    /// runs on parallel workers, so melee on bots accumulates as fixed-point
+    /// (atomic adds, same shape as the ECS dmg_fp) plus an atomic last-
+    /// attacker; the main thread drains it into attributed damage after the
+    /// AI pass joins (tick -> drainWorkerDamage), so no worker ever mutates
+    /// hp/events/last_attacker directly. dmg_scale matches systems.zig.
+    dmg_scale: u32 = 100,
+    dmg_fp: [max_bots]u32 = .{0} ** max_bots,
+    attacker_fp: [max_bots]std.atomic.Value(i32) = [_]std.atomic.Value(i32){std.atomic.Value(i32).init(-1)} ** max_bots,
     /// Fixed slot table; slots are recycled on remove (an !alive slot is free).
     /// MUST be zero-initialized: `spawn` scans `bots[slot].alive` to find a
     /// free slot, and uninitialized memory (Debug allocator 0xAA) reads as
@@ -304,6 +313,7 @@ pub const BotManager = struct {
     /// can retaliate). No-op when the target is absent. Records a damage-event
     /// sense record for the guest and sets the victim's `last_attacker`.
     /// Players and bots both route here (C2S damage path + `shoot`).
+    /// Main thread only.
     pub fn damageFrom(self: *BotManager, target: i32, dmg: f32, attacker: i32) bool {
         const ts = self.find(target) orelse return false;
         if (self.ev_n < max_sense_events) {
@@ -312,6 +322,36 @@ pub const BotManager = struct {
         }
         self.bots[ts].last_attacker = attacker;
         return self.damageBot(target, dmg);
+    }
+
+    /// Zombie-melee damage from the parallel AI workers (ADR 0026): atomic
+    /// fixed-point accumulation only — no hp/event/attacker mutation on the
+    /// worker. False when the bot is gone (the melee whiffs). The main thread
+    /// drains `drainWorkerDamage` after the AI pass joins.
+    pub fn damageFromWorker(self: *BotManager, bot_net: i32, attacker_net: i32, amount: f32) bool {
+        const ts = self.find(bot_net) orelse return false;
+        const add: u32 = @trunc(amount * @as(f32, @floatFromInt(self.dmg_scale)));
+        _ = @atomicRmw(u32, &self.dmg_fp[ts], .Add, add, .monotonic);
+        self.attacker_fp[ts].store(attacker_net, .monotonic);
+        return true;
+    }
+
+    /// Main-thread drain of worker-accumulated zombie melee (called from
+    /// `tick`, after the parallel AI pass joins): each slot's fixed-point sum
+    /// is applied as attributed damage (event + last_attacker + possible
+    /// death). Deterministic order; no atomics needed here.
+    pub fn drainWorkerDamage(self: *BotManager) void {
+        var i: usize = 0;
+        while (i < max_bots) : (i += 1) {
+            const fp = self.dmg_fp[i];
+            if (fp == 0) continue;
+            self.dmg_fp[i] = 0;
+            if (!self.bots[i].alive) continue;
+            const amount = @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(self.dmg_scale));
+            if (!(amount > 0)) continue;
+            const attacker = self.attacker_fp[i].swap(-1, .monotonic);
+            _ = self.damageFrom(self.bots[i].net_id, amount, attacker);
+        }
     }
 
     /// Copy pending damage events into the sense snapshot trailer starting at
@@ -493,6 +533,9 @@ pub const BotManager = struct {
     /// terrain surface so it follows hills instead of floating at a fixed
     /// height. No heap; the ECS is not touched (bots live here only).
     pub fn tick(self: *BotManager, g: *Game, dt: f32) void {
+        // Drain worker-accumulated zombie melee first (the AI pass joined):
+        // attributed damage lands before the guest's next sense pass.
+        self.drainWorkerDamage();
         for (&self.bots) |*b| {
             if (!b.alive or !b.move_active) continue;
             // Wall-aware step: bots cannot phase through solid blocks; they
@@ -836,6 +879,39 @@ test "BotManager fillSenseBotInfo writes one kind-4 record per live bot" {
     var out2: [128]u8 = [_]u8{0xBB} ** 128;
     try std.testing.expectEqual(@as(usize, 1), m.fillSenseBotInfo(&out2, 16, 1));
     try std.testing.expectEqual(@as(u8, 0xBB), out2[32]);
+}
+
+test "BotManager worker melee accumulates atomically and drains attributed" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.bots[1] = .{ .net_id = 11, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
+    m.n = 2;
+
+    // Two zombies hit bot 10 in the same parallel pass: atomic fixed-point
+    // accumulation, no hp/event mutation on the "worker".
+    try std.testing.expect(m.damageFromWorker(10, 500, 12.5));
+    try std.testing.expect(m.damageFromWorker(10, 501, 7.25));
+    try std.testing.expect(m.damageFromWorker(11, 502, 200.0));
+    try std.testing.expect(!m.damageFromWorker(999, 1, 5)); // gone: whiff
+    try std.testing.expectEqual(@as(f32, 100), m.bots[0].hp); // not yet applied
+    try std.testing.expectEqual(@as(usize, 0), m.ev_n);
+
+    // Main-thread drain: summed damage attributed to the last attacker.
+    m.drainWorkerDamage();
+    try std.testing.expectApproxEqAbs(@as(f32, 100 - 19.75), m.bots[0].hp, 0.01);
+    try std.testing.expectEqual(@as(i32, 501), m.bots[0].last_attacker); // last writer wins
+    try std.testing.expectEqual(@as(usize, 2), m.ev_n); // one event per drained bot
+    try std.testing.expectEqual(@as(i32, 501), m.events[0].attacker);
+    try std.testing.expectEqual(@as(i32, 502), m.events[1].attacker);
+    // Bot 11 took the 200 hit too (lethal: hp goes <= 0, alive false).
+    try std.testing.expect(m.bots[1].hp <= 0);
+    try std.testing.expect(!m.bots[1].alive);
+
+    // Idempotent: a second drain applies nothing.
+    const hp = m.bots[0].hp;
+    m.drainWorkerDamage();
+    try std.testing.expectEqual(hp, m.bots[0].hp);
+    try std.testing.expectEqual(@as(usize, 2), m.ev_n);
 }
 
 test "BotManager fillSense appends after existing ECS actor records" {
