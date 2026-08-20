@@ -30,6 +30,8 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0023](0023-perk-attribute-system.md) | Perk/attribute progression: per-player levels, scoped requirement evaluator, generic passive-effect resolver | accepted |
 | [0024](0024-passive-effect-stack-layers.md) | Passive-effect stack: name the item/equipment/progression/buffs layers once, one resolver for all of them | accepted |
 | [0025](0025-gameevent-scoped-interpreter.md) | GameEvent sequence engine: a scoped, bounded dispatch table, not the full 132-verb VM | accepted |
+| [0026](0026-fps-bot-wasm-module.md) | FPS bots as a Wasm module: host sense/act boundary, not a core bot brain | accepted (amended 2026-08-12: bots are not ECS entities) |
+| [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
