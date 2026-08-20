@@ -239,6 +239,12 @@ pub fn step(self: *Game) !void {
         if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
         self.plugins.onTick();
         self.wasm_plugins.onTick();
+        // Temporal composability: a plugin that disabled itself this pass must
+        // not leave queued (undrained) effects behind; withdraw before the
+        // next drain (paper: revertible effects).
+        var wsrc: [8]i16 = undefined;
+        const wn = self.wasm_plugins.takeWithdrawn(&wsrc);
+        for (wsrc[0..wn]) |s| self.sim.commands.dropFrom(s);
     }
     {
         const cn = self.sim.completed_quests_n;

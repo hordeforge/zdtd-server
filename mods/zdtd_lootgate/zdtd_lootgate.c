@@ -63,3 +63,9 @@ int on_loot_roll(int list_ptr, int list_len, int rolled) {
   flush(1);
   return 50; // scale every roll to 50%
 }
+
+// Declarative dependency check (paper: reactive coeffects).
+long long _zdtd_requires(void) {
+  static const char spec[] = "on_loot_roll,log";
+  return (long long)(unsigned long)spec | ((long long)(unsigned long)(sizeof(spec) - 1) << 32);
+}

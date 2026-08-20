@@ -1007,6 +1007,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             // Same honesty as saveworld: never claim success when disk I/O failed.
             self.adminReply(if (self.saveAllStores()) "saved\n" else "save failed; see server log\n");
         },
+        .plugin => |rest| self.adminPlugin(rest),
         .kick => |k| {
             const res = self.resolveAdminTarget(k.target);
             const slot = switch (res) {

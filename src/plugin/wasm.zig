@@ -74,7 +74,10 @@ pub const HostCtx = struct {
     data: ?*anyopaque = null,
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,
-    queue_fn: *const fn (ctx: *HostCtx, cmd: []const u8) void,
+    /// `src` is the 1-based wasm slot the queued command came from (0 = not
+    /// attributable). The owner uses it to withdraw a disabled plugin's
+    /// pending effects (paper: temporal composability).
+    queue_fn: *const fn (ctx: *HostCtx, src: i16, cmd: []const u8) void,
     /// Build a read-only world snapshot into `out`, returning bytes written.
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
@@ -84,6 +87,10 @@ pub const HostCtx = struct {
     /// returning bytes written (0 = no answer / unknown query). Null when the
     /// owner has no query surface.
     query_fn: ?*const fn (ctx: *HostCtx, req: []const u8, out: []u8) usize = null,
+    /// Runtime pointers of loaded instances, 1:1 with WasmHost slots. The
+    /// queue import matches Caller.rt against this table to attribute a queued
+    /// command to its plugin (slot index + 1; 0 = unattributed).
+    rt_slot: [max_wasm_plugins]?*anyopaque = .{null} ** max_wasm_plugins,
 };
 
 pub const LoadError = error{
@@ -109,6 +116,13 @@ pub const Plugin = struct {
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
+    /// Declarative dependency check (paper: reactive coeffects): `_zdtd_requires`
+    /// returns a comma-separated list of capabilities (hook names + host verbs
+    /// log/tick/queue/sense/query). Unknown or missing capabilities fail the
+    /// load loudly instead of failing lazily at the first call.
+    requires_failed: bool = false,
+    requires_err: [128]u8 = undefined,
+    requires_err_len: usize = 0,
     /// Guest offset and size of the host's scratch region for the request/reply
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
@@ -147,6 +161,7 @@ pub const Plugin = struct {
             .name = allocator.dupe(u8, name) catch return error.OutOfMemory,
         };
         p.probeHooks();
+        p.probeRequires();
         return p;
     }
 
@@ -166,6 +181,72 @@ pub const Plugin = struct {
         for (Hook.names, 0..) |hname, i| {
             self.hook_present[i] = self.instance.exportFuncSig(hname) != null;
         }
+    }
+
+    /// Declarative capability check (`_zdtd_requires` -> "name,name,..." in
+    /// guest memory). Every name must be a hook the module exports or a host
+    /// verb it imports; anything else fails the load with the offending name.
+    /// Coeffect fail-closed: a typo'd hook never silently never-fires.
+    fn probeRequires(self: *Plugin) void {
+        if (self.instance.exportFuncSig("_zdtd_requires") == null) return;
+        const ret64 = self.instance.call(fn () i64, "_zdtd_requires", .{}) catch {
+            self.requiresFailed("_zdtd_requires trapped");
+            return;
+        };
+        const ptr: u32 = @truncate(@as(u64, @bitCast(ret64)));
+        const len: u32 = @truncate(@as(u64, @bitCast(ret64)) >> 32);
+        if (len == 0 or len > 4096) {
+            self.requiresFailed("_zdtd_requires returned an invalid range");
+            return;
+        }
+        const mem = self.instance.memory() orelse {
+            self.requiresFailed("_zdtd_requires: no memory");
+            return;
+        };
+        const spec = mem.sliceAt(ptr, len) catch {
+            self.requiresFailed("_zdtd_requires range out of bounds");
+            return;
+        };
+        var it = std.mem.splitScalar(u8, spec, ',');
+        while (it.next()) |raw| {
+            const cap = std.mem.trim(u8, raw, " \t\r\n");
+            if (cap.len == 0) continue;
+            if (std.mem.eql(u8, cap, "log") or std.mem.eql(u8, cap, "tick") or
+                std.mem.eql(u8, cap, "queue") or std.mem.eql(u8, cap, "sense") or
+                std.mem.eql(u8, cap, "query")) continue;
+            var found = false;
+            for (Hook.names, 0..) |hname, i| {
+                if (std.mem.eql(u8, cap, hname)) {
+                    if (!self.hook_present[i]) {
+                        self.requiresFailed2("requires hook '", cap, "' but does not export it");
+                        return;
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                self.requiresFailed2("unknown capability '", cap, "'");
+                return;
+            }
+        }
+    }
+
+    fn requiresFailed(self: *Plugin, why: []const u8) void {
+        self.requiresFailed2("", why, "");
+    }
+
+    fn requiresFailed2(self: *Plugin, pre: []const u8, mid: []const u8, post: []const u8) void {
+        const n = @min(pre.len + mid.len + post.len, self.requires_err.len);
+        var w: usize = 0;
+        @memcpy(self.requires_err[w .. w + @min(pre.len, n - w)], pre[0..@min(pre.len, n - w)]);
+        w += @min(pre.len, n - w);
+        @memcpy(self.requires_err[w .. w + @min(mid.len, n - w)], mid[0..@min(mid.len, n - w)]);
+        w += @min(mid.len, n - w);
+        @memcpy(self.requires_err[w .. w + @min(post.len, n - w)], post[0..@min(post.len, n - w)]);
+        w += @min(post.len, n - w);
+        self.requires_err_len = w;
+        self.requires_failed = true;
     }
 
     /// Call a no-arg hook (on_enable, on_tick, on_shutdown). A trap or
@@ -473,6 +554,14 @@ const max_wasm_module_bytes: usize = 16 * 1024 * 1024;
 pub const WasmHost = struct {
     slots: [max_wasm_plugins]Plugin = undefined,
     n: usize = 0,
+    /// Load-time context + budget (stored so `reload` can dispose and
+    /// reinstantiate a slot in place; paper: hot module replacement).
+    allocator: std.mem.Allocator = undefined,
+    ctx: ?*HostCtx = null,
+    budget: Budget = .{},
+    /// Pending-effect withdrawal marks: a disabled plugin's queued commands are
+    /// dropped once (temporal composability); cleared on reload.
+    withdrawn: [max_wasm_plugins]bool = .{false} ** max_wasm_plugins,
 
     /// Load every module path that exists; a missing or unloadable module is
     /// logged and skipped so one bad file does not take the server down.
@@ -483,28 +572,88 @@ pub const WasmHost = struct {
         ctx: *HostCtx,
         budget: Budget,
     ) void {
+        self.allocator = allocator;
+        self.ctx = ctx;
+        self.budget = budget;
         for (paths) |p| {
             if (self.n >= max_wasm_plugins) {
                 std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, p });
                 return;
             }
-            const bytes = io_fs.readFileAll(allocator, p) catch |err| {
-                std.debug.print("zdtd: wasm plugin '{s}' unreadable: {s}\n", .{ p, @errorName(err) });
-                continue;
-            };
-            defer allocator.free(bytes);
-            if (bytes.len > max_wasm_module_bytes) {
-                std.debug.print("zdtd: wasm plugin '{s}' too large ({d} bytes)\n", .{ p, bytes.len });
-                continue;
-            }
-            const p2 = Plugin.load(allocator, p, bytes, ctx, budget) catch |err| {
+            self.loadInto(self.n, p) catch |err| {
                 std.debug.print("zdtd: wasm plugin '{s}' load failed: {s}\n", .{ p, @errorName(err) });
                 continue;
             };
-            self.slots[self.n] = p2;
             self.n += 1;
             std.debug.print("zdtd: wasm plugin loaded '{s}'\n", .{p});
         }
+    }
+
+    /// Load `path` into slot `idx` (append or in-place reload). On success the
+    /// slot owns the new instance; on error the slot is left empty.
+    fn loadInto(self: *WasmHost, idx: usize, path: []const u8) !void {
+        const bytes = try io_fs.readFileAll(self.allocator, path);
+        defer self.allocator.free(bytes);
+        if (bytes.len > max_wasm_module_bytes) return error.ModuleTooLarge;
+        const ctx = self.ctx orelse return error.NoContext;
+        var p2 = try Plugin.load(self.allocator, path, bytes, ctx, self.budget);
+        errdefer p2.deinit();
+        if (p2.requires_failed) {
+            std.debug.print(
+                "zdtd: wasm plugin '{s}' rejected: {s}\n",
+                .{ path, p2.requires_err[0..p2.requires_err_len] },
+            );
+            return error.RequiresUnmet;
+        }
+        if (p2.instance.handle.runtime) |rt| ctx.rt_slot[idx] = @ptrCast(rt);
+        self.slots[idx] = p2;
+        self.withdrawn[idx] = false;
+    }
+
+    /// Dispose slot `idx` (on_shutdown + deinit) so a replacement can load
+    /// into it (paper: dispose old fiber, reinstantiate the reloaded module).
+    /// Returns false when no module occupies the slot or the reload failed.
+    pub fn reload(self: *WasmHost, idx: usize, path: []const u8) bool {
+        if (idx >= self.n) return false;
+        // The module's own name is freed by deinit below; work on a copy so
+        // callers passing slots[idx].name (the admin verb does) stay valid.
+        const path_owned = self.allocator.dupe(u8, path) catch return false;
+        defer self.allocator.free(path_owned);
+        _ = self.slots[idx].callHook(.on_shutdown);
+        self.slots[idx].deinit();
+        if (self.ctx) |ctx| ctx.rt_slot[idx] = null;
+        self.loadInto(idx, path_owned) catch |err| {
+            std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
+            return false;
+        };
+        // Activate the new fiber (paper: reinstantiate + reinstall).
+        _ = self.slots[idx].callHook(.on_enable);
+        return true;
+    }
+
+    /// First slot whose module path ends with `name` (basename or suffix).
+    pub fn findByName(self: *const WasmHost, name: []const u8) ?usize {
+        for (0..self.n) |i| {
+            if (std.mem.endsWith(u8, self.slots[i].name, name)) return i;
+        }
+        return null;
+    }
+
+    /// Temporal composability (paper): report the 1-based slots of plugins
+    /// that disabled themselves (trap / fuel exhaustion) whose pending effects
+    /// have not yet been withdrawn, and mark them withdrawn (once per
+    /// disable). The owner (Game) calls CommandBuffer.dropFrom for each before
+    /// the drain, so a broken plugin's queued commands never execute. Plugin
+    /// stays a leaf package: it returns srcs, the owner owns the buffer.
+    pub fn takeWithdrawn(self: *WasmHost, out: []i16) usize {
+        var n: usize = 0;
+        for (0..self.n) |i| {
+            if (!self.slots[i].disabled or self.withdrawn[i]) continue;
+            if (n < out.len) out[n] = @intCast(i + 1);
+            self.withdrawn[i] = true;
+            n += 1;
+        }
+        return n;
     }
 
     /// Call on_enable for every loaded plugin (once, at enable).
@@ -671,7 +820,18 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             const mem = caller.memory() orelse return 1;
             if (ptr < 0 or len < 0) return 1;
             const cmd = mem.sliceAt(@intCast(ptr), @intCast(len)) catch return 1;
-            hc.queue_fn(hc, cmd);
+            // Attribute the command to its plugin via the caller's runtime
+            // (paper: revertible effects - the owner withdraws a disabled
+            // plugin's pending effects by src).
+            var src: i16 = 0;
+            const rt: *anyopaque = @ptrCast(caller.rt);
+            for (hc.rt_slot, 0..) |r, i| {
+                if (r == rt) {
+                    src = @intCast(i + 1);
+                    break;
+                }
+            }
+            hc.queue_fn(hc, src, cmd);
             return 0;
         }
         fn sense(caller: *zwasm.Caller, ptr: i32, len: i32, token: i32) anyerror!i32 {
@@ -728,7 +888,7 @@ test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-
             }
         }.f,
         .queue_fn = &struct {
-            fn f(_: *HostCtx, _: []const u8) void {}
+            fn f(_: *HostCtx, _: i16, _: []const u8) void {}
         }.f,
     };
     var p = try Plugin.load(std.testing.allocator, "trivial", &bytes, &ctx, .{});
@@ -759,7 +919,7 @@ test "wasm runtime disables a looping module on fuel exhaustion" {
             }
         }.f,
         .queue_fn = &struct {
-            fn f(_: *HostCtx, _: []const u8) void {}
+            fn f(_: *HostCtx, _: i16, _: []const u8) void {}
         }.f,
     };
     var p = try Plugin.load(std.testing.allocator, "looper", &bytes, &ctx, .{ .fuel = 1_000 });
@@ -785,7 +945,7 @@ test "wasm host loads the C fixture modules: hooks fire, looper disabled" {
         fn tickFn(_: *HostCtx) u64 {
             return tick;
         }
-        fn queueFn(_: *HostCtx, cmd: []const u8) void {
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
             if (queued_n < queued.len) {
                 queued[queued_n] = cmd;
                 queued_n += 1;
@@ -849,7 +1009,7 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{
         .log_fn = &Cap.logFn,
@@ -892,7 +1052,7 @@ test "wasm plugin admin command hook handles ping/echo and falls through" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -926,7 +1086,7 @@ test "wasm chat filter hook deny/rewrite/keep" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -951,7 +1111,7 @@ test "wasm on_player_login join gate: deny reason, allow others" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -977,7 +1137,7 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -1010,7 +1170,7 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
         fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
             var it = std.mem.tokenizeScalar(u8, req, ' ');
             _ = it.next();
@@ -1046,7 +1206,7 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
         fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
             var it = std.mem.tokenizeScalar(u8, req, ' ');
             _ = it.next();
@@ -1081,7 +1241,7 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -1102,7 +1262,7 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -1122,7 +1282,7 @@ test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
         fn tickFn(_: *HostCtx) u64 {
             return 1;
         }
-        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
@@ -1134,6 +1294,85 @@ test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
     host.traderEvent(107, 42, 1); // buy
     host.traderEvent(107, 42, 2); // sell
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "_zdtd_requires validates declarative dependencies at load" {
+    // Coeffect fail-closed (paper): a module declaring a capability it does
+    // not export (typo'd hook) is rejected at load with a loud error, instead
+    // of silently never firing. The valid tradefeed module passes.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    try std.testing.expect(!host.slots[0].requires_failed);
+
+    var bad: WasmHost = .{};
+    bad.loadAll(std.testing.allocator, &[_][]const u8{"assets/fixtures/plugin_requires_bad.wasm"}, &ctx, .{});
+    defer bad.shutdown();
+    // The module names an unknown capability: it must be rejected, not loaded.
+    try std.testing.expectEqual(@as(usize, 0), bad.n);
+}
+
+test "plugin reload disposes and reinstantiates the module in place" {
+    // HMR (paper): dispose the old fiber (on_shutdown + deinit), reload the
+    // module from disk into the same slot, and re-activate (on_enable). The
+    // reloaded module must be fully functional and not disabled.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    const path = host.slots[0].name;
+    try std.testing.expect(host.reload(0, path));
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
+    try std.testing.expect(!host.slots[0].disabled);
+    host.traderEvent(107, 42, 1);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "queue import attributes commands to the calling plugin slot" {
+    // Temporal composability plumbing: plugin_hello queues a spawn each of the
+    // first ticks; the queue import must hand the owner the 1-based slot so a
+    // disabled plugin's pending effects can be withdrawn by src.
+    const Cap = struct {
+        var last_src: i16 = 0;
+        var last_cmd: [64]u8 = undefined;
+        var last_len: usize = 0;
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, src: i16, cmd: []const u8) void {
+            last_src = src;
+            const n = @min(cmd.len, last_cmd.len);
+            @memcpy(last_cmd[0..n], cmd[0..n]);
+            last_len = n;
+        }
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"assets/fixtures/plugin_hello.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    host.onTick();
+    try std.testing.expectEqual(@as(i16, 1), Cap.last_src);
+    try std.testing.expect(std.mem.startsWith(u8, Cap.last_cmd[0..Cap.last_len], "spawn"));
 }
 
 test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
@@ -1153,7 +1392,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         var with_trailer: bool = false;
         var bot_hp: f32 = 100;
 
-        fn queueFn(_: *HostCtx, cmd: []const u8) void {
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
             if (queued_n >= queued.len) return;
             const n = @min(cmd.len, queued[queued_n].len);
             @memcpy(queued[queued_n][0..n], cmd[0..n]);

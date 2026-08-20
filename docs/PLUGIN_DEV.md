@@ -55,6 +55,46 @@ skipped, it does not stop the server. `on_enable` runs right after load,
 join, `on_shutdown` runs at shutdown, and the four event hooks run at their
 game events (death, kill, block damage, quest completion).
 
+### Declarative dependencies (`_zdtd_requires`)
+
+A module may export `_zdtd_requires() -> (ptr, len)` returning a comma-
+separated list of capabilities it needs (hook names + the host verbs
+`log` / `tick` / `queue` / `sense` / `query`). The host validates the list at
+load and **rejects the module loudly** when a capability is unknown or a
+declared hook is not actually exported. This is fail-closed at load: a typo'd
+hook name cannot silently never fire.
+
+```c
+long long _zdtd_requires(void) {
+  static const char spec[] = "on_trader_event,log";
+  return (long long)(unsigned long)spec |
+         ((long long)(unsigned long)(sizeof(spec) - 1) << 32);
+}
+```
+
+### Hot module replacement (`plugin reload <name>`)
+
+Admin console (or webui console):
+
+```text
+plugin list              # slot, module path, enabled/disabled
+plugin reload zdtd_bot   # suffix match on the module path
+```
+
+`plugin reload` disposes the old instance (`on_shutdown`, fuel/memory
+reclaimed), loads the module from disk into the same slot, re-arms the budget
+and runs `on_enable` on the new one - no server restart. A reload that fails
+to parse/instantiate leaves the slot empty and reports failure. This is the
+paper-style dispose-then-reinstantiate cycle: because a module's effects are
+bounded by the host boundary, reloading it recovers everything it installed.
+
+### Temporal composability (queued-effect withdrawal)
+
+Queued commands (`zdtd.queue`) are attributed to the plugin that issued them.
+When a module disables itself (hook trap / fuel exhaustion), its still-queued,
+not-yet-applied commands are **withdrawn** before the next drain, so a broken
+module cannot leave side effects behind. Re-enabling requires a reload.
+
 ## Host imports
 
 The host provides five functions, all in the `zdtd` module namespace. The

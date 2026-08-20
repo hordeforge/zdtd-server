@@ -388,6 +388,9 @@ pub const Command = union(enum) {
     /// `evidence` prints the ring inline; `evidence dump [path]` writes the
     /// JSONL lines to a file (default `<world>/evidence.jsonl`).
     evidence: ?[]const u8,
+    /// zdtd wasm plugin ops: `plugin list` / `plugin reload <name>` (paper:
+    /// hot module replacement - dispose the old fiber, reinstantiate).
+    plugin: []const u8,
     /// Dump zdtd-native APM counters + section latency (same text as --ticks exit).
     apm,
     save,
@@ -524,6 +527,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "evidence") or std.mem.eql(u8, verb, "ev")) return "evidence [dump [path]]";
     if (std.mem.eql(u8, verb, "apm") or std.mem.eql(u8, verb, "metrics")) return "apm";
     if (std.mem.eql(u8, verb, "save")) return "save";
+    if (std.mem.eql(u8, verb, "plugin")) return "plugin <list|reload <name>>";
     if (std.mem.eql(u8, verb, "list") or std.mem.eql(u8, verb, "players")) return "list";
     if (std.mem.eql(u8, verb, "gettime") or std.mem.eql(u8, verb, "gt")) return "gettime";
     if (std.mem.eql(u8, verb, "listents") or std.mem.eql(u8, verb, "le")) return "listents";
@@ -573,6 +577,10 @@ pub fn parseCommand(line: []const u8) Command {
     }
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "plugin")) {
+        // zdtd wasm plugin ops: `plugin list` / `plugin reload <name>`.
+        return .{ .plugin = std.mem.trim(u8, it.rest(), " ") };
+    }
     if (std.mem.eql(u8, cmd, "kick")) {
         // Stock: "kick <name / entity id / user id> [reason]" (asm.il 229326).
         const p = it.next() orelse return .{ .wrong_args = .{ .expected = "at least 1", .found = 0 } };
@@ -1247,6 +1255,7 @@ fn fuzzParseCommand(_: void, smith: *std.testing.Smith) !void {
         },
         .spawnentity => |se| try std.testing.expect(se.name_off + se.name_len <= line.len),
         .help => |t| if (t) |tt| try expectWithin(line, tt),
+        .plugin => |p| try expectWithin(line, p),
         else => {},
     }
 }

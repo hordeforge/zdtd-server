@@ -65,3 +65,10 @@ void on_trader_event(int player, int trader, int kind) {
   }
   flush(1);
 }
+
+// Declarative dependency check (paper: reactive coeffects): the host rejects
+// the module at load if any listed capability is missing.
+long long _zdtd_requires(void) {
+  static const char spec[] = "on_trader_event,log";
+  return (long long)(unsigned long)spec | ((long long)(unsigned long)(sizeof(spec) - 1) << 32);
+}

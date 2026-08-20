@@ -26,6 +26,10 @@ pub const DrainResult = struct {
 
 pub const Buffer = struct {
     ops: [max_commands]Op = undefined,
+    /// Source attribution per op (0 = native/server; else 1-based wasm plugin
+    /// slot). Temporal composability: a disabled plugin's pending ops are
+    /// dropped by src before drain (paper).
+    srcs: [max_commands]i16 = .{0} ** max_commands,
     n: usize = 0,
     /// Lifetime drop counter (not cleared on drain).
     dropped: u32 = 0,
@@ -33,11 +37,16 @@ pub const Buffer = struct {
     cap_warned: bool = false,
 
     pub fn push(self: *Buffer, op: Op) bool {
+        return self.pushSrc(0, op);
+    }
+
+    pub fn pushSrc(self: *Buffer, src: i16, op: Op) bool {
         if (self.n >= max_commands) {
             self.dropped +%= 1;
             return false;
         }
         self.ops[self.n] = op;
+        self.srcs[self.n] = src;
         self.n += 1;
         if (!self.cap_warned and self.n >= warn_at) {
             self.cap_warned = true;
@@ -47,6 +56,24 @@ pub const Buffer = struct {
             );
         }
         return true;
+    }
+
+    /// Withdraw (drop) every pending op attributed to `src`; later ops shift
+    /// down so drain order is preserved. Used when a plugin disables so its
+    /// queued effects never execute (temporal composability).
+    pub fn dropFrom(self: *Buffer, src: i16) void {
+        if (src == 0) return;
+        var w: usize = 0;
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (self.srcs[i] == src) continue;
+            if (w != i) {
+                self.ops[w] = self.ops[i];
+                self.srcs[w] = self.srcs[i];
+            }
+            w += 1;
+        }
+        self.n = w;
     }
 
     pub fn clear(self: *Buffer) void {
@@ -133,6 +160,26 @@ test "command buffer drops at cap" {
     try std.testing.expect(buf.cap_warned);
     buf.clear();
     try std.testing.expectEqual(@as(usize, 0), buf.len());
+}
+
+test "dropFrom withdraws a plugin's pending effects, preserving drain order" {
+    // Temporal composability (paper): ops attributed to a disabled plugin are
+    // dropped before drain; remaining ops shift down and keep their order.
+    var buf: Buffer = .{};
+    _ = buf.pushSrc(0, .{ .damage = .{ .net_id = 1, .amount = 1 } }); // native
+    _ = buf.pushSrc(1, .{ .damage = .{ .net_id = 2, .amount = 2 } }); // plugin 1
+    _ = buf.pushSrc(1, .{ .damage = .{ .net_id = 3, .amount = 3 } }); // plugin 1
+    _ = buf.pushSrc(2, .{ .damage = .{ .net_id = 4, .amount = 4 } }); // plugin 2
+    buf.dropFrom(1);
+    try std.testing.expectEqual(@as(usize, 2), buf.len());
+    try std.testing.expectEqual(@as(i16, 0), buf.srcs[0]);
+    try std.testing.expectEqual(@as(i16, 2), buf.srcs[1]);
+    // Order preserved: net 1 then net 4.
+    try std.testing.expectEqual(@as(i32, 1), buf.ops[0].damage.net_id);
+    try std.testing.expectEqual(@as(i32, 4), buf.ops[1].damage.net_id);
+    // src 0 (native) is never withdrawable.
+    buf.dropFrom(0);
+    try std.testing.expectEqual(@as(usize, 2), buf.len());
 }
 
 test "command buffer soft warn at warn_ratio" {

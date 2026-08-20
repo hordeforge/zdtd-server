@@ -1028,6 +1028,11 @@ pub const Game = struct {
     pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         admin_console.runAdminLine(self, line, source);
     }
+
+    /// `plugin list` / `plugin reload <name>` (wasm plugin ops; wasm_host.zig).
+    pub fn adminPlugin(self: *Game, rest: []const u8) void {
+        return game_wasm_host.adminPlugin(self, rest);
+    }
     pub fn bindPort(self: *const Game) u16 {
         return self.net.port;
     }

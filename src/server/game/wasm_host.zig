@@ -47,7 +47,7 @@ pub fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32)
 
 pub const max_plugin_cmd_len: usize = 128;
 
-pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
+pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return));
     if (cmd.len > max_plugin_cmd_len) {
         std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
@@ -66,7 +66,7 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, cmd: []const u8) void {
         std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{vb[0..vn]});
         return;
     };
-    _ = g.sim.commands.push(op);
+    _ = g.sim.commands.pushSrc(src, op);
 }
 
 fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
@@ -224,4 +224,46 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
     const cv = g.findCover(from, threat, 10.0) orelse return 0;
     const s = std.fmt.bufPrint(out, "{d} {d}", .{ cv[0], cv[2] }) catch return 0;
     return s.len;
+}
+
+/// `plugin list` / `plugin reload <name>` (paper: hot module replacement).
+pub fn adminPlugin(self: *Game, rest: []const u8) void {
+    var it = std.mem.tokenizeScalar(u8, rest, ' ');
+    const sub = it.next() orelse {
+        self.adminReply("usage: plugin <list|reload <name>>\n");
+        return;
+    };
+    if (std.mem.eql(u8, sub, "list")) {
+        const h = &self.wasm_plugins;
+        if (h.n == 0) {
+            self.adminReply("no wasm plugins loaded\n");
+            return;
+        }
+        var buf: [2048]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&buf);
+        for (0..h.n) |i| {
+            const p = &h.slots[i];
+            const st: []const u8 = if (p.disabled) "disabled" else "enabled";
+            w.print("{d}: {s} [{s}]\n", .{ i, p.name, st }) catch break;
+        }
+        self.adminReply(w.buffered());
+        return;
+    }
+    if (std.mem.eql(u8, sub, "reload")) {
+        const name = it.next() orelse {
+            self.adminReply("usage: plugin reload <name>\n");
+            return;
+        };
+        const idx = self.wasm_plugins.findByName(name) orelse {
+            var eb: [256]u8 = undefined;
+            const s = std.fmt.bufPrint(&eb, "no loaded plugin matches '{s}'\n", .{name}) catch return;
+            self.adminReply(s);
+            return;
+        };
+        const path = self.wasm_plugins.slots[idx].name;
+        const ok = self.wasm_plugins.reload(idx, path);
+        self.adminReply(if (ok) "plugin reloaded\n" else "plugin reload failed; see server log\n");
+        return;
+    }
+    self.adminReply("usage: plugin <list|reload <name>>\n");
 }
