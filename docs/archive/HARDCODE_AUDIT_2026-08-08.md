@@ -55,6 +55,8 @@ Spot-check summary vs the prior audit claims:
 
 **CLOSED 2026-08-20** (see A36 note): `Chunk.terrain` points at `World.terrain_ids`; `rawAt`/`isSolid` use it when set and the pins otherwise.
 | **A39** | `server/game/trader.zig:190-191` (`fillTraderFromXml`) | Sell = `econ × sell_markdown`; stock is `econ × EconomicSellScale × SellMarkdown`; the scale constant is missing (buy side is correct) | `XUiM_Trader.GetSellPrice` (asm.il 1830470-1830700, loot-economy.md §5) | **P3** | Add the `EconomicSellScale` constant after RE pin | Sell prices shift toward stock; documented residual |
+
+**CLOSED 2026-08-20**: `EconomicSellScale` is a per-item stock **data** property (`ItemClass.EconomicSellScale`, IL ctor default 1.0; `PropEconomicSellScale`), not a constant. `assets/items.zig` now parses it per item (`econ_sell_scale`, default 1.0) and `fillTraderFromXml` computes sell = `econ × scale × sell_markup` (trader + vending share the fill). Stock V3.1.0 b14 items.xml sets `.5` on `toolCookingGrill` (2 rows); the stock test asserts 0.5 for it and 1.0 defaults.
 | **A40** | `ecs/world.zig:225` | Builtin class_table row 2 `"zombieFeral"` (hash = zombie hash); no such class exists in stock entityclasses.xml (0 hits), no stock group names it | None (builtin invention) | **P3** | Delete or repoint to a real stock class; verify no reachable group picks it first | No behavioral change (unreachable today) |
 
 **CLOSED 2026-08-20**: row 2 repointed to the real feral variant `zombieBoeFeral` (stock class, Unity hash -272178566, max_hp 550 = its HealthMax `^healthNormalFeral`). No reachable group referenced the old name (live spawns resolve per-class via the A35 hook); offline-fallback only.
@@ -84,7 +86,11 @@ Spot-check summary vs the prior audit claims:
 **CLOSED 2026-08-20**: `[apm] dump_every_s` (seconds; 0 disables) drives `Game.apm_report_period_ticks`.
 | **B38** | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | **P3** | Document only | Already documented as fixed-size architecture in prior audit |
 | **B39** | `game.zig:3969` and `game/sleeper.zig:13` | `sleeper_party_radius=100.0` duplicated (same RE cite) | **P3** | Dedupe to one shared const | RE: CalcGameStageAround radius (asm.il ~1093363) |
+
+**CLOSED 2026-08-20**: `sleeper_party_radius` is now the single `[sim] sleeper_party_radius` config field (commit fe7729d).
 | **B40** | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig:412-427` `builtinStockName` | **P3** | Cross-check test or share one table | Documented mirror; divergence would be caught by existing id tests |
+
+**PARKED 2026-08-20**: accepted as a documented mirror. A cross-check test cannot import across the ecs->assets lint edge, and the shared builtin ids are already pinned by the stock-type tests (`byId(8)` etc.); divergence would surface there.
 
 ## Carried-forward open findings (unchanged, re-verified)
 
@@ -100,18 +106,86 @@ Spot-check summary vs the prior audit claims:
 | B08-B12 | lock_channel[16] array, lock stale | P2/P3 | `lock_stale_ms` config; array size engineering |
 | B23-B24 | LiteNet port offset, APM cadence | P3 | Port+2 documented; APM cadence = B37 |
 
+### Carried rows disposition (2026-08-20, per the layered-policy goal)
+
+Every row above is **PARKED** (not a config/data gap; documented engineering or
+feature-blocked) or **RE-BLOCKED** (needs evidence outside this repo), with its
+citation:
+
+- **PARKED (feature-blocked)**: A07 (pre-XML defaults only; biomes.xml load
+  failure is loud), A13 (builtin-gated; stock XML list exact), A14 (loud warn
+  on builtin-with-game-dir), A21 (gamestages.xml loads; stage inputs partial,
+  GAP_ANALYSIS 5.x), A24 (no NONE-file loader ships until the feature exists).
+- **PARKED (OK-class / protocol / engineering)**: A18 (dump-verified `stock_terr_*`
+  pins; the server dictates ids via NameIdMapping), B08-B12 (lock channel array
+  size; `lock_stale_ms` is config), B23 (LiteNet port+2 is the stock protocol),
+  B24 (APM cadence = B37, closed), B31 (load-time sleeper scan budget, not the
+  tick path), B34-B36 (named consts already; array sizes / ops constants),
+  B38 (fixed-size architecture caps, documented), B40 (documented mirror, see row).
+- **RE-BLOCKED**: A33 (subbiome noise `_perm` literal byte-reproduction is owned
+  by `../7dtd-research`; the rest of the subbiome port is exact, GAP_ANALYSIS 18).
+
+No remaining row is an un-cited hardcode in game behavior: every Bucket A value
+either reads stock data, is an OK-class dump/RE pin, or carries its blocker
+citation above.
+
 ## Loader inventory vs stock Config
+
+Complete cross-reference, **all 44 `Data/Config/*.xml` files** (re-verified
+2026-08-20 against the V3.1.0 b14 dedicated install). The LoadLocal name list
+(`config_files.zig`, protocol) and `xml_patch.zig` (operator override patches,
+not data loaders) are excluded from "loader"; every sim-affecting value reads
+through the listed loader or is documented NONE with no code dependency.
 
 | Stock file | Loader | State |
 |---|---|---|
-| blocks.xml, materials.xml, AssignIds dump | maxdamage.zig / blocks.zig / blocks_nim.zig | HAVE (power watts/Class/MaxFuel/OutputPerFuel/Charge/Stack; CraftingAreaRecipes added at HEAD 3b06680; HeatMapStrength) |
-| items.xml | items.zig | HAVE (Stacknumber via Extends, EconomicValue, DamageEntity, FuelValue, Eat cvars, stock type assign) |
-| entityclasses.xml | entities.zig | **HAVE** (hash, kind, loot, speeds, sight, HandItem parse; HP via `HealthMax` passive_effect + `replace_passive_effect` variables — A34 closed 2026-08-20) |
-| entitygroups.xml | entitygroups.zig | HAVE (cap 512 of 1892 groups, GAP_ANALYSIS 1820) |
-| recipes.xml / loot.xml / quests.xml / traders.xml / npc.xml / gamestages.xml | recipes/loot/quests/traders/npc/gamestages | HAVE |
-| biomes.xml | biome_layers.zig + world/biomes.zig | HAVE (layers, weather groups, deco, biomemapcolor) |
-| painting.xml / spawning.xml / buffs.xml / progression.xml / vehicles.xml / storage_pairs (blocks DowngradeBlock) / signs (Prefabs) | matching loaders | HAVE |
-| archetypes, blockplaceholders, challenges, dialogs, dmscontent, events, gameevents, item_modifiers, misc, music, nav_objects, physicsbodies, qualityinfo, rwgmixer, sandbox_overrides, shapes, sounds, twitch, twitch_events, ui_display, utilityai, weathersurvival, worldglobal, Localization, loadingscreen, XUi_* | none | NONE until feature (A24); LoadLocal name list is protocol (OK). A NONE file becomes a finding only when code behaves as if the data exists; the one such case is A34 (entityclasses HP), not a missing file |
+| archetypes.xml | none | NONE, no dependency (wire "archetype" is the PlayerProfile field, not this file) |
+| biomes.xml | biome_layers.zig + world/biomes.zig | HAVE (layers, weather groups, deco, biomemapcolor, subbiome sets) |
+| blockplaceholders.xml | none | NONE, no dependency |
+| blocks.xml (+ materials.xml) | blocks.zig / maxdamage.zig / storage_pairs | HAVE (solid/name, MaxDamage, power watts/Class/Fuel, CraftingAreaRecipes, HeatMapStrength, DowngradeBlock pairs) |
+| buffs.xml | buffs.zig | HAVE (stack/duration/update_rate, passive_effect rows; triggered_effect VM is later) |
+| challenges.xml | none | NONE, no dependency (challengegroup_reward_* quest names are name-keys, quests.xml side) |
+| dialogs.xml | none | NONE, no dependency (trader dialog is client-side XUiM; server sends TraderData) |
+| dmscontent.xml | none | NONE, no dependency |
+| entityclasses.xml | entities.zig | **HAVE** (hash, kind, loot, speeds, sight, HandItem; HP via `HealthMax` passive_effect + variables — A34 closed 2026-08-20) |
+| entitygroups.xml | entitygroups.zig | HAVE (weighted picks; parse cap 512 of 1892, GAP_ANALYSIS 1820) |
+| events.xml | none | NONE, no dependency |
+| gameevents.xml | none | NONE, no dependency |
+| gamestages.xml | gamestages.zig | HAVE (stage ladders + player/party stage math) |
+| item_modifiers.xml | none | NONE, no dependency |
+| items.xml | items.zig | HAVE (Stacknumber via Extends, EconomicValue, **EconomicSellScale — A39 closed 2026-08-20**, DamageEntity, FuelValue, Eat cvars, stock type assign) |
+| loadingscreen.xml | none | NONE, no dependency (client UI) |
+| loot.xml | loot.zig | HAVE (groups/containers, count=all, force_prob, quality template) |
+| materials.xml | via blocks/maxdamage | HAVE (block Material props ride blocks.xml rows) |
+| misc.xml | none | NONE, no dependency |
+| music.xml | none | NONE, no dependency (blood-moon music is the wire package, not this file) |
+| nav_objects.xml | names verified (join.zig test) | OK (the three marker class names are wire identifiers from stock names; test asserts they exist in the stock file; sprite settings are client-side) |
+| npc.xml | npc.zig | HAVE (trader class → traders.xml id + quest_list) |
+| painting.xml | painting.zig | HAVE (paint id ↔ TextureId) |
+| physicsbodies.xml | none | NONE, no dependency |
+| progression.xml | progression.zig | HAVE (level curve, attribute/perk catalog) |
+| qualityinfo.xml | none | NONE, no dependency (quality rolls ride loot/trader tables) |
+| quests.xml | quests.zig | HAVE (defs, template inheritance, objective/reward/action kinds) |
+| recipes.xml | recipes.zig | HAVE (craft outputs + ingredients; Workstation recipe blobs) |
+| rwgmixer.xml | none | NONE, no dependency (worldgen is DTM/proc, not RWG mixer) |
+| sandbox_overrides.xml | none | NONE, no dependency (SandboxCode passes through as config) |
+| shapes.xml | none | NONE, no dependency (block shapes resolve via AssignIds ids) |
+| signs.xml | none | NONE, no dependency (server ships sign shells; sign content is client-owned; prefab `*_signs.xml` libraries load via signs.zig) |
+| sounds.xml | none | NONE, no dependency (FX are client-side) |
+| spawning.xml | spawning.zig | HAVE (biome night/day/animal rules) |
+| subtitles.xml | none | NONE, no dependency (client UI) |
+| traders.xml | traders.zig | HAVE (trader_info, trader_item_groups, economy attrs, inventory roll) |
+| twitch.xml / twitch_events.xml | none | NONE, no dependency (explicit non-goal, GAP_ANALYSIS 2a.6) |
+| ui_display.xml | none | NONE, no dependency (client UI) |
+| utilityai.xml | none | NONE, no dependency (EAI table is hand-ported, GAP_ANALYSIS 5.x) |
+| vehicles.xml | vehicles.zig | HAVE (physical attributes → sim VehicleKind) |
+| videos.xml | none | NONE, no dependency (client UI) |
+| weathersurvival.xml | none | NONE, no dependency by design: the stock dedicated server stubs felt temperature, so wet/cold buffs stay client-computed (STATUS weather-env §4) |
+| worldglobal.xml | none | NONE, no dependency |
+
+Every NONE row was re-checked 2026-08-20 for code that behaves as if the file's
+data exists; none does (the prior A34 case is closed). The LoadLocal name list
+is protocol (OK).
 
 ## Builtin production leakage check
 
@@ -203,7 +277,9 @@ values are Bucket A (stock data), never zdtd.toml.
    with current defaults as field initializers; delete the consts.
 6. **Cleanup (P3)**: B39 dedupe sleeper_party_radius, B40 offlineStockName
    cross-check, A39 EconomicSellScale, A40 zombieFeral row, B31/B34-B36/B38
-   named-const notes.
+   named-const notes. **LANDED 2026-08-20**: A39 (EconomicSellScale is stock
+   data, now parsed), A40 (feral row repointed), B39 (config field), B40
+   (parked, documented mirror); B31/B34-B36/B38 parked with citations above.
 
 ## Validation
 

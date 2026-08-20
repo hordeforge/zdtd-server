@@ -654,3 +654,23 @@ pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stac
     }
     try self.sendGame(peer, "NetPackageHoldingItem", hb);
 }
+
+test "quest nav class names exist in stock nav_objects.xml" {
+    // sendQuestNavObjects carries these class NAMES on the NetPackageNavObject
+    // wire; the client resolves them against its own nav_objects.xml, so the
+    // names must exist in the stock file. Fail closed: a renamed class would
+    // leave the marker unresolved on the client (the names are wire
+    // identifiers from stock names, like block/item names; the file's sprite
+    // settings are client-side rendering config the server never reads).
+    const io_fs = @import("../../util/io_fs.zig");
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/nav_objects.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    const buf = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
+    defer std.testing.allocator.free(buf);
+    const classes = [_][]const u8{ "quest", "go_to_trader", "return_to_trader" };
+    for (classes) |c| {
+        var needle_buf: [64]u8 = undefined;
+        const needle = std.fmt.bufPrint(&needle_buf, "<nav_object_class name=\"{s}\"", .{c}) catch unreachable;
+        try std.testing.expect(std.mem.find(u8, buf, needle) != null);
+    }
+}
