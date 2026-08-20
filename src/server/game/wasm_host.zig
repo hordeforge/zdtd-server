@@ -180,10 +180,21 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
 ///                                 "" when the id is unknown/absent (lets
 ///                                 plugins classify an attacker/victim, e.g.
 ///                                 PvP/friendly-fire policies).
+///   "quest <def_id>"           -> the quest def's name (stable key), or ""
+///                                 when unknown (lets plugins gate by name).
 pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
     var it = std.mem.tokenizeScalar(u8, req, ' ');
     const verb = it.next() orelse return 0;
+    if (std.mem.eql(u8, verb, "quest")) {
+        const id_s = it.next() orelse return 0;
+        if (it.next() != null) return 0;
+        const id = std.fmt.parseInt(u16, id_s, 10) catch return 0;
+        const d = g.sim.catalog.byId(id) orelse return 0;
+        const n = @min(d.name.len, out.len);
+        @memcpy(out[0..n], d.name[0..n]);
+        return n;
+    }
     if (std.mem.eql(u8, verb, "kind")) {
         const id_s = it.next() orelse return 0;
         if (it.next() != null) return 0;

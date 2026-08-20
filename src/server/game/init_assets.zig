@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
+const game_hooks = @import("hooks.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const biomes_mod = @import("../../world/biomes.zig");
@@ -380,6 +381,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // rest). Unset hook = no plugins = today's behaviour.
         self.sim.kill_verdict_ctx = self;
         self.sim.kill_verdict_fn = &game_mod.killVerdict;
+        // Quest-accept gate (AGENTS rule 29): on_quest_accept verdict on every
+        // acceptance (plugins gate which quests a player may take).
+        self.sim.quest_accept_ctx = self;
+        self.sim.quest_accept_fn = &game_hooks.questAcceptAt;
         if (night_g.len > 0 or day_g.len > 0) {
             util_log.info("zdtd: director groups night={s} day={s} animal={s}\n", .{ night_g, day_g, animal_g });
         }

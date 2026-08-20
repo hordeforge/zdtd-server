@@ -151,6 +151,7 @@ behavior, not server.
 |---|---|---|
 | Chat filtering / commands / reactions | **Plugin already** | `on_chat` (rewrite/suppress, `c2s/misc.zig:42`) |
 | Kill / death / quest events | **Plugin already** | `on_entity_killed` / `on_player_death` / `on_quest_complete` verdicts; `mods/zdtd_killfeed` is the reference |
+| Quest acceptance policy (which quests a player may take) | **Plugin already** | `on_quest_accept` verdict (added 2026-08-20, fired on every acceptance via a World gate) + the `quest` query verb; `mods/zdtd_questgate` is the reference (denies `forbidden_*` quests by name) |
 | Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
 | Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 — every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
@@ -210,6 +211,10 @@ native by construction; a feature that *decides* about such things is a plugin.
   `on_player_damage` verdict + the `kind` query verb to deny all
   player-vs-player damage while leaving NPC damage untouched. Use it as the
   template for PvP/friendly-fire and damage-scaling policies.
+- `mods/zdtd_questgate/zdtd_questgate.wasm` — a quest-acceptance policy
+  module: uses the `on_quest_accept` verdict + the `quest` query verb to deny
+  quests named `forbidden_*` and log every acceptance. Use it as the template
+  for quest gating (whitelists, class/level restrictions).
 
 ## Data across the boundary
 

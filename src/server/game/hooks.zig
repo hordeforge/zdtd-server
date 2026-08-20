@@ -150,6 +150,21 @@ pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f3
     return g.bots.damageFrom(bot_net, amount, attacker_net);
 }
 
+/// Quest-accept gate (AGENTS rule 29, Wasm-first): routes the sim's
+/// acceptance decision to the plugin on_quest_accept verdicts (first non-zero
+/// wins; <0 denies the accept). Resolves the peer slot to the player's net id
+/// for the plugin. Unset hook = no plugins = today's behaviour.
+pub fn questAcceptAt(ctx: ?*anyopaque, peer_slot: i32, def_id: u16) i32 {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
+    var player: i32 = -1;
+    if (peer_slot >= 0 and peer_slot < g.sim.player.len) {
+        const ps: usize = @intCast(peer_slot);
+        if (g.sim.mask[ps].network_id) player = g.sim.network_id[ps].id;
+    }
+    const sv = g.plugins.questAccept(player, def_id);
+    return if (sv != 0) sv else g.wasm_plugins.questAccept(player, def_id);
+}
+
 pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const iname: ?[]const u8 = if (g.items.byId(item_id)) |d|

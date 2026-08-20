@@ -25,12 +25,13 @@ pub const Hook = enum(u8) {
     on_player_login = 10,
     on_player_leave = 11,
     on_player_damage = 12,
+    on_quest_accept = 13,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",  "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage", "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login", "on_player_leave",
-        "on_player_damage",
+        "on_player_damage", "on_quest_accept",
     };
 };
 
@@ -226,6 +227,19 @@ pub const Plugin = struct {
         return self.instance.call(fn (i32, i32, i32) i32, "on_player_damage", .{ attacker, victim, amount }) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_player_damage disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_quest_accept(player: i32, def_id: i32) -> i32 (verdict: <0 deny the
+    /// accept, 0 keep). Fired on every quest acceptance so plugins gate which
+    /// quests a player may take (AGENTS rule 29, Wasm-first).
+    pub fn callQuestAccept(self: *Plugin, player: i32, def_id: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_quest_accept)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32) i32, "on_quest_accept", .{ player, def_id }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_quest_accept disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -472,6 +486,14 @@ pub const WasmHost = struct {
     pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn questAccept(self: *WasmHost, player: i32, def_id: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callQuestAccept(player, def_id);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
@@ -931,6 +953,43 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_damage)]);
     try std.testing.expectEqual(@as(i32, -1), host.playerDamage(100, 200, 50)); // both players: deny
     try std.testing.expectEqual(@as(i32, 0), host.playerDamage(300, 200, 50)); // zombie -> player: keep
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
+    // The quest-acceptance policy plugin (AGENTS rule 29): with the "quest"
+    // query verb stubbed (def 1 -> "forbidden_evil", def 2 -> "tier1_clear"),
+    // on_quest_accept must deny the forbidden name and keep the rest, never
+    // disabling.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
+            var it = std.mem.tokenizeScalar(u8, req, ' ');
+            _ = it.next();
+            const id_s = it.next() orelse return 0;
+            const id = std.fmt.parseInt(i32, id_s, 10) catch return 0;
+            const name: []const u8 = switch (id) {
+                1 => "forbidden_evil",
+                2 => "tier1_clear",
+                else => return 0,
+            };
+            const n = @min(name.len, out.len);
+            @memcpy(out[0..n], name[0..n]);
+            return n;
+        }
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_questgate/zdtd_questgate.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_accept)]);
+    try std.testing.expectEqual(@as(i32, -1), host.questAccept(5, 1)); // forbidden_evil: deny
+    try std.testing.expectEqual(@as(i32, 0), host.questAccept(5, 2)); // tier1_clear: keep
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

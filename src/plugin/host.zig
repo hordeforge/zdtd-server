@@ -113,6 +113,18 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    pub fn questAccept(self: *PluginHost, player: i32, def_id: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_quest_accept) |f| {
+                const v = f(&self.view, player, def_id);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {

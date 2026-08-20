@@ -345,6 +345,13 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     const ps = w.playerByPeer(peer_slot) orelse return false;
     if (!w.mask[ps].journal) return false;
     if (w.catalog.byId(def_id) == null) return false;
+    // Wasm-first (AGENTS rule 29): every quest acceptance passes the
+    // on_quest_accept plugin verdict (World hook wired by Game). <0 denies
+    // the accept (no slot allocated); 0 keeps. Plugins gate which quests a
+    // player may take (class/level/whitelist policies) instead of native code.
+    if (w.quest_accept_fn) |qf| {
+        if (qf(w.quest_accept_ctx, @intCast(peer_slot), def_id) < 0) return false;
+    }
     var j = &w.journal[ps];
     if (j.hasActive(def_id)) return false;
     const s = j.findFree() orelse return false;

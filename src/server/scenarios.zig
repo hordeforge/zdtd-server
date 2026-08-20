@@ -5531,6 +5531,44 @@ test "scenario player dig routes the on_block_damage verdict (plugin_rules doubl
     std.debug.print("PASS dig-verdict: player dig scales through on_block_damage (10 -> 30)\n", .{});
 }
 
+test "scenario on_quest_accept verdict gates acceptance (real zdtd_questgate)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A catalog with one forbidden and one normal quest (names are the key).
+    const defs = [_]quest_mod.QuestDef{
+        .{ .id = 1, .kind = .kill_zombies, .name = "forbidden_evil", .title = "FE", .target_count = 1 },
+        .{ .id = 2, .kind = .goto_point, .name = "ok_quest", .title = "OK", .target_count = 1 },
+    };
+    g.sim.catalog = .{ .defs = &defs, .starter_id = 99, .source = .builtin };
+
+    // Load the committed gate module into the Game's wasm host.
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_questgate/zdtd_questgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // The forbidden quest is denied at the sim gate (no journal slot).
+    try std.testing.expect(!systems.questAccept(&g.sim, c.slot, 1));
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
+    // The normal quest still accepts.
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, 2));
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 2));
+    std.debug.print("PASS questgate: forbidden_evil denied, ok_quest accepted\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

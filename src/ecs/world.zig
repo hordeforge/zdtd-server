@@ -312,6 +312,11 @@ pub const World = struct {
     /// attacker and emit a damage event for the guest's retaliation.
     bot_damage_ctx: ?*anyopaque = null,
     bot_damage_fn: ?*const fn (?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool = null,
+    /// Optional quest-accept gate (AGENTS rule 29, Wasm-first): (ctx,
+    /// peer_slot, def_id) -> i32, <0 denies the accept. Game wires the plugin
+    /// on_quest_accept verdict; unset = no plugins, today's behaviour.
+    quest_accept_ctx: ?*anyopaque = null,
+    quest_accept_fn: ?*const fn (?*anyopaque, peer_slot: i32, def_id: u16) i32 = null,
     /// Optional POI footprint at a world XZ (Game wires the prefabs index).
     /// Unset → no POI data (tests / headless), so quests get no POI rect and
     /// their rally objectives stay scaffolding instead of stalling.
