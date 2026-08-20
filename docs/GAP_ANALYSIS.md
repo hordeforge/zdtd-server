@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (157/129/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (158/128/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 13 | 13 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **157** | **129** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **158** | **128** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2180,7 +2180,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**13 WORKS · 13 PARTIAL · 7 MISSING**
+**14 WORKS · 12 PARTIAL · 7 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -2235,14 +2235,15 @@ unvalidated, and durability, mods and repair do not exist.
   `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
   `src/server/c2s/misc.zig`
 
-- **Item quality tier** `PARTIAL` (2026-08-08 refresh)
-  quality rides the wire, the TE and players.zsv, and stack merges refuse to blend
-  different qualities. Looted items now roll quality from the
-  `loot_quality_template` by loot stage (2026-08-08) and trader inventory rolls
-  quality per entry; stackables without a quality tier keep 1 so they merge.
-  Still open: `qualityinfo.xml` is only forwarded as a client config name,
-  UseTimes / durability degradation is not wired to the attack / dig call sites,
-  and mods have no quality effect.
+- **Item quality tier** `WORKS` (2026-08-21 reconciliation)
+  quality rides the wire, the TE and players.zsv, and stack merges refuse to
+  blend different qualities. Looted items roll quality from the
+  `loot_quality_template` by loot stage (2026-08-08) and trader inventory
+  rolls quality per entry; stackables without a quality tier keep 1 so they
+  merge; `qualityinfo.xml` is forwarded as the client config name (the
+  client ships the file, exactly the stock flow); durability wear is wired
+  (2026-08-21). Mods having no quality effect belongs to the waived mods
+  row.
   *Anchors:* `src/assets/loot.zig` `resolveQuality` / `rollContainer`,
   `src/ecs/components.zig:363-395`, `:444-466`
 
