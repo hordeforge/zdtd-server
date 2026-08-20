@@ -39,7 +39,14 @@ pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         }
     }
     const coin = self.coinItemId();
-    _ = systems.trade(&self.sim, c.slot, t.trader_entity, t.item, t.qty, t.side, coin);
+    const traded = systems.trade(&self.sim, c.slot, t.trader_entity, t.item, t.qty, t.side, coin);
+    // Wasm-first (AGENTS rule 29): trader announcements react through a
+    // plugin, not native code (kind 1 buy / 2 sell; stock side 0=buy 1=sell).
+    if (traded) {
+        const kind: i32 = if (t.side == 0) 1 else 2;
+        self.plugins.traderEvent(c.entity_id, t.trader_entity, kind);
+        self.wasm_plugins.traderEvent(c.entity_id, t.trader_entity, kind);
+    }
     if (c.peer) |p| {
         const ts = self.sim.slotOfNetId(t.trader_entity);
         try self.sendTraderSnapshot(p, ts);

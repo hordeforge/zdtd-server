@@ -513,6 +513,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         .entries = ent_buf[0..n],
                     });
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    // Wasm-first: the window-open announcement rides a plugin
+                    // (kind 0 = trader open), not native code.
+                    self.plugins.traderEvent(c.entity_id, self.sim.network_id[ts].id, 0);
+                    self.wasm_plugins.traderEvent(c.entity_id, self.sim.network_id[ts].id, 0);
                 } else if (vending_pos) |vp| {
                     // Vending machines are always open (trader_info has no
                     // hours). The LockResponse carries the machine's

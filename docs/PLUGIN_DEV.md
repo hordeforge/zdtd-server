@@ -163,7 +163,8 @@ behavior, not server.
 | Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `mods/zdtd_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
 | Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/zdtd_killfeed` logs both |
-| Announcements wired to more events (trader, vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
+| Trader announcements (window open, buy, sell) | **Plugin already** | `on_trader_event` (added 2026-08-20; kind 0 open / 1 buy / 2 sell, fired at the LockResponse open and the typed trade path) — `mods/zdtd_tradefeed` is the reference |
+| Announcements wired to more events (vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
 | Wire encode/emit, LiteNet, chunk stream, interest/replication | **Cannot be a plugin** | Boundary never touches wire bytes or package layout (enforced) |
 | ECS sim mutation: inventory, blocks, quests, trading authority | **Cannot be a plugin** | Plugins mutate only via `queue` verbs the server already understands; no direct sim access |
 | World store, persistence (ZCH3/ZPV3/…), config loading | **Cannot be a plugin** | Filesystem/capability-gated; init-time, not tick |
@@ -224,6 +225,9 @@ native by construction; a feature that *decides* about such things is a plugin.
 - `mods/zdtd_lootgate/zdtd_lootgate.wasm` — a loot-roll policy module: uses
   the `on_loot_roll` verdict to scale every rolled loot count to 50%. Use it
   as the template for loot-abundance and empty-loot policies.
+- `mods/zdtd_tradefeed/zdtd_tradefeed.wasm` — a trader-event observer module:
+  uses `on_trader_event` (kind 0 open / 1 buy / 2 sell) to log every trade
+  window event. Use it as the template for trader/vehicle announcements.
 
 ## Data across the boundary
 

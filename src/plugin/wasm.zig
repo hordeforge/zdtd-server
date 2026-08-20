@@ -28,12 +28,14 @@ pub const Hook = enum(u8) {
     on_quest_accept = 13,
     on_craft_request = 14,
     on_loot_roll = 15,
+    on_trader_event = 16,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
+        "on_trader_event",
     };
 };
 
@@ -201,6 +203,21 @@ pub const Plugin = struct {
         self.instance.call(fn (i32, i32) void, "on_player_leave", .{ slot, entity_id }) catch |err| {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_player_leave disabled: {s}\n", .{ self.name, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
+
+    /// on_trader_event(player: i32, trader_entity: i32, kind: i32).
+    /// kind: 0 = trader window opened, 1 = player bought, 2 = player sold.
+    /// Announcements/observers react through a plugin (Wasm-first); the trade
+    /// itself already executed - this is an event, not a verdict.
+    pub fn callTraderEvent(self: *Plugin, player: i32, trader_entity: i32, kind: i32) bool {
+        if (self.disabled) return false;
+        if (!self.hook_present[@intFromEnum(Hook.on_trader_event)]) return false;
+        self.instance.call(fn (i32, i32, i32) void, "on_trader_event", .{ player, trader_entity, kind }) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_trader_event disabled: {s}\n", .{ self.name, @errorName(err) });
             return false;
         };
         return true;
@@ -505,6 +522,10 @@ pub const WasmHost = struct {
 
     pub fn playerLeave(self: *WasmHost, slot: u16, entity_id: i32) void {
         for (0..self.n) |i| _ = self.slots[i].callPlayerLeave(@intCast(slot), entity_id);
+    }
+
+    pub fn traderEvent(self: *WasmHost, player: i32, trader_entity: i32, kind: i32) void {
+        for (0..self.n) |i| _ = self.slots[i].callTraderEvent(player, trader_entity, kind);
     }
 
     /// Event-hook verdicts: first non-zero return across plugins in load order.
@@ -1090,6 +1111,28 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_loot_roll)]);
     try std.testing.expectEqual(@as(i32, 50), host.lootRoll("EntityLootContainerRegular", 4));
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
+    // The trader-event observer plugin (AGENTS rule 29): on_trader_event must
+    // be present, fire for every kind without disabling, and stay loaded.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
+    host.traderEvent(107, 42, 0); // open
+    host.traderEvent(107, 42, 1); // buy
+    host.traderEvent(107, 42, 2); // sell
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

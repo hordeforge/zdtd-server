@@ -331,11 +331,12 @@ RE-cited settime parse) deleted; **B3/B4** noted (admin-only vehicle-kind
 heuristic with vehicles.xml fallback; `kill` 99999 admin literal), no change.
 
 **PLUGIN_DEV expressibility audit re-run (2026-08-20):** the table in
-docs/PLUGIN_DEV.md was re-verified against the current hook surface (16 hooks,
-6 reference modules). Every discretionary behavior the boundary can carry is
-plugin-covered or a documented boundary-extension candidate (guard policy
-ladder and trader/vehicle announcements are the two "Not yet" rows, each with
-the correct disposition: extend the boundary, do not add native code). The
+docs/PLUGIN_DEV.md was re-verified against the current hook surface (17 hooks,
+6 reference modules, plus the on_trader_event observer added 2026-08-20).
+Every discretionary behavior the boundary can carry is plugin-covered or a
+documented boundary-extension candidate: the guard policy ladder is the
+remaining "Not yet" row (per-peer counter/quarantine verbs), each with the
+correct disposition - extend the boundary, do not add native code. The
 native additions of this session were data-driven fixes (A34/A39/R1/R2,
 nav_objects gate) and `[rules]` config fields (R1-R7) - none is discretionary
 behavior, so no new plugin rows were required. No undocumented native

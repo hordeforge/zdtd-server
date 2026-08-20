@@ -75,6 +75,14 @@ pub const PluginHost = struct {
         }
     }
 
+    pub fn traderEvent(self: *PluginHost, player: i32, trader_entity: i32, kind: i32) void {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_trader_event) |f| f(&self.view, player, trader_entity, kind);
+        }
+    }
+
     /// Event-hook verdicts (T15): first non-zero return across enabled
     /// plugins. 0 keeps today's behaviour; a null hook is skipped.
     pub fn playerDeath(self: *PluginHost, victim: i32) i32 {
