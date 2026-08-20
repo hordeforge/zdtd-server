@@ -157,7 +157,7 @@ behavior, not server.
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
 | Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
 | Bot brains | **Plugin already** | `mods/zdtd_bot` (ADR 0026) |
-| Player-damage policy (PvP / friendly-fire rules) | **Not yet** — technically expressible with one new verdict | Needs `on_player_damage`-style affordance; until then PvP gate is native authority |
+| Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `mods/zdtd_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
 | Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/zdtd_killfeed` logs both |
 | Announcements wired to more events (trader, vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
@@ -206,6 +206,10 @@ native by construction; a feature that *decides* about such things is a plugin.
   kills, player deaths and quest completions via the verdict hooks and keeps
   every outcome (0). Use it as the template for announcements, kill-feeds,
   scoreboards and integrations.
+- `mods/zdtd_pvp/zdtd_pvp.wasm` — a player-damage policy module: uses the
+  `on_player_damage` verdict + the `kind` query verb to deny all
+  player-vs-player damage while leaving NPC damage untouched. Use it as the
+  template for PvP/friendly-fire and damage-scaling policies.
 
 ## Data across the boundary
 

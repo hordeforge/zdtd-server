@@ -269,6 +269,19 @@ pub const BotManager = struct {
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
         // damageFrom attributes the bot as the attacker (zombie revenge target,
         // kill attribution) — `damage` would leave it unattributed.
+        // Wasm-first (AGENTS rule 29): a bot damaging a PLAYER passes the
+        // on_player_damage plugin verdict (PvP/friendly-fire, damage scaling).
+        if (g.sim.slotOfNetId(target)) |es| {
+            if (g.sim.mask[es].player) {
+                const sv = g.plugins.playerDamage(shooter, target, @intFromFloat(dmg));
+                const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(shooter, target, @intFromFloat(dmg));
+                if (v < 0) return;
+                if (v > 0) {
+                    _ = g.sim.damageFrom(target, dmg * @as(f32, @floatFromInt(v)) / 100.0, shooter);
+                    return;
+                }
+            }
+        }
         _ = g.sim.damageFrom(target, dmg, shooter);
     }
 

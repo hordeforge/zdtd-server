@@ -24,11 +24,13 @@ pub const Hook = enum(u8) {
     on_chat = 9,
     on_player_login = 10,
     on_player_leave = 11,
+    on_player_damage = 12,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",  "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage", "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login", "on_player_leave",
+        "on_player_damage",
     };
 };
 
@@ -209,6 +211,21 @@ pub const Plugin = struct {
         return self.instance.call(fn (i32) i32, "on_player_death", .{victim}) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_player_death disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_player_damage(attacker: i32, victim: i32, amount: i32) -> i32
+    /// (verdict convention: <0 deny the hit, 0 keep, >0 scale by percent).
+    /// Fired for damage directed at a player after the native PvP/armor gate,
+    /// so plugins express PvP/friendly-fire and damage-scaling policy
+    /// (AGENTS rule 29, Wasm-first).
+    pub fn callPlayerDamage(self: *Plugin, attacker: i32, victim: i32, amount: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_player_damage)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32, i32) i32, "on_player_damage", .{ attacker, victim, amount }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_player_damage disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -447,6 +464,14 @@ pub const WasmHost = struct {
     pub fn entityKilled(self: *WasmHost, killed: i32, killer: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callEntityKilled(killed, killer);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
@@ -871,6 +896,41 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     // Join/leave are void notifications: they never disable the module.
     host.playerJoin(0, 10);
     host.playerLeave(0, 10);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
+    // The player-damage policy plugin (AGENTS rule 29): with the "kind" query
+    // verb stubbed (100/200 players, 300 zombie), on_player_damage must deny
+    // player-vs-player and keep everything else, never disabling.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+        fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
+            var it = std.mem.tokenizeScalar(u8, req, ' ');
+            _ = it.next();
+            const id_s = it.next() orelse return 0;
+            const id = std.fmt.parseInt(i32, id_s, 10) catch return 0;
+            const k: u8 = switch (id) {
+                100, 200 => 0, // players
+                300 => 1, // zombie
+                else => return 0,
+            };
+            out[0] = '0' + k;
+            return 1;
+        }
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_pvp/zdtd_pvp.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_damage)]);
+    try std.testing.expectEqual(@as(i32, -1), host.playerDamage(100, 200, 50)); // both players: deny
+    try std.testing.expectEqual(@as(i32, 0), host.playerDamage(300, 200, 50)); // zombie -> player: keep
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

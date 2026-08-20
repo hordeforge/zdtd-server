@@ -176,10 +176,28 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
 ///
 ///   "cover <x> <z> <tx> <tz>"  -> "<cx> <cz>" (a point near (x,z) not visible
 ///                                 from (tx,tz)), or "" when none exists.
+///   "kind <net_id>"            -> "0" player, "1" zombie/animal, "2" bot, or
+///                                 "" when the id is unknown/absent (lets
+///                                 plugins classify an attacker/victim, e.g.
+///                                 PvP/friendly-fire policies).
 pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
     var it = std.mem.tokenizeScalar(u8, req, ' ');
     const verb = it.next() orelse return 0;
+    if (std.mem.eql(u8, verb, "kind")) {
+        const id_s = it.next() orelse return 0;
+        if (it.next() != null) return 0;
+        const id = std.fmt.parseInt(i32, id_s, 10) catch return 0;
+        const k: u8 = if (g.bots.find(id) != null)
+            2
+        else if (g.sim.slotOfNetId(id)) |es| switch (g.sim.kind[es]) {
+            .player => 0,
+            .zombie, .animal => 1,
+            else => return 0,
+        } else return 0;
+        out[0] = '0' + k;
+        return 1;
+    }
     if (!std.mem.eql(u8, verb, "cover")) return 0;
     const sx = it.next() orelse return 0;
     const sz = it.next() orelse return 0;

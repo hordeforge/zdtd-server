@@ -53,6 +53,7 @@ pub const PluginVTable = struct {
     on_shutdown: ?*const fn (*const Host) void = null,
     on_player_death: ?*const fn (*const Host, victim: i32) i32 = null,
     on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,
+    on_player_damage: ?*const fn (*const Host, attacker: i32, victim: i32, amount: i32) i32 = null,
     on_block_damage: ?*const fn (*const Host, x: i32, y: i32, z: i32, dmg: i32) i32 = null,
     on_quest_complete: ?*const fn (*const Host, player: i32, quest_def: i32) i32 = null,
     /// Admin command hook: receives the full console line (verb + args), writes

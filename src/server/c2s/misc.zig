@@ -314,6 +314,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 amount *= (1.0 - mit);
             }
         }
+        // Wasm-first (AGENTS rule 29): damage directed at a player passes the
+        // on_player_damage plugin verdict after the native gate, so plugins
+        // express PvP/friendly-fire and damage-scaling policy. <0 deny, 0
+        // keep, >0 scale by percent. The native pvp_mode floor still wins.
+        if (self.sim.slotOfNetId(d.entity_id)) |ei| {
+            if (self.sim.mask[ei].player) {
+                const atk = self.sim.network_id[actor_slot].id;
+                const sv = self.plugins.playerDamage(atk, d.entity_id, @intFromFloat(amount));
+                const v = if (sv != 0) sv else self.wasm_plugins.playerDamage(atk, d.entity_id, @intFromFloat(amount));
+                if (v < 0) return true;
+                if (v > 0) amount = amount * @as(f32, @floatFromInt(v)) / 100.0;
+            }
+        }
         // Attribute the hit: stock's NetPackageDamageEntity carries
         // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt
         // turns it into the victim's attack target. The actor is already

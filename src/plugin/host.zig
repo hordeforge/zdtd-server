@@ -101,6 +101,18 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    pub fn playerDamage(self: *PluginHost, attacker: i32, victim: i32, amount: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_player_damage) |f| {
+                const v = f(&self.view, attacker, victim, amount);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {

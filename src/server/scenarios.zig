@@ -5440,6 +5440,57 @@ test "scenario bot host config flows from options (headshot multiplier)" {
     );
 }
 
+test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    // pvp_mode 3 (PvP allowed natively): only the plugin verdict can stop it.
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .player_killing_mode = 3 });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Load the committed policy module into the Game's wasm host (its
+    // sense/query fns are already wired in wasm_ctx).
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_pvp/zdtd_pvp.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+
+    const id_a: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
+    const id_b: platform_user.Id = .{ .platform = "Steam", .id = "9002" };
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, id_a);
+    const cb = try g.attachJoinedClientAs(&cap_b, id_b);
+    const pa = g.sim.slotOfNetId(ca.entity_id).?;
+    try std.testing.expect(g.sim.mask[pa].player);
+
+    // Player B attacks player A: the on_player_damage verdict denies it.
+    const hp0 = g.sim.health[pa].hp;
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const dmg = try packages.buildDamageBody(&body, ca.entity_id, 0, 0, 50, false, cb.entity_id);
+    try g.injectFramed(cb, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+    try std.testing.expectEqual(hp0, g.sim.health[pa].hp);
+
+    // A zombie near the players still takes player damage (the module keeps
+    // non-PvP damage untouched). Spawn it beside player A so the interest
+    // range gate passes.
+    const ap = g.sim.transform[pa];
+    const zy = g.groundHeight(@intFromFloat(ap.x + 2), @intFromFloat(ap.z));
+    const zid = g.sim.spawnZombie(ap.x + 2, zy, ap.z, 100).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    const zhp0 = g.sim.health[zs].hp;
+    const zdmg = try packages.buildDamageBody(&body, zid, 0, 0, 50, false, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageDamageEntity", zdmg));
+    try std.testing.expect(zhp0 > g.sim.health[zs].hp);
+    std.debug.print("PASS pvp-verdict: player damage denied, zombie damage kept\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
