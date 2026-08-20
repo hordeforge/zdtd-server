@@ -358,8 +358,8 @@ pub const Director = struct {
         }
 
         if (self.clock.isNight() and self.horde_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 2, 18.0, 28.0, "");
-            self.horde_cd = if (self.bloodmoon_active) 8.0 else 45.0;
+            spawned += self.spawnNearPlayers(w, 2, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
+            self.horde_cd = if (self.bloodmoon_active) w.rules.director.bloodmoon_horde_drip_cd else w.rules.director.horde_drip_cd;
         }
         if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
             // Freeze the party gamestage at dusk (InitParty): the ladder and
@@ -375,7 +375,7 @@ pub const Director = struct {
                 bm_group = sg.group;
             }
             spawned += self.spawnBloodMoonParties(w, wave, bm_group);
-            self.bloodmoon_cd = 6.0;
+            self.bloodmoon_cd = w.rules.director.bloodmoon_wave_cd;
         } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
             // EndBloodMoon (412618): clear horde marks and the frozen stage at
             // dawn; nothing is despawned.
@@ -400,8 +400,8 @@ pub const Director = struct {
         // Heat map: decay + the 5 s scout check (AIDirectorChunkEventComponent).
         self.tickHeat(w, dt);
         if (!self.clock.isNight() and self.scouts_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 1, 30.0, 40.0, self.scoutGroup());
-            self.scouts_cd = 120.0;
+            spawned += self.spawnNearPlayers(w, 1, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
+            self.scouts_cd = w.rules.director.scout_drip_cd;
         }
         // Daytime wildlife up to MaxSpawnedAnimals (wander, not chase).
         spawned += self.tickAnimals(w);
@@ -425,9 +425,9 @@ pub const Director = struct {
         // MaxSpawnedAnimals, so the day-only gate is dropped.
         if (self.max_alive_animals <= 0 or self.animals_cd > 0) return 0;
         if (w.countKind(.animal) < self.max_alive_animals) {
-            n += self.spawnAnimalsNearPlayers(w, 1, 20.0, 45.0);
+            n += self.spawnAnimalsNearPlayers(w, 1, w.rules.director.animal_spawn_ring_min, w.rules.director.animal_spawn_ring_max);
         }
-        self.animals_cd = 60.0;
+        self.animals_cd = w.rules.director.animal_drip_cd;
         return n;
     }
 
@@ -672,7 +672,7 @@ pub const Director = struct {
                 ct = w.class_table[csel];
             }
         }
-        const bm_mul: f32 = if (self.bloodmoon_active) 1.5 else 1.0;
+        const bm_mul: f32 = if (self.bloodmoon_active) w.rules.director.bloodmoon_hp_mult else 1.0;
         const hp: f32 = (if (resolved) |d| d.max_hp else ct.max_hp) * bm_mul * self.hpScale();
         const id = if (resolved) |d|
             w.spawnZombieDef(x, y, z, hp, d)

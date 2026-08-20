@@ -238,6 +238,27 @@ pub const Director = struct {
     /// (aidirector.md verified literals). Was 60 before the A41 alignment.
     heat_neighbor_cooldown_seconds: f32 = 180.0,
     heat_scout_dist: f32 = 10.0,
+    /// Enemy spawn ring around players. Stock `GetRandomSpawnPositionInAreaMinMaxToPlayers`
+    /// cEnemyMin/MaxDistance = 28..54 m (spawning.md; was 18..28, on-camera).
+    enemy_spawn_ring_min: f32 = 28.0,
+    enemy_spawn_ring_max: f32 = 54.0,
+    /// Animal spawn ring. Stock cAnimalMin/MaxDistance = 48..70 m (spawning.md;
+    /// was 20..45). The periodic wildlife drip itself is a zdtd mechanic.
+    animal_spawn_ring_min: f32 = 48.0,
+    animal_spawn_ring_max: f32 = 70.0,
+    /// Night horde drip cadence (zdtd population mechanic; stock has no
+    /// periodic drip, GAP 2011-2017). 45 s normal, 8 s during a blood moon.
+    horde_drip_cd: f32 = 45.0,
+    bloodmoon_horde_drip_cd: f32 = 8.0,
+    /// Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat
+    /// events only, GAP 1407).
+    scout_drip_cd: f32 = 120.0,
+    /// Daytime wildlife drip cadence (zdtd mechanic).
+    animal_drip_cd: f32 = 60.0,
+    /// Blood-moon wave cadence (zdtd approximation of the stock wave system).
+    bloodmoon_wave_cd: f32 = 6.0,
+    /// Blood-moon zombie HP multiplier (zdtd policy; 1.5x).
+    bloodmoon_hp_mult: f32 = 1.5,
 };
 
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
@@ -333,6 +354,16 @@ pub const DirectorOverlay = struct {
     heat_cooldown_seconds: ?f32 = null,
     heat_neighbor_cooldown_seconds: ?f32 = null,
     heat_scout_dist: ?f32 = null,
+    enemy_spawn_ring_min: ?f32 = null,
+    enemy_spawn_ring_max: ?f32 = null,
+    animal_spawn_ring_min: ?f32 = null,
+    animal_spawn_ring_max: ?f32 = null,
+    horde_drip_cd: ?f32 = null,
+    bloodmoon_horde_drip_cd: ?f32 = null,
+    scout_drip_cd: ?f32 = null,
+    animal_drip_cd: ?f32 = null,
+    bloodmoon_wave_cd: ?f32 = null,
+    bloodmoon_hp_mult: ?f32 = null,
 };
 
 pub const SystemsOverlay = struct {

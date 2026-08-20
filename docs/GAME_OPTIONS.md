@@ -204,6 +204,13 @@ test, so a retune cannot land silently).
 | `heat_cooldown_seconds` | 240.0 | Region cooldown after a heat spawn. Stock `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44; the long form 1320 is the feral 2x approximation). Aligned from 120 (A41) |
 | `heat_neighbor_cooldown_seconds` | 180.0 | Shorter cooldown applied to the eight surrounding regions. Stock `StartNeighborCooldown` short = 180 s (720 long). Aligned from 60 (A41) |
 | `heat_scout_dist` | 10.0 | Scout-party spawn distance from the hot region center (chunk-heat spawner 0/8/10 constants) |
+| `enemy_spawn_ring_min` / `enemy_spawn_ring_max` | 28.0 / 54.0 | Enemy spawn ring around players. Stock `cEnemyMin/MaxDistance` (spawning.md); was 18..28 (on-camera) before the R4 alignment |
+| `animal_spawn_ring_min` / `animal_spawn_ring_max` | 48.0 / 70.0 | Animal spawn ring. Stock `cAnimalMin/MaxDistance` (spawning.md); was 20..45 before the R4 alignment |
+| `horde_drip_cd` / `bloodmoon_horde_drip_cd` | 45.0 / 8.0 | Night horde drip cadence (zdtd population mechanic; stock has no periodic drip, GAP 2011-2017) |
+| `scout_drip_cd` | 120.0 | Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat events only, GAP 1407) |
+| `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |
+| `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |
+| `bloodmoon_hp_mult` | 1.5 | Blood-moon zombie HP multiplier (zdtd policy) |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
