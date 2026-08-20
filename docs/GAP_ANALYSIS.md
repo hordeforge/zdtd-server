@@ -4074,7 +4074,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Falling blocks | PARTIAL (2026-08-20: stability-collapse groups spawn one EntityFallingBlock entity (class fallingBlocks) carrying the fallen cells (raw values + world positions), falling under the stock gravity integrator and dying on ground contact - no re-placement (RE entity-ai.md LetBlocksFall / CreateFallingBlockGroup / landing; cells air out like stock). Missing: single-block fallingBlock branch, item-drop on landing (GamePrefs OptionsStabSpawnBlocksOnGround 148, default off), impact particles, group-size IL pin) |
 | POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
 | Land claim / bedroll spawn | WORKS (2026-08-20: LandClaim options + keystone deny + bedroll respawn point) |
-| World borders / difficulty tiers | MISSING | |
+| World borders / difficulty tiers | RE-BLOCKED (2026-08-21: the world border is client-side - the client clamps at the WorldInfo size zdtd sends; the difficulty damage table (GameDifficulty -> damage multipliers applied in the stock damage paths) needs IL not in the corpus: the dump set covers EnumEnemyDifficulty and ModifySpawnCountByGameDifficulty but no difficulty-affected DamageEntity lookup. 7dtd-research needs a dump of that path before implementation; zdtd's game_difficulty/enemy_difficulty currently drive spawn scaling only) | |
 
 ---
 
@@ -4330,7 +4330,7 @@ Honest gaps:
 | TurnIn at correct trader NPC | PARTIAL (any trader open) |
 | Stock quest wire packages | MISSING (zdtd-native journal body) |
 | Localization.csv titles | MISSING |
-| Reward choice / loot groups | MISSING |
+| Reward choice / loot groups | RE-BLOCKED (2026-08-21: RE quests-challenges.md pins the mechanics - CloseQuest(finalState, rewardChoice), RewardChoicesCount, isChosenReward pick-one-of-N - but the C2S field carrying the client's chosen reward index is not in the corpus; a dump of the turn-in package reader is needed before implementing. The reward payout itself is WORKS) |
 | Trader tiers / quest_list offers | WORKS (2026-08-20 reconciliation: per-trader quest_list resolves via npc.xml + class-hash fallbacks, offers are tier-filtered and sent through NetPackageNPCQuestList FetchList, and the remove_quest accept marker journals the quest - the stock trader quest window is driven end to end) |
 | `traders.xml` inventory | PARTIAL (`traderAlways` direct items populate the stock TraderData window; group rolls skipped) |
 | Duke tokens / currency stock | PARTIAL (coins wallet) |
@@ -4476,7 +4476,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | MISSING |
 | materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
-| sounds / music (server triggers) | MISSING |
+| sounds / music (server triggers) | RE-BLOCKED (2026-08-21: NetPackageSoundAtPosition (id 25) is listed as pos/audioClipName/mode/distance/entityId (protocol-packages.md) but the exact field types and write-IL are not pinned; the mode enum and encodings need a write-method dump before implementing. NetPackageAudioPlayInHead is local-only, not server-required) |
 | nav_objects.xml | MISSING |
 | worldglobal / weathersurvival | MISSING |
 | shapes / painting | PARTIAL (painting.xml atlas; shapes via AssignIds/TTS) |
