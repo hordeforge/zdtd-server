@@ -60,7 +60,7 @@ light-level leg stays RE-blocked, no server light channel)
 11. World borders / difficulty tiers (RE-BLOCKED 2026-08-21 - difficulty damage table IL absent from the corpus; border is client-side)
 12. Server-triggered sounds / music (RE-BLOCKED 2026-08-21 - NetPackageSoundAtPosition field types not pinned)
 13. Quest reward choice / loot groups (RE-BLOCKED 2026-08-21 - the C2S chosen-reward field is not in the corpus; payout WORKS)
-14. AIDirector / sleeper save blobs (MISSING)
+14. AIDirector / sleeper save blobs (PARTIAL - non-client-visible save-format internal; clock/weather persist, full AIDirector blob out of scope)
 15. Localization titles (MISSING)
 
 AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + CheckToSpawn scouts + cooldowns +

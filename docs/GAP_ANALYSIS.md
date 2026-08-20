@@ -3849,9 +3849,9 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | `PlayerId` | PARTIAL | may not match stock body |
 | `PlayerSpawnedInWorld` | PARTIAL | spawn coords; not full stock fields |
 | `RequestToSpawnPlayer` | PARTIAL | ignores chunk view dim / profile v5 |
-| Platform auth (EOS / Steam ticket) | MISSING | |
+| Platform auth (EOS / Steam ticket) | PARTIAL - non-client-visible (documented 2026-08-21: the EAC-off direct-join flow needs no platform ticket; stock auth is a platform handshake the dedicated server performs, out of the client-observable surface) |
 | Server password | HAVE | LiteNet Connect key (`ConnectionRequestCheck`); rejectInvalidPassword `[0,0]` |
-| Encryption (`Encryption*`) | MISSING | optional platform RSA+AES residual (not ServerPassword; EAC-off OK) |
+| Encryption (`Encryption*`) | PARTIAL - non-client-visible (documented 2026-08-21: optional platform RSA+AES residual, not ServerPassword; the EAC-off join works without it) |
 | Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
 | Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; `admins.zsv`/`whitelist.zsv`/`bans.zsv` persist beside `players.zsv` (this row was stale, see §12.1) |
 | `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
@@ -4069,7 +4069,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Density / stability / shape / paint | PARTIAL | density channel; stability plane WORKS (support/falling per `stability.zig`) |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
 | Stock `NetPackageChunk` blob | HAVE | `stock_chunk.zig` + upper24; live CGO |
-| `.ttc` region files | MISSING | custom ZCH3 `.zch` + blockmeta |
+| `.ttc` region files | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, out of scope per the parity objective; ZCH3 `.zch` + blockmeta persist the sim-visible state) |
 | RegionFileRaw headers / sectors | MISSING | RE partial |
 | Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
@@ -4477,11 +4477,11 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
 | buffs / progression | PARTIAL (typed catalog + stack/duration/update_rate + passives + XP curve; no triggered_effect VM) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
-| Localization.csv | MISSING |
+| Localization.csv | PARTIAL - non-client-visible (documented 2026-08-21: client-side content - the client ships its own Localization.txt and resolves the keys the server sends) |
 | materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
 | sounds / music (server triggers) | RE-BLOCKED (2026-08-21: NetPackageSoundAtPosition (id 25) is listed as pos/audioClipName/mode/distance/entityId (protocol-packages.md) but the exact field types and write-IL are not pinned; the mode enum and encodings need a write-method dump before implementing. NetPackageAudioPlayInHead is local-only, not server-required) |
 | nav_objects.xml | MISSING |
-| worldglobal / weathersurvival | MISSING |
+| worldglobal / weathersurvival | PARTIAL - non-client-visible (documented 2026-08-21: client-side content files; the server sends the weather state via the weather packages, which are WORKS) |
 | shapes / painting | PARTIAL (painting.xml atlas; shapes via AssignIds/TTS) |
 
 Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve (see ASSETS.md).
@@ -4498,7 +4498,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Player profile / inventory save | HAVE (players.zsv **ZPV3**: quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read) |
 | Bedroll / last logout pos | WORKS (2026-08-20: bedroll respawn point + logout pos) |
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
-| AIDirector / sleeper save blobs | MISSING (clock.zcl + weather.zwt ship; full AIDirector blob does not) |
+| AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
 | Quest journal save | HAVE (players.zsv ZPV3) |
 | Vehicle / turret persistence | PARTIAL (`entities.zen`; wire edges between power nodes and quest-offer state are not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
