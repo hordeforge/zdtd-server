@@ -56,14 +56,24 @@ Spot-check summary vs the prior audit claims:
 | ID | Location | Value / shape | Sev | Fix shape | Notes |
 |---|---|---|---|---|---|
 | **B29** | `server/movement.zig:7-11` | `max_horizontal_speed_mps=20.0`, `min_dt_s=1/40`, `max_dt_s=1.0` anti-cheat envelope, named + cited but not tunable | **P2** | `[authority] move_max_speed_mps` (+ dt clamps as engineering consts) | Soft cap; sprint ~6 m/s + vehicle margin. Prefer Rules/authority surface over serverconfig (no stock key) |
+
+**CLOSED 2026-08-20** (landed before this pass): `[authority] max_horizontal_speed_mps` (game/types.zig + Game field + zdtd_config wiring).
 | **B30** | `server/guard_policy.zig:21-33` | `kick_delay_ticks=10`, `shed_hold_ticks=40`, `weak_break_rate_per_window=900`, `detector_slots=9` | **P3** | `[authority] guard_*` keys | The other guard keys (window_ticks, strong_distinct, hard_repeat, load_shed) already parse |
+
+**CLOSED 2026-08-20**: `kick_delay_ticks`, `shed_hold_ticks`, `weak_break_rate_per_window` are `Policy` fields (zdtd.toml `guard_kick_delay_ticks` / `guard_shed_hold_ticks` / `guard_weak_break_rate`), clamped in `Policy.clamp`; `detector_slots` stays a fixed-width engineering const.
 | **B31** | `game.zig:1295,1305` | Sleeper POI scan budget: 512-block spawn radius, 800/1200 prefab ref caps | **P3** | `[stream] sleeper_prefab_radius_blocks` / caps | Load-time budget, not tick path |
 | **B32** | `game.zig:4170,4181` | Per-tick loot container scan caps 32 / 48 | **P3** | `[sim]` caps or named consts | Tick budget |
+
+**CLOSED 2026-08-20**: `te_scan_block_cap` / `te_scan_te_cap` (zdtd.toml `[sim]`) bound `ensurePrefabStorageInChunk` (chunk_fill.zig).
 | **B33** | `world/workstations.zig:58-60` | `max_crafts_per_tick=64`, `max_craft_backlog=60` | **P3** | `[sim]` caps | Engineering |
+
+**CLOSED 2026-08-20**: `workstation_crafts_per_tick` / `workstation_craft_backlog` (zdtd.toml `[sim]`), carried by `workstations.Caps` into the tick.
 | **B34** | `ecs/quest.zig:20,98,101` | `max_phases=32`, `max_reward_flags=16`, `max_actions=8` | **P3** | named consts (already) | Array sizes |
 | **B35** | `ecs/poi_lock.zig:19,23,26` | `unlock_grace=2000`, `max_locks=64`, `max_questers=8` | **P3** | named consts | Engineering |
 | **B36** | `server/webui.zig:918` | `readiness_stale_ns=30 s` | **P3** | named const | Ops |
 | **B37** | `game.zig:123` | `apm_report_period_ticks = ticks_per_second * 60` (60 s dump) | **P3** | `[apm] dump_every_s` | APM.md documents the periodic dump; no key |
+
+**CLOSED 2026-08-20**: `[apm] dump_every_s` (seconds; 0 disables) drives `Game.apm_report_period_ticks`.
 | **B38** | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | **P3** | Document only | Already documented as fixed-size architecture in prior audit |
 | **B39** | `game.zig:3969` and `game/sleeper.zig:13` | `sleeper_party_radius=100.0` duplicated (same RE cite) | **P3** | Dedupe to one shared const | RE: CalcGameStageAround radius (asm.il ~1093363) |
 | **B40** | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig:412-427` `builtinStockName` | **P3** | Cross-check test or share one table | Documented mirror; divergence would be caught by existing id tests |

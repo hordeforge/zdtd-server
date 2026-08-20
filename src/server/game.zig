@@ -126,7 +126,6 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 
 pub const max_land_claims = game_types.max_land_claims;
 pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
-pub const apm_report_period_ticks = @import("game/constants.zig").apm_report_period_ticks;
 pub const admin_help_index = @import("game/constants.zig").admin_help_index;
 pub const logPersistErr = @import("game/constants.zig").logPersistErr;
 pub const Zpv2Drop = @import("game/constants.zig").Zpv2Drop;
@@ -456,6 +455,14 @@ pub const Game = struct {
     trader_restock_refill: u16 = default_trader_restock_refill,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     storm_frequency: i32 = default_storm_frequency,
+    /// Per-chunk storage/prefab TE scan caps (zdtd.toml [sim] te_scan_*).
+    te_scan_block_cap: u32 = game_types.default_te_scan_block_cap,
+    te_scan_te_cap: u32 = game_types.default_te_scan_te_cap,
+    /// Workstation craft budgets (zdtd.toml [sim] workstation_*).
+    workstation_crafts_per_tick: u16 = game_types.default_workstation_crafts_per_tick,
+    workstation_craft_backlog: f32 = game_types.default_workstation_craft_backlog,
+    /// Periodic apm snapshot dump period in ticks (zdtd.toml [apm] dump_every_s).
+    apm_report_period_ticks: u64 = game_types.default_apm_report_period_ticks,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
     pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
@@ -550,6 +557,15 @@ pub const Game = struct {
             .trader_restock_refill = opts.trader_restock_refill,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .storm_frequency = opts.storm_frequency,
+            .te_scan_block_cap = opts.te_scan_block_cap,
+            .te_scan_te_cap = opts.te_scan_te_cap,
+            .workstation_crafts_per_tick = opts.workstation_crafts_per_tick,
+            .workstation_craft_backlog = opts.workstation_craft_backlog,
+            .apm_report_period_ticks = if (opts.apm_dump_every_s) |s|
+                // 0 disables the periodic dump (mod-by-zero guard; maxInt never fires).
+                if (s == 0) std.math.maxInt(u64) else s * protocol.ticks_per_second
+            else
+                game_types.default_apm_report_period_ticks,
             .deco_objects_per_join = opts.deco_objects_per_join,
             .sandbox_code = opts.sandbox_code,
             .sandbox_preset = opts.sandbox_preset,
@@ -1604,7 +1620,7 @@ pub const Game = struct {
             c.farm_breaks = 0;
         }
         c.farm_breaks +|= 1;
-        if (c.farm_breaks != guard_policy.weak_break_rate_per_window) return;
+        if (c.farm_breaks != self.guard.weak_break_rate_per_window) return;
         const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
         self.noteEvidence(
             c,
@@ -1614,7 +1630,7 @@ pub const Game = struct {
             .soft,
             .block,
             @floatFromInt(c.farm_breaks),
-            @floatFromInt(guard_policy.weak_break_rate_per_window),
+            @floatFromInt(self.guard.weak_break_rate_per_window),
         );
     }
 
@@ -2542,7 +2558,7 @@ pub const Game = struct {
                 // Availability valve: hold weak evidence + deferrable broadcasts
                 // for 2 s. Chunk streaming, motion replicate, WorldTime and every
                 // Hard gate keep running.
-                if (self.guard.load_shed) self.shed_until_tick = self.tick_n + guard_policy.shed_hold_ticks;
+                if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
                 const overruns = self.harness.counters.get(.tick_overruns);
                 if (overruns == 1 or overruns % 100 == 0) {
                     const late_us = (now -% next_t) / 1000;

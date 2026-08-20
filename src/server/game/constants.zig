@@ -2,12 +2,10 @@
 //! and a few caps out of the main file. Behavior-identical: re-exported as
 //! `pub const` from game.zig so external refs keep compiling.
 
-const protocol = @import("../../protocol.zig");
 const admin_cmds = @import("../admin_cmds.zig");
 const persist = @import("../persist.zig");
 
 pub const max_quest_position_data: usize = 3;
-pub const apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 
 pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "admin", .description = "Manage user permission levels" },

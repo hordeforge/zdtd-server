@@ -46,6 +46,11 @@ peer_stale_ms = 3000
 # guard_window_ticks = 1200    # counting window (1200 = 60 s at 20 TPS)
 # guard_strong_distinct = 2    # distinct Strong detectors in a window that trip
 # guard_hard_repeat = 25       # Hard events in a window that trip
+# guard_kick_delay_ticks = 10  # ticks between the deny send and the peer drop
+#                             # (stock disconnectLater(0.5f) = 10 at 20 TPS)
+# guard_shed_hold_ticks = 40   # ticks the load-shed valve stays open (2 s)
+# guard_weak_break_rate = 900  # block destroys per window that trip the weak
+#                             # farming signal (record-only, cannot kick)
 
 [feature]
 wire_chunks = true
@@ -86,6 +91,18 @@ block_id_mapping = true
 # storms). No stock V3.1.0 serverconfig key; feeds the weather scheduler and
 # the GameStats wire value.
 # storm_frequency = 100
+# Per-chunk storage/prefab TE scan caps (engineering budgets: bound one chunk
+# fill so a 65536-cell walk cannot stall the 50 ms tick).
+# te_scan_block_cap = 32
+# te_scan_te_cap = 48
+# Workstation craft budgets: max crafts advanced per tick per station, and the
+# largest client-written CraftingTimeLeft backlog (seconds) accepted.
+# workstation_crafts_per_tick = 64
+# workstation_craft_backlog = 60
+
+# Operator metrics cadence (docs/APM.md). 0 disables the periodic dump.
+# [apm]
+# dump_every_s = 60
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]

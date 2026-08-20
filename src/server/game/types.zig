@@ -30,6 +30,22 @@ pub const max_land_claims: usize = 1024;
 /// prior fixed value).
 pub const default_trader_wallet_dukes: i32 = 5000;
 
+/// Per-chunk storage/prefab TE scan caps (zdtd.toml [sim] te_scan_*). Bucket B
+/// engineering budgets: a 65536-cell block walk and the prefab TE list are
+/// bounded so one chunk fill cannot stall the 50 ms tick.
+pub const default_te_scan_block_cap: u32 = 32;
+pub const default_te_scan_te_cap: u32 = 48;
+
+/// Workstation craft budgets (zdtd.toml [sim] workstation_*). Bucket B
+/// anti-abuse caps: a client TE write must not burst a whole queue or a huge
+/// CraftingTimeLeft backlog in one tick.
+pub const default_workstation_crafts_per_tick: u16 = 64;
+pub const default_workstation_craft_backlog: f32 = 60;
+
+/// Periodic apm snapshot dump period in ticks (zdtd.toml [apm] dump_every_s,
+/// default 60 s at 20 TPS). Bucket B: docs/APM.md documents the dump.
+pub const default_apm_report_period_ticks: u64 = @import("../../protocol.zig").ticks_per_second * 60;
+
 // Compile-time array bound for Client.streamed. The cap is the config clamp
 // (zdtd_config sanitizes max_streamed_chunks against it), so there is one
 // definition and the bound cannot drift from what config accepts.
@@ -273,6 +289,15 @@ pub const InitOptions = struct {
     /// GameStats wire value and the weather scheduler divisor. Stock default
     /// 100 (GamePrefs.StormFreq); 0 disables storms.
     storm_frequency: i32 = default_storm_frequency,
+    /// Per-chunk storage/prefab TE scan caps (zdtd.toml [sim] te_scan_*).
+    te_scan_block_cap: u32 = default_te_scan_block_cap,
+    te_scan_te_cap: u32 = default_te_scan_te_cap,
+    /// Workstation craft budgets (zdtd.toml [sim] workstation_*).
+    workstation_crafts_per_tick: u16 = default_workstation_crafts_per_tick,
+    workstation_craft_backlog: f32 = default_workstation_craft_backlog,
+    /// Periodic apm snapshot dump period in seconds (zdtd.toml [apm]
+    /// dump_every_s; null = the 60 s default). Converted to ticks at create.
+    apm_dump_every_s: ?u64 = null,
     /// Trader AvailableMoney display pool (zdtd.toml [sim] trader_wallet_dukes).
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     /// Sim rule parameters (ADR 0021): the effective Rules after the

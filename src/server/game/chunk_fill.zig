@@ -215,7 +215,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     }
                 }
                 found += 1;
-                if (found >= 32) return;
+                if (found >= self.te_scan_block_cap) return;
             }
         }
     }
@@ -226,7 +226,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
             found: *u32,
             fn onTe(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8) void {
                 const tc: *@This() = @ptrCast(@alignCast(ctx.?));
-                if (tc.found.* >= 48) return;
+                if (tc.found.* >= tc.g.te_scan_te_cap) return;
                 // Loot-like types only.
                 if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type) or te_type == te_types.light)) return;
                 const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
@@ -249,7 +249,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
         var tc: TeCtx = .{ .g = self, .found = &te_found };
         pf.foreachTeInChunk(cx, cz, TeCtx.onTe, &tc);
         // Scan complete unless the TE cap truncated it; then retry next send.
-        if (te_found < 48) ch.te_scanned = true;
+        if (te_found < self.te_scan_te_cap) ch.te_scanned = true;
     } else {
         ch.te_scanned = true;
     }

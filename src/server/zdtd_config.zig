@@ -52,6 +52,13 @@ pub const Authority = struct {
     guard_window_ticks: ?u64 = null,
     guard_strong_distinct: ?u32 = null,
     guard_hard_repeat: ?u32 = null,
+    /// Policy kick delay (ticks between the deny send and the peer drop; stock
+    /// disconnectLater(0.5f) = 10 at 20 TPS), load-shed hold (ticks the valve
+    /// stays open after an overrun) and the weak farming signal threshold
+    /// (block destroys per window).
+    guard_kick_delay_ticks: ?u64 = null,
+    guard_shed_hold_ticks: ?u64 = null,
+    guard_weak_break_rate: ?u32 = null,
 };
 
 pub const Feature = struct {
@@ -108,6 +115,23 @@ pub const Sim = struct {
     /// 100 = 1.0x; 0 disables storms). No V3.1.0 serverconfig key (world state,
     /// GameStats blob); this is the zdtd.toml surface.
     storm_frequency: ?i32 = null,
+    /// Per-chunk storage/prefab TE scan caps (block-store walk + prefab TE
+    /// list). Engineering budgets: bound one peer's chunk fill so a single
+    /// chunk cannot stall the tick.
+    te_scan_block_cap: ?u32 = null,
+    te_scan_te_cap: ?u32 = null,
+    /// Workstation craft budgets (zdtd.toml [sim]): max crafts advanced per
+    /// tick per station and the largest client-written CraftingTimeLeft backlog
+    /// (seconds) accepted before it is reset. Anti-abuse caps.
+    workstation_crafts_per_tick: ?u16 = null,
+    workstation_craft_backlog: ?f32 = null,
+};
+
+/// `[apm]` config section: operator-facing metrics cadence (docs/APM.md).
+pub const Apm = struct {
+    /// Periodic apm snapshot dump period, in seconds (0 disables the periodic
+    /// dump). Default 60 matches the pre-config `apm_report_period_ticks`.
+    dump_every_s: ?u64 = null,
 };
 
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
@@ -188,6 +212,8 @@ pub const File = struct {
     /// Host-side bot policy (ADR 0026): damage floor, headshot multiplier,
     /// spawn spread/y and the move step-up cap.
     bots: Bots = .{},
+    /// Operator metrics cadence (docs/APM.md): `[apm] dump_every_s`.
+    apm: Apm = .{},
     /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
     /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
     rules: rules_mod.RulesOverlay = .{},
@@ -274,6 +300,10 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
         opts.guard.strong_distinct = @intCast(@min(v, @as(u32, std.math.maxInt(u8))));
     if (f.authority.guard_hard_repeat) |v|
         opts.guard.hard_repeat = @intCast(@min(v, @as(u32, std.math.maxInt(u16))));
+    if (f.authority.guard_kick_delay_ticks) |v| opts.guard.kick_delay_ticks = v;
+    if (f.authority.guard_shed_hold_ticks) |v| opts.guard.shed_hold_ticks = v;
+    if (f.authority.guard_weak_break_rate) |v|
+        opts.guard.weak_break_rate_per_window = @intCast(@min(v, @as(u32, std.math.maxInt(u16))));
     if (f.feature.wire_chunks) |v| opts.wire_chunks = v;
     if (f.feature.deco_trees) |v| opts.deco_trees = v;
     if (f.feature.deco_mirror) |v| opts.deco_mirror = v;
@@ -296,6 +326,13 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.trader_restock_refill) |v| opts.trader_restock_refill = v;
     if (f.sim.sleeper_party_radius) |v| opts.sleeper_party_radius = v;
     if (f.sim.storm_frequency) |v| opts.storm_frequency = v;
+    if (f.sim.te_scan_block_cap) |v| opts.te_scan_block_cap = v;
+    if (f.sim.te_scan_te_cap) |v| opts.te_scan_te_cap = v;
+    if (f.sim.workstation_crafts_per_tick) |v| opts.workstation_crafts_per_tick = v;
+    if (f.sim.workstation_craft_backlog) |v| opts.workstation_craft_backlog = v;
+    if (f.apm.dump_every_s) |v| {
+        if (@hasField(@TypeOf(opts.*), "apm_dump_every_s")) opts.apm_dump_every_s = v;
+    }
 }
 
 /// Compile cap for Client.streamed[]: config owns the clamp, `server/game/types.zig`
@@ -501,11 +538,21 @@ test "parse stream and authority" {
         \\guard_window_ticks = 600
         \\guard_strong_distinct = 3
         \\guard_hard_repeat = 40
+        \\guard_kick_delay_ticks = 20
+        \\guard_shed_hold_ticks = 80
+        \\guard_weak_break_rate = 1200
         \\[feature]
         \\wire_chunks = false
         \\deco_trees = no
         \\deco_mirror = no
         \\block_id_mapping = false
+        \\[sim]
+        \\te_scan_block_cap = 16
+        \\te_scan_te_cap = 24
+        \\workstation_crafts_per_tick = 8
+        \\workstation_craft_backlog = 30.0
+        \\[apm]
+        \\dump_every_s = 120
         \\[mode]
         \\name = "default"
         \\[plugin]
@@ -528,6 +575,14 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u64, 600), f.authority.guard_window_ticks.?);
     try std.testing.expectEqual(@as(u32, 3), f.authority.guard_strong_distinct.?);
     try std.testing.expectEqual(@as(u32, 40), f.authority.guard_hard_repeat.?);
+    try std.testing.expectEqual(@as(u64, 20), f.authority.guard_kick_delay_ticks.?);
+    try std.testing.expectEqual(@as(u64, 80), f.authority.guard_shed_hold_ticks.?);
+    try std.testing.expectEqual(@as(u32, 1200), f.authority.guard_weak_break_rate.?);
+    try std.testing.expectEqual(@as(u32, 16), f.sim.te_scan_block_cap.?);
+    try std.testing.expectEqual(@as(u32, 24), f.sim.te_scan_te_cap.?);
+    try std.testing.expectEqual(@as(u16, 8), f.sim.workstation_crafts_per_tick.?);
+    try std.testing.expectApproxEqAbs(@as(f32, 30.0), f.sim.workstation_craft_backlog.?, 0.01);
+    try std.testing.expectEqual(@as(u64, 120), f.apm.dump_every_s.?);
     try std.testing.expectEqual(false, f.feature.wire_chunks.?);
     try std.testing.expectEqual(false, f.feature.deco_trees.?);
     try std.testing.expectEqual(false, f.feature.deco_mirror.?);
@@ -628,6 +683,11 @@ const TestOpts = struct {
     craft_max_times: u16 = 20,
     sleeper_party_radius: f32 = 100.0,
     storm_frequency: i32 = 100,
+    te_scan_block_cap: u32 = 32,
+    te_scan_te_cap: u32 = 48,
+    workstation_crafts_per_tick: u16 = 64,
+    workstation_craft_backlog: f32 = 60,
+    apm_dump_every_s: ?u64 = null,
     land_claim_size: u16 = 41,
     plugin_budget: struct {
         fuel: u64 = 100_000_000,

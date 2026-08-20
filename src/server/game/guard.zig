@@ -72,7 +72,7 @@ pub fn loadShedding(self: *const Game) bool {
 
 fn armPolicyKick(self: *Game, c: *Client, det: evidence_mod.Detector) void {
     if (c.guard.kick_at_tick != 0) return;
-    c.guard.kick_at_tick = self.tick_n + guard_policy.kick_delay_ticks;
+    c.guard.kick_at_tick = self.tick_n + self.guard.kick_delay_ticks;
     self.harness.counters.inc(.guard_kicks);
     if (c.peer) |p| {
         var denied: [64]u8 = undefined;

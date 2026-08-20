@@ -54,10 +54,17 @@ pub const stock_last_input_len: u8 = 3;
 pub const stock_queue_len: u8 = 4;
 pub const stock_melt_len: u8 = 3;
 
-/// One client write must not be able to burst a whole queue into the output.
-const max_crafts_per_tick: usize = 64;
-/// Largest craft backlog a client-supplied CraftingTimeLeft may carry (seconds).
-const max_craft_backlog: f32 = 60;
+/// Per-tick craft budgets (zdtd.toml [sim] workstation_*). Bucket B anti-abuse
+/// caps: one client write must not be able to burst a whole queue into the
+/// output, and a far-negative client-written CraftingTimeLeft must not drain
+/// the whole multiplier in a single tick.
+pub const Caps = struct {
+    /// Max crafts advanced per tick per station.
+    max_crafts_per_tick: usize = 64,
+    /// Largest craft backlog a client-supplied CraftingTimeLeft may carry
+    /// (seconds) before it is reset.
+    max_craft_backlog: f32 = 60,
+};
 
 /// Recipe queue cell shared by sim state and TE wire (stock RecipeQueueItem fields).
 pub const QueueItem = struct {
@@ -199,13 +206,13 @@ pub const Workstation = struct {
     /// Advance burn + craft; completed crafts land in output[] when the
     /// resolver maps the recipe's stock output type to a sim item.
     pub fn tick(self: *Workstation, dt: f32) void {
-        self.tickResolved(dt, null, null);
+        self.tickResolved(dt, null, null, .{});
     }
 
-    pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque) void {
+    pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         if (dt <= 0) return;
         self.handleFuel(dt);
-        self.handleRecipeQueue(dt, resolve, ctx);
+        self.handleRecipeQueue(dt, resolve, ctx, caps);
     }
 
     /// Stock `HandleFuel` (asm.il ~1331911): burn down, then consume one fuel item.
@@ -233,7 +240,7 @@ pub const Workstation = struct {
     /// Stock `HandleRecipeQueue` (asm.il ~1331686): the active entry is the last
     /// slot, a full output array stalls the craft, and each finished item records
     /// a CraftCompleteData before the multiplier drops.
-    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque) void {
+    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         if (self.queue_len == 0) return;
         // Stock gate (asm.il 1331687): only stations with a fuel module wait
         // for isBurning; workbench / cement mixer / table saw advance without
@@ -243,7 +250,7 @@ pub const Workstation = struct {
         var active = &self.queue[last];
         // A client-written CraftingTimeLeft of -inf (or a huge backlog) would let
         // one packet drain the whole multiplier in a single tick.
-        if (!std.math.isFinite(active.craft_time_left) or active.craft_time_left < -max_craft_backlog) {
+        if (!std.math.isFinite(active.craft_time_left) or active.craft_time_left < -caps.max_craft_backlog) {
             active.craft_time_left = 0;
         }
         if (!std.math.isFinite(active.one_item_craft_time) or active.one_item_craft_time < 0) {
@@ -254,7 +261,7 @@ pub const Workstation = struct {
         while (active.craft_time_left < 0 and self.hasRecipeInQueue()) {
             // Stock has no step bound here: OneItemCraftTime 0 with a large
             // Multiplier would otherwise craft the whole entry in one tick.
-            if (steps >= max_crafts_per_tick) break;
+            if (steps >= caps.max_crafts_per_tick) break;
             steps += 1;
             if (active.multiplier > 0) {
                 if (!self.completeOneCraft(active, resolve, ctx)) return; // output full → stall
@@ -623,12 +630,12 @@ pub const WorkstationStore = struct {
     }
 
     pub fn tickAll(self: *WorkstationStore, dt: f32) void {
-        self.tickAllResolved(dt, null, null);
+        self.tickAllResolved(dt, null, null, .{});
     }
 
-    pub fn tickAllResolved(self: *WorkstationStore, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque) void {
+    pub fn tickAllResolved(self: *WorkstationStore, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         for (self.items[0..], self.used[0..]) |*w, u| {
-            if (u) w.tickResolved(dt, resolve, ctx);
+            if (u) w.tickResolved(dt, resolve, ctx, caps);
         }
     }
 };
@@ -703,14 +710,14 @@ test "workstation store holds past the old 64 cap (GAP 12)" {
 
 test "workstation craft materializes output and records a craft complete" {
     var w = testStation(2, 0.4);
-    w.tickResolved(0.5, testResolve, null); // first craft
+    w.tickResolved(0.5, testResolve, null, .{}); // first craft
     try std.testing.expectEqual(@as(u16, 9), w.output[0].item_id);
     try std.testing.expectEqual(@as(u16, 3), w.output[0].count);
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     try std.testing.expectEqual(@as(i32, 171), w.craft_complete[0].crafter_entity_id);
     try std.testing.expectEqual(@as(i32, 12), w.craft_complete[0].exp_gain);
     try std.testing.expectEqualStrings("outputItem", w.craft_complete[0].recipeName());
-    w.tickResolved(0.5, testResolve, null); // second craft merges
+    w.tickResolved(0.5, testResolve, null, .{}); // second craft merges
     try std.testing.expectEqual(@as(u16, 6), w.output[0].count);
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     try std.testing.expectEqual(@as(u16, 6), w.craft_complete[0].item_count);
@@ -721,11 +728,11 @@ test "workstation stalls instead of dropping a craft when the output is full" {
     w.output_len = 1;
     w.output[0] = .{ .item_id = 8, .count = 5 }; // different item, no room to merge
     const last = w.queue_len - 1;
-    w.tickResolved(0.5, testResolve, null);
+    w.tickResolved(0.5, testResolve, null, .{});
     try std.testing.expectEqual(@as(i16, 3), w.queue[last].multiplier);
     try std.testing.expectEqual(@as(u8, 0), w.craft_complete_n);
     w.output[0] = .{}; // room again → the stalled craft lands
-    w.tickResolved(0.1, testResolve, null);
+    w.tickResolved(0.1, testResolve, null, .{});
     try std.testing.expectEqual(@as(i16, 2), w.queue[last].multiplier);
 }
 
@@ -739,7 +746,7 @@ test "workstation cycle shifts entries toward the end and carries the overrun" {
         .output_type = 70001,
         .output_count = 1,
     };
-    w.tickResolved(2.5, testResolve, null); // finishes slot `last`, cycles
+    w.tickResolved(2.5, testResolve, null, .{}); // finishes slot `last`, cycles
     try std.testing.expectEqual(@as(i32, 70001), w.queue[last].output_type);
     try std.testing.expect(w.queue[last].is_crafting);
     try std.testing.expectEqual(@as(i32, 0), w.queue[last - 1].output_type);
@@ -780,12 +787,12 @@ test "client-written timers cannot stall or burst the tick" {
     try std.testing.expectEqual(@as(u16, 59999), w.fuel[0].count);
     // Bounded per tick rather than draining the whole multiplier at once.
     const crafted = 32767 - w.queue[w.queue_len - 1].multiplier;
-    try std.testing.expect(crafted <= @as(i16, @intCast(max_crafts_per_tick)));
+    try std.testing.expect(crafted <= @as(i16, @intCast((Caps{}).max_crafts_per_tick)));
 }
 
 test "craft complete list drains to what the client acknowledged" {
     var w = testStation(2, 0.4);
-    w.tickResolved(0.5, testResolve, null);
+    w.tickResolved(0.5, testResolve, null, .{});
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     w.setCraftComplete(&.{});
     try std.testing.expectEqual(@as(u8, 0), w.craft_complete_n);

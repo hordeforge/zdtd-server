@@ -15,19 +15,6 @@
 const std = @import("std");
 const evidence = @import("evidence.zig");
 
-/// Ticks a policy kick waits between the `NetPackagePlayerDenied` send and the
-/// peer drop. 10 ticks at 20 TPS = 0.5 s, matching stock
-/// `GameUtils.disconnectLater(0.5f)` (asm.il:1918548-1918583).
-pub const kick_delay_ticks: u64 = 10;
-
-/// Ticks the load-shed valve stays open after a tick-budget overrun (2 s).
-pub const shed_hold_ticks: u64 = 40;
-
-/// Block destroys inside one policy window that trip the weak farming signal.
-/// Heuristic, not stock-derived: nothing in the IL defines a legitimate harvest
-/// rate. Record-only by construction (`.soft`), so tuning it cannot cause a kick.
-pub const weak_break_rate_per_window: u16 = 900;
-
 /// Distinct detector slots addressable by `strong_mask` (Detector minus `.other`,
 /// plus one catch-all slot for `.other`).
 pub const detector_slots: u8 = 9;
@@ -83,6 +70,17 @@ pub const Policy = struct {
     strong_distinct: u8 = 2,
     /// Hard events inside one window that trip the gate.
     hard_repeat: u16 = 25,
+    /// Ticks a policy kick waits between the `NetPackagePlayerDenied` send and
+    /// the peer drop. 10 ticks at 20 TPS = 0.5 s, matching stock
+    /// `GameUtils.disconnectLater(0.5f)` (asm.il:1918548-1918583).
+    kick_delay_ticks: u64 = 10,
+    /// Ticks the load-shed valve stays open after a tick-budget overrun (2 s).
+    shed_hold_ticks: u64 = 40,
+    /// Block destroys inside one policy window that trip the weak farming
+    /// signal. Heuristic, not stock-derived: nothing in the IL defines a
+    /// legitimate harvest rate. Record-only by construction (`.soft`), so
+    /// tuning it cannot cause a kick.
+    weak_break_rate_per_window: u16 = 900,
 
     /// Repair operator values after config merge. Logs each repair like
     /// `zdtd_config.sanitizeInitOptions`; never panics.
@@ -105,6 +103,18 @@ pub const Policy = struct {
         if (self.hard_repeat == 0) {
             std.debug.print("zdtd: guard_hard_repeat=0 invalid; using 1\n", .{});
             self.hard_repeat = 1;
+        }
+        if (self.kick_delay_ticks == 0) {
+            std.debug.print("zdtd: guard_kick_delay_ticks=0 invalid; using 1\n", .{});
+            self.kick_delay_ticks = 1;
+        }
+        if (self.shed_hold_ticks == 0) {
+            std.debug.print("zdtd: guard_shed_hold_ticks=0 invalid; using 1\n", .{});
+            self.shed_hold_ticks = 1;
+        }
+        if (self.weak_break_rate_per_window == 0) {
+            std.debug.print("zdtd: guard_weak_break_rate=0 invalid; using 1\n", .{});
+            self.weak_break_rate_per_window = 1;
         }
     }
 };

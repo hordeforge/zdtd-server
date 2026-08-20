@@ -295,7 +295,7 @@ pub fn step(self: *Game) !void {
     }
     self.sampleFlushCounters();
 
-    if (self.tick_n % game_mod.apm_report_period_ticks == 0) {
+    if (self.tick_n % self.apm_report_period_ticks == 0) {
         var snap = self.harness.snapshot();
         var entered_n: u32 = 0;
         var peers_alive: u32 = 0;

@@ -202,7 +202,10 @@ pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
 
 /// One workstation step: burn/craft, then re-broadcast the stations it changed.
 pub fn tickWorkstations(self: *Game, dt: f32) !void {
-    self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self);
+    self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{
+        .max_crafts_per_tick = self.workstation_crafts_per_tick,
+        .max_craft_backlog = self.workstation_craft_backlog,
+    });
     // Heat map feed (AIDirectorChunkData): burning workstations with a
     // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
     // raise the region's activity like stock TileEntity.heatMapLastTime.
