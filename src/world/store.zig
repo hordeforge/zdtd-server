@@ -48,6 +48,11 @@ pub const block_dirt: u16 = assignids.terr_dirt;
 pub const block_water: u16 = assignids.water;
 pub const blocks_per_chunk: usize = 16 * 256 * 16; // 65536
 
+/// Offline/test terrain id set: the module pins verbatim. Chunks created
+/// outside a World (unit fixtures) fall back to this in rawAt/isSolid (A38);
+/// live chunks point at `World.terrain_ids` after resolveTerrainIds runs.
+const terrain_pins = TerrainIds{};
+
 /// Runtime terrain type ids (AssignIds names). Defaults match module pins.
 pub const TerrainIds = struct {
     air: u16 = block_air,
@@ -56,6 +61,10 @@ pub const TerrainIds = struct {
     dirt: u16 = block_dirt,
     water: u16 = block_water,
     forest_ground: u16 = assignids.terr_forest_ground,
+    /// Prefab TTS paint skips the filler surface types (A37); resolved like the
+    /// terrain ids so modded dumps keep the skip correct.
+    terrain_filler: u16 = assignids.terrain_filler,
+    terrain_filler_adaptive: u16 = assignids.terrain_filler_adaptive,
 
     /// Resolve from live idByName dump. Missing names keep pin defaults (fail closed).
     pub fn resolve(self: *TerrainIds, lookup: *const fn (ctx: ?*anyopaque, name: []const u8) ?u16, ctx: ?*anyopaque) void {
@@ -65,6 +74,8 @@ pub const TerrainIds = struct {
         if (lookup(ctx, "terrDirt")) |id| self.dirt = id;
         if (lookup(ctx, "water")) |id| self.water = id;
         if (lookup(ctx, "terrForestGround")) |id| self.forest_ground = id;
+        if (lookup(ctx, "terrainFiller")) |id| self.terrain_filler = id;
+        if (lookup(ctx, "terrainFillerAdaptive")) |id| self.terrain_filler_adaptive = id;
     }
 };
 
@@ -84,6 +95,10 @@ fn blockIndex(lx: i32, y: i32, lz: i32) usize {
 
 pub const Chunk = struct {
     pos: ChunkPos,
+    /// Live terrain type ids for the heightmap fallback + solid checks (A38).
+    /// Set by World.getOrCreate; null in offline/tests, which keep the module
+    /// pins. Points at World.terrain_ids (same lifetime as the World).
+    terrain: ?*const TerrainIds = null,
     /// On-disk / stock-wire surface Y (0..255). API returns u16 for headroom.
     heights: [256]u8 = .{sea_level} ** 256,
     /// Full BlockValue.rawData columns when allocated (lazy). Type = low 16 bits.
@@ -292,16 +307,19 @@ pub const Chunk = struct {
         return @truncate(self.rawAt(lx, y, lz));
     }
 
-    /// Full BlockValue.rawData for wire packing.
+    /// Full BlockValue.rawData for wire packing. The no-blocks fallback
+    /// synthesizes terrain from the height map using the live terrain ids
+    /// (A38); offline/test chunks keep the module pins via `terrain_pins`.
     pub fn rawAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u32 {
-        if (y < 0 or y >= y_dim) return block_air;
+        const t = self.terrain orelse &terrain_pins;
+        if (y < 0 or y >= y_dim) return t.air;
         if (self.blocks) |b| return b[blockIndex(lx, y, lz)];
         const h = self.heightAt(lx, lz);
-        if (y > h) return block_air;
-        if (y == 0) return block_bedrock;
-        if (y + 3 < h) return block_stone;
-        if (y == h) return assignids.terr_forest_ground;
-        return block_dirt;
+        if (y > h) return t.air;
+        if (y == 0) return t.bedrock;
+        if (y + 3 < h) return t.stone;
+        if (y == h) return t.forest_ground;
+        return t.dirt;
     }
 
     pub fn setBlock(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, id: u16) !void {
@@ -357,8 +375,9 @@ pub const Chunk = struct {
     }
 
     pub fn isSolid(self: *const Chunk, lx: i32, y: i32, lz: i32) bool {
+        const t = self.terrain orelse &terrain_pins;
         const id = self.blockAt(lx, y, lz);
-        return id != block_air and id != block_water;
+        return id != t.air and id != t.water;
     }
 
     /// Feet Y a walking body can occupy in column (lx,lz) near `from_y`, or null
@@ -634,6 +653,8 @@ pub const World = struct {
         self.touch_seq += 1;
         if (!gop.found_existing) {
             gop.value_ptr.* = Chunk.generateFlat(pos);
+            // A38: fallback terrain synthesis reads live ids, not module pins.
+            gop.value_ptr.terrain = &self.terrain_ids;
             // Stamped here, not at the tail: the load_state == .full path below
             // returns early.
             gop.value_ptr.last_touch = self.touch_seq;
@@ -696,7 +717,7 @@ pub const World = struct {
                         .base_x = pos.x * 16,
                         .base_z = pos.z * 16,
                     };
-                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, PaintCtx.put, &pc);
+                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
                             "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",

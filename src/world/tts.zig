@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const assignids = @import("../assets/assignids_comptime.zig");
 
 /// TTS block-paint blockId bitfield: child flag (RE: tts.zig header, Prefab.readBlockData).
 pub const child_bit: u32 = 0x4000_0000;
@@ -394,10 +395,13 @@ pub fn paintDecoration(
     origin_z: i32,
     rot: u8,
     water_id: u16,
+    /// Resolved filler type ids (A37): TTS stamps these as "keep world terrain"
+    /// placeholders; skipping them via live ids keeps modded dumps correct.
+    filler_id: u16,
+    filler_adaptive_id: u16,
     set_block: SetBlockFn,
     ctx: ?*anyopaque,
 ) void {
-    const assignids = @import("../assets/assignids_comptime.zig");
     const count: i32 = @intCast(tts.blockCount());
     var i: i32 = 0;
     while (i < count) : (i += 1) {
@@ -418,7 +422,7 @@ pub fn paintDecoration(
         const raw = tts.types[@intCast(i)];
         if (raw == 0) continue;
         const typ: u16 = @truncate(raw & type_mask);
-        if (typ == assignids.terrain_filler or typ == assignids.terrain_filler_adaptive) continue;
+        if (typ == filler_id or typ == filler_adaptive_id) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
         // Stock rotates a block by CalcRotation(rot, 4 - r): BlockShapeNew::RotateY
@@ -606,7 +610,7 @@ test "prefab water channel decodes and paints water blocks" {
         }
     };
     var p: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 240, Paint.put, &p);
+    paintDecoration(&t, 100, 60, 100, 0, 240, assignids.terrain_filler, assignids.terrain_filler_adaptive, Paint.put, &p);
     try std.testing.expectEqual(@as(usize, 1), p.blocks);
     const wcell = p.water.?;
     try std.testing.expectEqual(@as(i32, 101), wcell.wx);
@@ -615,6 +619,6 @@ test "prefab water channel decodes and paints water blocks" {
 
     // water_id 0 fails closed: no water painted.
     var p0: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 0, Paint.put, &p0);
+    paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, Paint.put, &p0);
     try std.testing.expectEqual(@as(usize, 0), p0.blocks);
 }

@@ -1434,7 +1434,7 @@ pub const Game = struct {
                 } else |_| {}
             }
         };
-        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, Ctx.put, self);
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
 
