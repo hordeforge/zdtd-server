@@ -31,6 +31,9 @@ const PlayerSnap = struct {
     x: f32,
     y: f32,
     z: f32,
+    /// Stock EntityPlayer.Crouching: muffles the hearing gate and shrinks
+    /// sleeper attack-detect (RE entity-ai.md PlayerStealth).
+    crouching: bool = false,
 };
 
 /// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
@@ -53,6 +56,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .x = w.transform[j].x,
             .y = w.transform[j].y,
             .z = w.transform[j].z,
+            .crouching = w.player[j].crouching,
         };
         n += 1;
     }
@@ -90,11 +94,13 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
 }
 
 /// Stock sense gate (RE entity-ai.md CanEntityBeSeen + PlayerStealth): a
-/// player is sensed when heard (within `hear_range`; sound passes walls) or
+/// player is sensed when heard (within `hear`; sound passes walls) or
 /// seen (within sense range, inside the view cone, block-LOS clear). Replaces
 /// the old distance-only check so zombies stop seeing through solid geometry.
 /// `zslot` is the sensing zombie, for its per-class cone (entityclasses
 /// MaxViewAngle) — stock EntityAlive cctor defaults the full angle to 180.
+/// `hear` is the effective hearing radius, already stealth-scaled by the
+/// caller (crouched players are muffled).
 fn canSensePlayer(
     w: *const World,
     zslot: Slot,
@@ -105,13 +111,13 @@ fn canSensePlayer(
     px: f32,
     py: f32,
     pz: f32,
+    hear: f32,
 ) bool {
     const dx = px - zx;
     const dy = py - zy;
     const dz = pz - zz;
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 >= w.rules.ai.sense_dist_sq) return false;
-    const hear = w.rules.ai.hear_range;
     if (d2 < hear * hear) return true;
     // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)) then LOS.
     const half = viewHalfDeg(w, zslot) * (std.math.pi / 180.0);
@@ -158,7 +164,11 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx
             // player's effective smell radius the zombie senses regardless of
             // sight or hearing (a bleeding player reeks from further away).
             const smell = smellRadiusFor(w, p.slot);
-            if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z)) continue;
+            // Stealth (RE PlayerStealth NotifyNoise): a crouched player's
+            // movement noise is muffled, so the hearing gate shrinks by
+            // crouch_hear_scale.
+            const hear = if (p.crouching) w.rules.ai.hear_range * w.rules.ai.crouch_hear_scale else w.rules.ai.hear_range;
+            if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear)) continue;
             best_d = d;
             best_id = p.id;
             best_slot = p.slot;
@@ -1212,14 +1222,21 @@ const AiCtx = struct {
                 }
                 w2.markDirty(s, .{ .pos = true });
             }
-            // Sleepers: stay sleep until player in volume.
+            // Sleepers: stay sleep until player in volume. Stealth (RE
+            // entity-ai.md CanSleeperAttackDetect): a crouched player only
+            // disturbs sleepers within the close crouch_sleeper_detect_range
+            // (stock's light-based FastLerp(3,15,light) leg is RE-blocked).
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
                 var near = false;
                 for (ctx.players) |pl| {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
-                    if (dx * dx + dz * dz <= sl.volume_r * sl.volume_r) {
+                    const reach = if (pl.crouching)
+                        @min(sl.volume_r, ctx.w.rules.ai.crouch_sleeper_detect_range)
+                    else
+                        sl.volume_r;
+                    if (dx * dx + dz * dz <= reach * reach) {
                         near = true;
                         break;
                     }
@@ -4246,17 +4263,17 @@ test "AI senses: LOS and view cone gate sight; hearing ignores walls" {
     // Zombie at origin facing +x (yaw 90 = atan2(1, 0)).
     const zyaw: f32 = 90.0;
     // Far player (20 m, beyond hear 10) with a wall at x=10: not sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, 10.0));
     // Same distance, no wall (y shifted so the wall cell is not on the ray):
     // sensed - LOS clear, in the cone.
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 4));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 4, 10.0));
     // Near player (5 m, within hear) with a wall: still sensed (hearing).
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0, 10.0));
     // Behind the zombie (yaw 90 faces +x; player at -x): out of the cone at
     // 20 m, not sensed even without a wall.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0, 10.0));
     // Beyond the sense range: never sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0, 10.0));
 }
 
 test "AI senses: per-class MaxViewAngle narrows the cone" {
@@ -4271,14 +4288,14 @@ test "AI senses: per-class MaxViewAngle narrows the cone" {
     const off30 = std.math.pi / 6.0; // 30 degrees off-axis.
     // Default class table (rules floor 90 half): a player 30 deg off-axis at
     // 20 m IS sensed (dot 0.866 > cos 90 = 0).
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
     // Per-class full angle 30 (half 15): the same target is now out of cone.
     w.class_table[0].view_angle_deg = 30.0;
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
     // Per-entity layer beats the class table: class says 30 but the entity's
     // own view_angle_deg 360 (half 180) re-opens the cone.
     w.class_id[0].view_angle_deg = 360.0;
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
 }
 
 test "AI senses: smell radius gates through walls, bleeding extends it" {
@@ -4427,4 +4444,55 @@ test "AI move: wander target inside a wall does not clip through it" {
     // Goal inside the wall block: the body stops at the near face (x < 5).
     for (0..80) |_| stepToward(&w, s, 6, 0, 2.2, 0.05);
     try std.testing.expect(w.transform[s].x < 5.0);
+}
+
+test "stealth: crouch muffles the hearing gate through walls" {
+    // RE entity-ai.md PlayerStealth NotifyNoise: a crouched player's movement
+    // noise is muffled (stock per-clip muffledWhenCrouched; rules floor
+    // crouch_hear_scale 0.5), so the hearing gate shrinks while sight stays
+    // unchanged. Wall between zombie and player blocks sight; hearing decides.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48, .smell_radius = 2.0 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x == 4 and y >= 70 and y <= 71 and z == 0;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    var snaps = [_]PlayerSnap{
+        .{ .id = 100, .slot = 0, .x = 8, .y = 70, .z = 0, .crouching = false },
+    };
+    // Standing at 8 m (hear 10): heard through the wall.
+    const t_stand = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    try std.testing.expectEqual(@as(i32, 100), t_stand.id);
+    // Crouched at 8 m (hear 10 x 0.5 = 5): muffled, sight blocked: not sensed.
+    snaps[0].crouching = true;
+    const t_crouch = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    try std.testing.expectEqual(@as(i32, -1), t_crouch.id);
+    // Crouched but close (3 m < 5): still heard.
+    snaps[0] = .{ .id = 100, .slot = 0, .x = 3, .y = 70, .z = 0, .crouching = true };
+    const t_close = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    try std.testing.expectEqual(@as(i32, 100), t_close.id);
+}
+
+test "stealth: crouched players do not wake sleepers beyond the close detect range" {
+    // RE entity-ai.md CanSleeperAttackDetect: crouching shrinks sleeper
+    // disturbance to a close range (stock light-based FastLerp(3,15,light);
+    // rules floor crouch_sleeper_detect_range 5). A player 8 m inside a
+    // volume_r 10 sleeper wakes it standing, not crouched.
+    var w: World = .{ .rules = .{ .ai = .{ .crouch_sleeper_detect_range = 5.0 } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 10;
+    const p = w.spawnPlayer(8, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.player[ps].crouching = true;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    // Standing at the same distance: the volume disturbs the sleeper.
+    w.player[ps].crouching = false;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
 }

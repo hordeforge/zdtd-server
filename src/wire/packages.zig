@@ -70,6 +70,8 @@ pub const PackageName = enum {
     NetPackageBag,
     NetPackageDropItemsContainer,
     NetPackageTileEntity,
+    // Appended after the stock set; stock ids 0..15 stay stable for fixtures.
+    NetPackageEntityFlags,
 };
 
 /// Stable server map: index = pkgId (same idea as MockGameServer.DefaultMappings).
@@ -118,6 +120,7 @@ pub const default_mappings = [_][]const u8{
     "NetPackageBag",
     "NetPackageDropItemsContainer",
     "NetPackageTileEntity",
+    "NetPackageEntityFlags",
     "NetPackagePlayerDisconnect",
     "NetPackagePlayerData",
     "NetPackageAuthConfirmation",
@@ -768,6 +771,10 @@ pub fn buildRelPosBody(buf: []u8, entity_id: i32, dx: i16, dy: i16, dz: i16, rx:
 pub const cF_approaching_player: u16 = 0x0002;
 pub const cF_spawned: u16 = 0x0008;
 pub const cF_is_alert: u16 = 0x0040;
+/// Stock `IsCrouching` bit (protocol-packages.md 5.5.6): set by the client's
+/// EntityFlags/AliveFlags package; the sim reads it for the stealth sense
+/// gates (hear muffle + sleeper detect).
+pub const cF_crouching: u16 = 0x0200;
 
 pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };

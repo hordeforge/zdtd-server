@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (142/140/47) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (142/141/46) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 12 | 8 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 9 | 14 | 3 | 26 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 21 | 21 | 6 | 48 | Real fights with real stakes and real A*; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 21 | 22 | 5 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 18 | 7 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **142** | **140** | **47** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **142** | **141** | **46** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1752,7 +1752,7 @@ behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
 gamestage, no wandering hordes, and no screamers.
 
-**21 WORKS · 21 PARTIAL · 6 MISSING**
+**21 WORKS · 22 PARTIAL · 5 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -4079,7 +4079,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | MoveHelper physics / collision | PARTIAL (2026-08-20: collide-and-slide against the block grid (body ~0.35×1.8, axis-separated like the stock CC Move), step-up of 1 block, and gravity per the stock formula - World.Gravity 0.08/tick with the 0.98 y-drag, ~1.6 blocks/s²; RE entity-movement.md. Remaining: jump, dig-through, swimming strokes, elevator, entity push, door-opening) |
 | Gravity / swimming / climbing | PARTIAL (AI bodies fall under stock gravity and land - entity-movement.md; vehicle gravity; void rescue teleport; swimming/climbing MISSING) |
 | Line of sight / hearing / smell | WORKS (2026-08-20: sense gate ships - per-class view cone (entityclasses MaxViewAngle, stock cctor default 180 halved like IsInFrontOfMe), block-LOS sight via Voxel.Raycast-equivalent, hearing within hear_range that passes walls, and a smell radius that passes walls with a bleeding-player extension (buffInjuryBleeding → cSmellRadiusBleed 25, else cSmellRadiusMin 10), RE entity-ai.md CanEntityBeSeen + PlayerStealth + EntityAlive/EntityClass cctor defaults. Sub-note: CanSeeStealth's light-level leg needs the client's light channel and is not evaluated server-side; sub-note documented in 7dtd-research/docs/entity-ai.md) |
-| Stealth / crouch | MISSING |
+| Stealth / crouch | PARTIAL (2026-08-20: crouch replicates via NetPackageEntityAliveFlags bit 512 (IsCrouching); a crouched player's hearing gate muffles by crouch_hear_scale (0.5; stock per-clip muffledWhenCrouched from noisysounds.xml is data-driven) and sleepers only detect crouched players within crouch_sleeper_detect_range (5; stock light-based FastLerp(3,15,light) leg is RE-blocked - no server light channel), RE entity-ai.md PlayerStealth + protocol-packages.md 5.5.6. Missing: the light-level CanSeeStealth leg, movement-noise volume model, smoke/smell stealth) |
 | Group AI / pack behavior | MISSING |
 | Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
 | Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |

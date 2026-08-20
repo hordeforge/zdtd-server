@@ -132,7 +132,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.ownership_rejects);
             return true;
         }
-        if (self.sim.slotOfNetId(f.entity_id)) |idx| self.sim.flags[idx].bits = f.flags;
+        if (self.sim.slotOfNetId(f.entity_id)) |idx| {
+            self.sim.flags[idx].bits = f.flags;
+            // Stealth (RE entity-ai.md PlayerStealth): the client reports its
+            // crouch in this flags word (bit 512); the AI sense gates muffle
+            // hearing and shrink sleeper detect for crouched players.
+            if (self.sim.mask[idx].player) {
+                self.sim.player[idx].crouching = (f.flags & packages.cF_crouching) != 0;
+            }
+        }
         // Fan-out to other peers (stock tracked-players path).
         try self.broadcastExcept("NetPackageEntityAliveFlags", body, c.slot);
         return true;

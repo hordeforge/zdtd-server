@@ -48,6 +48,10 @@ pub const Player = struct {
     /// active blood moon, cleared on respawn. Horde zombies skip these players
     /// as targets (EAISetNearestEntityAsTarget), so they hunt the living.
     is_blood_moon_dead: bool = false,
+    /// Stock `EntityPlayer.Crouching` (EntityFlags bit 512): muffles the
+    /// player's movement noise for the AI hearing gate and shrinks sleeper
+    /// attack-detect (RE entity-ai.md PlayerStealth).
+    crouching: bool = false,
 };
 
 pub const ClassId = struct {
