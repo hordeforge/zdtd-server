@@ -5921,3 +5921,43 @@ test "scenario bots collide with walls and slide instead of phasing through" {
     // Still trying to move (intent not cleared just because it is blocked).
     try std.testing.expect(b.move_active);
 }
+
+test "scenario persist: blood-moon schedule survives restart (ZCL2)" {
+    // Stock CalcNextDay: the schedule is persisted (bmDayLast -> nextBM), so
+    // a restart keeps the client's red moon on the horde night. Game.deinit
+    // saves the clock (lifecycle) and Game.create restores it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var first_bm: i32 = 0;
+    {
+        const g = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        g.sim.director.clock.bloodmoon_frequency = 7;
+        g.sim.director.clock.bloodmoon_range = 2;
+        g.sim.director.clock.day = 5;
+        g.sim.director.clock.hours = 12.0;
+        first_bm = g.sim.director.clock.bloodMoonDayFor(5);
+        try std.testing.expect(first_bm >= 7 and first_bm <= 9);
+    }
+    {
+        const g2 = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        // The restored schedule keeps the same target (not recomputed from a
+        // different stream) and stays monotonic with the live day.
+        try std.testing.expectEqual(first_bm, g2.sim.director.clock.bloodMoonDayFor(5));
+        g2.sim.director.clock.day = @intCast(first_bm);
+        g2.sim.director.clock.hours = 23.0;
+        try std.testing.expect(g2.sim.director.clock.isBloodMoonNight());
+    }
+}

@@ -25,6 +25,17 @@ pub const WorldClock = struct {
     bloodmoon_frequency: u32 = 7,
     /// BloodMoonRange: deterministic ±day jitter around each frequency multiple.
     bloodmoon_range: u8 = 0,
+    /// Persisted blood-moon schedule (stock `CalcNextDay`, asm.il 412880):
+    /// `next_bm = bm_day_last + frequency + RandomRange(0, range+1)` rolled at
+    /// each cycle. `bm_cycle` is the schedule position and `bm_freq` /
+    /// `bm_range` remember the settings the schedule was built for (a runtime
+    /// change recomputes). 0 = uninitialized. Survives restart via clock.zcl
+    /// so the client's red moon stays on the horde night across day jumps.
+    bm_cycle: u32 = 0,
+    bm_day_last: u32 = 0,
+    next_bm: u32 = 0,
+    bm_freq: u32 = 0,
+    bm_range: u8 = 0,
 
     /// Real seconds per in-game hour from DayNightLength (real minutes per day).
     pub fn setDayNightLength(self: *WorldClock, minutes_per_day: u16) void {
@@ -84,43 +95,54 @@ pub const WorldClock = struct {
     }
 
     fn isBloodMoonDay(self: *const WorldClock, day: u32) bool {
-        if (self.bloodmoon_range == 0) return day % self.bloodmoon_frequency == 0;
-        // Blood moon day = c*freq + jitter(c), jitter deterministic in [0, range].
-        // A given day may match the target of an adjacent cycle (jitter can push a
-        // blood moon across the c*freq boundary), so test the neighbouring cycles.
-        const base = day / self.bloodmoon_frequency;
-        const lo = if (base == 0) 0 else base - 1;
-        var c = lo;
-        while (c <= base + 1) : (c += 1) {
-            if (self.bloodMoonDayForCycle(c) == day) return true;
-        }
-        return false;
+        if (self.bloodmoon_frequency == 0) return false;
+        self.ensureBmSchedule(day);
+        // The dawn-crossing leg (isBloodMoonNight) tests the day before the
+        // scheduled one too, so both the current and the previous target
+        // count (they are never equal: next_bm > bm_day_last by construction).
+        return day == self.next_bm or day == self.bm_day_last;
     }
 
-    fn bloodMoonDayForCycle(self: *const WorldClock, cycle: u32) i64 {
-        // Stock CalcNextDay (asm.il 412880): bmDayLast + frequency +
-        // RandomRange(0, range+1) — the jitter is non-negative, so a blood moon
-        // is never early relative to the frequency multiple.
+    /// The persisted schedule position: advance `next_bm` past `today` using
+    /// the stock CalcNextDay roll (bm_day_last + frequency + RandomRange(0,
+    /// range+1)); the jitter is the deterministic hash of the cycle (same
+    /// stream as the old live derivation, so existing worlds keep their
+    /// cadence). A runtime frequency/range change rebuilds the schedule from
+    /// cycle 1.
+    fn ensureBmSchedule(self: *const WorldClock, today: u32) void {
+        // Const-cast: the schedule is lazy state cached from the live clock.
+        const wc: *WorldClock = @constCast(self);
+        if (wc.next_bm == 0 or wc.bm_freq != self.bloodmoon_frequency or wc.bm_range != self.bloodmoon_range) {
+            wc.bm_cycle = 0;
+            wc.bm_day_last = 0;
+            wc.bm_freq = self.bloodmoon_frequency;
+            wc.bm_range = self.bloodmoon_range;
+            wc.next_bm = wc.bmDayForCycle(1);
+        }
+        while (wc.next_bm < today and wc.next_bm != 0) {
+            wc.bm_day_last = wc.next_bm;
+            wc.bm_cycle += 1;
+            wc.next_bm = wc.bmDayForCycle(wc.bm_cycle + 1);
+        }
+    }
+
+    fn bmDayForCycle(self: *const WorldClock, cycle: u32) u32 {
         const span: u32 = @as(u32, self.bloodmoon_range) + 1;
-        const jitter: i64 = @as(i64, @intCast((cycle *% 2654435761) % span));
-        return @as(i64, cycle) * @as(i64, self.bloodmoon_frequency) + jitter;
+        const jitter: u64 = (@as(u64, cycle) *% 2654435761) % span;
+        return @as(u32, @intCast(@as(u64, cycle) * self.bloodmoon_frequency + jitter));
     }
 
     /// The scheduled blood-moon day for the client's stat 58 (GameStats
-    /// BloodMoonDay): the horde day of the active cycle — the next jittered
-    /// cycle day at/after `today`. NOT the plain frequency multiple: with
-    /// BloodMoonRange jitter the horde can land on day c*freq+1, and the old
-    /// multiple put the client's red moon on the wrong night (a non-horde
-    /// multiple lit up, the actual horde night showed nothing). Cycle 0 is
-    /// pre-game; the first horde is cycle 1.
+    /// BloodMoonDay): the horde day of the active cycle — the next persisted
+    /// schedule day at/after `today` (stock CalcNextDay). NOT the plain
+    /// frequency multiple: with BloodMoonRange jitter the horde can land on
+    /// day c*freq+1, and the old multiple put the client's red moon on the
+    /// wrong night (a non-horde multiple lit up, the actual horde night
+    /// showed nothing). Cycle 1 is the first horde; cycle 0 is pre-game.
     pub fn bloodMoonDayFor(self: *const WorldClock, today: u32) i32 {
         if (self.bloodmoon_frequency == 0) return 0;
-        const base: i64 = @intCast(@max(1, today / self.bloodmoon_frequency));
-        var c: i64 = base;
-        while (true) : (c += 1) {
-            const day = self.bloodMoonDayForCycle(@intCast(c));
-            if (day >= today) return @intCast(day);
-        }
+        self.ensureBmSchedule(today);
+        return @intCast(self.next_bm);
     }
 
     /// Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000 (+ minutes*1000/60).
@@ -1298,4 +1320,38 @@ test "heat map: low activity never spawns and decays away" {
     }
     try std.testing.expectEqual(@as(u32, 0), zombies);
     try std.testing.expectEqual(@as(u8, 0), d.heat_n); // expired
+}
+
+test "bloodmoon schedule persists position and advances past the live day" {
+    // Stock CalcNextDay (asm.il 412880): the schedule is a persisted
+    // bmDayLast -> nextBM roll, not a live modulus. The first horde sits at
+    // cycle 1 (freq 7 + jitter 0..2); the horde spans dusk to dawn across
+    // midnight; advancing the live day rolls the schedule forward; a runtime
+    // frequency change rebuilds it.
+    var cl: WorldClock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 };
+    cl.bloodmoon_frequency = 7;
+    cl.bloodmoon_range = 2;
+    const first = cl.bloodMoonDayFor(1);
+    try std.testing.expect(first >= 7 and first <= 9);
+    try std.testing.expectEqual(@as(u32, @intCast(first)), cl.next_bm);
+    // Horde night and the dawn-crossing leg match the schedule.
+    cl.day = @intCast(first);
+    cl.hours = 23.0;
+    try std.testing.expect(cl.isBloodMoonNight());
+    cl.tick(3.0); // past midnight into day first+1, before dawn
+    try std.testing.expect(cl.isBloodMoonNight());
+    cl.tick(3.0); // dawn passed
+    try std.testing.expect(!cl.isBloodMoonNight());
+    // Live day far past the first horde: the schedule rolls forward and the
+    // previous target is retained (stock bmDayLast).
+    cl.day = 30;
+    const next = cl.bloodMoonDayFor(30);
+    try std.testing.expect(next > first);
+    try std.testing.expect(cl.bm_day_last >= first and cl.bm_day_last < next);
+    try std.testing.expect(next >= 30);
+    // A runtime frequency change rebuilds from cycle 1.
+    cl.bloodmoon_frequency = 10;
+    cl.bloodmoon_range = 0;
+    cl.day = 1;
+    try std.testing.expectEqual(@as(i32, 10), cl.bloodMoonDayFor(1));
 }

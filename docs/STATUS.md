@@ -34,8 +34,10 @@ prime-and-explode shipped (RE entity-ai.md EntityZombieCop; entity + block
 AoE), moving a bosses sub-item to WORKS inside the still-PARTIAL special
 infected row. Reconciliation: the trader quest-list row (per-trader offers
 via NetPackageNPCQuestList + accept marker) was stale PARTIAL - the window
-is driven end to end, flipped to WORKS, total **143/142/44**. The dashboard
-(docs/provenance.html) is synced.
+is driven end to end, flipped to WORKS, total **143/142/44**. Then the
+blood-moon schedule row went WORKS (stock CalcNextDay persisted on the
+clock as ZCL2, seekable across restarts and day jumps), total
+**144/141/44**. The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE

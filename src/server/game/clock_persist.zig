@@ -1,4 +1,6 @@
-//! World-clock persist extracted from game.zig (ZCL1: worldTime u64).
+//! World-clock persist extracted from game.zig (ZCL2: worldTime u64 + the
+//! persisted blood-moon schedule; ZCL1 files without the schedule restore the
+//! clock and recompute the schedule from cycle 1).
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -10,10 +12,18 @@ const logPersistErr = game_mod.logPersistErr;
 pub fn saveClock(self: *const Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/clock.zcl", .{self.world.world_dir});
-    var buf: [16]u8 = undefined;
-    @memcpy(buf[0..4], "ZCL1");
-    std.mem.writeInt(u64, buf[4..12], self.sim.director.clock.worldTimeBits(), .little);
-    try io_fs.writeFile(p, buf[0..12]);
+    var buf: [28]u8 = undefined;
+    @memcpy(buf[0..4], "ZCL2");
+    const clk = &self.sim.director.clock;
+    std.mem.writeInt(u64, buf[4..12], clk.worldTimeBits(), .little);
+    // Persisted blood-moon schedule (stock CalcNextDay): the schedule is
+    // advanced lazily by the day queries, so save the position as-is; a
+    // restore recomputes forward to the live day.
+    std.mem.writeInt(u32, buf[12..16], clk.bm_cycle, .little);
+    std.mem.writeInt(u32, buf[16..20], clk.bm_day_last, .little);
+    std.mem.writeInt(u32, buf[20..24], clk.next_bm, .little);
+    std.mem.writeInt(u32, buf[24..28], clk.bm_freq, .little);
+    try io_fs.writeFile(p, buf[0..28]);
 }
 
 pub fn restoreClock(self: *Game) void {
@@ -23,17 +33,24 @@ pub fn restoreClock(self: *Game) void {
         return;
     };
     if (!io_fs.fileExists(p)) return;
-    var buf: [16]u8 = undefined;
+    var buf: [28]u8 = undefined;
     const bytes = io_fs.readFileInto(p, &buf) catch |err| {
         logPersistErr(self, "restore clock", err);
         return;
     };
-    if (bytes.len < 12 or !std.mem.eql(u8, bytes[0..4], "ZCL1")) {
+    if (bytes.len < 12 or !(std.mem.eql(u8, bytes[0..4], "ZCL1") or std.mem.eql(u8, bytes[0..4], "ZCL2"))) {
         std.debug.print("zdtd: clock.zcl unreadable or mismatched; keeping fresh clock\n", .{});
         return;
     }
     const wt = std.mem.readInt(u64, bytes[4..12], .little);
-    self.sim.director.clock.day = @intCast(wt / 24000 + 1);
-    self.sim.director.clock.hours = @as(f32, @floatFromInt(wt % 24000)) / 1000.0;
-    util_log.info("zdtd: clock restored day={d} hours={d:.2}\n", .{ self.sim.director.clock.day, self.sim.director.clock.hours });
+    const clk = &self.sim.director.clock;
+    clk.day = @intCast(wt / 24000 + 1);
+    clk.hours = @as(f32, @floatFromInt(wt % 24000)) / 1000.0;
+    if (bytes.len >= 28 and std.mem.eql(u8, bytes[0..4], "ZCL2")) {
+        clk.bm_cycle = std.mem.readInt(u32, bytes[12..16], .little);
+        clk.bm_day_last = std.mem.readInt(u32, bytes[16..20], .little);
+        clk.next_bm = std.mem.readInt(u32, bytes[20..24], .little);
+        clk.bm_freq = std.mem.readInt(u32, bytes[24..28], .little);
+    }
+    util_log.info("zdtd: clock restored day={d} hours={d:.2}\n", .{ clk.day, clk.hours });
 }
