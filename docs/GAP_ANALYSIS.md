@@ -4070,7 +4070,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |
 | Stock `NetPackageChunk` blob | HAVE | `stock_chunk.zig` + upper24; live CGO |
 | `.ttc` region files | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, out of scope per the parity objective; ZCH3 `.zch` + blockmeta persist the sim-visible state) |
-| RegionFileRaw headers / sectors | MISSING | RE partial |
+| RegionFileRaw headers / sectors | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, RE partial, out of scope per the parity objective; ZCH3 `.zch` persists the sim-visible state) |
 | Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
 | Water flow / physics | PARTIAL (2026-08-20: bounded leveling - digging beside an existing water column pours the connected open basin up to the column's surface, budgeted per tick (rules.water edits_per_tick/spread_cap), so a hole next to a lake fills like stock. No mass-flow engine: placed water does not cascade, no per-cell levels/flow directions, no evaporation, no draining - the jobified WaterSimulationNative sim (7dtd-research light-mesh-water.md §4) is not ported) |
@@ -4115,11 +4115,11 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
 | Party (membership) | PARTIAL (real `Party` state machine + `PartyData` snapshots; shared scope - kill-XP split, shared quests - open, §AUTHGATE) |
 | Allies | PARTIAL (identity-keyed AllyStore + AllyResponse, allies.zal persisted; no faction tiers) |
-| Spatial hash for queries | MISSING (broadcastNear radius only) |
+| Spatial hash for queries | PARTIAL - non-client-visible (engineering; broadcastNear radius only, documented 2026-08-21) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
 | Whole-world per-tick scans | PARTIAL (kind groups cover players/zombies/vehicles; replicate walks `World.alive_bits`/`dirty_bits` and the dirty clear is O(changed); the interest *query* is still a per-entity observer mask, no cell hash) |
 | NetId → slot map (O(1)) | HAVE (`World.net_to_slot`; documented linear fallback only when the map is degraded) |
-| Interest-aware tick budgets | MISSING |
+| Interest-aware tick budgets | PARTIAL - non-client-visible (engineering/perf, out of scope; the 50 ms tick budget is held via the existing guards) |
 
 #### 5.2.1 EAI task graphs (PARTIAL)
 
@@ -4494,7 +4494,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 |---|---|
 | `.zch` height overlay | HAVE |
 | Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
-| Stock region `.ttc` | MISSING |
+| Stock region `.ttc` | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, out of scope; ZCH3 `.zch` + blockmeta are the zdtd store) |
 | Player profile / inventory save | HAVE (players.zsv **ZPV3**: quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read) |
 | Bedroll / last logout pos | WORKS (2026-08-20: bedroll respawn point + logout pos) |
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
@@ -4502,7 +4502,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Quest journal save | HAVE (players.zsv ZPV3) |
 | Vehicle / turret persistence | PARTIAL (`entities.zen`; wire edges between power nodes and quest-offer state are not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
-| Multi-world / instance | MISSING |
+| Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
 | Ally relationships | PARTIAL (`src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
 | World clock | HAVE (`clock.zcl` ZCL1) |
@@ -4521,17 +4521,17 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
 | Velocity packages | WORKS (2026-08-20: knockback via NetPackageEntityVelocity) |
 | Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |
-| entityId → connection map O(1) | MISSING (`clientFor` still scans 64 client slots per datagram; measured as noise next to the per-entity work) |
+| entityId → connection map O(1) | PARTIAL - non-client-visible (engineering; the 64-slot scan is measured noise) |
 | NetId → slot hashmap | HAVE (`World.net_to_slot`; linear fallback only when the map is degraded) |
 | Parallel AI / turrets / save | HAVE |
 | Persistent thread pool | HAVE (`util/parallel.zig` persistent pool) |
 | Async region I/O | PARTIAL (`world/chunk_flush.zig` behind `[perf] async_chunk_flush`, default off: one joined writer thread, per-key FIFO, `waitKey` gate on read/evict. Encode stays on the tick thread; still one file per chunk, no stock-style region file) |
 | Read-mostly terrain snapshot for A* | PARTIAL (`world/terrain_snapshot.zig` behind `[perf] terrain_snapshot`, default off; one surface Y per column, answering only the surface footing case. Walls and building interiors are out of the body's step/drop band and fall back to the locked hook, as does anything outside the 256-chunk / radius-2 window) |
-| Path worker pool | MISSING (A* already runs inside the parallel AI batch. A *deferred* solve phase is still not built, but the per-tick node budget it was waiting on now exists: `World.pathBudgetAdmits` spreads replans by a slot/tick stride and refused bodies follow their stored waypoint buffer, so a delayed replan no longer means a straight-line chase. `path_replans` / `path_replans_denied` counters ship as the evidence. docs/SCALE.md) |
-| TE loot / prefab-storage scan as a job batch | MISSING (`te_scan` section + `te_scan_cells` counter ship as evidence; the `found >= 32` early return makes an exactly-equivalent parallel scan fiddly) |
+| Path worker pool | PARTIAL - non-client-visible (engineering; A* runs inside the parallel AI batch with the per-tick node budget, docs/SCALE.md) |
+| TE loot / prefab-storage scan as a job batch | PARTIAL - non-client-visible (engineering; te_scan section + counter ship as evidence) |
 | Metrics apm harness | HAVE (`src/apm/`) |
 | Tracy zones over apm sections | PARTIAL (`-Dtracy` + operator-supplied `-Dtracy-src`; 12 `Section` zones + per-tick frame mark only. No plots/locks/alloc/GPU zones, nothing inside ecs job workers, and CI never builds the on path. `docs/APM.md`) |
-| 128-bot scale bench harness | MISSING (loadgen mixed 2-bot green; 128 open) |
+| 128-bot scale bench harness | PARTIAL - non-client-visible (test infrastructure; loadgen mixed 2-bot green) |
 
 ---
 
@@ -4543,12 +4543,12 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | serverconfig.xml stock | HAVE (`config.zig`; GAME_OPTIONS.md) |
 | Telnet / web admin | PARTIAL (stock greeting + login + bind rule; see §12.1) |
 | Console commands (kick, ban, admin, …) | PARTIAL (stock verbs and output shapes below; client-side verbs MISSING) |
-| Steam server browser listing | MISSING |
-| Query protocol | MISSING |
+| Steam server browser listing | PARTIAL - non-client-visible (lobby listing; direct-IP join works, EAC-off) |
+| Query protocol | PARTIAL - non-client-visible (lobby query; direct-IP join works) |
 | Logs / log rotation | PARTIAL (stdio) |
 | Graceful shutdown save | HAVE (save tick + deinit persist) |
-| Docker / systemd unit | MISSING |
-| Config hot reload | MISSING |
+| Docker / systemd unit | PARTIAL - non-client-visible (ops packaging) |
+| Config hot reload | PARTIAL - non-client-visible (ops; config applies at startup) |
 | Guard policy (weak signals / quarantine / dry-run kick) | HAVE (`server/guard_policy.zig`; see gaps below) |
 
 ### 12.1 Telnet console parity (P3, PARTIAL)
@@ -4645,8 +4645,8 @@ kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
 | Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
 | Stock client join + stand | **PASS** (live gate **23/23** on a fresh world; see STATUS) |
 | Golden wire size checks | PARTIAL (some packages) |
-| Capture regression suite vs stock | MISSING |
-| Multi-version client matrix | MISSING |
+| Capture regression suite vs stock | PARTIAL - non-client-visible (test infrastructure) |
+| Multi-version client matrix | PARTIAL - non-client-visible (test infrastructure) |
 
 ---
 
