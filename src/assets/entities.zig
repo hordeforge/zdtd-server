@@ -454,7 +454,20 @@ test "load stock entityclasses when present" {
     // ExperienceGain resolves the '^xpNormal01' replace_properties reference
     // (entityclasses.xml XP_ZOMBIE_TEMPLATE -> zombieTemplateMale -> zombieBoe).
     try std.testing.expectEqual(@as(f32, 500), boe.xp_gain);
+    // A34: HP comes from the HealthMax passive_effect chain, not the 40 builtin
+    // floor. Ground truth = the V3.1.0 b14 stock file: zombieBoe's own body
+    // declares `value="^healthNormal"` = 200 (the earlier audit guess of 125
+    // was wrong for this file). No perc_add on the row; rolls would be pinned
+    // to base for deterministic sims either way (documented).
+    try std.testing.expectEqual(@as(f32, 200), boe.max_hp);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);
+    // A34 on animals: the stag's own HealthMax base_set=100 wins over the 30
+    // builtin animal floor (the 10 row in the file is inside an XML comment).
+    try std.testing.expectEqual(@as(f32, 100), stag.max_hp);
+    const fer = t.byName("zombieBoeFeral") orelse return error.TestExpectedEqual;
+    // A34 on the feral ladder: zombieBoeFeral overrides zombieBoe's HealthMax
+    // with ^healthNormalFeral = 550 (Extends-chain override + variable lookup).
+    try std.testing.expectEqual(@as(f32, 550), fer.max_hp);
 }

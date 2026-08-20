@@ -37,7 +37,11 @@ Spot-check summary vs the prior audit claims:
 | ID | Location | Value / shape | Stock source | Sev | Fix shape | Default after fix |
 |---|---|---|---|---|---|---|
 | **A34** | `assets/entities.zig:262-266` (parse keys), `:170` (`defaultHp` floors), `:224-235` (property-only body scan); call sites `game.zig:944` (setClassDef max_hp), `game.zig:3958` (resolveSleeperClass), `admin_console.zig:383` | `MaxHealth`/`HandHealthMax` property lookup; both are absent from stock entityclasses (2 / 0 occurrences). Fallback `defaultHp`: zombie 40, animal 30, trader 9999 | `Data/Config/entityclasses.xml` `<passive_effect name="HealthMax" operation="base_set">` + `<replace_passive_effect>` (`healthSlim=125`, `healthSlimFeral=500`, `healthSlimRadiated=800`, `healthSlimCharged=1000`, `healthSlimInfernal=1600`, `healthNormal*`, `healthScreamer`, ...) + `perc_add -.15,.15` | **P1** | Extend `entities.zig`: parse passive_effect `HealthMax` base_set through the Extends chain, resolve `^variable` names from `<replace_passive_effect>`, pick deterministically inside the perc_add range (seeded stream, stock RNG-per-spawn). Trader 100000 also comes from this path | 40 → 125±15% (zombieBoe), feral 500, stag 50, rabbit 10, bear 2500. **Not default-preserving, intentionally; changes combat pacing** |
+
+**CLOSED 2026-08-20** (landed after the audit; this pass added the stock-file proof): `entities.zig` parses `<passive_effect name="HealthMax" operation="base_set">` alongside `<property>` rows (both feed the same props map), resolves `^name` values through the parsed `<replace_passive_effect>` map, and walks the Extends chain via `resolveProp`; `defaultHp` remains the fail-closed floor only. `perc_add` rolls are pinned to the base value for deterministic sims (documented; AGENTS rule 22). The stock-file test ("load stock entityclasses when present") now asserts HP: **zombieBoe = 200** (`^healthNormal`), **animalStag = 100** (own `base_set`; the 10 row in the file is inside an XML comment), **zombieBoeFeral = 550** (overrides zombieBoe with `^healthNormalFeral`, proving Extends-chain override + variable lookup). Ground truth = the V3.1.0 b14 file; the audit's 125/500/50 guesses were stale for this pin.
 | **A35** | `ecs/world.zig:223-233` (16-row class_table), `game.zig:1003-1016` (only rows 1,8-11 seeded from ZombiesAll picks), `ecs/aidirector.zig:596-626` (spawnOneZombie name match, else `class_table[1]`) | At most 6 classes (5 seeded zombies + zombieBoe) can spawn; every other ZombiesAll member (24+ classes incl. all feral variants) spawns with zombieBoe stats. `spawnZombieClass` keeps `class_id.id = 1`, so AI speeds/sight/damage read zombieBoe for sleeper and director spawns | `entityclasses.xml` per-class defs (parsed) + `entitygroups.xml` ZombiesAll (29 members) | **P2** (documented GAP_ANALYSIS 1828-1838; P1-arguable: feral variants at non-feral stats) | Carry the full spawnable class table into the sim (expand class_table or a Game hook on the director), or fill all reachable classes at load. Not small | Same classes as today until A34-style fix lands |
+
+**CLOSED 2026-08-20** (landed after the audit): the director's `class_resolve_fn` hook (ecs/aidirector.zig, wired by Game to the entities table) resolves any picked class that was not preloaded into the fixed class_table to its full entityclasses stats (HP/speeds/damage/hash/loot), so non-preloaded ZombiesAll members no longer fall back to zombieBoe stats.
 | **A36** | `game.zig:3307` (`spawnSurface` spawn pad) | `world_store.block_dirt` module pin written on the join path | AssignIds `terrDirt` (live `World.terrain_ids.dirt` after merge, A05) | **P2** | Use `self.world.terrain_ids.dirt` | Identical (pin == dump value); removes the version-skew pin use |
 
 **CLOSED 2026-08-20** (A36 verified landed; A37/A38 fixed in the terrain-id pass): `spawnSurface` already reads `World.terrain_ids.dirt` (game.zig `spawnSurface`); the TTS filler skip now takes the resolved `terrain_ids.terrain_filler(_adaptive)` ids instead of comptime pins, and `Chunk.rawAt`/`isSolid` fall back to `World.terrain_ids` (via a `terrain` pointer set in `World.getOrCreate`; offline chunks keep the pins).
@@ -98,7 +102,7 @@ Spot-check summary vs the prior audit claims:
 |---|---|---|
 | blocks.xml, materials.xml, AssignIds dump | maxdamage.zig / blocks.zig / blocks_nim.zig | HAVE (power watts/Class/MaxFuel/OutputPerFuel/Charge/Stack; CraftingAreaRecipes added at HEAD 3b06680; HeatMapStrength) |
 | items.xml | items.zig | HAVE (Stacknumber via Extends, EconomicValue, DamageEntity, FuelValue, Eat cvars, stock type assign) |
-| entityclasses.xml | entities.zig | **PARTIAL: A34** (hash, kind, loot, speeds, sight, HandItem parse; HP does not) |
+| entityclasses.xml | entities.zig | **HAVE** (hash, kind, loot, speeds, sight, HandItem parse; HP via `HealthMax` passive_effect + `replace_passive_effect` variables — A34 closed 2026-08-20) |
 | entitygroups.xml | entitygroups.zig | HAVE (cap 512 of 1892 groups, GAP_ANALYSIS 1820) |
 | recipes.xml / loot.xml / quests.xml / traders.xml / npc.xml / gamestages.xml | recipes/loot/quests/traders/npc/gamestages | HAVE |
 | biomes.xml | biome_layers.zig + world/biomes.zig | HAVE (layers, weather groups, deco, biomemapcolor) |
@@ -118,7 +122,8 @@ Spot-check summary vs the prior audit claims:
 - `biome_layers.tryLoad` logs `load biomes.xml failed` with the path (verified).
 - A34 is the real leakage case: `entities.source == .xml` is true, so no warn
   fires, yet HP is the builtin floor. Fixing A34 removes the last silent
-  builtin-balance-on-XML case.
+  builtin-balance-on-XML case. **CLOSED 2026-08-20**: HP now parses from the
+  XML (see the A34 row); no silent builtin-balance-on-XML case remains.
 
 ## OK hardcodes (false positives, with cites)
 
@@ -180,9 +185,12 @@ values are Bucket A (stock data), never zdtd.toml.
    perc_add seeded pick in `assets/entities.zig`; unit test on the stock file
    (SkipZigTest when install missing) asserting zombieBoe ~125, feral ~500,
    stag ~50. Loadgen soak to confirm zombie TTK. Not default-preserving by
-   design; do it as its own PR with STATUS/TODO update.
+   design; do it as its own PR with STATUS/TODO update. **LANDED** (the
+   passive_effect + variable parsing and the `class_resolve_fn` hook shipped
+   after the audit; this pass added the stock-file HP assertions — see the
+   CLOSED notes on A34/A35).
 2. **A35 (P2, after A34)**: expand reachable classes in the sim (class_table or
-   director hook). Separate PR.
+   director hook). Separate PR. **LANDED** (director `class_resolve_fn`).
 3. **A36 + A37 + A38 (P2/P3, default-preserving)**: swap module pins for
    `World.terrain_ids` / idByName on the three residual sites. Small PR.
 4. **A41 (P2)**: re-verify IL, align heat cooldowns or expose as `[rules.ai]`
