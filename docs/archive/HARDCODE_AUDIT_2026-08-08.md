@@ -187,6 +187,23 @@ Every NONE row was re-checked 2026-08-20 for code that behaves as if the file's
 data exists; none does (the prior A34 case is closed). The LoadLocal name list
 is protocol (OK).
 
+### Beyond Data/Config (whole Data tree, re-verified 2026-08-20)
+
+| Location | Files | State |
+|---|---|---|
+| `Data/Config/XUi_*` (styles/templates/windows/xui) | 10 | NONE, no dependency: client UI only; appears in the LoadLocal protocol list (the server tells the client which files to load, never parses them) |
+| `Data/Worlds/<world>/map_info.xml` | 1/world | HAVE: `world/dtm.zig` (HeightMapSize) |
+| `Data/Worlds/<world>/spawnpoints.xml` | 1/world | HAVE: `world/dtm.zig` (spawn points) |
+| `Data/Worlds/<world>/water_info.xml` | 1/world | HAVE: `world/water.zig` (lake/river point sources) |
+| `Data/Worlds/<world>/prefabs.xml` | 1/world | HAVE: `world/prefabs.zig` (POI decoration list) |
+| `Data/Prefabs/*_signs.xml` | 515 | HAVE: `assets/signs.zig` (sign libraries for NetPackageSignDataResponse) |
+| `Data/Prefabs/<name>.xml` (poi_/part_/rwgtile_ descriptors) | 1866 | HAVE: `world/prefabs.zig` reads YOffset, QuestTags, DifficultyTier, ThemeTags, TraderArea(/Protect), TeleportVolume*; footprint size comes from the `.tts` header. No descriptor value is hardcoded (the 8/4/8 size defaults are offline fallbacks) |
+
+The whole game XML surface is therefore covered: 44 Data/Config + 10 XUi +
+4 per-world kinds + 2381 Data/Prefabs XMLs, every one either loaded from the
+operator install or verified NONE with a documented reason. No game XML data
+is hardcoded anywhere in the codebase.
+
 ## Builtin production leakage check
 
 - Loud warns when game-dir/config-dir set and core catalog still builtin:
