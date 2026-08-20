@@ -20,6 +20,7 @@ const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
 const assets_recipes = @import("../assets/recipes.zig");
+const assets_loot = @import("../assets/loot.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const containers_mod = @import("../world/containers.zig");
@@ -5612,6 +5613,42 @@ test "scenario on_craft_request verdict gates crafting (real zdtd_craftgate)" {
     // The normal recipe still crafts.
     try std.testing.expect(g.tryCraft(c.slot, 1, 1));
     std.debug.print("PASS craftgate: forbidden_sword denied, resourceWood crafted\n", .{});
+}
+
+test "scenario on_loot_roll verdict halves loot (real zdtd_lootgate)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Control roll without any plugin: the seeded roll's stack count.
+    var stacks: [64]assets_loot.Stack = undefined;
+    const n0 = g.loot.rollContainer("EntityLootContainerRegular", 1, 42, &stacks);
+    try std.testing.expect(n0 >= 1);
+
+    // Load the committed gate module (scales every roll to 50%).
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_lootgate/zdtd_lootgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+
+    // Fill a loot bag with the SAME seed: the verdict halves the stack count.
+    const bag_nid = g.sim.spawnLootBag(10, 70, 10, 1, 1).?;
+    g.fillLootBagFromTable(bag_nid, "EntityLootContainerRegular", 42, 1);
+    const bs = g.sim.slotOfNetId(bag_nid).?;
+    var got: usize = 0;
+    for (g.sim.inventory[bs].slots) |s| {
+        if (s.item_id != 0 and s.count > 0) got += 1;
+    }
+    try std.testing.expectEqual(n0 / 2, got);
+    std.debug.print("PASS lootgate: roll {d} -> {d} stacks at 50%\n", .{ n0, got });
 }
 
 test "scenario bots are grounded to terrain height on spawn and move" {

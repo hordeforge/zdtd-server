@@ -268,7 +268,16 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // Roll up to the container's own capacity (the roll is capped by the
     // buffer, so a bigger container actually fills more stacks).
     var stacks: [containers_mod.max_container_slots]assets_loot.Stack = undefined;
-    const n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count]);
+    var n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count]);
+    // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
+    // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
+    const sv = self.plugins.lootRoll(loot_name, @intCast(n));
+    const v = if (sv != 0) sv else self.wasm_plugins.lootRoll(loot_name, @intCast(n));
+    if (v < 0) return;
+    if (v > 0) {
+        const scaled: usize = n * @as(usize, @intCast(v)) / 100;
+        n = @min(scaled, cont.slot_count);
+    }
     var si: usize = 0;
     var i: usize = 0;
     while (i < n and si < cont.slot_count) : (i += 1) {

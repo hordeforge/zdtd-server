@@ -27,12 +27,13 @@ pub const Hook = enum(u8) {
     on_player_damage = 12,
     on_quest_accept = 13,
     on_craft_request = 14,
+    on_loot_roll = 15,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
-        "on_player_damage", "on_quest_accept",  "on_craft_request",
+        "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
     };
 };
 
@@ -261,6 +262,27 @@ pub const Plugin = struct {
         ) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_craft_request disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_loot_roll(list_ptr: i32, list_len: i32, rolled: i32) -> i32
+    /// (verdict: <0 deny the roll (empty), 0 keep, >0 scale the rolled stack
+    /// count by percent). The loot-list name is copied into the guest's
+    /// scratch (the stable key).
+    pub fn callLootRoll(self: *Plugin, list_name: []const u8, rolled: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_loot_roll)]) return verdict_keep;
+        const mem = self.instance.memory() orelse return verdict_keep;
+        const off = self.reserveScratch(mem, list_name.len) orelse return verdict_keep;
+        @memcpy(mem.slice()[off..][0..list_name.len], list_name);
+        return self.instance.call(
+            fn (i32, i32, i32) i32,
+            "on_loot_roll",
+            .{ @intCast(off), @intCast(list_name.len), rolled },
+        ) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_loot_roll disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -523,6 +545,14 @@ pub const WasmHost = struct {
     pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callCraftRequest(player, recipe_name, times);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn lootRoll(self: *WasmHost, list_name: []const u8, rolled: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callLootRoll(list_name, rolled);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
@@ -1040,6 +1070,26 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_craft_request)]);
     try std.testing.expectEqual(@as(i32, -1), host.craftRequest(5, "forbidden_sword", 1)); // deny
     try std.testing.expectEqual(@as(i32, 0), host.craftRequest(5, "resourceWood", 3)); // keep
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
+    // The loot-roll policy plugin (AGENTS rule 29): on_loot_roll must return
+    // 50 (scale percent) for every list and never disable.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_lootgate/zdtd_lootgate.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_loot_roll)]);
+    try std.testing.expectEqual(@as(i32, 50), host.lootRoll("EntityLootContainerRegular", 4));
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

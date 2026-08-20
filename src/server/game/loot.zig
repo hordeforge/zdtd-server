@@ -26,12 +26,20 @@ pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
 
 pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {
     const list_name = if (loot_list.len > 0) loot_list else "EntityLootContainerRegular";
-    var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-    const n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
-    if (n == 0) return;
+    // Resolve + clear first: a denied or empty roll leaves an EMPTY bag (fail
+    // closed), never stale content from a previous fill.
     const slot = self.sim.slotOfNetId(bag_net_id) orelse return;
     if (!self.sim.mask[slot].inventory) return;
     self.sim.inventory[slot].clear();
+    var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
+    var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
+    // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
+    // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
+    const sv = self.plugins.lootRoll(list_name, @intCast(n));
+    const v = if (sv != 0) sv else self.wasm_plugins.lootRoll(list_name, @intCast(n));
+    if (v < 0) return;
+    if (v > 0) n = n * @as(usize, @intCast(v)) / 100;
+    if (n == 0) return;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const eid = ecsIdFromItemName(self, stacks[i].item_name);

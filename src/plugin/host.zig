@@ -137,6 +137,18 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    pub fn lootRoll(self: *PluginHost, list_name: []const u8, rolled: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_loot_roll) |f| {
+                const v = f(&self.view, list_name, rolled);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
