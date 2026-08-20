@@ -340,7 +340,12 @@ pub const World = struct {
     class_table: [16]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
         .{ .name = "zombie", .max_hp = 40, .kind = .zombie, .hash = 948863590, .loot_list = "EntityLootContainerRegular" },
-        .{ .name = "zombieFeral", .max_hp = 60, .kind = .zombie, .hash = 948863590, .loot_list = "EntityLootContainerRegular" },
+        // A40: the old "zombieFeral" builtin row was an invented class (0 hits
+        // in stock entityclasses.xml; no stock group names it). Repointed to
+        // the real feral variant zombieBoeFeral (Unity hash computed; max_hp =
+        // its stock HealthMax ^healthNormalFeral). Offline fallback only: live
+        // spawns resolve per-class via the director class_resolve_fn hook (A35).
+        .{ .name = "zombieBoeFeral", .max_hp = 550, .kind = .zombie, .hash = -272178566, .loot_list = "EntityLootContainerRegular" },
         .{ .name = "trader", .max_hp = 9999, .kind = .trader },
         .{ .name = "vehicle", .max_hp = 200, .kind = .vehicle },
         .{ .name = "turret", .max_hp = 150, .kind = .turret },

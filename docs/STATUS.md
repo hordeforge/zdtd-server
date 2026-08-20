@@ -12,6 +12,29 @@ owns all C2S domains. `GAP_ANALYSIS.md` scores 329 features: 134 `WORKS`,
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
 `IMPLEMENTATION_PLAN.md` (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Wave 2026-08-20 (config + provenance pass)
+
+Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
+layered-policy ladder (stock data -> config -> wasm plugin -> core) pushed
+further down, default-preserving except where stock alignment was intended.
+
+- **Terrain-id pins -> live TerrainIds (A36-A38)**: TTS filler skip and the
+  chunk heightmap fallback read `World.terrain_ids` (resolved via idByName),
+  not comptime pins; `Chunk.terrain` points at the world's ids.
+- **Config keys (B29-B37)**: guard kick/shed/weak-rate, te-scan caps,
+  workstation craft caps and the apm dump period are zdtd.toml keys; movement
+  envelope was already config. All defaults match the prior constants.
+- **A34/A35 closed**: entityclasses `HealthMax` passive_effect + variable
+  resolution was already live; the stock-file test now pins zombieBoe 200 /
+  animalStag 100 / zombieBoeFeral 550 (V3.1.0 b14 ground truth), and the
+  director class-resolve hook makes all 293 classes reachable per-class.
+- **A41 stock alignment**: heat cooldowns 120/60 -> stock 240/180 s
+  (`[rules.director]`, still operator-tunable); scout cadence roughly halves.
+- **A40**: the invented builtin `zombieFeral` class row repointed to the real
+  `zombieBoeFeral`.
+- Webui porting dashboard (`/partials/porting`) reflects the scorecard and
+  provenance state.
+
 ## Wave 2026-08-06
 
 Landed on main, each gated on `zig build` + `make check` and, where it is

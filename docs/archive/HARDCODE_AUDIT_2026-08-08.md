@@ -46,6 +46,8 @@ Spot-check summary vs the prior audit claims:
 
 **CLOSED 2026-08-20** (A36 verified landed; A37/A38 fixed in the terrain-id pass): `spawnSurface` already reads `World.terrain_ids.dirt` (game.zig `spawnSurface`); the TTS filler skip now takes the resolved `terrain_ids.terrain_filler(_adaptive)` ids instead of comptime pins, and `Chunk.rawAt`/`isSolid` fall back to `World.terrain_ids` (via a `terrain` pointer set in `World.getOrCreate`; offline chunks keep the pins).
 | **A41** | `ecs/aidirector.zig:163-164` (`heat_cooldown_seconds=120`, `heat_neighbor_cooldown_seconds=60`) | Region cooldown 120 s, neighbor 60 s | Stock `AIDirectorChunkData`: `FindBestEventAndReset` region cooldown **240 s**; `StartCooldownOnNeighbors` neighbor table **180 s / 720 s** (aidirector.md 2026-08-07, asm.il 414504-415200) | **P2** (AI pacing divergence, semi-documented GAP_ANALYSIS 2037) | Align to 240 / 180-720 after IL re-verify, or expose as `[rules.ai]` tunables | Changes scout cadence (2x-3x slower); not default-preserving |
+
+**CLOSED 2026-08-20**: defaults aligned to the RE-verified stock literals — `[rules.director] heat_cooldown_seconds` 240.0 (was 120), `heat_neighbor_cooldown_seconds` 180.0 (was 60), both still operator-tunable (ADR 0021). The stock long forms (1320/720) are modelled as the feral 2x roll (documented approximation); the pin test now asserts 240/180. Scout cadence roughly halves; GAME_OPTIONS.md updated.
 | **A37** | `world/tts.zig:418` | Filler skip compares comptime pins `assignids.terrain_filler(_adaptive)` | AssignIds names `terrainFiller` / `terrainFillerAdaptive` (dump-verified values 2/3) | **P3** | Resolve both names via idByName once at world init (alongside `terrain_ids`) | Identical |
 
 **CLOSED 2026-08-20** (see A36 note): filler ids are fields of `TerrainIds`, resolved by `resolveTerrainIds`, and threaded into `tts.paintDecoration` / `Index.applyTtsPaintToChunk`.
@@ -54,6 +56,8 @@ Spot-check summary vs the prior audit claims:
 **CLOSED 2026-08-20** (see A36 note): `Chunk.terrain` points at `World.terrain_ids`; `rawAt`/`isSolid` use it when set and the pins otherwise.
 | **A39** | `server/game/trader.zig:190-191` (`fillTraderFromXml`) | Sell = `econ × sell_markdown`; stock is `econ × EconomicSellScale × SellMarkdown`; the scale constant is missing (buy side is correct) | `XUiM_Trader.GetSellPrice` (asm.il 1830470-1830700, loot-economy.md §5) | **P3** | Add the `EconomicSellScale` constant after RE pin | Sell prices shift toward stock; documented residual |
 | **A40** | `ecs/world.zig:225` | Builtin class_table row 2 `"zombieFeral"` (hash = zombie hash); no such class exists in stock entityclasses.xml (0 hits), no stock group names it | None (builtin invention) | **P3** | Delete or repoint to a real stock class; verify no reachable group picks it first | No behavioral change (unreachable today) |
+
+**CLOSED 2026-08-20**: row 2 repointed to the real feral variant `zombieBoeFeral` (stock class, Unity hash -272178566, max_hp 550 = its HealthMax `^healthNormalFeral`). No reachable group referenced the old name (live spawns resolve per-class via the A35 hook); offline-fallback only.
 
 ## Bucket B findings (new this pass)
 

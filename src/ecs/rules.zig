@@ -228,8 +228,15 @@ pub const Director = struct {
     wandering_spawn_dist: f32 = 92.0,
     heat_spawn_threshold: f32 = 25.0,
     heat_check_seconds: f32 = 5.0,
-    heat_cooldown_seconds: f32 = 120.0,
-    heat_neighbor_cooldown_seconds: f32 = 60.0,
+    /// Region cooldown after a heat spawn. Stock `AIDirectorChunkData`
+    /// `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44,
+    /// aidirector.md verified literals; the long form is 1320 via SetLongDelay,
+    /// modelled here as the feral 2x roll). Was 120 before the A41 alignment.
+    heat_cooldown_seconds: f32 = 240.0,
+    /// Cooldown applied to the eight surrounding regions. Stock
+    /// `StartNeighborCooldown` sets 180 s (short) / 720 s (long) via FastMax
+    /// (aidirector.md verified literals). Was 60 before the A41 alignment.
+    heat_neighbor_cooldown_seconds: f32 = 180.0,
     heat_scout_dist: f32 = 10.0,
 };
 
@@ -470,4 +477,8 @@ test "Rules defaults pin pre-move constants" {
     try std.testing.expectEqual(@as(f32, 40.0), r.bloodmoon.party_spawn_dist);
     try std.testing.expectEqual(@as(u32, 30), r.bloodmoon.party_enemy_max);
     try std.testing.expectEqual(@as(u32, 8), r.bloodmoon.max_parties);
+    // Director heat cooldowns: stock-aligned (A41, aidirector.md verified
+    // literals: FindBestEventAndReset 240 s, StartNeighborCooldown 180 s).
+    try std.testing.expectEqual(@as(f32, 240.0), r.director.heat_cooldown_seconds);
+    try std.testing.expectEqual(@as(f32, 180.0), r.director.heat_neighbor_cooldown_seconds);
 }

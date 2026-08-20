@@ -201,8 +201,8 @@ test, so a retune cannot land silently).
 | `wandering_spawn_dist` | 92.0 | Blocks out the horde spawns (stock `RandomOnUnitCircle * 92f`, IL_018B) |
 | `heat_spawn_threshold` | 25.0 | Chunk-heat activity at which a region spawns a scout party |
 | `heat_check_seconds` | 5.0 | Heat-region check cadence |
-| `heat_cooldown_seconds` | 120.0 | Region cooldown after a heat spawn |
-| `heat_neighbor_cooldown_seconds` | 60.0 | Shorter cooldown applied to the eight surrounding regions |
+| `heat_cooldown_seconds` | 240.0 | Region cooldown after a heat spawn. Stock `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44; the long form 1320 is the feral 2x approximation). Aligned from 120 (A41) |
+| `heat_neighbor_cooldown_seconds` | 180.0 | Shorter cooldown applied to the eight surrounding regions. Stock `StartNeighborCooldown` short = 180 s (720 long). Aligned from 60 (A41) |
 | `heat_scout_dist` | 10.0 | Scout-party spawn distance from the hot region center (chunk-heat spawner 0/8/10 constants) |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
