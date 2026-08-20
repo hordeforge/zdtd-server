@@ -601,7 +601,16 @@ pub const Director = struct {
     fn recountAndTeleportHorde(self: *Director, w: *ecs_world.World) void {
         const rules = w.rules.bloodmoon;
         for (self.bm_parties[0..self.bm_party_n]) |*party| party.alive = 0;
-        if (self.bm_party_n == 0) return;
+        if (self.bm_party_n == 0) {
+            // All parties wiped: stock KillPartyZombies (party Tick, aidirector.md)
+            // kills the horde when its party empties, so a dead party does not
+            // leave horde zombies roaming until dawn.
+            var s: ecs_world.Slot = 0;
+            while (s < ecs_world.max_entities) : (s += 1) {
+                if (w.alive[s] and w.zombie_ai[s].is_horde) w.destroy(s);
+            }
+            return;
+        }
         const tel2 = rules.party_teleport_dist * rules.party_teleport_dist;
         var s: ecs_world.Slot = 0;
         while (s < ecs_world.max_entities) : (s += 1) {
@@ -1399,4 +1408,30 @@ test "blood moon spawns past the ordinary world budget (1.9x CanSpawn)" {
     // ceiling by its own size (stock CanSpawn behaves the same); the count
     // stays well under the 64 stock MaxSpawnedZombies default.
     try std.testing.expect(w.countKind(.zombie) <= 64);
+}
+
+test "blood moon kills the horde when the party is wiped" {
+    // Stock KillPartyZombies (party Tick, aidirector.md): when the horde's
+    // party empties (all players dead), the horde zombies die instead of
+    // roaming until dawn.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .day = 7, .hours = 23.0 }, .bloodmoon_enemy_count = 8, .horde_cd = 999 };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    for (0..80) |_| _ = d.tick(&w, 0.05);
+    var horde_n: u32 = 0;
+    for (0..ecs_world.max_entities) |s| {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde_n += 1;
+    }
+    try std.testing.expect(horde_n >= 1);
+    // Wipe the party: the horde must be destroyed on the next tick.
+    for (0..ecs_world.max_entities) |s| {
+        if (w.alive[s] and w.mask[s].player) w.destroy(@intCast(s));
+    }
+    for (0..5) |_| _ = d.tick(&w, 0.05);
+    var horde_left: u32 = 0;
+    for (0..ecs_world.max_entities) |s| {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde_left += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 0), horde_left);
 }
