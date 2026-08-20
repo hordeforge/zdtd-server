@@ -32,7 +32,10 @@ groups spawn EntityFallingBlock entities, fall + die on landing) went
 MISSING -> PARTIAL, total **142/143/44**. Then the Demolition (zombieCop)
 prime-and-explode shipped (RE entity-ai.md EntityZombieCop; entity + block
 AoE), moving a bosses sub-item to WORKS inside the still-PARTIAL special
-infected row. The dashboard (docs/provenance.html) is synced.
+infected row. Reconciliation: the trader quest-list row (per-trader offers
+via NetPackageNPCQuestList + accept marker) was stale PARTIAL - the window
+is driven end to end, flipped to WORKS, total **143/142/44**. The dashboard
+(docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -48,7 +51,7 @@ light-level leg stays RE-blocked, no server light channel)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
-6. NPC dialog trees (MISSING)
+6. NPC dialog trees (MISSING - no stock-map NPC dialog surface beyond traders, whose quest/trade windows already work)
 8. Challenges system (MISSING)
 9. Falling blocks (PARTIAL - collapse groups spawn EntityFallingBlock entities that fall and die on landing 2026-08-20; item-drop-on-land + single-block branch open)
 10. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; other special variants open)

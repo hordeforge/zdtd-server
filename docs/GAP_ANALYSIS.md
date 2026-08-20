@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (142/143/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (143/142/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -146,7 +146,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
-| [Traders](#5-traders) | 12 | 8 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock and the WorldAreas compound package land; POI placement open |
+| [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 9 | 14 | 3 | 26 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **142** | **143** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **143** | **142** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -811,7 +811,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**12 WORKS · 10 PARTIAL · 3 MISSING**
+**13 WORKS · 9 PARTIAL · 3 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -4313,7 +4313,7 @@ Honest gaps:
 | Stock quest wire packages | MISSING (zdtd-native journal body) |
 | Localization.csv titles | MISSING |
 | Reward choice / loot groups | MISSING |
-| Trader tiers / quest_list offers | PARTIAL (lists parsed, not driven UI) |
+| Trader tiers / quest_list offers | WORKS (2026-08-20 reconciliation: per-trader quest_list resolves via npc.xml + class-hash fallbacks, offers are tier-filtered and sent through NetPackageNPCQuestList FetchList, and the remove_quest accept marker journals the quest - the stock trader quest window is driven end to end) |
 | `traders.xml` inventory | PARTIAL (`traderAlways` direct items populate the stock TraderData window; group rolls skipped) |
 | Duke tokens / currency stock | PARTIAL (coins wallet) |
 | NPC dialog trees | MISSING |
