@@ -4309,11 +4309,11 @@ Honest gaps:
 | Night horde near players | PARTIAL (simple spawn) |
 | Scout daytime | PARTIAL |
 | Gamestage scaling | PARTIAL (player/party stage, scout tier, blood-moon stage, sleeper groups, loot prob bands; see 5.x gamestage gaps) |
-| Heat map / activity | MISSING |
-| Wandering horde paths | MISSING |
-| Feral sense / blood moon music sync | MISSING |
-| Sleeper wake cascade | MISSING |
-| Persistent director state save | MISSING |
+| Heat map / activity | WORKS (2026-08-21 reconciliation: AIDirector::NotifyActivity (asm.il 414504-415200) adds region activity with linear decay, the 5 s CheckToSpawn spawns scout parties toward hot centers, region + neighbor cooldowns and the 20% feral roll (doubled cooldown) match FindBestEventAndReset / StartCooldownOnNeighbors; workstation crafting raises activity like stock) |
+| Wandering horde paths | PARTIAL (horde spawns at ~92 m, marked horde, chases through the normal A* pathing with drift-teleport back to the party focus; stock road-following path generation is not ported) |
+| Feral sense / blood moon music sync | PARTIAL (blood moon music sync WORKS - global eligibility + join replay; entityclasses FeralSense is not parsed - night sense amplification for feral classes missing) |
+| Sleeper wake cascade | PARTIAL (sleeper volumes wake their group on player entry and combat noise wakes sleepers within radius (2026-08-20); volume-to-volume cascade and sleeper-pose respawn are not ported) |
+| Persistent director state save | PARTIAL (world clock + blood-moon schedule persist (ZCL2, 2026-08-20); wandering-horde next time and the heat map do not survive restart) |
 
 ---
 

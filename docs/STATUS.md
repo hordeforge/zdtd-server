@@ -63,6 +63,10 @@ light-level leg stays RE-blocked, no server light channel)
 14. AIDirector / sleeper save blobs (MISSING)
 15. Localization titles (MISSING)
 
+AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + CheckToSpawn scouts + cooldowns +
+feral roll); wandering horde paths, feral sense, sleeper wake cascade and persistent director state are PARTIAL
+with documented notes in GAP_ANALYSIS 5.3.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
