@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (147/138/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (148/137/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 13 | 10 | 3 | 26 | Horde runs dusk to dawn; CalcNextDay persists; stat 58 + red clock + music replay wired; 1.9x BM budget |
+| [Blood moon](#6-blood-moon) | 14 | 9 | 3 | 26 | Horde runs dusk to dawn; gamestage-ladder composition, CalcNextDay persists, stat 58 + red clock + music replay, 1.9x BM budget |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **147** | **138** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **148** | **137** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1167,7 +1167,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**13 WORKS · 10 PARTIAL · 3 MISSING**
+**14 WORKS · 9 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1277,14 +1277,16 @@ encoding is one day high.
   *Anchors:* `src/world/weather.zig:106`, `:125`, `src/server/game.zig:8106`,
   `src/assets/biome_layers.zig:757`, `Data/Config/biomes.xml:190`
 
-- **Horde spawn composition** `PARTIAL`
-  Blood-moon spawns reuse `Director.spawnNearPlayers`, which picks from the
-  biome's ordinary night entitygroup (`ZombiesNight` for pine_forest) or a fixed
-  5-slot class rotation. Stock draws from the `BloodMoonHorde` spawner in
-  `gamestages.xml`, whose stages reference `feralHordeStageGS1..GS4086`. Every
-  blood moon is the same handful of basic zombies regardless of level or day.
-  *Anchors:* `src/ecs/aidirector.zig:233`, `:247`, `src/server/game.zig:892`,
-  `:6682`, `Data/Config/gamestages.xml:4428`, `Data/Config/entitygroups.xml:15809`
+- **Horde spawn composition** `WORKS` (2026-08-20 reconciliation)
+  Blood-moon spawns draw from the `BloodMoonHorde` spawner in `gamestages.xml`
+  at the party gamestage frozen at dusk (`stageGroup` resolves the ladder via
+  the Game's `pickStageGroup`, wave capped by the stage `maxAlive`), and the
+  ladder's entitygroup (e.g. `feralHordeStageGS1..GS4086`) is resolved through
+  entitygroups.xml into per-class stats. The composition escalates with level
+  and day instead of repeating the ordinary night group.
+  *Anchors:* `src/ecs/aidirector.zig:400`, `:521`, `:644`, `src/server/game.zig`
+  `pickStageGroup`, `Data/Config/gamestages.xml:4428`,
+  `Data/Config/entitygroups.xml:15809`
 
 - **Escalation by gamestage** `PARTIAL (waived)`
   Gamestage is holistic (party stage, loot quality, quest tier, spawn ramps);
