@@ -19,6 +19,7 @@ const blocks_mod = @import("../assets/blocks.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
+const assets_recipes = @import("../assets/recipes.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const containers_mod = @import("../world/containers.zig");
@@ -5567,6 +5568,50 @@ test "scenario on_quest_accept verdict gates acceptance (real zdtd_questgate)" {
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 2));
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 2));
     std.debug.print("PASS questgate: forbidden_evil denied, ok_quest accepted\n", .{});
+}
+
+test "scenario on_craft_request verdict gates crafting (real zdtd_craftgate)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A custom recipes table: one forbidden and one normal craft (names are
+    // the stable key for the verdict).
+    var defs = [_]assets_recipes.RecipeDef{
+        .{ .name = "forbidden_sword", .count = 1, .always_unlocked = true, .ingredient_n = 1 },
+        .{ .name = "resourceWood", .count = 1, .always_unlocked = true, .ingredient_n = 1 },
+    };
+    defs[0].ingredients[0] = .{ .name = "resourceWood", .count = 1 };
+    defs[1].ingredients[0] = .{ .name = "resourceWood", .count = 1 };
+    g.recipes = .{ .defs = &defs, .source = .builtin };
+
+    // Load the committed gate module into the Game's wasm host.
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_craftgate/zdtd_craftgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // Give the player the ingredient (1 wood) so the ok craft can succeed.
+    const wood = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood != 0);
+    try std.testing.expect(g.sim.depositItem(ps, wood, 2));
+
+    // The forbidden recipe is denied at the gate (no ingredients consumed).
+    try std.testing.expect(!g.tryCraft(c.slot, 0, 1));
+    // The normal recipe still crafts.
+    try std.testing.expect(g.tryCraft(c.slot, 1, 1));
+    std.debug.print("PASS craftgate: forbidden_sword denied, resourceWood crafted\n", .{});
 }
 
 test "scenario bots are grounded to terrain height on spawn and move" {

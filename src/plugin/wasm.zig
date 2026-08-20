@@ -26,12 +26,13 @@ pub const Hook = enum(u8) {
     on_player_leave = 11,
     on_player_damage = 12,
     on_quest_accept = 13,
+    on_craft_request = 14,
 
     pub const names = [_][]const u8{
-        "on_enable",        "on_tick",          "on_player_join",  "on_shutdown",
-        "on_player_death",  "on_entity_killed", "on_block_damage", "on_quest_complete",
-        "on_admin_command", "on_chat",          "on_player_login", "on_player_leave",
-        "on_player_damage", "on_quest_accept",
+        "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
+        "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
+        "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
+        "on_player_damage", "on_quest_accept",  "on_craft_request",
     };
 };
 
@@ -240,6 +241,26 @@ pub const Plugin = struct {
         return self.instance.call(fn (i32, i32) i32, "on_quest_accept", .{ player, def_id }) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_quest_accept disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_craft_request(player: i32, name_ptr: i32, name_len: i32, times: i32)
+    /// -> i32 (verdict: <0 deny the craft, 0 keep, >0 caps the batch). The
+    /// recipe name is copied into the guest's scratch (the stable key).
+    pub fn callCraftRequest(self: *Plugin, player: i32, recipe_name: []const u8, times: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_craft_request)]) return verdict_keep;
+        const mem = self.instance.memory() orelse return verdict_keep;
+        const off = self.reserveScratch(mem, recipe_name.len) orelse return verdict_keep;
+        @memcpy(mem.slice()[off..][0..recipe_name.len], recipe_name);
+        return self.instance.call(
+            fn (i32, i32, i32, i32) i32,
+            "on_craft_request",
+            .{ player, @intCast(off), @intCast(recipe_name.len), times },
+        ) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_craft_request disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -494,6 +515,14 @@ pub const WasmHost = struct {
     pub fn questAccept(self: *WasmHost, player: i32, def_id: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestAccept(player, def_id);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callCraftRequest(player, recipe_name, times);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
@@ -990,6 +1019,27 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_accept)]);
     try std.testing.expectEqual(@as(i32, -1), host.questAccept(5, 1)); // forbidden_evil: deny
     try std.testing.expectEqual(@as(i32, 0), host.questAccept(5, 2)); // tier1_clear: keep
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
+    // The craft-request policy plugin (AGENTS rule 29): on_craft_request must
+    // deny the forbidden recipe name and keep the rest, never disabling.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_craftgate/zdtd_craftgate.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_craft_request)]);
+    try std.testing.expectEqual(@as(i32, -1), host.craftRequest(5, "forbidden_sword", 1)); // deny
+    try std.testing.expectEqual(@as(i32, 0), host.craftRequest(5, "resourceWood", 3)); // keep
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

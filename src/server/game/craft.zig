@@ -114,7 +114,17 @@ pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bo
 fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].inventory) return false;
-    const n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
+    var n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
+    // Wasm-first (AGENTS rule 29): crafting passes the on_craft_request
+    // verdict (<0 deny, 0 keep, >0 caps the batch). The recipe name is the
+    // stable key. Plugins gate which recipes a player may craft / how many.
+    {
+        const pid: i32 = if (self.sim.mask[ps].network_id) self.sim.network_id[ps].id else -1;
+        const sv = self.plugins.craftRequest(pid, recipe.name, n);
+        const v = if (sv != 0) sv else self.wasm_plugins.craftRequest(pid, recipe.name, n);
+        if (v < 0) return false;
+        if (v > 0) n = @intCast(@min(@as(u32, n), @as(u32, @intCast(v))));
+    }
     // Aggregate by ECS id so duplicate ingredient lines (or aliases that
     // resolve to the same id) do not double-count inventory room.
     var need: [assets_recipes.max_ingredients]struct { id: u16, count: u32 } = undefined;

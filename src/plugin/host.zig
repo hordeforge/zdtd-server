@@ -125,6 +125,18 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    pub fn craftRequest(self: *PluginHost, player: i32, recipe_name: []const u8, times: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_craft_request) |f| {
+                const v = f(&self.view, player, recipe_name, times);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
