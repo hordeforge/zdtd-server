@@ -50,20 +50,18 @@ pre .in{color:var(--acc)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{
 <header>
 <h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
 <label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm porting players console-log">Refresh now</button>
+<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console-log">Refresh now</button>
 <form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
 </header>
 <nav class="page-nav" aria-label="Dashboard sections">
 <a href="#status-section">Status</a>
 <a href="#apm-section">Performance</a>
-<a href="#porting-section">Porting</a>
 <a href="#players-section">Players</a>
 <a href="#console-section">Console</a>
 </nav>
 <main id="main-content" tabindex="-1">
 <section id="status-section" aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
 <section id="apm-section" aria-labelledby="apm-heading"><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-<section id="porting-section" aria-labelledby="porting-heading"><h2 id="porting-heading">Porting progress</h2><div id="porting" hx-get="/partials/porting" hx-trigger="load, every 30s" hx-swap="innerHTML"><p class="meta">Loading porting progress…</p></div></section>
 <section id="players-section" aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
 <section id="console-section" aria-labelledby="console-heading">
 <h2 id="console-heading">Console</h2>

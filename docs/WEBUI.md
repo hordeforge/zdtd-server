@@ -104,9 +104,8 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun | snapshot |
 | `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
 | `GET /partials/apm` | Counters + section p50/p99 | apm harness |
-| `GET /partials/porting` | Porting progress: stock-game systems vs GAP_ANALYSIS scorecard, with provenance buckets per row (static data, comptime) | docs/GAP_ANALYSIS.md scorecard + docs/PROVENANCE.md buckets |
-| `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
 | `GET /partials/console` | Last N audit log lines (command form lives in the shell) | ops log ring |
+| `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
 | `POST /api/cmd` | Run one admin command; HTML fragment by default, `text/plain` when `Accept: text/plain` or `application/json` | inline → admin parser (same request) |
 | `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools) | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
@@ -125,6 +124,12 @@ returns plain `401 unauthorized` plus `WWW-Authenticate: Bearer realm="zdtd-webu
 (`/`, `/partials/*`, `/api/apm.json`) also accept `HEAD` (same status and
 headers, empty body), matching `/healthz` and `/readyz`; their `405` responses
 advertise `Allow: GET, HEAD`.
+
+The porting/provenance report is **not** a served route: it is a standalone
+HTML document ([`provenance.html`](provenance.html)) kept with the scorecard
+docs it summarizes (`docs/GAP_ANALYSIS.md` scorecard + `docs/PROVENANCE.md`
+buckets) and opened directly from the repo. The shell dashboard's live ops
+sections (status, apm, players, console) stay server-rendered.
 
 Optional later:
 

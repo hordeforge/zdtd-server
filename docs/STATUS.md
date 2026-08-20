@@ -32,8 +32,9 @@ further down, default-preserving except where stock alignment was intended.
   (`[rules.director]`, still operator-tunable); scout cadence roughly halves.
 - **A40**: the invented builtin `zombieFeral` class row repointed to the real
   `zombieBoeFeral`.
-- Webui porting dashboard (`/partials/porting`) reflects the scorecard and
-  provenance state.
+- Standalone provenance dashboard (`docs/provenance.html`, opened from the
+  repo, not served) reflects the scorecard and provenance state.
+
 
 ## Wave 2026-08-06
 
@@ -706,7 +707,7 @@ Full map: [INDEX.md](INDEX.md).
 | Doc | Role |
 |---|---|
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections); its scorecard feeds the webui Porting dashboard (`/partials/porting`, see [WEBUI.md](WEBUI.md)) |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections); its scorecard feeds the standalone provenance dashboard ([provenance.html](provenance.html)) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |
