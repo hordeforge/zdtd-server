@@ -331,21 +331,44 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     // faces and the body runs along it (stock CC Move semantics).
     var nx = t.x;
     var nz = t.z;
-    if (bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y, h, r)) {
+    const jumping = w.mask[s].zombie_ai and w.zombie_ai[s].vy > 0;
+    // While rising from a jump the body sails at the arc apex, so a hop
+    // clears obstacles up to jump_height (stock StartJumpMotion forward
+    // motion over the arc); the step-up only applies on the ground.
+    const probe_h: f32 = if (jumping) t.y + w.rules.ai.jump_height else t.y;
+    if (bodyClearAt(ctx, solid_fn, t.x + mx, t.z, probe_h, h, r)) {
         nx = t.x + mx;
-    } else if (step > 0 and bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y + step, h, r)) {
+    } else if (!jumping and step > 0 and bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y + step, h, r)) {
         // Step-up: a ledge up to step_height is climbed, not blocked.
         nx = t.x + mx;
         t.y += step;
     }
-    if (bodyClearAt(ctx, solid_fn, nx, t.z + mz, t.y, h, r)) {
+    if (bodyClearAt(ctx, solid_fn, nx, t.z + mz, probe_h, h, r)) {
         nz = t.z + mz;
-    } else if (step > 0 and bodyClearAt(ctx, solid_fn, nx, t.z + mz, t.y + step, h, r)) {
+    } else if (!jumping and step > 0 and bodyClearAt(ctx, solid_fn, nx, t.z + mz, t.y + step, h, r)) {
         nz = t.z + mz;
         t.y += step;
     }
+    // "Moved" means a real position change: a zero-length axis (mz == 0)
+    // must not count as a successful move, or the jump gate below would never
+    // fire for a body walking straight into a wall. Computed BEFORE the
+    // assignment (nx != t.x after t.x = nx is always false).
+    const moved = nx != t.x or nz != t.z;
     t.x = nx;
     t.z = nz;
+    // Stock MoveHelper StartJump (entity-ai.md 2030-2034): a fully blocked,
+    // grounded AI hops over the obstacle with heightDiff ~1.3. The impulse is
+    // sized against the gravity integrator (v = sqrt(2 g h)); the rising body
+    // clears the wall on the next tick's probe, the arc lands it past it.
+    if (!moved and w.mask[s].zombie_ai) {
+        const ai = &w.zombie_ai[s];
+        if (ai.vy == 0 and ai.jump_cd <= 0) {
+            const g: f32 = -w.rules.ai.gravity;
+            ai.vy = @sqrt(2.0 * g * w.rules.ai.jump_height);
+            ai.jump_cd = w.rules.ai.jump_delay_s;
+            ai.jumping = true;
+        }
+    }
 }
 
 /// Vertical physics for one AI body (RE entity-movement.md): the feet cell
@@ -358,11 +381,14 @@ fn applyGravity(w: *World, s: Slot, dt: f32) void {
     const solid_fn = w.solid_fn orelse return;
     const t = &w.transform[s];
     const ai = &w.zombie_ai[s];
+    if (ai.jump_cd > 0) ai.jump_cd -= dt;
     const below: i32 = @intFromFloat(@floor(t.y - 0.05));
-    if (solid_fn(w.solid_ctx, @intFromFloat(@floor(t.x)), below, @intFromFloat(@floor(t.z)))) {
+    const rising = ai.jumping and ai.vy > 0;
+    if (!rising and solid_fn(w.solid_ctx, @intFromFloat(@floor(t.x)), below, @intFromFloat(@floor(t.z)))) {
         t.y = @as(f32, @floatFromInt(below)) + 1.0;
         ai.vy = 0;
     } else {
+        if (ai.jumping and ai.vy <= 0) ai.jumping = false; // apex passed; fall lands normally
         // Stock per-tick integrator (RE entity-movement.md): the fall applies
         // World.Gravity then the 0.98 y-drag, so acceleration is ~1.6
         // blocks/s² and the speed self-caps around -3.9 blocks/s.
@@ -4899,6 +4925,50 @@ test "falling block: crush damage hits entities in the fall path, capped per ent
         if (!w.alive[s2]) break;
     }
     try std.testing.expectEqual(hp2_0, w.health[zs2].hp);
+}
+
+test "move helper: a blocked grounded zombie jumps a 1-block wall" {
+    // RE entity-ai.md 2030-2034: MoveHelper.StartJump triggers when both slide
+    // axes are blocked and the body is grounded; the hop (heightDiff ~1.3)
+    // carries the body over obstacles up to jump_height. Step-up is disabled
+    // so only the jump can cross.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .step_height = 0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            if (y <= 70) return true; // ground
+            if (x == 10 and y == 71 and z == 5) return true; // 1-block wall
+            return false;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const z = w.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Walk toward x=15; the wall at x=10 must be jumped.
+    for (0..600) |_| {
+        stepToward(&w, s, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+        if (w.transform[s].x >= 14.0) break;
+    }
+    try std.testing.expect(w.transform[s].x >= 14.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 71.0), w.transform[s].y, 0.5); // settled near the ground
+    // The jump cost at least one impulse (vy was set positive once).
+    try std.testing.expect(w.zombie_ai[s].jump_cd <= w.rules.ai.jump_delay_s);
+
+    // Control: with no jump height the wall is impassable.
+    var w2: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .step_height = 0, .jump_height = 0 } } };
+    defer w2.deinit();
+    w2.solid_ctx = null;
+    w2.solid_fn = &Ground.solid;
+    const z2 = w2.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const s2 = w2.slotOfNetId(z2).?;
+    for (0..600) |_| {
+        stepToward(&w2, s2, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w2, s2, 0.05);
+        if (w2.transform[s2].x >= 14.0) break;
+    }
+    try std.testing.expect(w2.transform[s2].x < 10.0);
 }
 
 test "demolition: primes at the health threshold, countdowns, then requests the explosion" {

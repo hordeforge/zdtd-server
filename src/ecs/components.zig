@@ -176,6 +176,13 @@ pub const ZombieAi = struct {
     fear_target: i32 = -1,
     fear_cd: f32 = 0,
     active_scale: f32 = 1,
+    /// Cooldown after a MoveHelper-style jump (stock jumpDelay); prevents
+    /// bunny-hop against a sealed wall.
+    jump_cd: f32 = 0,
+    /// True while the jump arc is rising (stock JumpState moving): the ground
+    /// snap is suppressed so the impulse is not zeroed on its own tick; the
+    /// flag clears at the apex (vy < 0) and the fall lands normally.
+    jumping: bool = false,
     path_goal_x: f32 = 0,
     path_goal_z: f32 = 0,
     has_path: bool = false,

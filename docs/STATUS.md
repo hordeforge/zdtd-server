@@ -61,7 +61,14 @@ damage leg shipped (massKg from materials.xml Hardness/Mass with stock goldens
 armor reduction; the singular cell now tracks the transform exactly, fixing a
 pre-existing floor-offset bug that landed blocks in 4 ticks), counts unchanged
 (Fall-event drops, landing audio and the opt-in group mode stay open). The
-dashboard (docs/provenance.html) is synced.
+dashboard (docs/provenance.html) is synced. Then the MoveHelper jump leg
+shipped (a fully blocked, grounded AI fires an impulse sized to clear
+jump_height - stock StartJump heightDiff ~1.3 - and sails at the arc apex
+while rising, with the 1 s jumpDelay gate; fixed a moved-tracking bug the
+tests exposed where the assignment preceded the comparison, so the body
+jumped every tick; the step-up and wall tests stay green), counts unchanged
+(dig/swim/elevator/push/door remain). The dashboard (docs/provenance.html) is
+synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -72,7 +79,7 @@ halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
-1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open; server-side only - a human client moves itself)
+1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump shipped 2026-08-21; dig/swim/elevator/push/door open; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)

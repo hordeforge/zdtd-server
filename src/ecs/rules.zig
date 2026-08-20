@@ -130,6 +130,15 @@ pub const Ai = struct {
     /// feet lifted by this much (stock CC stepOffset; zombies climb a full
     /// block). Policy floor.
     step_height: f32 = 1.0,
+    /// Jump hop height, blocks: when both slide axes are blocked and the body
+    /// is grounded, the AI hops over the obstacle (stock MoveHelper StartJump
+    /// heightDiff ~1.3 - entity-ai.md 2030-2034; the blocked-up call site
+    /// passes 0.5+rand*0.4..1.3 and the entity-blocked site 0.7+rand*0.8..1.4).
+    /// Policy floor.
+    jump_height: f32 = 1.3,
+    /// Min seconds between jumps (stock EntityAlive jumpDelay default 1 x20
+    /// ticks = 1 s - entity-ai.md 3228). Prevents bunny-hop on a sealed wall.
+    jump_delay_s: f32 = 1.0,
     /// Vertical acceleration, blocks/s². RE: `World::Gravity` cctor default
     /// **0.08** blocks/tick (World.il.txt:96) integrated as
     /// `motion.y = (motion.y - Gravity) * 0.98` per physics tick (the 0.98 is
@@ -411,6 +420,8 @@ pub const AiOverlay = struct {
     body_radius: ?f32 = null,
     body_height: ?f32 = null,
     step_height: ?f32 = null,
+    jump_height: ?f32 = null,
+    jump_delay_s: ?f32 = null,
     gravity: ?f32 = null,
     fall_max_vy: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
