@@ -66,7 +66,7 @@ light-level leg stays RE-blocked, no server light channel)
 AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + CheckToSpawn scouts + cooldowns +
 feral roll); wandering horde paths, feral sense, sleeper wake cascade and persistent director state are PARTIAL
 with documented notes in GAP_ANALYSIS 5.3.
-Vehicle definitions XML reconciled WORKS 2026-08-21 (vehicles.xml loads per-kind Defs used by the spawn path).
+Vehicle definitions XML reconciled WORKS 2026-08-21 (vehicles.xml loads per-kind Defs used by the spawn path). nav_objects.xml and blade/junk turret variants documented PARTIAL (markers/turrets ship with the stock wire; the data-driven per-objective nav_object and per-variant turret tables are refinements).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

@@ -4436,7 +4436,7 @@ not stock:
 | Battery charge / solar | PARTIAL (solar = generator node; no battery SoC) |
 | Turret placeable block + power | PARTIAL (entity + node) |
 | Ammo items / reload | PARTIAL (ammo counter) |
-| Blade / junk turret variants | MISSING |
+| Blade / junk turret variants | PARTIAL (the turret system ships blade + junk variants with the stock wire + sim; per-variant data (damage, fire rate, ammo) is rules-driven rather than parsed from items.xml/block data) |
 
 ---
 
@@ -4480,7 +4480,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | Localization.csv | PARTIAL - non-client-visible (documented 2026-08-21: client-side content - the client ships its own Localization.txt and resolves the keys the server sends) |
 | materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
 | sounds / music (server triggers) | RE-BLOCKED (2026-08-21: NetPackageSoundAtPosition (id 25) is listed as pos/audioClipName/mode/distance/entityId (protocol-packages.md) but the exact field types and write-IL are not pinned; the mode enum and encodings need a write-method dump before implementing. NetPackageAudioPlayInHead is local-only, not server-required) |
-| nav_objects.xml | MISSING |
+| nav_objects.xml | PARTIAL (2026-08-21: join emits the stock nav-object class names (quest / go_to_trader / return_to_trader - unit-verified against the shipped nav_objects.xml) for active quests, so markers render; the per-objective `nav_object` property override is not parsed - the class comes from the quest kind instead) |
 | worldglobal / weathersurvival | PARTIAL - non-client-visible (documented 2026-08-21: client-side content files; the server sends the weather state via the weather packages, which are WORKS) |
 | shapes / painting | PARTIAL (painting.xml atlas; shapes via AssignIds/TTS) |
 
