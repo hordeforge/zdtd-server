@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (135/141/53) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (140/138/51) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 16 | 27 | 9 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **135** | **141** | **53** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 21 | 25 | 7 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **140** | **138** | **51** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3188,7 +3188,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**16 WORKS · 28 PARTIAL · 9 MISSING**
+**21 WORKS · 25 PARTIAL · 7 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3909,7 +3909,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageSetBlock` multi-block / shape / rotation | PARTIAL (multi parse; rotation meta sparse) |
 | Block damage / upgrade / paint | PARTIAL (HP accumulate; upgrade/paint open) |
 | `NetPackageAnimateBlock` / `BlockTrigger` | PARTIAL (BlockTrigger C2S handled) |
-| Stability / support collapse | MISSING |
+| Stability / support collapse | WORKS (2026-08-20: stability plane, see STATUS wave 2026-08-08) |
 | Land claim / bedroll / keystones | PARTIAL (LandClaim options; bedroll open) |
 | Door / hatch / storage open state | PARTIAL (chest open pair; generic door shallow) |
 
@@ -4042,7 +4042,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint |
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; prefab-local ids remapped by name via `<name>.blocks.nim` (`Prefab::loadIdMapping`), pre-18 files converted from `BlockValueV3` |
 | water_info.xml | PARTIAL | height hints only |
-| biomes.png / radiation | PARTIAL | biomes.png color→biomemap; radiation MISSING |
+| biomes.png / radiation | WORKS (2026-08-20: biomes.png color→biomemap + radiated biome damage, Rules knobs) |
 | RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
 | Density / stability / shape / paint | PARTIAL | density channel; stability plane WORKS (support/falling per `stability.zig`) |
@@ -4055,7 +4055,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Water flow / physics | MISSING | |
 | Falling blocks | MISSING | |
 | POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
-| Land claim / bedroll spawn | PARTIAL | LandClaim options + keystone deny; bedroll ownership MISSING |
+| Land claim / bedroll spawn | WORKS (2026-08-20: LandClaim options + keystone deny + bedroll respawn point) |
 | World borders / difficulty tiers | MISSING | |
 
 ---
@@ -4475,7 +4475,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
 | Stock region `.ttc` | MISSING |
 | Player profile / inventory save | HAVE (players.zsv **ZPV3**: quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read) |
-| Bedroll / last logout pos | PARTIAL (logout pos; bedroll ownership MISSING) |
+| Bedroll / last logout pos | WORKS (2026-08-20: bedroll respawn point + logout pos) |
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
 | AIDirector / sleeper save blobs | MISSING (clock.zcl + weather.zwt ship; full AIDirector blob does not) |
 | Quest journal save | HAVE (players.zsv ZPV3) |
@@ -4498,7 +4498,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Serialize-once shared buffers | HAVE (`Game.replicate` is entity-outer: encode + frame once, memcpy fan-out per interested peer; docs/adr/0008) |
 | Dirty flags (POS/ROT/FLAGS/HP) | HAVE (`World.dirty_bits` mirrors `dirty[]` through `markDirty`; off-heartbeat replicate visits dirty ∪ mobs only. Mob motion stays heartbeat-only by design: marking `stepToward` dirty would take mob PosAndRot from tick%10 to tick%2) |
 | RelPos vs PosAndRot bands | PARTIAL (client RelPos applied; server mostly PosAndRot) |
-| Velocity packages | MISSING |
+| Velocity packages | WORKS (2026-08-20: knockback via NetPackageEntityVelocity) |
 | Per-client byte budget | PARTIAL (WindowFull tiered soft-drop) |
 | entityId → connection map O(1) | MISSING (`clientFor` still scans 64 client slots per datagram; measured as noise next to the per-entity work) |
 | NetId → slot hashmap | HAVE (`World.net_to_slot`; linear fallback only when the map is degraded) |

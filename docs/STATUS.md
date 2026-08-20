@@ -12,6 +12,34 @@ owns all C2S domains. `GAP_ANALYSIS.md` scores 329 features: 134 `WORKS`,
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
 `IMPLEMENTATION_PLAN.md` (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Wave 2026-08-20 (surface-parity reconciliation)
+
+GAP_ANALYSIS reconciled against the code (STATUS wins on conflict): five
+client-visible rows were stale and flipped to WORKS - stability/support
+collapse, biomes.png + radiated biome damage, land-claim + bedroll spawn,
+bedroll/last-logout persistence, and velocity packages. Net and ops area
+16/27/9 -> 21/25/7; total 135/141/53 -> **140/138/51**. The dashboard
+(docs/provenance.html) is synced.
+
+**Client-visible parity queue (goal: 100% surface parity), ranked by client
+impact:**
+1. Projectile / ranged combat (MISSING - guns do not shoot)
+2. AI senses: line of sight / hearing / smell (MISSING)
+3. MoveHelper physics / collision (MISSING)
+4. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
+5. Water flow / physics (MISSING)
+6. Stealth / crouch (MISSING)
+7. Group AI / pack behavior (MISSING)
+8. NPC dialog trees (MISSING)
+9. Challenges system (MISSING)
+10. Falling blocks (MISSING)
+11. Bosses / special infected (PARTIAL)
+12. World borders / difficulty tiers (MISSING)
+13. Server-triggered sounds / music (MISSING)
+14. Quest reward choice / loot groups (MISSING)
+15. AIDirector / sleeper save blobs (MISSING)
+16. Localization titles (MISSING)
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
