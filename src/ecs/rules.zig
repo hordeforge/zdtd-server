@@ -209,7 +209,30 @@ pub const Progression = struct {
 };
 
 /// Placeholder group: added as constants move; no fields invented.
-pub const WorldGroup = struct {};
+pub const WorldGroup = struct {
+    /// Container open/use reach in blocks (3D, squared internally). Authority
+    /// reach cap like max_edit_range, but ECS-visible (openContainer has no
+    /// Game handle); R7.
+    container_open_range: f32 = 8.0,
+};
+
+/// Vehicle sim tuning (zdtd-owned: the stock dedicated server has no vehicle
+/// physics sim, GAP 4816; these shape the server-side drive model). All
+/// operator-policy, so they live on the rules surface (ADR 0021).
+pub const Vehicle = struct {
+    /// Throttle acceleration (blocks/s^2) per unit throttle input.
+    accel_mps2: f32 = 14.0,
+    /// Reverse speed cap as a fraction of max_speed.
+    reverse_frac: f32 = 0.3,
+    /// Coast decay per second with no throttle (1.0 = full stop instantly).
+    coast_decay: f32 = 0.8,
+    /// Yaw rate (deg/s) per unit steer input at speed.
+    steer_deg_per_s: f32 = 100.0,
+    /// Minimum turn-speed fraction (keeps steering alive near standstill).
+    min_turn_speed_frac: f32 = 0.15,
+    /// Fuel consumed per block travelled (non-bicycle kinds).
+    fuel_per_m: f32 = 0.02,
+};
 
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
 /// horde schedule (start tick + min/max gap in world ticks) and spawn
@@ -270,6 +293,7 @@ pub const Rules = struct {
     bloodmoon: Bloodmoon = .{},
     progression: Progression = .{},
     world: WorldGroup = .{},
+    vehicle: Vehicle = .{},
     director: Director = .{},
 };
 
@@ -340,7 +364,18 @@ pub const ProgressionOverlay = struct {
     trap_kill_xp_frac: ?f32 = null,
 };
 
-pub const WorldGroupOverlay = struct {};
+pub const WorldGroupOverlay = struct {
+    container_open_range: ?f32 = null,
+};
+
+pub const VehicleOverlay = struct {
+    accel_mps2: ?f32 = null,
+    reverse_frac: ?f32 = null,
+    coast_decay: ?f32 = null,
+    steer_deg_per_s: ?f32 = null,
+    min_turn_speed_frac: ?f32 = null,
+    fuel_per_m: ?f32 = null,
+};
 
 /// AIDirector overlay: `[rules.director]` binds these (binder-reflected).
 pub const DirectorOverlay = struct {
@@ -388,6 +423,7 @@ pub const RulesOverlay = struct {
     bloodmoon: BloodmoonOverlay = .{},
     progression: ProgressionOverlay = .{},
     world: WorldGroupOverlay = .{},
+    vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
 };
 

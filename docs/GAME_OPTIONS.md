@@ -212,6 +212,18 @@ test, so a retune cannot land silently).
 | `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |
 | `bloodmoon_hp_mult` | 1.5 | Blood-moon zombie HP multiplier (zdtd policy) |
 
+`[rules.world]` / `[rules.vehicle]` (ADR 0021):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `container_open_range` | 8.0 | Container open/use reach in blocks, 3D (R7; authority reach cap, ECS-visible) |
+| `accel_mps2` | 14.0 | Vehicle throttle acceleration (blocks/s^2 per throttle unit; zdtd sim, GAP 4816) |
+| `reverse_frac` | 0.3 | Vehicle reverse speed cap as a fraction of max speed |
+| `coast_decay` | 0.8 | Vehicle coast decay per second with no throttle |
+| `steer_deg_per_s` | 100.0 | Vehicle yaw rate (deg/s) per steer unit at speed |
+| `min_turn_speed_frac` | 0.15 | Vehicle minimum turn-speed fraction (steering near standstill) |
+| `fuel_per_m` | 0.02 | Vehicle fuel consumed per block travelled (non-bicycle) |
+
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
 `entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md)).

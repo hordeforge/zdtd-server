@@ -293,9 +293,9 @@ prior rows closed. Findings and dispositions:
 | R2 | `ecs/world.zig` + `ecs/systems.zig` corpse dwell | fallback 300/30 s | A | **FIXED**: fallback = stock `EntityAlive.timeStayAfterDeath` default 5 s (RE entity-ai.md 3157); XML values 30/300 flow via `class_id.time_stay` when declared |
 | R3 | `ecs/inventory.zig:148` armorMitigation | flat 10 %/piece, 50 % cap | A | OPEN: stock mitigation is per-item (items.xml ItemClassArmor damage-modifier chain, items.md 2122); needs a loader+sim feature, not a drive-by |
 | R4 | `ecs/aidirector.zig:361-362,403-404,428-430` director drips | night 18-28 m / day 30-40 m / animal 20-45 m, cds 45/120/60 s | A/B | OPEN: animal/enemy rings contradict stock (48-70 m cAnimalMin/MaxDistance, 28-54 m cEnemyMin/MaxDistance, spawning.md); the periodic drips are zdtd population mechanics (GAP 1407/2011-2017) — align rings to RE, expose cds as `[rules.director]` |
-| R5 | `ecs/aidirector.zig:378,675-676` | bloodmoon_cd 6 s, bm_mul 1.5 | B | OPEN: move to `[rules.director]` fields |
-| R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | OPEN: zdtd-owned sim (GAP 4816, stock has no server vehicle sim); name as consts with cites or `[rules]` fields |
-| R7 | `ecs/inventory.zig:348` container open range | 8 blocks / 64.0 | B | OPEN: authority reach cap not on the `[authority]` surface; expose as config |
+| R5 | `ecs/aidirector.zig:378,675-676` | bloodmoon_cd 6 s, bm_mul 1.5 | B | **FIXED**: `[rules.director] bloodmoon_wave_cd` / `bloodmoon_hp_mult` |
+| R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | **FIXED**: `[rules.vehicle]` group (accel_mps2, reverse_frac, coast_decay, steer_deg_per_s, min_turn_speed_frac, fuel_per_m) |
+| R7 | `ecs/inventory.zig:348` container open range | 8 blocks / 64.0 | B | **FIXED**: `[rules.world] container_open_range` (ECS-visible reach cap) |
 | R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
 | R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | PARKED: stock serverconfig tables (GameDifficulty/ZombieMove), bare literals; next pass makes them named consts with cites |
 

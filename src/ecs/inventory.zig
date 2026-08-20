@@ -344,8 +344,10 @@ pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
         const dx = w.transform[ps].x - w.transform[cs].x;
         const dy = w.transform[ps].y - w.transform[cs].y;
         const dz = w.transform[ps].z - w.transform[cs].z;
-        // 3D range (8 blocks): XZ-only allowed remote open through floors/ceilings.
-        if (dx * dx + dy * dy + dz * dz > 64.0) return false;
+        // 3D reach (R7, [rules.world] container_open_range, default 8 blocks):
+        // XZ-only allowed remote open through floors/ceilings.
+        const range = w.rules.world.container_open_range;
+        if (dx * dx + dy * dy + dz * dz > range * range) return false;
     }
     w.inventory[ps].open_container = container_net;
     if (w.mask[cs].loot_bag) w.loot_bag[cs].open = true;

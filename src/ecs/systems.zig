@@ -1902,14 +1902,15 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
     v.throttle = throttle;
     v.steer = steer;
     const max_spd: f32 = if (v.max_speed > 0.1) v.max_speed else vehicleKindDefaultSpeed(v.kind);
-    // Stronger accel so a short C2S drive pulse still moves (playtest ≥0.4 m).
-    v.speed += throttle * 14.0 * dt;
+    const vr = &w.rules.vehicle;
+    // Stronger accel so a short C2S drive pulse still moves (playtest >=0.4 m).
+    v.speed += throttle * vr.accel_mps2 * dt;
     if (v.speed > max_spd) v.speed = max_spd;
-    if (v.speed < -max_spd * 0.3) v.speed = -max_spd * 0.3;
+    if (v.speed < -max_spd * vr.reverse_frac) v.speed = -max_spd * vr.reverse_frac;
     // Coast decay only when no throttle input.
-    if (@abs(throttle) < 0.05) v.speed *= 1.0 - 0.8 * dt;
+    if (@abs(throttle) < 0.05) v.speed *= 1.0 - vr.coast_decay * dt;
     const spd_frac = if (max_spd > 0.01) @abs(v.speed) / max_spd else 0;
-    w.transform[slot].yaw += steer * 100.0 * dt * @max(spd_frac, 0.15);
+    w.transform[slot].yaw += steer * vr.steer_deg_per_s * dt * @max(spd_frac, vr.min_turn_speed_frac);
     const rad = w.transform[slot].yaw * (std.math.pi / 180.0);
     w.transform[slot].x += @sin(rad) * v.speed * dt;
     w.transform[slot].z += @cos(rad) * v.speed * dt;
@@ -1918,7 +1919,7 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
             v.speed = 0;
             return;
         }
-        v.fuel -= @abs(v.speed) * 0.02 * dt;
+        v.fuel -= @abs(v.speed) * vr.fuel_per_m * dt;
         if (v.fuel < 0) v.fuel = 0;
     }
 }
