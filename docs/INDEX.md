@@ -24,7 +24,7 @@ roughly 3500 lines in the NetPackage region.
 New to the project, or picking up work:
 
 1. [STATUS.md](STATUS.md) what works now, with the current gates.
-2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 329 features scored
+2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 330 features scored
    WORKS / PARTIAL / MISSING with anchors.
 3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.

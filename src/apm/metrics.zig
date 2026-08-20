@@ -46,6 +46,10 @@ pub const CounterId = enum(u16) {
     c2s_throttle,
     /// Malformed decode / unexpected package body (flood signal).
     c2s_malformed,
+    /// Stock InventoryTransaction.Write requests detected (the transactional
+    /// mapping is the top remaining wire item; counted so real client
+    /// container traffic is visible).
+    c2s_stock_invtx,
     /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
     c2s_rejects,
     /// Named C2S package with no handler arm (falls off handlePackage).

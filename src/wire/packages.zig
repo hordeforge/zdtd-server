@@ -3514,3 +3514,153 @@ test "ally response body layout" {
     try std.testing.expectEqual(@as(u8, 6), try r.readByte());
     try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
+
+// --- Stock NetPackageInventoryTransactionRequest parse (RE protocol-packages.md
+// 6.13, items.md 2060-2087, InventoryOperation.Write IL) ---
+//
+// Body: i32 count, then per inventory: Guid key (16 bytes, .NET little-endian)
+// + i32 initialHash + i32 finalHash + i32 opCount + opCount x
+// InventoryOperation.Write. Each op: i16 operation (0 SetAbsolute, 1
+// SetRelative, 2 SetAll); SetAbsolute/SetRelative write ItemStack.Write + i32
+// index; SetAll writes ItemStack.WriteArray. The stock client sends this for
+// container/backpack transactions; zdtd's native 11-byte body is tried first.
+
+/// SetAll stack cap per op: stock backpack size is 36; 128 bounds hostile input.
+pub const stock_tx_setall_cap: usize = 128;
+
+pub const StockInvOp = struct {
+    op: u8,
+    stack: stock_inv.StockSlot = .{},
+    index: i32 = 0,
+    /// SetAll (op 2): NewStacks array; empty when op != 2 or null array.
+    new_stacks: [stock_tx_setall_cap]stock_inv.StockSlot = undefined,
+    new_n: u16 = 0,
+};
+
+/// Ops per inventory (a stock backpack move is 1-2; cap bounds hostile input).
+pub const stock_tx_op_cap: usize = 8;
+pub const stock_tx_entry_cap: usize = 4;
+
+pub const StockInvEntry = struct {
+    guid: [16]u8,
+    initial_hash: i32,
+    final_hash: i32,
+    ops: [stock_tx_op_cap]StockInvOp = undefined,
+    op_n: u8 = 0,
+};
+
+pub const StockInvTx = struct {
+    entries: [stock_tx_entry_cap]StockInvEntry = undefined,
+    entry_n: u8 = 0,
+};
+
+/// Parse a stock InventoryTransaction.Write body. Returns error.EndOfStream on
+/// truncation and error.InvalidArgument when the layout is not stock-shaped
+/// (callers fall back to the native body).
+pub fn parseStockInvTx(body: []const u8) !StockInvTx {
+    var r: binary.Reader = .{ .data = body };
+    var out: StockInvTx = .{};
+    const count = try r.readI32();
+    if (count < 0 or count > stock_tx_entry_cap) return error.InvalidArgument;
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(count))) : (i += 1) {
+        const e = &out.entries[i];
+        for (&e.guid) |*b| b.* = try r.readByte();
+        e.initial_hash = try r.readI32();
+        e.final_hash = try r.readI32();
+        const op_count = try r.readI32();
+        if (op_count < 0 or op_count > stock_tx_op_cap) return error.InvalidArgument;
+        var k: usize = 0;
+        while (k < @as(usize, @intCast(op_count))) : (k += 1) {
+            const op_raw = try r.readI16();
+            if (op_raw < 0 or op_raw > 2) return error.InvalidArgument;
+            const op: u8 = @intCast(op_raw);
+            const oe = &e.ops[k];
+            oe.op = op;
+            if (op == 2) {
+                // SetAll: ItemStack.WriteArray (i16 count; -1 = null array).
+                const n = try r.readI16();
+                if (n == -1) {
+                    oe.new_n = 0; // null NewStacks
+                    continue;
+                }
+                if (n < 0 or n > stock_tx_setall_cap) return error.InvalidArgument;
+                var j: i16 = 0;
+                while (j < n) : (j += 1) {
+                    oe.new_stacks[@intCast(j)] = try stock_inv.readItemStack(&r);
+                }
+                oe.new_n = @intCast(n);
+            } else {
+                oe.stack = try stock_inv.readItemStack(&r);
+                oe.index = try r.readI32();
+            }
+        }
+        e.op_n = @intCast(op_count);
+        out.entry_n = @intCast(count);
+    }
+    return out;
+}
+
+test "parseStockInvTx reads the stock InventoryTransaction layout" {
+    // Golden bytes per RE (items.md 2060-2087, InventoryOperation Write IL):
+    // count 1; one inventory: 16-byte Guid, initialHash, finalHash, opCount 1,
+    // then one SetAbsolute op (i16 0, ItemStack.Write, i32 index).
+    var buf: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(1); // inventoryCount
+    // Guid: 16 bytes (0x00..0x0F).
+    for (0..16) |i| try w.writeByte(@intCast(i));
+    try w.writeI32(111); // initialHash
+    try w.writeI32(222); // finalHash
+    try w.writeI32(1); // opCount
+    try w.writeI16(0); // SetAbsolute
+    try stock_inv.writeItemStack(&w, .{ .type_id = 800, .count = 1, .quality = 1 });
+    try w.writeI32(3); // index slot 3
+    const tx = try parseStockInvTx(w.written());
+    try std.testing.expectEqual(@as(u8, 1), tx.entry_n);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }, &tx.entries[0].guid);
+    try std.testing.expectEqual(@as(i32, 111), tx.entries[0].initial_hash);
+    try std.testing.expectEqual(@as(i32, 222), tx.entries[0].final_hash);
+    try std.testing.expectEqual(@as(u8, 1), tx.entries[0].op_n);
+    try std.testing.expectEqual(@as(u8, 0), tx.entries[0].ops[0].op);
+    try std.testing.expectEqual(@as(i32, 3), tx.entries[0].ops[0].index);
+    try std.testing.expectEqual(@as(u16, 1), tx.entries[0].ops[0].stack.count);
+    try std.testing.expectEqual(@as(i32, 800), tx.entries[0].ops[0].stack.type_id);
+
+    // SetAll op: i16 2 + ItemStack.WriteArray (i16 count, -1 = null).
+    var buf2: [256]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &buf2 };
+    try w2.writeI32(1);
+    for (0..16) |i| try w2.writeByte(@intCast(i));
+    try w2.writeI32(1);
+    try w2.writeI32(2);
+    try w2.writeI32(1); // opCount
+    try w2.writeI16(2); // SetAll
+    try w2.writeI16(2); // array count
+    try stock_inv.writeItemStack(&w2, .{ .type_id = 800, .count = 5, .quality = 1 });
+    try stock_inv.writeItemStack(&w2, .{ .type_id = 801, .count = 2, .quality = 1 });
+    const tx2 = try parseStockInvTx(w2.written());
+    try std.testing.expectEqual(@as(u8, 1), tx2.entries[0].op_n);
+    try std.testing.expectEqual(@as(u8, 2), tx2.entries[0].ops[0].op);
+    try std.testing.expectEqual(@as(u16, 2), tx2.entries[0].ops[0].new_n);
+    try std.testing.expectEqual(@as(i32, 800), tx2.entries[0].ops[0].new_stacks[0].type_id);
+    try std.testing.expectEqual(@as(i32, 801), tx2.entries[0].ops[0].new_stacks[1].type_id);
+
+    // Null WriteArray: i16 -1 decodes to an empty stack list.
+    var buf3: [256]u8 = undefined;
+    var w3: binary.Writer = .{ .buf = &buf3 };
+    try w3.writeI32(1);
+    for (0..16) |i| try w3.writeByte(@intCast(i));
+    try w3.writeI32(1);
+    try w3.writeI32(2);
+    try w3.writeI32(1);
+    try w3.writeI16(2);
+    try w3.writeI16(-1);
+    const tx3 = try parseStockInvTx(w3.written());
+    try std.testing.expectEqual(@as(u8, 2), tx3.entries[0].ops[0].op);
+    try std.testing.expectEqual(@as(u16, 0), tx3.entries[0].ops[0].new_n);
+
+    // A native 11-byte body must NOT parse as a stock transaction.
+    var native: [11]u8 = .{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 };
+    try std.testing.expectError(error.EndOfStream, parseStockInvTx(&native));
+}

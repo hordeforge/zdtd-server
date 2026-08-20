@@ -502,7 +502,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        const tx = packages.parseInvTxRequest(body) catch return true;
+        const tx = packages.parseInvTxRequest(body) catch {
+            // Stock-shaped request? (RE protocol-packages.md 6.13): a real
+            // stock client sends InventoryTransaction.Write, which the native
+            // parser cannot read. The transactional mapping (Guid resolution,
+            // op application, hash check, stock response) is the top wire
+            // item; for now detect + count so real client traffic is visible.
+            if (packages.parseStockInvTx(body)) |_| {
+                self.harness.counters.inc(.c2s_stock_invtx);
+            } else |_| {}
+            return true;
+        };
         var r: invsys.Result = .{};
         // Captured before apply: a rejected place must refund what it consumed.
         const place_item_id: u16 = blk: {

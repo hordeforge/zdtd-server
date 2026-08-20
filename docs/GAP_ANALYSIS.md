@@ -130,7 +130,7 @@ scorecard; the per-area headers match the row counts). On 2026-08-07 the
 scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
-Recount 2026-08-08 from the same markers: **329 features** carry a
+Recount 2026-08-08 from the same markers: **330 features** carry a
 canonical WORKS/PARTIAL/MISSING tag (158/128/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
@@ -140,7 +140,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-329 features scored across nine areas (recounted 2026-08-08 from the
+330 features scored across nine areas (recounted 2026-08-08 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **158** | **128** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **158** | **128** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2285,16 +2285,21 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`
 
 - **NetPackageInventoryTransactionRequest / Response wire format** `PARTIAL`
-  zdtd reuses the stock package **name** with a homegrown 11-byte body
-  (`op u8 | a u16 | b u16 | qty u16 | entity i32`), documented as a deliberate
-  deviation. Stock `read()` is `InventoryTransaction::Read`: i32 opCount then per
+  The stock `InventoryTransaction::Read` layout is now parsed and detected:
+  `parseStockInvTx` (`src/wire/packages.zig`) decodes i32 opCount then per
   inventory Guid key, i32 InitialHash, i32 FinalHash, i32 opCount, and
-  `InventoryOperation.Write` per op. Stock Response is bool, i32 count, then
-  (Guid, bool, ItemStack[])*. A genuine stock transaction packet would be misparsed
-  as `op = low byte of the i32 count` (typically 1 = move) with Guid bytes as slot
-  indices, and zdtd's response is not decodable by the stock client. Crafting via
-  op 11 is unreachable from a legitimate client but trivially forgeable.
-  *Anchors:* `src/wire/packages.zig:1639-1668`, `src/server/game.zig:4459-4534`,
+  `InventoryOperation.Write` per op (i16 op: 0 SetAbsolute / 1 SetRelative /
+  2 SetAll; op<=1 ItemStack.Write + i32 index, op 2 ItemStack.WriteArray with
+  i16 count, -1 = null), all capped and fail-closed. `c2s/inv.zig` tries the
+  native 11-byte body first and falls back to the stock parse, counting hits on
+  `c2s_stock_invtx`. Stock Response is bool, i32 count, then (Guid, bool,
+  ItemStack[])*. Remaining: apply ops to the ECS inventory and emit the stock
+  response - blocked on Guid-key resolution: `InventoryTransaction.Read` clears
+  the whole transaction on an unknown key, and the server registry population
+  path (`CreateInventoryServer` callers, Key delivery to the client) has no
+  callers in the RE corpus (RE-blocked, protocol-packages.md 6.13; candidate
+  capture: container-open sequence vs stock dedi).
+  *Anchors:* `src/wire/packages.zig:3518-3640`, `src/server/c2s/inv.zig`,
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 

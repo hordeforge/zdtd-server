@@ -6,7 +6,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | Doc | Role |
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | What works now (hub; wins on conflict) |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory · 329 features · **53 MISSING** |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory · 330 features · **44 MISSING** |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phased milestones |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
