@@ -1752,6 +1752,9 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
             ctx.w.flags[s].bits |= 1;
+            // Combat noise (stock NotifyNoise): the landed hit alerts zombies
+            // and wakes sleepers within radius (group-AI PARTIAL).
+            ctx.w.pushNoise(ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.rules.ai.combat_noise_radius);
         }
     } else {
         ai.state = .chase;
@@ -2034,8 +2037,51 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // broadcast/wait round-trip; skip it while the live population is small
     // enough that one worker's share would finish before the wakeup does.
     if (w.entity_count < 64) AiCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, AiCtx.work);
+    consumeCombatNoise(w);
     _ = applyDeferredDamage(w, dmg_fp[0..]);
     return hits_a.load(.monotonic);
+}
+
+/// Group-AI consume pass (stock NotifyNoise, entity-ai.md): combat-noise
+/// events alert zombies within radius (they investigate the spot) and wake
+/// sleepers. Runs single-threaded after the parallel AI join; events were
+/// pushed atomically during the pass (parallel workers + the net thread).
+/// The ring is drained here - NOT beginTick - because direct system calls
+/// (tests) and the net-poll-then-sim ordering both rely on consume-owns-drain.
+fn consumeCombatNoise(w: *World) void {
+    const take = @min(@min(w.noise_n, c.noise_events_cap), w.rules.ai.noise_events_per_tick);
+    var i: usize = 0;
+    while (i < take) : (i += 1) {
+        const ev = w.noise_events[i];
+        const r2 = ev.radius * ev.radius;
+        for (query.groupSlice(w, .zombie)) |s| {
+            if (!w.alive[s] or !w.mask[s].zombie_ai or !w.mask[s].transform) continue;
+            const dx = w.transform[s].x - ev.x;
+            const dz = w.transform[s].z - ev.z;
+            if (dx * dx + dz * dz > r2) continue;
+            const ai = &w.zombie_ai[s];
+            if (w.mask[s].sleeper and !w.sleeper[s].awake) {
+                // Wake and investigate the noise (stock sleeper wake).
+                w.sleeper[s].awake = true;
+                ai.state = .chase;
+                ai.alert = true;
+                ai.spot_x = ev.x;
+                ai.spot_z = ev.z;
+                ai.has_spot = true;
+                continue;
+            }
+            if (ai.state == .idle or ai.state == .wander) {
+                ai.alert = true;
+                ai.state = .chase;
+                ai.target_id = -1;
+                ai.spot_x = ev.x;
+                ai.spot_z = ev.z;
+                ai.has_spot = true;
+            }
+        }
+    }
+    // Drain (budget-excess events are dropped, never re-alerted next tick).
+    w.noise_n = 0;
 }
 
 pub fn systemDirector(w: *World, dt: f32) struct { spawned: u32, world_time: u64 } {
@@ -4495,4 +4541,49 @@ test "stealth: crouched players do not wake sleepers beyond the close detect ran
     w.player[ps].crouching = false;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
+}
+
+test "group AI: combat noise alerts distant zombies to investigate" {
+    // Stock NotifyNoise: a landed melee hit emits noise that alerts zombies
+    // within radius even when they cannot sense the player directly; they
+    // investigate the spot (has_spot) instead of wandering.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
+    defer w.deinit();
+    const a = w.spawnZombie(0, 70, 0, 40).?;
+    const aslot = w.slotOfNetId(a).?;
+    _ = w.spawnZombie(10, 70, 0, 40).?;
+    const bslot = w.slotOfNetId(a).? + 1;
+    const p = w.spawnPlayer(1, 70, 0, 0).?;
+    _ = w.slotOfNetId(p).?;
+    var hit: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0 and hit == 0) : (t += 0.05) {
+        hit = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(hit > 0); // A landed a hit -> noise.
+    // B at 10 m cannot sense the player (sense 4) but the noise alerts it.
+    try std.testing.expect(w.zombie_ai[aslot].alert);
+    try std.testing.expect(w.zombie_ai[bslot].alert);
+    try std.testing.expect(w.zombie_ai[bslot].has_spot);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.zombie_ai[bslot].spot_x, 1.0);
+}
+
+test "group AI: combat noise wakes sleepers within radius" {
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
+    defer w.deinit();
+    _ = w.spawnZombie(0, 70, 0, 40).?;
+    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 16;
+    _ = w.spawnPlayer(1, 70, 0, 0).?;
+    var hit: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0 and hit == 0) : (t += 0.05) {
+        hit = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(hit > 0);
+    // The sleeper at 12 m (volume 16 would need the player closer, but the
+    // noise radius 24 covers it) wakes and investigates.
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
 }

@@ -149,6 +149,8 @@ test, so a retune cannot land silently).
 | `smell_bleed_radius` | 25.0 | Smell radius while the player carries `buffInjuryBleeding`. RE entity-ai.md PlayerStealth `cSmellRadiusBleed` |
 | `crouch_hear_scale` | 0.5 | Hearing multiplier while the player crouches (stealth). Stock mutes tracked-player noise per clip via `muffledWhenCrouched` (noisysounds.xml, data-driven, not ported); this flat scale is the floor on `hear_range`. RE entity-ai.md NotifyNoise |
 | `crouch_sleeper_detect_range` | 5.0 | Sleeper attack-detect range while the target crouches. Stock `CanSleeperAttackDetect` crouch is light-based `FastLerp(3,15,light)` (light leg RE-blocked); this close range is the floor |
+| `combat_noise_radius` | 24.0 | Combat-noise radius, blocks: a landed melee hit or ranged damage alerts zombies and wakes sleepers within it (stock NotifyNoise; per-clip noisysounds.xml volumes are data-driven, not ported - flat floor). Group-AI PARTIAL |
+| `noise_events_per_tick` | 2 | Combat-noise events the AI consume pass drains per tick (bursts dropped; ring holds one tick's worth) |
 | `body_radius` | 0.35 | Move-body half-width, blocks (stock CharacterController radius ~0.35); the AI collide-and-slide keeps this much of the body out of solid cells. Policy floor (RE entity-movement.md) |
 | `body_height` | 1.8 | Move-body height, blocks (stock zombie CC height ~1.8); the head probe so a body does not duck through 1-high gaps. Policy floor |
 | `step_height` | 1.0 | Step-up limit, blocks: a blocked horizontal move is retried with the feet lifted by this much (stock CC stepOffset; zombies climb a full block). Policy floor |

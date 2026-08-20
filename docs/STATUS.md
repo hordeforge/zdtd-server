@@ -26,7 +26,9 @@ then the AI senses row WORKS (smell + per-class cone), taking the total to
 **142/139/48**. Then the RWG water table (fluids/aquifers) and the water
 flow dig-leveling both shipped, total **142/140/47**. Then crouch stealth
 (hear muffle + sleeper detect) went MISSING -> PARTIAL, total
-**142/141/46**. The dashboard (docs/provenance.html) is synced.
+**142/141/46**. Then group AI (combat-noise alerts + sleeper wake) went
+MISSING -> PARTIAL, total **142/142/45**. The
+dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -41,7 +43,7 @@ light-level leg stays RE-blocked, no server light channel)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
-5. Group AI / pack behavior (MISSING)
+5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
 6. NPC dialog trees (MISSING)
 8. Challenges system (MISSING)
 9. Falling blocks (MISSING)

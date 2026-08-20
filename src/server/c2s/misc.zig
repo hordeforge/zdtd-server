@@ -332,6 +332,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Combat noise (stock NotifyNoise): a landed ranged hit alerts zombies
+        // and wakes sleepers around the shooter (group-AI PARTIAL).
+        if (self.sim.mask[actor_slot].transform) {
+            const pt = self.sim.transform[actor_slot];
+            self.sim.pushNoise(pt.x, pt.y, pt.z, self.sim.rules.ai.combat_noise_radius);
+        }
         // Hit shove: the victim's knockback impulse animates on every peer
         // that sees it (stock EntityAlive.AddMotion -> NetPackageEntityVelocity).
         if (dmg.knocked) {

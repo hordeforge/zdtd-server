@@ -102,6 +102,14 @@ pub const Ai = struct {
     /// `FastLerp(3, 15, lightAttackPercent)` - light-based, so the light leg
     /// is RE-blocked and this flat close range is the floor (RE entity-ai.md).
     crouch_sleeper_detect_range: f32 = 5.0,
+    /// Combat-noise radius, blocks: a landed melee hit or ranged damage emits
+    /// a noise event that alerts zombies and wakes sleepers within it (stock
+    /// NotifyNoise; per-clip volumes from noisysounds.xml are data-driven and
+    /// not ported - this flat radius is the floor). Group-AI PARTIAL.
+    combat_noise_radius: f32 = 24.0,
+    /// Noise events the consume pass drains per tick (bursts beyond the cap
+    /// are dropped; the ring holds one tick's worth).
+    noise_events_per_tick: u8 = 2,
     /// Move-body half-width, blocks (stock CharacterController radius ~0.35):
     /// the AI collide-and-slide keeps this much of the body out of solid
     /// cells when walking. Policy floor; entityclasses collider data is not
@@ -387,6 +395,8 @@ pub const AiOverlay = struct {
     smell_bleed_radius: ?f32 = null,
     crouch_hear_scale: ?f32 = null,
     crouch_sleeper_detect_range: ?f32 = null,
+    combat_noise_radius: ?f32 = null,
+    noise_events_per_tick: ?u8 = null,
     body_radius: ?f32 = null,
     body_height: ?f32 = null,
     step_height: ?f32 = null,

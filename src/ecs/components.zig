@@ -740,6 +740,19 @@ pub const Sleeper = struct {
     home_z: f32 = 0,
 };
 
+/// A combat-noise event (melee hit / ranged damage): alerts nearby zombies
+/// and wakes sleepers within radius (stock NotifyNoise, group-AI PARTIAL).
+pub const NoiseEvent = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    radius: f32,
+};
+
+/// One tick's noise ring cap: a busy fight cannot grow it (events beyond the
+/// cap are dropped; the per-tick consume budget already throttles).
+pub const noise_events_cap: usize = 8;
+
 pub const Flags = struct {
     bits: u16 = 8, // Spawned
 };

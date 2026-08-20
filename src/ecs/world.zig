@@ -167,6 +167,12 @@ pub const World = struct {
     kind: [max_entities]c.Kind = [_]c.Kind{.zombie} ** max_entities,
     player: [max_entities]c.Player = [_]c.Player{.{}} ** max_entities,
     zombie_ai: [max_entities]c.ZombieAi = [_]c.ZombieAi{.{}} ** max_entities,
+    /// Combat-noise ring (group AI): melee/ranged hits push events (atomic
+    /// counter; parallel AI workers + the net thread), the AI consume pass
+    /// alerts zombies and wakes sleepers and drains the ring. Cap + per-tick
+    /// budget bound the pass so a busy fight cannot stall the tick.
+    noise_events: [c.noise_events_cap]c.NoiseEvent = undefined,
+    noise_n: usize = 0,
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
     trader_stock: [max_entities]c.TraderStock = [_]c.TraderStock{.{}} ** max_entities,
@@ -567,6 +573,15 @@ pub const World = struct {
     fn notifySpawn(self: *World, slot: Slot) void {
         if (!self.alive[slot] or !self.mask[slot].network_id) return;
         self.observers.fireSpawn(self, slot, self.network_id[slot].id);
+    }
+
+    /// Push a combat-noise event (stock NotifyNoise). Called from parallel AI
+    /// workers (melee hits) and the net thread (ranged damage), so the ring
+    /// index is an atomic RMW; events beyond the cap are dropped.
+    pub fn pushNoise(self: *World, x: f32, y: f32, z: f32, radius: f32) void {
+        const n = @atomicRmw(usize, &self.noise_n, .Add, 1, .monotonic);
+        if (n >= c.noise_events_cap) return;
+        self.noise_events[n] = .{ .x = x, .y = y, .z = z, .radius = radius };
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or
