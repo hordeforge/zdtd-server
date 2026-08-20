@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**17 WORKS · 17 PARTIAL · 1 MISSING**
+**17 WORKS · 14 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -811,7 +811,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**13 WORKS · 9 PARTIAL · 3 MISSING**
+**13 WORKS · 7 PARTIAL · 3 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -1446,7 +1446,7 @@ files and reach a stock client, but they are built from the wrong block ids
 rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
 can walk into every POI but none of them is the building TFP authored.
 
-**16 WORKS · 15 PARTIAL · 0 MISSING**
+**16 WORKS · 14 PARTIAL · 0 MISSING**
 
 - **prefabs.xml decoration parse** `WORKS`
   Reads all 1559 `<decoration>` elements with rotation mod 4 and
@@ -2175,7 +2175,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**11 WORKS · 16 PARTIAL · 8 MISSING**
+**12 WORKS · 14 PARTIAL · 7 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =

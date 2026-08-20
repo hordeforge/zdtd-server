@@ -281,6 +281,7 @@ field-by-field provenance.
 | `Ai.execute_delay_scale` | 0.85 | R | `EAITaskList.executeDelayScale` base (asm.il:437541) |
 | `Ai.look_turn_speed_deg` | 250.0 | A | Per-class MaxTurnSpeed, zombieTemplateMale (`entityclasses.xml`) |
 | `Ai.revenge_window_s` | 20.0 | R | Revenge target window, 400 ticks @ 20 Hz (RE: entity-ai.md) |
+| `Ai.gravity` | -1.6 | R | Stock `World::Gravity` **0.08** blocks/tick (World cctor, World.il.txt:96) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) -> ~1.6 blocks/s², self-capping ~ -3.9 |
 | `Bloodmoon.party_*` | 80/150/40/30 | R | `AIDirectorBloodMoonParty` (asm.il 413090-413140) |
 | `Progression.*` | see fields | Z | **Invented placeholders** (WORK_PLAN T16); stock ships survival from buffs.xml `buffStatusHungry01-03` / `Thirsty01-03` damage + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT`/`StaminaChangeOT` + items.xml `StaminaLoss` |
 
@@ -359,6 +360,12 @@ field-by-field provenance.
 | `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
 | `game/sleeper.zig` sleeper spawn | no global cap | Z | **Diverges**: stock `SleeperVolume.UpdateSpawn` gates every restore on `AIDirector.CanSpawn(2.1f)` = `EnemyCount < MaxSpawnedZombies * 2.1` (spawning.md, live-verified 2026-08-11); zdtd's sleeper spawn bypasses the cap (the volume count is group/255-capped only). Wake/stage radius is `[sim] sleeper_party_radius` (default 100 m, `CalcGameStageAround` asm.il ~1093363) vs stock volume-box + party stage |
 | `ecs/systems.zig traderRestock` | day-based | Z | **Simplifies**: stock `TraderManager` restocks on a tick-based `ResetIntervalInTicks` with a boundary snap (loot-economy.md 3); zdtd restocks on a day counter (-1 never, 0 daily, N>0 every N days) |
+| `world/worldgen.zig water_surface_cell` | 62 | R | RE `Block.cWaterLevel` = **62.88** (Block cctor `ldc.r4 62.88`, stock_facts `world_water_level`); the RWG water table fills cells 0..62 and the surface cell is world-constant so chunks cannot seam |
+| `world/store.zig` leveler pending_cap / pour budgets | 256 / 4 / 128 | Z | **zdtd-owned** dig-leveling queue cap + per-tick drain/spread budgets (stock is the jobified mass-flow sim, light-mesh-water.md §4 - not ported). Config: `[rules.water]` (ADR 0021) |
+| `ecs/aidirector.zig bloodmoon_budget_scale` | 1.9 | R | `AIDirector::CanSpawn(1.9f)` (asm.il:413528) - the 1.9x blood-moon ceiling over MaxSpawnedZombies |
+| `ecs/aidirector.zig` WorldClock bm schedule (bm_cycle / bm_day_last / next_bm / bm_freq / bm_range) | persisted | R | Stock `CalcNextDay` (asm.il 412880): `nextBM = bmDayLast + frequency + RandomRange(0, range+1)`, persisted with the clock (ZCL2) so the red moon stays on the horde night across restarts and day jumps |
+| `wire/packages.zig cF_crouching` | 0x0200 | R | Stock EntityFlags `IsCrouching` bit 512 (protocol-packages.md 5.5.6); the sim reads it for the stealth sense gates |
+| `ecs/components.zig falling_group_cap` | 32 | Z | **zdtd-owned** falling-block group cap (stock `GroupBounds.IsWithinSize` clamps groups but the bound is not IL-pinned); larger collapses keep the first 32 cells - the rest still air out |
 
 ### 3.9 Divergence register (provenance for the differences)
 
