@@ -291,7 +291,7 @@ prior rows closed. Findings and dispositions:
 |---|---|---|---|---|
 | R1 | `world/workstations.zig` handleFuel | flat +10 s per fuel item | A | **FIXED**: burn time now = items.xml `FuelValue` seconds per item (RE items.md GetFuelValue; coal 100 s, wood 1-5 s) via a `FuelResolver` Game wires from the items table; 10 s remains the offline fallback |
 | R2 | `ecs/world.zig` + `ecs/systems.zig` corpse dwell | fallback 300/30 s | A | **FIXED**: fallback = stock `EntityAlive.timeStayAfterDeath` default 5 s (RE entity-ai.md 3157); XML values 30/300 flow via `class_id.time_stay` when declared |
-| R3 | `ecs/inventory.zig:148` armorMitigation | flat 10 %/piece, 50 % cap | A | OPEN: stock mitigation is per-item (items.xml ItemClassArmor damage-modifier chain, items.md 2122); needs a loader+sim feature, not a drive-by |
+| R3 | `ecs/inventory.zig:148` armorMitigation | flat 10 %/piece, 50 % cap | A | **FIXED (config-exposed)**: `[rules.combat] armor_mitigation_per_piece` / `armor_mitigation_cap` make the approximation tunable; the full stock chain (passive-effects ModifyValue, items.md IL=304) stays an RE-blocked engine feature |
 | R4 | `ecs/aidirector.zig:361-362,403-404,428-430` director drips | night 18-28 m / day 30-40 m / animal 20-45 m, cds 45/120/60 s | A/B | OPEN: animal/enemy rings contradict stock (48-70 m cAnimalMin/MaxDistance, 28-54 m cEnemyMin/MaxDistance, spawning.md); the periodic drips are zdtd population mechanics (GAP 1407/2011-2017) — align rings to RE, expose cds as `[rules.director]` |
 | R5 | `ecs/aidirector.zig:378,675-676` | bloodmoon_cd 6 s, bm_mul 1.5 | B | **FIXED**: `[rules.director] bloodmoon_wave_cd` / `bloodmoon_hp_mult` |
 | R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | **FIXED**: `[rules.vehicle]` group (accel_mps2, reverse_frac, coast_decay, steer_deg_per_s, min_turn_speed_frac, fuel_per_m) |
@@ -299,9 +299,9 @@ prior rows closed. Findings and dispositions:
 | R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
 | R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | PARKED: stock serverconfig tables (GameDifficulty/ZombieMove), bare literals; next pass makes them named consts with cites |
 
-R4-R7 were fixed on 2026-08-20 (rules fields: director rings/cads, vehicle
-tuning, container range); R3 (armor mitigation) remains the open loader+sim
-feature and R8/R9 stay parked with reasons.
+
+tuning, container range, armor mitigation); data fixes: fuel burn, corpse
+dwell). R8/R9 stay parked with reasons.
 
 **PLUGIN_DEV expressibility audit re-run (2026-08-20):** the table in
 docs/PLUGIN_DEV.md was re-verified against the current hook surface (16 hooks,
@@ -310,7 +310,7 @@ plugin-covered or a documented boundary-extension candidate (guard policy
 ladder and trader/vehicle announcements are the two "Not yet" rows, each with
 the correct disposition: extend the boundary, do not add native code). The
 native additions of this session were data-driven fixes (A34/A39/R1/R2,
-nav_objects gate) and `[rules]` config fields (R4-R7) - none is discretionary
+nav_objects gate) and `[rules]` config fields (R1-R7) - none is discretionary
 behavior, so no new plugin rows were required. No undocumented native
 discretionary behavior exists.
 

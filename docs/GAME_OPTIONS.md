@@ -138,6 +138,7 @@ test, so a retune cannot land silently).
 | `attack_damage` | 8.0 | **Floor**: `entityclasses.xml` `HandItem` → `items.xml` `DamageEntity` wins when non-zero |
 | `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
 | `attack_cooldown_s` | 1.2 | Policy (no entityclasses field) |
+| `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | Flat armor mitigation per worn armor piece + cap (zdtd approximation, R3). Stock mitigation is the passive-effects damage/armor modifier chain (items.md ModifyValue IL=304) - an engine feature, RE-blocked; these numbers make the approximation operator-tunable |
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |

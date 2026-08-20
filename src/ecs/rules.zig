@@ -53,6 +53,13 @@ pub const Combat = struct {
     /// Strike cadence in seconds. Policy: "No entityclasses field; always this
     /// cadence (stock melee interval approx)" (pre-move comment).
     attack_cooldown_s: f32 = 1.2,
+    /// Flat armor mitigation per worn armor piece and its cap (zdtd
+    /// approximation; R3). Stock mitigation is the passive-effects
+    /// damage/armor modifier chain (items.md ModifyValue IL=304, ItemClassArmor
+    /// IL=61) - an engine feature, RE-blocked; these numbers are the zdtd
+    /// approximation made operator-tunable.
+    armor_mitigation_per_piece: f32 = 0.1,
+    armor_mitigation_cap: f32 = 0.5,
 };
 
 /// Zombie AI tuning read by the systems.zig task table and the despawn pass.
@@ -301,6 +308,8 @@ pub const CombatOverlay = struct {
     attack_damage: ?f32 = null,
     attack_range_sq: ?f32 = null,
     attack_cooldown_s: ?f32 = null,
+    armor_mitigation_per_piece: ?f32 = null,
+    armor_mitigation_cap: ?f32 = null,
 };
 
 pub const AiOverlay = struct {

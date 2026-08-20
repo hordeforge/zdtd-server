@@ -145,7 +145,7 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
             pieces += 1;
         }
     }
-    return @min(0.5, pieces * 0.1);
+    return @min(w.rules.combat.armor_mitigation_cap, pieces * w.rules.combat.armor_mitigation_per_piece);
 }
 
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
