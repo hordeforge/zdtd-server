@@ -234,6 +234,14 @@ test, so a retune cannot land silently).
 | `min_turn_speed_frac` | 0.15 | Vehicle minimum turn-speed fraction (steering near standstill) |
 | `fuel_per_m` | 0.02 | Vehicle fuel consumed per block travelled (non-bicycle) |
 
+`[rules.water]` (water-leveling budgets, GAP "Water flow / physics" PARTIAL;
+the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `edits_per_tick` | 4 | Pending block edits the leveling pass drains per tick (each may pour) |
+| `spread_cap` | 128 | Max cells one pour fills (fills, not traversals) |
+
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
 `entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md)).

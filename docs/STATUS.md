@@ -23,7 +23,9 @@ slices: projectile/ranged combat verified WORKS (client-side projectiles),
 then the AI senses row WORKS (smell + per-class cone), taking the total to
 **142/138/49**. Next, MoveHelper physics/collision went MISSING -> PARTIAL
 (collide-and-slide + step-up + stock gravity, RE entity-movement.md), total
-**142/139/48**. The dashboard (docs/provenance.html) is synced.
+**142/139/48**. Then the RWG water table (fluids/aquifers) and the water
+flow dig-leveling both shipped, total **142/140/47**. The dashboard
+(docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -36,7 +38,7 @@ light-level leg stays RE-blocked, no server light channel)
 
 1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
-3. Water flow / physics (MISSING)
+3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (MISSING)
 5. Group AI / pack behavior (MISSING)
 6. NPC dialog trees (MISSING)

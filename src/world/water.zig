@@ -1,8 +1,42 @@
-//! Stock water_info.xml point sources (used as local water-table hints).
+//! Stock water_info.xml point sources (used as local water-table hints) and
+//! the bounded water-leveling queue (GAP "Water flow / physics", PARTIAL).
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const xml_util = @import("../assets/xml_util.zig");
+
+/// One world-space cell queued by a block edit (dug to air, or water placed).
+pub const Cell = struct {
+    x: i32,
+    y: i32,
+    z: i32,
+};
+
+/// Edits queued before the leveler drains them. Full = drop the new edit (a
+/// delayed pour is invisible; dropping never corrupts). Fixed ring, no heap:
+/// the queue lives on the store World and is touched from the edit path.
+pub const pending_cap: usize = 256;
+
+pub const Leveler = struct {
+    cells: [pending_cap]Cell = undefined,
+    n: usize = 0,
+    head: usize = 0,
+
+    pub fn push(self: *Leveler, x: i32, y: i32, z: i32) void {
+        if (self.n == pending_cap) return;
+        const i = (self.head + self.n) % pending_cap;
+        self.cells[i] = .{ .x = x, .y = y, .z = z };
+        self.n += 1;
+    }
+
+    pub fn pop(self: *Leveler) ?Cell {
+        if (self.n == 0) return null;
+        const c = self.cells[self.head];
+        self.head = (self.head + 1) % pending_cap;
+        self.n -= 1;
+        return c;
+    }
+};
 
 pub const WaterPoint = struct {
     x: i32,

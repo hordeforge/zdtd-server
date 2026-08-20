@@ -427,6 +427,10 @@ pub const World = struct {
     heightmap: ?dtm.Heightmap = null,
     prefabs: ?prefabs_mod.Index = null,
     water: ?water_mod.Sources = null,
+    /// Bounded water-leveling queue: block edits (dig to air / place water)
+    /// enqueue here, and `levelWaterTick` pours connected basins on the tick
+    /// (GAP "Water flow / physics", PARTIAL).
+    leveler: water_mod.Leveler = .{},
     biomes: ?biomes_mod.BiomeMap = null,
     /// biomes.xml layer stacks (AssignIds-resolved). Empty until Game loads config.
     biome_layers_table: biome_layers.Table = .{},
@@ -765,6 +769,7 @@ pub const World = struct {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
         try c.setBlock(self.allocator, t.lx, y, t.lz, id);
+        self.levelerPushIfWaterEdit(x, y, z, id);
     }
 
     /// World-space full BlockValue.rawData write (type low 16 + rotation/meta
@@ -775,6 +780,15 @@ pub const World = struct {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
         try c.setBlockRaw(self.allocator, t.lx, y, t.lz, raw);
+        self.levelerPushIfWaterEdit(x, y, z, @truncate(raw));
+    }
+
+    /// Queue an edit that opened air or placed water for the leveling pass.
+    /// Solids never pour (a wall placed next to water holds), so only air and
+    /// water enqueue; the pour itself rejects cells with no water nearby.
+    fn levelerPushIfWaterEdit(self: *World, x: i32, y: i32, z: i32, id: u16) void {
+        const t = &self.terrain_ids;
+        if (id == t.air or id == t.water) self.leveler.push(x, y, z);
     }
 
     /// World-space raw+texture set (POI reset re-paint path): keeps the baked
@@ -808,6 +822,87 @@ pub const World = struct {
     pub fn isSolidWorld(self: *World, x: i32, y: i32, z: i32) !bool {
         const id = try self.blockWorld(x, y, z);
         return id != self.terrain_ids.air and id != self.terrain_ids.water;
+    }
+
+    /// Bounded water leveling (GAP "Water flow / physics", PARTIAL): drain up
+    /// to `edits` queued block edits; each pours up to `spread` cells of water
+    /// into the connected open basin up to the adjacent water column's surface
+    /// (the client-visible "dig beside a lake and the hole fills" behavior).
+    /// The stock sim is a jobified mass-flow engine (7dtd-research
+    /// light-mesh-water.md §4); this approximation has no per-cell levels,
+    /// flow directions or evaporation, only pours (never drains), and placed
+    /// water does not cascade. Returns cells filled. Runs after sim edits
+    /// each tick (Game.step).
+    pub fn levelWaterTick(self: *World, edits: usize, spread: usize) u32 {
+        const water_id = self.terrain_ids.water;
+        var filled: u32 = 0;
+        var done: usize = 0;
+        while (done < edits) : (done += 1) {
+            const e = self.leveler.pop() orelse break;
+            filled += self.pourAt(e.x, e.y, e.z, water_id, spread);
+        }
+        return filled;
+    }
+
+    /// Top cell of the contiguous water column containing (x, y, z), or -1
+    /// when that cell is not water (walk up through water to its surface).
+    fn waterTopAt(self: *World, x: i32, y: i32, z: i32, water_id: u16) i32 {
+        if (self.blockWorld(x, y, z) catch 0 != water_id) return -1;
+        var top: i32 = y;
+        while (top + 1 < y_dim) : (top += 1) {
+            if (self.blockWorld(x, top + 1, z) catch 0 != water_id) break;
+        }
+        return top;
+    }
+
+    /// One edit: find the water surface from the edit cell and its 5
+    /// neighbors, then flood-fill the connected air basin up to that surface.
+    fn pourAt(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize) u32 {
+        // Source columns: the edit cell itself (placed water), its 4 side
+        // neighbors, and the cell above (dug under a pool). The surface is
+        // the top of any adjacent water column; -1 = no water nearby.
+        var surface: i32 = -1;
+        surface = @max(surface, self.waterTopAt(ex, ey, ez, water_id));
+        inline for ([_][2]i32{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } }) |d| {
+            surface = @max(surface, self.waterTopAt(ex + d[0], ey, ez + d[1], water_id));
+        }
+        if (ey + 1 < y_dim) surface = @max(surface, self.waterTopAt(ex, ey + 1, ez, water_id));
+        if (surface < 0) return 0;
+
+        // BFS through air cells at y <= surface. Water cells are already full
+        // and terminate the branch; the fill budget doubles as the loop bound
+        // (every visited air cell fills), so no visited set is needed.
+        const air_id = self.terrain_ids.air;
+        // Placed water does not cascade: without a mass model, a bucket pour
+        // would flood every connected flat cell (a floating puddle), which is
+        // not stock. Only an edit that OPENED air next to an existing water
+        // column pours (digging beside a lake). Documented in GAP_ANALYSIS.
+        if (self.blockWorld(ex, ey, ez) catch 0 == water_id) return 0;
+        var stack: [256]water_mod.Cell = undefined;
+        var sp: usize = 0;
+        stack[sp] = .{ .x = ex, .y = ey, .z = ez };
+        sp = 1;
+        var filled: u32 = 0;
+        while (sp > 0 and filled < spread) {
+            sp -= 1;
+            const c = stack[sp];
+            if (c.y < 0 or c.y >= y_dim) continue;
+            if (c.y > surface) continue;
+            if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue; // water or solid: stop
+            const t = worldToChunk(c.x, c.z);
+            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            filled += 1;
+            if (sp + 6 <= stack.len) {
+                stack[sp] = .{ .x = c.x + 1, .y = c.y, .z = c.z };
+                stack[sp + 1] = .{ .x = c.x - 1, .y = c.y, .z = c.z };
+                stack[sp + 2] = .{ .x = c.x, .y = c.y, .z = c.z + 1 };
+                stack[sp + 3] = .{ .x = c.x, .y = c.y, .z = c.z - 1 };
+                stack[sp + 4] = .{ .x = c.x, .y = c.y + 1, .z = c.z };
+                stack[sp + 5] = .{ .x = c.x, .y = c.y - 1, .z = c.z };
+                sp += 6;
+            }
+        }
+        return filled;
     }
 
     /// Feet Y a walking body can occupy at world XZ near `from_y` (module
@@ -1570,4 +1665,105 @@ test "procBiomeAt follows the surface fill field deterministically" {
         w.biome_layers_table.biomeIdAt(w.worldgen.?.biomeAt(8, 8)),
         w.procBiomeAt(0, 0),
     );
+}
+
+/// Carve one column (world x, z=0) to air from `lo`..`hi` and return the chunk
+/// plane write for the water tests (the flat default world pre-fills terrain
+/// up to its surface, so basins must be carved before pouring).
+fn carveAirColumn(w: *World, x: i32, lo: i32, hi: i32) !void {
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = lo;
+    while (y <= hi) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, x, y, 0, block_air);
+    }
+}
+
+test "water leveling: digging beside a lake pours the connected basin to its surface" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    // Flat default world (terrain to its surface ~63). Carve a lake column at
+    // x=0 (water 51..62, surface 62) and a basin x=1..7 (air 51..62); x=8
+    // stays terrain as the wall. The carve bypasses the edit wrapper, so only
+    // the dig below enqueues.
+    carveAirColumn(&w, 0, 51, 62) catch return;
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = 51;
+    while (y <= 62) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, 0, y, 0, block_water);
+    }
+    for (1..8) |x| try carveAirColumn(&w, @intCast(x), 51, 62);
+    // Dig the cell right beside the lake (x=1, y=51): its neighbor (0,51) is
+    // water with surface 62, so the basin x=1..7, y=51..62 pours (7 x 12).
+    try w.setBlockWorld(1, 51, 0, block_air);
+    try std.testing.expectEqual(@as(u32, 84), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(block_water, try w.blockWorld(1, 51, 0));
+    try std.testing.expectEqual(block_water, try w.blockWorld(3, 55, 0));
+    try std.testing.expectEqual(block_water, try w.blockWorld(7, 62, 0));
+    // Above the surface cell (63) the flat terrain holds; never water.
+    try std.testing.expect((try w.blockWorld(7, 63, 0)) != block_water);
+    try std.testing.expect((try w.blockWorld(4, 63, 0)) != block_water);
+}
+
+test "water leveling: a deep dig not connected to water stays dry" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    carveAirColumn(&w, 0, 51, 62) catch return;
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = 51;
+    while (y <= 62) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, 0, y, 0, block_water);
+    }
+    // One cell dug at y=45, sealed above by the flat terrain: no water
+    // adjacent at the edit, so nothing pours.
+    try w.setBlockWorld(1, 45, 0, block_air);
+    try std.testing.expectEqual(@as(u32, 0), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(block_air, try w.blockWorld(1, 45, 0));
+}
+
+test "water leveling: placed water stays put - no cascade without a mass model" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    // A 1-wide shaft at x=5 carved 51..62; x=4 and x=6 stay terrain walls.
+    try carveAirColumn(&w, 5, 51, 62);
+    // Placing water (bucket) does not cascade: the stock mass-flow sim is not
+    // ported, and without volume a cascade would flood every connected flat
+    // cell. The block sits where placed; digging beside it later pours.
+    try w.setBlockWorld(5, 62, 0, block_water);
+    try std.testing.expectEqual(@as(u32, 0), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(block_water, try w.blockWorld(5, 62, 0));
+    try std.testing.expect((try w.blockWorld(5, 61, 0)) != block_water);
+}
+
+test "water leveling: the spread cap bounds one pour" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    carveAirColumn(&w, 0, 51, 62) catch return;
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = 51;
+    while (y <= 62) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, 0, y, 0, block_water);
+    }
+    for (1..8) |x| try carveAirColumn(&w, @intCast(x), 51, 62);
+    try w.setBlockWorld(1, 51, 0, block_air);
+    // Cap 2: only two cells pour this tick; the rest stay air (a further edit
+    // would re-seed, but the queue is drained here).
+    try std.testing.expectEqual(@as(u32, 2), w.levelWaterTick(4, 2));
+    try std.testing.expectEqual(block_water, try w.blockWorld(1, 51, 0));
+    try std.testing.expectEqual(block_air, try w.blockWorld(1, 53, 0));
 }

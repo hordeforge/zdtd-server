@@ -333,6 +333,17 @@ pub const Director = struct {
     bloodmoon_hp_mult: f32 = 1.5,
 };
 
+/// Water leveling budgets (zdtd policy, GAP "Water flow / physics" PARTIAL):
+/// the stock sim is a jobified mass-flow engine (light-mesh-water.md §4); the
+/// leveling approximation pours water into basins opened by block edits, and
+/// these bound its per-tick cost so one player digging cannot stall the tick.
+pub const Water = struct {
+    /// Pending block edits drained per tick (each may pour).
+    edits_per_tick: u8 = 4,
+    /// Max cells one pour may fill (fills, not traversals).
+    spread_cap: u16 = 128,
+};
+
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -344,6 +355,7 @@ pub const Rules = struct {
     world: WorldGroup = .{},
     vehicle: Vehicle = .{},
     director: Director = .{},
+    water: Water = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -472,6 +484,12 @@ pub const SystemsOverlay = struct {
     commands: ?bool = null,
 };
 
+/// Water leveling overlay: `[rules.water]` binds these (binder-reflected).
+pub const WaterOverlay = struct {
+    edits_per_tick: ?u8 = null,
+    spread_cap: ?u16 = null,
+};
+
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
@@ -485,6 +503,7 @@ pub const RulesOverlay = struct {
     world: WorldGroupOverlay = .{},
     vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
+    water: WaterOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.

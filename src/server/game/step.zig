@@ -94,6 +94,13 @@ pub fn step(self: *Game) !void {
         const r = systems.tickAll(&self.sim, dt);
         self.harness.counters.add(.path_replans, r.path_replans);
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
+        // Water leveling: pour basins opened by this tick's block edits (dig
+        // beside a lake, placed water). Budgeted per tick; the fills mark
+        // chunks dirty and the chunk stream broadcasts them.
+        _ = self.world.levelWaterTick(
+            self.sim.rules.water.edits_per_tick,
+            self.sim.rules.water.spread_cap,
+        );
         self.tickSurvival(dt);
         self.tickBots(dt);
         {
