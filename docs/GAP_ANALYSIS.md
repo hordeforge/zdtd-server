@@ -2260,8 +2260,9 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig:6670-6680`
 
 - **recipes.xml load** `PARTIAL`
-  630 recipes with up to 5 ingredients parse fine. Missing: tags (631 uses),
-  craft_tool (53), material_based (34), use_ingredient_modifier (6),
+  630 recipes with up to 5 ingredients parse fine. craft_tool (53) and
+  material_based (34) now parse (2026-08-21); missing: tags (631 uses),
+  use_ingredient_modifier (6),
   learn_exp_gain, craft_exp_gain (17). `craft_area` is parsed into RecipeDef and
   has zero consumers, so a workbench-only recipe can be crafted anywhere. Default
   craft_time is 1.0 where stock leaves `Recipe::craftingTime = -1` (a sentinel) for
@@ -2271,11 +2272,13 @@ unvalidated, and durability, mods and repair do not exist.
 
 - **Server craft execution** `PARTIAL`
   `tryCraftRecipe` aggregates ingredients, snapshots the bag, consumes, deposits
-  and rolls back on failure. But it is instantaneous (craft_time never applied),
-  ignores craft_area and craft_tool, and does not check the recipe is unlocked. The
-  33 zero-ingredient material_based scrap recipes survive the loader, so crafting
-  through this path mints items from nothing.
-  *Anchors:* `src/server/game.zig:6688-6752`, `src/assets/recipes.zig:181-184`
+  and rolls back on failure. 2026-08-21: the general path now rejects
+  workstation-area, tool-bound and material_based recipes (generalCraftAllowed -
+  closing the zero-ingredient mint), and the workstation queue path rejects
+  material_based too; craft_tool is parsed from recipes.xml. Remaining: craft_time
+  is never applied server-side (the client drives its own progress), and the
+  recipe-unlock check needs the progression/magazine system.
+  *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`
 
 - **NetPackageInventoryTransactionRequest / Response wire format** `PARTIAL`
   zdtd reuses the stock package **name** with a homegrown 11-byte body

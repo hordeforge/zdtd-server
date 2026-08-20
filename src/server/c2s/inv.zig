@@ -396,8 +396,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // its craft_area has to be in the block's
                         // CraftingAreaRecipes (or the block name when no list
                         // is declared), so a modified client cannot queue a
-                        // forge output on a campfire.
+                        // forge output on a campfire. Material-based recipes
+                        // (the material system, 34 stock) have no queue here.
                         if (rd.craft_area.len > 0 and !self.blocks.allowsCraftArea(@intCast(ws.block_id), rd.craft_area)) {
+                            dst.* = .{};
+                            continue;
+                        }
+                        if (rd.material_based) {
                             dst.* = .{};
                             continue;
                         }

@@ -118,9 +118,20 @@ pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bo
     return tryCraftRecipe(self, peer_slot, self.recipes.defs[recipe_index], times);
 }
 
+/// The general inventory craft path only handles recipes with no
+/// workstation/tool/material requirements - the stock player inventory
+/// never offers those, and accepting them here would bypass the workstation
+/// gate (craft_area/craft_tool) or mint items from nothing (zero-ingredient
+/// material_based recipes). GAP "Server craft execution". The workstation
+/// craft path (inv.zig) enforces craft_area against the station block.
+pub fn generalCraftAllowed(recipe: assets_recipes.RecipeDef) bool {
+    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based;
+}
+
 fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].inventory) return false;
+    if (!generalCraftAllowed(recipe)) return false;
     var n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
     // Wasm-first (AGENTS rule 29): crafting passes the on_craft_request
     // verdict (<0 deny, 0 keep, >0 caps the batch). The recipe name is the
@@ -277,4 +288,15 @@ pub fn tickBlockRadiusEffects(self: *Game) void {
             }
         }
     }
+}
+
+test "general craft path rejects workstation/tool/material recipes" {
+    // GAP "Server craft execution": the inventory craft path must not accept
+    // forge/campfire-area recipes (they need a station), tool-bound recipes,
+    // or zero-ingredient material_based recipes that would mint items.
+    const base = assets_recipes.RecipeDef{};
+    try std.testing.expect(generalCraftAllowed(base));
+    try std.testing.expect(!generalCraftAllowed(.{ .craft_area = "forge" }));
+    try std.testing.expect(!generalCraftAllowed(.{ .craft_tool = "toolForgeHammer" }));
+    try std.testing.expect(!generalCraftAllowed(.{ .material_based = true }));
 }

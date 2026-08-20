@@ -29,6 +29,15 @@ pub const RecipeDef = struct {
     /// step, not something the dedicated server IL runs — items.xml ships zero
     /// CraftComponentExp rows to derive from even if it did).
     craft_exp_gain: i32 = -1,
+    /// recipes.xml craft_tool: the tool name a recipe requires (53 stock
+    /// recipes). Empty = any. The general inventory craft path rejects
+    /// tool-bound recipes (they need the workstation/tool context).
+    craft_tool: []const u8 = "",
+    /// recipes.xml material_based="true": the recipe uses the material
+    /// system (34 stock); the general craft path rejects them (materials are
+    /// not a stock inventory ingredient, so crafting from nothing would mint
+    /// items - GAP "Server craft execution").
+    material_based: bool = false,
     ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
     ingredient_n: u8 = 0,
 };
@@ -171,6 +180,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         }
         if (xml.attr(clean, tag, "craft_area")) |ca| {
             def.craft_area = try arena.dupe(u8, ca);
+        }
+        if (xml.attr(clean, tag, "craft_tool")) |ct| {
+            def.craft_tool = try arena.dupe(u8, ct);
+        }
+        if (xml.attr(clean, tag, "material_based")) |mb| {
+            def.material_based = std.mem.eql(u8, mb, "true") or std.mem.eql(u8, mb, "True");
         }
         if (xml.attr(clean, tag, "craft_exp_gain")) |ceg| {
             def.craft_exp_gain = xml.parseI32Prefix(ceg) orelse -1;
