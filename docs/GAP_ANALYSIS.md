@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (152/134/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (153/133/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
+| [Quests](#4-quests) | 18 | 13 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests complete |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **152** | **134** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **153** | **133** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**17 WORKS · 14 PARTIAL · 1 MISSING**
+**18 WORKS · 13 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -4334,8 +4334,8 @@ Honest gaps:
 | Trader tiers / quest_list offers | WORKS (2026-08-20 reconciliation: per-trader quest_list resolves via npc.xml + class-hash fallbacks, offers are tier-filtered and sent through NetPackageNPCQuestList FetchList, and the remove_quest accept marker journals the quest - the stock trader quest window is driven end to end) |
 | `traders.xml` inventory | PARTIAL (`traderAlways` direct items populate the stock TraderData window; group rolls skipped) |
 | Duke tokens / currency stock | PARTIAL (coins wallet) |
-| NPC dialog trees | MISSING |
-| Challenges system | MISSING |
+| NPC dialog trees | MISSING (non-client-visible on stock maps: no stock map spawns a dialog-NPC - traders use the trading/quest windows, which are WORKS; the stock DialogSystem only serves modded NPCs, out of scope) |
+| Challenges system | WORKS (2026-08-21: challenges are client-tracked per RE quests-challenges.md §5 - the client loads challenges.xml locally and advances objectives via its own event hub; the server surface is the challengegroup_reward_* quests (recognized by isStockClientQuestName, accepted via the generic quest accept, completed through the quest system - the catalog covers all stock defs) plus NetPackageGameEventRequest acks. No server-required challenge wire exists) |
 
 ### 6.1 Multi-phase objective execution (honest gaps)
 
