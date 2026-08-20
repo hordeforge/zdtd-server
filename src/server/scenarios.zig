@@ -5491,6 +5491,46 @@ test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module"
     std.debug.print("PASS pvp-verdict: player damage denied, zombie damage kept\n", .{});
 }
 
+test "scenario player dig routes the on_block_damage verdict (plugin_rules doubles)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const pa = g.sim.playerByPeer(c.slot).?;
+    const ap = g.sim.transform[pa];
+    const bx: i32 = @intFromFloat(ap.x + 1);
+    const bz: i32 = @intFromFloat(ap.z);
+    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    try g.world.setBlockWorld(bx, by, bz, world_store.block_stone);
+
+    // Control: a dig claiming 10 damage on a fresh block applies exactly 10.
+    var sb: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const d1 = try packages.buildSetBlockBodyDamage(&sb, bx, by, bz, world_store.block_stone, 10, c.entity_id, 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", d1));
+    try std.testing.expectEqual(@as(u16, 10), g.getBlockHp(bx, by, bz));
+
+    // Load plugin_rules (on_block_damage returns 200 = scale by percent).
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"assets/fixtures/plugin_rules.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+    // A further dig claiming +10 now passes the verdict: 10 * 200% = +20.
+    const d2 = try packages.buildSetBlockBodyDamage(&sb, bx, by, bz, world_store.block_stone, 20, c.entity_id, 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", d2));
+    try std.testing.expectEqual(@as(u16, 30), g.getBlockHp(bx, by, bz));
+    std.debug.print("PASS dig-verdict: player dig scales through on_block_damage (10 -> 30)\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

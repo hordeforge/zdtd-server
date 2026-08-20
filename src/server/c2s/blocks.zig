@@ -114,6 +114,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     out_dmg = 0;
                     self.clearBlockHp(b.x, b.y, b.z);
                 } else {
+                    // Wasm-first (AGENTS rule 29): player dig is a block-damage
+                    // path, so the claimed delta passes the on_block_damage
+                    // verdict like every other path (addBlockDamage). Plugins
+                    // may deny (no progress) or scale the delta.
+                    if (abs > cur_dmg) {
+                        const delta = abs - cur_dmg;
+                        const sv = self.plugins.blockDamage(b.x, b.y, b.z, @intCast(delta));
+                        const v = if (sv != 0) sv else self.wasm_plugins.blockDamage(b.x, b.y, b.z, @intCast(delta));
+                        if (v < 0) {
+                            abs = cur_dmg;
+                        } else if (v > 0) {
+                            const add = @as(u32, delta) * @as(u32, @intCast(v)) / 100;
+                            abs = @intCast(@min(@as(u32, cur_dmg) + add, 65535));
+                        }
+                    }
                     place_id = if (cur_id != 0) cur_id else b.block_id;
                     out_dmg = abs;
                     self.setBlockHp(b.x, b.y, b.z, abs);

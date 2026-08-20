@@ -152,7 +152,7 @@ behavior, not server.
 | Chat filtering / commands / reactions | **Plugin already** | `on_chat` (rewrite/suppress, `c2s/misc.zig:42`) |
 | Kill / death / quest events | **Plugin already** | `on_entity_killed` / `on_player_death` / `on_quest_complete` verdicts; `mods/zdtd_killfeed` is the reference |
 | Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
-| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`) |
+| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 — every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
 | Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |

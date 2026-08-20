@@ -164,3 +164,28 @@ already over budget.
 6. Land the top-3 candidates (`on_loot_roll`, `on_director_spawn`,
    `on_quest_accept` / `on_craft_request`) behind the existing verdict
    convention and budget machinery.
+
+## Pass 2026-08-20 (plugin-policy verdict-coverage audit)
+
+Reviewed every hook against its real server paths per AGENTS rule 29
+("everything technically expressible over the boundary ships as a plugin;
+prove the native exception"). Verdict-coverage results:
+
+- on_player_death / on_entity_killed: fire on BOTH ECS death paths
+  (applyDeferredDamage and the immediate damageFrom) so plugins observe
+  every kill/death, not just AI-deferred ones.
+- on_block_damage: addBlockDamage is the choke point for zombie chew and
+  admin edits; **player dig previously bypassed it** (c2s/blocks.zig wrote
+  block HP directly from the wire delta). Fixed: the claimed dig delta now
+  passes the verdict (deny = no progress, scale = percent), matching every
+  other block-damage path. Scenario `dig-verdict` proves it: control dig
+  10, then with plugin_rules (200%) a +10 delta lands as +20 (hp 30).
+- on_player_damage: C2S + bot shoot (the two player-directed paths); future
+  player-damage mechanisms must route through it.
+- on_quest_complete / on_chat / on_player_login / on_player_join /
+  on_player_leave / on_admin_command: all wired to their real paths.
+
+Remaining boundary extensions (documented in PLUGIN_DEV "not yet" rows):
+guard/anti-cheat counters, trader/vehicle event hooks, and the review's own
+top-3 candidates (on_loot_roll, on_director_spawn, on_quest_accept /
+on_craft_request).
