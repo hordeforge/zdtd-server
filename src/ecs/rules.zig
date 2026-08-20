@@ -110,6 +110,14 @@ pub const Ai = struct {
     /// Noise events the consume pass drains per tick (bursts beyond the cap
     /// are dropped; the ring holds one tick's worth).
     noise_events_per_tick: u8 = 2,
+    /// Demolition explosion effect floors (RE entity-ai.md EntityZombieCop:
+    /// the stock values live in the class's ExplosionData value string, which
+    /// is data-driven and not parsed - these floors bound the AoE). Radius in
+    /// blocks, block damage per cell (vs maxDamageForBlock), entity damage at
+    /// the epicentre (linear falloff).
+    explosion_radius: f32 = 4.0,
+    explosion_block_damage: u16 = 1000,
+    explosion_entity_damage: f32 = 100.0,
     /// Move-body half-width, blocks (stock CharacterController radius ~0.35):
     /// the AI collide-and-slide keeps this much of the body out of solid
     /// cells when walking. Policy floor; entityclasses collider data is not
@@ -397,6 +405,9 @@ pub const AiOverlay = struct {
     crouch_sleeper_detect_range: ?f32 = null,
     combat_noise_radius: ?f32 = null,
     noise_events_per_tick: ?u8 = null,
+    explosion_radius: ?f32 = null,
+    explosion_block_damage: ?u16 = null,
+    explosion_entity_damage: ?f32 = null,
     body_radius: ?f32 = null,
     body_height: ?f32 = null,
     step_height: ?f32 = null,

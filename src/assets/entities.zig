@@ -42,6 +42,13 @@ pub const EntityDef = struct {
     /// 180 = only excludes targets strictly behind; the sense gate halves it
     /// like EntityAlive.IsInFrontOfMe). 0 = unset → Rules floor.
     view_angle_deg: f32 = 0,
+    /// entityclasses ExplodeHealthThreshold (Demolition): the cop primes when
+    /// health drops below max*threshold. 0 = no explosion (the class has no
+    /// ExplosionData). RE entity-ai.md EntityZombieCop.
+    explode_threshold: f32 = 0,
+    /// entityclasses ExplodeDelay seconds (Demolition prime-to-explode
+    /// delay). 0.5 stock default when unset.
+    explode_delay_s: f32 = 0.5,
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -376,6 +383,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (f > 0 and f <= 360) view_angle = f;
             }
         }
+        // Demolition (RE entity-ai.md EntityZombieCop): the cop primes when
+        // health drops below max*ExplodeHealthThreshold and explodes after
+        // ExplodeDelay. Only classes carrying an ExplosionData property
+        // explode (threshold stays 0 otherwise - fail closed). The
+        // ExplosionData value string (radius/damages) is data-driven and not
+        // parsed; rules floors cover the effect.
+        var explode_threshold: f32 = 0;
+        var explode_delay: f32 = 0.5;
+        const has_explosion = resolveProp(&classes, name, "ExplosionData", 0) != null;
+        if (has_explosion) {
+            if (resolveProp(&classes, name, "ExplodeHealthThreshold", 0)) |t| {
+                if (xml.parseF32(t)) |f| {
+                    if (f > 0 and f <= 1) explode_threshold = f;
+                }
+            }
+            if (resolveProp(&classes, name, "ExplodeDelay", 0)) |d| {
+                if (xml.parseF32(d)) |f| {
+                    if (f > 0 and f <= 60) explode_delay = f;
+                }
+            }
+        }
         var time_stay: f32 = 0;
         if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
             if (xml.parseF32(ts)) |f| {
@@ -413,6 +441,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .time_stay = time_stay,
             .sight_range = sight,
             .view_angle_deg = view_angle,
+            .explode_threshold = explode_threshold,
+            .explode_delay_s = explode_delay,
             .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });

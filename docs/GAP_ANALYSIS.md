@@ -4072,7 +4072,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 |---|---|
 | Entity class system (`entityclasses.xml`) | HAVE (`assets/entities.zig`) |
 | Archetypes / gamestages / spawning.xml | PARTIAL (`assets/gamestages.zig` + spawning.xml `<biome>`/`<entityspawner>`; archetypes MISSING) |
-| Animals / special infected / bosses | PARTIAL (animals spawner + cap; bosses MISSING) |
+| Animals / special infected / bosses | PARTIAL (animals spawner + cap; Demolition zombieCop prime-and-explode WORKS 2026-08-20 - primes below max*ExplodeHealthThreshold, two-countdown blast, entity + block AoE via the addBlockDamage choke point, RE entity-ai.md EntityZombieCop; ExplosionData values data-driven from entityclasses.xml, rules floors bound the AoE. Missing: death-time explosion (not IL-verified), other special infected variants (crawler/spider/fat) behaviors) |
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
 | Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |

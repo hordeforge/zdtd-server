@@ -330,3 +330,12 @@ A configured `GameName`/`GameWorld` that resolves to a non-existent world dir
 aborts startup. This prevents a misspelled or stale map setting from silently
 starting a new flat world. Omit the configured stock world to intentionally use
 the default flat world.
+
+`[rules.ai]` Demolition explosion effect floors (the stock ExplosionData value
+string is data-driven from entityclasses.xml and not parsed):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `explosion_radius` | 4.0 | Demolition blast radius, blocks (linear falloff) |
+| `explosion_block_damage` | 1000 | Demolition block damage per cell at the epicentre (vs `maxDamageForBlock`) |
+| `explosion_entity_damage` | 100.0 | Demolition entity damage at the epicentre (linear falloff) |

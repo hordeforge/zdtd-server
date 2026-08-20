@@ -84,6 +84,10 @@ pub const ClassId = struct {
     /// entityclasses MaxViewAngle in degrees, full cone; 0 = class_table[id]
     /// then the Rules cone floor (systems.viewHalfDeg).
     view_angle_deg: f32 = 0,
+    /// Demolition (RE entity-ai.md): prime threshold (0 = no explosion) and
+    /// explode delay seconds; 0 = class_table[id].
+    explode_threshold: f32 = 0,
+    explode_delay_s: f32 = 0,
     /// IsEnemyEntity: false on passive wildlife, so only predators chase.
     is_enemy: bool = true,
     /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
@@ -209,6 +213,12 @@ pub const ZombieAi = struct {
     /// entity-movement.md): the body falls under gravity when its feet cell is
     /// air, and lands on the first solid cell below. 0 when grounded.
     vy: f32 = 0,
+    /// Demolition (zombieCop) prime state (RE entity-ai.md EntityZombieCop):
+    /// primed when health drops below max*explode_threshold; the two
+    /// countdowns then explode (a request ring drains the Game's AoE).
+    primed: bool = false,
+    prime_ticks: i32 = 0,
+    explode_ticks: i32 = 0,
     /// EntityAlive.revengeTarget net id (-1 = none), set by World.damageFrom.
     /// EAISetAsTargetIfHurt (asm.il:435831) promotes it to the attack target.
     revenge_target: i32 = -1,
@@ -764,6 +774,17 @@ pub const FallingCell = struct {
     y: i32,
     z: i32,
     raw: u32,
+};
+
+/// One pending Demolition explosion (RE entity-ai.md EntityZombieCop): the
+/// sim counts down and pushes the request; the Game drains it (single
+/// thread) and applies the entity + block AoE. Cap bounds the ring so a
+/// pack of primed cops cannot stall the tick.
+pub const explode_cap: usize = 8;
+
+pub const ExplodeRequest = struct {
+    /// Entity slot (u16: components.zig cannot see world.zig's Slot type).
+    slot: u16,
 };
 
 /// Group cap for one falling-blocks entity. Stock `GroupBounds.IsWithinSize`

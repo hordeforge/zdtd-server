@@ -12,6 +12,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
+const packages = @import("../../wire/packages.zig");
 
 const max_land_claims = game_mod.max_land_claims;
 
@@ -202,6 +203,83 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
         self.block_hp_key[i] = self.block_hp_key[self.block_hp_n];
         self.block_hp[i] = self.block_hp[self.block_hp_n];
         return;
+    }
+}
+
+/// Drain this tick's Demolition explode requests (RE entity-ai.md
+/// EntityZombieCop): the cop dies with the blast (SetDead, no loot), nearby
+/// entities take radius-falloff damage, and blocks in the sphere take
+/// explosion_block_damage through the single addBlockDamage choke point
+/// (breaking when max hp is exceeded). Consume-owns-drain, like the noise
+/// ring. Runs after the sim AI pass each tick (Game.step).
+pub fn drainExplosions(self: *Game) void {
+    const ecs_components = @import("../../ecs/components.zig");
+    const n = @min(self.sim.explode_n, ecs_components.explode_cap);
+    self.sim.explode_n = 0;
+    const radius = self.sim.rules.ai.explosion_radius;
+    const ent_dmg = self.sim.rules.ai.explosion_entity_damage;
+    const block_dmg = self.sim.rules.ai.explosion_block_damage;
+    const r2 = radius * radius;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const s: u16 = self.sim.explode_reqs[i].slot; // Slot = u16
+        if (!self.sim.alive[s] or !self.sim.mask[s].transform or !self.sim.mask[s].network_id) continue;
+        const ex = self.sim.transform[s];
+        const nid = self.sim.network_id[s].id;
+        // The cop dies with the blast (RE: SetDead after ExplosionServer).
+        self.sim.destroy(s);
+        // Entity AoE: linear falloff from the epicentre (players, zombies,
+        // animals; falling blocks and vehicles are not damaged).
+        const kinds = [_]ecs_components.Kind{ .player, .zombie, .animal };
+        for (kinds) |kind| {
+            for (self.sim.kind_groups.slice(kind)) |t| {
+                if (!self.sim.alive[t] or !self.sim.mask[t].transform or !self.sim.mask[t].network_id) continue;
+                const dx = self.sim.transform[t].x - ex.x;
+                const dz = self.sim.transform[t].z - ex.z;
+                const dy = self.sim.transform[t].y - ex.y;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 > r2) continue;
+                const falloff: f32 = 1.0 - @sqrt(d2) / radius;
+                _ = self.sim.damageFrom(self.sim.network_id[t].id, ent_dmg * falloff, nid);
+            }
+        }
+        // Block AoE: blocks in the sphere (bounded by the radius) take
+        // falloff block damage through the choke point; break like the chew.
+        const ir: i32 = @intFromFloat(@ceil(radius));
+        const bx: i32 = @intFromFloat(@floor(ex.x));
+        const by: i32 = @intFromFloat(@floor(ex.y));
+        const bz: i32 = @intFromFloat(@floor(ex.z));
+        var dy2: i32 = -ir;
+        while (dy2 <= ir) : (dy2 += 1) {
+            var dz2: i32 = -ir;
+            while (dz2 <= ir) : (dz2 += 1) {
+                var dx2: i32 = -ir;
+                while (dx2 <= ir) : (dx2 += 1) {
+                    const d2f: f32 = @floatFromInt(dx2 * dx2 + dy2 * dy2 + dz2 * dz2);
+                    if (d2f > r2) continue;
+                    const wx = bx + dx2;
+                    const wy = by + dy2;
+                    const wz = bz + dz2;
+                    const id = self.blockIdAtWorld(wx, wy, wz);
+                    if (id == 0) continue;
+                    const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
+                    const dmg: u16 = @intFromFloat(@as(f32, @floatFromInt(block_dmg)) * falloff);
+                    if (dmg == 0) continue;
+                    const max_hp = self.maxDamageForBlock(id);
+                    const total = self.addBlockDamage(wx, wy, wz, dmg);
+                    if (total >= max_hp) {
+                        self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
+                        self.clearBlockHp(wx, wy, wz);
+                        self.clearBlockRaw(wx, wy, wz);
+                        if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
+                            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+                        } else |_| {}
+                    }
+                }
+            }
+        }
+        // Combat noise so nearby zombies react to the blast.
+        self.sim.pushNoise(ex.x, ex.y, ex.z, self.sim.rules.ai.combat_noise_radius);
     }
 }
 

@@ -105,6 +105,9 @@ pub fn step(self: *Game) !void {
         // under gravity, die on landing (RE entity-ai.md landing: no
         // re-placement).
         systems.systemFallingBlocks(&self.sim, dt);
+        // Demolition explosions (RE entity-ai.md EntityZombieCop): the sim
+        // countdowns pushed requests; apply the entity + block AoE here.
+        self.drainExplosions();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

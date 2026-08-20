@@ -148,6 +148,10 @@ pub const EntityClass = struct {
     /// entityclasses MaxViewAngle in degrees, full cone (stock default 180);
     /// the sense gate halves it. 0 = use the Rules cone floor.
     view_angle_deg: f32 = 0,
+    /// entityclasses ExplodeHealthThreshold (Demolition prime); 0 = no
+    /// explosion. ExplodeDelay seconds (0.5 default).
+    explode_threshold: f32 = 0,
+    explode_delay_s: f32 = 0.5,
     /// IsEnemyEntity (wolf/bear/coyote hunt; stag/rabbit flee). Defaults true
     /// for zombies; passive animals carry false.
     is_enemy: bool = true,
@@ -173,6 +177,11 @@ pub const World = struct {
     /// budget bound the pass so a busy fight cannot stall the tick.
     noise_events: [c.noise_events_cap]c.NoiseEvent = undefined,
     noise_n: usize = 0,
+    /// Demolition explode requests (RE entity-ai.md): pushed by parallel AI
+    /// workers when a primed cop's countdown hits zero; the Game drains the
+    /// ring and applies entity + block AoE. Consume-owns-drain like noise.
+    explode_reqs: [c.explode_cap]c.ExplodeRequest = undefined,
+    explode_n: usize = 0,
     falling: [max_entities]c.FallingBlocks = [_]c.FallingBlocks{.{}} ** max_entities,
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
@@ -583,6 +592,14 @@ pub const World = struct {
         const n = @atomicRmw(usize, &self.noise_n, .Add, 1, .monotonic);
         if (n >= c.noise_events_cap) return;
         self.noise_events[n] = .{ .x = x, .y = y, .z = z, .radius = radius };
+    }
+
+    /// Push a Demolition explode request (RE entity-ai.md EntityZombieCop).
+    /// Parallel AI workers push; the Game drains in step (consume-owns-drain).
+    pub fn pushExplode(self: *World, slot: Slot) void {
+        const n = @atomicRmw(usize, &self.explode_n, .Add, 1, .monotonic);
+        if (n >= c.explode_cap) return;
+        self.explode_reqs[n] = .{ .slot = @intCast(slot) };
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or

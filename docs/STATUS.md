@@ -29,8 +29,10 @@ flow dig-leveling both shipped, total **142/140/47**. Then crouch stealth
 **142/141/46**. Then group AI (combat-noise alerts + sleeper wake) went
 MISSING -> PARTIAL, total **142/142/45**. Then falling blocks (collapse
 groups spawn EntityFallingBlock entities, fall + die on landing) went
-MISSING -> PARTIAL, total **142/143/44**. The
-dashboard (docs/provenance.html) is synced.
+MISSING -> PARTIAL, total **142/143/44**. Then the Demolition (zombieCop)
+prime-and-explode shipped (RE entity-ai.md EntityZombieCop; entity + block
+AoE), moving a bosses sub-item to WORKS inside the still-PARTIAL special
+infected row. The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -49,7 +51,7 @@ light-level leg stays RE-blocked, no server light channel)
 6. NPC dialog trees (MISSING)
 8. Challenges system (MISSING)
 9. Falling blocks (PARTIAL - collapse groups spawn EntityFallingBlock entities that fall and die on landing 2026-08-20; item-drop-on-land + single-block branch open)
-10. Bosses / special infected (PARTIAL)
+10. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; other special variants open)
 11. World borders / difficulty tiers (MISSING)
 12. Server-triggered sounds / music (MISSING)
 13. Quest reward choice / loot groups (MISSING)

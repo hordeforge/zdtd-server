@@ -1286,6 +1286,12 @@ pub const Game = struct {
         return game_world.clearBlockHp(self, x, y, z);
     }
 
+    /// Drain Demolition explode requests (entity + block AoE). Runs after the
+    /// sim AI pass each tick (Game.step).
+    pub fn drainExplosions(self: *Game) void {
+        return game_world.drainExplosions(self);
+    }
+
     pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
         return game_world.setBlockRaw(self, x, y, z, raw);
     }

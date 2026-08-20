@@ -1250,6 +1250,43 @@ const AiCtx = struct {
             }
             if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
 
+            // Demolition (RE entity-ai.md EntityZombieCop.OnUpdateEntity):
+            // when health drops below max*explode_threshold the cop primes,
+            // then ticks down explodeDelay*20; at zero it readies the blast
+            // ((explodeDelay/5)*1.5*20 ticks) and pushes an explode request
+            // the Game drains (entity + block AoE). Class data gates it: a
+            // class without ExplosionData never primes (threshold 0).
+            const ctd = ctx.w.class_table[ctx.w.class_id[s].id].explode_threshold;
+            const ptd = ctx.w.class_id[s].explode_threshold;
+            const threshold: f32 = if (ptd > 0) ptd else ctd;
+            if (threshold > 0 and ctx.w.mask[s].health) {
+                const health = ctx.w.health[s];
+                const delay: f32 = if (ctx.w.class_id[s].explode_delay_s > 0)
+                    ctx.w.class_id[s].explode_delay_s
+                else
+                    ctx.w.class_table[ctx.w.class_id[s].id].explode_delay_s;
+                if (ai.primed) {
+                    if (ai.prime_ticks > 0) {
+                        ai.prime_ticks -= 1;
+                        if (ai.prime_ticks == 0) {
+                            ai.explode_ticks = @intFromFloat(delay / 5.0 * 1.5 * 20.0);
+                        }
+                    }
+                    if (ai.explode_ticks > 0) {
+                        ai.explode_ticks -= 1;
+                        if (ai.explode_ticks == 0) {
+                            ctx.w.pushExplode(s);
+                            ai.explode_ticks = -1; // once per prime
+                        }
+                    }
+                } else if (health.max_hp > 0 and health.hp < health.max_hp * threshold and
+                    !ctx.w.mask[s].sleeper)
+                {
+                    ai.primed = true;
+                    ai.prime_ticks = @intFromFloat(delay * 20.0);
+                }
+            }
+
             // EAIRunawayFromEntity (AITask-2): passive animals scan for feared
             // classes (players, zombies, other animals) within fleeDistance on
             // a 0.5 s cadence; the runaway task then flees the nearest one.
@@ -4668,4 +4705,42 @@ test "falling blocks: spawn is capped at the group size and centered" {
     const id = w.spawnFallingBlocks(&cells).?;
     const s = w.slotOfNetId(id).?;
     try std.testing.expectEqual(@as(u8, c.falling_group_cap), w.falling[s].n);
+}
+
+test "demolition: primes at the health threshold, countdowns, then requests the explosion" {
+    // RE entity-ai.md EntityZombieCop.OnUpdateEntity: the cop primes when
+    // health drops below max*explode_threshold, counts down explodeDelay*20,
+    // readies the blast ((delay/5)*1.5*20) and pushes an explode request the
+    // Game drains. A class without ExplosionData never primes.
+    var w: World = .{ .rules = .{ .ai = .{ .explosion_radius = 4.0 } } };
+    defer w.deinit();
+    w.setClassDef(1, .{ .name = "zombieCop", .kind = .zombie, .hash = 7, .explode_threshold = 0.75, .explode_delay_s = 0.5 });
+    const z = w.spawnZombieClass(0, 70, 0, 40, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Full health: never primes.
+    for (0..5) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[s].primed);
+    // Damage below 75% (40 * 0.75 = 30): primes on the next AI tick.
+    w.health[s].hp = 29;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[s].primed);
+    try std.testing.expectEqual(@as(i32, 10), w.zombie_ai[s].prime_ticks); // 0.5 * 20
+    // Countdown: 10 ticks start + (0.5/5)*1.5*20 = 3 explode ticks.
+    var exploded = false;
+    for (0..30) |_| {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.explode_n > 0) {
+            exploded = true;
+            break;
+        }
+    }
+    try std.testing.expect(exploded);
+    // A plain zombie (no explosion data) never primes no matter how hurt.
+    var w2: World = .{};
+    defer w2.deinit();
+    const z2 = w2.spawnZombie(0, 70, 0, 40).?;
+    const s2 = w2.slotOfNetId(z2).?;
+    w2.health[s2].hp = 1;
+    for (0..3) |_| _ = systemZombieAi(&w2, 0.05);
+    try std.testing.expect(!w2.zombie_ai[s2].primed);
 }
