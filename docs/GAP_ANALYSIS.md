@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (134/142/53) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (135/141/53) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 9 | 14 | 3 | 26 | Horde runs dusk to dawn; stat 58 jittered horde day, clock calendar persists, IsBloodMoonDead bookkeeping lands |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 20 | 21 | 7 | 48 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 11 | 15 | 7 | 33 | Containers roll their own tables; items stack like stock; crafting instant and unvalidated |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 16 | 27 | 9 | 52 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **134** | **142** | **53** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **135** | **141** | **53** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -964,9 +964,10 @@ parsed, and quest offering is unwired.
   per-trader OverrideBuyMarkup wins) and by `SellMarkdown` (root 0.2,
   OverrideSellMarkdown wins); zdtd now applies those parsed multipliers, so the
   server charges what the client's `XUiM_Trader` displays on the buy side
-  (previously ~30x low). Residual: the `EconomicSellScale` (not in traders.xml)
-  and the quality lerp / `PercentUsesLeft` / `Entry.Markup` terms are still
-  absent, so sell prices stay approximate.
+  (previously ~30x low). Residual: the sell side now applies the per-item
+  `EconomicSellScale` (items.xml, default 1.0, RE `GetSellPrice`; added
+  2026-08-20) but the quality lerp / `PercentUsesLeft` / `Entry.Markup` terms
+  are still absent, so sell prices stay approximate.
   *Anchors:* `src/server/game.zig:6757-6777`, `src/assets/items.zig:429-432`,
   `asm.il:1830470-1830700`, `Data/Config/traders.xml:3`
 
@@ -2037,7 +2038,9 @@ gamestage, no wandering hordes, and no screamers.
   (`Director.heat`): burning workstations whose block carries a blocks.xml
   `HeatMapStrength` (forge 6, campfire 5, workbench 5, ...) feed
   `notifyActivity(value, 720 ticks)`; events decay linearly and expire. Every
-  5 s `CheckToSpawn`: a region at/above 25 resets and spawns a scout party
+  5 s `CheckToSpawn`: a region at/above 25 resets and spawns a scout party;
+  cooldowns are the RE-verified stock literals (region 240 s, neighbors 180 s,
+  aligned 2026-08-20, `[rules.director]` tunable).
   (Scouts1/2/Feral/Radiated by gamestage, chunk-heat spawner 0/8/10 constants)
   that investigates the nearest player; the region and its neighbors go on
   cooldown (120 s / 60 s; the 20% feral roll doubles it). Blood moons suppress
@@ -2295,12 +2298,12 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/workstations.zig:220-337`, `src/server/game.zig:6824-6864`,
   `:8056-8060`
 
-- **Workstation fuel burn rate** `PARTIAL`
-  `handleFuel` consumes one fuel item per 10.0 s flat. Stock
-  `TileEntityWorkstation::GetFuelTime` returns `ItemClass::GetFuelValue`, i.e. the
-  items.xml FuelValue: `resourceCoal` = 100, most wood and oil shale 1-5. zdtd
-  already parses FuelValue into ItemDef and simply does not use it here, so coal
-  burns 10x too short and wood 10x too long.
+- **Workstation fuel burn rate** `WORKS` (2026-08-20)
+  `handleFuel` consumes one fuel item per its items.xml `FuelValue` (stock
+  `TileEntityWorkstation::GetFuelTime` = `ItemClass::GetFuelValue`):
+  `resourceCoal` = 100 s, most wood and oil shale 1-5 s (was a flat 10 s).
+  The offline fallback stays 10 s. The fuel lookup is a `FuelResolver` the
+  Game wires from the items table.
   *Anchors:* `src/world/workstations.zig:196-215`, `src/assets/items.zig:119-125`,
   `asm.il:1332283-1332301`, `asm.il:1331999`
 
@@ -4084,7 +4087,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
-| Equipment / armor mitigation | PARTIAL (equip slots; mitigation shallow) |
+| Equipment / armor mitigation | PARTIAL (equip slots; mitigation is the zdtd flat approximation, `[rules.combat] armor_mitigation_*` since 2026-08-20; the stock passive-effects chain stays RE-blocked) |
 | Projectile / ranged combat | MISSING |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
