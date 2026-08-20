@@ -183,12 +183,15 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
         const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
+        // A39: the sell base is EconomicValue * EconomicSellScale (stock
+        // GetSellPrice; default scale 1.0, a few items mark down to .5).
+        const sell_scale: f32 = if (self.items.byId(iid)) |d| d.econ_sell_scale else 1.0;
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,
             .quality = r.quality,
             .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * buy_markup)), 65535)) else 5,
-            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * sell_markup)), 65535)))) else 1,
+            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * sell_markup)), 65535)))) else 1,
         };
         n += 1;
     }

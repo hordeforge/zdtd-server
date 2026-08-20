@@ -31,6 +31,10 @@ pub const ItemDef = struct {
     stock_type: i32 = 0,
     /// items.xml EconomicValue (0 = not tradeable).
     econ: u16 = 0,
+    /// items.xml EconomicSellScale (stock `ItemClass.EconomicSellScale`,
+    /// IL default 1.0; the sell price base is EconomicValue * scale, RE
+    /// loot-economy.md GetSellPrice). A39.
+    econ_sell_scale: f32 = 1.0,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
@@ -87,6 +91,8 @@ pub const ItemTable = struct {
     stock_types: []const i32 = &.{},
     /// Resolved Stacknumber per stock_names row (Extends chain, default 500).
     stock_stacks: []const u16 = &.{},
+    /// Per-item EconomicSellScale (stock ItemClass field, default 1.0; A39).
+    stock_econ_scales: []const f32 = &.{},
 
     pub fn deinit(self: *ItemTable) void {
         if (self.arena_ptr) |ap| {
@@ -465,6 +471,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer ext_names.deinit(allocator);
     var stock_econs: std.ArrayList(u16) = .empty;
     defer stock_econs.deinit(allocator);
+    var stock_econ_scales: std.ArrayList(f32) = .empty;
+    defer stock_econ_scales.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
@@ -519,6 +527,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 econ = xml.parseU16(v) orelse 0;
             }
             try stock_econs.append(allocator, econ);
+            // A39: EconomicSellScale (default 1.0 = stock ItemClass ctor IL).
+            var econ_scale: f32 = 1.0;
+            if (xml.propertyValue(clean[ii..item_end], "EconomicSellScale")) |v| {
+                econ_scale = xml.parseF32(v) orelse 1.0;
+            }
+            try stock_econ_scales.append(allocator, econ_scale);
             // Action0 DamageEntity (first hit; melee hands and weapons).
             var edmg: f32 = 0;
             if (xml.propertyValue(clean[ii..item_end], "DamageEntity")) |v| {
@@ -624,6 +638,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.stock_type = stock_types.items[idx];
                 def.stack = stock_stacks.items[idx];
                 def.econ = stock_econs.items[idx];
+                def.econ_sell_scale = stock_econ_scales.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
@@ -655,6 +670,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .stack = stock_stacks.items[idx],
             .stock_type = stock_types.items[idx],
             .econ = stock_econs.items[idx],
+            .econ_sell_scale = stock_econ_scales.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
@@ -680,6 +696,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     @memcpy(st, stock_types.items);
     const ss = try arena.alloc(u16, stock_stacks.items.len);
     @memcpy(ss, stock_stacks.items);
+    const ssc = try arena.alloc(f32, stock_econ_scales.items.len);
+    @memcpy(ssc, stock_econ_scales.items);
 
     return .{
         .defs = defs,
@@ -688,6 +706,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .stock_names = sn,
         .stock_types = st,
         .stock_stacks = ss,
+        .stock_econ_scales = ssc,
     };
 }
 
@@ -835,4 +854,17 @@ test "stock items.xml Stacknumber default and Extends resolution" {
     try std.testing.expectEqual(@as(u16, 1), stackOf(&t, "meleeHandZombieFeral"));
     // The builtin stone axe (id 8) inherits the resolved stack via its stock alias.
     try std.testing.expectEqual(@as(u16, 500), t.byId(8).?.stack);
+    // A39: EconomicSellScale from items.xml (stock ItemClass.EconomicSellScale,
+    // IL ctor default 1.0; toolCookingGrill marks down to .5).
+    const scaleOf = struct {
+        fn f(tab: *const ItemTable, name: []const u8) f32 {
+            for (tab.stock_names, 0..) |n, i| {
+                if (std.mem.eql(u8, n, name)) return tab.stock_econ_scales[i];
+            }
+            return 0;
+        }
+    }.f;
+    try std.testing.expectEqual(@as(f32, 1.0), scaleOf(&t, "meleeToolRepairT0StoneAxe"));
+    try std.testing.expectEqual(@as(f32, 0.5), scaleOf(&t, "toolCookingGrill"));
+    try std.testing.expectEqual(@as(f32, 1.0), t.byId(8).?.econ_sell_scale);
 }
