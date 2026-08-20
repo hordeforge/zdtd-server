@@ -217,3 +217,26 @@ world → wire imports, no snake_case `pub fn`, no hungarian prefixes, no
 misleading `*_enabled` flags, `@intFromFloat` uses are legitimate float→int
 conversions, no `std.math.min/max` where builtins fit. game.zig continued
 shrinking (5310 → 5115 at the wave head; loot/weather/vehicle shards).
+
+## Pass 2026-08-20 (hot-path perf review, post config/plugin wave)
+
+Reviewed the recently touched hot paths (plugin sense/verdict dispatch,
+bot config reads, quest policy reads, `[rules.director]` reads, wasm sense
+trailer building) against the 20 TPS / 50 ms budget + no-hot-path-heap
+rule:
+
+- **Allocations:** none on the tick path. Plugin load (Engine + name
+  dupe) is init-only; `wasmSense` uses the existing 2048-byte stack
+  scratch; the bot-info/damage-event trailer and `BotManager`/quest/
+  director config reads are caller buffers and struct-field reads. No
+  `ArrayList`/`alloc`/`create` in `step.zig`, `wasm_host.zig`, `bot.zig`,
+  `plugin/wasm.zig` tick paths (grep-verified).
+- **apm coverage:** tick_total, net_poll, sim_entities, chunk_stream,
+  terrain_snap, save_io/save_encode all instrumented; the plugin on_tick
+  dispatch sits inside the instrumented tick.
+- **Measured** (loadgen 4 clients + `bot count 2` + bot + killfeed
+  plugins, warm flat world, 30 actions): tick_total p50 393 µs, mean
+  16.6 ms, p99/max spikes from the join-burst chunk stream (throttled)
+  and idle poll-wait (net_poll max == tick_total max is the poll blocking,
+  not work); sim_entities p50 196 µs. Budget 50 ms holds with >100x
+  margin at steady state; no refactor warranted by the measured data.
