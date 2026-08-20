@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (142/142/45) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (142/143/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 23 | 18 | 7 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **142** | **142** | **45** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **142** | **143** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2771,7 +2771,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**23 WORKS · 18 PARTIAL · 7 MISSING**
+**23 WORKS · 19 PARTIAL · 6 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -4053,7 +4053,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
 | Water flow / physics | PARTIAL (2026-08-20: bounded leveling - digging beside an existing water column pours the connected open basin up to the column's surface, budgeted per tick (rules.water edits_per_tick/spread_cap), so a hole next to a lake fills like stock. No mass-flow engine: placed water does not cascade, no per-cell levels/flow directions, no evaporation, no draining - the jobified WaterSimulationNative sim (7dtd-research light-mesh-water.md §4) is not ported) |
-| Falling blocks | MISSING | |
+| Falling blocks | PARTIAL (2026-08-20: stability-collapse groups spawn one EntityFallingBlock entity (class fallingBlocks) carrying the fallen cells (raw values + world positions), falling under the stock gravity integrator and dying on ground contact - no re-placement (RE entity-ai.md LetBlocksFall / CreateFallingBlockGroup / landing; cells air out like stock). Missing: single-block fallingBlock branch, item-drop on landing (GamePrefs OptionsStabSpawnBlocksOnGround 148, default off), impact particles, group-size IL pin) |
 | POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
 | Land claim / bedroll spawn | WORKS (2026-08-20: LandClaim options + keystone deny + bedroll respawn point) |
 | World borders / difficulty tiers | MISSING | |

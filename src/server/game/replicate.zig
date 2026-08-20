@@ -76,6 +76,7 @@ pub fn replicate(self: *Game) !void {
         for (self.sim.kind_groups.slice(.zombie)) |s| candidates.set(s);
         for (self.sim.kind_groups.slice(.animal)) |s| candidates.set(s);
         for (self.sim.kind_groups.slice(.trader)) |s| candidates.set(s);
+        for (self.sim.kind_groups.slice(.falling_block)) |s| candidates.set(s);
         candidates.intersectFromStatic(self.sim.alive_bits);
     } else {
         // Heartbeat: every live entity is a candidate.
@@ -90,9 +91,11 @@ pub fn replicate(self: *Game) !void {
         const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
         const in_range = interest.observerMask(game_mod.max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
 
+        const is_falling = self.sim.mask[i].kind and self.sim.kind[i] == .falling_block;
         const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or
             self.sim.kind[i] == .animal or
-            self.sim.kind[i] == .trader);
+            self.sim.kind[i] == .trader or
+            is_falling);
         var spawn_mask: game_mod.ObsMask = 0;
         if (is_mob) {
             var m = in_range;
@@ -102,11 +105,30 @@ pub fn replicate(self: *Game) !void {
             }
         }
         if (spawn_mask != 0) {
-            const eclass: i32 = if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
+            const eclass: i32 = if (is_falling)
+                packages.stock_entity.class_falling_blocks
+            else if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
                 self.sim.class_id[i].hash
             else
                 packages.stock_entity.class_zombie_default;
             const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
+            // Falling-block groups carry their cells (RE entity-ai.md
+            // CreateFallingBlockGroup): raw values + world positions so the
+            // client renders the right blocks falling.
+            var fb_buf: [ecs.components.falling_group_cap]packages.stock_entity.FallingBlock = undefined;
+            const fb_slice: ?[]const packages.stock_entity.FallingBlock = if (is_falling) blk: {
+                const n = @min(self.sim.falling[i].n, ecs.components.falling_group_cap);
+                var k: usize = 0;
+                while (k < n) : (k += 1) {
+                    fb_buf[k] = .{
+                        .raw_data = self.sim.falling[i].cells[k].raw,
+                        .x = self.sim.falling[i].cells[k].x,
+                        .y = self.sim.falling[i].cells[k].y,
+                        .z = self.sim.falling[i].cells[k].z,
+                    };
+                }
+                break :blk fb_buf[0..n];
+            } else null;
             if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
                 .entity_id = self.sim.network_id[i].id,
                 .entity_class = eclass,
@@ -115,6 +137,7 @@ pub fn replicate(self: *Game) !void {
                 .z = self.sim.transform[i].z,
                 .yaw = self.sim.transform[i].yaw,
                 .is_sleeper = sleeper,
+                .falling_blocks = if (fb_slice) |fb| .{ .blocks = fb } else null,
                 .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);

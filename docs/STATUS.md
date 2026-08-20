@@ -27,7 +27,9 @@ then the AI senses row WORKS (smell + per-class cone), taking the total to
 flow dig-leveling both shipped, total **142/140/47**. Then crouch stealth
 (hear muffle + sleeper detect) went MISSING -> PARTIAL, total
 **142/141/46**. Then group AI (combat-noise alerts + sleeper wake) went
-MISSING -> PARTIAL, total **142/142/45**. The
+MISSING -> PARTIAL, total **142/142/45**. Then falling blocks (collapse
+groups spawn EntityFallingBlock entities, fall + die on landing) went
+MISSING -> PARTIAL, total **142/143/44**. The
 dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
@@ -46,7 +48,7 @@ light-level leg stays RE-blocked, no server light channel)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
 6. NPC dialog trees (MISSING)
 8. Challenges system (MISSING)
-9. Falling blocks (MISSING)
+9. Falling blocks (PARTIAL - collapse groups spawn EntityFallingBlock entities that fall and die on landing 2026-08-20; item-drop-on-land + single-block branch open)
 10. Bosses / special infected (PARTIAL)
 11. World borders / difficulty tiers (MISSING)
 12. Server-triggered sounds / music (MISSING)

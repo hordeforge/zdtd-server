@@ -10,6 +10,10 @@ pub const Kind = enum(u8) {
     turret,
     loot_bag,
     animal,
+    /// Stability-collapse group entity (RE entity-ai.md LetBlocksFall):
+    /// carries the fallen cells as one EntityFallingBlock, falls under
+    /// gravity, dies on landing (no re-placement).
+    falling_block,
 };
 
 pub const Transform = struct {
@@ -753,6 +757,31 @@ pub const NoiseEvent = struct {
 /// cap are dropped; the per-tick consume budget already throttles).
 pub const noise_events_cap: usize = 8;
 
+/// One cell carried by a falling-blocks group entity (world coords + the
+/// block's raw value so the client renders the right block falling).
+pub const FallingCell = struct {
+    x: i32,
+    y: i32,
+    z: i32,
+    raw: u32,
+};
+
+/// Group cap for one falling-blocks entity. Stock `GroupBounds.IsWithinSize`
+/// clamps falling groups (stability.md) but the bound value is not IL-pinned;
+/// 32 is a zdtd policy cap (a collapse rarely exceeds it; larger groups keep
+/// their first 32 cells - the rest still air out via the collapse).
+pub const falling_group_cap: usize = 32;
+
+/// Stability-collapse group state: the cells that lost support, falling as
+/// one EntityFallingBlock (RE entity-ai.md LetBlocksFall / landing: no
+/// re-placement, die on ground contact).
+pub const FallingBlocks = struct {
+    cells: [falling_group_cap]FallingCell = undefined,
+    n: u8 = 0,
+    /// Vertical velocity, blocks/s (stock gravity integrator).
+    vy: f32 = 0,
+};
+
 pub const Flags = struct {
     bits: u16 = 8, // Spawned
 };
@@ -873,7 +902,8 @@ pub const Mask = packed struct(u32) {
     bot: bool = false,
     dirty: bool = false,
     buffs: bool = false,
-    _pad: u12 = 0,
+    falling: bool = false,
+    _pad: u11 = 0,
 };
 
 test "putInSlot rejects overflowing stack counts" {

@@ -129,7 +129,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
             // Zombies and animals share the hostile bucket in the guest.
             .zombie, .animal => 1,
             // Non-combat world objects are not combat candidates; omit.
-            .trader, .vehicle, .turret, .loot_bag => continue,
+            .trader, .vehicle, .turret, .loot_bag, .falling_block => continue,
         };
         const base = 16 + n * 32;
         const r = out[base .. base + 32];

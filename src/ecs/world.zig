@@ -173,6 +173,7 @@ pub const World = struct {
     /// budget bound the pass so a busy fight cannot stall the tick.
     noise_events: [c.noise_events_cap]c.NoiseEvent = undefined,
     noise_n: usize = 0,
+    falling: [max_entities]c.FallingBlocks = [_]c.FallingBlocks{.{}} ** max_entities,
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
     trader_stock: [max_entities]c.TraderStock = [_]c.TraderStock{.{}} ** max_entities,
@@ -701,6 +702,7 @@ pub const World = struct {
         const cid: u16 = switch (kind) {
             .player => 0,
             .zombie => 1,
+            .falling_block => 2,
             .trader => 3,
             .vehicle => 4,
             .turret => 5,
@@ -906,6 +908,31 @@ pub const World = struct {
         self.loot_bag[s] = .{};
         self.inventory[s] = .{};
         _ = self.depositItem(s, item_id, count);
+        self.notifySpawn(s);
+        return self.network_id[s].id;
+    }
+
+    /// Spawn one falling-blocks group entity at the cells' centroid (RE
+    /// entity-ai.md CreateFallingBlockGroup): the cells keep their world
+    /// positions and raw block values; the group falls as a unit and dies on
+    /// landing (no re-placement). `cells` beyond the group cap are dropped
+    /// (stock GroupBounds.IsWithinSize clamps groups).
+    pub fn spawnFallingBlocks(self: *World, cells: []const c.FallingCell) ?NetId {
+        if (cells.len == 0) return null;
+        const n = @min(cells.len, c.falling_group_cap);
+        var cx: f32 = 0;
+        var cy: f32 = 0;
+        var cz: f32 = 0;
+        for (cells[0..n]) |cell| {
+            cx += @floatFromInt(cell.x);
+            cy += @floatFromInt(cell.y);
+            cz += @floatFromInt(cell.z);
+        }
+        const inv: f32 = 1.0 / @as(f32, @floatFromInt(n));
+        const s = self.spawnBase(.falling_block, cx * inv + 0.5, cy * inv, cz * inv + 0.5, 1) orelse return null;
+        self.mask[s].falling = true;
+        self.falling[s] = .{ .n = @intCast(n) };
+        @memcpy(self.falling[s].cells[0..n], cells[0..n]);
         self.notifySpawn(s);
         return self.network_id[s].id;
     }

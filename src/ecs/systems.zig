@@ -2089,6 +2089,42 @@ pub fn systemDirector(w: *World, dt: f32) struct { spawned: u32, world_time: u64
     return .{ .spawned = r.spawned, .world_time = r.world_time };
 }
 
+/// Stability-collapse groups (RE entity-ai.md EntityFallingBlock landing):
+/// the group falls under the stock gravity integrator and dies on ground
+/// contact - cells are never re-placed (the collapse already aired them).
+/// The land probe reuses the solid_fn hook (same chunk reads as the AI LOS).
+pub fn systemFallingBlocks(w: *World, dt: f32) void {
+    const solid_fn = w.solid_fn orelse return;
+    const g = w.rules.ai.gravity;
+    for (query.groupSlice(w, .falling_block)) |s| {
+        if (!w.alive[s] or !w.mask[s].falling or !w.mask[s].transform) continue;
+        const f = &w.falling[s];
+        // Lowest cell decides contact: when the cell directly below any cell
+        // is solid, the group has landed.
+        var landed = false;
+        for (f.cells[0..f.n]) |cell| {
+            if (solid_fn(w.solid_ctx, cell.x, cell.y - 1, cell.z)) {
+                landed = true;
+                break;
+            }
+        }
+        if (landed) {
+            w.destroy(s);
+            continue;
+        }
+        f.vy = (f.vy + g * dt) * 0.98;
+        if (f.vy < -30.0) f.vy = -30.0;
+        const t = &w.transform[s];
+        const dy: f32 = f.vy * dt;
+        t.y += dy;
+        // The carried cells ride the entity: keep them in sync so the next
+        // tick's land probe reads the updated heights.
+        for (f.cells[0..f.n]) |*cell| {
+            cell.y = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.y)) + dy));
+        }
+    }
+}
+
 /// EntityVehicle::cGravity static literal, asm.il:536018. Vertical acceleration
 /// applied to server-simulated vehicles (distinct from World::Gravity 0.08).
 const gravity_accel: f32 = -9.81;
@@ -4586,4 +4622,50 @@ test "group AI: combat noise wakes sleepers within radius" {
     // noise radius 24 covers it) wakes and investigates.
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expect(w.zombie_ai[zs].has_spot);
+}
+
+test "falling blocks: group falls under gravity and dies on landing (no re-placement)" {
+    // RE entity-ai.md EntityFallingBlock landing: the group falls with the
+    // stock gravity integrator; ground contact kills it and the cells are
+    // never written back (the collapse already aired them).
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70; // solid at y=70 and below; air above.
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const id = w.spawnFallingBlocks(&.{
+        .{ .x = 5, .y = 75, .z = 5, .raw = 700 },
+        .{ .x = 5, .y = 76, .z = 5, .raw = 701 },
+    }).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(c.Kind.falling_block, w.kind[s]);
+    try std.testing.expect(w.mask[s].falling);
+    // Falls until the lowest cell (y=75) lands on the solid at 70: the group
+    // is destroyed; cells stay air (no re-placement).
+    var landed = false;
+    for (0..600) |_| {
+        systemFallingBlocks(&w, 0.05);
+        if (!w.alive[s]) {
+            landed = true;
+            break;
+        }
+    }
+    try std.testing.expect(landed);
+    try std.testing.expect(!w.alive[s]);
+}
+
+test "falling blocks: spawn is capped at the group size and centered" {
+    var w: World = .{};
+    defer w.deinit();
+    var cells: [40]c.FallingCell = undefined;
+    for (&cells, 0..) |*cell, i| {
+        cell.* = .{ .x = @intCast(i), .y = 70, .z = 0, .raw = 700 };
+    }
+    const id = w.spawnFallingBlocks(&cells).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(@as(u8, c.falling_group_cap), w.falling[s].n);
 }

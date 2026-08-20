@@ -101,6 +101,10 @@ pub fn step(self: *Game) !void {
             self.sim.rules.water.edits_per_tick,
             self.sim.rules.water.spread_cap,
         );
+        // Stability-collapse falling blocks (EntityFallingBlock groups): fall
+        // under gravity, die on landing (RE entity-ai.md landing: no
+        // re-placement).
+        systems.systemFallingBlocks(&self.sim, dt);
         self.tickSurvival(dt);
         self.tickBots(dt);
         {
