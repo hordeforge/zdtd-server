@@ -801,6 +801,11 @@ pub const FallingBlocks = struct {
     n: u8 = 0,
     /// Vertical velocity, blocks/s (stock gravity integrator).
     vy: f32 = 0,
+    /// Horizontal drift, blocks/s (stock singular spawns carry "random motion"
+    /// - entity-ai.md LetBlocksFall 1262; a small deterministic impulse so
+    /// falling blocks scatter like stock).
+    vx: f32 = 0,
+    vz: f32 = 0,
 };
 
 pub const Flags = struct {

@@ -582,6 +582,46 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
     std.debug.print("PASS upgrade: woodMaster -> cobblestoneMaster accepted, forged swap rejected\n", .{});
 }
 
+test "scenario stability collapse spawns one singular fallingBlock per qualifying cell" {
+    // RE entity-ai.md LetBlocksFall 1256-1262: the default path (group mode
+    // EntityFallingBlocks.Enabled is false) spawns one fallingBlock entity
+    // per collapsed cell whose block ShowModelOnFall is true. The builtin
+    // tables default the gate to true, so a stone column collapses into two
+    // singular entities (n=1 each), never a group.
+    freshScenarioDir("worlds/zdtd_sc_fall");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_fall", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    // Column on the flat terrain (top ~70): base at y=71, two above.
+    const stone = world_store.block_stone;
+    try g.setBlock(250, 71, 250, stone);
+    try g.setBlock(250, 72, 250, stone);
+    try g.setBlock(250, 73, 250, stone);
+    // Remove the base; the two cells above lose support and fall.
+    _ = game_mod.stabilityAfterSetBlock(g, 250, 71, 250, stone, 0);
+    var n_falling: usize = 0;
+    for (g.sim.kind_groups.slice(.falling_block)) |s| {
+        if (!g.sim.mask[s].falling or !g.sim.alive[s]) continue;
+        n_falling += 1;
+        try std.testing.expectEqual(@as(u8, 1), g.sim.falling[s].n);
+        try std.testing.expectEqual(@as(u32, stone), g.sim.falling[s].cells[0].raw & 0xffff);
+    }
+    try std.testing.expectEqual(@as(usize, 2), n_falling);
+    // The collapsed cells aired out.
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(250, 72, 250));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(250, 73, 250));
+
+    std.debug.print("PASS stability-collapse: 2 cells fall as 2 singular fallingBlock entities\n", .{});
+}
+
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_switch");

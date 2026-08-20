@@ -812,6 +812,15 @@ pub const World = struct {
         return c.blockAt(t.lx, y, t.lz);
     }
 
+    /// World-space full BlockValue.rawData (type low 16 + rotation/meta upper
+    /// bits), so a falling-block capture keeps the block's rotation/meta like
+    /// stock's snapshot (EntityFallingBlock.SetBlockValue stores the BlockValue).
+    pub fn rawWorld(self: *World, x: i32, y: i32, z: i32) !u32 {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        return c.rawAt(t.lx, y, t.lz);
+    }
+
     /// Surface block Y at world XZ (u16 API; current maps still 0..255).
     pub fn heightWorld(self: *World, x: i32, z: i32) !u16 {
         const t = worldToChunk(x, z);

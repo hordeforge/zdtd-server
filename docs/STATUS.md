@@ -50,7 +50,13 @@ candidate capture: container-open sequence vs stock dedi). Then the XP curve
 numeric-parity row went WORKS (expForLevel now mirrors stock
 Progression.GetExpForNextLevel bit-for-bit: double-pow Mathf.Pow cast to float,
 Clamp(level+1, 0, ClampExpCostAtLevel) exponent, 2.147484e9f min then conv.i4;
-level 1->2 costs 11024 like stock, not 10000), total **159/127/44**. The
+level 1->2 costs 11024 like stock, not 10000), total **159/127/44**. Then the
+falling-blocks row gained the stock default path: collapse now spawns one
+singular `fallingBlock` entity per cell whose `ShowModelOnFall` resolves true
+(blocks.xml property, default true per Block.il.txt 1876-18A2), at the cell
+center with the stock -0.1..0.1 Y offset + deterministic horizontal impulse;
+full rawData rides the ECD and replicate branches on n==1 (counts unchanged -
+Fall-event drops, landing damage and the opt-in group mode stay open). The
 dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
@@ -62,20 +68,19 @@ halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
-1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open)
+1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
-6. NPC dialog trees (MISSING - no stock-map NPC dialog surface beyond traders, whose quest/trade windows already work)
-8. Challenges system (WORKS 2026-08-21 - client-tracked; server surface is the challengegroup_reward_* quests + GameEvent acks)
-9. Falling blocks (PARTIAL - collapse groups spawn EntityFallingBlock entities that fall and die on landing 2026-08-20; item-drop-on-land + single-block branch open)
-10. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; other special variants open)
-11. World borders / difficulty tiers (RE-BLOCKED 2026-08-21 - difficulty damage table IL absent from the corpus; border is client-side)
-12. Server-triggered sounds / music (RE-BLOCKED 2026-08-21 - NetPackageSoundAtPosition field types not pinned)
-13. Quest reward choice / loot groups (RE-BLOCKED 2026-08-21 - the C2S chosen-reward field is not in the corpus; payout WORKS)
-14. AIDirector / sleeper save blobs (PARTIAL - non-client-visible save-format internal; clock/weather persist, full AIDirector blob out of scope)
-15. Localization titles (MISSING)
+6. Falling blocks (PARTIAL - collapse spawns per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall 2026-08-21; Fall-event item drops, landing damage and the opt-in group mode open)
+7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; other special variants open)
+8. World borders / difficulty tiers (RE-BLOCKED 2026-08-21 - difficulty damage table IL absent from the corpus; border is client-side)
+9. Server-triggered sounds / music (RE-BLOCKED 2026-08-21 - NetPackageSoundAtPosition field types not pinned)
+10. Quest reward choice / loot groups (RE-BLOCKED 2026-08-21 - the C2S chosen-reward field is not in the corpus; payout WORKS)
+11. AIDirector / sleeper save blobs (PARTIAL - non-client-visible save-format internal; clock/weather persist, full AIDirector blob out of scope)
+12. NPC dialog trees (non-client-visible on stock maps - no stock map spawns a dialog-NPC; traders use the trading/quest windows, WORKS; GAP_ANALYSIS 4349)
+13. Localization titles (WORKS 2026-08-21 - the server sends localization keys and the stock client resolves them from its own Localization.txt)
 
 AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + CheckToSpawn scouts + cooldowns +
 feral roll); wandering horde paths, feral sense, sleeper wake cascade and persistent director state are PARTIAL

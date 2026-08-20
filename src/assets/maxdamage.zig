@@ -89,6 +89,9 @@ pub const Table = struct {
     /// block name → resolved `StabilityIgnore` (default false): exempt from the
     /// stability plane, never falls and never carries support.
     stability_ignore_names: std.StringHashMapUnmanaged(void) = .{},
+    /// blocks.xml ShowModelOnFall="false" names (default true per Block.il.txt
+    /// 1876-18A2; only explicit false is stored).
+    no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -208,6 +211,15 @@ pub const Table = struct {
     /// exempt from the stability plane, never falls and never carries support.
     pub fn stabilityIgnore(self: *const Table, name: []const u8) bool {
         return self.stability_ignore_names.contains(name);
+    }
+
+    /// blocks.xml `ShowModelOnFall` after Extends resolution (default true per
+    /// Block.il.txt 1876-18A2): gates whether a collapsing cell spawns a
+    /// fallingBlock entity (stock LetBlocksFall spawns a model only when the
+    /// block shows one; most containers/traps/cars opt in, heavy stone defaults
+    /// to showing nothing).
+    pub fn showModelOnFall(self: *const Table, name: []const u8) bool {
+        return !self.no_show_model_on_fall.contains(name);
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -439,6 +451,10 @@ const DecoFacts = struct {
     /// "ask the parent", both default true/false when the chain is exhausted).
     stability_support: ?bool = null,
     stability_ignore: ?bool = null,
+    /// ShowModelOnFall (resolved through Extends; null = "ask the parent",
+    /// default TRUE when the chain is exhausted - Block.il.txt 1876-18A2:
+    /// absent property -> true, explicit false disables the falling model).
+    show_model_on_fall: ?bool = null,
 };
 
 /// Resolve one block's inherited facts by walking `Extends`. Stock chains are
@@ -455,8 +471,10 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         if (out.dim == null) out.dim = f.dim;
         if (out.stability_support == null) out.stability_support = f.stability_support;
         if (out.stability_ignore == null) out.stability_ignore = f.stability_ignore;
+        if (out.show_model_on_fall == null) out.show_model_on_fall = f.show_model_on_fall;
         if (out.distant != null and out.dim != null and
-            out.stability_support != null and out.stability_ignore != null) break;
+            out.stability_support != null and out.stability_ignore != null and
+            out.show_model_on_fall != null) break;
         cur = f.extends orelse break;
     }
     return out;
@@ -595,6 +613,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "StabilityIgnore")) |si| {
             facts.stability_ignore = parseBool(si);
         }
+        if (xml.propertyValue(body, "ShowModelOnFall")) |sm| {
+            facts.show_model_on_fall = parseBool(sm);
+        }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
         // upgrade path). ToBlock appears only inside that class.
@@ -609,6 +630,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
     var non_support: std.StringHashMapUnmanaged(void) = .{};
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
+    var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
@@ -619,6 +641,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         if (r.stability_support orelse true == false) try non_support.put(arena, e.key_ptr.*, {});
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
+        if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -645,6 +668,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .multi_block_dim = multi_block_dim,
         .non_support = non_support,
         .stability_ignore_names = stability_ignore_names,
+        .no_show_model_on_fall = no_show_model_on_fall,
         .upgrade_to = upgrade_to_names,
         .arena_ptr = arena_holder,
     };
@@ -822,6 +846,11 @@ test "stock blocks.xml deco facts when present" {
     try std.testing.expectEqualStrings("cobblestoneMaster", t.upgradeTarget("woodMaster").?);
     // A terminal block has no upgrade target.
     try std.testing.expect(t.upgradeTarget("bedroll") == null);
+    // ShowModelOnFall: explicit true, explicit false, and absent -> true
+    // (Block.il.txt 1876-18A2 default).
+    try std.testing.expect(t.showModelOnFall("metalCatwalkTrap"));
+    try std.testing.expect(t.showModelOnFall("woodMaster"));
+    try std.testing.expect(!t.showModelOnFall("cntAmmoPileSmall"));
 }
 
 test "every placeable blocks.xml name resolves in the AssignIds dump" {

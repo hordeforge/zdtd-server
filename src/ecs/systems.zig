@@ -2154,9 +2154,13 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
         const t = &w.transform[s];
         const dy: f32 = f.vy * dt;
         t.y += dy;
+        t.x += f.vx * dt;
+        t.z += f.vz * dt;
         // The carried cells ride the entity: keep them in sync so the next
         // tick's land probe reads the updated heights.
         for (f.cells[0..f.n]) |*cell| {
+            cell.x = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.x)) + f.vx * dt));
+            cell.z = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.z)) + f.vz * dt));
             cell.y = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.y)) + dy));
         }
     }
@@ -4705,6 +4709,42 @@ test "falling blocks: spawn is capped at the group size and centered" {
     const id = w.spawnFallingBlocks(&cells).?;
     const s = w.slotOfNetId(id).?;
     try std.testing.expectEqual(@as(u8, c.falling_group_cap), w.falling[s].n);
+}
+
+test "falling block: singular spawn is per-cell, offset within the stock dy and drifts deterministically" {
+    // Stock default path (entity-ai.md LetBlocksFall 1256-1262): one
+    // fallingBlock entity per cell at the cell center with a random Y offset
+    // in -0.1..0.1 and a random horizontal impulse. The jitter is seeded by
+    // the cell position, so the same collapse reproduces the same scatter.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const cell = c.FallingCell{ .x = 5, .y = 75, .z = 5, .raw = 0x0002_01FF };
+    const id = w.spawnFallingBlock(cell).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(c.Kind.falling_block, w.kind[s]);
+    try std.testing.expectEqual(@as(u8, 1), w.falling[s].n);
+    try std.testing.expectEqual(cell.raw, w.falling[s].cells[0].raw);
+    const t = w.transform[s];
+    const dy = t.y - @as(f32, @floatFromInt(cell.y));
+    try std.testing.expect(dy >= -0.1001 and dy <= 0.1001);
+    // Deterministic: a second spawn of the same cell lands at the same pos.
+    const id2 = w.spawnFallingBlock(cell).?;
+    const s2 = w.slotOfNetId(id2).?;
+    try std.testing.expectEqual(t.x, w.transform[s2].x);
+    try std.testing.expectEqual(t.y, w.transform[s2].y);
+    try std.testing.expectEqual(t.z, w.transform[s2].z);
+    // The impulse is bounded and the entity falls under the stock integrator.
+    try std.testing.expect(@abs(w.falling[s].vx) <= 0.5);
+    try std.testing.expect(@abs(w.falling[s].vz) <= 0.5);
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70;
+        }
+    };
+    w.solid_fn = &Ground.solid;
+    const y0 = w.transform[s].y;
+    for (0..30) |_| _ = systemFallingBlocks(&w, 0.05);
+    try std.testing.expect(w.transform[s].y < y0);
 }
 
 test "demolition: primes at the health threshold, countdowns, then requests the explosion" {

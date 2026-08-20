@@ -34,16 +34,19 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
             stabilityFacts,
             &fallen,
         );
-        // Falling-block group (RE entity-ai.md LetBlocksFall): snapshot the
-        // raw values BEFORE the air write, then spawn one EntityFallingBlock
-        // carrying the group. The client renders the fall; landing removes it
-        // (no re-placement). Group cap 32 matches stock GroupBounds.
+        // Falling blocks (RE entity-ai.md LetBlocksFall): snapshot the full
+        // BlockValue BEFORE the air write, then spawn one fallingBlock entity
+        // per qualifying cell. Stock's default path (group mode
+        // EntityFallingBlocks.Enabled is false) spawns a singular entity per
+        // cell only when the block's ShowModelOnFall is true (default true,
+        // explicit false suppresses the model - Block.il.txt 1876-18A2); the
+        // group entity is the opt-in mode and is not spawned here.
         var cells: [ecs_components.falling_group_cap]ecs_components.FallingCell = undefined;
         var cn: usize = 0;
         var i: usize = 0;
         while (i < n and cn < cells.len) : (i += 1) {
             const p = fallen[i];
-            const raw: u32 = @intCast(self.world.blockWorld(p.x, p.y, p.z) catch 0);
+            const raw: u32 = self.world.rawWorld(p.x, p.y, p.z) catch 0;
             self.clearBlockHp(p.x, p.y, p.z);
             self.removeClaimAt(p.x, p.y, p.z);
             self.clearBlockRaw(p.x, p.y, p.z);
@@ -64,8 +67,13 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
                 self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(p.x), @floatFromInt(p.z), self.interest_range) catch {};
             } else |_| {}
         }
-        if (cn > 0) {
-            _ = self.sim.spawnFallingBlocks(cells[0..cn]);
+        var k: usize = 0;
+        while (k < cn) : (k += 1) {
+            const cell = cells[k];
+            const tid: u16 = @truncate(cell.raw & 0xffff);
+            const def = self.blocks.byId(tid) orelse continue;
+            if (!self.maxdamage.showModelOnFall(def.name)) continue;
+            _ = self.sim.spawnFallingBlock(cell);
         }
     }
     if (new_id != 0) {

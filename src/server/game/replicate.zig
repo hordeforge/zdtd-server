@@ -105,18 +105,23 @@ pub fn replicate(self: *Game) !void {
             }
         }
         if (spawn_mask != 0) {
-            const eclass: i32 = if (is_falling)
+            // Singular fallingBlock (n=1, stock default path) vs the opt-in
+            // fallingBlocks group: distinct class hashes and ECD payloads.
+            const falling_single = is_falling and self.sim.falling[i].n == 1;
+            const eclass: i32 = if (falling_single)
+                packages.stock_entity.class_falling_block
+            else if (is_falling)
                 packages.stock_entity.class_falling_blocks
             else if (self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0)
                 self.sim.class_id[i].hash
             else
                 packages.stock_entity.class_zombie_default;
             const sleeper = self.sim.mask[i].sleeper and !self.sim.sleeper[i].awake;
-            // Falling-block groups carry their cells (RE entity-ai.md
+            // Falling blocks carry their cells (RE entity-ai.md
             // CreateFallingBlockGroup): raw values + world positions so the
             // client renders the right blocks falling.
             var fb_buf: [ecs.components.falling_group_cap]packages.stock_entity.FallingBlock = undefined;
-            const fb_slice: ?[]const packages.stock_entity.FallingBlock = if (is_falling) blk: {
+            const fb_slice: ?[]const packages.stock_entity.FallingBlock = if (is_falling and !falling_single) blk: {
                 const n = @min(self.sim.falling[i].n, ecs.components.falling_group_cap);
                 var k: usize = 0;
                 while (k < n) : (k += 1) {
@@ -137,6 +142,9 @@ pub fn replicate(self: *Game) !void {
                 .z = self.sim.transform[i].z,
                 .yaw = self.sim.transform[i].yaw,
                 .is_sleeper = sleeper,
+                .falling_block = if (falling_single) .{ .block = .{
+                    .raw_data = self.sim.falling[i].cells[0].raw,
+                } } else null,
                 .falling_blocks = if (fb_slice) |fb| .{ .blocks = fb } else null,
                 .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;

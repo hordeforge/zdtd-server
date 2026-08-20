@@ -954,6 +954,38 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
+    /// Spawn one singular fallingBlock entity (stock default path: group mode
+    /// EntityFallingBlocks.Enabled is false, so each falling cell spawns its
+    /// own entity - entity-ai.md LetBlocksFall 1256-1262). Position is the cell
+    /// center plus the stock random Y offset (-0.1..0.1); the horizontal
+    /// impulse is a small deterministic per-cell draw (seeded by world pos, so
+    /// the same collapse reproduces the same scatter).
+    pub fn spawnFallingBlock(self: *World, cell: c.FallingCell) ?NetId {
+        var prng = std.Random.Xoshiro256.init(
+            @as(u64, @bitCast(@as(i64, cell.x))) *% 0x9E37_79B1_7F4A_7C15 ^
+                @as(u64, @bitCast(@as(i64, cell.y))) *% 0xBF58_476D_1CE4_E5B9 ^
+                @as(u64, @bitCast(@as(i64, cell.z))) *% 0x94D0_49BB_1331_11EB,
+        );
+        const rnd = prng.random();
+        const dy: f32 = (rnd.float(f32) - 0.5) * 0.2; // stock -0.1..0.1
+        const s = self.spawnBase(
+            .falling_block,
+            @as(f32, @floatFromInt(cell.x)) + 0.5,
+            @as(f32, @floatFromInt(cell.y)) + dy,
+            @as(f32, @floatFromInt(cell.z)) + 0.5,
+            1,
+        ) orelse return null;
+        self.mask[s].falling = true;
+        self.falling[s] = .{
+            .n = 1,
+            .vx = (rnd.float(f32) - 0.5) * 1.0,
+            .vz = (rnd.float(f32) - 0.5) * 1.0,
+        };
+        self.falling[s].cells[0] = cell;
+        self.notifySpawn(s);
+        return self.network_id[s].id;
+    }
+
     pub fn spawnTrader(self: *World, name: []const u8, x: f32, y: f32, z: f32, trader_info_id: u16, wallet: i32) ?NetId {
         const s = self.spawnBase(.trader, x, y, z, 9999) orelse return null;
         self.mask[s].trader = true;
