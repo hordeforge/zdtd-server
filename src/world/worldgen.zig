@@ -17,13 +17,14 @@
 //! `density()` oracle and chunk borders cannot seam. That is a structural
 //! property, and "chunk fill matches density oracle" is the test that pins it.
 //!
-//! Honest gaps (see docs/GAP_ANALYSIS.md): no fluids/aquifers (a density
-//! dip below sea level is a dry pit, W4), single biome only (W3), caves are
-//! implicit in the noise rather than carved (W4), and surface material is
-//! applied per column from its topmost solid block, so overhang shelves and
-//! cave ceilings expose stone rather than topsoil (run-aware surfacing is W3).
-//! Generation is synchronous on the tick, bounded by `chunk_adds_per_stream_tick`
-//! (async worker pool is W2b).
+//! Honest gaps (see docs/GAP_ANALYSIS.md): fluids are a flat water table
+//! (W4: basins below the stock water level fill to the surface cell; stock's
+//! per-lake waterRect sources and shore falloff are not ported), single biome
+//! only (W3), caves are implicit in the noise rather than carved (W4), and
+//! surface material is applied per column from its topmost solid block, so
+//! overhang shelves and cave ceilings expose stone rather than topsoil
+//! (run-aware surfacing is W3). Generation is synchronous on the tick, bounded
+//! by `chunk_adds_per_stream_tick` (async worker pool is W2b).
 
 const std = @import("std");
 const noise_mod = @import("noise.zig");
@@ -40,6 +41,13 @@ pub const base_height: f32 = 68;
 pub const height_amp: f32 = 24;
 pub const min_surface: u8 = 12;
 pub const max_surface: u8 = 200;
+
+/// Top water cell of the RWG water table. RE: `Block.cWaterLevel` cctor
+/// `ldc.r4 62.88` (7dtd-research stock_facts `world_water_level`; the client
+/// renders the surface of the top water cell at 62.88), so the table fills
+/// cells 0..62 and the surface cell is 62. Terrain at or above the surface
+/// cell stays dry.
+pub const water_surface_cell: u8 = 62;
 
 /// Coarse interpolation cell in blocks. `chunk_size % cell_w == 0` and
 /// `y_dim % cell_h == 0` are required for the world-snapped grid to line up.
@@ -412,6 +420,27 @@ pub const WorldGen = struct {
             }
         }
     }
+
+    /// RWG water table (W4): every column whose surface sits below the stock
+    /// water level gets water from one above its bed up to `water_surface_cell`
+    /// (RE `Block.cWaterLevel` 62.88, surface cell 62). Only air cells are
+    /// overwritten; a column with terrain at or above the surface cell stays
+    /// dry, and a shelf column (topmost solid above the table, cave below)
+    /// keeps its dry overhang air pocket. Must run after the material pass.
+    /// The surface cell is world-constant, so adjacent chunks agree by
+    /// construction and the fill cannot seam.
+    pub fn fillWaterTable(heights: *const [256]u8, blocks: []u32, water_id: u16) void {
+        var col: usize = 0;
+        while (col < 256) : (col += 1) {
+            const h = heights[col];
+            if (h >= water_surface_cell) continue;
+            var y: usize = @as(usize, h) + 1;
+            while (y <= water_surface_cell) : (y += 1) {
+                const bi = col + y * 256;
+                if (blocks[bi] == assignids.air) blocks[bi] = water_id;
+            }
+        }
+    }
 };
 
 test "worldgen determinism same seed and chunk" {
@@ -701,5 +730,61 @@ test "generateChunkBlocks fills each biome's surface stack" {
         // single-biome default. The biome field itself is contiguous per
         // region, so one chunk usually sits in a single biome (checked above).
         try std.testing.expect(top == 700 or top == 800);
+    }
+}
+
+test "RWG water table fills basins to the stock surface cell, not shores" {
+    // RE: Block.cWaterLevel 62.88 (stock_facts world_water_level) - the table
+    // fills cells 0..62, surface cell 62. A basin (bed h=50) gets water
+    // 51..62 with air above; terrain at or above the surface cell stays dry.
+    var heights: [256]u8 = [_]u8{0} ** 256;
+    var blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    for (heights, 0..) |_, col| {
+        heights[col] = 50;
+    }
+    WorldGen.fillWaterTable(&heights, &blocks, assignids.water);
+    const col: usize = 0;
+    try std.testing.expectEqual(assignids.water, blocks[col + 51 * 256]);
+    try std.testing.expectEqual(assignids.water, blocks[col + 62 * 256]);
+    try std.testing.expectEqual(assignids.air, blocks[col + 63 * 256]);
+    try std.testing.expectEqual(assignids.air, blocks[col + 50 * 256]); // bed stays terrain
+    // Shores: surface at the cell, and above it, stay dry.
+    var dry_heights: [256]u8 = [_]u8{0} ** 256;
+    dry_heights[0] = 62;
+    dry_heights[1] = 70;
+    var dry_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    WorldGen.fillWaterTable(&dry_heights, &dry_blocks, assignids.water);
+    try std.testing.expectEqual(assignids.air, dry_blocks[0 + 63 * 256]);
+    try std.testing.expectEqual(assignids.air, dry_blocks[256 + 63 * 256]);
+    // Existing solids (a carved shelf) are never overwritten.
+    var shelf_heights: [256]u8 = [_]u8{0} ** 256;
+    shelf_heights[0] = 50;
+    var shelf_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    shelf_blocks[0 + 55 * 256] = assignids.terr_stone;
+    WorldGen.fillWaterTable(&shelf_heights, &shelf_blocks, assignids.water);
+    try std.testing.expectEqual(assignids.terr_stone, shelf_blocks[0 + 55 * 256]);
+    try std.testing.expectEqual(assignids.water, shelf_blocks[0 + 54 * 256]);
+}
+
+test "RWG water table surface is world-constant across adjacent chunks" {
+    // The surface cell is a fixed stock constant, so two adjacent chunks of
+    // the same basin fill the same cell - no seam by construction.
+    const g = WorldGen.init(42);
+    var ha: [256]u8 = undefined;
+    var hb: [256]u8 = undefined;
+    var ba: [16 * 256 * 16]u32 = undefined;
+    var bb: [16 * 256 * 16]u32 = undefined;
+    g.generateChunkBlocks(0, 0, &ha, &ba);
+    g.generateChunkBlocks(1, 0, &hb, &bb);
+    WorldGen.fillWaterTable(&ha, &ba, assignids.water);
+    WorldGen.fillWaterTable(&hb, &bb, assignids.water);
+    // Every water column tops out at cell 62 in both chunks.
+    for (0..256) |col| {
+        if (ba[col + 62 * 256] == assignids.water) {
+            try std.testing.expectEqual(assignids.air, ba[col + 63 * 256]);
+        }
+        if (bb[col + 62 * 256] == assignids.water) {
+            try std.testing.expectEqual(assignids.air, bb[col + 63 * 256]);
+        }
     }
 }

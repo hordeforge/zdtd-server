@@ -161,10 +161,16 @@ World_generation / Noise_settings):
   release, ~14 ms/tick Debug. Watch it via the apm `chunk_gen` section; the fix
   for Debug-with-many-clients is W2b (async workers), not a raised cap.
 
-Not in W2 (honest gaps): fluids and aquifers, so a density dip below sea level
-is a dry pit (section 4 / W4); biome climate (W3); carved caves (W4); POIs (W5).
+Not in W2 (honest gaps): biome climate (W3); carved caves (W4); POIs (W5).
 Surface material is applied per column from its topmost solid block, so overhang
 shelves and cave ceilings expose stone; run-aware surfacing belongs with W3.
+
+Shipped W4 (2026-08-20): the water table. `fillWaterTable` fills every column
+whose surface sits below the stock water level (RE `Block.cWaterLevel` 62.88,
+surface cell 62) with water up to that cell, after the material pass. The
+surface cell is a world-constant, so adjacent chunks agree by construction and
+cannot seam. Not ported: per-lake `waterRect` sources and shore falloff, lava
+lakes (section 4 keeps those as future work), water flow.
 
 ## 3. Biomes: multi-axis climate
 

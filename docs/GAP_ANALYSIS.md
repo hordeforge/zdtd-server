@@ -4043,7 +4043,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; prefab-local ids remapped by name via `<name>.blocks.nim` (`Prefab::loadIdMapping`), pre-18 files converted from `BlockValueV3` |
 | water_info.xml | PARTIAL | height hints only |
 | biomes.png / radiation | WORKS (2026-08-20: biomes.png color→biomemap + radiated biome damage, Rules knobs) |
-| RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`. MISSING: fluids/aquifers (dips are dry pits), 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
+| RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs, single biome) via `--worldgen-seed`; W4 water table: basins below the stock water level (`Block.cWaterLevel` 62.88, surface cell 62) fill as lakes, world-constant surface so chunks cannot seam. MISSING: per-lake waterRect sources/shore falloff, 6-axis climate/biomes, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
 | Density / stability / shape / paint | PARTIAL | density channel; stability plane WORKS (support/falling per `stability.zig`) |
 | Stock layer model (`y>>2`) | PARTIAL | stock chunk encode path |

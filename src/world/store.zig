@@ -300,6 +300,11 @@ pub const Chunk = struct {
         const b = try allocator.alloc(u32, blocks_per_chunk);
         self.blocks = b;
         wg.generateChunkBlocks(self.pos.x, self.pos.z, &self.heights, b);
+        // RWG water table: basins below the stock water level become lakes
+        // (W4); the id comes from the live terrain set so a modded dump keeps
+        // the correct water block.
+        const water_id = (self.terrain orelse &terrain_pins).water;
+        worldgen_mod.WorldGen.fillWaterTable(&self.heights, b, water_id);
     }
 
     /// Block type id (low 16 of rawData).

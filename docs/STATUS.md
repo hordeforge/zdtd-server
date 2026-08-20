@@ -35,7 +35,7 @@ extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
 1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open)
-2. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
+2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
 3. Water flow / physics (MISSING)
 4. Stealth / crouch (MISSING)
 5. Group AI / pack behavior (MISSING)
