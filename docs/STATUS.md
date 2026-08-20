@@ -22,23 +22,25 @@ bedroll/last-logout persistence, and velocity packages. Net and ops area
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
-impact:**
-1. Projectile / ranged combat (MISSING - guns do not shoot)
-2. AI senses: line of sight / hearing / smell (MISSING)
-3. MoveHelper physics / collision (MISSING)
-4. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
-5. Water flow / physics (MISSING)
-6. Stealth / crouch (MISSING)
-7. Group AI / pack behavior (MISSING)
-8. NPC dialog trees (MISSING)
-9. Challenges system (MISSING)
-10. Falling blocks (MISSING)
-11. Bosses / special infected (PARTIAL)
-12. World borders / difficulty tiers (MISSING)
-13. Server-triggered sounds / music (MISSING)
-14. Quest reward choice / loot groups (MISSING)
-15. AIDirector / sleeper save blobs (MISSING)
-16. Localization titles (MISSING)
+impact:** (projectile/ranged combat verified WORKS 2026-08-20 - RE
+items.md:1097-1140: projectiles are client-side GameObjects, the server
+surface is the DamageEntity C2S claim, which is complete)
+
+1. AI senses: line of sight / hearing / smell (MISSING)
+2. MoveHelper physics / collision (MISSING)
+3. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
+4. Water flow / physics (MISSING)
+5. Stealth / crouch (MISSING)
+6. Group AI / pack behavior (MISSING)
+7. NPC dialog trees (MISSING)
+8. Challenges system (MISSING)
+9. Falling blocks (MISSING)
+10. Bosses / special infected (PARTIAL)
+11. World borders / difficulty tiers (MISSING)
+12. Server-triggered sounds / music (MISSING)
+13. Quest reward choice / loot groups (MISSING)
+14. AIDirector / sleeper save blobs (MISSING)
+15. Localization titles (MISSING)
 
 ## Wave 2026-08-20 (config + provenance pass)
 
@@ -62,7 +64,6 @@ further down, default-preserving except where stock alignment was intended.
   `zombieBoeFeral`.
 - Standalone provenance dashboard (`docs/provenance.html`, opened from the
   repo, not served) reflects the scorecard and provenance state.
-
 
 ## Wave 2026-08-06
 

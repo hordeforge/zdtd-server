@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (140/138/51) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (141/138/50) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 21 | 25 | 7 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **140** | **138** | **51** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 22 | 25 | 6 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **141** | **138** | **50** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3188,7 +3188,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**21 WORKS · 25 PARTIAL · 7 MISSING**
+**22 WORKS · 25 PARTIAL · 6 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -4088,7 +4088,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
 | Equipment / armor mitigation | PARTIAL (equip slots; mitigation is the zdtd flat approximation, `[rules.combat] armor_mitigation_*` since 2026-08-20; the stock passive-effects chain stays RE-blocked) |
-| Projectile / ranged combat | MISSING |
+| Projectile / ranged combat | WORKS (2026-08-20, RE items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
 | Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
