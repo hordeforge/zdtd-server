@@ -299,9 +299,20 @@ prior rows closed. Findings and dispositions:
 | R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
 | R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | PARKED: stock serverconfig tables (GameDifficulty/ZombieMove), bare literals; next pass makes them named consts with cites |
 
-R3-R7 are the open work queue from this re-scan; each is a bounded fix (loader
-feature, ring alignment + rules fields, named consts / rules fields, config
-key). R8/R9 parked with reasons.
+R4-R7 were fixed on 2026-08-20 (rules fields: director rings/cads, vehicle
+tuning, container range); R3 (armor mitigation) remains the open loader+sim
+feature and R8/R9 stay parked with reasons.
+
+**PLUGIN_DEV expressibility audit re-run (2026-08-20):** the table in
+docs/PLUGIN_DEV.md was re-verified against the current hook surface (16 hooks,
+6 reference modules). Every discretionary behavior the boundary can carry is
+plugin-covered or a documented boundary-extension candidate (guard policy
+ladder and trader/vehicle announcements are the two "Not yet" rows, each with
+the correct disposition: extend the boundary, do not add native code). The
+native additions of this session were data-driven fixes (A34/A39/R1/R2,
+nav_objects gate) and `[rules]` config fields (R4-R7) - none is discretionary
+behavior, so no new plugin rows were required. No undocumented native
+discretionary behavior exists.
 
 ## Validation
 
