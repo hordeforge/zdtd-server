@@ -313,12 +313,12 @@ prior rows closed. Findings and dispositions:
 | R5 | `ecs/aidirector.zig:378,675-676` | bloodmoon_cd 6 s, bm_mul 1.5 | B | **FIXED**: `[rules.director] bloodmoon_wave_cd` / `bloodmoon_hp_mult` |
 | R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | **FIXED**: `[rules.vehicle]` group (accel_mps2, reverse_frac, coast_decay, steer_deg_per_s, min_turn_speed_frac, fuel_per_m) |
 | R7 | `ecs/inventory.zig:348` container open range | 8 blocks / 64.0 | B | **FIXED**: `[rules.world] container_open_range` (ECS-visible reach cap) |
-| R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
+| R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | **FIXED**: named consts `battery_capacity_fallback_scale` / `battery_initial_charge_frac` with provenance (proxy until the power-feature milestone; real battery tuning is a separate track) |
 | R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | **FIXED**: named consts `hp_scale_by_difficulty` / `move_scale_by_mode` with provenance (stock tier semantic; numbers zdtd-tuned, no pinned RE table) |
 
 
 tuning, container range, armor mitigation); data fixes: fuel burn, corpse
-dwell). R8 stays parked (commented battery proxy; tune with the power feature).
+dwell). All R1-R9 rows are now fixed; nothing remains open from the re-scan.
 
 **Value-level sweep (2026-08-20, paths beyond the game shards):** scanned
 src/server (non-game), persist, plugin, util, apm, main for stock-data
