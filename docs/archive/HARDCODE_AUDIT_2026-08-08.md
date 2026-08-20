@@ -320,6 +320,16 @@ prior rows closed. Findings and dispositions:
 tuning, container range, armor mitigation); data fixes: fuel burn, corpse
 dwell). R8/R9 stay parked with reasons.
 
+**Value-level sweep (2026-08-20, paths beyond the game shards):** scanned
+src/server (non-game), persist, plugin, util, apm, main for stock-data
+hardcodes. Result: no Bucket A hardcode (every name-keyed lookup resolves
+through a loader table; config.zig stock serverconfig key spellings verified
+against V3.1.0). Follow-ups: **B1** fixed — GSI `world_size` was a hardcoded
+6144, now `Game.worldSize()` reads the DTM `HeightMapSize` (fallback 6144);
+**B2** fixed — dead `consoleSetTime` ("night" 22.0, disagreeing with the
+RE-cited settime parse) deleted; **B3/B4** noted (admin-only vehicle-kind
+heuristic with vehicles.xml fallback; `kill` 99999 admin literal), no change.
+
 **PLUGIN_DEV expressibility audit re-run (2026-08-20):** the table in
 docs/PLUGIN_DEV.md was re-verified against the current hook surface (16 hooks,
 6 reference modules). Every discretionary behavior the boundary can carry is

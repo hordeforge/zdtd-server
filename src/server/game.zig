@@ -925,10 +925,6 @@ pub const Game = struct {
         return admin_console.handleConsoleCmd(self, peer, c, body);
     }
 
-    pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-        admin_console.consoleSetTime(self, it, out);
-    }
-
     pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
         admin_console.consoleTeleport(self, player, it, out);
     }
@@ -1373,7 +1369,7 @@ pub const Game = struct {
             .max_players = self.max_players,
             .current_players = @intCast(self.countJoined()),
             .server_version = version.stock_wire_gsi_version,
-            .world_size = 6144,
+            .world_size = self.worldSize(),
             .eac_enabled = false,
             .password_protected = self.password.len > 0,
             .sandbox_preset = self.sandbox_preset,
@@ -1670,6 +1666,13 @@ pub const Game = struct {
         // Prefer surface+1; if player is already near surface, keep their y band.
         if (tr_y > surface - 2 and tr_y < surface + 8) return tr_y;
         return surface + 1.0;
+    }
+
+    /// Advertised map size (GSI world_size). Stock reports the loaded map's
+    /// HeightMapSize; offline/flat worlds fall back to the Navezgane default
+    /// 6144 (B1, value-level sweep).
+    pub fn worldSize(self: *const Game) i32 {
+        return if (self.world.heightmap) |hm| hm.width else 6144;
     }
 
     /// Align spawn to DTM height and ensure a solid under the feet block so

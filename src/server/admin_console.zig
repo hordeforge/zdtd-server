@@ -319,30 +319,6 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
 }
 
-pub fn consoleSetTime(self: *Game, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
-    const clk = &self.sim.director.clock;
-    const a = it.next() orelse {
-        out.line("usage: settime <day|night|D H M>");
-        return;
-    };
-    if (std.mem.eql(u8, a, "day")) {
-        clk.hours = 12.0;
-    } else if (std.mem.eql(u8, a, "night")) {
-        clk.hours = 22.0;
-    } else {
-        const d = std.fmt.parseInt(u32, a, 10) catch {
-            out.line("bad day");
-            return;
-        };
-        if (d > 0) clk.day = d;
-        if (it.next()) |hs| clk.hours = @floatFromInt(std.fmt.parseInt(u32, hs, 10) catch 0);
-        if (it.next()) |ms| clk.hours += @as(f32, @floatFromInt(std.fmt.parseInt(u32, ms, 10) catch 0)) / 60.0;
-    }
-    const wt = packages.buildWorldTimeBody(self.body_buf[0..16], clk.worldTimeBits()) catch return;
-    self.broadcast("NetPackageWorldTime", wt) catch {};
-    out.linef("time set: day {d} {d:0>2}:00", .{ clk.day, @as(u32, @trunc(clk.hours)) });
-}
-
 pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
     const ps = player orelse {
         out.line("no player entity");

@@ -116,7 +116,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .max_players = self.max_players,
             .current_players = 0,
             .server_version = version.stock_wire_gsi_version,
-            .world_size = 6144,
+            .world_size = self.worldSize(),
             .eac_enabled = false,
             .password_protected = self.password.len > 0,
             .sandbox_preset = self.sandbox_preset,
