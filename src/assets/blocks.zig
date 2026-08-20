@@ -19,6 +19,12 @@ pub const BlockDef = struct {
     class: []const u8 = "",
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
+    /// Door block (RE entity-ai.md CheckForDoorAndOpen): stock doors carry the
+    /// door FastTag (bit 2) and a TEFeatureDoor; zdtd detects them by the
+    /// stock naming (672 door-named blocks, all door classes) since the tag
+    /// is class-assigned, not a blocks.xml property. Zombies open these on
+    /// their path instead of chewing.
+    is_door: bool = false,
     /// IndexName="TraderOnOff": trader-area gate/loudspeaker blocks that
     /// TraderArea::SetClosed toggles (doors lock, lights flip meta bit 0x2).
     trader_onoff: bool = false,
@@ -204,6 +210,7 @@ pub fn loadFromPath(
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         trader_onoff: bool = false,
+        is_door: bool = false,
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
         crafting_areas: ?[]const u8 = null,
@@ -300,6 +307,7 @@ pub fn loadFromPath(
             .trader_id = trader_id,
             .extends = extends,
             .trader_onoff = trader_onoff,
+            .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
             .crafting_areas = if (crafting_areas) |ca| try arena.dupe(u8, ca) else "",
@@ -356,6 +364,7 @@ pub fn loadFromPath(
             .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,
+            .is_door = pb.is_door,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
             .crafting_areas = if (pb.crafting_areas) |ca| try arena.dupe(u8, ca) else "",
@@ -486,6 +495,9 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const gate = t.byName("doorWoodLargeGate").?;
     try std.testing.expect(t.isTraderOnOff(gate.id));
     try std.testing.expect(!t.isTraderOnOff(crate.id));
+    // Door detection (stock door-naming set): a door is a door, a crate is not.
+    try std.testing.expect(t.byName("doorWoodLargeGate").?.is_door);
+    try std.testing.expect(!t.byName("cntWoodCrateWood01").?.is_door);
     // HeatMapStrength feeds the AI heat map while the block runs.
     const fire = t.byName("campfire").?;
     try std.testing.expectApproxEqAbs(@as(f32, 5), t.heatStrength(fire.id), 1e-4);

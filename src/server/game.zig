@@ -627,6 +627,9 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        // Door-id oracle for the solid probe: an open door is passable.
+        self.world.door_id_ctx = self;
+        self.world.door_id_fn = &blockIsDoor;
         // AI sense smell probe: effective radius (stock cSmellRadiusMin / Bleed,
         // the latter bound to buffInjuryBleeding via the buff catalog).
         self.sim.smell_ctx = self;
@@ -757,6 +760,10 @@ pub const Game = struct {
 
     fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
         return game_hooks.blockSolidAt(ctx, x, y, z);
+    }
+
+    fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
+        return game_hooks.blockIsDoor(ctx, id);
     }
 
     fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {

@@ -622,6 +622,62 @@ test "scenario stability collapse spawns one singular fallingBlock per qualifyin
     std.debug.print("PASS stability-collapse: 2 cells fall as 2 singular fallingBlock entities\n", .{});
 }
 
+test "scenario zombie opens a door on its path instead of chewing" {
+    // RE entity-ai.md CheckForDoorAndOpen: a zombie pressed against a door
+    // (path blocked, door tag + TEFeatureDoor) opens it - SetOpen meta bit +
+    // broadcast - instead of damaging it, and the AI solid probe then reports
+    // the open door passable so the zombie walks through.
+    freshScenarioDir("worlds/zdtd_sc_door");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_door", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // A door-capable blocks table (builtin has no door): a minimal fixture with
+    // the stock door name, loaded through the same loader the XML path uses.
+    const DoorId = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "doorWoodLargeGate")) return 105;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    const src = "<blocks><block name=\"terrStone\"><property name=\"Class\" value=\"Terrain\"/></block><block name=\"doorWoodLargeGate\"><property name=\"Class\" value=\"CompositeTileEntity\"/></block></blocks>";
+    const path = ".zdtd_test_blocks_door.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+    const ft = try blocks_mod.loadFromPath(gpa, path, DoorId.id, null);
+    g.blocks.deinit();
+    g.blocks = ft;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Pull the player next to the zombie (2 blocks away, within block_range).
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 7;
+    g.sim.transform[ps].y = 71;
+    g.sim.transform[ps].z = 5;
+    const zs = g.sim.spawnZombie(5, 71, 5, 200).?;
+    const zi = g.sim.slotOfNetId(zs).?;
+    g.sim.zombie_ai[zi].state = .chase;
+    g.sim.zombie_ai[zi].target_id = c.entity_id;
+    // Door two-tall at the zombie's facing cell (head height 72).
+    try g.world.setBlockWorld(6, 71, 5, 105);
+    try g.world.setBlockWorld(6, 72, 5, 105);
+    try std.testing.expect(try g.world.isSolidWorld(6, 72, 5)); // closed: solid
+    g.tickZombieBlockDamage();
+    // The door is now open: meta bit set, block passable, no damage applied.
+    const raw = try g.world.rawWorld(6, 72, 5);
+    try std.testing.expect((packages.blockMeta(raw) & packages.block_meta_on) != 0);
+    try std.testing.expect(!try g.world.isSolidWorld(6, 72, 5));
+    try std.testing.expectEqual(@as(u16, 105), try g.world.blockWorld(6, 72, 5)); // still the door
+
+    std.debug.print("PASS zombie-door: blocked zombie opens the door and walks through\n", .{});
+}
+
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_switch");

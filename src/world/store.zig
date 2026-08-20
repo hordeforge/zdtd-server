@@ -443,6 +443,10 @@ pub const World = struct {
     /// flat | baked | dem | proc. loadStockMap sets baked; --worldgen-seed sets proc.
     terrain_source: TerrainSource = .flat,
     worldgen: ?worldgen_mod.WorldGen = null,
+    /// Door-id oracle (Game wires the blocks table): true when the id is a
+    /// door block, so `isSolidWorld` treats an open door as passable.
+    door_id_ctx: ?*anyopaque = null,
+    door_id_fn: ?*const fn (?*anyopaque, u16) bool = null,
     /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
     terrain_ids: TerrainIds = .{},
     /// Hand chunk writes to the background flusher ([perf] async_chunk_flush).
@@ -829,8 +833,19 @@ pub const World = struct {
     }
 
     pub fn isSolidWorld(self: *World, x: i32, y: i32, z: i32) !bool {
-        const id = try self.blockWorld(x, y, z);
-        return id != self.terrain_ids.air and id != self.terrain_ids.water;
+        const raw = try self.rawWorld(x, y, z);
+        const id: u16 = @truncate(raw);
+        if (id == self.terrain_ids.air or id == self.terrain_ids.water) return false;
+        // An open door is passable (RE TEFeatureDoor.SetOpen): the AI solid
+        // probes use this predicate, so a zombie walks through the door it
+        // just opened. The meta open bit is bit 1 of the 22..25 nibble (wire
+        // `block_meta_on`; duplicated here because world must not import wire).
+        if (self.door_id_fn) |f| {
+            if (f(self.door_id_ctx, id)) {
+                return (@as(u8, @truncate((raw >> 22) & 15)) & 2) == 0;
+            }
+        }
+        return true;
     }
 
     /// Bounded water leveling (GAP "Water flow / physics", PARTIAL): drain up
@@ -1641,6 +1656,35 @@ test "navezgane spawn chunk carries its POI blocks" {
         if (ch.blockAt(t2.lx, y, t2.lz) != 0) non_air += 1;
     }
     try std.testing.expect(non_air > 0);
+}
+
+test "isSolidWorld: a closed door is solid, an open door is passable" {
+    // RE TEFeatureDoor.SetOpen: the open state is a meta bit (bit 1 of the
+    // 22..25 nibble). With the door-id hook wired, an open door no longer
+    // blocks the AI probes; without the hook it stays solid.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const Door = struct {
+        fn isDoor(_: ?*anyopaque, id: u16) bool {
+            return id == 999;
+        }
+    };
+    w.door_id_ctx = null;
+    w.door_id_fn = &Door.isDoor;
+    try w.setBlockWorld(5, 70, 5, 999);
+    try std.testing.expect(try w.isSolidWorld(5, 70, 5)); // closed
+    const open_raw: u32 = 999 | (2 << 22); // meta open bit
+    try w.setBlockRawWorld(5, 70, 5, open_raw);
+    try std.testing.expect(!try w.isSolidWorld(5, 70, 5)); // open
+    // Without the hook the table is unknown: the open door stays solid.
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    try w2.setBlockRawWorld(5, 70, 5, open_raw);
+    try std.testing.expect(try w2.isSolidWorld(5, 70, 5));
 }
 
 test "navezgane heights agree with the blocks in the same column" {

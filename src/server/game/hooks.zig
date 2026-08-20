@@ -207,6 +207,15 @@ pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     return g.world.isSolidWorld(x, y, z) catch false;
 }
 
+/// Door-id oracle: true when the block id resolves to a door (name-based, per
+/// the stock door-naming set). Feeds `isSolidWorld` so open doors are
+/// passable and closed doors block.
+pub fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const def = g.blocks.byId(id) orelse return false;
+    return def.is_door;
+}
+
 /// Effective smell radius for a slot: stock `cSmellRadiusBleed` (25) while the
 /// player carries buffInjuryBleeding, else `cSmellRadiusMin` (10). The bleed
 /// radius is data-bound: resolved via the buff catalog name, never a hardcoded

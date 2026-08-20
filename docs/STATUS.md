@@ -79,7 +79,12 @@ shaping stack so regions run flat, rolling or ridged, on top of the
 already-shipped multi-biome surfaces (biome field + per-biome surface stacks +
 procBiomeAt chunk biome ids), counts unchanged (the stock 6-axis climate
 model, carved caves and POI/WFC placement stay open). The dashboard
-(docs/provenance.html) is synced.
+(docs/provenance.html) is synced. Then the MoveHelper row gained
+door-opening: a zombie pressed against a door on its path opens it (SetOpen
+meta bit + broadcast, RE CheckForDoorAndOpen) instead of chewing, and the AI
+solid probe now treats an open door as passable (door ids detected by the
+stock door-naming set), counts unchanged (dig/swim/elevator/push remain). The
+dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -90,7 +95,7 @@ halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
-1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump shipped 2026-08-21; dig/swim/elevator/push/door open; server-side only - a human client moves itself)
+1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening shipped 2026-08-21; dig/swim/elevator/push open; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)

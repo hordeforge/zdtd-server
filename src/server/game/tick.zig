@@ -231,6 +231,23 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         if (!solid) continue;
         const id = self.blockIdAtWorld(bx, by, bz);
         if (id == 0) continue;
+        // Zombies open unlocked doors on their path instead of chewing (RE
+        // entity-ai.md CheckForDoorAndOpen: block with the door tag +
+        // TEFeatureDoor, SetOpen when not open). Set the open meta bit and
+        // broadcast; an already-open door is skipped (no re-broadcast).
+        if (self.blocks.byId(id)) |def| {
+            if (def.is_door) {
+                const raw = self.world.rawWorld(bx, by, bz) catch continue;
+                if ((packages.blockMeta(raw) & packages.block_meta_on) == 0) {
+                    const open_raw = packages.withBlockMeta(raw, packages.block_meta_on);
+                    self.world.setBlockRawWorld(bx, by, bz, open_raw) catch continue;
+                    if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], bx, by, bz, open_raw, 0, -1, -1)) |sb| {
+                        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
+                    } else |_| {}
+                }
+                continue;
+            }
+        }
         const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(bx, by, bz, dmg);
