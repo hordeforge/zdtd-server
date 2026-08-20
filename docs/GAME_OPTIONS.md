@@ -143,6 +143,8 @@ test, so a retune cannot land silently).
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
 | `sense_dist_sq` | 2304.0 | **Floor**: `entityclasses.xml` `SightRange` wins per class (stock ships 27, 30, 40 m) |
+| `hear_range` | 10.0 | Hearing radius: a player within it is sensed regardless of sight (sound passes walls). RE entity-ai.md PlayerStealth; exact movement-noise radius not IL-pinned |
+| `view_cone_half_deg` | 50.0 | Sight view-cone half-angle (stock `maxViewAngle` field, `IsInFrontOfMe`; per-class default not in the RE corpus) |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
 | `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |

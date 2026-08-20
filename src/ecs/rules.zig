@@ -72,6 +72,15 @@ pub const Ai = struct {
     /// wins per class when present (stock ships 27, 30, 40 m on different
     /// zombie classes); see systems.senseDistSq.
     sense_dist_sq: f32 = 48.0 * 48.0,
+    /// Hearing radius, blocks: a player within this range is sensed regardless
+    /// of sight (stock sound passes walls; the exact movement-noise radius is
+    /// not IL-pinned, default ~stock cSmellRadiusMin 10). RE entity-ai.md
+    /// PlayerStealth.
+    hear_range: f32 = 10.0,
+    /// Sight view-cone half-angle, degrees (stock `maxViewAngle` field,
+    /// IsInFrontOfMe half-angle; the per-class default is not in the RE
+    /// corpus, 50 is the UAI-typical value).
+    view_cone_half_deg: f32 = 50.0,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
     /// Chase speed, blocks/s. **Floor**: entityclasses.xml MoveSpeedAggro wins
@@ -316,6 +325,8 @@ pub const AiOverlay = struct {
     full_dist_sq: ?f32 = null,
     mid_dist_sq: ?f32 = null,
     sense_dist_sq: ?f32 = null,
+    hear_range: ?f32 = null,
+    view_cone_half_deg: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,

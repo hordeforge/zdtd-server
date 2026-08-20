@@ -199,3 +199,10 @@ pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     if (g.items.byId(item_id)) |_| return g.items.stackFor(item_id);
     return invsys.maxStackBuiltin(item_id);
 }
+
+/// Block-solid probe for the AI sense LOS ray (stock CanSee's Voxel.Raycast).
+/// A missing/erroring chunk counts as clear (nothing to hide behind yet).
+pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.world.isSolidWorld(x, y, z) catch false;
+}

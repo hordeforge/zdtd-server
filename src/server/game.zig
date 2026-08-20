@@ -624,6 +624,9 @@ pub const Game = struct {
         // AI path move probe: destination footing, or blocked.
         self.sim.step_ctx = self;
         self.sim.step_fn = &pathStepAt;
+        // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
+        self.sim.solid_ctx = self;
+        self.sim.solid_fn = &blockSolidAt;
         // Zombie AI bot targets (ADR 0026): bots are not ECS entities, so the
         // AI reaches them through these Game-side hooks (snap + melee damage).
         self.sim.bot_snap_ctx = self;
@@ -746,6 +749,10 @@ pub const Game = struct {
 
     fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
         return game_hooks.heightAtWorld(ctx, wx, wz);
+    }
+
+    fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+        return game_hooks.blockSolidAt(ctx, x, y, z);
     }
 
     pub fn spawnPoiTraders(self: *Game) void {

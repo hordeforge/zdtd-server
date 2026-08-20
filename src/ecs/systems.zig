@@ -29,6 +29,7 @@ const PlayerSnap = struct {
     id: i32,
     slot: Slot,
     x: f32,
+    y: f32,
     z: f32,
 };
 
@@ -50,6 +51,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .id = w.network_id[j].id,
             .slot = j,
             .x = w.transform[j].x,
+            .y = w.transform[j].y,
             .z = w.transform[j].z,
         };
         n += 1;
@@ -61,7 +63,65 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
 /// player" for this tick (nearest sensed, or the attacker via revenge).
 const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
 
-fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zz: f32) TargetSnap {
+/// Block-LOS between the zombie head (y+1.6) and the target head (y+1.6),
+/// stepping the segment in ~0.8 block increments (stock CanSee's
+/// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
+/// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
+fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
+    const solid_fn = w.solid_fn orelse return true; // no terrain hook: sight unblocked
+    const solid_ctx = w.solid_ctx;
+    const zy2 = zy + 1.6;
+    const py2 = py + 1.6;
+    const dx = px - zx;
+    const dy = py2 - zy2;
+    const dz = pz - zz;
+    const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist < 0.001) return true;
+    const steps: usize = @intCast(@min(@as(u32, @intFromFloat(dist / 0.8)), 64));
+    var i: usize = 1;
+    while (i < steps) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) * 0.8 / dist;
+        const sx = zx + dx * t;
+        const sy = zy2 + dy * t;
+        const sz = zz + dz * t;
+        if (solid_fn(solid_ctx, @intFromFloat(@floor(sx)), @intFromFloat(@floor(sy)), @intFromFloat(@floor(sz)))) return false;
+    }
+    return true;
+}
+
+/// Stock sense gate (RE entity-ai.md CanEntityBeSeen + PlayerStealth): a
+/// player is sensed when heard (within `hear_range`; sound passes walls) or
+/// seen (within sense range, inside the view cone, block-LOS clear). Replaces
+/// the old distance-only check so zombies stop seeing through solid geometry.
+fn canSensePlayer(
+    w: *const World,
+    zx: f32,
+    zy: f32,
+    zz: f32,
+    zyaw: f32,
+    px: f32,
+    py: f32,
+    pz: f32,
+) bool {
+    const dx = px - zx;
+    const dy = py - zy;
+    const dz = pz - zz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 >= w.rules.ai.sense_dist_sq) return false;
+    const hear = w.rules.ai.hear_range;
+    if (d2 < hear * hear) return true;
+    // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)) then LOS.
+    const half = w.rules.ai.view_cone_half_deg * (std.math.pi / 180.0);
+    const yaw_r = zyaw * (std.math.pi / 180.0);
+    const hd = @sqrt(dx * dx + dz * dz);
+    if (hd > 0.001) {
+        const dot = (dx * @sin(yaw_r) + dz * @cos(yaw_r)) / hd;
+        if (dot < @cos(half)) return false;
+    }
+    return losClear(w, zx, zy, zz, px, py, pz);
+}
+
+fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
     var best_d: f32 = w.rules.ai.sense_dist_sq;
@@ -72,6 +132,7 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zz: f3
         const dz = p.z - zz;
         const d = dx * dx + dz * dz;
         if (d < best_d and d > 0.0001) {
+            if (!canSensePlayer(w, zx, zy, zz, zyaw, p.x, p.y, p.z)) continue;
             best_d = d;
             best_id = p.id;
             best_slot = p.slot;
@@ -1056,7 +1117,7 @@ const AiCtx = struct {
 
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].z), ctx.dt);
+            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
             // Host-side bot as a secondary target (ADR 0026): with no player
             // sensed (and no revenge latched), a zombie senses the nearest
             // live bot within its own sight range and chases it. Bots are not
@@ -2511,6 +2572,7 @@ test "chase reuses one solve for many steps instead of replanning per metre" {
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(10, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
     var replans: u32 = 0;
     var t: f32 = 0;
     while (t < 4.0) : (t += 0.05) {
@@ -2561,6 +2623,7 @@ test "budget-denied tick still walks the buffered path" {
     // reaches melee range clears its path instead of asking for a new one).
     _ = w.spawnPlayer(14, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
     // Prime the buffer, then close the budget on this slot.
     _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.zombie_ai[zs].currentWp() != null);
@@ -3019,6 +3082,7 @@ test "configured chase floor never beats the entityclasses MoveSpeedAggro" {
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(30, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
     var t: f32 = 0;
     while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     // Class 1.0 -> 1.6 blocks/s; 4 s closes only a few blocks. A 100 floor would
@@ -4033,4 +4097,34 @@ test "sense range comes from entityclasses SightRange, not the global rule" {
     // resolved outside the table senses at its own SightRange, not the row.
     w.class_id[0].sight_range = 40.0;
     try std.testing.expectEqual(@as(f32, 1600.0), senseDistSq(&w, 0));
+}
+
+test "AI senses: LOS and view cone gate sight; hearing ignores walls" {
+    // Stock CanEntityBeSeen + PlayerStealth (RE entity-ai.md): a player is
+    // sensed when heard (within hear_range, walls pass sound) or seen (within
+    // sense range, inside the view cone, block-LOS clear). A wall between the
+    // zombie and a far player must break sight; a near player is still heard.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x == 10 and y >= 70 and y <= 71 and z == 0;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    // Zombie at origin facing +x (yaw 90 = atan2(1, 0)).
+    const zyaw: f32 = 90.0;
+    // Far player (20 m, beyond hear 10) with a wall at x=10: not sensed.
+    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, 20, 70, 0));
+    // Same distance, no wall (y shifted so the wall cell is not on the ray):
+    // sensed - LOS clear, in the cone.
+    try std.testing.expect(canSensePlayer(&w, 0, 70, 0, zyaw, 20, 70, 4));
+    // Near player (5 m, within hear) with a wall: still sensed (hearing).
+    try std.testing.expect(canSensePlayer(&w, 0, 70, 0, zyaw, 5, 70, 0));
+    // Behind the zombie (yaw 90 faces +x; player at -x): out of the cone at
+    // 20 m, not sensed even without a wall.
+    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, -20, 70, 0));
+    // Beyond the sense range: never sensed.
+    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, 100, 70, 0));
 }

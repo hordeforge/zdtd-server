@@ -265,6 +265,12 @@ pub const World = struct {
     /// solid-cell bool cannot (see path.StepFn).
     step_ctx: ?*anyopaque = null,
     step_fn: ?path_mod.StepFn = null,
+    /// Optional block-solid probe (x, y, z) -> solid, backing the AI sense
+    /// LOS ray (stock CanSee's Voxel.Raycast). Game wires the block store;
+    /// unset (null) means no terrain data (headless / tests) so sight is
+    /// unblocked.
+    solid_ctx: ?*anyopaque = null,
+    solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
     /// A* replans issued this tick. Atomic: the AI phase runs on parallel
     /// workers. Cleared by beginTick and surfaced as TickResult.path_replans
     /// (ecs must not import apm; see the note on commands_applied).

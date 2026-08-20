@@ -26,7 +26,7 @@ impact:** (projectile/ranged combat verified WORKS 2026-08-20 - RE
 items.md:1097-1140: projectiles are client-side GameObjects, the server
 surface is the DamageEntity C2S claim, which is complete)
 
-1. AI senses: line of sight / hearing / smell (MISSING)
+1. AI senses: smell radius + light-level threshold (PARTIAL - sight LOS + hearing shipped 2026-08-20)
 2. MoveHelper physics / collision (MISSING)
 3. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
 4. Water flow / physics (MISSING)

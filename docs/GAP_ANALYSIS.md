@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (141/138/50) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (141/139/49) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 17 | 8 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 22 | 25 | 6 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **141** | **138** | **50** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **141** | **139** | **49** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3188,7 +3188,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**22 WORKS · 25 PARTIAL · 6 MISSING**
+**22 WORKS · 26 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -4078,7 +4078,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |
 | MoveHelper physics / collision | MISSING |
 | Gravity / swimming / climbing | PARTIAL (void rescue teleport; vehicle gravity) |
-| Line of sight / hearing / smell | MISSING |
+| Line of sight / hearing / smell | PARTIAL (2026-08-20: sense gate ships - view-cone + block-LOS sight via Voxel.Raycast-equivalent, and hearing within hear_range that passes walls, RE entity-ai.md CanEntityBeSeen + PlayerStealth; smell radius and the light-level threshold still open) |
 | Stealth / crouch | MISSING |
 | Group AI / pack behavior | MISSING |
 | Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
