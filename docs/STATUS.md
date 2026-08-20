@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 330 features: 158 `WORKS`,
-128 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 330 features: 159 `WORKS`,
+127 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -46,7 +46,12 @@ counts unchanged (row still PARTIAL - op application and the stock response
 remain open, and Guid-key resolution is RE-blocked: `InventoryTransaction.Read`
 clears the transaction on an unknown key while `CreateInventoryServer` has no
 callers in the RE corpus, so the registry population path is unpinned;
-candidate capture: container-open sequence vs stock dedi).
+candidate capture: container-open sequence vs stock dedi). Then the XP curve
+numeric-parity row went WORKS (expForLevel now mirrors stock
+Progression.GetExpForNextLevel bit-for-bit: double-pow Mathf.Pow cast to float,
+Clamp(level+1, 0, ClampExpCostAtLevel) exponent, 2.147484e9f min then conv.i4;
+level 1->2 costs 11024 like stock, not 10000), total **159/127/44**. The
+dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE

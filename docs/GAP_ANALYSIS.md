@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **330 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (158/128/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (159/127/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
-| [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
+| [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **158** | **128** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **159** | **127** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2496,7 +2496,7 @@ runtime (client-owned spending, no server model), the client's
 `NetPackagePlayerStats` blob is dropped so other players never see your level,
 and server-to-client XP/level pushes do not exist.
 
-**10 WORKS · 12 PARTIAL · 15 MISSING**
+**11 WORKS · 11 PARTIAL · 15 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -2520,14 +2520,16 @@ and server-to-client XP/level pushes do not exist.
   `src/server/game/step.zig` (turret path), `src/assets/entities.zig`
   (`ExperienceGain` parse)
 
-- **XP curve numeric parity with stock** `PARTIAL`
-  zdtd's `expForLevel(L) = exp_to_level * mult^(min(L,clamp)-1)`. Stock's
-  `GetExpForNextLevel()` is `BaseExpToLevel * ExpMultiplier^(Level+1)`. The
-  exponent is off by 2, so every zdtd level costs a factor of 1.05^2 = 1.1025 less
-  XP than stock (10000 vs 11025 for level 1 to 2). zdtd clamps at u32 max, stock at
-  2.14748365e9.
-  *Anchors:* `src/assets/progression.zig:21-30`, `asm.il:1083482`,
-  `asm.il:1083513`, `asm.il:1088481`
+- **XP curve numeric parity with stock** `WORKS`
+  `expForLevel` now mirrors `Progression.GetExpForNextLevel` bit-for-bit:
+  `conv.r4 BaseExpToLevel * Mathf.Pow(ExpMultiplier, Clamp(level+1, 0,
+  ClampExpCostAtLevel))` where Mathf.Pow computes in double and casts to float
+  (Progression.il.txt 1083482/1083513), `Math.Min(.., 2.147484e9f)` then
+  `conv.i4` saturates at int.MaxValue. Golden values: level 1->2 = 11024
+  (was 10000, a 1.1024x undercharge), clamp at 60 freezes the cost at 186791.
+  Award/join/stats callers pass the current level so exp_to_next matches stock.
+  *Anchors:* `src/assets/progression.zig:33-45`, `src/server/game/player.zig:34,39,54`,
+  `src/server/game/join.zig:540`, `Progression.il.txt:1083482`, `:1083513`
 
 - **XPMultiplier server option** `WORKS`
   Parsed, applied to awards, reported in the GameStats blob. Client log confirms
@@ -2574,7 +2576,7 @@ and server-to-client XP/level pushes do not exist.
   book_group are not parsed at all. (d) Nothing in `src/` reads perks or
   attributes: `perkByName` and `attrByName` have zero callers outside their own
   file, and the only consumer of the Table is a debug print of the counts.
-  *Anchors:* `src/assets/progression.zig:166-188`, `:137-164`, `:68-80`,
+  *Anchors:* `src/assets/progression.zig:126-187`, `:163-167`, `:38-44`,
   `src/server/game.zig:839-844`, `Data/Config/progression.xml:189`, `:193-214`,
   `:240`, `:875`, `:879`
 

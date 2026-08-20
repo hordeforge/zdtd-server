@@ -22,15 +22,24 @@ pub const LevelCurve = struct {
     clamp_exp_cost_at_level: u16 = 60,
     loaded: bool = false,
 
-    /// XP required to go from `level` to level+1 (stock geometric curve).
+    /// XP required to go from `level` to level+1. Stock
+    /// Progression.GetExpForNextLevel (7dtd-research docs/progression.md XP
+    /// curve, Progression.il.txt 1083482/1083513): conv.r4 BaseExpToLevel *
+    /// Mathf.Pow(ExpMultiplier, Clamp(level+1, 0, ClampExpCostAtLevel)).
+    /// Mathf.Pow computes in double and casts to float, so the multiply is
+    /// float32; Math.Min(.., 2.147484e9f) then conv.i4 saturates at
+    /// int.MaxValue. Players start at level 1, so level 1->2 is
+    /// 10000 * 1.05f^2 = 11024 for the stock 10000/1.05/60 defaults.
     pub fn expForLevel(self: LevelCurve, level: u16) u64 {
-        if (level == 0) return self.exp_to_level;
         const clamp_l = if (self.clamp_exp_cost_at_level == 0) self.max_level else self.clamp_exp_cost_at_level;
-        const L: f64 = @floatFromInt(@min(level, clamp_l));
-        const base: f64 = @floatFromInt(self.exp_to_level);
-        const mult: f64 = self.experience_multiplier;
-        const cost = base * std.math.pow(f64, mult, L - 1.0);
-        if (cost > @as(f64, @floatFromInt(std.math.maxInt(u32)))) return std.math.maxInt(u32);
+        const exp: f32 = @floatFromInt(@min(@as(u32, level) + 1, @as(u32, clamp_l)));
+        const powf: f32 = @floatCast(std.math.pow(
+            f64,
+            self.experience_multiplier,
+            exp,
+        ));
+        const cost: f32 = @as(f32, @floatFromInt(self.exp_to_level)) * powf;
+        if (cost >= 2147483648.0) return std.math.maxInt(i32);
         return @trunc(cost);
     }
 };
@@ -183,6 +192,30 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 
 pub fn tryLoadTable(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("progression.xml", Table, loadTableFromPath, allocator, game_dir, config_dir);
+}
+
+test "expForLevel matches stock GetExpForNextLevel golden values" {
+    // Stock defaults from progression.xml parse (10000 / 1.05 / clamp 60):
+    // cost(L) = float32(10000 * Mathf.Pow(1.05f, min(L+1, 60))), truncated,
+    // Math.Min(.., 2.147484e9f) then conv.i4 saturates at int.MaxValue.
+    // Golden values computed independently in float32 (numpy), same as the
+    // stock Single arithmetic (Progression.il.txt 1083482).
+    const c: LevelCurve = .{};
+    try std.testing.expectEqual(@as(u64, 10500), c.expForLevel(0));
+    try std.testing.expectEqual(@as(u64, 11024), c.expForLevel(1));
+    try std.testing.expectEqual(@as(u64, 11576), c.expForLevel(2));
+    try std.testing.expectEqual(@as(u64, 17103), c.expForLevel(10));
+    try std.testing.expectEqual(@as(u64, 177896), c.expForLevel(58));
+    try std.testing.expectEqual(@as(u64, 186791), c.expForLevel(59));
+    // Exponent clamps at ClampExpCostAtLevel=60: 60 and beyond are identical.
+    try std.testing.expectEqual(@as(u64, 186791), c.expForLevel(60));
+    try std.testing.expectEqual(@as(u64, 186791), c.expForLevel(299));
+    try std.testing.expectEqual(@as(u64, 186791), c.expForLevel(300));
+    // A degenerate clamp (0 = no clamp) uses max_level: far levels hit the
+    // 2.147484e9f ceiling like stock's Math.Min.
+    const noclamp: LevelCurve = .{ .clamp_exp_cost_at_level = 0 };
+    try std.testing.expectEqual(@as(u64, 2082136064), noclamp.expForLevel(250));
+    try std.testing.expectEqual(@as(u64, std.math.maxInt(i32)), noclamp.expForLevel(251));
 }
 
 test "load progression.xml when present" {

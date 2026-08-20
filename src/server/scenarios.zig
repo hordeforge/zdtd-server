@@ -185,8 +185,9 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     try std.testing.expectEqual(@as(u16, 1), try pr.readU16()); // Level in blob
 
     // Level-up pushes a fresh snapshot to peers: award A enough XP for lvl 2.
+    // Stock threshold (progression.zig expForLevel): 10000 * 1.05f^2 = 11024.
     cap_b.clear();
-    g.awardXp(ca.slot, 10000);
+    g.awardXp(ca.slot, 11024);
     const psb2 = cap_b.findPkgIdEntity(ps_id, ca.entity_id) orelse return error.TestUnexpectedResult;
     var pr2 = binary.Reader{ .data = psb2 };
     try std.testing.expectEqual(ca.entity_id, try pr2.readI32());

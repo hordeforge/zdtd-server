@@ -537,7 +537,7 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
 fn sendPlayerStatsTo(self: *Game, peer: *ln_peer.Peer, owner: *const Client, nid: i32) !void {
     if (owner.name_len == 0) return;
     const exp_to_next: i32 = @intCast(@min(
-        self.progression.expForLevel(@min(owner.level + 1, self.progression.max_level)),
+        self.progression.expForLevel(@min(owner.level, self.progression.max_level)),
         std.math.maxInt(i32),
     ));
     if (packages.stock_xp.buildPlayerStatsBody(self.body_buf[32..160], .{
