@@ -1923,6 +1923,14 @@ pub const Game = struct {
         const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
         try self.sendGame(peer, "NetPackageWorldTime", wt);
         try self.sendGameStats(peer);
+        // Blood-moon music is edge-triggered on the broadcast path (rising /
+        // falling edge each tick), so a client joining (or respawning) during
+        // an active horde would never hear it; replay the current state here
+        // (RE aidirector.md DynamicMusic.Conductor eligibility).
+        if (self.sim.director.bloodmoon_active) {
+            const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], true);
+            try self.sendGame(peer, "NetPackageBloodmoonMusic", bm_body);
+        }
         // Weather only once the client has already completed first join (re-bundle /
         // respawn). First join: client InitPackages may still be null → underrun kick.
         if (!first_join) try self.sendWeather(peer);

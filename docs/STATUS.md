@@ -37,7 +37,7 @@ via NetPackageNPCQuestList + accept marker) was stale PARTIAL - the window
 is driven end to end, flipped to WORKS, total **143/142/44**. Then the
 blood-moon schedule row went WORKS (stock CalcNextDay persisted on the
 clock as ZCL2, seekable across restarts and day jumps), total
-**144/141/44**. Reconciliation: GameStats.BloodMoonDay re-broadcasts on any day change (the step.zig per-tick diff already covered settime jumps), so the stat-58 row went WORKS, total **145/140/44**. The dashboard (docs/provenance.html) is synced.
+**144/141/44**. Reconciliation: GameStats.BloodMoonDay re-broadcasts on any day change (the step.zig per-tick diff already covered settime jumps), so the stat-58 row went WORKS, total **145/140/44**. Then the blood-moon warning-window row went WORKS (default red clock at hour 8 on the horde night; operator SandboxCode forwarded verbatim), total **146/139/44**. The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE

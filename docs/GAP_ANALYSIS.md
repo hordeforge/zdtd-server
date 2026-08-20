@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (145/140/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (147/138/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 11 | 12 | 3 | 26 | Horde runs dusk to dawn; CalcNextDay schedule persists; stat 58 re-sent on any day change; IsBloodMoonDead lands |
+| [Blood moon](#6-blood-moon) | 13 | 10 | 3 | 26 | Horde runs dusk to dawn; CalcNextDay persists; stat 58 + red clock + music replay wired; 1.9x BM budget |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **145** | **140** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **147** | **138** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1167,7 +1167,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**11 WORKS · 12 PARTIAL · 3 MISSING**
+**13 WORKS · 10 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1236,24 +1236,27 @@ encoding is one day high.
   `src/ecs/aidirector.zig` (`bloodMoonDayFor`), `src/server/game.zig:589`
   `:1983`
 
-- **Blood-moon warning window (red HUD clock)** `PARTIAL`
-  Stock has no warning packet: `XUiC_CompassWindow` colours the clock FF0000 when
-  `GameStats[BloodMoonDay]` equals the client's current day and
-  `World::BloodMoonWarningHour <= hour` (default 8). The day is now the jittered
-  horde day, so the clock turns red on the real horde night. Remaining: zdtd
-  sends an empty SandboxCode so the client never applies the server's
-  BloodMoonWarning choice; `BloodMoonWarning` is parsed nowhere in zdtd. Stat 61
-  is read only by `GameSenseManager`
-  (SteelSeries LEDs), never by the HUD.
+- **Blood-moon warning window (red HUD clock)** `WORKS` (2026-08-20
+  reconciliation) Stock has no warning packet: `XUiC_CompassWindow` colours
+  the clock FF0000 when `GameStats[BloodMoonDay]` equals the client's current
+  day and `World::BloodMoonWarningHour <= hour` (default 8; sandbox option
+  -1 off / 8 / 18, applied from the SandboxCode the client decodes). zdtd
+  sends the jittered horde day (re-sent on any day change) and the operator's
+  `SandboxCode` is forwarded verbatim in the stats blob (RE sandbox-options
+  §3/§8: empty code = stock defaults, groups encode only changed options), so
+  the red clock fires on the real horde night at the configured hour.
   *Anchors:* `asm.il:1574299`, `asm.il:1248240`, `asm.il:2502629`,
-  `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`
+  `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`, `src/server/game.zig:393`
 
 - **NetPackageBloodmoonMusic** `PARTIAL`
   Builder is IL-correct and broadcast on the rising and falling edge every 20
-  ticks. Two gaps: it is a single global bool where stock computes it per player
-  from `EntityPlayer.bloodMoonParty`; and because it is edge-triggered only, a
-  client that joins **during** a blood moon never receives it and hears normal
-  night music all night.
+  ticks, and a client joining (or respawning) during an active horde now
+  receives the current eligibility state with the join bundle (2026-08-20),
+  so join-during-BM hears the horde music. Remaining: it is a single global
+  bool where stock computes it per player from `EntityPlayer.bloodMoonParty` -
+  zdtd's horde model hordes the party as a whole, so the global state is the
+  approximation (multi-party servers may hear horde music for a party not
+  currently horded).
   *Anchors:* `src/wire/packages.zig:896`, `src/server/game.zig:8114`, `:8119`,
   `asm.il:807834`, `asm.il:2593714`, `asm.il:807889`
 
@@ -1298,12 +1301,13 @@ encoding is one day high.
   *Anchors:* `src/server/config.zig:226`, `src/ecs/aidirector.zig:96`, `:164`,
   `src/server/game.zig:6224`, `asm.il:413818`, `asm.il:412041`
 
-- **Alive-zombie budget during a blood moon** `PARTIAL`
-  `Director.tick` hard-returns at `MaxSpawnedZombies`, the same cap day and night.
-  Stock's blood-moon party spawner calls `AIDirector::CanSpawn(1.9f)`, a 1.9x
-  budget, which is what the stock serverconfig comment refers to. The horde caps
-  out at the ordinary world budget and thins as soon as anything else is alive.
-  *Anchors:* `src/ecs/aidirector.zig:151`, `:104`, `src/server/config.zig:46`,
+- **Alive-zombie budget during a blood moon** `WORKS` (2026-08-20)
+  `Director.tick` gates spawns on a per-tick ceiling: the world
+  `MaxSpawnedZombies` cap normally, and `CanSpawn(1.9f)` (asm.il:413528) - a
+  1.9x ceiling - while the blood moon is active, so the horde does not thin
+  at the ordinary cap. A spawn batch may overshoot the ceiling by its own
+  size (the gate runs at tick start; stock CanSpawn behaves the same).
+  *Anchors:* `src/ecs/aidirector.zig:370`, `:378`, `src/server/config.zig:46`,
   `asm.il:413528`
 
 - **Spawn placement and spawn direction rotation** `PARTIAL`

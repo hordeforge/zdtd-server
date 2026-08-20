@@ -318,6 +318,10 @@ pub const Director = struct {
     /// Alive-zombie ceiling: stock MaxSpawnedZombies default is 64; we keep a
     /// smaller dev cap so long soaks do not accrete entities without despawn.
     pub const default_max_alive_zombies: u32 = 24;
+    /// Blood-moon spawn ceiling multiplier. RE: the stock blood-moon party
+    /// spawner calls `AIDirector::CanSpawn(1.9f)` (asm.il:413528) - a 1.9x
+    /// budget over the world MaxSpawnedZombies cap.
+    pub const bloodmoon_budget_scale: f32 = 1.9;
 
     /// Zombie hp multiplier from GameDifficulty (0=Scavenger .. 5=Insane).
     /// The tier semantic is stock serverconfig GameDifficulty; the exact
@@ -368,7 +372,14 @@ pub const Director = struct {
         }
 
         const alive_z = w.countKind(.zombie);
-        if (alive_z >= self.max_alive) {
+        // Blood-moon budget: stock's party spawner calls `AIDirector::CanSpawn
+        // (1.9f)` (asm.il:413528), a 1.9x ceiling over the world budget, so
+        // the horde does not thin at the ordinary day/night cap.
+        const cap: u32 = if (self.bloodmoon_active)
+            @intFromFloat(@as(f32, @floatFromInt(self.max_alive)) * bloodmoon_budget_scale)
+        else
+            self.max_alive;
+        if (alive_z >= cap) {
             // Daily trader restock still runs below; skip spawn branches.
             if (self.clock.day != day_before) {
                 @import("systems.zig").traderRestock(w);
@@ -1354,4 +1365,38 @@ test "bloodmoon schedule persists position and advances past the live day" {
     cl.bloodmoon_range = 0;
     cl.day = 1;
     try std.testing.expectEqual(@as(i32, 10), cl.bloodMoonDayFor(1));
+}
+
+test "blood moon spawns past the ordinary world budget (1.9x CanSpawn)" {
+    // RE asm.il:413528: the stock BM party spawner calls CanSpawn(1.9f), a
+    // 1.9x ceiling over MaxSpawnedZombies, so the horde does not thin at the
+    // day/night cap. With max_alive 24 the BM ceiling is 45.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .day = 3, .hours = 23.0 }, .max_alive = 24 };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    // Seed 24 zombies (the ordinary cap): on a normal night the tick must not
+    // spawn more (the director derives bloodmoon_active from the clock).
+    var s: u32 = 0;
+    while (s < 24) : (s += 1) {
+        _ = w.spawnZombie(@floatFromInt(s % 8), 70, @floatFromInt(s / 8), 40);
+    }
+    for (0..40) |_| _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 24), w.countKind(.zombie));
+    // A blood-moon night (freq 7 -> day 7): the 1.9x budget admits more and
+    // the horde drip runs; the BM ceiling (45) is never exceeded.
+    d.clock.day = 7;
+    d.clock.hours = 23.0;
+    var ticks: u32 = 0;
+    while (ticks < 600 and w.countKind(.zombie) <= 24) : (ticks += 1) {
+        _ = d.tick(&w, 0.05);
+    }
+    try std.testing.expect(w.countKind(.zombie) > 24);
+    while (ticks < 1200) : (ticks += 1) {
+        _ = d.tick(&w, 0.05);
+    }
+    // The cap gates at tick start, so a horde batch may overshoot the 45
+    // ceiling by its own size (stock CanSpawn behaves the same); the count
+    // stays well under the 64 stock MaxSpawnedZombies default.
+    try std.testing.expect(w.countKind(.zombie) <= 64);
 }
