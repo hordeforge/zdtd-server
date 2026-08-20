@@ -73,7 +73,7 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
             const tid: u16 = @truncate(cell.raw & 0xffff);
             const def = self.blocks.byId(tid) orelse continue;
             if (!self.maxdamage.showModelOnFall(def.name)) continue;
-            _ = self.sim.spawnFallingBlock(cell);
+            _ = self.sim.spawnFallingBlock(cell, self.maxdamage.fallingMassKg(def.name));
         }
     }
     if (new_id != 0) {

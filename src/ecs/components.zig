@@ -806,7 +806,25 @@ pub const FallingBlocks = struct {
     /// falling blocks scatter like stock).
     vx: f32 = 0,
     vz: f32 = 0,
+    /// fallTimeInTicks (stock EntityFallingBlock.OnUpdateEntity); the damage
+    /// pass runs every other tick.
+    tick: u16 = 0,
+    /// Crush mass (RE IL=232-250): FastMin(hardness*mass, 10) * 8 via
+    /// materials.xml; 0 = no crush damage. Raw damage caps at
+    /// FastMin(massKg * |vy| * 0.05, 40).
+    mass_kg: f32 = 0,
+    /// Per-entity hit counts (stock cMaxHitsPerEntity 3, Dictionary keyed by
+    /// entity id): a bounded fixed array so one falling block cannot damage an
+    /// entity every tick forever.
+    hit_ids: [falling_hits_tracked]i32 = undefined,
+    hit_counts: [falling_hits_tracked]u8 = undefined,
+    hit_n: u8 = 0,
 };
+
+/// Per-entity hit-count cap (stock cMaxHitsPerEntity = 3).
+pub const falling_hit_cap: usize = 3;
+/// Entities tracked per falling block (a collapse column crushes few victims).
+pub const falling_hits_tracked: usize = 8;
 
 pub const Flags = struct {
     bits: u16 = 8, // Spawned

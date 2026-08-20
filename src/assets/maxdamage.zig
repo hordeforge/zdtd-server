@@ -92,6 +92,10 @@ pub const Table = struct {
     /// blocks.xml ShowModelOnFall="false" names (default true per Block.il.txt
     /// 1876-18A2; only explicit false is stored).
     no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{},
+    /// materials.xml Hardness (float) / Mass (int) per material id; feed the
+    /// falling-block massKg formula (EntityFallingBlock IL=232-250).
+    material_hardness: std.StringHashMapUnmanaged(f32) = .{},
+    material_mass: std.StringHashMapUnmanaged(f32) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -220,6 +224,20 @@ pub const Table = struct {
     /// to showing nothing).
     pub fn showModelOnFall(self: *const Table, name: []const u8) bool {
         return !self.no_show_model_on_fall.contains(name);
+    }
+
+    /// Falling-block massKg for a block name (RE EntityFallingBlock IL=232-250):
+    /// FastMin(MaterialBlock.Hardness * MaterialBlock.Mass, 10) * 8, resolving
+    /// the block's blocks.xml Material ref into materials.xml Hardness/Mass.
+    /// 0 when unresolvable (builtin table or unknown material) -> the entity
+    /// still falls and lands but deals no crush damage.
+    pub fn fallingMassKg(self: *const Table, name: []const u8) f32 {
+        const mat = self.block_material.get(name) orelse return 0;
+        const h = self.material_hardness.get(mat) orelse return 0;
+        const m = self.material_mass.get(mat) orelse return 0;
+        const hmm = h * m;
+        const clamped: f32 = if (hmm > 10.0) 10.0 else hmm;
+        return clamped * 8.0;
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -357,6 +375,18 @@ pub const Table = struct {
                 if (xml.parseU16(md)) |hp| {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_max.put(arena, kn, hp);
+                }
+            }
+            if (xml.propertyValue(body, "Hardness")) |hv| {
+                if (xml.parseF32(hv)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_hardness.put(arena, kn, v);
+                }
+            }
+            if (xml.propertyValue(body, "Mass")) |mv| {
+                if (xml.parseU32(mv)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_mass.put(arena, kn, @floatFromInt(v));
                 }
             }
             i = body_end;
@@ -851,6 +881,14 @@ test "stock blocks.xml deco facts when present" {
     try std.testing.expect(t.showModelOnFall("metalCatwalkTrap"));
     try std.testing.expect(t.showModelOnFall("woodMaster"));
     try std.testing.expect(!t.showModelOnFall("cntAmmoPileSmall"));
+    // Falling massKg via materials.xml: Mcobblestone H1/M10 -> FastMin(10,10)*8
+    // = 80; Mtrash H1/M5 -> 40.
+    const mat_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    if (io_fs.fileExists(mat_path)) {
+        try t.mergeMaterialsXml(std.testing.allocator, mat_path);
+        try std.testing.expectEqual(@as(f32, 80.0), t.fallingMassKg("cobblestoneMaster"));
+        try std.testing.expectEqual(@as(f32, 40.0), t.fallingMassKg("cntAmmoPileSmall"));
+    }
 }
 
 test "every placeable blocks.xml name resolves in the AssignIds dump" {

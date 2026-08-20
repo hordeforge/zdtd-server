@@ -960,7 +960,7 @@ pub const World = struct {
     /// center plus the stock random Y offset (-0.1..0.1); the horizontal
     /// impulse is a small deterministic per-cell draw (seeded by world pos, so
     /// the same collapse reproduces the same scatter).
-    pub fn spawnFallingBlock(self: *World, cell: c.FallingCell) ?NetId {
+    pub fn spawnFallingBlock(self: *World, cell: c.FallingCell, mass_kg: f32) ?NetId {
         var prng = std.Random.Xoshiro256.init(
             @as(u64, @bitCast(@as(i64, cell.x))) *% 0x9E37_79B1_7F4A_7C15 ^
                 @as(u64, @bitCast(@as(i64, cell.y))) *% 0xBF58_476D_1CE4_E5B9 ^
@@ -980,6 +980,7 @@ pub const World = struct {
             .n = 1,
             .vx = (rnd.float(f32) - 0.5) * 1.0,
             .vz = (rnd.float(f32) - 0.5) * 1.0,
+            .mass_kg = mass_kg,
         };
         self.falling[s].cells[0] = cell;
         self.notifySpawn(s);

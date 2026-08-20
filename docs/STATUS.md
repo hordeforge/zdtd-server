@@ -55,8 +55,12 @@ falling-blocks row gained the stock default path: collapse now spawns one
 singular `fallingBlock` entity per cell whose `ShowModelOnFall` resolves true
 (blocks.xml property, default true per Block.il.txt 1876-18A2), at the cell
 center with the stock -0.1..0.1 Y offset + deterministic horizontal impulse;
-full rawData rides the ECD and replicate branches on n==1 (counts unchanged -
-Fall-event drops, landing damage and the opt-in group mode stay open). The
+full rawData rides the ECD and replicate branches on n==1. Then the crush
+damage leg shipped (massKg from materials.xml Hardness/Mass with stock goldens
+80/40; every-other-tick box-overlap damage, 3-hit cap, head + velocity gates,
+armor reduction; the singular cell now tracks the transform exactly, fixing a
+pre-existing floor-offset bug that landed blocks in 4 ticks), counts unchanged
+(Fall-event drops, landing audio and the opt-in group mode stay open). The
 dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
@@ -73,7 +77,7 @@ light-level leg stays RE-blocked, no server light channel)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
-6. Falling blocks (PARTIAL - collapse spawns per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall 2026-08-21; Fall-event item drops, landing damage and the opt-in group mode open)
+6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)
 7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; other special variants open)
 8. World borders / difficulty tiers (RE-BLOCKED 2026-08-21 - difficulty damage table IL absent from the corpus; border is client-side)
 9. Server-triggered sounds / music (RE-BLOCKED 2026-08-21 - NetPackageSoundAtPosition field types not pinned)
