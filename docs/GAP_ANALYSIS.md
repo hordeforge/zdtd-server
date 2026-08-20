@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (149/136/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (150/135/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 15 | 8 | 3 | 26 | Horde runs dusk to dawn; gamestage-ladder composition + jittered CalcNextDay schedule + stat 58/red clock/music + 1.9x budget |
+| [Blood moon](#6-blood-moon) | 16 | 7 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **149** | **136** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **150** | **135** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1167,7 +1167,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**15 WORKS · 8 PARTIAL · 3 MISSING**
+**16 WORKS · 7 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1298,13 +1298,14 @@ encoding is one day high.
   subsystem, not wire fake.
   *Anchors:* `src/ecs/aidirector.zig:163`, `src/assets/xml_patch.zig:99`
 
-- **BloodMoonEnemyCount semantics** `PARTIAL`
-  Parsed (clamped 0..60) and used as `wave = max(1, count/2)` per 6 s burst. Stock
-  meaning is different: it is the per-player multiplier for the party's alive cap,
-  `enemyActiveMax = min(30, count * partyMemberCount)`. zdtd has no per-player
-  alive cap at all.
-  *Anchors:* `src/server/config.zig:226`, `src/ecs/aidirector.zig:96`, `:164`,
-  `src/server/game.zig:6224`, `asm.il:413818`, `asm.il:412041`
+- **BloodMoonEnemyCount semantics** `WORKS` (2026-08-20 reconciliation)
+  Parsed (clamped 0..60). The party spawner enforces the stock per-party
+  alive cap `enemyActiveMax = min(30, count * partyMemberCount)` (asm.il
+  413818 / 412041) as `min(party_enemy_max 30, count * party.members)` per
+  party; the 6 s burst wave (`max(1, count/2)`) is capped by the gamestages
+  ladder's `maxAlive`, matching stock's burst cadence.
+  *Anchors:* `src/server/config.zig:226`, `src/ecs/aidirector.zig:401`, `:648`,
+  `src/ecs/rules.zig:221`, `asm.il:413818`, `asm.il:412041`
 
 - **Alive-zombie budget during a blood moon** `WORKS` (2026-08-20)
   `Director.tick` gates spawns on a per-tick ceiling: the world
