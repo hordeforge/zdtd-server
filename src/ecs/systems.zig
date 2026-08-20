@@ -254,15 +254,112 @@ fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s:
     };
 }
 
+/// True when the body column at (x, z) with feet y fits: the four corners at
+/// ±body_radius are probed at mid-body and head heights (the stock
+/// CharacterController capsule ~(0.35, 1.8); RE entity-movement.md). A solid
+/// cell anywhere in the column blocks the move.
+///
+/// Corners are inset by 1 mm so a body exactly tangent to a cell face (edge
+/// at the boundary) counts as clear: that is what lets the capsule slide
+/// along a wall instead of gluing to it (the Unity CC resolves the contact
+/// as zero penetration; a cell-membership probe would block every move).
+fn bodyClearAt(
+    solid_ctx: ?*anyopaque,
+    solid_fn: *const fn (?*anyopaque, i32, i32, i32) bool,
+    x: f32,
+    z: f32,
+    y: f32,
+    h: f32,
+    r: f32,
+) bool {
+    const inset: f32 = 0.001;
+    const mid: i32 = @intFromFloat(@floor(y + 0.5));
+    const head: i32 = @intFromFloat(@floor(y + h - 0.1));
+    const cx: i32 = @intFromFloat(@floor(x));
+    const cz: i32 = @intFromFloat(@floor(z));
+    for ([_]f32{ -1.0, 1.0 }) |sx| {
+        for ([_]f32{ -1.0, 1.0 }) |sz| {
+            const px: i32 = @intFromFloat(@floor(x + sx * (r - inset)));
+            const pz: i32 = @intFromFloat(@floor(z + sz * (r - inset)));
+            // Degenerate corner inside the center cell: probing it at mid/head
+            // would block standing on a 1-wide ledge.
+            if (px == cx and pz == cz) continue;
+            if (solid_fn(solid_ctx, px, mid, pz)) return false;
+            if (solid_fn(solid_ctx, px, head, pz)) return false;
+        }
+    }
+    return true;
+}
+
+/// Horizontal move with stock MoveHelper surface (RE entity-movement.md):
+/// axis-separated collide-and-slide (the Unity CharacterController Move the
+/// stock server calls from ccMove) and step-up of `step_height`. Vertical
+/// physics (gravity + ground snap) is `applyGravity`, run once per AI tick so
+/// an idle body still falls. With no `solid_fn` hook (offline/tests) this
+/// degenerates to the old straight-line step so grid-only worlds keep their
+/// behavior.
 fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
-    const dx = tx - w.transform[s].x;
-    const dz = tz - w.transform[s].z;
+    const t = &w.transform[s];
+    const dx = tx - t.x;
+    const dz = tz - t.z;
     const d2 = dx * dx + dz * dz;
     if (d2 < 0.04) return;
     const inv = 1.0 / @sqrt(d2);
-    w.transform[s].x += dx * inv * speed * dt;
-    w.transform[s].z += dz * inv * speed * dt;
-    w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+    const mx = dx * inv * speed * dt;
+    const mz = dz * inv * speed * dt;
+    t.yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+    const solid_fn = w.solid_fn orelse {
+        t.x += mx;
+        t.z += mz;
+        return;
+    };
+    const r = w.rules.ai.body_radius;
+    const h = w.rules.ai.body_height;
+    const step = w.rules.ai.step_height;
+    const ctx = w.solid_ctx;
+    // Axis-separated slide: try X, then Z, so a wall blocks only the axis it
+    // faces and the body runs along it (stock CC Move semantics).
+    var nx = t.x;
+    var nz = t.z;
+    if (bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y, h, r)) {
+        nx = t.x + mx;
+    } else if (step > 0 and bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y + step, h, r)) {
+        // Step-up: a ledge up to step_height is climbed, not blocked.
+        nx = t.x + mx;
+        t.y += step;
+    }
+    if (bodyClearAt(ctx, solid_fn, nx, t.z + mz, t.y, h, r)) {
+        nz = t.z + mz;
+    } else if (step > 0 and bodyClearAt(ctx, solid_fn, nx, t.z + mz, t.y + step, h, r)) {
+        nz = t.z + mz;
+        t.y += step;
+    }
+    t.x = nx;
+    t.z = nz;
+}
+
+/// Vertical physics for one AI body (RE entity-movement.md): the feet cell
+/// below decides. Solid → grounded (snap onto the block top, clear vy). Air
+/// → fall under gravity like the stock physics tick (DefaultMoveEntity
+/// friction + gravity in Entity::ccMove); the accumulator is capped so a
+/// long drop cannot outrun the per-tick probe. Runs once per AI tick so an
+/// idle or attacking body still settles.
+fn applyGravity(w: *World, s: Slot, dt: f32) void {
+    const solid_fn = w.solid_fn orelse return;
+    const t = &w.transform[s];
+    const ai = &w.zombie_ai[s];
+    const below: i32 = @intFromFloat(@floor(t.y - 0.05));
+    if (solid_fn(w.solid_ctx, @intFromFloat(@floor(t.x)), below, @intFromFloat(@floor(t.z)))) {
+        t.y = @as(f32, @floatFromInt(below)) + 1.0;
+        ai.vy = 0;
+    } else {
+        // Stock per-tick integrator (RE entity-movement.md): the fall applies
+        // World.Gravity then the 0.98 y-drag, so acceleration is ~1.6
+        // blocks/s² and the speed self-caps around -3.9 blocks/s.
+        ai.vy = (ai.vy + w.rules.ai.gravity * dt) * 0.98;
+        if (ai.vy < w.rules.ai.fall_max_vy) ai.vy = w.rules.ai.fall_max_vy;
+        t.y += ai.vy * dt;
+    }
 }
 
 /// Deferred damage accumulates as fixed-point (dmg_scale) to stay atomic-friendly.
@@ -1169,6 +1266,7 @@ const AiCtx = struct {
                 ai.active_task = .wander;
                 ai.decision_cd = 1.0;
                 wanderUpdate(ctx.w, s, ai, wspd * 0.5, ctx.dt);
+                applyGravity(ctx.w, s, ctx.dt);
                 continue;
             }
 
@@ -1242,6 +1340,10 @@ const AiCtx = struct {
             } else {
                 ctx.w.flags[s].bits &= ~@as(u16, 64);
             }
+
+            // Vertical settle once per tick (gravity + ground snap), so the
+            // body falls and lands even when its task never moves horizontally.
+            applyGravity(ctx.w, s, ctx.dt);
         }
     }
 };
@@ -1714,8 +1816,10 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
             _ = w.path_replans_denied.fetchAdd(1, .monotonic);
         }
     }
-    // Consume every waypoint already reached, adopting its feet height so the
-    // body follows terrain up and down instead of floating at spawn height.
+    // Consume every waypoint already reached. With collision active the body
+    // settles its own height (gravity + ground snap in stepToward), so the
+    // waypoint feet height is only adopted on the hook-less grid where nothing
+    // else tracks terrain. Offline paths keep following terrain up and down.
     while (ai.currentWp()) |wp| {
         const tx = @as(f32, @floatFromInt(wp.x)) + 0.5;
         const tz = @as(f32, @floatFromInt(wp.z)) + 0.5;
@@ -1723,7 +1827,7 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
         const dz = tz - w.transform[s].z;
         const wp_arr = w.rules.ai.path_wp_arrive;
         if (dx * dx + dz * dz >= wp_arr * wp_arr) break;
-        w.transform[s].y = @floatFromInt(wp.y);
+        if (w.solid_fn == null) w.transform[s].y = @floatFromInt(wp.y);
         ai.path_wp_i += 1;
     }
     if (ai.currentWp()) |wp| {
@@ -4228,4 +4332,99 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
     w2.smell_fn = &FarSmell.radius;
     const t2 = nearestPlayerSnap(&w2, &far_snaps, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, -1), t2.id);
+}
+
+test "AI move: collide-and-slide stops at a wall and slides along it" {
+    // RE entity-movement.md: the stock body is a CharacterController capsule,
+    // so a wall stops only the facing axis and the body slides along the face
+    // instead of clipping or gluing. Body radius 0.35, wall plane at x=5.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x == 5 and y >= 70 and y <= 72 and z >= -3 and z <= 3;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    // Straight into the wall: the body must stop short of x=5 (edge rests at
+    // the face, never entering the wall cell). ~42 ticks to cover 4.65 m.
+    for (0..80) |_| stepToward(&w, s, 50, 0, 2.2, 0.05);
+    try std.testing.expect(w.transform[s].x > 3.0 and w.transform[s].x < 5.0);
+    const x_blocked = w.transform[s].x;
+    // Diagonally (+x, +z): X stays blocked at the face while Z slides along it
+    // until the body reaches the wall's end (z edge stops at ~2.65).
+    const z_start = w.transform[s].z;
+    for (0..60) |_| stepToward(&w, s, 50, 8, 2.2, 0.05);
+    try std.testing.expectApproxEqAbs(x_blocked, w.transform[s].x, 0.02);
+    try std.testing.expect(w.transform[s].z > z_start + 1.0 and w.transform[s].z < 3.0);
+}
+
+test "AI move: a 1-high ledge is stepped up, not blocked" {
+    // Stock CC stepOffset: a horizontal move into a block is retried with the
+    // feet lifted by step_height, so a zombie climbs a full block. Ground at
+    // y=69 (top 70); the ledge block at (x=6, y=70) adds a 1-high step (top
+    // 71). Without step-up the body would pin at the ledge face; with it the
+    // zombie crosses and gravity re-settles it to the ground behind.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Ledge = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return y == 69 or (x == 6 and y == 70 and z >= -3 and z <= 3);
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ledge.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    for (0..120) |_| {
+        stepToward(&w, s, 12, 0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+    }
+    // Crossed the block; the body stepped up to 71 over the ledge and then
+    // settled back onto the ground (top 70) behind it.
+    try std.testing.expect(w.transform[s].x > 8.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 70.0), w.transform[s].y, 0.01);
+}
+
+test "AI move: airborne body falls under gravity and lands on the first solid cell" {
+    // RE entity-movement.md: the vertical leg integrates gravity and lands on
+    // the first solid cell below (block top y=71 for ground at y=70). An idle
+    // body (applyGravity alone, no horizontal intent) still settles.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y == 70;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const zs = w.spawnZombie(0, 75, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    for (0..200) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 71.0), w.transform[s].y, 0.001);
+    try std.testing.expectEqual(@as(f32, 0.0), w.zombie_ai[s].vy);
+}
+
+test "AI move: wander target inside a wall does not clip through it" {
+    // The old wander used a straight-line step, so a wander pick inside a
+    // building walked the body through the wall. The collide-and-slide stops
+    // the body at the face even when the goal cell is unreachable.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x >= 5 and x <= 8 and y >= 70 and y <= 72 and z >= -3 and z <= 3;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    // Goal inside the wall block: the body stops at the near face (x < 5).
+    for (0..80) |_| stepToward(&w, s, 6, 0, 2.2, 0.05);
+    try std.testing.expect(w.transform[s].x < 5.0);
 }

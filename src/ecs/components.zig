@@ -197,6 +197,10 @@ pub const ZombieAi = struct {
     look_yaw: f32 = 0,
     /// EAIWander.time (asm.il:438366): seconds the current wander has run.
     wander_time: f32 = 0,
+    /// Vertical velocity (blocks/s) for gravity integration (RE
+    /// entity-movement.md): the body falls under gravity when its feet cell is
+    /// air, and lands on the first solid cell below. 0 when grounded.
+    vy: f32 = 0,
     /// EntityAlive.revengeTarget net id (-1 = none), set by World.damageFrom.
     /// EAISetAsTargetIfHurt (asm.il:435831) promotes it to the attack target.
     revenge_target: i32 = -1,

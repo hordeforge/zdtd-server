@@ -6,7 +6,7 @@
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 329 features: 142 `WORKS`,
-138 `PARTIAL`, 49 `MISSING` (see its scorecard for the per-area breakdown).
+139 `PARTIAL`, 48 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -21,7 +21,9 @@ bedroll/last-logout persistence, and velocity packages. Net and ops area
 16/27/9 -> 21/25/7; total 135/141/53 -> **140/138/51**. Two follow-up
 slices: projectile/ranged combat verified WORKS (client-side projectiles),
 then the AI senses row WORKS (smell + per-class cone), taking the total to
-**142/138/49**. The dashboard (docs/provenance.html) is synced.
+**142/138/49**. Next, MoveHelper physics/collision went MISSING -> PARTIAL
+(collide-and-slide + step-up + stock gravity, RE entity-movement.md), total
+**142/139/48**. The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -32,12 +34,12 @@ halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
-1. MoveHelper physics / collision (MISSING)
-3. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
-4. Water flow / physics (MISSING)
-5. Stealth / crouch (MISSING)
-6. Group AI / pack behavior (MISSING)
-7. NPC dialog trees (MISSING)
+1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity shipped 2026-08-20; jump/dig/swim/elevator/push/door open)
+2. RWG depth: fluids/aquifers, climate/biomes, caves, POI/WFC placement
+3. Water flow / physics (MISSING)
+4. Stealth / crouch (MISSING)
+5. Group AI / pack behavior (MISSING)
+6. NPC dialog trees (MISSING)
 8. Challenges system (MISSING)
 9. Falling blocks (MISSING)
 10. Bosses / special infected (PARTIAL)

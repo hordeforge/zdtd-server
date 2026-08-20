@@ -147,6 +147,11 @@ test, so a retune cannot land silently).
 | `view_cone_half_deg` | 90.0 | Sight view-cone half-angle. Stock `EntityAlive.maxViewAngle` cctor default 180 (half 90 = only excludes targets strictly behind), per-class `MaxViewAngle` in entityclasses.xml halves and wins via `viewHalfDeg`; this is the floor when unset. RE entity-ai.md EntityAlive cctor |
 | `smell_radius` | 10.0 | Smell radius: a player within it is sensed regardless of sight or hearing (smell passes walls). RE entity-ai.md PlayerStealth `cSmellRadiusMin` |
 | `smell_bleed_radius` | 25.0 | Smell radius while the player carries `buffInjuryBleeding`. RE entity-ai.md PlayerStealth `cSmellRadiusBleed` |
+| `body_radius` | 0.35 | Move-body half-width, blocks (stock CharacterController radius ~0.35); the AI collide-and-slide keeps this much of the body out of solid cells. Policy floor (RE entity-movement.md) |
+| `body_height` | 1.8 | Move-body height, blocks (stock zombie CC height ~1.8); the head probe so a body does not duck through 1-high gaps. Policy floor |
+| `step_height` | 1.0 | Step-up limit, blocks: a blocked horizontal move is retried with the feet lifted by this much (stock CC stepOffset; zombies climb a full block). Policy floor |
+| `fall_max_vy` | -30.0 | Hard terminal fall velocity cap, blocks/s (safety bound; the stock 0.98 y-drag already self-caps ~ -3.9) |
+| `gravity` | -1.6 | Vertical acceleration, blocks/s². RE: `World::Gravity` 0.08 blocks/tick (World cctor) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) → ~1.6 blocks/s², self-capping ~ -3.9 |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
 | `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |

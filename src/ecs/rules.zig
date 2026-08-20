@@ -91,6 +91,29 @@ pub const Ai = struct {
     /// Smell radius extension while the player is bleeding (stock
     /// `cSmellRadiusBleed` 25; tied to buffInjuryBleeding in the Game hook).
     smell_bleed_radius: f32 = 25.0,
+    /// Move-body half-width, blocks (stock CharacterController radius ~0.35):
+    /// the AI collide-and-slide keeps this much of the body out of solid
+    /// cells when walking. Policy floor; entityclasses collider data is not
+    /// ported (RE entity-movement.md).
+    body_radius: f32 = 0.35,
+    /// Move-body height, blocks (stock zombie CC height ~1.8): the head probe
+    /// so a body does not duck through 1-high gaps. Policy floor.
+    body_height: f32 = 1.8,
+    /// Step-up limit, blocks: a blocked horizontal move is retried with the
+    /// feet lifted by this much (stock CC stepOffset; zombies climb a full
+    /// block). Policy floor.
+    step_height: f32 = 1.0,
+    /// Vertical acceleration, blocks/s². RE: `World::Gravity` cctor default
+    /// **0.08** blocks/tick (World.il.txt:96) integrated as
+    /// `motion.y = (motion.y - Gravity) * 0.98` per physics tick (the 0.98 is
+    /// the y-drag; EntityAlive.il.txt:6330-6355) → effective ~1.6 blocks/s²
+    /// with a self-cap around -3.9 blocks/s. zdtd's accumulator mirrors the
+    /// per-tick formula so falls look stock.
+    gravity: f32 = -1.6,
+    /// Hard terminal fall velocity, blocks/s: safety cap on the accumulator
+    /// (the stock 0.98 drag already self-caps around -3.9; this bounds a
+    /// pathological tick so a long drop cannot outrun the per-tick probes).
+    fall_max_vy: f32 = -30.0,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
     /// Chase speed, blocks/s. **Floor**: entityclasses.xml MoveSpeedAggro wins
@@ -339,6 +362,11 @@ pub const AiOverlay = struct {
     view_cone_half_deg: ?f32 = null,
     smell_radius: ?f32 = null,
     smell_bleed_radius: ?f32 = null,
+    body_radius: ?f32 = null,
+    body_height: ?f32 = null,
+    step_height: ?f32 = null,
+    gravity: ?f32 = null,
+    fall_max_vy: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,
