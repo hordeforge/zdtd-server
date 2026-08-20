@@ -247,6 +247,7 @@ the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):
 |---|---|---|
 | `edits_per_tick` | 4 | Pending block edits the leveling pass drains per tick (each may pour) |
 | `spread_cap` | 128 | Max cells one pour fills (fills, not traversals) |
+| `puddle_cap` | 8 | Placed-water puddle: how many cells a bucket may spread at the landing level (bounds the no-mass approximation so a flat floor does not flood in one tick) |
 
 A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards

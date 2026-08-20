@@ -1555,15 +1555,21 @@ test "scenario drowning damages a submerged player" {
     if (water_id == 0) return; // flat world without water: nothing to test
 
     const hx: i32 = @trunc(g.sim.transform[ps].x);
-    const hy: i32 = @trunc(g.sim.transform[ps].y);
     const hz: i32 = @trunc(g.sim.transform[ps].z);
+    // Let the player settle onto the surface (the flat-world spawn is a few
+    // blocks in the air), then submerge the settled head block.
+    var k: u32 = 0;
+    while (k < 30) : (k += 1) try g.step();
+    const hy: i32 = @trunc(g.sim.transform[ps].y);
     try g.world.setBlockWorld(hx, hy + 1, hz, water_id);
     const hp0 = g.sim.health[ps].hp;
-    var k: u32 = 0;
+    k = 0;
     while (k < 25) : (k += 1) try g.step(); // >1 s submerged
     try std.testing.expect(g.sim.health[ps].hp < hp0);
-    // Out of the water: no further loss.
-    try g.world.setBlockWorld(hx, hy + 1, hz, world_store.block_air);
+    // Out of the water: no further loss. The placed water cascaded and its
+    // puddle refills cleared cells, so teleport the player to dry air instead
+    // of fighting the pour.
+    g.sim.transform[ps].y = 100;
     const hp1 = g.sim.health[ps].hp;
     k = 0;
     while (k < 25) : (k += 1) try g.step();

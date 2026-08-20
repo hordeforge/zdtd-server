@@ -100,6 +100,7 @@ pub fn step(self: *Game) !void {
         _ = self.world.levelWaterTick(
             self.sim.rules.water.edits_per_tick,
             self.sim.rules.water.spread_cap,
+            self.sim.rules.water.puddle_cap,
         );
         // Stability-collapse falling blocks (EntityFallingBlock groups): fall
         // under gravity, die on landing (RE entity-ai.md landing: no

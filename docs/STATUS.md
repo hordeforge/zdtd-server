@@ -68,7 +68,11 @@ while rising, with the 1 s jumpDelay gate; fixed a moved-tracking bug the
 tests exposed where the assignment preceded the comparison, so the body
 jumped every tick; the step-up and wall tests stay green), counts unchanged
 (dig/swim/elevator/push/door remain). The dashboard (docs/provenance.html) is
-synced.
+synced. Then placed water gained a bounded cascade (a bucket now falls down
+its air column to the first solid and puddles into up to puddle_cap cells
+that rest on solid, instead of sitting where placed; the old leveler only
+poured dig edits beside lakes), counts unchanged (mass-flow, evap and drain
+stay open). The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -81,7 +85,7 @@ light-level leg stays RE-blocked, no server light channel)
 
 1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump shipped 2026-08-21; dig/swim/elevator/push/door open; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers shipped 2026-08-20 - water table fills basins to the stock 62.88 surface)
-3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water 2026-08-20; placed water no cascade, no mass-flow/evap/drain)
+3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; no pack hunting/horde directives)
 6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)

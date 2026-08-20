@@ -378,6 +378,10 @@ pub const Water = struct {
     edits_per_tick: u8 = 4,
     /// Max cells one pour may fill (fills, not traversals).
     spread_cap: u16 = 128,
+    /// Placed-water puddle: how many cells a bucket may spread at the landing
+    /// level. The stock mass model limits a pour by mass; this bounds the
+    /// approximation so a big flat floor does not flood in one tick.
+    puddle_cap: u8 = 8,
 };
 
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
@@ -533,6 +537,7 @@ pub const SystemsOverlay = struct {
 pub const WaterOverlay = struct {
     edits_per_tick: ?u8 = null,
     spread_cap: ?u16 = null,
+    puddle_cap: ?u8 = null,
 };
 
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections

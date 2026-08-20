@@ -836,19 +836,20 @@ pub const World = struct {
     /// Bounded water leveling (GAP "Water flow / physics", PARTIAL): drain up
     /// to `edits` queued block edits; each pours up to `spread` cells of water
     /// into the connected open basin up to the adjacent water column's surface
-    /// (the client-visible "dig beside a lake and the hole fills" behavior).
-    /// The stock sim is a jobified mass-flow engine (7dtd-research
-    /// light-mesh-water.md §4); this approximation has no per-cell levels,
-    /// flow directions or evaporation, only pours (never drains), and placed
-    /// water does not cascade. Returns cells filled. Runs after sim edits
-    /// each tick (Game.step).
-    pub fn levelWaterTick(self: *World, edits: usize, spread: usize) u32 {
+    /// (the client-visible "dig beside a lake and the hole fills" behavior),
+    /// and a placed water cell cascades down its column and puddles at the
+    /// bottom (bounded by `puddle`). The stock sim is a jobified mass-flow
+    /// engine (7dtd-research light-mesh-water.md §4); this approximation has
+    /// no per-cell levels, flow directions or evaporation, only pours (never
+    /// drains). Returns cells filled. Runs after sim edits each tick
+    /// (Game.step).
+    pub fn levelWaterTick(self: *World, edits: usize, spread: usize, puddle: usize) u32 {
         const water_id = self.terrain_ids.water;
         var filled: u32 = 0;
         var done: usize = 0;
         while (done < edits) : (done += 1) {
             const e = self.leveler.pop() orelse break;
-            filled += self.pourAt(e.x, e.y, e.z, water_id, spread);
+            filled += self.pourAt(e.x, e.y, e.z, water_id, spread, puddle);
         }
         return filled;
     }
@@ -866,7 +867,14 @@ pub const World = struct {
 
     /// One edit: find the water surface from the edit cell and its 5
     /// neighbors, then flood-fill the connected air basin up to that surface.
-    fn pourAt(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize) u32 {
+    fn pourAt(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize, puddle: usize) u32 {
+        // Placed water cascades (stock WaterSimulationNative gravity flow,
+        // bounded): the column of air below fills down to the first solid,
+        // then the landing cell puddles. Dig edits (air at the cell) pour the
+        // basin instead.
+        if (self.blockWorld(ex, ey, ez) catch 0 == water_id) {
+            return self.pourPlacedWater(ex, ey, ez, water_id, spread, puddle);
+        }
         // Source columns: the edit cell itself (placed water), its 4 side
         // neighbors, and the cell above (dug under a pool). The surface is
         // the top of any adjacent water column; -1 = no water nearby.
@@ -882,11 +890,6 @@ pub const World = struct {
         // and terminate the branch; the fill budget doubles as the loop bound
         // (every visited air cell fills), so no visited set is needed.
         const air_id = self.terrain_ids.air;
-        // Placed water does not cascade: without a mass model, a bucket pour
-        // would flood every connected flat cell (a floating puddle), which is
-        // not stock. Only an edit that OPENED air next to an existing water
-        // column pours (digging beside a lake). Documented in GAP_ANALYSIS.
-        if (self.blockWorld(ex, ey, ez) catch 0 == water_id) return 0;
         var stack: [256]water_mod.Cell = undefined;
         var sp: usize = 0;
         stack[sp] = .{ .x = ex, .y = ey, .z = ez };
@@ -909,6 +912,60 @@ pub const World = struct {
                 stack[sp + 4] = .{ .x = c.x, .y = c.y + 1, .z = c.z };
                 stack[sp + 5] = .{ .x = c.x, .y = c.y - 1, .z = c.z };
                 sp += 6;
+            }
+        }
+        return filled;
+    }
+
+    /// Placed water falls down its air column and puddles at the landing
+    /// level (stock gravity flow; bounded approximation). The column fill
+    /// never climbs above the placed level and the puddle only spreads into
+    /// cells resting on solid, so a floating puddle cannot form.
+    fn pourPlacedWater(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize, puddle: usize) u32 {
+        const air_id = self.terrain_ids.air;
+        var filled: u32 = 0;
+        // 1. Column: fill the air below the placed cell down to the first
+        // solid (the falling column).
+        var y: i32 = ey - 1;
+        while (y >= 0 and filled < spread) : (y -= 1) {
+            if (self.blockWorld(ex, y, ez) catch 0 != air_id) break;
+            const t = worldToChunk(ex, ez);
+            (self.getOrCreate(t.pos) catch break).setBlockRaw(self.allocator, t.lx, y, t.lz, water_id) catch break;
+            filled += 1;
+        }
+        const bottom = y + 1; // lowest filled cell (or ey when the column was blocked)
+        // 2. Puddle: 4-neighbor air cells at the landing level whose own
+        // below is solid or water, bounded by the puddle cap.
+        var stack: [64]water_mod.Cell = undefined;
+        var sp: usize = 0;
+        const puddle_left: usize = @min(@as(usize, puddle), spread -| filled);
+        var pu: usize = 0;
+        stack[sp] = .{ .x = ex + 1, .y = bottom, .z = ez };
+        sp += 1;
+        stack[sp] = .{ .x = ex - 1, .y = bottom, .z = ez };
+        sp += 1;
+        stack[sp] = .{ .x = ex, .y = bottom, .z = ez + 1 };
+        sp += 1;
+        stack[sp] = .{ .x = ex, .y = bottom, .z = ez - 1 };
+        sp += 1;
+        while (sp > 0 and pu < puddle_left) {
+            sp -= 1;
+            const c = stack[sp];
+            if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue;
+            if (self.blockWorld(c.x, c.y - 1, c.z) catch 0 == air_id) continue; // floating: no spread
+            const t = worldToChunk(c.x, c.z);
+            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            filled += 1;
+            pu += 1;
+            if (sp + 4 <= stack.len) {
+                stack[sp] = .{ .x = c.x + 1, .y = c.y, .z = c.z };
+                sp += 1;
+                stack[sp] = .{ .x = c.x - 1, .y = c.y, .z = c.z };
+                sp += 1;
+                stack[sp] = .{ .x = c.x, .y = c.y, .z = c.z + 1 };
+                sp += 1;
+                stack[sp] = .{ .x = c.x, .y = c.y, .z = c.z - 1 };
+                sp += 1;
             }
         }
         return filled;
@@ -1708,7 +1765,7 @@ test "water leveling: digging beside a lake pours the connected basin to its sur
     // Dig the cell right beside the lake (x=1, y=51): its neighbor (0,51) is
     // water with surface 62, so the basin x=1..7, y=51..62 pours (7 x 12).
     try w.setBlockWorld(1, 51, 0, block_air);
-    try std.testing.expectEqual(@as(u32, 84), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(@as(u32, 84), w.levelWaterTick(4, 128, 8));
     try std.testing.expectEqual(block_water, try w.blockWorld(1, 51, 0));
     try std.testing.expectEqual(block_water, try w.blockWorld(3, 55, 0));
     try std.testing.expectEqual(block_water, try w.blockWorld(7, 62, 0));
@@ -1733,11 +1790,11 @@ test "water leveling: a deep dig not connected to water stays dry" {
     // One cell dug at y=45, sealed above by the flat terrain: no water
     // adjacent at the edit, so nothing pours.
     try w.setBlockWorld(1, 45, 0, block_air);
-    try std.testing.expectEqual(@as(u32, 0), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(@as(u32, 0), w.levelWaterTick(4, 128, 8));
     try std.testing.expectEqual(block_air, try w.blockWorld(1, 45, 0));
 }
 
-test "water leveling: placed water stays put - no cascade without a mass model" {
+test "water leveling: placed water cascades down its column and puddles" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -1746,13 +1803,38 @@ test "water leveling: placed water stays put - no cascade without a mass model" 
     defer w.deinit();
     // A 1-wide shaft at x=5 carved 51..62; x=4 and x=6 stay terrain walls.
     try carveAirColumn(&w, 5, 51, 62);
-    // Placing water (bucket) does not cascade: the stock mass-flow sim is not
-    // ported, and without volume a cascade would flood every connected flat
-    // cell. The block sits where placed; digging beside it later pours.
+    // Placing water (bucket) cascades down the air column to the shaft
+    // bottom (stock gravity flow, bounded: 11 cells 51..61; the puddle has
+    // no air neighbors - the walls are terrain - so it adds 0).
     try w.setBlockWorld(5, 62, 0, block_water);
-    try std.testing.expectEqual(@as(u32, 0), w.levelWaterTick(4, 128));
+    try std.testing.expectEqual(@as(u32, 11), w.levelWaterTick(4, 128, 8));
     try std.testing.expectEqual(block_water, try w.blockWorld(5, 62, 0));
-    try std.testing.expect((try w.blockWorld(5, 61, 0)) != block_water);
+    try std.testing.expectEqual(block_water, try w.blockWorld(5, 61, 0));
+    try std.testing.expectEqual(block_water, try w.blockWorld(5, 51, 0));
+    try std.testing.expect((try w.blockWorld(5, 50, 0)) != block_water);
+}
+
+test "water leveling: the puddle cap bounds sideways spread on a flat floor" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    // Flat floor at y=51 (terrain below), open air 51..60 across x=1..8.
+    for (1..9) |x| try carveAirColumn(&w, @intCast(x), 51, 60);
+    try w.setBlockWorld(4, 51, 0, block_water);
+    // Column has no air below (floor at 51 rests on terrain 50); the pour is
+    // the puddle only: at most puddle_cap 3 cells spread at the floor level,
+    // never climbing (52 stays air).
+    try std.testing.expectEqual(@as(u32, 3), w.levelWaterTick(4, 128, 3));
+    // 3 puddle cells + the placed cell at the floor level; nothing above.
+    var wet: u32 = 0;
+    for (1..9) |x| {
+        if ((try w.blockWorld(@intCast(x), 51, 0)) == block_water) wet += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 4), wet);
+    try std.testing.expect((try w.blockWorld(4, 52, 0)) != block_water);
 }
 
 test "water leveling: the spread cap bounds one pour" {
@@ -1772,7 +1854,7 @@ test "water leveling: the spread cap bounds one pour" {
     try w.setBlockWorld(1, 51, 0, block_air);
     // Cap 2: only two cells pour this tick; the rest stay air (a further edit
     // would re-seed, but the queue is drained here).
-    try std.testing.expectEqual(@as(u32, 2), w.levelWaterTick(4, 2));
+    try std.testing.expectEqual(@as(u32, 2), w.levelWaterTick(4, 2, 8));
     try std.testing.expectEqual(block_water, try w.blockWorld(1, 51, 0));
     try std.testing.expectEqual(block_air, try w.blockWorld(1, 53, 0));
 }
