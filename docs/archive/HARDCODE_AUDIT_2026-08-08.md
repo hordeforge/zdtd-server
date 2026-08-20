@@ -314,11 +314,11 @@ prior rows closed. Findings and dispositions:
 | R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | **FIXED**: `[rules.vehicle]` group (accel_mps2, reverse_frac, coast_decay, steer_deg_per_s, min_turn_speed_frac, fuel_per_m) |
 | R7 | `ecs/inventory.zig:348` container open range | 8 blocks / 64.0 | B | **FIXED**: `[rules.world] container_open_range` (ECS-visible reach cap) |
 | R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
-| R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | PARKED: stock serverconfig tables (GameDifficulty/ZombieMove), bare literals; next pass makes them named consts with cites |
+| R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | **FIXED**: named consts `hp_scale_by_difficulty` / `move_scale_by_mode` with provenance (stock tier semantic; numbers zdtd-tuned, no pinned RE table) |
 
 
 tuning, container range, armor mitigation); data fixes: fuel burn, corpse
-dwell). R8/R9 stay parked with reasons.
+dwell). R8 stays parked (commented battery proxy; tune with the power feature).
 
 **Value-level sweep (2026-08-20, paths beyond the game shards):** scanned
 src/server (non-game), persist, plugin, util, apm, main for stock-data

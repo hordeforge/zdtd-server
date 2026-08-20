@@ -191,6 +191,12 @@ pub const heat_check_seconds: f32 = director_defaults.heat_check_seconds;
 pub const heat_cooldown_seconds: f32 = director_defaults.heat_cooldown_seconds;
 pub const heat_neighbor_cooldown_seconds: f32 = director_defaults.heat_neighbor_cooldown_seconds;
 pub const heat_feral_chance: f32 = 0.2; // doc-only; the feral roll is not modelled
+/// GameDifficulty 0..5 -> zombie HP multiplier (Scavenger..Insane). Stock tier
+/// semantic; numbers zdtd-tuned (no pinned RE table, R9).
+pub const hp_scale_by_difficulty = [_]f32{ 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+/// ZombieMove 0..4 -> speed multiplier (walk/jog/run/sprint/nightmare). Stock
+/// tier semantic; numbers zdtd-tuned (R9).
+pub const move_scale_by_mode = [_]f32{ 0.5, 0.75, 1.0, 1.4, 1.7 };
 pub const max_heat_regions: usize = 32;
 pub const heat_scout_count: u32 = 2;
 pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
@@ -292,26 +298,17 @@ pub const Director = struct {
     pub const default_max_alive_zombies: u32 = 24;
 
     /// Zombie hp multiplier from GameDifficulty (0=Scavenger .. 5=Insane).
+    /// The tier semantic is stock serverconfig GameDifficulty; the exact
+    /// numbers are zdtd-tuned (no pinned RE table in the research corpus,
+    /// R9 value-level disposition).
     pub fn hpScale(self: *const Director) f32 {
-        return switch (self.difficulty) {
-            0 => 0.5,
-            1 => 0.75,
-            2 => 1.0,
-            3 => 1.25,
-            4 => 1.5,
-            else => 2.0,
-        };
+        return hp_scale_by_difficulty[@min(self.difficulty, 5)];
     }
 
     /// ZombieMove index 0..4 → speed multiplier (walk/jog/run/sprint/nightmare).
+    /// Tier semantic stock; numbers zdtd-tuned (R9).
     fn moveScale(idx: u8) f32 {
-        return switch (idx) {
-            0 => 0.5,
-            1 => 0.75,
-            2 => 1.0,
-            3 => 1.4,
-            else => 1.7,
-        };
+        return move_scale_by_mode[@min(idx, 4)];
     }
 
     /// Current zombie speed multiplier for the active day/night/blood-moon state.
