@@ -223,7 +223,11 @@ pub const WorldGen = struct {
 
     /// 2D shaping stack (`cache_2d`): the Y around which the density gradient
     /// pivots for this column. Continental low-freq + ridged mountains +
-    /// domain-warped detail (the W1 terrain character, kept verbatim).
+    /// domain-warped detail (the W1 terrain character, kept verbatim), with
+    /// the amplitudes blended by a terrain-tile field (RE world-generation.md
+    /// 86: stock TerrainTiles roll Plains/Hills/Mountains with the 4/4/2
+    /// weights), so broad regions run flat, rolling or ridged instead of one
+    /// noise character everywhere.
     ///
     /// The clamp is to [min_surface + margin, max_surface - margin], NOT to
     /// [min_surface, max_surface]: interpolation pulls in corner samples up to
@@ -239,13 +243,32 @@ pub const WorldGen = struct {
         const ridge = noise_mod.ridged2(&self.noise, fx + 1000, fz - 500, ridge_p);
         const detail = noise_mod.warpedFbm2(&self.noise, fx, fz, 8.0, warp_p, detail_p);
 
+        // Terrain-tile blend: plains (low) .. mountains (high). Amplitudes
+        // lerp so regions slope into each other instead of cliffing at a tile
+        // edge (the stock tile grid is discrete; the smooth blend keeps the
+        // no-seam guarantee by construction).
+        const m = self.mountainness(fx, fz);
+        const cont_amp = 8.0 + m * 16.0;
+        const ridge_amp = 4.0 + m * 22.0;
+
         // cont ~[-1,1], ridge ~[0,2], detail ~[-1,1]
-        const h = base_height + cont * height_amp + ridge * 18.0 + detail * 6.0;
+        const h = base_height + cont * cont_amp + ridge * ridge_amp + detail * 6.0;
         return std.math.clamp(
             h,
             @as(f32, @floatFromInt(min_surface)) + margin,
             @as(f32, @floatFromInt(max_surface)) - margin,
         );
+    }
+
+    /// Terrain-tile blend factor in [0,1]: plains .. mountains. Low-frequency
+    /// field independent of the biome field (stock keeps TerrainTiles and
+    /// BiomeTiles separate); deterministic per seed. The pre-scale saturates
+    /// the extremes so broad flat and ridged regions both occur (a raw fBm
+    /// band maps to a middle-only hump otherwise).
+    pub fn mountainness(self: *const WorldGen, fx: f32, fz: f32) f32 {
+        const tile_p: noise_mod.FbmParams = .{ .octaves = 3, .frequency = 0.0015, .gain = 0.5 };
+        const v = noise_mod.fbm2(&self.noise, fx - 7000, fz + 9000, tile_p); // ~[-0.7,0.7]
+        return std.math.clamp((v * 1.6 + 1.0) * 0.5, 0, 1);
     }
 
     /// Standalone world-coordinate density oracle: same value the chunk fill
@@ -679,6 +702,34 @@ test "biome field is deterministic, in range and region-contiguous" {
     var single = WorldGen.init(42);
     single.biome_n = 1;
     try std.testing.expectEqual(@as(u8, 0), single.biomeAt(0, 0));
+}
+
+test "terrain tiles: mountainness is deterministic, bounded and region-varied" {
+    var g = WorldGen.init(1234);
+    var g2 = WorldGen.init(1234);
+    // Deterministic + in range.
+    try std.testing.expectEqual(g.mountainness(100, 200), g2.mountainness(100, 200));
+    for ([_]f32{ -5000, -1, 0, 1, 5000 }) |x| {
+        for ([_]f32{ -5000, 0, 5000 }) |z| {
+            const m = g.mountainness(x, z);
+            try std.testing.expect(m >= 0 and m <= 1);
+        }
+    }
+    // Regional: over a wide span both flat and mountainous samples exist, so
+    // the blend is not a single constant everywhere.
+    var lo: f32 = 1;
+    var hi: f32 = 0;
+    var i: i32 = 0;
+    while (i < 256) : (i += 1) {
+        const m = g.mountainness(@floatFromInt(i * 64), 0);
+        lo = @min(lo, m);
+        hi = @max(hi, m);
+    }
+    try std.testing.expect(lo < 0.25 and hi > 0.75);
+    // Column targets differ by region (plains vs mountain character).
+    const flat = g.columnTarget(0, 0);
+    const ridgy = g.columnTarget(8000, 0);
+    try std.testing.expect(@abs(flat - ridgy) > 1.0);
 }
 
 test "generateChunkBlocks fills each biome's surface stack" {
