@@ -4424,7 +4424,7 @@ not stock:
 | Item | Status |
 |---|---|
 | Vehicle kinds + enter/drive | PARTIAL (arcade physics) |
-| Stock vehicle definitions XML | MISSING |
+| Stock vehicle definitions XML | WORKS (2026-08-21 reconciliation: vehicles.xml loads into per-kind Defs (velocity_max, motor_torque, max_hp, fuel_km_per_l, seat_count) and the spawn path uses them via byKind (init_world.zig) with rules-default fallbacks) |
 | Multi-seat | HAVE (seat0..N from vehicles.xml, driver is seat 0) |
 | Storage / fuel items | PARTIAL fuel float only |
 | Vehicle collision / terrain stick | PARTIAL (server gravity + terrain-top clamp; no entity/block-side collision) |
