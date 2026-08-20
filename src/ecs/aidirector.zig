@@ -546,7 +546,14 @@ pub const Director = struct {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             var k: u32 = 0;
             while (k < count and n < count) : (k += 1) {
-                const ang = @as(f32, @floatFromInt(k + n)) * 1.7;
+                // Stock AIDirector ring placement (asm.il:413135): the base
+                // bearing spreads the batch, and a per-spawn jitter (seeded
+                // from the spawn counter) keeps the pattern from repeating
+                // identically every tick - zombies stop materialising from
+                // the same bearings each wave.
+                const base = @as(f32, @floatFromInt(k + n)) * 1.7;
+                const jit = @as(f32, @floatFromInt(spawnJitter(self.total_spawned +% n))) / 10000.0 * 2.0 * std.math.pi;
+                const ang = base + jit;
                 const r = min_r + (max_r - min_r) * (@mod(ang, 1.0));
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
@@ -559,6 +566,14 @@ pub const Director = struct {
             }
         }
         return n;
+    }
+
+    /// Deterministic per-spawn jitter seed (0..9999) from the spawn counter,
+    /// so consecutive waves place zombies on varied bearings without a global
+    /// RNG (RE spawn placement, asm.il:413135).
+    fn spawnJitter(seed: u32) u32 {
+        const x = (seed +% 0x9E3779B9) *% 0x85EBCA6B;
+        return (x ^ (x >> 16)) % 10000;
     }
 
     /// Cluster online players into blood-moon parties: anyone within

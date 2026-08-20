@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (151/135/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (152/134/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 17 | 6 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end/KillPartyZombies |
+| [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **151** | **135** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **152** | **134** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1167,7 +1167,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**17 WORKS · 6 PARTIAL · 3 MISSING**
+**18 WORKS · 5 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1316,13 +1316,16 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:370`, `:378`, `src/server/config.zig:46`,
   `asm.il:413528`
 
-- **Spawn placement and spawn direction rotation** `PARTIAL`
-  Deterministic angle at 12-22 m from each player. Stock spawns at
-  `cSpawnDistance = 40` with +/-45 degrees of jitter, a hard 30 m minimum, 0..10
-  extra random distance, and rotates `spawnBaseDir` by 120 degrees per group.
-  Zombies materialize inside visual range in front of the player and always from
-  the same bearing pattern.
-  *Anchors:* `src/ecs/aidirector.zig:165`, `:240`, `asm.il:413135`,
+- **Spawn placement and spawn direction rotation** `WORKS` (2026-08-21)
+  The per-player ring spawns on the A36-aligned rules radii (28-54 m) with a
+  deterministic per-spawn bearing jitter (seeded from the spawn counter, no
+  global RNG), so consecutive waves no longer repeat the same pattern and
+  zombies stop materialising from identical bearings every tick. The blood-moon
+  party spawner uses the stock `cSpawnDistance 40` + 0..10 jitter ring. The
+  exact stock jitter shape (45 deg around the group base, 120 deg per-group
+  rotation) is approximated by the seeded full-circle jitter; the ring radii
+  are the rules tunable (`[rules.director] enemy_spawn_ring_*`).
+  *Anchors:* `src/ecs/aidirector.zig:548`, `:656`, `asm.il:413135`,
   `asm.il:414107`, `asm.il:413541`
 
 - **Blood-moon party grouping (multiplayer)** `WORKS`
