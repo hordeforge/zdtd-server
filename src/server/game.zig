@@ -627,6 +627,10 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        // AI sense smell probe: effective radius (stock cSmellRadiusMin / Bleed,
+        // the latter bound to buffInjuryBleeding via the buff catalog).
+        self.sim.smell_ctx = self;
+        self.sim.smell_fn = &smellRadiusFor;
         // Zombie AI bot targets (ADR 0026): bots are not ECS entities, so the
         // AI reaches them through these Game-side hooks (snap + melee damage).
         self.sim.bot_snap_ctx = self;
@@ -753,6 +757,10 @@ pub const Game = struct {
 
     fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
         return game_hooks.blockSolidAt(ctx, x, y, z);
+    }
+
+    fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
+        return game_hooks.smellRadiusFor(ctx, slot);
     }
 
     pub fn spawnPoiTraders(self: *Game) void {

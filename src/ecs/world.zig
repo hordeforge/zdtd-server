@@ -145,6 +145,9 @@ pub const EntityClass = struct {
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
     sight_range: f32 = 0,
+    /// entityclasses MaxViewAngle in degrees, full cone (stock default 180);
+    /// the sense gate halves it. 0 = use the Rules cone floor.
+    view_angle_deg: f32 = 0,
     /// IsEnemyEntity (wolf/bear/coyote hunt; stag/rabbit flee). Defaults true
     /// for zombies; passive animals carry false.
     is_enemy: bool = true,
@@ -271,6 +274,12 @@ pub const World = struct {
     /// unblocked.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
+    /// Optional per-player smell radius (RE PlayerStealth cSmellRadius*):
+    /// (ctx, player_slot) -> effective radius, so stateful players (bleeding,
+    /// dysentery) attract zombies from further through walls. Game wires the
+    /// buff table; unset (null) uses the Rules `smell_radius`.
+    smell_ctx: ?*anyopaque = null,
+    smell_fn: ?*const fn (?*anyopaque, Slot) f32 = null,
     /// A* replans issued this tick. Atomic: the AI phase runs on parallel
     /// workers. Cleared by beginTick and surfaced as TickResult.path_replans
     /// (ecs must not import apm; see the note on commands_applied).

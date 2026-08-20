@@ -38,6 +38,10 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// entityclasses MaxViewAngle in degrees, full cone angle (stock default
+    /// 180 = only excludes targets strictly behind; the sense gate halves it
+    /// like EntityAlive.IsInFrontOfMe). 0 = unset → Rules floor.
+    view_angle_deg: f32 = 0,
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -363,6 +367,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (f > 0 and f <= 256) sight = f;
             }
         }
+        // MaxViewAngle: full cone angle, stock EntityAlive cctor default 180
+        // (RE entity-ai.md), per-class property overrides. Bounded: a crafted
+        // value must not exceed a full 360. 0 stays "unset" → Rules floor.
+        var view_angle: f32 = 0;
+        if (resolveProp(&classes, name, "MaxViewAngle", 0)) |va| {
+            if (xml.parseF32(va)) |f| {
+                if (f > 0 and f <= 360) view_angle = f;
+            }
+        }
         var time_stay: f32 = 0;
         if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
             if (xml.parseF32(ts)) |f| {
@@ -399,6 +412,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .wander_speed = wander,
             .time_stay = time_stay,
             .sight_range = sight,
+            .view_angle_deg = view_angle,
             .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });

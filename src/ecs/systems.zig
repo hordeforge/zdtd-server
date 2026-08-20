@@ -93,8 +93,11 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
 /// player is sensed when heard (within `hear_range`; sound passes walls) or
 /// seen (within sense range, inside the view cone, block-LOS clear). Replaces
 /// the old distance-only check so zombies stop seeing through solid geometry.
+/// `zslot` is the sensing zombie, for its per-class cone (entityclasses
+/// MaxViewAngle) — stock EntityAlive cctor defaults the full angle to 180.
 fn canSensePlayer(
     w: *const World,
+    zslot: Slot,
     zx: f32,
     zy: f32,
     zz: f32,
@@ -111,7 +114,7 @@ fn canSensePlayer(
     const hear = w.rules.ai.hear_range;
     if (d2 < hear * hear) return true;
     // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)) then LOS.
-    const half = w.rules.ai.view_cone_half_deg * (std.math.pi / 180.0);
+    const half = viewHalfDeg(w, zslot) * (std.math.pi / 180.0);
     const yaw_r = zyaw * (std.math.pi / 180.0);
     const hd = @sqrt(dx * dx + dz * dz);
     if (hd > 0.001) {
@@ -121,7 +124,26 @@ fn canSensePlayer(
     return losClear(w, zx, zy, zz, px, py, pz);
 }
 
-fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
+/// View-cone half-angle for one entity, degrees. **Per-class first**:
+/// entityclasses.xml `MaxViewAngle` (full angle, stock default 180) is halved
+/// like EntityAlive.IsInFrontOfMe; the `Rules` value is the floor for a class
+/// with no MaxViewAngle, or when no entityclasses.xml loaded (ADR 0021 d5).
+fn viewHalfDeg(w: *const World, s: Slot) f32 {
+    const pe = w.class_id[s].view_angle_deg;
+    if (pe > 0) return pe / 2.0;
+    const ct = w.class_table[w.class_id[s].id].view_angle_deg;
+    if (ct > 0) return ct / 2.0;
+    return w.rules.ai.view_cone_half_deg;
+}
+
+/// Effective smell radius for a player snap: the per-player hook (bleeding /
+/// dysentery extend it, RE PlayerStealth cSmellRadius*) or the Rules base.
+fn smellRadiusFor(w: *const World, slot: Slot) f32 {
+    if (w.smell_fn) |f| return f(w.smell_ctx, slot);
+    return w.rules.ai.smell_radius;
+}
+
+fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
     var best_d: f32 = w.rules.ai.sense_dist_sq;
@@ -132,7 +154,11 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zx: f32, zy: f3
         const dz = p.z - zz;
         const d = dx * dx + dz * dz;
         if (d < best_d and d > 0.0001) {
-            if (!canSensePlayer(w, zx, zy, zz, zyaw, p.x, p.y, p.z)) continue;
+            // Smell passes walls (RE PlayerStealth cSmellRadius*): within the
+            // player's effective smell radius the zombie senses regardless of
+            // sight or hearing (a bleeding player reeks from further away).
+            const smell = smellRadiusFor(w, p.slot);
+            if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z)) continue;
             best_d = d;
             best_id = p.id;
             best_slot = p.slot;
@@ -1117,7 +1143,7 @@ const AiCtx = struct {
 
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
+            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, s, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
             // Host-side bot as a secondary target (ADR 0026): with no player
             // sensed (and no revenge latched), a zombie senses the nearest
             // live bot within its own sight range and chases it. Bots are not
@@ -4116,15 +4142,90 @@ test "AI senses: LOS and view cone gate sight; hearing ignores walls" {
     // Zombie at origin facing +x (yaw 90 = atan2(1, 0)).
     const zyaw: f32 = 90.0;
     // Far player (20 m, beyond hear 10) with a wall at x=10: not sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, 20, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0));
     // Same distance, no wall (y shifted so the wall cell is not on the ray):
     // sensed - LOS clear, in the cone.
-    try std.testing.expect(canSensePlayer(&w, 0, 70, 0, zyaw, 20, 70, 4));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 4));
     // Near player (5 m, within hear) with a wall: still sensed (hearing).
-    try std.testing.expect(canSensePlayer(&w, 0, 70, 0, zyaw, 5, 70, 0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0));
     // Behind the zombie (yaw 90 faces +x; player at -x): out of the cone at
     // 20 m, not sensed even without a wall.
-    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, -20, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0));
     // Beyond the sense range: never sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 70, 0, zyaw, 100, 70, 0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0));
+}
+
+test "AI senses: per-class MaxViewAngle narrows the cone" {
+    // RE entity-ai.md: stock EntityAlive cctor defaults maxViewAngle to 180
+    // (half 90 = only strictly-behind is out of cone); entityclasses.xml
+    // MaxViewAngle narrows it per class, and the sense gate halves it like
+    // IsInFrontOfMe. A 30-degree class (half 15) must not sense a target 30
+    // degrees off-axis that the stock-default 180 would.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const zyaw: f32 = 90.0; // faces +x.
+    const off30 = std.math.pi / 6.0; // 30 degrees off-axis.
+    // Default class table (rules floor 90 half): a player 30 deg off-axis at
+    // 20 m IS sensed (dot 0.866 > cos 90 = 0).
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+    // Per-class full angle 30 (half 15): the same target is now out of cone.
+    w.class_table[0].view_angle_deg = 30.0;
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+    // Per-entity layer beats the class table: class says 30 but the entity's
+    // own view_angle_deg 360 (half 180) re-opens the cone.
+    w.class_id[0].view_angle_deg = 360.0;
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30)));
+}
+
+test "AI senses: smell radius gates through walls, bleeding extends it" {
+    // RE entity-ai.md PlayerStealth: smell passes walls and is independent of
+    // the sight cone; the per-player effective radius comes from the hook
+    // (stock cSmellRadiusBleed 25 while bleeding, else cSmellRadiusMin 10).
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x == 10 and y >= 70 and y <= 71 and z == 0;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    const Smell = struct {
+        fn radius(_: ?*anyopaque, slot: Slot) f32 {
+            // Slot 1 = bleeding player (25), slot 0 = normal (10).
+            return if (slot == 1) 25.0 else 10.0;
+        }
+    };
+    w.smell_ctx = null;
+    w.smell_fn = &Smell.radius;
+    // Zombie at origin facing +x. Both players at 20 m behind the wall at
+    // x=10: no sight (LOS blocked) and no hearing (20 > hear 10). Only the
+    // bleeding player (smell 25) is sensed - smell ignores the wall and cone.
+    const snaps = [_]PlayerSnap{
+        .{ .id = 100, .slot = 0, .x = 20, .y = 70, .z = 0 },
+        .{ .id = 101, .slot = 1, .x = 20, .y = 70, .z = 0 },
+    };
+    const t = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    try std.testing.expectEqual(@as(i32, 101), t.id);
+    try std.testing.expectEqual(@as(Slot, 1), t.slot);
+    // Both players at 20 m (beyond every non-bleed radius): nobody sensed.
+    const far_snaps = [_]PlayerSnap{
+        .{ .id = 100, .slot = 0, .x = 20, .y = 70, .z = 0 },
+        .{ .id = 101, .slot = 1, .x = 20, .y = 70, .z = 0 },
+    };
+    var w2: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w2.deinit();
+    // Same wall as above: without smell, the 20 m players are behind it, out
+    // of hearing, so nobody is sensed (a bleeding player would reek through).
+    w2.solid_ctx = null;
+    w2.solid_fn = &Wall.solid;
+    const FarSmell = struct {
+        fn radius(_: ?*anyopaque, _: Slot) f32 {
+            return 10.0;
+        }
+    };
+    w2.smell_ctx = null;
+    w2.smell_fn = &FarSmell.radius;
+    const t2 = nearestPlayerSnap(&w2, &far_snaps, 0, 0, 70, 0, 90.0);
+    try std.testing.expectEqual(@as(i32, -1), t2.id);
 }

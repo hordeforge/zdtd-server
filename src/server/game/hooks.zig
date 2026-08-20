@@ -206,3 +206,18 @@ pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     return g.world.isSolidWorld(x, y, z) catch false;
 }
+
+/// Effective smell radius for a slot: stock `cSmellRadiusBleed` (25) while the
+/// player carries buffInjuryBleeding, else `cSmellRadiusMin` (10). The bleed
+/// radius is data-bound: resolved via the buff catalog name, never a hardcoded
+/// def id (ecs/buff.zig:178 offline id 4 is the fixture table, not stock).
+pub fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const base = g.sim.rules.ai.smell_radius;
+    if (g.sim.mask[slot].buffs) {
+        if (g.buffs.indexOfName("buffInjuryBleeding")) |bid| {
+            if (g.sim.buffs[slot].find(bid) != null) return g.sim.rules.ai.smell_bleed_radius;
+        }
+    }
+    return base;
+}

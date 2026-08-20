@@ -77,10 +77,20 @@ pub const Ai = struct {
     /// not IL-pinned, default ~stock cSmellRadiusMin 10). RE entity-ai.md
     /// PlayerStealth.
     hear_range: f32 = 10.0,
-    /// Sight view-cone half-angle, degrees (stock `maxViewAngle` field,
-    /// IsInFrontOfMe half-angle; the per-class default is not in the RE
-    /// corpus, 50 is the UAI-typical value).
-    view_cone_half_deg: f32 = 50.0,
+    /// Sight view-cone half-angle, degrees. Stock `EntityAlive.maxViewAngle`
+    /// cctor default is 180 (full cone; IsInFrontOfMe halves it → 90 half =
+    /// only excludes targets strictly behind), overridden per class by
+    /// entityclasses.xml `MaxViewAngle` — that per-class value wins here via
+    /// `viewHalfDeg` (systems.zig). RE entity-ai.md EntityAlive cctor.
+    view_cone_half_deg: f32 = 90.0,
+    /// Smell radius, blocks: players within this range are sensed regardless
+    /// of sight or hearing (stock `cSmellRadiusMin` 10; the smell-emit/decay
+    /// simulation is not ported, only the radius gate). RE entity-ai.md
+    /// PlayerStealth.
+    smell_radius: f32 = 10.0,
+    /// Smell radius extension while the player is bleeding (stock
+    /// `cSmellRadiusBleed` 25; tied to buffInjuryBleeding in the Game hook).
+    smell_bleed_radius: f32 = 25.0,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
     /// Chase speed, blocks/s. **Floor**: entityclasses.xml MoveSpeedAggro wins
@@ -327,6 +337,8 @@ pub const AiOverlay = struct {
     sense_dist_sq: ?f32 = null,
     hear_range: ?f32 = null,
     view_cone_half_deg: ?f32 = null,
+    smell_radius: ?f32 = null,
+    smell_bleed_radius: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,

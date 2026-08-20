@@ -179,6 +179,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .attack_damage = self.handItemDamage(zdef.hand_item),
             .time_stay = zdef.time_stay,
             .sight_range = zdef.sight_range,
+            .view_angle_deg = zdef.view_angle_deg,
         });
         const adef = self.entities.defaultAnimal();
         self.sim.setClassDef(7, .{
@@ -193,6 +194,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .attack_damage = self.handItemDamage(adef.hand_item),
             .time_stay = adef.time_stay,
             .sight_range = adef.sight_range,
+            .view_angle_deg = adef.view_angle_deg,
         });
         util_log.info("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
             self.entities.defs.len, zdef.name, zdef.hash,
@@ -245,6 +247,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .wander_speed = def.wander_speed,
                 .attack_damage = self.handItemDamage(def.hand_item),
                 .time_stay = def.time_stay,
+                .view_angle_deg = def.view_angle_deg,
             });
             zslot = if (zslot == 1) 8 else zslot + 1;
             if (pick_seed > 32) break;

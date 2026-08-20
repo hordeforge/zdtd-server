@@ -144,7 +144,9 @@ test, so a retune cannot land silently).
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
 | `sense_dist_sq` | 2304.0 | **Floor**: `entityclasses.xml` `SightRange` wins per class (stock ships 27, 30, 40 m) |
 | `hear_range` | 10.0 | Hearing radius: a player within it is sensed regardless of sight (sound passes walls). RE entity-ai.md PlayerStealth; exact movement-noise radius not IL-pinned |
-| `view_cone_half_deg` | 50.0 | Sight view-cone half-angle (stock `maxViewAngle` field, `IsInFrontOfMe`; per-class default not in the RE corpus) |
+| `view_cone_half_deg` | 90.0 | Sight view-cone half-angle. Stock `EntityAlive.maxViewAngle` cctor default 180 (half 90 = only excludes targets strictly behind), per-class `MaxViewAngle` in entityclasses.xml halves and wins via `viewHalfDeg`; this is the floor when unset. RE entity-ai.md EntityAlive cctor |
+| `smell_radius` | 10.0 | Smell radius: a player within it is sensed regardless of sight or hearing (smell passes walls). RE entity-ai.md PlayerStealth `cSmellRadiusMin` |
+| `smell_bleed_radius` | 25.0 | Smell radius while the player carries `buffInjuryBleeding`. RE entity-ai.md PlayerStealth `cSmellRadiusBleed` |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
 | `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |
