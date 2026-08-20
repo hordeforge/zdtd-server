@@ -985,12 +985,13 @@ pub const World = struct {
                 // second hit must not re-fire kill side effects (hp <= 0 guard
                 // above already returns).
                 self.health[s].hp = 0; // clamp: the wire stat shows 0, not the overkill
+                // Stock EntityAlive timeStayAfterDeath default = 5 s (RE
+                // entity-ai.md; the XML values 30/300 flow via class_id.time_stay
+                // when the class declares the property). 5 s fallback, not 300/30.
                 const dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
                     self.class_id[s].time_stay
-                else if (self.kind[s] == .animal)
-                    300.0
                 else
-                    30.0;
+                    5.0;
                 self.health[s].corpse_seconds = dwell;
                 // The corpse does not act: stop its AI and any chase.
                 if (self.mask[s].zombie_ai) {
@@ -1444,10 +1445,10 @@ test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
     const killed = w.damage(id, 9999);
     try std.testing.expect(killed.killed);
     // The corpse stays in world (builtin class has no TimeStayAfterDeath, so
-    // the 30 s zombie default applies) with its AI stopped.
+    // the stock EntityAlive default of 5 s applies) with its AI stopped.
     try std.testing.expect(w.alive[s]);
     try std.testing.expect(w.health[s].hp <= 0);
-    try std.testing.expect(w.health[s].corpse_seconds > 0 and w.health[s].corpse_seconds <= 30);
+    try std.testing.expectEqual(@as(f32, 5), w.health[s].corpse_seconds);
     try std.testing.expect(w.zombie_ai[s].state == .idle);
     // A second hit must not re-fire kill side effects.
     const again = w.damage(id, 9999);
@@ -1455,9 +1456,9 @@ test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
     try std.testing.expect(w.alive[s]);
     // The sweep leaves the body until the dwell elapses, then destroys it.
     var out: [4]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(5, &out));
+    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(2, &out));
     try std.testing.expect(w.alive[s]);
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(10, &out));
     try std.testing.expectEqual(id, out[0]);
     try std.testing.expect(!w.alive[s]);
 }

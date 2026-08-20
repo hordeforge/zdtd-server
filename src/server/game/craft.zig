@@ -105,6 +105,13 @@ fn resolveWorkstationOutput(ctx: ?*anyopaque, stock_type: i32) workstations_mod.
     return out;
 }
 
+/// Burn time per fuel item from items.xml FuelValue (RE items.md GetFuelValue;
+/// 0 = not a fuel item, workstation falls back to the offline flat rate).
+fn resolveWorkstationFuel(ctx: ?*anyopaque, item_id: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.fuelValueFor(item_id);
+}
+
 /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
 pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
     if (recipe_index >= self.recipes.defs.len) return false;
@@ -205,6 +212,8 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
     self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{
         .max_crafts_per_tick = self.workstation_crafts_per_tick,
         .max_craft_backlog = self.workstation_craft_backlog,
+        .fuel_resolve = &resolveWorkstationFuel,
+        .fuel_ctx = self,
     });
     // Heat map feed (AIDirectorChunkData): burning workstations with a
     // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)

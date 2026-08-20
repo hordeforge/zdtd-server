@@ -54,6 +54,11 @@ pub const stock_last_input_len: u8 = 3;
 pub const stock_queue_len: u8 = 4;
 pub const stock_melt_len: u8 = 3;
 
+/// Item fuel burn-time lookup (RE items.md GetFuelValue: items.xml FuelValue is
+/// the burn time in seconds per fuel item). Game supplies the items table; null
+/// in unit tests keeps the offline fallback `default_fuel_burn_seconds`.
+pub const FuelResolver = *const fn (ctx: ?*anyopaque, item_id: u16) f32;
+
 /// Per-tick craft budgets (zdtd.toml [sim] workstation_*). Bucket B anti-abuse
 /// caps: one client write must not be able to burst a whole queue into the
 /// output, and a far-negative client-written CraftingTimeLeft must not drain
@@ -64,7 +69,14 @@ pub const Caps = struct {
     /// Largest craft backlog a client-supplied CraftingTimeLeft may carry
     /// (seconds) before it is reset.
     max_craft_backlog: f32 = 60,
+    /// Per-item fuel burn-time lookup (null = offline fallback).
+    fuel_resolve: ?FuelResolver = null,
+    fuel_ctx: ?*anyopaque = null,
 };
+
+/// Offline burn time per fuel item when no items table is attached (the stock
+/// value lives in items.xml FuelValue; 10 s is the pre-loader flat fallback).
+const default_fuel_burn_seconds: f32 = 10.0;
 
 /// Recipe queue cell shared by sim state and TE wire (stock RecipeQueueItem fields).
 pub const QueueItem = struct {
@@ -211,12 +223,12 @@ pub const Workstation = struct {
 
     pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         if (dt <= 0) return;
-        self.handleFuel(dt);
+        self.handleFuel(dt, caps);
         self.handleRecipeQueue(dt, resolve, ctx, caps);
     }
 
     /// Stock `HandleFuel` (asm.il ~1331911): burn down, then consume one fuel item.
-    fn handleFuel(self: *Workstation, dt: f32) void {
+    fn handleFuel(self: *Workstation, dt: f32, caps: Caps) void {
         // Timers arrive from the client TE write, so they can be non-finite or far
         // negative; the catch-up loop below only terminates promptly when a timer
         // starts within one period of zero.
@@ -224,10 +236,13 @@ pub const Workstation = struct {
         if (!self.is_burning) return;
         self.burn_time_left -= dt;
         while (self.burn_time_left <= 0) {
-            // consume one fuel item = 10s burn (ponytail: flat rate; per-item
-            // fuel values from items.xml when the loader grows them)
+            // Stock GetFuelTime = items.xml FuelValue (seconds per fuel item,
+            // RE items.md 1953); coal 100 s, wood 1-5 s. takeOne zeroes the
+            // slot, so read the item id before consuming.
+            const fuel_id: u16 = if (self.fuel_len > 0) self.fuel[0].item_id else 0;
             if (takeOne(self.fuel[0..self.fuel_len])) {
-                self.burn_time_left += 10.0;
+                const burn_s: f32 = if (caps.fuel_resolve) |fr| fr(caps.fuel_ctx, fuel_id) else 0;
+                self.burn_time_left += if (burn_s > 0) burn_s else default_fuel_burn_seconds;
             } else {
                 self.is_burning = false;
                 self.burn_time_left = 0;

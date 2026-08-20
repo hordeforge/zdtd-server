@@ -281,6 +281,28 @@ values are Bucket A (stock data), never zdtd.toml.
    data, now parsed), A40 (feral row repointed), B39 (config field), B40
    (parked, documented mirror); B31/B34-B36/B38 parked with citations above.
 
+## Re-scan 2026-08-20 (fresh hardcode pass over game-behavior paths)
+
+Re-ran the hardcoded-data review (docs/prompts/hardcoded-data-review.md) over
+src/assets, src/ecs, src/world, src/server/game, src/server/c2s after all
+prior rows closed. Findings and dispositions:
+
+| ID | Location | Value | Bucket | Disposition |
+|---|---|---|---|---|
+| R1 | `world/workstations.zig` handleFuel | flat +10 s per fuel item | A | **FIXED**: burn time now = items.xml `FuelValue` seconds per item (RE items.md GetFuelValue; coal 100 s, wood 1-5 s) via a `FuelResolver` Game wires from the items table; 10 s remains the offline fallback |
+| R2 | `ecs/world.zig` + `ecs/systems.zig` corpse dwell | fallback 300/30 s | A | **FIXED**: fallback = stock `EntityAlive.timeStayAfterDeath` default 5 s (RE entity-ai.md 3157); XML values 30/300 flow via `class_id.time_stay` when declared |
+| R3 | `ecs/inventory.zig:148` armorMitigation | flat 10 %/piece, 50 % cap | A | OPEN: stock mitigation is per-item (items.xml ItemClassArmor damage-modifier chain, items.md 2122); needs a loader+sim feature, not a drive-by |
+| R4 | `ecs/aidirector.zig:361-362,403-404,428-430` director drips | night 18-28 m / day 30-40 m / animal 20-45 m, cds 45/120/60 s | A/B | OPEN: animal/enemy rings contradict stock (48-70 m cAnimalMin/MaxDistance, 28-54 m cEnemyMin/MaxDistance, spawning.md); the periodic drips are zdtd population mechanics (GAP 1407/2011-2017) — align rings to RE, expose cds as `[rules.director]` |
+| R5 | `ecs/aidirector.zig:378,675-676` | bloodmoon_cd 6 s, bm_mul 1.5 | B | OPEN: move to `[rules.director]` fields |
+| R6 | `ecs/systems.zig:1906-1921` vehicle tuning | throttle 14, steer 100, coast 0.8, fuel 0.02 | B | OPEN: zdtd-owned sim (GAP 4816, stock has no server vehicle sim); name as consts with cites or `[rules]` fields |
+| R7 | `ecs/inventory.zig:348` container open range | 8 blocks / 64.0 | B | OPEN: authority reach cap not on the `[authority]` surface; expose as config |
+| R8 | `ecs/powerblocks.zig:96,100` battery proxy | watts ×10, cap ×0.5 | B | PARKED: commented proxy; tune with the power feature |
+| R9 | `ecs/aidirector.zig:297-313` difficulty tables | GameDifficulty/ZombieMove scales | A | PARKED: stock serverconfig tables (GameDifficulty/ZombieMove), bare literals; next pass makes them named consts with cites |
+
+R3-R7 are the open work queue from this re-scan; each is a bounded fix (loader
+feature, ring alignment + rules fields, named consts / rules fields, config
+key). R8/R9 parked with reasons.
+
 ## Validation
 
 `git status` clean at HEAD 3b06680 before this file. Docs-only change this

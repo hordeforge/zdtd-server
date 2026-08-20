@@ -2162,11 +2162,13 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             // read before the corpse marking, which keeps the slot.
             const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
             // Corpse dwell like player kills: the body stays at hp 0 for
-            // TimeStayAfterDeath; the tick sweep destroys it later.
+            // TimeStayAfterDeath; the tick sweep destroys it later. Fallback
+            // is the stock EntityAlive default 5 s (RE entity-ai.md); the XML
+            // values 30/300 flow via class_id.time_stay when declared.
             const dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
                 w.class_id[i].time_stay
             else
-                30.0;
+                5.0;
             w.health[i].hp = 0;
             w.health[i].corpse_seconds = dwell;
             if (w.mask[i].zombie_ai) {
