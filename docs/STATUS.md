@@ -683,7 +683,7 @@ Full map: [INDEX.md](INDEX.md).
 | Doc | Role |
 |---|---|
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections) |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections); its scorecard feeds the webui Porting dashboard (`/partials/porting`, see [WEBUI.md](WEBUI.md)) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
 | [PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |

@@ -104,6 +104,7 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun | snapshot |
 | `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
 | `GET /partials/apm` | Counters + section p50/p99 | apm harness |
+| `GET /partials/porting` | Porting progress: stock-game systems vs GAP_ANALYSIS scorecard, with provenance buckets per row (static data, comptime) | docs/GAP_ANALYSIS.md scorecard + docs/PROVENANCE.md buckets |
 | `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
 | `GET /partials/console` | Last N audit log lines (command form lives in the shell) | ops log ring |
 | `POST /api/cmd` | Run one admin command; HTML fragment by default, `text/plain` when `Accept: text/plain` or `application/json` | inline → admin parser (same request) |

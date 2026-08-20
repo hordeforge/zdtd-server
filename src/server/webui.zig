@@ -626,6 +626,10 @@ pub const Server = struct {
                 try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderApm(&body_buf, &self.snap), &.{});
                 return;
             }
+            if (std.mem.eql(u8, path, "/partials/porting")) {
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderPorting(&body_buf), &.{});
+                return;
+            }
             if (std.mem.eql(u8, path, "/partials/console")) {
                 try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderConsoleLog(&body_buf, self), &.{});
                 return;
@@ -961,6 +965,7 @@ fn isGetOnlyPath(path: []const u8) bool {
         std.mem.eql(u8, path, "/partials/status") or
         std.mem.eql(u8, path, "/partials/players") or
         std.mem.eql(u8, path, "/partials/apm") or
+        std.mem.eql(u8, path, "/partials/porting") or
         std.mem.eql(u8, path, "/partials/console") or
         std.mem.eql(u8, path, "/api/apm.json");
 }
@@ -1801,6 +1806,100 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     return w.buffered();
 }
 
+/// One row of the porting dashboard. The scored rows carry the GAP_ANALYSIS
+/// scorecard counts (recount 2026-08-08: 329 features, 134 WORKS / 142 PARTIAL
+/// / 53 MISSING; STATUS.md wins on conflict). The engineering rows carry
+/// works=0 (not scored) and render status + provenance only. Provenance strings
+/// follow PROVENANCE.md buckets: A stock game data / R RE-cited / Z zdtd-owned.
+const PortingRow = struct {
+    category: []const u8,
+    works: u16,
+    partial: u16,
+    missing: u16,
+    status: []const u8,
+    provenance: []const u8,
+};
+
+const porting_rows = [_]PortingRow{
+    .{ .category = "Net and ops", .works = 16, .partial = 27, .missing = 9, .status = "Join works, C2S 33/33 handled; telnet stock-shaped; browser ops via webui", .provenance = "R: network.md, protocol.md, protocol-packages.md, console-commands.md · Z: litenet transport, admin TCP, webui" },
+    .{ .category = "World systems", .works = 23, .partial = 17, .missing = 8, .status = "Walk, dig, build, persist; lakes and POI pools wet; claims expire; supports collapse", .provenance = "A: biomes.xml + biome_layers, blocks.xml, spawning.xml · R: chunk-providers.md, light-mesh-water.md · Z: stability plane, ZCH3 store" },
+    .{ .category = "Entities and AI", .works = 20, .partial = 21, .missing = 7, .status = "Real fights with stakes and A*; population still thin; 3 EAI tasks blocked", .provenance = "A: entityclasses/entitygroups/gamestages/buffs.xml · R: entity-ai.md, combat-damage.md, aidirector.md · Z: ECS SoA sim, path, interest" },
+    .{ .category = "Items, crafting, loot", .works = 11, .partial = 15, .missing = 7, .status = "Containers roll own tables; stacking like stock; crafting instant and unvalidated", .provenance = "A: items.xml, recipes.xml, loot.xml · R: items.md, crafting-recipes.md, loot-economy.md" },
+    .{ .category = "Quests", .works = 17, .partial = 14, .missing = 1, .status = "Template defs non-empty; accept marker wired; rewards and actions pay out", .provenance = "A: quests.xml · R: quests-challenges.md, protocol-packages.md · Z: objective-kind map + quest policy" },
+    .{ .category = "Traders", .works = 12, .partial = 8, .missing = 3, .status = "Per-trader stock, hours, wallet, roll, restock; POI placement open", .provenance = "A: traders.xml, npc.xml, items.xml EconomicValue · R: npc-dialog.md · Z: TraderInfo roll, wallet" },
+    .{ .category = "Blood moon", .works = 9, .partial = 14, .missing = 3, .status = "Horde runs dusk to dawn; day jitter + schedule persist; escalation partial", .provenance = "A: gamestages.xml · R: aidirector.md, sandbox-options.md · Z: party grouping, IsBloodMoonDead" },
+    .{ .category = "POIs and prefabs", .works = 16, .partial = 14, .missing = 0, .status = "Ids, rotation, height correct; water planes; multi-block regen", .provenance = "A: prefabs.xml + .tts/.nim, biome_layers subbiomes · R: block-shapes.md, server-browser-prefabs.md · Z: paint and rotation paths" },
+    .{ .category = "Player progression", .works = 10, .partial = 12, .missing = 15, .status = "Damage, buffs, survival and stamina land; ZPV3 persists; deep perks open", .provenance = "A: progression.xml, buffs.xml · R: progression.md, entity-stats.md, save-persistence.md · Z: ZPV3 persist, survival knobs" },
+};
+
+const engineering_rows = [_]PortingRow{
+    .{ .category = "Wire and package parity", .works = 0, .partial = 0, .missing = 0, .status = "190-pkg catalog; 33/33 ToServer handled; 46 S2C emitted", .provenance = "R: protocol.md, protocol-packages.md, parity tooling · docs/wire/PACKAGES.md" },
+    .{ .category = "Persistence", .works = 0, .partial = 0, .missing = 0, .status = "ZPV3 players, claims.zlc, containers.zct, blockmeta.zbm, entities.zen, weather.zwt, workstations.zws, allies.zal", .provenance = "R: save-persistence.md · Z: world/store + persist.zig (ZCH3/ZPV3, zdtd-owned layouts)" },
+    .{ .category = "Wasm plugin surface", .works = 0, .partial = 0, .missing = 0, .status = "16 verdict/event hooks + sense/queue/query; 6 reference modules", .provenance = "Z: ADR 0020, PLUGIN_DEV.md expressibility audit · mods/ (zdtd_bot, zdtd_killfeed, zdtd_pvp, zdtd_questgate, zdtd_craftgate, zdtd_lootgate)" },
+    .{ .category = "Config-driven policy", .works = 0, .partial = 0, .missing = 0, .status = "Rules + mode packs + serverconfig through one toml_bind; no hand-written key chains", .provenance = "Z: ADR 0021, GAME_OPTIONS.md, src/util/toml_bind.zig" },
+    .{ .category = "Bots", .works = 0, .partial = 0, .missing = 0, .status = "Wasm-only brains; host BotManager is a servant", .provenance = "Z: ADR 0026, BOTS_PRD.md, BOTS_SPEC.md, mods/zdtd_bot" },
+    .{ .category = "Native metrics", .works = 0, .partial = 0, .missing = 0, .status = "apm sections + counters + webui snapshot; 7dtd-apm not required", .provenance = "Z: docs/APM.md, src/apm/*" },
+};
+
+/// Round-half-up percent of fully-ported features in a scored row.
+fn portPct(works: u16, partial: u16, missing: u16) u16 {
+    const total = @as(u32, works) + partial + missing;
+    if (total == 0) return 0;
+    return @intCast((@as(u32, works) * 100 + total / 2) / total);
+}
+
+/// Porting-progress dashboard: how much of the stock game logic is ported,
+/// per GAP_ANALYSIS category, with provenance buckets per row. Static data;
+/// the doc scorecard is the source of truth (STATUS.md wins on conflict).
+fn renderPorting(buf: []u8) ![]const u8 {
+    var w: std.Io.Writer = .fixed(buf);
+    var tw: u32 = 0;
+    var tp: u32 = 0;
+    var tm: u32 = 0;
+    for (porting_rows) |r| {
+        tw += r.works;
+        tp += r.partial;
+        tm += r.missing;
+    }
+    const total = tw + tp + tm;
+    const pct = if (total > 0) @as(u16, @intCast((tw * 100 + total / 2) / total)) else 0;
+    const any_pct = if (total > 0) @as(u16, @intCast(((tw + tp) * 100 + total / 2) / total)) else 0;
+    var pct_buf: [16]u8 = undefined;
+    const pct_str = std.fmt.bufPrint(&pct_buf, "{d}%", .{pct}) catch "0%";
+    var any_buf: [16]u8 = undefined;
+    const any_str = std.fmt.bufPrint(&any_buf, "{d}%", .{any_pct}) catch "0%";
+    try w.print(
+        \\<h3 style="margin-top:0">Stock game systems (GAP_ANALYSIS scorecard)</h3>
+        \\<p class="meta" style="margin:0 0 0.5rem">Overall: <b class="num">{d}</b> WORKS / <b class="num">{d}</b> PARTIAL / <b class="num">{d}</b> MISSING of <b class="num">{d}</b> scored features = <b>{s}</b> fully ported, <b>{s}</b> at least partial (recount 2026-08-08; STATUS.md wins on conflict).</p>
+        \\<table><caption class="sr-only">Game systems porting progress by category</caption>
+        \\<thead><tr><th scope="col">Category</th><th scope="col">Ported</th><th scope="col">WORKS</th><th scope="col">PARTIAL</th><th scope="col">MISSING</th><th scope="col">Status</th><th scope="col">Provenance</th></tr></thead><tbody>
+    , .{ tw, tp, tm, total, pct_str, any_str });
+    for (porting_rows) |r| {
+        const rp = portPct(r.works, r.partial, r.missing);
+        var rp_buf: [16]u8 = undefined;
+        const rp_str = std.fmt.bufPrint(&rp_buf, "{d}", .{rp}) catch "0";
+        try w.print(
+            \\<tr><th scope="row">{s}</th><td><span class="pbar" role="progressbar" aria-valuenow="{s}" aria-valuemin="0" aria-valuemax="100" style="--p:{s}%"><span class="sr-only">{s}% ported</span></span> {s}%</td><td class="num">{d}</td><td class="num">{d}</td><td class="num">{d}</td><td>{s}</td><td>{s}</td></tr>
+        , .{ r.category, rp_str, rp_str, rp_str, rp_str, r.works, r.partial, r.missing, r.status, r.provenance });
+    }
+    try w.writeAll(
+        \\</tbody></table>
+        \\<h3>zdtd-owned engineering surface (not stock-parity scored)</h3>
+        \\<table><caption class="sr-only">zdtd-owned engineering surfaces</caption>
+        \\<thead><tr><th scope="col">Surface</th><th scope="col">Status</th><th scope="col">Provenance</th></tr></thead><tbody>
+    );
+    for (engineering_rows) |r| {
+        try w.print(
+            \\<tr><th scope="row">{s}</th><td>{s}</td><td>{s}</td></tr>
+        , .{ r.category, r.status, r.provenance });
+    }
+    try w.print(
+        \\</tbody></table>
+        \\<p class="meta" style="margin:0.5rem 0 0">Counts: docs/GAP_ANALYSIS.md scorecard. Provenance buckets: docs/PROVENANCE.md (A stock data / R RE-cited / Z zdtd-owned; 188/188 files ledgered). Status details: docs/STATUS.md, docs/WORK_PLAN.md.</p>
+    , .{});
+    return w.buffered();
+}
+
 test "parseIpv4 loopback and any" {
     try std.testing.expectEqual(@as(u32, 0x7f000001), try parseIpv4("127.0.0.1"));
     try std.testing.expectEqual(@as(u32, 0), try parseIpv4("0.0.0.0"));
@@ -1821,6 +1920,7 @@ test "isGetOnlyPath known dashboard routes" {
     try std.testing.expect(isGetOnlyPath("/"));
     try std.testing.expect(isGetOnlyPath("/api/apm.json"));
     try std.testing.expect(isGetOnlyPath("/partials/status"));
+    try std.testing.expect(isGetOnlyPath("/partials/porting"));
     try std.testing.expect(!isGetOnlyPath("/api/cmd"));
     try std.testing.expect(!isGetOnlyPath("/logout"));
     try std.testing.expect(!isGetOnlyPath("/nope"));
@@ -2046,6 +2146,39 @@ test "listen refuses header-injectable secret" {
     defer s.deinit();
     try std.testing.expectError(error.SecretInvalid, s.listen(.{ .port = 1, .secret = "bad\r\nX:1" }));
     try std.testing.expectError(error.SecretInvalid, s.listen(.{ .port = 1, .secret = "has;semi" }));
+}
+
+test "porting dashboard totals match the GAP scorecard and percent math rounds" {
+    // The dashboard is a status report over docs/GAP_ANALYSIS.md (recount
+    // 2026-08-08): keep the rendered totals and per-row math pinned so a row
+    // edit that desyncs the headline is caught here, not on a browser.
+    var tw: u32 = 0;
+    var tp: u32 = 0;
+    var tm: u32 = 0;
+    for (porting_rows) |r| {
+        tw += r.works;
+        tp += r.partial;
+        tm += r.missing;
+    }
+    try std.testing.expectEqual(@as(u32, 134), tw);
+    try std.testing.expectEqual(@as(u32, 142), tp);
+    try std.testing.expectEqual(@as(u32, 53), tm);
+    try std.testing.expectEqual(@as(u16, 31), portPct(16, 27, 9)); // net and ops
+    try std.testing.expectEqual(@as(u16, 53), portPct(17, 14, 1)); // quests
+    try std.testing.expectEqual(@as(u16, 41), portPct(134, 142, 53)); // overall
+    var buf: [16384]u8 = undefined;
+    const html = try renderPorting(&buf);
+    // The totals render as `<b class="num">134</b> WORKS / ... 329</b>`; check
+    // the rendered shape, not a contiguous literal.
+    try std.testing.expect(std.mem.find(u8, html, "134</b> WORKS") != null);
+    try std.testing.expect(std.mem.find(u8, html, "329</b>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "Quests") != null);
+    try std.testing.expect(std.mem.find(u8, html, "role=\"progressbar\"") != null);
+    // Provenance buckets are per row (docs/PROVENANCE.md A/R/Z style).
+    try std.testing.expect(std.mem.find(u8, html, "R: quests-challenges.md") != null);
+    try std.testing.expect(std.mem.find(u8, html, "Z: ADR 0020") != null);
+    // Engineering rows render status without a fake percent bar.
+    try std.testing.expect(std.mem.find(u8, html, "190-pkg catalog") != null);
 }
 
 test "render status fits buffer" {

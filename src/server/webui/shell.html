@@ -36,6 +36,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visib
    top would sit under it (WCAG 2.2 SC 2.4.11 Focus Not Obscured). */
 a,button,input,[tabindex]{scroll-margin-top:3.5rem}
 pre.cmd-out,pre.cmd-log{margin:0.5rem 0 0;background:var(--well);border-radius:6px;padding:0.6rem 0.75rem;font-family:var(--mono);font-size:var(--fs-sm);overflow:auto;max-height:14rem;white-space:pre-wrap;word-break:break-word}
+.pbar{display:inline-block;width:4.5rem;height:0.55rem;border-radius:3px;background:var(--sunken);vertical-align:middle;overflow:hidden;margin-right:0.4rem}.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:3px}
 pre .in{color:var(--acc)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{color:var(--muted)}
 #players{overflow-x:auto}#players:focus-visible{outline:3px solid var(--warn);outline-offset:3px}#players table{min-width:30rem}
 .noscript{margin:0;padding:0.75rem 1.25rem;background:#3a2410;color:var(--warn);border-bottom:1px solid #6a4a20}
@@ -49,18 +50,20 @@ pre .in{color:var(--acc)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{
 <header>
 <h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
 <label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console-log">Refresh now</button>
+<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm porting players console-log">Refresh now</button>
 <form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
 </header>
 <nav class="page-nav" aria-label="Dashboard sections">
 <a href="#status-section">Status</a>
 <a href="#apm-section">Performance</a>
+<a href="#porting-section">Porting</a>
 <a href="#players-section">Players</a>
 <a href="#console-section">Console</a>
 </nav>
 <main id="main-content" tabindex="-1">
 <section id="status-section" aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
 <section id="apm-section" aria-labelledby="apm-heading"><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+<section id="porting-section" aria-labelledby="porting-heading"><h2 id="porting-heading">Porting progress</h2><div id="porting" hx-get="/partials/porting" hx-trigger="load, every 30s" hx-swap="innerHTML"><p class="meta">Loading porting progress…</p></div></section>
 <section id="players-section" aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
 <section id="console-section" aria-labelledby="console-heading">
 <h2 id="console-heading">Console</h2>
