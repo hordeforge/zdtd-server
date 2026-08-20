@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (155/131/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (156/130/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -146,7 +146,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 20 | 11 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
-| [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
+| [Traders](#5-traders) | 14 | 6 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **155** | **131** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **156** | **130** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -811,7 +811,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**13 WORKS · 7 PARTIAL · 3 MISSING**
+**14 WORKS · 6 PARTIAL · 3 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -4332,7 +4332,7 @@ Honest gaps:
 | Localization.csv titles | WORKS (2026-08-21 reconciliation: the server sends localization keys - quest_id, item/entity names - and the stock client resolves them from its own Localization.txt, exactly like the stock server; no server-side localization table is needed) |
 | Reward choice / loot groups | RE-BLOCKED (2026-08-21: RE quests-challenges.md pins the mechanics - CloseQuest(finalState, rewardChoice), RewardChoicesCount, isChosenReward pick-one-of-N - but the C2S field carrying the client's chosen reward index is not in the corpus; a dump of the turn-in package reader is needed before implementing. The reward payout itself is WORKS) |
 | Trader tiers / quest_list offers | WORKS (2026-08-20 reconciliation: per-trader quest_list resolves via npc.xml + class-hash fallbacks, offers are tier-filtered and sent through NetPackageNPCQuestList FetchList, and the remove_quest accept marker journals the quest - the stock trader quest window is driven end to end) |
-| `traders.xml` inventory | PARTIAL (`traderAlways` direct items populate the stock TraderData window; group rolls skipped) |
+| `traders.xml` inventory | WORKS (2026-08-21 reconciliation: per-trader `<trader_items>` refs (or the traderAlways fallback) are parsed with name/group/count/prob/quality/unique_only, and group refs are rolled prob-weighted via stock SpawnLootItemsFromList (asm.il:863343) - group rolls are not skipped; the stock TraderData window is populated end to end) |
 | Duke tokens / currency stock | PARTIAL (coins wallet) |
 | NPC dialog trees | MISSING (non-client-visible on stock maps: no stock map spawns a dialog-NPC - traders use the trading/quest windows, which are WORKS; the stock DialogSystem only serves modded NPCs, out of scope) |
 | Challenges system | WORKS (2026-08-21: challenges are client-tracked per RE quests-challenges.md §5 - the client loads challenges.xml locally and advances objectives via its own event hub; the server surface is the challengegroup_reward_* quests (recognized by isStockClientQuestName, accepted via the generic quest accept, completed through the quest system - the catalog covers all stock defs) plus NetPackageGameEventRequest acks. No server-required challenge wire exists) |
