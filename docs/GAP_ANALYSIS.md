@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (148/137/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (149/136/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 17 | 14 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands |
 | [Traders](#5-traders) | 13 | 7 | 3 | 23 | Per-trader stock, hours, wallet, inventory roll, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 14 | 9 | 3 | 26 | Horde runs dusk to dawn; gamestage-ladder composition, CalcNextDay persists, stat 58 + red clock + music replay, 1.9x BM budget |
+| [Blood moon](#6-blood-moon) | 15 | 8 | 3 | 26 | Horde runs dusk to dawn; gamestage-ladder composition + jittered CalcNextDay schedule + stat 58/red clock/music + 1.9x budget |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **148** | **137** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **149** | **136** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1167,7 +1167,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**14 WORKS · 9 PARTIAL · 3 MISSING**
+**15 WORKS · 8 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1180,13 +1180,16 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:41`, `src/server/game/clock_persist.zig`,
   `asm.il:412880`, `asm.il:412986`
 
-- **BloodMoonRange jitter** `PARTIAL`
-  zdtd jitters +/-range around each frequency multiple. Stock only ever adds
-  0..range, so a stock blood moon is never early. Worse, the
-  `GameStats.BloodMoonDay` zdtd sends ignores `bloodmoon_range` entirely, so with
-  Range>0 the server-simulated horde night and the client-rendered blood moon are
-  on different days by construction.
-  *Anchors:* `src/ecs/aidirector.zig:57`, `src/server/game.zig:6216`,
+- **BloodMoonRange jitter** `WORKS` (2026-08-20 reconciliation)
+  The persisted schedule (slice: CalcNextDay) jitters each cycle by the
+  stock's non-negative `RandomRange(0, range+1)` (deterministic hash of the
+  cycle), so a blood moon is never early relative to the frequency multiple;
+  `GameStats.BloodMoonDay` reads the same jittered schedule day, so the
+  server-simulated horde night and the client-rendered red moon are always
+  the same day. `BloodMoonRange` is parsed from serverconfig (clamped 0..15)
+  and plumbed to both the clock and the director.
+  *Anchors:* `src/ecs/aidirector.zig:100`, `:116`, `src/server/game.zig:587`,
+  `:594`, `src/server/config.zig`
   `asm.il:412894`, `src/server/config.zig:231`
 
 - **Blood-moon night window (dusk to dawn)** `WORKS`
