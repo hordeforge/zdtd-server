@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **330 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (159/127/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (160/126/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Damage and buffs land; nothing survives a restart |
-| [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **159** | **127** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **160** | **126** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2803,7 +2803,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**23 WORKS · 19 PARTIAL · 6 MISSING**
+**24 WORKS · 18 PARTIAL · 6 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -2906,13 +2906,16 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   `DmgCtx` (world coords). Null hook falls back to all-zero.
   *Anchors:* `src/wire/stock_chunk.zig:writeDamageChannel`, `src/server/game/chunk_fill.zig:DmgCtx`
 
-- **Join-time deco burst (NetPackageDecoUpdate) plus world mirror** `PARTIAL`
+- **Join-time deco burst (NetPackageDecoUpdate) plus world mirror** `WORKS`
   One `firstPackage=true` burst at RequestToEnterGame, 4096 objects per package,
-  mirrored into the block store so collision and harvest agree. It is the only
-  window (the client drains and nulls `DecoManager.loadedDecos` at the end of
-  OnWorldLoaded), so anything outside the join radius stays bald for the whole
-  session however far the player walks.
-  *Anchors:* `src/server/game.zig:1534-1627`, `:1637-1645`,
+  mirrored into the block store so collision and harvest agree. Decorations now
+  also stream with newly entered chunks: `sendDecoForStreamedChunk` generates +
+  sends each new 128-block deco chunk once per client (tracked in
+  `Client.deco_sent`), mirroring as it goes - the client's `DecoManager.Read`
+  ADDS post-join firstPackage=false updates to `loadedDecos` (DecoManager.il.txt
+  Read IL=29; the old "client discards post-join deco" assumption was not RE'd
+  and is wrong), so the world is decorated beyond the join radius.
+  *Anchors:* `src/server/game/join.zig:140-275`, `src/server/game/chunk_stream.zig:198-210`,
   `src/wire/stock_deco.zig:98-141`, `src/world/deco_mirror.zig:1-22`
 
 - **Deco density (biomes.xml probabilities)** `WORKS` (superseded 2026-08-08,

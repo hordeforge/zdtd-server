@@ -137,7 +137,7 @@ pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamin
 ///
 /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
 /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
     const has_species = self.deco_trees and
         self.world.biomes != null and
         self.world.biome_layers_table.hasDecos();
@@ -209,10 +209,68 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, w
     // Always send a final package, even with 0 objects: the client needs at
     // least one firstPackage=true to allocate + drain + mark decorated.
     try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+    // Track the deco chunks the burst covered so the stream path does not
+    // regenerate them (the client's HashSet dedupes, but this avoids the work).
+    var mark_z = deco.worldToDecoChunk(window.z0);
+    const mark_z_end = deco.worldToDecoChunk(window.z1 - 1);
+    const mark_x_end = deco.worldToDecoChunk(window.x1 - 1);
+    while (mark_z <= mark_z_end) : (mark_z += 1) {
+        var mark_x = deco.worldToDecoChunk(window.x0);
+        while (mark_x <= mark_x_end) : (mark_x += 1) {
+            if (c.deco_sent_n < c.deco_sent.len) {
+                c.deco_sent[c.deco_sent_n] = packages.makeChunkKey(mark_x, mark_z);
+                c.deco_sent_n += 1;
+            }
+        }
+    }
     std.debug.print(
         "zdtd: DecoUpdate objs={d} pkgs={d} r={d} mirrored={d} capped={}\n",
         .{ total, pw.sent, r, mirrored, capped },
     );
+}
+
+/// Send one 128-block deco chunk's objects to a client whose stream just
+/// entered it (RE DecoManager.Read: a post-join firstPackage=false update
+/// ADDS to the client's loadedDecos HashSet - the client renders decorations
+/// beyond the join window; the old "post-join deco is discarded" assumption
+/// was not RE'd and is wrong). Mirrors like the join burst; the mirror and the
+/// client both dedupe, so overlapping the join window is harmless.
+pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
+    if (!self.deco_trees or self.world.biomes == null or !self.world.biome_layers_table.hasDecos()) return;
+    const dcx = deco.worldToDecoChunk(cx * deco.chunk_side);
+    const dcz = deco.worldToDecoChunk(cz * deco.chunk_side);
+    const key = packages.makeChunkKey(dcx, dcz);
+    for (c.deco_sent[0..c.deco_sent_n]) |k| {
+        if (k == key) return;
+    }
+    const window: deco.Window = .{
+        .x0 = dcx * deco.chunk_side,
+        .z0 = dcz * deco.chunk_side,
+        .x1 = (dcx + 1) * deco.chunk_side,
+        .z1 = (dcz + 1) * deco.chunk_side,
+    };
+    const sampler: deco.Sampler = .{
+        .height_at = decoHeightAt,
+        .species_at = decoSpeciesAt,
+        .ctx = self,
+    };
+    var chunk_objs: [deco.attempts_per_deco_chunk]deco.DecoObj = undefined;
+    const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, self.worldSeed(), window, sampler);
+    var pw = try deco.PackageWriter.init(&self.body_buf, deco.zdtd_decos_per_package);
+    var dim_cache: DecoDimCache = .{};
+    for (chunk_objs[0..n]) |o| {
+        if (self.deco_mirror) _ = self.mirrorDeco(&dim_cache, o);
+        if (pw.full()) {
+            try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+            self.pollNetOnce();
+        }
+        try pw.push(o);
+    }
+    try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+    if (c.deco_sent_n < c.deco_sent.len) {
+        c.deco_sent[c.deco_sent_n] = key;
+        c.deco_sent_n += 1;
+    }
 }
 
 pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {

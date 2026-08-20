@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 330 features: 159 `WORKS`,
-127 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 330 features: 160 `WORKS`,
+126 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -83,8 +83,12 @@ model, carved caves and POI/WFC placement stay open). The dashboard
 door-opening: a zombie pressed against a door on its path opens it (SetOpen
 meta bit + broadcast, RE CheckForDoorAndOpen) instead of chewing, and the AI
 solid probe now treats an open door as passable (door ids detected by the
-stock door-naming set), counts unchanged (dig/swim/elevator/push remain). The
-dashboard (docs/provenance.html) is synced.
+stock door-naming set), counts unchanged (dig/swim/elevator/push remain). Then
+the join-time deco row went WORKS (decorations now stream with newly entered
+chunks - sendDecoForStreamedChunk generates + sends each new 128-block deco
+chunk once per client with tracking; the client's DecoManager.Read ADDS
+post-join updates, so the world is not bald beyond spawn), total
+**160/126/44**. The dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE

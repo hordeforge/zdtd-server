@@ -56,6 +56,12 @@ pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
 pub const default_chunk_stream_radius_min: i32 = 7;
 pub const default_chunk_stream_radius_max: i32 = 9;
 pub const default_chunk_adds_per_stream_tick: u32 = 8;
+
+/// Decorations this client has received, tracked per 128-block deco chunk so a
+/// streamed 16-block chunk ships its deco chunk's objects once (the client's
+/// loadedDecos HashSet dedupes, but tracking avoids regenerating + resending
+/// the same objects for each of the 64 member chunks).
+pub const max_deco_chunks_cap: usize = 256;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
 
@@ -369,6 +375,10 @@ pub const Client = struct {
     /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
     streamed: [max_streamed_chunks_cap]i64 = undefined,
     streamed_n: usize = 0,
+    /// Deco chunks (packed makeChunkKey of the 128-grid) already sent (join
+    /// burst + streamed chunks); full = stop tracking (the client dedupes).
+    deco_sent: [max_deco_chunks_cap]i64 = undefined,
+    deco_sent_n: usize = 0,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),

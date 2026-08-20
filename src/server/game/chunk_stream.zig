@@ -15,6 +15,7 @@ const containers_mod = @import("../../world/containers.zig");
 const vending_mod = @import("../../world/vending.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("../replicate_te.zig");
+const game_join = @import("join.zig");
 
 const max_streamed_chunks_cap = game_mod.max_streamed_chunks_cap;
 
@@ -198,10 +199,14 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
                 clientAddStreamed(self, c, key);
                 in_view.set(bit);
-                // No per-chunk deco: the client drains and nulls DecoManager.loadedDecos
-                // at the end of OnWorldLoaded, so a post-join DecoUpdate either NREs
-                // (firstPackage=false) or is silently discarded (firstPackage=true).
-                // Deco ships once, at RequestToEnterGame (sendDecoAroundSpawn).
+                // Deco for the newly-streamed chunk: the client's
+                // DecoManager.Read adds post-join firstPackage=false updates
+                // (RE IL), so decorations stream with the world instead of the
+                // join window only. Tracked per deco chunk; harmless overlap
+                // with the join burst (client HashSet + mirror both dedupe).
+                game_join.sendDecoForStreamedChunk(self, c, peer, cx, cz) catch |err| {
+                    std.debug.print("zdtd: stream deco failed at {d},{d}: {s}\n", .{ cx, cz, @errorName(err) });
+                };
                 added += 1;
             }
         }

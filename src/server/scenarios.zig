@@ -865,6 +865,74 @@ test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
     );
 }
 
+test "scenario deco streams beyond the join window as chunks stream" {
+    // RE DecoManager.Read: a post-join firstPackage=false DecoUpdate ADDS to
+    // the client's loadedDecos HashSet, so decorations must stream with newly
+    // entered chunks (the world is not bald beyond spawn). Teleporting the
+    // player to a fresh region must generate + send the new deco chunks.
+    if (!stockMapPresent()) return error.SkipZigTest;
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_decostream");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_decostream", 0, .{
+        .game_dir = game_dir,
+        .map_dir = navezgane_path,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const sp = g.world.primarySpawn();
+    // The join burst sent the spawn view's deco and tracked its deco chunks.
+    const join_marked = c.deco_sent_n;
+    try std.testing.expect(join_marked > 0);
+    // Teleport to a fresh forest region (10 chunks east of spawn - beyond the
+    // join window's deco chunks) and stream: new chunks ship their deco. The
+    // first added chunks land in a south band whose deco chunk can be sparse,
+    // so the assertion is on the mechanism (new deco chunks tracked + packages
+    // sent, deduped on the next pass); object production is proven by the join
+    // burst, which uses the same generator.
+    g.sim.transform[ps].x = @as(f32, @floatFromInt(sp.x)) + 160.0;
+    g.sim.transform[ps].z = @as(f32, @floatFromInt(sp.z));
+    cap.clear();
+    try g.streamChunksForClient(c);
+    const streamed_marked = c.deco_sent_n;
+    try std.testing.expect(streamed_marked > join_marked);
+    // A DecoUpdate package was sent for the new deco chunks (parseable payload).
+    const did = packages.idOf("NetPackageDecoUpdate").?;
+    var found = false;
+    var si: usize = 0;
+    while (si < cap.n and !found) : (si += 1) {
+        const msg = cap.slots[si].data[0..cap.slots[si].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                _ = try r.readBool();
+                _ = try r.readI32(); // payloadLen
+                _ = try r.readI32(); // object count (may be 0 in a sparse deco chunk)
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+    // Dedupe: a second pass at the same position sends no new deco chunks.
+    cap.clear();
+    try g.streamChunksForClient(c);
+    try std.testing.expectEqual(streamed_marked, c.deco_sent_n);
+    std.debug.print("PASS deco-stream: {d} join deco chunks, {d} after teleport, deduped on re-stream\n", .{ join_marked, streamed_marked });
+}
+
 test "scenario persist with stock map: edit survives restart under same --map" {
     if (!stockMapPresent()) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});

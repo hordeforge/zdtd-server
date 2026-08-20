@@ -878,7 +878,7 @@ pub const Game = struct {
     ///
     /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
     /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
-    pub fn sendDecoAroundSpawn(self: *Game, c: *const Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+    pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
         return game_join.sendDecoAroundSpawn(self, c, peer, wx, wz);
     }
 
