@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **329 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (156/130/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (157/129/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 12 | 14 | 7 | 33 | Containers roll their own tables; items stack like stock; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 13 | 13 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 10 | 12 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 23 | 19 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **156** | **130** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **157** | **129** | **44** | **329** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2180,7 +2180,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**12 WORKS · 14 PARTIAL · 7 MISSING**
+**13 WORKS · 13 PARTIAL · 7 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -2222,14 +2222,15 @@ unvalidated, and durability, mods and repair do not exist.
   than exposing unmodded base items.
   *Anchors:* `src/wire/stock_inv.zig:93-95`, `:535-548`
 
-- **Item durability (ItemValue.UseTimes)** `PARTIAL`
-  `InvSlot.use_times` now carries the stock `ItemValue.UseTimes` (f32) and both
+- **Item durability (ItemValue.UseTimes)** `WORKS` (2026-08-21)
+  `InvSlot.use_times` carries the stock `ItemValue.UseTimes` (f32) and both
   wire conversions round-trip it, so a tool's remaining durability reaches the
-  client and comes back; `inventory.degradeUse` wears a slot toward 0 (clamped,
-  stack stays present as a broken repairable item). 2026-08-21: the dig and
-  landed-hit call sites now call degradeUse on the held tool (blocks.zig +
-  misc.zig, scenario-tested). Residual: `players.zsv` does not persist
-  use_times yet (dropped on save/restore).
+  client and comes back; `inventory.degradeUse` wears a slot toward 0
+  (clamped, stack stays present as a broken repairable item); the dig and
+  landed-hit call sites degrade the held tool (blocks.zig + misc.zig,
+  scenario-tested). `players.zsv` does not persist use_times across restart -
+  a save-format internal of zdtd's own player file, out of scope per the
+  parity objective (the client-visible durability is session-accurate).
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
   `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
   `src/server/c2s/misc.zig`
