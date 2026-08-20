@@ -2226,11 +2226,13 @@ unvalidated, and durability, mods and repair do not exist.
   `InvSlot.use_times` now carries the stock `ItemValue.UseTimes` (f32) and both
   wire conversions round-trip it, so a tool's remaining durability reaches the
   client and comes back; `inventory.degradeUse` wears a slot toward 0 (clamped,
-  stack stays present as a broken repairable item). Residual: `players.zsv` does
-  not persist use_times yet (dropped on save/restore), and the attack / dig call
-  sites in Game.dealDamage have not been wired to degradeUse.
+  stack stays present as a broken repairable item). 2026-08-21: the dig and
+  landed-hit call sites now call degradeUse on the held tool (blocks.zig +
+  misc.zig, scenario-tested). Residual: `players.zsv` does not persist
+  use_times yet (dropped on save/restore).
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
-  `src/ecs/inventory.zig:243-257`, `src/server/game.zig:1910-1913`
+  `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
+  `src/server/c2s/misc.zig`
 
 - **Item quality tier** `PARTIAL` (2026-08-08 refresh)
   quality rides the wire, the TE and players.zsv, and stack merges refuse to blend

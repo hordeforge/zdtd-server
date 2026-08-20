@@ -134,6 +134,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     self.setBlockHp(b.x, b.y, b.z, abs);
                 }
                 mutated = true;
+                // Item durability (GAP "Item durability"): the held tool wears
+                // with each dig (stock ItemValue.UseTimes; the client shows the
+                // durability bar). Zero keeps a broken, repairable stack.
+                if (self.sim.mask[editor].inventory) {
+                    _ = invsys.degradeUse(&self.sim, c.slot, self.sim.inventory[editor].holding, 1.0);
+                }
             } else {
                 place_id = b.block_id;
                 out_dmg = 0;

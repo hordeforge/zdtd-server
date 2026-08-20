@@ -5961,3 +5961,35 @@ test "scenario persist: blood-moon schedule survives restart (ZCL2)" {
         try std.testing.expect(g2.sim.director.clock.isBloodMoonNight());
     }
 }
+
+test "scenario dig wears the held tool (ItemValue.UseTimes)" {
+    // GAP "Item durability": the held tool's use_times wears with each dig
+    // (stock ItemValue.UseTimes; the client shows the durability bar). The
+    // dig C2S path (blocks.zig) calls degradeUse on the holding slot.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // A tool in hand with remaining durability.
+    const hold = g.sim.inventory[ps].holding;
+    g.sim.inventory[ps].slots[hold] = .{ .item_id = 7, .count = 1, .use_times = 10 };
+    // A diggable block in reach (the player spawns near the primary spawn;
+    // the existing explosion-dig scenario uses the same coordinate).
+    try g.setBlock(250, 70, 250, world_store.block_stone);
+    var body_buf: [128]u8 = undefined;
+    const body = try packages.buildSetBlockBodyDamage(&body_buf, 250, 70, 250, world_store.block_stone, 1, 0, 0);
+    var frame_buf: [128]u8 = undefined;
+    try g.onData(c.peer.?, try packages.framed(&frame_buf, "NetPackageSetBlock", body));
+    try std.testing.expectEqual(@as(f32, 9), g.sim.inventory[ps].slots[hold].use_times);
+}

@@ -332,6 +332,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Item durability (GAP "Item durability"): the held tool wears with
+        // each landed hit (stock ItemValue.UseTimes; the client shows the
+        // durability bar). Zero keeps a broken, repairable stack.
+        if (self.sim.mask[actor_slot].inventory) {
+            _ = invsys.degradeUse(&self.sim, c.slot, self.sim.inventory[actor_slot].holding, 1.0);
+        }
         // Combat noise (stock NotifyNoise): a landed ranged hit alerts zombies
         // and wakes sleepers around the shooter (group-AI PARTIAL).
         if (self.sim.mask[actor_slot].transform) {
