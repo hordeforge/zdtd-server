@@ -506,6 +506,49 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     try std.testing.expect(!g.clients[c.slot].joined);
 }
 
+test "scenario replicate sends EntityVelocity for a falling zombie" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_vel");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_vel", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    // Spawn a zombie at the observer's feet and drop it (vy < 0).
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const z = g.sim.spawnZombie(g.sim.transform[ps].x, g.sim.transform[ps].y + 1, g.sim.transform[ps].z, 40).?;
+    const zs = g.sim.slotOfNetId(z).?;
+    g.sim.zombie_ai[zs].vy = -3.0;
+    try g.replicate();
+    const did = packages.idOf("NetPackageEntityVelocity").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap.n and !found) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                try std.testing.expectEqual(z, try r.readI32());
+                _ = try r.readBool(); // bAdd
+                _ = try r.readF32();
+                try std.testing.expectApproxEqAbs(@as(f32, -3.0), try r.readF32(), 0.001);
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+}
+
 test "scenario map: PersistentPlayerPositions broadcasts every 6 s" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ppp");

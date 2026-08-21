@@ -51,6 +51,7 @@ pub fn replicate(self: *Game) !void {
     var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var speeds_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var flags_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    var vel_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
 
     var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
@@ -217,6 +218,7 @@ pub fn replicate(self: *Game) !void {
 
         var speeds_framed: ?[]const u8 = null;
         var flags_framed: ?[]const u8 = null;
+        var vel_framed: ?[]const u8 = null;
         if (self.sim.mask[i].kind and self.sim.kind[i] == .zombie) {
             var fwd: f32 = 0.2;
             var state: u8 = 1;
@@ -244,11 +246,25 @@ pub fn replicate(self: *Game) !void {
                     self.harness.counters.inc(.packages_encoded);
                 } else |_| {}
             } else |_| {}
+            // Vertical motion (RE NetEntityDistributionEntry velocity updates):
+            // a falling/jumping zombie streams its vy so the client renders the
+            // fall instead of gliding; delta-gated per slot.
+            const vy = self.sim.zombie_ai[i].vy;
+            if (@abs(vy - self.entity_vel_sent_y[i]) > 0.1) {
+                self.entity_vel_sent_y[i] = vy;
+                if (packages.buildEntityVelocityBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 32], nid, false, 0, vy, 0)) |vb| {
+                    if (packages.framed(&vel_frame_buf, "NetPackageEntityVelocity", vb)) |vf| {
+                        vel_framed = vf;
+                        self.harness.counters.inc(.packages_encoded);
+                    } else |_| {}
+                } else |_| {}
+            }
         }
 
         const per_viewer: u64 = 1 +
             @as(u64, @intFromBool(speeds_framed != null)) +
-            @as(u64, @intFromBool(flags_framed != null));
+            @as(u64, @intFromBool(flags_framed != null)) +
+            @as(u64, @intFromBool(vel_framed != null));
         var m = viewers;
         while (m != 0) : (m &= m - 1) {
             const ci = @ctz(m);
@@ -256,6 +272,7 @@ pub fn replicate(self: *Game) !void {
             self.sendFramedUnreliable(peer, pos_framed);
             if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
             if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
+            if (vel_framed) |vf| self.sendFramedUnreliable(peer, vf);
             self.harness.counters.add(.replicate_fanouts, per_viewer);
         }
     }

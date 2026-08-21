@@ -288,7 +288,10 @@ block - MapColor property, else the atlas color, else gray; water takes
 BlockLiquidv2.Color. The in-game minimap now fills in, player markers
 broadcast every 6 s (PersistentPlayerPositions, stock
 playerPositionsCountdownTimer cadence) and trader compounds ship on join
-(WorldAreas already sent) - the map trio is complete.
+(WorldAreas already sent) - the map trio is complete. Falling/jumping
+zombies stream their vertical velocity (NetPackageEntityVelocity, delta-gated
+in the replicate fan-out) so the client renders falls instead of glides; the
+C2S handler row was recounted (76 of 98 stock-sent names handled).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

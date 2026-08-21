@@ -3257,17 +3257,18 @@ persists so little that a restart visibly damages a built base.
   a typo.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
-- **C2S handler coverage** `PARTIAL`
-  70 package names have a handler in `Game.handlePackage`. Scanning asm.il for
-  `GetPackage<X>` immediately preceding `SendToServer` yields 98 names the stock
-  client actually sends; 32 have no handler: Debug, DroneDataSync,
+- **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
+  76 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse
+  and EntityStatChanged have handlers since the last count). Scanning asm.il
+  for `GetPackage<X>` immediately preceding `SendToServer` yields 98 names the
+  stock client actually sends; 26 have no handler: Debug, DroneDataSync,
   DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume, EncryptionPublicKey,
-  EntityAwardKillServer, EntityPhysics, EntityRagdoll, EntityStatChanged,
-  EntityStealth, GameEventResponse, GameMessage, KeyExchangeComplete,
-  ModifyCVar, ParticleEffect, PartyQuestChange, PlayerDisconnect,
-  PlayerLaserSight, PlayerTwitchStats, PlayerVendingMachine, QuestGotoPoint,
-  QuestTreasurePoint, SetProp, SharedPartyKill, SimpleRPC,
-  SoundAtPosition, TwitchAccess, TwitchVoteScheduling, Waypoint, WorldFolder.
+  EntityAwardKillServer, EntityPhysics, EntityRagdoll, EntityStealth,
+  GameMessage, KeyExchangeComplete, ModifyCVar, ParticleEffect,
+  PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
+  SetProp, SimpleRPC, SoundAtPosition, TwitchAccess, TwitchVoteScheduling,
+  Waypoint, WorldFolder.
   Player-visible: map waypoints are local only, vending machines are inert,
   buried-supplies and goto quest markers never register, ragdolls/particles/
   positional sound are not relayed, and a clean Quit-to-menu is not noticed.
@@ -3338,10 +3339,12 @@ persists so little that a restart visibly damages a built base.
   atlas colors come from the meshdescriptions bundle (texture-atlas.md).
   The map trio is complete: player markers broadcast every 6 s
   (NetPackagePersistentPlayerPositions, 2026-08-21) and trader areas ship on
-  join (NetPackageWorldAreas). ToClient names never sent at all include
-  TurretSync, EntityVelocity, EntitySetSkillLevelClient, ChunkClusterInfo,
-  WallVolume, Light, TreeFade, AudioPlayInHead, WaterSimChunkUpdate,
-  PlayerSetBackpackPosition, ClientInfo, AuthState.
+  join (NetPackageWorldAreas). Falling/jumping zombies stream their vertical
+  velocity (NetPackageEntityVelocity, 2026-08-21, delta-gated in the
+  replicate fan-out). ToClient names never sent at all include TurretSync,
+  EntitySetSkillLevelClient, ChunkClusterInfo, WallVolume, Light, TreeFade,
+  AudioPlayInHead, WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo,
+  AuthState.
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
   sole stock sender is the Homerun minigame (ShowTooltipMP unicast,
