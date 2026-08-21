@@ -3802,6 +3802,183 @@ pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
     return out;
 }
 
+/// Stock `NetPackageWaypoint` (write IL=17, read IL=17): a `Waypoint`
+/// (Waypoint.Write IL=57; NetPackageWaypoint.read reads it with version 7,
+/// so every version-gated field is present) followed by inviteMode:u8
+/// (EnumWaypointInviteMode Friends=0 / Everyone=1) and inviterEntityId:i32.
+/// Waypoint field order: pos Vector3i (3xi32), icon string ("" when null),
+/// name AuthoredText (bool present, then string text + platform id when
+/// present), bTracked bool, hiddenOnCompass bool, ownerId platform id,
+/// lastKnownPositionEntityId i32, bIsAutoWaypoint bool, bUsingLocalizationId
+/// bool, inviterEntityId i32, hiddenOnMap bool, lastKnownPositionEntityType
+/// i32 (eLastKnownPositionEntityType None=0/Vehicle=1/Drone=2/Animal=3).
+/// Server relay (GameManager.WaypointInviteServer IL=164) clones the waypoint,
+/// clears bTracked, sets waypoint.inviterEntityId = inviter, and targets the
+/// inviter's allies (mode Friends) or all players (mode Everyone), skipping
+/// the inviter (7dtd-research protocol-packages.md §5.x).
+pub const WaypointInvite = struct {
+    pos: [3]i32,
+    /// Fixed-size copies of the client strings; parse never returns slices
+    /// into the body or into stack scratch.
+    icon: [max_waypoint_str]u8 = .{0} ** max_waypoint_str,
+    icon_len: u8 = 0,
+    name_present: bool = false,
+    name_text: [max_waypoint_str]u8 = .{0} ** max_waypoint_str,
+    name_text_len: u8 = 0,
+    name_author: platform_user.Stored = .{},
+    b_tracked: bool = false,
+    hidden_on_compass: bool = false,
+    owner_id: platform_user.Stored = .{},
+    last_known_entity_id: i32 = 0,
+    is_auto: bool = false,
+    using_loc_id: bool = false,
+    waypoint_inviter_entity: i32 = 0,
+    hidden_on_map: bool = false,
+    last_known_entity_type: i32 = 0,
+    invite_mode: u8 = 0,
+    inviter_entity_id: i32 = 0,
+
+    pub fn iconSlice(self: *const WaypointInvite) []const u8 {
+        return self.icon[0..self.icon_len];
+    }
+
+    pub fn nameTextSlice(self: *const WaypointInvite) []const u8 {
+        return self.name_text[0..self.name_text_len];
+    }
+};
+
+/// Waypoint names/icons are short user strings; anything longer fails closed
+/// (malformed C2S is dropped, never truncated).
+pub const max_waypoint_str: usize = 256;
+
+fn copyWaypointStr(dst: *[max_waypoint_str]u8, src: []const u8) error{Overflow}!u8 {
+    if (src.len > max_waypoint_str) return error.Overflow;
+    @memcpy(dst[0..src.len], src);
+    return @intCast(src.len);
+}
+
+pub fn parseWaypointInvite(body: []const u8) (binary.ReadError || error{Overflow})!WaypointInvite {
+    var r: binary.Reader = .{ .data = body };
+    var out: WaypointInvite = .{ .pos = .{ 0, 0, 0 } };
+    out.pos = .{ try r.readI32(), try r.readI32(), try r.readI32() };
+    var str_buf: [max_waypoint_str]u8 = undefined;
+    out.icon_len = try copyWaypointStr(&out.icon, try r.readString(&str_buf));
+    out.name_present = try r.readBool();
+    if (out.name_present) {
+        out.name_text_len = try copyWaypointStr(&out.name_text, try r.readString(&str_buf));
+        var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+        var id_buf: [platform_user.max_id_len]u8 = undefined;
+        try out.name_author.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    }
+    out.b_tracked = try r.readBool();
+    out.hidden_on_compass = try r.readBool();
+    var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+    var id_buf: [platform_user.max_id_len]u8 = undefined;
+    try out.owner_id.set(try platform_user.read(&r, &plat_buf, &id_buf));
+    out.last_known_entity_id = try r.readI32();
+    out.is_auto = try r.readBool();
+    out.using_loc_id = try r.readBool();
+    out.waypoint_inviter_entity = try r.readI32();
+    out.hidden_on_map = try r.readBool();
+    out.last_known_entity_type = try r.readI32();
+    out.invite_mode = try r.readByte();
+    out.inviter_entity_id = try r.readI32();
+    return out;
+}
+
+/// Rebuild the relay body. Matches the server adjustments in
+/// WaypointInviteServer: bTracked=false, waypoint.inviterEntityId = inviter
+/// (Setup), package inviterEntityId = inviter.
+pub fn buildWaypointInviteBody(buf: []u8, wp: *const WaypointInvite, inviter: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(wp.pos[0]);
+    try w.writeI32(wp.pos[1]);
+    try w.writeI32(wp.pos[2]);
+    try w.writeString(wp.iconSlice());
+    try w.writeBool(wp.name_present);
+    if (wp.name_present) {
+        try w.writeString(wp.nameTextSlice());
+        try platform_user.write(&w, wp.name_author.get());
+    }
+    try w.writeBool(false); // bTracked: server clears before relay (IL_002E)
+    try w.writeBool(wp.hidden_on_compass);
+    try platform_user.write(&w, wp.owner_id.get());
+    try w.writeI32(wp.last_known_entity_id);
+    try w.writeBool(wp.is_auto);
+    try w.writeBool(wp.using_loc_id);
+    try w.writeI32(inviter);
+    try w.writeBool(wp.hidden_on_map);
+    try w.writeI32(wp.last_known_entity_type);
+    try w.writeByte(wp.invite_mode);
+    try w.writeI32(inviter);
+    return w.written();
+}
+
+test "waypoint invite parses and rebuilds round-trip" {
+    var src: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &src };
+    try w.writeI32(123);
+    try w.writeI32(64);
+    try w.writeI32(-9);
+    try w.writeString("ui_game_symbol_map");
+    try w.writeBool(true);
+    try w.writeString("my marker");
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000000" });
+    try w.writeBool(true); // bTracked
+    try w.writeBool(false); // hiddenOnCompass
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
+    try w.writeI32(-1);
+    try w.writeBool(false); // isAuto
+    try w.writeBool(false); // usingLocId
+    try w.writeI32(7); // waypoint inviterEntityId
+    try w.writeBool(true); // hiddenOnMap
+    try w.writeI32(2); // lastKnownPositionEntityType Drone
+    try w.writeByte(0); // inviteMode Friends
+    try w.writeI32(7); // inviterEntityId
+    const body = w.written();
+
+    const wp = try parseWaypointInvite(body);
+    try std.testing.expectEqual([3]i32{ 123, 64, -9 }, wp.pos);
+    try std.testing.expectEqualStrings("ui_game_symbol_map", wp.iconSlice());
+    try std.testing.expect(wp.name_present);
+    try std.testing.expectEqualStrings("my marker", wp.nameTextSlice());
+    const author = wp.name_author.get().?;
+    try std.testing.expectEqualStrings("Steam", author.platform);
+    try std.testing.expectEqualStrings("76561198000000000", author.id);
+    try std.testing.expect(wp.b_tracked);
+    try std.testing.expect(!wp.hidden_on_compass);
+    try std.testing.expectEqual(@as(i32, 2), wp.last_known_entity_type);
+    try std.testing.expectEqual(@as(u8, 0), wp.invite_mode);
+    try std.testing.expectEqual(@as(i32, 7), wp.inviter_entity_id);
+
+    // Relay rebuild: bTracked forced false, inviter re-keyed.
+    var out: [512]u8 = undefined;
+    const rebuilt = try buildWaypointInviteBody(&out, &wp, 42);
+    var rd: binary.Reader = .{ .data = rebuilt };
+    try std.testing.expectEqual(@as(i32, 123), try rd.readI32());
+    try std.testing.expectEqual(@as(i32, 64), try rd.readI32());
+    try std.testing.expectEqual(@as(i32, -9), try rd.readI32());
+    var sbuf: [max_waypoint_str]u8 = undefined;
+    try std.testing.expectEqualStrings("ui_game_symbol_map", try rd.readString(&sbuf));
+    try std.testing.expect(try rd.readBool()); // name present
+    try std.testing.expectEqualStrings("my marker", try rd.readString(&sbuf));
+    var rp: [platform_user.max_platform_len]u8 = undefined;
+    var ri: [platform_user.max_id_len]u8 = undefined;
+    const ra: platform_user.Id = (try platform_user.read(&rd, &rp, &ri)).?;
+    try std.testing.expectEqualStrings("76561198000000000", ra.id);
+    try std.testing.expect(!try rd.readBool()); // bTracked cleared
+    try std.testing.expect(!try rd.readBool()); // hiddenOnCompass
+    try std.testing.expect((try platform_user.read(&rd, &rp, &ri)) != null);
+    try std.testing.expectEqual(@as(i32, -1), try rd.readI32());
+    try std.testing.expect(!try rd.readBool());
+    try std.testing.expect(!try rd.readBool());
+    try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
+    try std.testing.expect(try rd.readBool());
+    try std.testing.expectEqual(@as(i32, 2), try rd.readI32());
+    try std.testing.expectEqual(@as(u8, 0), try rd.readByte());
+    try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
+}
+
 /// Stock `NetPackagePartyQuestChange::read` (asm.il): senderEntityID i32 |
 /// objectiveIndex u8 | isComplete bool | questCode i32. Server fans it to the
 /// other party members; the client's HandlePlayer applies the shared-quest

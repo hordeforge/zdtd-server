@@ -9,6 +9,7 @@ const game_mod = @import("../game.zig");
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const wire_binary = @import("../../wire/binary.zig");
+const platform_user = @import("../../wire/platform_user.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
@@ -1605,4 +1606,75 @@ test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" 
         }
     }
     try std.testing.expect(found);
+}
+
+test "waypoint invites relay to allies (Friends) and all (Everyone)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    var cap_c: ln_peer.Capture = .{};
+    const id_a: platform_user.Id = .{ .platform = "Steam", .id = "1001" };
+    const id_b: platform_user.Id = .{ .platform = "Steam", .id = "1002" };
+    const id_c: platform_user.Id = .{ .platform = "Steam", .id = "1003" };
+    const ca = try g.attachJoinedClientAs(&cap_a, id_a);
+    const cb = try g.attachJoinedClientAs(&cap_b, id_b);
+    const cc = try g.attachJoinedClientAs(&cap_c, id_c);
+    _ = cb;
+    _ = cc;
+    try g.allies.setStatus(id_a, id_b, .allies);
+
+    const pkg_id = packages.idOf("NetPackageWaypoint").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // Friends-mode invite from A: only the ally B receives it.
+    var wp: packages.WaypointInvite = .{ .pos = .{ 1, 2, 3 } };
+    wp.invite_mode = 0;
+    wp.inviter_entity_id = ca.entity_id;
+    var body_buf: [512]u8 = undefined;
+    const body = try packages.buildWaypointInviteBody(&body_buf, &wp, ca.entity_id);
+    var frame_buf: [640]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageWaypoint", body);
+    cap_b.clear();
+    cap_c.clear();
+    try g.injectFramed(ca, framed);
+
+    var b_got = false;
+    var c_got = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) b_got = true;
+        }
+    }
+    for (cap_c.slots[0..cap_c.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) c_got = true;
+        }
+    }
+    try std.testing.expect(b_got);
+    try std.testing.expect(!c_got);
+
+    // Everyone-mode invite from A: the non-ally C receives it too.
+    wp.invite_mode = 1;
+    const body2 = try packages.buildWaypointInviteBody(&body_buf, &wp, ca.entity_id);
+    const framed2 = try packages.framed(&frame_buf, "NetPackageWaypoint", body2);
+    cap_c.clear();
+    try g.injectFramed(ca, framed2);
+    c_got = false;
+    for (cap_c.slots[0..cap_c.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) c_got = true;
+        }
+    }
+    try std.testing.expect(c_got);
 }

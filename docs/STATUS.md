@@ -318,6 +318,16 @@ finished-loading delegate, so the fixed-size branch cannot wedge it. RE pin:
 PARTIAL reflects the remaining never-sent names, all non-client-visible
 or RE-gated; Net and ops stays 43/8/5, total **182/107/44**).
 
+Waypoint invite relay shipped 2026-08-21 (C2S handler row, stays PARTIAL):
+NetPackageWaypoint C2S now parses the full Waypoint v7 body (pos/icon/
+AuthoredText name/ownerId platform stream/type enum) and relays per
+GameManager.WaypointInviteServer: Friends mode (0) fans to the inviter's
+AllyStore allies, Everyone (1) to all players, skipping the inviter, with
+the waypoint re-keyed (bTracked cleared, inviterEntityId set). Local
+waypoints stay client-local as in stock - only invites traverse the server.
+RE pin: 7dtd-research protocol-packages.md 5.7. C2S handled names 76 -> 77
+of the 98 stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

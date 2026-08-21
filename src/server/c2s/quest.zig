@@ -116,6 +116,37 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         self.harness.counters.inc(.ownership_rejects);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageWaypoint")) {
+        // Stock NetPackageWaypoint.ProcessPackage (IL=29): ValidEntityIdForSender
+        // gate, then GameManager.WaypointInviteServer (IL=164) relays to the
+        // inviter's allies (EnumWaypointInviteMode Friends=0, AllyStore.IsAlly
+        // on primary ids) or to all players (Everyone=1), skipping the
+        // inviter, with the waypoint cloned, bTracked cleared and
+        // inviterEntityId re-keyed to the inviter (Setup).
+        const wp = packages.parseWaypointInvite(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (wp.inviter_entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        const inviter_id = c.puid_primary.get() orelse return true;
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.entity_id == c.entity_id) continue;
+            if (cl.peer == null) continue;
+            if (wp.invite_mode == 0) {
+                const target_id = cl.puid_primary.get() orelse continue;
+                if (!self.allies.isAlly(inviter_id, target_id)) continue;
+            }
+            const relay = packages.buildWaypointInviteBody(self.body_buf[0..512], &wp, c.entity_id) catch continue;
+            self.sendGame(cl.peer.?, "NetPackageWaypoint", relay) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send Waypoint failed: {s}\n", .{@errorName(err)});
+            };
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
         try self.handleAddRemoveBuff(c, body);
         return true;
