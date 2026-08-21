@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (186/103/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (187/102/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 20 | 11 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 21 | 10 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **186** | **103** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **187** | **102** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**20 WORKS · 11 PARTIAL · 1 MISSING**
+**21 WORKS · 10 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -775,12 +775,17 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/server/game.zig:1845`, `:1947`, `:1991`,
   `src/assets/quests.zig:405`
 
-- **Quest NavObject markers** `PARTIAL`
+- **Quest NavObject markers** `WORKS` `(2026-08-22)`
   Emits `nav_objects.xml` class names at join for active quests with
-  client-known names. The class is derived from the legacy QuestKind, not from the
-  current phase's `nav_object` property, and the position is either the fabricated
-  def coordinate or the world primary spawn.
-  *Anchors:* `src/server/game/join.zig:367` `sendQuestNavObjects`,
+  client-known names. The class comes from the ACTIVE phase's `nav_object`
+  property (quests.xml objective `<property name="nav_object">`, arena-owned
+  on the PhaseSpec; values quest/rally/sleeper_volume/treasure/
+  restore_power/fetch_container/go_to_trader/return_to_trader) with the
+  legacy kind mapping as fallback, and the marker position is the placed POI
+  center (audit B26) or the objective target - the old primary-spawn
+  fallback put kill/fetch markers on the wrong side of the map.
+  *Anchors:* `src/server/game/join.zig` `sendQuestNavObjects`,
+  `src/assets/quests.zig` `buildPhaseGraph` (nav_object extraction),
   `asm.il:959379-959389`
 
 - **Client-known-name gate before writing a quest to the wire** `PARTIAL → CLOSED (2026-08-07)`

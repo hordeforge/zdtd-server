@@ -125,6 +125,10 @@ pub const PhaseSpec = struct {
     kind: PhaseKind,
     required: u16 = 1,
     radius: f32 = 0,
+    /// nav_objects.xml class for this phase's marker (quests.xml objective
+    /// `<property name="nav_object">`), e.g. quest / rally / sleeper_volume /
+    /// treasure / go_to_trader / return_to_trader. Empty = legacy fallback.
+    nav_object: []const u8 = "",
 };
 
 /// Quest catalog row defaults before quests.xml loads (stock XML wins at

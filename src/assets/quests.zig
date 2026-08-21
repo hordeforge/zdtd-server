@@ -168,6 +168,8 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         /// ObjectiveGoto / StayWithin distance in metres (stock parses those
         /// `value`s as a float distance, GAP objective-value row); 0 = unset.
         radius: f32 = 0,
+        /// nav_objects.xml class from the objective's nav_object property.
+        nav_object: []const u8 = "",
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
@@ -199,7 +201,11 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             if (xml.attr(body, oi, "value")) |v| radius = std.fmt.parseFloat(f32, v) catch 0;
             if (radius > 0) target = 1;
         }
-        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius };
+        // The XML body text is transient; the marker class must live in the
+        // catalog arena (a bare slice would dangle once the parse buffer frees).
+        const nav_object_raw = xml.propertyValue(body[oi..elem_end], "nav_object") orelse "";
+        const nav_object = if (nav_object_raw.len > 0) try arena.dupe(u8, nav_object_raw) else "";
+        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius, .nav_object = nav_object };
         obj_phase_bytes[n] = phase;
         // Objective Write subclass by type (stock CreateQuest). Everything not
         // listed writes the BaseObjective shape (FileVersion + CurrentValue).
@@ -225,7 +231,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             if (o.phase != p or o.kind == .auto) continue;
             if (o.score > best_score) {
                 best_score = o.score;
-                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target, .radius = o.radius };
+                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target, .radius = o.radius, .nav_object = o.nav_object };
             }
         }
         specs[p - 1] = spec;
@@ -1201,4 +1207,33 @@ test "resolveDifficultyTier reads param1 variables directly" {
     try std.testing.expectEqualStrings("difficulty", vars[0].name);
     try std.testing.expectEqualStrings("2", vars[0].value);
     try std.testing.expectEqual(@as(u8, 2), resolveDifficultyTier(body, vars[0..vn]));
+}
+
+test "objective nav_object rides the phase spec for the quest marker" {
+    const fixture =
+        \\<?xml version="1.0"?>
+        \\<quests starter_quest="tier1_clear">
+        \\  <quest id="tier1_clear">
+        \\    <property name="name_key" value="Clear"/>
+        \\    <objective type="ClearSleepers" phase="1">
+        \\      <property name="nav_object" value="sleeper_volume"/>
+        \\    </objective>
+        \\    <objective type="InteractWithNPC" phase="2">
+        \\      <property name="nav_object" value="return_to_trader"/>
+        \\    </objective>
+        \\    <objective type="Goto" id="trader" phase="1">
+        \\      <property name="nav_object" value="go_to_trader"/>
+        \\    </objective>
+        \\    <reward type="Exp" value="100"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
+    defer cat.deinit();
+    const d = cat.byName("tier1_clear").?;
+    // Phase 1: ClearSleepers out-scores Goto, so the sleeper marker wins.
+    try std.testing.expectEqualStrings("sleeper_volume", d.phases[0].nav_object);
+    try std.testing.expectEqualStrings("return_to_trader", d.phases[1].nav_object);
+    // The slice is arena-owned (not a view into the transient XML buffer).
+    try std.testing.expect(d.phases[0].nav_object.len > 0);
 }

@@ -475,27 +475,36 @@ pub fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, p
         if (!s.active or s.completed) continue;
         const d = self.sim.catalog.byId(s.def_id) orelse continue;
         if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-        // nav_objects.xml: quest | go_to_trader | return_to_trader
-        const nav_class: []const u8 = switch (d.kind) {
-            .fetch_trader => if (s.ready_turn_in) "return_to_trader" else "go_to_trader",
-            .goto_point, .kill_zombies, .fetch_item, .craft, .stay_within, .block_activate => "quest",
-        };
-        const use_def_pos = d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft;
-        // A POI-bound quest (audit B26) marks the placed POI center; defs
-        // without one keep the def marker position.
+        // nav_objects.xml class: the active phase's nav_object property when
+        // parsed from quests.xml (quest | rally | sleeper_volume | treasure |
+        // restore_power | fetch_container | go_to_trader | return_to_trader),
+        // else the legacy kind fallback.
+        var nav_class: []const u8 = "quest";
+        if (d.phases.len > 0 and s.phase >= 1 and s.phase <= d.phases.len) {
+            if (d.phases[s.phase - 1].nav_object.len > 0) {
+                nav_class = d.phases[s.phase - 1].nav_object;
+            }
+        }
+        if (std.mem.eql(u8, nav_class, "quest") or nav_class.len == 0) {
+            nav_class = switch (d.kind) {
+                .fetch_trader => if (s.ready_turn_in) "return_to_trader" else "go_to_trader",
+                else => "quest",
+            };
+        }
+        // Marker position: the placed POI center when the quest is POI-bound
+        // (audit B26), else the def's objective coordinates. The old primary-
+        // spawn fallback put kill/fetch markers on the wrong side of the map.
         const gx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else d.tx;
         const gz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else d.tz;
-        const lx: f32 = if (use_def_pos) gx else @floatFromInt(self.world.primarySpawn().x);
-        const ly: f32 = if (use_def_pos) d.ty else @floatFromInt(self.world.primarySpawn().y);
-        const lz: f32 = if (use_def_pos) gz else @floatFromInt(self.world.primarySpawn().z);
+        const ly: f32 = if (s.poi.valid()) s.poi.y else d.ty;
         // entityId tags marker to player for client cleanup.
         const body = try packages.buildNavObjectAdd(
             self.body_buf[8192..8704],
             nav_class,
             d.name,
-            lx,
+            gx,
             ly,
-            lz,
+            gz,
             player_eid,
         );
         try self.sendGame(peer, "NetPackageNavObject", body);

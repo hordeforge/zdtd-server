@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 186 `WORKS`,
-103 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 187 `WORKS`,
+102 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -477,6 +477,16 @@ every server-relevant stock verb is implemented; client-only verbs (dm,
 debugmenu, gfx, screenshot) are deliberately absent because they manipulate
 the local client's rendering - a documented design note, not a parity gap.
 Net and ops 46/5/5 -> **47/4/5**, total 185/104/44 -> **186/103/44**.
+
+Quest NavObject markers shipped 2026-08-22 (quest row -> WORKS): the join
+marker class now comes from the ACTIVE phase's `nav_object` property
+(quests.xml objective property, arena-owned on the PhaseSpec; values
+quest/rally/sleeper_volume/treasure/restore_power/fetch_container/
+go_to_trader/return_to_trader) with the legacy kind fallback, and the
+position is the placed POI center or the objective target - the old
+primary-spawn fallback put kill/fetch markers on the wrong side of the
+map. RE pin: 7dtd-research map-objects.md. Quests 20/11/1 -> 21/10/1,
+total 186/103/44 -> **187/102/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
