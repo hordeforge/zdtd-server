@@ -202,6 +202,28 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageEntityRagdoll")) {
+        // Stock NetPackageEntityRagdoll (write IL=59): entityId i32, flags
+        // u8, then conditionally (flags&1) duration/bodyPart/three vectors,
+        // (flags&2) mode, (flags&4) state. The owner's client forces the
+        // local ragdoll (EntityBuffs buff trigger / EModelBase.DoRagdoll);
+        // the server re-broadcasts to the entity's tracked players
+        // (SendPacketToTrackedPlayersAndTrackedEntity), so a verbatim relay
+        // to the other clients matches stock - the owner already ragdolled.
+        const rg = packages.parseRagdollInvoke(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null) continue;
+            if (cl.entity_id == rg.entity_id) continue; // owner already ragdolled
+            self.sendGame(cl.peer.?, "NetPackageEntityRagdoll", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send EntityRagdoll failed: {s}\n", .{@errorName(err)});
+            };
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

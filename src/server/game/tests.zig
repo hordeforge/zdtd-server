@@ -2083,3 +2083,59 @@ test "entity physics report is handled without touching the sim" {
     try g.injectFramed(ca, framed);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
 }
+
+test "entity ragdoll relays to other clients, not the owner" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    var body: [64]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeI32(ca.entity_id);
+    try w.writeByte(0x01); // flags: duration block
+    try w.writeF32(1);
+    try w.writeI16(2);
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    try w.writeF32(4);
+    try w.writeF32(5);
+    try w.writeF32(6);
+    try w.writeF32(7);
+    try w.writeF32(8);
+    try w.writeF32(9);
+    var frame_buf: [128]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageEntityRagdoll", w.written());
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, framed);
+    const rg_id = packages.idOf("NetPackageEntityRagdoll").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var a_got = false;
+    var b_got = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == rg_id) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == rg_id) b_got = true;
+        }
+    }
+    try std.testing.expect(!a_got);
+    try std.testing.expect(b_got);
+}

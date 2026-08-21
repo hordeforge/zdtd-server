@@ -4535,3 +4535,58 @@ test "parseItemReload reads the single entityId" {
     try std.testing.expectError(error.EndOfStream, parseItemReload(buf[0..3]));
     try std.testing.expectError(error.EndOfStream, parseItemReload(&.{}));
 }
+
+/// Stock `NetPackageEntityRagdoll` (write IL=59): entityId i32, flags u8,
+/// then conditionally (flags&1) duration f32, bodyPart i16, forceVec 3xf32,
+/// forceWorldPos 3xf32, hipPos 3xf32, (flags&2) mode u8, (flags&4) state u8.
+/// The sender is the entity's owner (EntityBuffs / EModelBase.DoRagdoll
+/// force the local ragdoll); the server applies it and re-broadcasts via
+/// NetEntityDistribution.SendPacketToTrackedPlayersAndTrackedEntity, so a
+/// verbatim relay to the other clients matches the intent (the owner already
+/// ragdolled locally).
+pub const RagdollInvoke = struct {
+    entity_id: i32,
+    flags: u8,
+};
+
+pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
+    var r: binary.Reader = .{ .data = body };
+    const entity_id = try r.readI32();
+    const flags = try r.readByte();
+    if ((flags & 1) != 0) {
+        _ = try r.readF32(); // duration
+        _ = try r.readI16(); // bodyPart
+        var i: usize = 0;
+        while (i < 3) : (i += 1) _ = try r.readF32();
+        i = 0;
+        while (i < 3) : (i += 1) _ = try r.readF32();
+        i = 0;
+        while (i < 3) : (i += 1) _ = try r.readF32();
+    }
+    if ((flags & 2) != 0) _ = try r.readByte(); // mode
+    if ((flags & 4) != 0) _ = try r.readByte(); // state
+    return .{ .entity_id = entity_id, .flags = flags };
+}
+
+test "ragdoll invoke parses the stock body" {
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(77); // entityId
+    try w.writeByte(0x07); // flags: duration+mode+state
+    try w.writeF32(1.5); // duration
+    try w.writeI16(2); // bodyPart
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    try w.writeF32(4);
+    try w.writeF32(5);
+    try w.writeF32(6);
+    try w.writeF32(7);
+    try w.writeF32(8);
+    try w.writeF32(9);
+    try w.writeByte(1); // mode
+    try w.writeByte(0); // state
+    const r = try parseRagdollInvoke(w.written());
+    try std.testing.expectEqual(@as(i32, 77), r.entity_id);
+    try std.testing.expectEqual(@as(u8, 0x07), r.flags);
+}

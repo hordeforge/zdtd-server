@@ -424,9 +424,13 @@ server-authoritative (broadcast PosAndRot / VehiclePositions /
 EntityVelocity). The remaining 17 unhandled names are categorized by scope
 (protocol-packages.md 5.14): mod API surface, EAC/encryption waivers,
 creative/editor, Twitch integration, headless mesh, and deferred
-cosmetic/depth (EntityRagdoll buff-triggered ragdoll relay,
-DroneDataSync/DroneParticleEffect junk-drone state). C2S handled names 84
--> 85 of the 98 stock client sends; Net and ops stays 44/7/5, total
+cosmetic/depth (DroneDataSync/DroneParticleEffect junk-drone state).
+EntityRagdoll relay shipped 2026-08-21: the owner-client's ragdoll impulse
+(entityId + flag-gated duration/bodyPart/vectors + mode/state) relays
+verbatim to the other clients - the owner already ragdolled locally
+(SendPacketToTrackedPlayersAndTrackedEntity). RE pin:
+7dtd-research protocol-packages.md 5.15. C2S handled names 85
+-> 86 of the 98 stock client sends; Net and ops stays 44/7/5, total
 **183/106/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)

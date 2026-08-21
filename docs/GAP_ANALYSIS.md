@@ -3258,11 +3258,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  85 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  86 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
   EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
   EntityAwardKillServer, ParticleEffect, EntityStealth, QuestGotoPoint,
-  QuestTreasurePoint and EntityPhysics have handlers
+  QuestTreasurePoint, EntityPhysics and EntityRagdoll have handlers
   since the last count; the Waypoint
   relay parses the full Waypoint v7 body and fans the invite to the
   inviter's allies or all players per
@@ -3281,18 +3281,20 @@ persists so little that a restart visibly damages a built base.
   movement frames, smell from buffs), the QuestGotoPoint /
   QuestTreasurePoint reports are validated no-ops because goto objectives
   complete by proximity (questTickGoto) and fetch/treasure phases advance
-  from the QuestObjectiveUpdate treasure_complete event, and the
+  from the QuestObjectiveUpdate treasure_complete event, the
   EntityPhysics physics-master report is a validated no-op because
-  movement/falling-block/vehicle sims are server-authoritative).
+  movement/falling-block/vehicle sims are server-authoritative, and the
+  EntityRagdoll impulse relays to the other clients - the owner already
+  ragdolled locally (SendPacketToTrackedPlayersAndTrackedEntity)).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 17 have no handler,
+  yields 98 names the stock client actually sends; 16 have no handler,
   categorized by scope (protocol-packages.md 5.14): mod API surface
   (ModifyCVar, SetProp, SimpleRPC, Debug), EAC/encryption waivers (EAC,
   EncryptionPublicKey, KeyExchangeComplete), creative/editor
   (EditorUpdateVolume, WorldFolder), Twitch integration (PlayerTwitchStats,
   TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
-  (DynamicMesh), deferred cosmetic/depth (EntityRagdoll buff-triggered
-  ragdoll relay, DroneDataSync/DroneParticleEffect junk-drone state).
+  (DynamicMesh), deferred cosmetic/depth (DroneDataSync,
+  DroneParticleEffect junk-drone state).
   Player-visible: vending machines are inert, ragdolls are not
   relayed. (Goto/treasure quest markers register through the server's
   objective wire; the client's reach/dig reports are redundant with the
