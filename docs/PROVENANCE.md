@@ -189,6 +189,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/stability.zig` | R | Stability helpers extracted verbatim from game.zig |
 | `src/server/game/step.zig` | R | Main tick step — extracted verbatim from game.zig. `Game.step` and helpers that are only called from the step |
 | `src/server/game/tests.zig` | R | Game integration tests: peerIpKey, player persist, claims, evidence, etc. Bodies are verbatim copies from src/server/game.zig (kept as integration tes |
+| `src/server/game/map.zig` | R | In-game minimap: MapChunks window send + per-chunk 256 RGB555 colors (CalcChunkColors -> Block.GetMapColor -> atlas color -> ToColor5; water = BlockLiquidv2.Color) and the 6 s PersistentPlayerPositions player-marker broadcast. RE: `../7dtd-research/docs/texture-atlas.md`, `protocol-packages.md §3.3` + PersistentPlayerPositions |
 | `src/server/game/tick.zig` | R | Tick orchestration — extracted from game.zig; helpers take *Game. Bodies are verbatim copies from src/server/game.zig (stock asm.il comments kept) |
 | `src/server/game/trader.zig` | R | Trader helpers extracted verbatim from game.zig |
 | `src/server/game/trader_wire.zig` | R | Trader wire helpers extracted from game.zig. stockEntries + sendTraderSnapshot + handleTrade + applyTraderDataCopyFrom |

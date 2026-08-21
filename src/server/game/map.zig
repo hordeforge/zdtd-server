@@ -106,3 +106,34 @@ pub fn tickMapChunks(self: *Game) void {
         }
     }
 }
+
+/// NetPackagePersistentPlayerPositions broadcast (RE GameManager
+/// playerPositionsCountdownTimer: 6 s cadence to all clients): the client's
+/// map shows online players. Entries = every joined client with a live
+/// entity, as platform id + int-truncated world position (Vector3i).
+pub fn tickPlayerPositions(self: *Game) void {
+    if (self.player_positions_timer > 0) {
+        self.player_positions_timer -= 1;
+        return;
+    }
+    self.player_positions_timer = 120; // 6 s at 20 TPS (stock timer value)
+    var entries: [game_mod.max_clients]packages.PlayerPositionEntry = undefined;
+    var n: usize = 0;
+    for (&self.clients) |*c| {
+        if (!c.joined or c.entity_id <= 0) continue;
+        const si = self.sim.slotOfNetId(c.entity_id) orelse continue;
+        if (!self.sim.alive[si] or !self.sim.mask[si].transform) continue;
+        if (n >= entries.len) break;
+        entries[n] = .{
+            .id = c.puid_primary.get(),
+            .x = @intFromFloat(@trunc(self.sim.transform[si].x)),
+            .y = @intFromFloat(@trunc(self.sim.transform[si].y)),
+            .z = @intFromFloat(@trunc(self.sim.transform[si].z)),
+        };
+        n += 1;
+    }
+    if (n == 0) return;
+    if (packages.buildPersistentPlayerPositionsBody(&self.body_buf, entries[0..n])) |body| {
+        self.broadcast("NetPackagePersistentPlayerPositions", body) catch {};
+    } else |_| {}
+}

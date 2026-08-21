@@ -285,8 +285,10 @@ atlases; default mesh 0 = opaque), NetPackageMapPosition C2S arms a per-client
 17x17 chunk window, and tickMapChunks sends NetPackageMapChunks (channel 1,
 compressed, batched) with per-chunk 256 RGB555 colors from the top visible
 block - MapColor property, else the atlas color, else gray; water takes
-BlockLiquidv2.Color. The in-game minimap now fills in. Party members on the
-map (PersistentPlayerPositions) and trader compounds (WorldAreas) stay open.
+BlockLiquidv2.Color. The in-game minimap now fills in, player markers
+broadcast every 6 s (PersistentPlayerPositions, stock
+playerPositionsCountdownTimer cadence) and trader compounds ship on join
+(WorldAreas already sent) - the map trio is complete.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

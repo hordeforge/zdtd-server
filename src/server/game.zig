@@ -407,6 +407,9 @@ pub const Game = struct {
     /// sqr-delta gate skips re-sends until the look moves ~0.04 blocks, so
     /// the per-tick look pass is quiet between meaningful target changes.
     entity_look_sent: [ecs.max_entities]EntityLookSent = [_]EntityLookSent{.{}} ** ecs.max_entities,
+    /// Ticks until the next NetPackagePersistentPlayerPositions broadcast
+    /// (stock GameManager.playerPositionsCountdownTimer, 6 s cadence).
+    player_positions_timer: u16 = 0,
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
@@ -1204,6 +1207,10 @@ pub const Game = struct {
 
     pub fn tickMapChunks(self: *Game) void {
         return game_map.tickMapChunks(self);
+    }
+
+    pub fn tickPlayerPositions(self: *Game) void {
+        return game_map.tickPlayerPositions(self);
     }
 
     /// Block id at world coords (0 = air / unloaded).

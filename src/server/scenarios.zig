@@ -506,6 +506,51 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     try std.testing.expect(!g.clients[c.slot].joined);
 }
 
+test "scenario map: PersistentPlayerPositions broadcasts every 6 s" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_ppp");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ppp", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const a = try g.attachJoinedClient(&cap_a);
+    const b = try g.attachJoinedClient(&cap_b);
+    // Two players online: the first broadcast carries both positions.
+    const n_before = cap_a.n;
+    g.tickPlayerPositions();
+    try std.testing.expect(cap_a.n > n_before);
+    const did = packages.idOf("NetPackagePersistentPlayerPositions").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap_a.n and !found) : (i += 1) {
+        const msg = cap_a.slots[i].data[0..cap_a.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                const count = try r.readI32();
+                try std.testing.expect(count >= 2); // a + b
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+    // The timer re-arms: the next tick only counts down.
+    _ = a;
+    _ = b;
+    g.tickPlayerPositions();
+    try std.testing.expectEqual(@as(u16, 119), g.player_positions_timer);
+}
+
 test "scenario map: MapPosition C2S arms the window and sends MapChunks" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_map");

@@ -3336,21 +3336,23 @@ persists so little that a restart visibly damages a built base.
   RGB555 colors computed from the top visible block (MapColor property, else
   the texture-atlas color, else gray; water = BlockLiquidv2.Color) - the
   atlas colors come from the meshdescriptions bundle (texture-atlas.md).
-  ToClient names never sent at all include PersistentPlayerPositions,
-  WorldAreas, TurretSync, EntityVelocity, EntitySetSkillLevelClient,
-  ChunkClusterInfo, WallVolume, Light, TreeFade, AudioPlayInHead,
-  WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo, AuthState.
+  The map trio is complete: player markers broadcast every 6 s
+  (NetPackagePersistentPlayerPositions, 2026-08-21) and trader areas ship on
+  join (NetPackageWorldAreas). ToClient names never sent at all include
+  TurretSync, EntityVelocity, EntitySetSkillLevelClient, ChunkClusterInfo,
+  WallVolume, Light, TreeFade, AudioPlayInHead, WaterSimChunkUpdate,
+  PlayerSetBackpackPosition, ClientInfo, AuthState.
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
   sole stock sender is the Homerun minigame (ShowTooltipMP unicast,
   protocol-packages.md); NetPackageSleeperPose is stock-dead (the sleep pose
   rides EntitySpawn flags); the sleeper trio wake path is wired (SleeperWakeup
-  on proximity/noise/damage wake, passive spawn flags). Party members on the
-  map (PersistentPlayerPositions) and trader compounds (WorldAreas) stay
-  open; turrets do not animate.
-  *Anchors:* `src/server/game/map.zig` (`tickMapChunks`, `chunkMapColors`),
-  `src/server/c2s/misc.zig` (MapPosition), `src/server/game/tick.zig`
-  (`tickEntityLookAt`, `drainSleeperWakeups`),
+  on proximity/noise/damage wake, passive spawn flags). Turrets do not
+  animate.
+  *Anchors:* `src/server/game/map.zig` (`tickMapChunks`, `chunkMapColors`,
+  `tickPlayerPositions`), `src/server/c2s/misc.zig` (MapPosition),
+  `src/server/game/join.zig` (`sendWorldAreas`),
+  `src/server/game/tick.zig` (`tickEntityLookAt`, `drainSleeperWakeups`),
   `src/server/game/player.zig` (`killXpAward`), `src/assets/map_atlas.zig`
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`

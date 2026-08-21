@@ -126,6 +126,9 @@ pub fn step(self: *Game) !void {
         // In-game minimap (RE MapChunkDatabase.GetMapChunkPackagesToSend):
         // fill the 17x17 window around each client's map middle, batched.
         self.tickMapChunks();
+        // Map player markers (RE GameManager.playerPositionsCountdownTimer):
+        // broadcast PersistentPlayerPositions every 6 s.
+        self.tickPlayerPositions();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {
