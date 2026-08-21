@@ -734,6 +734,10 @@ pub const Game = struct {
         // (persistent across restart).
         self.sim.quest_clear_ctx = self;
         self.sim.quest_clear_fn = &questClearSleepers;
+        // QuestActionSpawnGSEnemy spawns gamestage-scaled enemies on phase
+        // entry (stock SpawnQuestEntity placement).
+        self.sim.quest_spawn_ctx = self;
+        self.sim.quest_spawn_fn = &questSpawnGsEnemy;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -870,6 +874,10 @@ pub const Game = struct {
 
     fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
         return game_hooks.questClearSleepers(ctx, rect);
+    }
+
+    fn questSpawnGsEnemy(ctx: ?*anyopaque, rect: ecs.components.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
+        return game_hooks.questSpawnGsEnemy(ctx, rect, list, min, max, px, pz);
     }
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {

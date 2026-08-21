@@ -394,6 +394,12 @@ pub const World = struct {
     /// suppression (test worlds without sleeper data).
     quest_clear_ctx: ?*anyopaque = null,
     quest_clear_fn: ?*const fn (?*anyopaque, c.PoiRect) void = null,
+    /// QuestActionSpawnGSEnemy: the Game spawns `count` gamestage-scaled
+    /// enemies around the player on phase entry (stock SpawnQuestEntity:
+    /// player position + random direction × (12 + rand*12) metres). Unset =
+    /// action recorded but not fired (test worlds without gamestage data).
+    quest_spawn_ctx: ?*anyopaque = null,
+    quest_spawn_fn: ?*const fn (?*anyopaque, c.PoiRect, []const u8, u8, u8, f32, f32) void = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

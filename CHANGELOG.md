@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Quest `<action>` elements are complete on the stock surface: SpawnGSEnemy
+  now spawns its gamestage-scaled enemies around the player on phase entry
+  (stock SpawnQuestEntity placement, 12-24 m), alongside the existing
+  UnlockPOI; SetCVar / ShowMessageWindow stay client-side as stock runs them
+  on the owning player, and GameEvent actions have no stock quest uses.
 - Quest phases now advance only when **all** their objectives complete (stock
   refreshQuestCompletion): the shared `tier1_clear` phase 3 (ClearSleepers +
   POIStayWithin) and always-active phase-0 objectives are enforced, per-objective

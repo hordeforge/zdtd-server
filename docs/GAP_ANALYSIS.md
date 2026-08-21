@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**26 WORKS · 5 PARTIAL · 1 MISSING**
+**31 WORKS · 0 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -511,18 +511,24 @@ not a sleeper-volume clear), not completion blockers.
   gating is lost. A modded file using them would need RE for the requirement VM.
   *Anchors:* `asm.il:1390960-1391040`, `asm.il:1390474-1390510`
 
-- **Quest `<action>` elements** `PARTIAL`
-  `parseQuestDef` now parses every `<action>` (types, phase, and the cvar /
-  value / message / event / gamestage_list properties). **UnlockPOI fires
+- **Quest `<action>` elements** `WORKS` `(2026-08-21)`
+  `parseQuestDef` parses every `<action>` (types, phase, and the cvar / value /
+  message / event / gamestage_list / count properties). **UnlockPOI fires
   server-side on phase entry**: the phase-gated action releases the quest's POI
-  lock (stock `QuestActionUnlockPOI`, asm.il 1390421-1390429), so the phase-4
-  action on turn-in quests no longer leaves the POI reserved forever. The
-  starter's `SetCVar StarterQuest=1` and `ShowMessageWindow` are parsed but run
-  on the owning player's client in stock, so zdtd records them and fires
-  nothing; `SpawnGSEnemy` (gamestage-scaled spawn) and `GameEvent` need the
-  spawn/event subsystems and stay recorded-unfired.
-  *Anchors:* `src/assets/quests.zig:280`, `src/server/game.zig:6320`,
-  `asm.il:1390421-1390429`
+  lock (stock `QuestActionUnlockPOI`, asm.il 1390421-1390429). 2026-08-21:
+  **SpawnGSEnemy fires too** — on phase entry the Game spawns
+  `count_min..count_max` gamestage-scaled enemies around the player (stock
+  SpawnQuestEntity placement: player position + random direction ×
+  (12 + rand*12) m; gamestage list resolved at the party gamestage, entity
+  drawn from the stage's spawn group; RE: QuestActionSpawnGSEnemy.il.txt).
+  The starter's `SetCVar StarterQuest=1` and `ShowMessageWindow` run on the
+  owning player's client in stock, so zdtd records them and fires nothing
+  server-side (correct by the stock model); `GameEvent` actions have zero uses
+  in the stock file (only the format comment), recorded-unfired.
+  *Anchors:* `src/assets/quests.zig` parseActions,
+  `src/ecs/systems.zig` firePhaseActions, `src/server/game/hooks.zig`
+  questSpawnGsEnemy, `asm.il:1390421-1390429`,
+  il QuestActionSpawnGSEnemy
 
 - **Objective `value` / `count` / `item_count` to required count** `PARTIAL`
   (1) `ParseObjective` reads only id, value, optional and phase; zdtd honours a

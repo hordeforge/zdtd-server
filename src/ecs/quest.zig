@@ -399,6 +399,10 @@ pub const QuestActionSpec = struct {
     phase: u8 = 0,
     name: []const u8 = "",
     value: []const u8 = "",
+    /// SpawnGSEnemy: the `count` property ("1-2") as a min/max range of
+    /// gamestage-scaled enemies (stock QuestActionSpawnGSEnemy).
+    count_min: u8 = 1,
+    count_max: u8 = 1,
 };
 
 pub const QuestList = struct {

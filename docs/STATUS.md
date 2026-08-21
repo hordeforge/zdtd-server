@@ -127,6 +127,12 @@ POIStayWithin) and always-active phase-0 objectives are enforced,
 per-objective progress rides the journal wire and the ZPV6 save, and a
 ForcePhaseFinish objective can fail a quest (0 stock uses, unit-tested); the
 99-def sweep over the real quests.xml completes 99/99. Total **197/92/44**.
+Then the quest-action row went WORKS: SpawnGSEnemy fires on phase entry
+(gamestage-scaled enemies around the player, stock SpawnQuestEntity
+placement 12-24 m; count range parsed from the action's `count` property);
+SetCVar/ShowMessageWindow stay recorded-unfired as stock runs them on the
+owning client, and GameEvent actions have no stock quest uses. Counts
+unchanged (the action row was outside the scored set).
 The dashboard
 (docs/provenance.html) is synced.
 

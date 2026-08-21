@@ -642,11 +642,36 @@ fn firePhaseActions(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef)
     var i: usize = 0;
     while (i < @min(@as(usize, d.action_n), quest.max_actions)) : (i += 1) {
         const a = d.actions[i];
-        if (a.kind != .unlock_poi) continue;
         if (a.phase != 0 and a.phase != s.phase) continue;
-        if (!s.poi.valid()) continue;
-        const eid: i32 = if (w.mask[ps].network_id) w.network_id[ps].id else -1;
-        questPoiUnlock(w, eid, s.poi.x, s.poi.z);
+        switch (a.kind) {
+            .unlock_poi => {
+                if (!s.poi.valid()) continue;
+                const eid: i32 = if (w.mask[ps].network_id) w.network_id[ps].id else -1;
+                questPoiUnlock(w, eid, s.poi.x, s.poi.z);
+            },
+            // Stock QuestActionSpawnGSEnemy: gamestage-scaled enemies around
+            // the player on phase entry. The Game hook owns the spawn
+            // (gamestage resolution + entity classes); unset = the action is
+            // parsed but not fired (test worlds).
+            .spawn_gs_enemy => {
+                if (!s.poi.valid()) continue;
+                if (w.quest_spawn_fn) |f| {
+                    f(
+                        w.quest_spawn_ctx,
+                        s.poi,
+                        a.name,
+                        a.count_min,
+                        a.count_max,
+                        w.transform[ps].x,
+                        w.transform[ps].z,
+                    );
+                }
+            },
+            // SetCVar / ShowMessageWindow run on the owning player's client in
+            // stock; GameEvent actions have no stock quest uses. Parsed and
+            // recorded; nothing to fire server-side.
+            else => {},
+        }
     }
 }
 
@@ -4265,6 +4290,59 @@ test "ForcePhaseFinish objective fails the quest while incomplete" {
     }
     try std.testing.expect(found_failed);
     try std.testing.expect(!questHasActive(&w, 0, 63));
+}
+
+test "SpawnGSEnemy action fires gamestage-scaled spawns on phase entry" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const actions = [_]quest.QuestActionSpec{.{ .kind = .spawn_gs_enemy, .phase = 2, .name = "SleeperGSList", .count_min = 1, .count_max = 2 }} ** quest.max_actions;
+    const defs = [_]quest.QuestDef{.{
+        .id = 64,
+        .kind = .kill_zombies,
+        .name = "gs",
+        .title = "GS",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objective_phases = &[_]u8{ 1, 2 },
+        .actions = actions,
+        .action_n = 1,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 64, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    // Spy: capture the fired spawn request.
+    const Call = struct { fired: bool = false, list: []const u8 = "", min: u8 = 0, max: u8 = 0, px: f32 = 0, pz: f32 = 0 };
+    var call = Call{};
+    const spy = struct {
+        fn f(ctx: ?*anyopaque, _: c.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
+            const c2: *Call = @ptrCast(@alignCast(ctx.?));
+            c2.fired = true;
+            c2.list = list;
+            c2.min = min;
+            c2.max = max;
+            c2.px = px;
+            c2.pz = pz;
+        }
+    }.f;
+    w.quest_spawn_ctx = &call;
+    w.quest_spawn_fn = spy;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 64));
+    try std.testing.expect(!call.fired); // phase 1 has no spawn action
+    // Completing phase 1 enters phase 2, firing the phase-2 SpawnGSEnemy.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(call.fired);
+    try std.testing.expectEqualStrings("SleeperGSList", call.list);
+    try std.testing.expectEqual(@as(u8, 1), call.min);
+    try std.testing.expectEqual(@as(u8, 2), call.max);
+    try std.testing.expectEqual(@as(f32, 0), call.px); // player spawn (0,0)
+    try std.testing.expectEqual(@as(f32, 0), call.pz);
 }
 
 test "fetch_trader goto target stays the def spot, not a covering POI center" {

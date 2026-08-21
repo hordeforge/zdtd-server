@@ -580,6 +580,19 @@ fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_act
         if (xml.propertyValue(inner, "gamestage_list")) |g| {
             if (spec.name.len == 0) spec.name = arena.dupe(u8, g) catch "";
         }
+        // SpawnGSEnemy: `count="1-2"` (a single value means exactly that many).
+        if (std.mem.eql(u8, typ, "SpawnGSEnemy")) {
+            if (xml.propertyValue(inner, "count")) |c| {
+                if (std.mem.findScalar(u8, c, '-')) |dash| {
+                    spec.count_min = xml.parseU8(c[0..dash]) orelse 1;
+                    spec.count_max = xml.parseU8(c[dash + 1 ..]) orelse spec.count_min;
+                } else {
+                    spec.count_min = xml.parseU8(c) orelse 1;
+                    spec.count_max = spec.count_min;
+                }
+                if (spec.count_max < spec.count_min) spec.count_max = spec.count_min;
+            }
+        }
         out[n] = spec;
         n += 1;
         i = close + "</action>".len;
@@ -1441,4 +1454,34 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
     try std.testing.expectEqual(@intFromEnum(quest.QuestTag.fetch), m3.tags_mask);
     try std.testing.expectEqual(quest.PoiSelectKind.none, m3.poi_select);
     try std.testing.expectEqual(quest.biome_filter_none, m3.biome_type);
+}
+
+test "SpawnGSEnemy action parses count range and gamestage list" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const body =
+        \\<quest id="q">
+        \\  <action type="SpawnGSEnemy">
+        \\    <property name="gamestage_list" value="SleeperGSList"/>
+        \\    <property name="count" value="1-2"/>
+        \\    <property name="phase" value="4"/>
+        \\  </action>
+        \\  <action type="SpawnGSEnemy">
+        \\    <property name="gamestage_list" value="SleeperGSList"/>
+        \\    <property name="count" value="3"/>
+        \\  </action>
+        \\</quest>
+    ;
+    var specs: [quest.max_actions]quest.QuestActionSpec = undefined;
+    const n = parseActions(arena, body, &specs);
+    try std.testing.expectEqual(@as(u8, 2), n);
+    try std.testing.expectEqual(quest.QuestActionKind.spawn_gs_enemy, specs[0].kind);
+    try std.testing.expectEqualStrings("SleeperGSList", specs[0].name);
+    try std.testing.expectEqual(@as(u8, 1), specs[0].count_min);
+    try std.testing.expectEqual(@as(u8, 2), specs[0].count_max);
+    try std.testing.expectEqual(@as(u8, 4), specs[0].phase);
+    // A bare count means exactly that many.
+    try std.testing.expectEqual(@as(u8, 3), specs[1].count_min);
+    try std.testing.expectEqual(@as(u8, 3), specs[1].count_max);
 }

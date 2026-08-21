@@ -453,6 +453,42 @@ pub fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
     g.sleepers.markClearedRect(rect.x, rect.y, rect.z, rect.size_x, rect.size_y, rect.size_z);
 }
 
+/// QuestActionSpawnGSEnemy (il/full-v3.1.0/_global/QuestActionSpawnGSEnemy):
+/// spawn `count_min..count_max` gamestage-scaled enemies around the player —
+/// stock SpawnQuestEntity places them at player.position + random unit
+/// direction × (12 + RandomFloat*12) metres, resolving the entity via
+/// GameStageDefinition.GetGameStage(list).GetStage(PartyGameStage)
+/// .GetSpawnGroup(0).groupName → EntityGroups.GetRandomFromGroup. The count
+/// is picked per phase-entry with a world-time-seeded stream (deterministic
+/// per tick, like the POI selector).
+pub fn questSpawnGsEnemy(
+    ctx: ?*anyopaque,
+    rect: ecs.components.PoiRect,
+    gs_list: []const u8,
+    count_min: u8,
+    count_max: u8,
+    px: f32,
+    pz: f32,
+) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (gs_list.len == 0) return;
+    if (count_max < count_min) return;
+    const stage: i32 = @max(0, g.partyStageAround(px, pz, g.sleeper_party_radius));
+    const stage_spawn = g.gamestages.sleeperEntityGroup(gs_list, stage);
+    var rng = rng_util.XorShift32.initFromNetId(@bitCast(@as(u32, @truncate(g.sim.director.clock.worldTimeBits()))));
+    const count: u8 = count_min + @as(u8, @intCast(rng.nextBounded(@as(u32, count_max - count_min) + 1)));
+    var n: u8 = 0;
+    while (n < count) : (n += 1) {
+        const def = g.resolveSleeperClass(gs_list, stage_spawn, rng.next());
+        const ang = (@as(f32, @floatFromInt(rng.nextBounded(6283))) / 1000.0); // 0..2π
+        const dist: f32 = 12.0 + @as(f32, @floatFromInt(rng.nextBounded(12))); // 12..23
+        const ox = px + @cos(ang) * dist;
+        const oz = pz + @sin(ang) * dist;
+        const oy = g.sim.groundY(ox, oz) orelse rect.y;
+        _ = g.sim.spawnSleeperDef(ox, oy, oz, g.entityClassOf(def));
+    }
+}
+
 /// Quest POI lockout home reasons (stock CheckForPOILockouts): bit 1 = the
 /// entity's respawn bedroll is inside the POI, bit 2 = a land claim overlaps
 /// the POI. The claim check uses the keystone-to-center distance (claim
