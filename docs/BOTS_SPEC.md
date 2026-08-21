@@ -415,3 +415,15 @@ which is honest: no bot addon, no bot commands.
    `unknown`; enabled module -> commands route to the plugin.
 6. `make check` stays green; no hot-path allocation added (audit the drain and
    sense paths).
+
+## 10. Parity with clanker (reference implementation)
+
+The guest is behaviorally cross-pollinated from the clanker C# mod. The parity
+ledger, what is in sync, tunable divergences, weapon-mag discrepancies vs game
+data, and the open alignment decisions, is
+`../7dtd-clanker/docs/research/REPORT-2026-08-21-R13-static-bot-parity.md`
+(clanker `docs/research/INDEX.md` maps the full R-series). This spec describes
+the intended contract; R13 records where the guest and the reference actually
+diverge today. Any alignment change to the guest updates
+`mods/zdtd_bot/zdtd_bot.c` + the `.wasm` rebuild, keeps `make check` green, and
+updates this spec and R13 in step.
