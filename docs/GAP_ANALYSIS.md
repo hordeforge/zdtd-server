@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **330 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (161/125/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (162/124/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -146,15 +146,15 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 20 | 11 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
-| [Traders](#5-traders) | 14 | 6 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
+| [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
-| [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Damage and buffs land; nothing survives a restart |
+| [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 23 | 25 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **161** | **125** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **162** | **124** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -811,7 +811,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**14 WORKS · 6 PARTIAL · 3 MISSING**
+**15 WORKS · 5 PARTIAL · 3 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -876,15 +876,15 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/wire/packages.zig:643-668`, `asm.il:861034-861057`,
   `asm.il:861060-861230`, `asm.il:860491-860628`, `asm.il:843213-843265`
 
-- **C2S NetPackageTraderData handling** `PARTIAL`
-  Stock clients push TraderData via `TraderData::SetModified`. zdtd routes on a
-  heuristic `body.len >= 9 and body[8] in {0,1}` into `parseTraderTrade`, a
-  zdtd-private 9-byte format that does not exist in stock. In a real stock body
-  byte 8 is the third byte of `TraderData.TraderID`, which for ids 1..10 is 0, so
-  a stock push is always misread as a "buy" op and then bounces off `slotOfNetId`.
-  The quest/open branch is therefore unreachable from a stock client.
-  *Anchors:* `src/server/game.zig:5357-5362`, `src/wire/packages.zig:2853-2862`,
-  `asm.il:860724-860742`
+- **C2S NetPackageTraderData handling** `WORKS`
+  The stock ToServer body is parsed first (RE protocol-packages.md 6.23:
+  isEntity bool | entityId i32 or tePosition 3xi32 | hasTraderData bool |
+  TraderData.Write) and the trader state is CopyFrom'd (`parseTraderDataToServer`
+  + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
+  the stock parse fails. A real stock client's post-trade push reaches the
+  server.
+  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:3131-3156`,
+  `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
   `loadFromPath` scans every `<trader_item_group>` and `expandGroup` resolves

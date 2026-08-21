@@ -3664,3 +3664,33 @@ test "parseStockInvTx reads the stock InventoryTransaction layout" {
     var native: [11]u8 = .{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 };
     try std.testing.expectError(error.EndOfStream, parseStockInvTx(&native));
 }
+
+test "parseTraderDataToServer reads the stock ToServer body" {
+    // RE protocol-packages.md 6.23: isEntity bool | entityId i32 (or
+    // tePosition 3xi32) | hasTraderData bool | TraderData.Write.
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeBool(true); // isEntity
+    try w.writeI32(1001); // entityId
+    try w.writeBool(true); // hasTraderData
+    try w.writeI32(3); // TraderData.TraderID
+    try w.writeU64(7); // lastInventoryUpdate
+    try w.writeByte(0); // trailing u8
+    const td = try parseTraderDataToServer(w.written());
+    try std.testing.expect(td.is_entity);
+    try std.testing.expectEqual(@as(i32, 1001), td.entity_id);
+    try std.testing.expect(td.has_trader_data);
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, td.trader_data[0..4], .little));
+    // Vending machine branch: isEntity false + tePosition.
+    var buf2: [64]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &buf2 };
+    try w2.writeBool(false);
+    try w2.writeI32(10);
+    try w2.writeI32(70);
+    try w2.writeI32(20);
+    try w2.writeBool(false); // no trader data
+    const td2 = try parseTraderDataToServer(w2.written());
+    try std.testing.expect(!td2.is_entity);
+    try std.testing.expectEqual(@as(i32, 10), td2.te_x);
+    try std.testing.expect(!td2.has_trader_data);
+}
