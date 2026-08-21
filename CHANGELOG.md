@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Loot-container discovery covers Navezgane-scale maps: the container store is
+  now 4096 entries with world-container eviction (a full table reuses a
+  non-player-placed container, which regenerates deterministically from the
+  next chunk scan; player-placed chests are never evicted), so no chest past
+  the old 256/512 cap silently comes back empty.
 - Blood-moon horde music is per player like stock (`EntityPlayer.bloodMoonParty`):
   a player hears it only while the horde is active and their own party's horde
   is alive; the old global bool made every player on a multi-party server hear

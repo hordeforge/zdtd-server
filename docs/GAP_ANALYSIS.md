@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **203** | **91** | **39** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **204** | **91** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1679,15 +1679,22 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/wire/te_types.zig:5`, `:19`, `src/server/game.zig:7423`,
   `asm.il:1311761-1311788`
 
-- **Loot container discovery in a POI chunk** `PARTIAL`
-  Scans 65536 cells for ids `maxdamage` marks as storage, caps at 32 per chunk.
-  Two problems compound: the ids in the chunk are the un-remapped prefab ids, so
-  real cabinets and safes are often not recognised while unrelated cells sometimes
-  are; and the global store is a fixed 256 entries with no eviction, so
-  `getOrCreate` returns null once 256 containers exist server-wide. Navezgane has
-  thousands.
-  *Anchors:* `src/server/game.zig:7380`, `:6657`, `src/world/containers.zig:9`,
-  `:82`
+- **Loot container discovery in a POI chunk** `WORKS` `(2026-08-21)`
+  Chunks are scanned for storage ids (`maxdamage` LootList/CompositeTileEntity
+  ∩ AssignIds; prefab-local ids were remapped through `<name>.blocks.nim` in
+  2026-08-06, so the un-remapped-id blindness is gone) with an id-verdict memo
+  and a per-chunk cap, and the prefab TE list (Loot/SecureLoot/Composite/
+  powered/sign/light) seeds containers from the authored tile entities. The
+  global store is now 4096 entries with **world-container eviction**: when the
+  table is full, `getOrCreate` reuses a non-player-placed container (it
+  regenerates deterministically from the next chunk scan) and never evicts a
+  player-placed chest, so Navezgane's thousands of loot containers all appear
+  and stay lootable (the old 256/512 hard cap silently emptied the tail).
+  Container size derives from loot.xml per fill; loot respawn re-rolls after
+  LootRespawnDays (Loot respawn row).
+  *Anchors:* `src/server/game/chunk_fill.zig` ensurePrefabStorageInChunk,
+  `src/world/containers.zig` getOrCreate + max_containers,
+  `src/world/prefabs.zig` foreachTeInChunk
 
 - **Loot content per container** `WORKS`
   `fillContainerFromLoot` now takes the block's `blocks.xml` LootList via
@@ -2255,7 +2262,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**14 WORKS · 12 PARTIAL · 7 MISSING**
+**15 WORKS · 12 PARTIAL · 6 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =

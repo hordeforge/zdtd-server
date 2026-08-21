@@ -7,8 +7,11 @@ const components = @import("../ecs/components.zig");
 pub const max_container_slots: usize = 54; // 9x6 common chest
 /// Game embeds ContainerStore on the heap (allocator.create), so the array is
 /// sized for a long-lived world; the save path buffers on the heap, not the
-/// stack (GAP 12: 256 silently dropped the 257th container on save).
-pub const max_containers: usize = 512;
+/// stack. GAP 12: 256 silently dropped the 257th container on save (raised to
+/// 512, then 2026-08-21 to 4096 + world-container eviction, because Navezgane
+/// alone has thousands of loot containers and a hard cap truncates the tail —
+/// every container past it comes back empty).
+pub const max_containers: usize = 4096;
 const persisted_container_size: usize = 20 + max_container_slots * 7 + 4; // + touched_day u32
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
@@ -105,10 +108,35 @@ pub const ContainerStore = struct {
             self.n += 1;
             return &self.items[i];
         }
+        // Table full: evict a WORLD container (player_storage=false). World
+        // containers regenerate deterministically from the prefab TE / block
+        // scan when its chunk is next streamed, so eviction is safe; a
+        // player-placed chest must never be evicted.
+        i = 0;
+        while (i < max_containers) : (i += 1) {
+            if (!self.used[i] or self.items[i].player_storage) continue;
+            const evicted = self.items[i].pos;
+            self.used[i] = true;
+            self.keys[i] = pos;
+            self.items[i] = .{
+                .pos = pos,
+                .block_id = block_id,
+                .inv_guid = guidFromPos(pos),
+                .slot_count = @min(slot_count, @as(u16, max_container_slots)),
+            };
+            if (!self.cap_warned) {
+                self.cap_warned = true;
+                std.debug.print(
+                    "zdtd: container table full ({d}); evicting world container ({d},{d},{d}) for ({d},{d},{d})\n",
+                    .{ max_containers, evicted.x, evicted.y, evicted.z, pos.x, pos.y, pos.z },
+                );
+            }
+            return &self.items[i];
+        }
         if (!self.cap_warned) {
             self.cap_warned = true;
             std.debug.print(
-                "zdtd: container table full, dropping new container at ({d},{d},{d}) (max_containers={d})\n",
+                "zdtd: container table full and every slot is player storage; dropping new container at ({d},{d},{d}) (max_containers={d})\n",
                 .{ pos.x, pos.y, pos.z, max_containers },
             );
         }
@@ -359,4 +387,27 @@ test "container persistence retains every full-capacity container" {
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
     try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);
     io_fs.deleteFile("./containers.zct");
+}
+
+test "container store evicts world containers before dropping (cap 4096)" {
+    // Navezgane-scale maps have thousands of loot containers; a hard cap
+    // truncates the tail (every container past it comes back empty). When the
+    // table is full, getOrCreate reuses a WORLD container (player_storage =
+    // false, regenerated deterministically on the next chunk scan) and never
+    // evicts a player-placed chest.
+    var s: ContainerStore = .{};
+    var i: usize = 0;
+    while (i < max_containers) : (i += 1) {
+        const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;
+        c.player_storage = (i % 2 == 0); // half world, half player-placed
+    }
+    try std.testing.expectEqual(max_containers, s.n);
+    const c = s.getOrCreate(.{ .x = 9999, .y = 0, .z = 0 }, 8, 1).?;
+    try std.testing.expectEqual(@as(i32, 9999), c.pos.x);
+    // The evicted slot was the first WORLD container (1,0,0, odd i): it is
+    // gone, while the player-placed (0,0,0, even i) one survives untouched.
+    try std.testing.expect(s.get(.{ .x = 9999, .y = 0, .z = 0 }) != null);
+    try std.testing.expect(s.get(.{ .x = 1, .y = 0, .z = 0 }) == null);
+    const kept = s.get(.{ .x = 0, .y = 0, .z = 0 }).?;
+    try std.testing.expect(kept.player_storage);
 }

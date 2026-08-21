@@ -241,7 +241,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/te_types.zig` | R | Stock TileEntityType enum values (RE: TileEntityType / network TE discriminant). Named constants only; not loaded from XML (engine enum, not game data |
 | `src/world/biomes.zig` | R | Load stock `biomes.png` (RGBA8 non-interlaced) for chunk biome ids. PNG pixels = biomemapcolor RGB keys (biomes.xml), NOT biome ids |
 | `src/world/chunk_flush.zig` | Z | Async chunk flush: encode on the tick thread, write on one background thread. |
-| `src/world/containers.zig` | Z | World-position keyed loot containers (block TE storage) |
+| `src/world/containers.zig` | Z | World-position keyed loot containers (block TE storage). `max_containers` 4096 + world-container eviction (2026-08-21): Navezgane-scale maps have thousands of loot containers; when the table is full, getOrCreate reuses a non-player-placed container (regenerated deterministically from the next chunk scan) and never evicts a player-placed chest |
 | `src/world/deco_mirror.zig` | R | Mirror placed decorations into the server block store, so collision, harvest and chunk streaming agree with what the client renders |
 | `src/world/dem.zig` | R | Copernicus GLO-30 DEM codec: COG header parse, tile decode, S3 object key and elevation-to-block mapping (fuzz-covered in src/fuzz.zig). The S3 |
 | `src/world/dtm.zig` | R | Stock 7DTD baked heightmap loader (Navezgane / Pregen*). |
