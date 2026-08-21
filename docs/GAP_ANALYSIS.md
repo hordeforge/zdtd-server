@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-08 from the same markers: **330 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (160/126/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (161/125/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Damage and buffs land; nothing survives a restart |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 22 | 26 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **160** | **126** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 23 | 25 | 5 | 53 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **161** | **125** | **44** | **330** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 35 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**22 WORKS · 26 PARTIAL · 5 MISSING**
+**23 WORKS · 25 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -4111,7 +4111,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
 | Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |
-| MoveHelper physics / collision | PARTIAL (2026-08-21: collide-and-slide against the block grid (body ~0.35×1.8, axis-separated like the stock CC Move), step-up of 1 block, gravity per the stock formula (World.Gravity 0.08/tick with the 0.98 y-drag, ~1.6 blocks/s²), the stock jump (a fully blocked, grounded AI hops when the obstacle's full height fits under the jump apex - rules.ai jump_height, stock StartJump heightDiff ~1.3 - and probes at its actual height while rising; jumpDelay 1 s gate), door-opening (zombies open unlocked doors on their path, RE CheckForDoorAndOpen, and the AI solid probe treats an open door as passable), and dig-through: a blocked grounded AI whose obstacle is too tall to hop digs the first solid cell in its move direction with the stock windup/attack cadence (DigStart/DigUpdate, 18-tick cycle), pushing damage requests the Game applies like the chase chew. Bots keep their own stepMoveCollide (host affordances, deferred). and swim physics: a submerged AI body floats (gravity*0.025 + 0.91 y-drag, stock cSwimGravityPer/cSwimDragY) and moves at the swim speed fraction (rules.ai swim_*), plus entity push: an entity in the move destination stops the zombie and is shoved along the push direction (RE entity-ai.md AttackPush), so crowds part instead of overlapping. Bots keep their own stepMoveCollide (host affordances, deferred). Remaining: elevator. RE entity-movement.md) |
+| MoveHelper physics / collision | WORKS (2026-08-21: collide-and-slide against the block grid (body ~0.35×1.8, axis-separated like the stock CC Move), step-up of 1 block, gravity per the stock formula (World.Gravity 0.08/tick with the 0.98 y-drag, ~1.6 blocks/s²), the stock jump (a blocked grounded AI hops when the obstacle's full height fits under the jump apex, probing at its actual height; jumpDelay 1 s gate), door-opening (zombies open unlocked doors on their path; open doors are passable), dig-through (obstacles too tall to hop are dug with the stock windup/attack cadence), swim physics (submerged bodies float - cSwimGravityPer 0.025 / cSwimDragY 0.91 - and move at the swim speed fraction), and entity push (blocked zombies shove blockers so crowds part). The stock elevator has no platform block (elevatorDoor handled as a door; the call-panel buttons are client UI; SetInElevator rides entity-driven platforms, none exist as blocks) - documented non-issue on stock maps. Bots keep their own stepMoveCollide (host affordances, deferred). RE entity-movement.md) |
 | Gravity / swimming / climbing | PARTIAL (AI bodies fall under stock gravity and land - entity-movement.md; vehicle gravity; void rescue teleport; swimming/climbing MISSING) |
 | Line of sight / hearing / smell | WORKS (2026-08-20: sense gate ships - per-class view cone (entityclasses MaxViewAngle, stock cctor default 180 halved like IsInFrontOfMe), block-LOS sight via Voxel.Raycast-equivalent, hearing within hear_range that passes walls, and a smell radius that passes walls with a bleeding-player extension (buffInjuryBleeding → cSmellRadiusBleed 25, else cSmellRadiusMin 10), RE entity-ai.md CanEntityBeSeen + PlayerStealth + EntityAlive/EntityClass cctor defaults. Sub-note: CanSeeStealth's light-level leg needs the client's light channel and is not evaluated server-side; sub-note documented in 7dtd-research/docs/entity-ai.md) |
 | Stealth / crouch | PARTIAL (2026-08-20: crouch replicates via NetPackageEntityAliveFlags bit 512 (IsCrouching); a crouched player's hearing gate muffles by crouch_hear_scale (0.5; stock per-clip muffledWhenCrouched from noisysounds.xml is data-driven) and sleepers only detect crouched players within crouch_sleeper_detect_range (5; stock light-based FastLerp(3,15,light) leg is RE-blocked - no server light channel), RE entity-ai.md PlayerStealth + protocol-packages.md 5.5.6. Missing: the light-level CanSeeStealth leg, movement-noise volume model, smoke/smell stealth) |
