@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 181 `WORKS`,
-108 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 182 `WORKS`,
+107 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -295,6 +295,10 @@ C2S handler row was recounted (76 of 98 stock-sent names handled). The player
 list broadcasts every 5 s (NetPackageClientInfo: entityId, ping, admin flag -
 ping 0, no RTT measurement yet). Death bags mark the map: the dropped
 backpack marker broadcasts on drop (DropOnDeath) and clears on collect.
+The per-channel sequence row flipped to WORKS (2026-08-21): the old
+`sendSequenced` latent channel hazard is gone - refactored away; zdtd emits
+no sequenced-channel packages and the ACK/reliable window is channel-2 only
+(Net and ops 42/9/5 -> 43/8/5; total **182/107/44**).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

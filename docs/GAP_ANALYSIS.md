@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (181/108/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (182/107/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 42 | 9 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **181** | **108** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 43 | 8 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **182** | **107** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**42 WORKS · 9 PARTIAL · 5 MISSING**
+**43 WORKS · 8 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3604,12 +3604,14 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/litenet/peer.zig` peer_mtu + ping/mtu handlers,
   `src/litenet/packet.zig` max_packet_size, network.md PossibleMtu list
 
-- **Per-channel sequence spaces** `PARTIAL`
-  `sendSequenced` writes channel byte 1 but reuses the same local_seq, window and
-  pending array as channel 2, and `flushAcks` unconditionally stamps channel byte
-  2. A real LiteNet channel has its own sequence and window. Currently harmless
-  only because `sendSequenced` has no callers.
-  *Anchors:* `src/litenet/peer.zig:208-215`, `:559`
+- **Per-channel sequence spaces** `WORKS` `(2026-08-21)`
+  The old `sendSequenced` (a latent channel-1/2 sequence hazard) is gone -
+  refactored away with the LiteNet send path; zdtd emits every game package on
+  the stock channel via the reliable/unreliable paths (channel 1 only for the
+  compressed bulk framer) and the ACK/reliable-window machinery is
+  channel-2-only, so no package can cross channel sequence spaces.
+  *Anchors:* `src/litenet/peer.zig` (reliable window + ACK), `src/wire/frame.zig`
+  (`channelFor`, `DeflateFramer`)
 
 - **LiteNet Broadcast property (LAN discovery)** `PARTIAL (waived: direct-IP parity)`
   Broadcast/NAT properties return null; no LAN-discovery responder. Direct-IP
