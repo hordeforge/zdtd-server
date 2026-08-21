@@ -91,7 +91,7 @@ jump now probes at the body actual height so hops cannot clip tall walls),
 counts unchanged (swim/elevator/push remain). Then the swim physics leg
 shipped (a submerged AI body floats - gravity*0.025 with the 0.91 y-drag,
 stock cSwimGravityPer/cSwimDragY - and moves at the swim speed fraction,
-rules.ai swim_*), counts unchanged (elevator/push remain). Then
+rules.ai swim_*), counts unchanged (elevator/push remain). Then the entity push leg shipped (an entity in the move destination stops the zombie and is shoved along the push direction - RE AttackPush - so crowds part instead of overlapping), counts unchanged (elevator remains). Then
 the join-time deco row went WORKS (decorations now stream with newly entered
 chunks - sendDecoForStreamedChunk generates + sends each new 128-block deco
 chunk once per client with tracking; the client's DecoManager.Read ADDS

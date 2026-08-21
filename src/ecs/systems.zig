@@ -331,6 +331,8 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const h = w.rules.ai.body_height;
     const step = w.rules.ai.step_height;
     const ctx = w.solid_ctx;
+    const ox = t.x;
+    const oz = t.z;
     // Axis-separated slide: try X, then Z, so a wall blocks only the axis it
     // faces and the body runs along it (stock CC Move semantics).
     var nx = t.x;
@@ -361,6 +363,43 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const moved = nx != t.x or nz != t.z;
     t.x = nx;
     t.z = nz;
+    // Entity push (RE entity-ai.md AttackPush): an entity occupying the move
+    // destination (cell probes cannot see entities) stops the move and gets
+    // shoved along the push direction, so crowds part instead of overlapping.
+    if (moved and w.mask[s].zombie_ai) {
+        const dest_x = nx;
+        const dest_z = nz;
+        const dest_y = t.y + 0.5;
+        const kinds = [_]c.Kind{ .player, .zombie, .animal };
+        outer: for (kinds) |kind| {
+            for (w.kind_groups.slice(kind)) |t2| {
+                if (t2 == s or !w.alive[t2] or !w.mask[t2].transform) continue;
+                const e = &w.transform[t2];
+                if (@abs(e.x - dest_x) > 0.7 or @abs(e.z - dest_z) > 0.7) continue;
+                if (@abs(e.y - dest_y) > 1.5) continue;
+                // Do not step into the entity; shove it along the push dir.
+                t.x = ox;
+                t.z = oz;
+                var pdx = e.x - t.x;
+                var pdz = e.z - t.z;
+                const plen = @sqrt(pdx * pdx + pdz * pdz);
+                if (plen < 0.001) {
+                    pdx = dx * inv;
+                    pdz = dz * inv;
+                } else {
+                    pdx /= plen;
+                    pdz /= plen;
+                }
+                const target_x = e.x + pdx * 0.15;
+                const target_z = e.z + pdz * 0.15;
+                if (bodyClearAt(ctx, solid_fn, target_x, target_z, e.y, h, r)) {
+                    e.x = target_x;
+                    e.z = target_z;
+                }
+                break :outer;
+            }
+        }
+    }
     // Stock MoveHelper StartJump / DigStart (entity-ai.md 2030-2034, 2327): a
     // fully blocked, grounded AI hops when the obstacle's full height fits
     // under the jump apex (the impulse is sized so feet clear jump_height),
@@ -5113,6 +5152,32 @@ test "move helper: a submerged body floats instead of dropping" {
     stepToward(&w, s, 20.0, 5.0, 2.2, 0.05);
     const moved = w.transform[s].x - x0;
     try std.testing.expect(moved > 0.02 and moved < 0.09); // ~0.055 (2.2*0.5*0.05)
+}
+
+test "move helper: an entity in the way is pushed, not walked through" {
+    // RE entity-ai.md AttackPush: a blocked-by-entity zombie stops and shoves
+    // the blocker along the push direction, so crowds part instead of overlap.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const a = w.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const b = w.spawnZombieClass(7, 71, 5, 200, 7, "").?;
+    const sa = w.slotOfNetId(a).?;
+    const sb = w.slotOfNetId(b).?;
+    const bx0 = w.transform[sb].x;
+    for (0..40) |_| {
+        stepToward(&w, sa, 12, 5, 2.2, 0.05);
+        applyGravity(&w, sa, 0.05);
+    }
+    // A never walked through B (stops just behind it) and B got shoved.
+    try std.testing.expect(w.transform[sa].x < w.transform[sb].x - 0.4);
+    try std.testing.expect(w.transform[sb].x > bx0 + 0.3);
 }
 
 test "demolition: primes at the health threshold, countdowns, then requests the explosion" {
