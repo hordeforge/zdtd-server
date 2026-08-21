@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
+| [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **202** | **92** | **39** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **203** | **91** | **39** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1239,7 +1239,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**18 WORKS · 5 PARTIAL · 3 MISSING**
+**19 WORKS · 4 PARTIAL · 3 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1323,17 +1323,20 @@ encoding is one day high.
   *Anchors:* `asm.il:1574299`, `asm.il:1248240`, `asm.il:2502629`,
   `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`, `src/server/game.zig:393`
 
-- **NetPackageBloodmoonMusic** `PARTIAL`
-  Builder is IL-correct and broadcast on the rising and falling edge every 20
-  ticks, and a client joining (or respawning) during an active horde now
-  receives the current eligibility state with the join bundle (2026-08-20),
-  so join-during-BM hears the horde music. Remaining: it is a single global
-  bool where stock computes it per player from `EntityPlayer.bloodMoonParty` -
-  zdtd's horde model hordes the party as a whole, so the global state is the
-  approximation (multi-party servers may hear horde music for a party not
-  currently horded).
-  *Anchors:* `src/wire/packages.zig:896`, `src/server/game.zig:8114`, `:8119`,
-  `asm.il:807834`, `asm.il:2593714`, `asm.il:807889`
+- **NetPackageBloodmoonMusic** `WORKS` `(2026-08-21)`
+  Builder is IL-correct; eligibility is now **per player** like stock
+  (`EntityPlayer.bloodMoonParty`): a player hears the horde music only while
+  the horde is active AND their own blood-moon party (focus within
+  party_join_dist) still has alive horde zombies. The broadcast path tracks a
+  per-client edge on the 20-tick pass, and a client joining (or respawning)
+  during an active horde receives its own party's current eligibility with the
+  join bundle, so join-during-BM hears the horde music when its party is
+  horded. The old single global bool (every player heard any party's horde) is
+  gone; scenario `bm-music` proves a far-away second party stays silent.
+  *Anchors:* `src/server/game.zig` `playerBloodMoonMusic`,
+  `src/server/game/step.zig` per-client music pass,
+  `src/server/game.zig` join bundle, `src/wire/packages.zig:896`,
+  `asm.il:807834`, `asm.il:2593714`, `asm.il:807889`, il EntityPlayer.bloodMoonParty
 
 - **NetPackageHordeEvent** `N/A (parity)`
   Builder and enum exist and are byte-correct but nothing calls

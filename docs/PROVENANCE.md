@@ -296,6 +296,7 @@ field-by-field provenance.
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
 | `bm_parties_cap` | 8 | R | Blood-moon party array cap (RE: aidirector.md) |
+| `game.zig playerBloodMoonMusic` | party_join_dist | R | Per-player horde-music eligibility: true while the horde is active and the player's own blood-moon party focus (within party_join_dist) has alive horde zombies (stock EntityPlayer.bloodMoonParty; the old global bool was the multi-party approximation) |
 | `wandering_horde_size` | 6 | R | **Approximation**: stock per-horde size is gamestage-group driven (live-observed 2026-08-11: `Party of 1, GS 1 ... enemy max 5`); fixed 6 here (aidirector.md wandering section) |
 | `wandering_spawn_dist` | 92.0 | R | `AIDirectorHordeComponent.FindTargets` inline start offset `RandomOnUnitCircle * 92f` (IL_018B; aidirector.md placement constants) |
 | `wander_min_gap` / `wander_max_gap` | 12-24 in-game hours | R | `ChooseNextTime` `Random(12000, 24000)` world-time units (12-24 in-game hours; aidirector.md wandering schedule; live-verified 2026-08-11) |

@@ -277,11 +277,18 @@ pub fn step(self: *Game) !void {
                 self.sim.director.bloodmoon_active,
             );
             if (!self.loadShedding()) try self.broadcastWeather();
-            const bm = self.sim.director.bloodmoon_active;
-            if (bm != self.bloodmoon_sent) {
-                self.bloodmoon_sent = bm;
-                const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], bm);
-                try self.broadcast("NetPackageBloodmoonMusic", bm_body);
+            // Blood-moon music is per player (stock EntityPlayer.bloodMoonParty):
+            // a player hears it while their own party's horde is alive. Each
+            // client's edge is tracked; the old single global bool made every
+            // player hear horde music when any party was horded.
+            for (&self.clients) |*cl| {
+                if (!cl.joined or cl.peer == null) continue;
+                const on = self.playerBloodMoonMusic(cl);
+                if (on != cl.bloodmoon_music) {
+                    cl.bloodmoon_music = on;
+                    const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], on);
+                    try self.sendGame(cl.peer.?, "NetPackageBloodmoonMusic", bm_body);
+                }
             }
         }
         if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();

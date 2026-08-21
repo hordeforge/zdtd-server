@@ -16,6 +16,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Blood-moon horde music is per player like stock (`EntityPlayer.bloodMoonParty`):
+  a player hears it only while the horde is active and their own party's horde
+  is alive; the old global bool made every player on a multi-party server hear
+  any party's horde music.
 - The admin console verb set is complete for the stock surface:
   `getoptions` dumps every known serverconfig option with its current value,
   `exportcurrentconfigs` writes them to `<world_dir>/exported_config.txt`,

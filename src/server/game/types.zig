@@ -362,6 +362,11 @@ pub const Client = struct {
     xp: u64 = 0,
     /// Player level derived from progression curve (1-based).
     level: u16 = 1,
+    /// Per-player blood-moon-music eligibility edge state (stock
+    /// EntityPlayer.bloodMoonParty): the horde music plays while the player's
+    /// own party's horde is alive, not for every player on a multi-party
+    /// server.
+    bloodmoon_music: bool = false,
     /// Zombie kills this session, for the AddScoreClient character-sheet
     /// counter (stock EntityAlive.AddScore on kill).
     zombie_kills: u16 = 0,

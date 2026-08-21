@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 202 `WORKS`,
-92 `PARTIAL`, 39 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 203 `WORKS`,
+91 `PARTIAL`, 39 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -140,7 +140,11 @@ serverconfig names with current values, GameStats-backed prefs preferred),
 and `commandpermission`/`cp` (per-command required level, enforced at the
 in-game console boundary; levels run 0 = highest like stock). The Steam-group
 verbs stay a documented hard gap. Net and ops 47/4/5 -> **52/4/0**; total
-**202/92/39**.
+**202/92/39**. Then the blood-moon music row went WORKS: eligibility is per
+player (stock EntityPlayer.bloodMoonParty) - the horde music plays only while
+the player's own party's horde is alive (per-client edge on the 20-tick pass,
+per-player state in the join bundle); scenario bm-music proves a far-away
+party stays silent. Blood moon 18/5/3 -> **19/4/3**; total **203/91/39**.
 The dashboard
 (docs/provenance.html) is synced.
 

@@ -475,8 +475,6 @@ pub const Game = struct {
     deco_objects_per_join: usize = default_deco_objects_per_join,
     /// Set on PlayerData receipt; flushed on the periodic save tick (not per packet).
     players_dirty: bool = false,
-    /// Last blood-moon-music state broadcast (edge-triggered).
-    bloodmoon_sent: bool = false,
     /// Empty = open. Non-empty = LiteNet Connect key; mismatched keys are rejected.
     password: []const u8 = "",
     /// Stream / authority tunables (InitOptions; filled from zdtd.toml via `zdtd_config.applyToInitOptions`).
@@ -2082,11 +2080,13 @@ pub const Game = struct {
         try self.sendGameStats(peer);
         // Blood-moon music is edge-triggered on the broadcast path (rising /
         // falling edge each tick), so a client joining (or respawning) during
-        // an active horde would never hear it; replay the current state here
-        // (RE aidirector.md DynamicMusic.Conductor eligibility).
-        if (self.sim.director.bloodmoon_active) {
+        // an active horde would never hear it; replay the current per-player
+        // eligibility here (RE aidirector.md DynamicMusic.Conductor eligibility;
+        // stock EntityPlayer.bloodMoonParty).
+        if (self.playerBloodMoonMusic(c)) {
             const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], true);
             try self.sendGame(peer, "NetPackageBloodmoonMusic", bm_body);
+            c.bloodmoon_music = true;
         }
         // Weather only once the client has already completed first join (re-bundle /
         // respawn). First join: client InitPackages may still be null → underrun kick.
@@ -2253,6 +2253,29 @@ pub const Game = struct {
     pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.items.stockTypeFor(item_id);
+    }
+
+    /// Per-player blood-moon-music eligibility (stock EntityPlayer.bloodMoonParty):
+    /// true only while the horde is active AND the player's own blood-moon
+    /// party (focus within party_join_dist) still has alive horde zombies. The
+    /// old global bool made every player on a multi-party server hear horde
+    /// music when any party was horded.
+    pub fn playerBloodMoonMusic(self: *const Game, c: *const Client) bool {
+        if (!self.sim.director.bloodmoon_active) return false;
+        const ps = self.sim.playerByPeer(c.slot) orelse return false;
+        if (!self.sim.mask[ps].transform) return false;
+        const x = self.sim.transform[ps].x;
+        const z = self.sim.transform[ps].z;
+        const j2 = self.sim.rules.bloodmoon.party_join_dist;
+        const j2sq = j2 * j2;
+        const d = &self.sim.director;
+        for (d.bm_parties[0..d.bm_party_n]) |*bm| {
+            if (bm.alive == 0) continue;
+            const dx = bm.focus_x - x;
+            const dz = bm.focus_z - z;
+            if (dx * dx + dz * dz <= j2sq) return true;
+        }
+        return false;
     }
 
     pub fn reverseItemType(ctx: ?*anyopaque, stock_type: i32) u16 {

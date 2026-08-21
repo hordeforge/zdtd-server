@@ -7001,3 +7001,50 @@ test "scenario admin ops verbs (getoptions/exportcurrentconfigs/loglevel/listthr
     try std.testing.expectEqual(@as(u8, 0), g.commandLevel("tele"));
     std.debug.print("PASS admin-ops: getoptions/exportcurrentconfigs/loglevel/listthreads/cp\n", .{});
 }
+
+test "scenario blood-moon music is per-party, not global" {
+    // NetPackageBloodmoonMusic row: stock EntityPlayer.bloodMoonParty makes the
+    // horde music per player - a player hears it only while their own party's
+    // horde is alive. The old global bool made every player on a multi-party
+    // server hear horde music when any party was horded.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bmmusic");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_bmmusic", 0, .{});
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    var cap2: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap2);
+    // Move player B far from player A so they are different blood-moon parties.
+    const ps_a = g.sim.playerByPeer(ca.slot).?;
+    const ps_b = g.sim.playerByPeer(cb.slot).?;
+    g.sim.transform[ps_b].x = g.sim.transform[ps_a].x + 1000;
+
+    // Horde active with only A's party having alive zombies.
+    g.sim.director.bloodmoon_active = true;
+    const BmParty = @import("../ecs/aidirector.zig").BmParty;
+    g.sim.director.bm_parties = [_]BmParty{.{}} ** @import("../ecs/aidirector.zig").bm_parties_cap;
+    g.sim.director.bm_parties[0] = .{
+        .focus_x = g.sim.transform[ps_a].x,
+        .focus_z = g.sim.transform[ps_a].z,
+        .members = 1,
+        .alive = 3,
+    };
+    g.sim.director.bm_party_n = 1;
+
+    try std.testing.expect(g.playerBloodMoonMusic(ca));
+    try std.testing.expect(!g.playerBloodMoonMusic(cb));
+    // Party wiped: the music stops for the surviving party member.
+    g.sim.director.bm_parties[0].alive = 0;
+    try std.testing.expect(!g.playerBloodMoonMusic(ca));
+    // Horde over: no music for anyone.
+    g.sim.director.bloodmoon_active = false;
+    try std.testing.expect(!g.playerBloodMoonMusic(ca));
+    std.debug.print("PASS bm-music: per-party eligibility, global-bool approximation gone\n", .{});
+}
