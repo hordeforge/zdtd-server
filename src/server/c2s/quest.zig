@@ -213,6 +213,28 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .fetch_item),
                 .treasure_radius_break => {},
             }
+            // Stock mirrors the objective event to the sender's party
+            // (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180: the
+            // server re-broadcasts to every party member, whose HandlePlayer
+            // applies it to the shared quest), so a treasure/block objective
+            // advances for the whole party, not just the reporter.
+            if (self.parties.partyByMember(c.entity_id)) |p| {
+                for (p.members[0..p.n]) |m| {
+                    if (m == c.entity_id) continue;
+                    const member = self.clientByEntityId(m) orelse continue;
+                    switch (u.event_type) {
+                        .block_activated => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate),
+                        .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .fetch_item),
+                        .treasure_radius_break => {},
+                    }
+                    if (member.peer) |mp| {
+                        self.sendGame(mp, "NetPackageQuestObjectiveUpdate", body) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
+                        };
+                    }
+                }
+            }
         } else |_| {
             if (packages.parseQuestOp(body)) |op| {
                 if (op.op == 1) _ = self.acceptQuestFor(c, op.def_id);

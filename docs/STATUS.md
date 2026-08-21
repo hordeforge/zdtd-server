@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 187 `WORKS`,
-102 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 188 `WORKS`,
+101 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -487,6 +487,16 @@ position is the placed POI center or the objective target - the old
 primary-spawn fallback put kill/fetch markers on the wrong side of the
 map. RE pin: 7dtd-research map-objects.md. Quests 20/11/1 -> 21/10/1,
 total 186/103/44 -> **187/102/44**.
+
+Quest objective party mirror shipped 2026-08-22 (S2C progress row ->
+WORKS): the mid-session S2C path is NetPackageQuestObjectiveUpdate's party
+fan-out (ProcessPackage IL=180) - the client reports its own objective
+events, the server applies them to the authoritative journal AND re-applies
+them to each party member's journal + re-sends the package to each member's
+client, so a shared quest advances live for the whole party
+(treasure_complete -> fetch phase, block_activated -> block_activate
+phase). RE pin: 7dtd-research protocol-packages.md. Quests 21/10/1 ->
+22/9/1, total 187/102/44 -> **188/101/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

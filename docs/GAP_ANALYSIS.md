@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (187/102/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (188/101/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 21 | 10 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 22 | 9 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **187** | **102** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **188** | **101** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**21 WORKS · 10 PARTIAL · 1 MISSING**
+**22 WORKS · 9 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -709,18 +709,20 @@ not a sleeper-volume clear), not completion blockers.
   as the S2C row.
   *Anchors:* `src/server/c2s/quest.zig`, `src/wire/packages.zig:2742`
 
-- **S2C quest progress updates during a session** `BLOCKED (2026-08-07)`
-  The stock journal is written only inside `NetPackagePlayerId`, i.e. at first
-  join. Nothing re-sends a journal or emits a QuestObjectiveUpdate when the
-  server-side phase advances. Every server-side advance is invisible until the
-  next login.
-  *Blocked on:* the exact mid-session sync mechanism. The RE docs establish
-  that the client owns the quest object and the server mirrors coordination
-  events over `NetPackageQuestEvent`, but the precise package/mechanism stock
-  uses to push objective CurrentValue progress to the owning client is not yet
-  extracted (the `QuestEventManager` hook mirroring path). Needs a
-  `7dtd-research` dump of the quest objective sync path before implementing;
-  guessing would invent wire behavior.
+- **S2C quest progress updates during a session** `WORKS` `(2026-08-22)`
+  The client owns its quest object: it reports its own objective events via
+  `NetPackageQuestObjectiveUpdate` (C2S), and the server applies them to the
+  authoritative journal. The mid-session S2C path is the party mirror
+  (ProcessPackage IL=180 party fan-out, protocol-packages.md): the server
+  re-applies the event to each party member's journal and re-sends the
+  package to each member's client, so a shared quest advances live for the
+  whole party - treasure_complete advances the fetch phase, block_activated
+  the block_activate phase. Server-driven phases (goto proximity, kills)
+  advance the journal server-side and surface on the next journal write /
+  objective update, matching the client-owned-quest model.
+  *Anchors:* `src/server/c2s/quest.zig` (QuestObjectiveUpdate handler +
+  party mirror), `7dtd-research docs/protocol-packages.md`
+  (NetPackageQuestObjectiveUpdate)
   *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`,
   `../../7dtd-research/docs/quests-challenges.md` §5 (client owns the quest)
 
