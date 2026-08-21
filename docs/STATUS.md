@@ -5,7 +5,7 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 332 features: 164 `WORKS`,
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 165 `WORKS`,
 124 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
@@ -150,6 +150,12 @@ the block's default texture so unpainted faces stay; ZCH3 persists the paint.
 The dedi rebroadcast (playerIdThatChanged=-1) reaches every peer but the
 painter. Net and ops 24/25/5 -> 25/25/5; total 163/124/44 -> **164/124/44**
 (332 features).
+
+Reload relay shipped 2026-08-21: the C2S NetPackageItemReload body (single
+i32 entityId) is entity-gated and relayed to every peer but the sender
+(GameManager.ItemReloadServer IL=32, flags 192), so other players see the
+reload animation; ammo counts keep riding the inventory sync. Net and ops
+25/25/5 -> 26/25/5; total 164/124/44 -> **165/124/44** (333 features).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

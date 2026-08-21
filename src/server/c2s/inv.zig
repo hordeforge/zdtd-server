@@ -27,6 +27,24 @@ const eatProps = game_mod.Game.eatProps;
 
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
+    if (std.mem.eql(u8, name, "NetPackageItemReload")) {
+        // Reload relay. RE GameManager.ItemReloadServer IL=32: the dedi plays
+        // the reload locally, then rebroadcasts NetPackageItemReload (single
+        // i32 entityId body) to every peer but the sender (flags 192), so the
+        // other players see the reload animation; the sender already started
+        // its own reload locally and needs no echo.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        if (body.len < 4) return true;
+        const entity_id = std.mem.readInt(i32, body[0..4], .little);
+        // Bounds rule 20: the id must name a real player entity, or a spoofed
+        // reload would fan out to every connected peer for free.
+        if (entity_id == 0 or self.sim.slotOfNetId(entity_id) == null) return true;
+        try self.broadcastExcept("NetPackageItemReload", body, c.slot);
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerInventory")) {
         if (!self.takeInvToken(c)) {
             self.harness.counters.inc(.c2s_throttle);

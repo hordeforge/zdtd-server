@@ -3189,6 +3189,14 @@ pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_
     return w.written();
 }
 
+/// Stock NetPackageItemReload (RE netpackage-bodies.md "NetPackageItemReload"):
+/// a single i32 entityId. Same layout both directions; the dedi relays it to
+/// every peer but the sender (GameManager.ItemReloadServer IL=32, flags 192).
+pub fn parseItemReload(body: []const u8) !i32 {
+    if (body.len < 4) return error.EndOfStream;
+    return std.mem.readInt(i32, body[0..4], .little);
+}
+
 /// Stock NetPackageSetBlockTexture (RE netpackage-bodies.md "NetPackageSetBlockTexture",
 /// read asm.il 24: StreamUtils.ReadVector3i | u8 face | u8 idx | i32
 /// playerIdThatChanged | u8 channel). The dedi rebroadcast sets
@@ -3854,4 +3862,16 @@ test "parseSetBlockTexture reads the stock paint body" {
     while (cut < 19) : (cut += 1) {
         try std.testing.expectError(error.EndOfStream, parseSetBlockTexture(built[0..cut]));
     }
+}
+
+test "parseItemReload reads the single entityId" {
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(i32, buf[0..4], 12345, .little);
+    try std.testing.expectEqual(@as(i32, 12345), try parseItemReload(buf[0..4]));
+    // Negative ids are legal wire values (the sender's own entity id is
+    // always positive; a negative one fails the entity-exists gate).
+    std.mem.writeInt(i32, buf[0..4], -1, .little);
+    try std.testing.expectEqual(@as(i32, -1), try parseItemReload(buf[0..4]));
+    try std.testing.expectError(error.EndOfStream, parseItemReload(buf[0..3]));
+    try std.testing.expectError(error.EndOfStream, parseItemReload(&.{}));
 }
