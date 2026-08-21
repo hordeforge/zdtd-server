@@ -127,7 +127,7 @@ Coverage targets, all enforced by the scan:
 | `src/litenet/packet.zig` | R | LiteNetLib wire packet property helpers. Property ordinals match the **game** Managed LiteNetLib (7DTD V3.1.0 b14), |
 | `src/litenet/peer.zig` | R | Per-endpoint reliable-ordered channel (LiteNetLib-compatible subset). Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing |
 | `src/litenet/root.zig` | R | LiteNetLib-compatible UDP transport (peers, packets, std.Io.net UDP). |
-| `src/litenet/server.zig` | R | UDP LiteNetLib-compatible server (accept + reliable user data) |
+| `src/litenet/server.zig` | R | UDP LiteNetLib-compatible server (accept + reliable user data) | ConnectRequest-level rate limit (stock ConnectionRequestCheck, reject_rate_limit Disconnect; 64-entry table with oldest eviction)
 | `src/litenet/udp_socket.zig` | Z | UDP socket via Zig 0.16 `std.Io.net` (no raw `std.os.linux` syscalls). Non-blocking poll: zero-duration Timeout → WouldBlock/Timeout |
 | `src/main.zig` | Z | zdtd: Zig dedicated server for 7 Days to Die (client wire). Run `zdtd --help` for CLI options and precedence |
 | `src/plugin/api.zig` | Z | Static plugin hook types for in-tree test scaffolding only (ADR 0020). Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping |
@@ -143,7 +143,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/blocks.zig` | R | Block editing: SetBlock, BlockTrigger, Explosions. Extracted from the old c2s/inv.zig tail (643-991) verbatim. NetPackagePickupBlock: stock PickupBlockServer IL=77 (type-match + echo + PickupSource/Air replace) with zdtd reach/claim bounds. NetPackageSetBlockTexture: Chunk.SetBlockFaceTexture IL=48 idx-in-face-byte paint into the textureFull plane + dedi rebroadcast (SetBlockTextureServer IL=41) |
 | `src/server/c2s/dispatch.zig` | R | C2S dispatch extracted verbatim from game.zig handlePackage. Phase gate + c2s/* fanout; game.zig keeps a one-line forwarder |
 | `src/server/c2s/inv.zig` | R | C2S inventory and block editing: player inventory snapshots, holding/item drop/bag, tile-entity edits, inventory transactions, block trigger/setblock. NetPackageItemReload: entity-gated relay to every peer but the sender (ItemReloadServer IL=32) |
-| `src/server/c2s/join.zig` | R | Join state machine — extracted from game.zig handlePackage (stock SM). Owns the 7 join packages that must stay coherent: PlayerLogin → | Login VersionAuthorizer gate (LongStringNoBuild compVersion compare, EKickReason.VersionMismatch)
+| `src/server/c2s/join.zig` | R | Join state machine — extracted from game.zig handlePackage (stock SM). Owns the 7 join packages that must stay coherent: PlayerLogin → | Login VersionAuthorizer gate (LongStringNoBuild compVersion compare, EKickReason.VersionMismatch) player-cap gate (PlayerLimitExceeded) at login
 | `src/server/c2s/misc.zig` | R | C2S misc domain: chat, player data / disconnect, dropped packages, game events, quest entity spawns, console commands, damage, lock requests, |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
@@ -172,7 +172,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/loot.zig` | R | Loot / item-table helpers — extracted verbatim from game.zig. ecsIdFromItemName, loot bags, and loot-spawn broadcasts |
 | `src/server/game/movement_helpers.zig` | R | Movement envelope helpers extracted from game.zig. Power-grid trigger activation and horizontal speed envelope |
 | `src/server/game/net.zig` | R | Net send path for Game: reliable-window pump, framed fan-out, and the broadcast helpers | Pre-auth challenge is CSPRNG-derived (stock Guid.NewGuid, asm.il 852999); per-connection accept-path init only
-| `src/server/game/net_handlers.zig` | R | Net ingress extracted from game.zig — onConnected / onData / dispatchGamePayload. Verbatim bodies; game.zig keeps one-line forwarders |
+| `src/server/game/net_handlers.zig` | R | Net ingress extracted from game.zig — onConnected / onData / dispatchGamePayload. Verbatim bodies; game.zig keeps one-line forwarders | PlayerDenied after PackageIds for deferred join rejects (banned)
 | `src/server/game/player.zig` | R | Player progression / gamestage / XP — extracted from game.zig; helpers take *Game. **Loot stage partial (2026-08-12):** `lootStageOf` is level-driven only — the stock `EntityPlayer.GetLootStage` (loot-economy.md 8, IL=184) POI-tier and biome terms (`POITierMod` x `POITierLootStageModifier`, biome `LootStageMod/Bonus` x `BiomeLootStageModifier`, passive **159** scale, GameStats **66** clamp) are pending the loot/POI tables; `partyLootStage` = `GetHighestPartyLootStage` high-water mark (implemented, stock-shaped). |
 | `src/server/game/quest.zig` | R | Quest helpers — journal snapshots + trader offers + POI quest events. Extracted from game.zig; helpers take *Game (called as game_quest.foo(g, …)) |
 | `src/server/game/rate_limits.zig` | Z | C2S rate limits extracted from game.zig. Inv/block token buckets, damage burst, chat gap |

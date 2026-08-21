@@ -89,6 +89,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     if (lite_port != 0) try self.net.listen(lite_port);
     // ServerPassword is LiteNet Connect key (not Encryption* / not PlayerLogin).
     self.net.server_password = self.password;
+    // Stock ConnectionRateLimitMilliseconds, enforced at ConnectRequest time
+    // (litenet Server.rateLimited, reject_rate_limit Disconnect).
+    self.net.join_rate_limit_ms = self.join_rate_limit_ms;
     self.info_port = port;
     // Offline harness (port 0): virtual mono clock + serial forRanges so
     // lock/stale/resend and parallel systems are seed-stable under DST.

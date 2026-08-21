@@ -13,7 +13,7 @@ const constantTimeEql = @import("../../util/secret.zig").constantTimeEql;
 pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     const c = self.clientFor(peer) orelse {
         self.harness.counters.inc(.join_fail);
-        std.debug.print("zdtd: join rejected (no client slot) local_id={d} max_players={d}\n", .{ peer.local_id, self.max_players });
+        std.debug.print("zdtd: join rejected (transport full) local_id={d}\n", .{peer.local_id});
         peer.alive = false;
         return;
     };
@@ -23,16 +23,10 @@ pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     if (self.isBanned(ip)) {
         std.debug.print("zdtd: ban reject local_id={d}\n", .{peer.local_id});
         self.harness.counters.inc(.join_fail);
-        peer.alive = false;
-        c.* = .{};
-        return;
-    }
-    if (self.joinRateLimited(ip)) {
-        std.debug.print("zdtd: join rate-limit local_id={d}\n", .{peer.local_id});
-        self.harness.counters.inc(.join_fail);
-        peer.alive = false;
-        c.* = .{};
-        return;
+        // Defer the PlayerDenied until PackageIds has been exchanged (the
+        // client cannot decode a game package before the name->id map); the
+        // challenge-echo path delivers it and drops the peer.
+        c.join_reject = .banned;
     }
     var ch: [17]u8 = undefined;
     wire_frame.buildChallenge(&ch, c.challenge);
@@ -60,6 +54,19 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
             try self.sendGame(peer, "NetPackagePackageIds", body);
             peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
             std.debug.print("zdtd: challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
+            // Deferred join-time reject (banned): the client now has the
+            // name->id map, so NetPackagePlayerDenied decodes and the client
+            // shows the reason instead of hanging on its own timeout.
+            if (c.join_reject) |reason| {
+                var denied: [64]u8 = undefined;
+                if (packages.buildPlayerDeniedBody(&denied, reason, 0, 0, "")) |dbody| {
+                    self.sendGame(peer, "NetPackagePlayerDenied", dbody) catch
+                        self.harness.counters.inc(.net_send_errors);
+                } else |_| self.harness.counters.inc(.encode_errors);
+                peer.alive = false;
+                c.* = .{};
+                return;
+            }
             if (c.preauth_len > 0) {
                 const saved = c.preauth_buf[0..c.preauth_len];
                 c.preauth_len = 0;

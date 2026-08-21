@@ -395,6 +395,12 @@ pub const Client = struct {
     /// Game payload arrived before challenge echo (stock/loadgen can race). Replay after auth.
     preauth_buf: [512]u8 = undefined,
     preauth_len: usize = 0,
+    /// Join-time reject reason (banned / server full): the connection is kept
+    /// alive until PackageIds has been exchanged (the client cannot decode a
+    /// game package before the name->id map), then NetPackagePlayerDenied is
+    /// sent with this reason and the peer is dropped (stock
+    /// AuthorizationManager timing).
+    join_reject: ?packages.KickReason = null,
     /// Last movement-envelope sample (horizontal speed gate).
     move_valid: bool = false,
     move_x: f32 = 0,

@@ -70,6 +70,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     std.debug.print("zdtd: login version mismatch comp='{s}' want='{s}' slot={d}\n", .{ login.compVersion(), version_mod.stock_wire_comp, c.slot });
                     return true;
                 }
+                // Stock AuthorizationManager rejects a full server with
+                // EKickReason.PlayerLimitExceeded(5) at login time (after
+                // PackageIds), not at the transport accept, so the client
+                // shows "server full" instead of hanging.
+                if (self.countJoined() >= self.max_players) {
+                    self.harness.counters.inc(.join_fail);
+                    if (c.peer) |p| {
+                        var denied: [64]u8 = undefined;
+                        if (packages.buildPlayerDeniedBody(&denied, .player_limit_exceeded, 0, 0, "")) |body2| {
+                            self.sendGame(p, "NetPackagePlayerDenied", body2) catch
+                                self.harness.counters.inc(.net_send_errors);
+                        } else |_| self.harness.counters.inc(.encode_errors);
+                    }
+                    std.debug.print("zdtd: login server full slot={d} joined={d} max={d}\n", .{ c.slot, self.countJoined(), self.max_players });
+                    return true;
+                }
             } else |_| {
                 // A login body zdtd cannot fully decode still gets its name
                 // read, because refusing the join would lock the player out

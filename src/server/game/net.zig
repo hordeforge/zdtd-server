@@ -368,7 +368,7 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
     for (&self.clients) |*c| {
         if (c.peer != null) occupied += 1;
     }
-    if (occupied >= self.max_players) return null;
+    if (occupied >= self.clients.len) return null;
     for (&self.clients, 0..) |*c, i| {
         if (c.peer == null) {
             c.* = .{ .peer = peer, .slot = i };

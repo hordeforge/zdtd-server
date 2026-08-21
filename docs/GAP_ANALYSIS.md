@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (169/120/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (171/118/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 30 | 21 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **169** | **120** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 32 | 19 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **171** | **118** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**30 WORKS · 21 PARTIAL · 5 MISSING**
+**32 WORKS · 19 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3405,17 +3405,16 @@ persists so little that a restart visibly damages a built base.
   blocker for EAC-off direct-IP parity.
   *Anchors:* `src/server/game.zig:4081-4113`, `asm.il:853692-853711`
 
-- **Connect rate limiting** `PARTIAL`
-  500 ms/IP matches stock `ConnectionRateLimitMilliseconds = 0x1F4`, but zdtd
-  applies it in `Game.onConnected`, **after** `Server.poll` has allocated a peer
-  slot and sent ConnectAccept, whereas stock rejects inside
-  `ConnectionRequestCheck`. The table is a fixed 16 entries that is append-only and
-  never aged: after 16 distinct IPs have connected, every further IP is
-  unthrottled. `packet.reject_rate_limit` and `packet.reject_pending_connection` are
-  defined and never used.
-  *Anchors:* `src/server/game.zig:3553-3572`, `:3628-3634`,
-  `src/litenet/server.zig:47-77`, `src/litenet/packet.zig:70-72`,
-  `asm.il:852995`
+- **Connect rate limiting** `WORKS` `(2026-08-21)`
+  500 ms/IP (`ConnectionRateLimitMilliseconds = 0x1F4`, asm.il 852995) is now
+  enforced inside the LiteNet ConnectRequest path - stock
+  `ConnectionRequestCheck` - **before** a peer slot is allocated or ConnectAccept
+  is sent, rejecting with a LiteNet Disconnect (`reject_rate_limit` reason) so a
+  flood never burns slots. The table is 64 entries with oldest-entry eviction
+  when full, so the limit never silently expires after N distinct IPs; loopback
+  is exempt and IPv4-mapped IPv6 folds to its IPv4 key.
+  *Anchors:* `src/litenet/server.zig` `rateLimited`/`ipHostKey` + ConnectRequest
+  branch, `src/litenet/packet.zig:81`, `asm.il:852995`
 
 - **NetPackagePlayerLogin body parsing** `WORKS` `(2026-08-21)`
   The full stock body is parsed field for field (asm.il 832140): playerName,
@@ -3442,14 +3441,19 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/serverinfo_tcp.zig:23`, `src/server/game.zig:3765`,
   `output_log_client_zdtd_connect.txt:61-62`
 
-- **Kick wire (NetPackagePlayerDenied)** `PARTIAL`
-  `buildPlayerDeniedBody` encodes the stock body and the guard policy uses it with
-  a delayed drop. But the three join-time rejects (no free slot, banned IP,
-  rate-limited) just set `peer.alive=false` and clear the slot with no PlayerDenied
-  and no LiteNet Disconnect, so the client hangs until its own timeout with no
-  reason string. Stock has PlayerLimitExceeded(5) and Banned(6) for exactly these.
-  *Anchors:* `src/wire/packages.zig:2149-2175`, `src/server/game.zig:3608-3634`,
-  `:5858-5870`, `asm.il:1921854-1921883`
+- **Kick wire (NetPackagePlayerDenied)** `WORKS` `(2026-08-21)`
+  `buildPlayerDeniedBody` encodes the stock body and every join-time reject now
+  delivers it with the stock reason, timed like stock's AuthorizationManager
+  (after PackageIds so the client can decode it): banned source ->
+  EKickReason.Banned(6), server full -> PlayerLimitExceeded(5) at login,
+  client build mismatch -> VersionMismatch(4). The peer is dropped right after
+  the deny, so the client shows the reason instead of hanging on its own
+  timeout; the rate-limited case is rejected one level earlier at
+  ConnectRequest with a LiteNet Disconnect (no game channel exists yet).
+  *Anchors:* `src/server/game/net_handlers.zig` challenge-echo deny,
+  `src/server/c2s/join.zig` player-cap + version gates,
+  `src/wire/packages.zig` `KickReason` + `buildPlayerDeniedBody`,
+  `asm.il:1921854-1921883`
 
 - **Bans and whitelist** `PARTIAL`
   `ban_ip` is 32 IPv4 host-order keys held in RAM only. No persistence across

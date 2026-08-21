@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 169 `WORKS`,
-120 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 171 `WORKS`,
+118 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -174,6 +174,15 @@ V3.1.0 b14, asm.il VersionAuthorizer) is rejected with
 EKickReason.VersionMismatch(4) instead of joining and desyncing silently.
 The loadgen harness now sends the stock LongStringNoBuild form
 (7dtd-loadgen b5c3069). Total 168/121/44 -> **169/120/44**.
+
+Kick wire + connect rate limiting shipped 2026-08-21 (Net and ops 30/21/5 ->
+32/19/5): every join-time reject now delivers NetPackagePlayerDenied with the
+stock reason, timed after PackageIds like stock AuthorizationManager (banned ->
+Banned(6), server full -> PlayerLimitExceeded(5) at login, build mismatch ->
+VersionMismatch(4)); the rate limit moved into the LiteNet ConnectRequest path
+(stock ConnectionRequestCheck, reject_rate_limit Disconnect before slot
+allocation) with a 64-entry table that evicts the oldest entry instead of
+expiring after N distinct IPs. Total 169/120/44 -> **171/118/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

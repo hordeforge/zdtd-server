@@ -4,6 +4,7 @@ const std = @import("std");
 const packet = @import("packet.zig");
 const peer_mod = @import("peer.zig");
 const udp = @import("udp_socket.zig");
+const clock = @import("../util/clock.zig");
 
 pub const max_peers = 64;
 
@@ -14,9 +15,71 @@ pub const Server = struct {
     next_local_id: i32 = 1,
     /// Stock ServerPassword: compared to LiteNet Connect key (NetDataWriter string in request Data).
     server_password: []const u8 = "",
+    /// Stock ConnectionRateLimitMilliseconds (0x1F4 = 500): minimum ms between
+    /// ConnectRequests from the same source IP, checked at ConnectRequest time
+    /// (stock ConnectionRequestCheck) and rejected with reject_rate_limit
+    /// before a peer slot is allocated. 0 = disabled.
+    join_rate_limit_ms: u64 = 0,
+    /// Source-IP table for the rate limit (host-order keys; 0 = empty slot).
+    /// Append-only with oldest-entry eviction, so the limit never silently
+    /// expires after the table fills.
+    join_ip: [64]u32 = .{0} ** 64,
+    join_ip_ms: [64]u64 = .{0} ** 64,
+    join_ip_n: usize = 0,
     /// Rejected ConnectRequests since start. Only the log is sampled off this;
     /// the count itself stays exact so a brute force is still visible.
     connect_rejects: u64 = 0,
+
+    /// Stock ConnectionRequestCheck rate gate: false allows the ConnectRequest
+    /// through, true rejects it with a LiteNet Disconnect (reject_rate_limit).
+    /// Loopback is exempt (local tooling never collides with itself).
+    pub fn rateLimited(self: *Server, ip: u32) bool {
+        if (self.join_rate_limit_ms == 0) return false;
+        if (ip == 0 or ip == 0x7f000001) return false;
+        const now_ms: u64 = clock.monoNs() / 1_000_000;
+        var i: usize = 0;
+        while (i < self.join_ip_n) : (i += 1) {
+            if (self.join_ip[i] != ip) continue;
+            if (now_ms -% self.join_ip_ms[i] < self.join_rate_limit_ms) return true;
+            self.join_ip_ms[i] = now_ms;
+            return false;
+        }
+        if (self.join_ip_n < self.join_ip.len) {
+            self.join_ip[self.join_ip_n] = ip;
+            self.join_ip_ms[self.join_ip_n] = now_ms;
+            self.join_ip_n += 1;
+        } else {
+            // Table full: evict the oldest entry so the limit keeps applying.
+            var oldest: usize = 0;
+            i = 1;
+            while (i < self.join_ip_n) : (i += 1) {
+                if (self.join_ip_ms[i] < self.join_ip_ms[oldest]) oldest = i;
+            }
+            self.join_ip[oldest] = ip;
+            self.join_ip_ms[oldest] = now_ms;
+        }
+        return false;
+    }
+
+    /// Host-order key for a source address, matching Game.peerIpKey semantics
+    /// (game/net.zig): IPv4 read big-endian, IPv4-mapped IPv6 folded to its
+    /// last 4 bytes, native IPv6 FNV-hashed (per-address, not per-prefix).
+    pub fn ipHostKey(addr: *const udp.IpAddress) u32 {
+        return switch (addr.*) {
+            .ip4 => |a| std.mem.readInt(u32, &a.bytes, .big),
+            .ip6 => |a| blk: {
+                if (std.mem.eql(u8, a.bytes[0..12], &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff })) {
+                    break :blk std.mem.readInt(u32, a.bytes[12..16], .big);
+                }
+                var h: u32 = 2166136261;
+                for (a.bytes) |b| {
+                    h ^= b;
+                    h *%= 16777619;
+                }
+                break :blk h;
+            },
+        };
+    }
 
     pub fn listen(self: *Server, port: u16) !void {
         self.port = try self.sock.openAndBind(port);
@@ -88,6 +151,27 @@ pub const Server = struct {
                 var accept_buf: [32]u8 = undefined;
                 const accept = try packet.writeConnectAccept(&accept_buf, req.connection_time, req.connection_number, existing.local_id);
                 try existing.sendRaw(&self.sock, accept);
+                return .none;
+            }
+            // Stock ConnectionRequestCheck rate gate: reject at the LiteNet
+            // level (before ConnectAccept / slot allocation) so a flood never
+            // burns peer slots, with a reason the client can surface.
+            if (self.rateLimited(ipHostKey(&src))) {
+                self.connect_rejects +|= 1;
+                var rej_buf: [32]u8 = undefined;
+                const rej = try packet.writeDisconnect(
+                    &rej_buf,
+                    req.connection_time,
+                    req.connection_number,
+                    &packet.reject_rate_limit,
+                );
+                self.sock.sendTo(rej, &src) catch |err| {
+                    // Reject still stands (no peer allocated).
+                    std.debug.print(
+                        "zdtd: rate reject send failed remote_peer_id={d}: {s}\n",
+                        .{ req.peer_id, @errorName(err) },
+                    );
+                };
                 return .none;
             }
             const p = try self.allocPeer(&src, req);

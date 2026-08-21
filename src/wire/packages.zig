@@ -2204,6 +2204,10 @@ pub const KickReason = enum(i32) {
     /// EKickReason.VersionMismatch (asm.il GameUtils_EKickReason): the
     /// client's compatibilityVersion differs from LongStringNoBuild.
     version_mismatch = 4,
+    /// EKickReason.PlayerLimitExceeded: the server is full (AuthorizationManager).
+    player_limit_exceeded = 5,
+    /// EKickReason.Banned: the source identity/IP is banned.
+    banned = 6,
 };
 
 /// Stock NetPackagePlayerDenied body (asm.il:827055-827090):

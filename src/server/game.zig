@@ -367,9 +367,6 @@ pub const Game = struct {
     lock_pos_key: [16]u64 = .{0} ** 16,
     /// Per-IP join throttle (ms since epoch-ish via monoNs/1e6). GAP 12: was 16,
     /// so a busy subnet's extra sources were unthrottled rather than dropped.
-    join_ip: [64]u32 = .{0} ** 64,
-    join_ip_ms: [64]u64 = .{0} ** 64,
-    join_ip_n: usize = 0,
     /// GAP 12: was 32; a long-lived server can ban more than a handful of
     /// players without silently forgetting the tail.
     ban_ip: [128]u32 = .{0} ** 128,
@@ -1370,9 +1367,6 @@ pub const Game = struct {
         return game_net.peerIpKey(peer);
     }
 
-    pub fn joinRateLimited(self: *Game, ip: u32) bool {
-        return game_bans.joinRateLimited(self, ip);
-    }
     pub fn isBanned(self: *const Game, ip: u32) bool {
         return game_bans.isBanned(self, ip);
     }
