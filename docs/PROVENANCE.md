@@ -47,7 +47,7 @@ python3 tools/provenance_scan.py      # file coverage + ledger well-formedness g
 ```
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 188/188 (100%).** Every row below carries a bucket and a
+- **File coverage: 189/189 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
@@ -89,6 +89,8 @@ Coverage targets, all enforced by the scan:
 | `src/assets/quests.zig` | A | Load stock `Data/Config/quests.xml` into a playable Quest catalog. Also parses the `[quests]` objective-kind spec + policy defaults (ADR 0021) into the catalog's `objective_kinds` / `policy` |
 | `src/assets/recipes.zig` | A | recipes.xml loader: craft outputs + ingredients for server craft queue |
 | `src/assets/root.zig` | A | Stock game config asset loaders (quests, blocks, items, …). |
+| `src/assets/sandbox.zig` | R | Sandbox code codec + option/value-set lookup. Codec (version char + base-26 triples) and decode semantics (unknown ids skipped, invalid index -> default) from `../7dtd-research/docs/sandbox-options.md §3`; value-set and option tables are generated stock data (see sandbox_data.zig). Values: `../7dtd-research/tools/sandbox/sandbox_tables.json` (extracted from `SandboxOptionManager.SetupOptions` IL of V3.1.0 b14) |
+| `src/assets/sandbox_data.zig` | R | Generated stock tables: 65 value sets (numeric arrays from `<PrivateImplementationDetails>` FieldRVA) + 165 options (id/name/value-set/default) from the IL census. Regenerate with `../7dtd-research/tools/sandbox/gen_zig_tables.py`; do not hand-edit |
 | `src/assets/signs.zig` | A | Prefab sign libraries (*_signs.xml under Data/Prefabs) for NetPackageSignDataResponse. Catalog data only; the wire encode lives in wire/stock_sign.zig |
 | `src/assets/spawning.zig` | A | spawning.xml biome spawn rules → director / animal pop |
 | `src/assets/storage_pairs.zig` | A | Closed↔Open storage block pairs from blocks.xml DowngradeBlock |
@@ -438,7 +440,7 @@ authoritative (different numbering; archived as stale 2026-08-09).
 ## 4. Coverage and maintenance
 
 - **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **188/188 (100%)**; a new src file without a ledger
+  File coverage must stay **189/189 (100%)**; a new src file without a ledger
   row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
 - **Constants:** the ledger covers the behavioral values; the authoritative
   field-by-field provenance for the rules surface lives inline in
@@ -449,7 +451,7 @@ authoritative (different numbering; archived as stale 2026-08-09).
 - **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
   table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
 
-- `python3 tools/provenance_scan.py` gates **file coverage 188/188** and ledger
+- `python3 tools/provenance_scan.py` gates **file coverage 189/189** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
   file exists). Wire it into `make check` after the first green run.
 - After a game update: re-run `../../7dtd-research/tools/parity/drift-check.sh`,

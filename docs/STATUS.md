@@ -220,6 +220,18 @@ raw and the chunk encoder reads the raw plane, so doors/wedges/shapes stream
 and relog in their real rotation (GAP 13 DONE 2026-08-07). Total 176/113/44
 -> **177/112/44**.
 
+SandboxCode decode shipped 2026-08-21 (Net and ops 38/13/5 -> 39/12/5): the
+stock difficulty knobs moved out of serverconfig.xml into the single
+SandboxCode string; zdtd now decodes it (version char + base-26 triples) and
+applies XP multiplier, player/AI/blood-moon block damage, loot abundance,
+blood-moon frequency/range/count, day/night lengths, loot respawn, air drops,
+drop-on-death and zombie speed indices from the embedded stock value sets
+(65 sets + 165 options, extracted from the SetupOptions IL census into
+src/assets/sandbox{,_data}.zig). Unknown ids skipped, invalid indices fall
+back to defaults, malformed version char leaves defaults - all exactly like
+stock; the code still echoes verbatim in GameStats(71). A real stock
+serverconfig.xml now tunes the sim. Total 177/112/44 -> **178/111/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

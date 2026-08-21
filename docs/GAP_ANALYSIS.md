@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (177/112/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (178/111/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 38 | 13 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **177** | **112** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 39 | 12 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **178** | **111** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**38 WORKS · 13 PARTIAL · 5 MISSING**
+**39 WORKS · 12 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3661,19 +3661,29 @@ persists so little that a restart visibly damages a built base.
   Browser-discoverable hosting is out of scope for this line.
   *Anchors:* `src/server/serverinfo_tcp.zig`, `serverconfig.xml:16`
 
-- **serverconfig.xml property coverage** `PARTIAL`
-  31 property names are applied and unknown ones are ignored with an edit-distance
-  typo hint. But of stock V3.1.0's 69 properties only 11 overlap (GameName,
-  GameWorld, ServerPort, ServerPassword, ServerMaxPlayerCount, PlayerKillingMode,
-  MaxSpawnedZombies, MaxSpawnedAnimals, LandClaimSize,
-  LandClaim{Online,Offline}DurabilityModifier). The other 20 names zdtd reads
-  (GameDifficulty, BloodMoonFrequency, DayNightLength, XPMultiplier, LootAbundance,
-  BlockDamage*, DropOnDeath, AirDropFrequency, Zombie*Move, ViewRadius, AdminPort)
-  do not exist in stock V3.1.0 serverconfig.xml at all: stock moved them into the
-  single SandboxCode string, which zdtd ignores entirely. Dropping a real stock
-  serverconfig.xml onto zdtd yields default gameplay tuning with no warning.
-  *Anchors:* `src/server/config.zig:94-127`, `:200-260`, `serverconfig.xml:103`,
-  `asm.il:796475-796476`
+- **serverconfig.xml property coverage** `WORKS` `(2026-08-21)`
+  41 property names are applied and unknown ones are ignored with an edit-distance
+  typo hint. The stock difficulty knobs (GameDifficulty, BloodMoonFrequency,
+  DayNightLength, XPMultiplier, LootAbundance, BlockDamage*, DropOnDeath,
+  AirDropFrequency, Zombie*Move, ViewRadius, AdminPort) do not exist as
+  serverconfig.xml properties in stock V3.1.0: they moved into the single
+  SandboxCode string, which zdtd now decodes and applies
+  (`config.zig applySandboxCode`, mirroring `StartAsServer` +
+  `UpdateInGameValuesWithSandboxOptions`, RE sandbox-options §5). The codec
+  (version char + base-26 triples) and the 65 stock value sets + 165 options
+  (id/name/value-set/default) are embedded as generated stock data
+  (`src/assets/sandbox.zig` + `sandbox_data.zig`, extracted from the
+  `SetupOptions` IL census). Mapped options: XP multiplier, player/AI/blood-moon
+  block damage, loot abundance, blood-moon frequency/range/count, day/night
+  lengths, loot respawn days, air-drop frequency, drop-on-death and the four
+  zombie speed indices; the remaining options decode but have no zdtd consumer
+  yet (the code still echoes verbatim in GameStats(71) for the client's own
+  decode). Unknown ids are skipped and invalid indices fall back to the option
+  default, exactly like stock; a malformed version char leaves every option at
+  default. Dropping a real stock serverconfig.xml onto zdtd now tunes the sim.
+  *Anchors:* `src/server/config.zig` (`applySandboxCode`),
+  `src/assets/sandbox.zig`, `src/assets/sandbox_data.zig`,
+  `../7dtd-research/docs/sandbox-options.md §2.1/§3/§5`
 
 - **Chunk save format** `PARTIAL`
   Works for zdtd, but is a private format and not interchangeable with stock. One

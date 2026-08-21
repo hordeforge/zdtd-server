@@ -32,6 +32,8 @@ pub const storage_pairs = @import("storage_pairs.zig");
 pub const paths = @import("paths.zig");
 pub const xml_patch = @import("xml_patch.zig");
 pub const blocks_nim = @import("blocks_nim.zig");
+pub const sandbox = @import("sandbox.zig");
+pub const sandbox_data = @import("sandbox_data.zig");
 
 test {
     _ = xml_util;
@@ -60,4 +62,6 @@ test {
     _ = paths;
     _ = xml_patch;
     _ = blocks_nim;
+    _ = sandbox;
+    _ = sandbox_data;
 }

@@ -4,6 +4,7 @@ const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
+const sandbox = @import("../assets/sandbox.zig");
 
 /// Stock serverconfig files are small. Bound operator input before parsing so a
 /// mistaken path cannot consume unbounded memory during startup.
@@ -31,10 +32,12 @@ pub const Config = struct {
     world_name: []const u8 = "zdtd",
     game_world: []const u8 = "",
     /// Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding
-    /// all 152 sandbox options, echoed verbatim into GameStats(71) so a joining
+    /// all 165 sandbox options, echoed verbatim into GameStats(71) so a joining
     /// client decodes the server's gates (TemperatureSurvival, StormFreq,
     /// blood-moon settings) instead of its own defaults (RE sandbox-options
-    /// §8). Malformed codes leave client defaults, exactly like stock.
+    /// §8). Decoded here too: `applySandboxCode` overlays the operator's
+    /// gameplay tuning (XP, block damage, blood moon, day length) on the sim.
+    /// Malformed codes leave client defaults, exactly like stock.
     sandbox_code: []const u8 = "",
     /// SandboxPreset (295): the preset NAME for server-browser display and the
     /// stock-settings check; not used to load values.
@@ -199,6 +202,8 @@ const known_serverconfig_names = [_][]const u8{
     "LandClaimOfflineDurabilityModifier",
     "LandClaimExpiryDays",
     "LootRespawnDays",
+    "SandboxPreset",
+    "SandboxCode",
     "ZdtdAuthorityMode",
 };
 
@@ -262,6 +267,87 @@ fn warnNearMissPropertyNames(hay: []const u8) void {
         }
         i = pi + 9;
     }
+}
+
+/// Decode `SandboxCode` (EnumGamePrefs 296) and overlay the gameplay tuning it
+/// carries. Stock V3.1.0 moved the difficulty knobs (XP, block damage, blood
+/// moon, day length, zombie speeds, drops, ...) out of individual
+/// serverconfig.xml properties into this one string: `StartAsServer` decodes
+/// it and `UpdateInGameValuesWithSandboxOptions` pushes the values into the
+/// consuming systems (RE sandbox-options §5). zdtd applies the same overlay
+/// here, after the legacy property reads, so a real stock serverconfig.xml
+/// tunes the sim instead of silently keeping defaults. Options with no zdtd
+/// consumer yet are skipped; unknown ids are skipped and invalid indices fall
+/// back to the option default, exactly like stock (§1.2 membership semantics).
+fn applySandboxCode(cfg: *Config) void {
+    if (cfg.sandbox_code.len == 0) return;
+    var groups: [sandbox.max_groups]sandbox.Group = undefined;
+    const n = sandbox.decode(cfg.sandbox_code, &groups);
+    if (n == 0) return;
+    for (groups[0..n]) |g| {
+        const o = sandbox.findOption(g.option_id) orelse {
+            std.debug.print("zdtd: sandbox code option id {d} unknown; skipped\n", .{g.option_id});
+            continue;
+        };
+        const set = sandbox.findSet(o.set_name) orelse continue;
+        // Runtime string dispatch (Zig cannot switch on slices).
+        if (std.mem.eql(u8, o.name, "XPMultiplier")) {
+            cfg.xp_multiplier = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BlockDamage")) {
+            cfg.block_damage_player = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BlockDamageAI")) {
+            cfg.block_damage_ai = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BlockDamageAIBM")) {
+            cfg.block_damage_ai_bm = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "GlobalLootCount")) {
+            cfg.loot_abundance = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BloodMoonFrequency")) {
+            cfg.blood_moon_frequency = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BloodMoonRange")) {
+            cfg.blood_moon_range = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BloodMoonEnemyCount")) {
+            cfg.blood_moon_enemy_count = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "DayNightLength")) {
+            cfg.day_night_length = sandboxIntU16(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "DayLightLength")) {
+            cfg.day_light_length = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "LootRespawnDays")) {
+            cfg.loot_respawn_days = sandboxIntU16(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "AirDropFrequency")) {
+            cfg.air_drop_frequency = sandboxIntU16(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "DropOnDeath")) {
+            cfg.drop_on_death = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "ZombieMove")) {
+            cfg.zombie_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "ZombieMoveNight")) {
+            cfg.zombie_move_night = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "ZombieFeralMove")) {
+            cfg.zombie_feral_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "ZombieBMMove")) {
+            cfg.zombie_bm_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        }
+        // Accepted but with no zdtd consumer yet: skip silently (the code
+        // still rides verbatim in GameStats(71) for the client's decode).
+    }
+}
+
+fn sandboxPct(v: f32) u16 {
+    const p = @round(v * 100.0);
+    if (p < 0.0) return 0;
+    if (p > 65535.0) return 65535;
+    return @intFromFloat(p);
+}
+
+fn sandboxIntU8(v: i32) u8 {
+    if (v < 0) return 0;
+    if (v > 255) return 255;
+    return @intCast(v);
+}
+
+fn sandboxIntU16(v: i32) u16 {
+    if (v < 0) return 0;
+    if (v > 65535) return 65535;
+    return @intCast(v);
 }
 
 /// Parse serverconfig.xml bytes (subset of stock ServerSettings).
@@ -365,6 +451,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
         }
     }
     warnNearMissPropertyNames(raw);
+    applySandboxCode(&cfg);
     return cfg;
 }
 
@@ -430,10 +517,79 @@ test "parse config fixture" {
     // sandbox-options §8).
     try std.testing.expectEqualStrings("AAAJABJACJADJARFBNC", cfg.sandbox_code);
     try std.testing.expectEqualStrings("Adventurer", cfg.sandbox_preset);
+    // The Adventurer code decodes to RangedDamage/MeleeDamage/BlockDamage/
+    // TerrainDamage 1.5, IncomingDamage 0.75, ZombieFeralSense 2 (RE
+    // sandbox-options §3); the mapped fields apply (BlockDamage -> player).
+    try std.testing.expectEqual(@as(u16, 150), cfg.block_damage_player);
     // Unset gameplay options keep stock defaults.
     try std.testing.expectEqual(@as(u8, 2), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u8, 3), cfg.player_killing_mode);
+}
+
+test "sandbox code applies gameplay tuning (RE sandbox-options §5)" {
+    // Synthetic code: XPMultiplier(18)=ASJ idx9=3, BloodMoonFrequency(48)=BWK
+    // idx10=10, DayNightLength(66)=COD idx3=40, ZombieMove(34)=BIC idx2=2.
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="SandboxCode" value="AASJBWKCODBIC"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 300), cfg.xp_multiplier);
+    try std.testing.expectEqual(@as(u8, 10), cfg.blood_moon_frequency);
+    try std.testing.expectEqual(@as(u16, 40), cfg.day_night_length);
+    try std.testing.expectEqual(@as(u8, 2), cfg.zombie_move);
+    // Untouched knobs keep stock defaults.
+    try std.testing.expectEqual(@as(u8, 3), cfg.zombie_move_night);
+    try std.testing.expectEqual(@as(u16, 100), cfg.block_damage_player);
+}
+
+test "sandbox code invalid index falls back to option default" {
+    // XPMultiplier(18)=ASU idx20 is out of XPGain's 11-entry set -> default 1.0.
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="SandboxCode" value="AASU"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 100), cfg.xp_multiplier);
+}
+
+test "malformed sandbox code leaves defaults (stock: version char reject)" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="SandboxCode" value="ZZZ"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 100), cfg.xp_multiplier);
+    try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
+    try std.testing.expectEqualStrings("ZZZ", cfg.sandbox_code); // still echoed
 }
 
 test "string properties decode XML attribute entities" {

@@ -75,7 +75,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 | `TelnetFailedLoginLimit` | 10 | 1..255 | failed logins before the session is dropped |
 | `TelnetFailedLoginsBlocktime` | 10 | 0..1440 | minutes a source address stays blocked (login lockout enforced in `admin.zig` auth; 0 = no lockout) |
 | `ZdtdAuthorityMode` | correct | observe\|permissive\|correct | C2S Hard reject ladder; see [AUTHORITY.md](AUTHORITY.md) |
-| `SandboxCode` | empty | string | Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding all 152 sandbox options, echoed verbatim into the GameStats(71) blob so a joining client decodes the server's gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults (RE sandbox-options §8). Malformed codes leave client defaults, exactly like stock |
+| `SandboxCode` | empty | string | Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding all 165 sandbox options, echoed verbatim into the GameStats(71) blob so a joining client decodes the server's gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults (RE sandbox-options §8). Also decoded server-side by `config.zig applySandboxCode`, which overlays the operator's tuning (XP, block damage, blood moon, day length, zombie speeds) on the sim from the embedded stock value sets (§2.1). Malformed codes leave client defaults, exactly like stock |
 | `SandboxPreset` | empty | string | Sandbox preset NAME (295) for the server-browser display and stock-settings check; not used to load values. Advertised in the GSI GameInfoString (SandboxPreset = 0x12, SandboxCode = 0x13) when set; unset keys are omitted (empty = client default) |
 
 ### Web UI (CLI / env; WU0–WU2 shipped)
