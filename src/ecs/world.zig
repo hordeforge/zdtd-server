@@ -184,6 +184,12 @@ pub const World = struct {
     explode_n: usize = 0,
     dig_reqs: [c.dig_cap]c.DigRequest = undefined,
     dig_n: usize = 0,
+    /// Sleeper wake requests (RE EntityAlive.ConditionalTriggerSleeperWakeUp):
+    /// pushed by the AI/proximity/noise/damage paths when a sleeper flips to
+    /// awake; the Game drains the ring and broadcasts NetPackageSleeperWakeup.
+    /// Consume-owns-drain like noise; parallel AI workers push atomically.
+    sleeper_wake_reqs: [c.sleeper_wake_cap]c.SleeperWakeRequest = undefined,
+    sleeper_wake_n: usize = 0,
     falling: [max_entities]c.FallingBlocks = [_]c.FallingBlocks{.{}} ** max_entities,
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
@@ -614,6 +620,16 @@ pub const World = struct {
         const n = @atomicRmw(usize, &self.dig_n, .Add, 1, .monotonic);
         if (n >= c.dig_cap) return;
         self.dig_reqs[n] = .{ .slot = @intCast(slot), .x = x, .y = y, .z = z };
+    }
+
+    /// Push a sleeper wake request (RE entity-ai.md sleeper wake; stock sends
+    /// NetPackageSleeperWakeup from EntityAlive.ConditionalTriggerSleeperWakeUp).
+    /// Parallel AI workers push; the Game drains in step and broadcasts the
+    /// wakeup so the client plays the wake animation.
+    pub fn pushSleeperWake(self: *World, slot: Slot) void {
+        const n = @atomicRmw(usize, &self.sleeper_wake_n, .Add, 1, .monotonic);
+        if (n >= c.sleeper_wake_cap) return;
+        self.sleeper_wake_reqs[n] = .{ .slot = @intCast(slot) };
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or
@@ -1078,6 +1094,16 @@ pub const World = struct {
         if (!self.mask[s].health) return .{};
         // Non-positive / NaN must not heal, mark dirty, or re-fire kill side effects.
         if (!(amount > 0)) return .{};
+        // Damage wakes sleepers (stock EntityAlive.ProcessDamageResponseLocal:
+        // any damage triggers ConditionalTriggerSleeperWakeUp, plus
+        // CheckSleeperVolumeNoise when still passive). The wake also pushes
+        // the SleeperWakeup wire event for the client (drained in step). The
+        // revenge_target set above drives the chase.
+        if (self.mask[s].sleeper and !self.sleeper[s].awake) {
+            self.sleeper[s].awake = true;
+            if (self.mask[s].zombie_ai) self.zombie_ai[s].state = .chase;
+            self.pushSleeperWake(s);
+        }
         // Already dead (hp<=0): players stay in-world; a second hit must not
         // report killed again (double DropOnDeath bags / quest XP / loot).
         if (self.health[s].hp <= 0) return .{};

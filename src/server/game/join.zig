@@ -489,6 +489,7 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
             .z = self.sim.transform[i].z,
             .yaw = self.sim.transform[i].yaw,
             .is_sleeper = sleeper,
+            .is_sleeper_passive = sleeper,
             .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
                 var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                 const n = self.stockEntries(i, &ent_buf);

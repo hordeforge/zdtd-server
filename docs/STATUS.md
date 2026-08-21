@@ -232,6 +232,17 @@ back to defaults, malformed version char leaves defaults - all exactly like
 stock; the code still echoes verbatim in GameStats(71). A real stock
 serverconfig.xml now tunes the sim. Total 177/112/44 -> **178/111/44**.
 
+Sleeper wake wire shipped 2026-08-21 (S2C emission row, stays PARTIAL): POI
+sleepers now spawn with the stock IsSleeperPassive flag (client renders them
+lying down) and waking - player proximity, combat noise, or damage (stock
+ProcessDamageResponseLocal wakes unconditionally) - broadcasts
+NetPackageSleeperWakeup from a drained ECS ring so the client plays the wake
+animation. RE pin in 7dtd-research protocol-packages.md: exact bodies, the
+ConditionalTriggerSleeperWakeUp / SetSleeperActive senders, and the finding
+that stock never emits NetPackageSleeperPose (the pose rides EntitySpawn
+flags). SleeperPassiveChange stays unsent: zdtd's sim has no
+active-but-not-waking sleeper state (documented divergence).
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

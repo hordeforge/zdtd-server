@@ -116,6 +116,10 @@ pub fn step(self: *Game) !void {
         // MoveHelper dig damage (RE entity-ai.md DigUpdate): the sim runs the
         // cadence; the Game applies the block damage like the chase chew.
         self.drainDigRequests();
+        // Sleeper wakes (RE EntityAlive.ConditionalTriggerSleeperWakeUp): the
+        // sim flipped sleepers to awake (proximity/noise/damage); broadcast
+        // NetPackageSleeperWakeup so clients play the wake animation.
+        self.drainSleeperWakeups();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

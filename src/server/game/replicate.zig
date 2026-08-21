@@ -142,6 +142,7 @@ pub fn replicate(self: *Game) !void {
                 .z = self.sim.transform[i].z,
                 .yaw = self.sim.transform[i].yaw,
                 .is_sleeper = sleeper,
+                .is_sleeper_passive = sleeper,
                 .falling_block = if (falling_single) .{ .block = .{
                     .raw_data = self.sim.falling[i].cells[0].raw,
                 } } else null,

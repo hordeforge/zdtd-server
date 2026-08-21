@@ -3327,17 +3327,25 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
 
 - **S2C package emission coverage** `PARTIAL`
-  35 names are emitted. ToClient names never sent at all include MapChunks,
-  PersistentPlayerPositions, WorldAreas, SleeperWakeup/SleeperPose/
-  SleeperPassiveChange, TurretSync, EntityLookAt, EntityVelocity,
-  EntityAddExpClient, EntitySetSkillLevelClient, ShowToolbeltMessage,
-  ChunkClusterInfo, WallVolume, Light, TreeFade, AudioPlayInHead,
-  WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo, AuthState. The
-  in-game map never fills in or shows party members, sleeper volumes (3124 loaded)
-  never wake or pose on the client, turrets do not animate, and pickup/toolbelt
-  notifications never appear.
+  38 names are emitted. ToClient names never sent at all include MapChunks,
+  PersistentPlayerPositions, WorldAreas, TurretSync, EntityLookAt,
+  EntityVelocity, EntityAddExpClient, EntitySetSkillLevelClient,
+  ShowToolbeltMessage, ChunkClusterInfo, WallVolume, Light, TreeFade,
+  AudioPlayInHead, WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo,
+  AuthState (NetPackageSleeperPose is registered but stock itself never emits
+  it - the sleep pose rides the EntitySpawn flags; protocol-packages.md
+  sleeper trio). The in-game map never fills in or shows party members,
+  turrets do not animate, and pickup/toolbelt notifications never appear.
+  Sleeper wake is wired (2026-08-21): volume sleepers spawn with the stock
+  IsSleeperPassive flag so the client renders them lying down, and wake
+  (proximity, noise, damage) broadcasts NetPackageSleeperWakeup from the
+  drained ring (RE EntityAlive.ConditionalTriggerSleeperWakeUp /
+  ProcessDamageResponseLocal); the stand-up SleeperPassiveChange stays unsent
+  because zdtd's sim has no active-but-not-waking sleeper state (documented
+  divergence, protocol-packages.md).
   *Anchors:* `src/server/game.zig:2976-3040`, `:7686-7760`,
-  `src/wire/packages.zig:1320`
+  `src/wire/packages.zig:1320`, `src/server/game/tick.zig` (`drainSleeperWakeups`),
+  `src/ecs/world.zig` (`pushSleeperWake`)
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`
   Stock `get_Channel` returns 1 for NetPackageChunk, ChunkRemove, DynamicMesh,

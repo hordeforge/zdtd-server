@@ -1384,6 +1384,10 @@ const AiCtx = struct {
                 }
                 ctx.w.sleeper[s].awake = true;
                 ai.state = .chase;
+                // Stock EntityAlive.ConditionalTriggerSleeperWakeUp broadcasts
+                // NetPackageSleeperWakeup so the client plays the wake; the
+                // Game drains the ring in step (RE entity-ai.md sleeper wake).
+                ctx.w.pushSleeperWake(s);
             }
             if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
 
@@ -2242,6 +2246,9 @@ fn consumeCombatNoise(w: *World) void {
                 ai.spot_x = ev.x;
                 ai.spot_z = ev.z;
                 ai.has_spot = true;
+                // Stock wakes broadcast NetPackageSleeperWakeup (the Game
+                // drains the ring in step).
+                w.pushSleeperWake(s);
                 continue;
             }
             if (ai.state == .idle or ai.state == .wander) {
@@ -4857,6 +4864,9 @@ test "stealth: crouched players do not wake sleepers beyond the close detect ran
     w.player[ps].crouching = false;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
+    // The wake pushed the SleeperWakeup wire event (Game drains + broadcasts).
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
 }
 
 test "group AI: combat noise alerts distant zombies to investigate" {
@@ -4902,6 +4912,30 @@ test "group AI: combat noise wakes sleepers within radius" {
     // noise radius 24 covers it) wakes and investigates.
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expect(w.zombie_ai[zs].has_spot);
+    // The noise wake also pushed the SleeperWakeup wire event.
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+
+test "damage wakes a sleeper and pushes the wakeup event" {
+    // Stock EntityAlive.ProcessDamageResponseLocal: any damage triggers
+    // ConditionalTriggerSleeperWakeUp (plus CheckSleeperVolumeNoise while
+    // passive). The sim flips the sleeper awake and the Game broadcasts
+    // NetPackageSleeperWakeup from the drained ring.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.sleeper[zs].awake);
+    _ = w.damageFrom(z, 10.0, -1);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    // The ring is consume-owns-drain: the drainer zeroes the count; a second
+    // hit on the now-awake sleeper pushes nothing new.
+    w.sleeper_wake_n = 0;
+    _ = w.damageFrom(z, 5.0, -1);
+    try std.testing.expectEqual(@as(usize, 0), w.sleeper_wake_n);
 }
 
 test "falling blocks: group falls under gravity and dies on landing (no re-placement)" {

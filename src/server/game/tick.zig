@@ -364,3 +364,23 @@ pub fn drainDigRequests(self: *Game) void {
         }
     }
 }
+
+/// Drain sleeper wake requests (RE EntityAlive.ConditionalTriggerSleeperWakeUp:
+/// broadcasts NetPackageSleeperWakeup, unreliable, to every client when a
+/// sleeper zombie wakes - proximity, noise or damage; protocol-packages.md
+/// §6.19). Consume-owns-drain like the dig ring. Broadcast, not interest
+/// gated: stock ConnectionManager.SendPackage with toEntityId=-1 reaches all
+/// clients, and a distant POI waking matters for a client's minimap/audio.
+pub fn drainSleeperWakeups(self: *Game) void {
+    const n = @min(self.sim.sleeper_wake_n, self.sim.sleeper_wake_reqs.len);
+    self.sim.sleeper_wake_n = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const s: u16 = self.sim.sleeper_wake_reqs[i].slot;
+        if (!self.sim.alive[s] or !self.sim.mask[s].network_id) continue;
+        const nid = self.sim.network_id[s].id;
+        if (packages.buildSleeperWakeupBody(&self.body_buf, nid)) |body| {
+            self.broadcast("NetPackageSleeperWakeup", body) catch {};
+        } else |_| {}
+    }
+}

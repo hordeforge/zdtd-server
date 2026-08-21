@@ -950,6 +950,46 @@ test "BloodmoonMusic body is a single eligibility bool" {
     try std.testing.expectEqual(@as(u8, 0), off[0]);
 }
 
+/// NetPackageSleeperWakeup (Assembly-CSharp NetPackageSleeperWakeup::write,
+/// IL=8): after the base header the payload is WriteInt32(m_targetId).
+/// GetLength()=8, PackageDirection=ToClient. Sent broadcast (unreliable) by
+/// EntityAlive.ConditionalTriggerSleeperWakeUp when a sleeper zombie wakes
+/// (proximity, noise, damage; protocol-packages.md §6.19). The client plays
+/// the wake animation via EntityAlive.ConditionalTriggerSleeperWakeUp.
+pub fn buildSleeperWakeupBody(buf: []u8, entity_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    return w.written();
+}
+
+/// NetPackageSleeperPassiveChange (Assembly-CSharp, base NetPackageEntityTargeted):
+/// payload is WriteInt32(entityId) via the base write. GetLength()=8,
+/// PackageDirection=ToClient. Sent broadcast (unreliable) by
+/// EntityAlive.SetSleeperActive (IL=26) when a volume's sleeper stays passive
+/// after trigger; the client clears IsSleeperPassive (Process IL=21).
+/// Note: NetPackageSleeperPose (entityId + pose byte) is registered but never
+/// emitted by any stock server path in the V3.1.0 b14 dump - the sleep pose
+/// rides the EntitySpawn is_sleeper/is_sleeper_passive flags instead.
+pub fn buildSleeperPassiveChangeBody(buf: []u8, entity_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    return w.written();
+}
+
+test "SleeperWakeup body is the target entity id" {
+    var buf: [8]u8 = undefined;
+    const b = try buildSleeperWakeupBody(&buf, 107);
+    try std.testing.expectEqual(@as(usize, 4), b.len);
+    try std.testing.expectEqual(@as(i32, 107), std.mem.readInt(i32, b[0..4], .little));
+}
+
+test "SleeperPassiveChange body is the target entity id" {
+    var buf: [8]u8 = undefined;
+    const b = try buildSleeperPassiveChangeBody(&buf, -5);
+    try std.testing.expectEqual(@as(usize, 4), b.len);
+    try std.testing.expectEqual(@as(i32, -5), std.mem.readInt(i32, b[0..4], .little));
+}
+
 /// AIDirector/HordeEvent enum (Assembly-CSharp AIDirector/HordeEvent). Client
 /// EntityPlayerLocal.HandleHordeEvent reacts to warn2 (spawn-warning audio) and
 /// spawn (camera shake + spawn audio); none/warn1 are no-ops.

@@ -816,6 +816,18 @@ pub const DigRequest = struct {
     z: i32,
 };
 
+/// One pending sleeper wake (RE entity-ai.md / EntityAlive
+/// ConditionalTriggerSleeperWakeUp): the sim flips a sleeper to awake and
+/// pushes the request; the Game drains it (single thread) and broadcasts
+/// NetPackageSleeperWakeup so the client plays the wake animation. Cap bounds
+/// the ring so a POI full of sleepers cannot stall the tick.
+pub const sleeper_wake_cap: usize = 16;
+
+pub const SleeperWakeRequest = struct {
+    /// Entity slot (u16: components.zig cannot see world.zig's Slot type).
+    slot: u16,
+};
+
 /// Group cap for one falling-blocks entity. Stock `GroupBounds.IsWithinSize`
 /// clamps falling groups (stability.md) but the bound value is not IL-pinned;
 /// 32 is a zdtd policy cap (a collapse rarely exceeds it; larger groups keep
