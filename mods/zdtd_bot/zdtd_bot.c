@@ -1021,14 +1021,16 @@ static void brain_tick(void) {
         bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
         bot_move_sent[bslot] = 1;
       } else {
-        if (retreating || dist < BACKPEDAL_RANGE || keep_range) {
+        if (retreating || bot_reload_ticks[bslot] > 0 || dist < BACKPEDAL_RANGE || keep_range) {
           // A RETREATING bot first tries to break LOS at a host-computed cover
           // point (Doom 3 idAASFindCover / clanker BotBrain.FindCover port):
           // ask `zdtd.query` for a spot near us that is not visible from the
           // threat, then head there and hold. No cover -> plain backpedal.
+          // A RELOADING bot does the same (CS-bot lineage, clanker Bot.cs):
+          // empty mag + visible target = move to cover instead of standing open.
           int has_cover = 0;
           float cdx = 0.f, cdz = 0.f;
-          if (retreating) {
+          if (retreating || bot_reload_ticks[bslot] > 0) {
             if (bot_cover_cd[bslot] > 0) bot_cover_cd[bslot]--;
             if (bot_cover_cd[bslot] == 0) {
               bot_cover_cd[bslot] = 8; // re-query every ~0.4 s
