@@ -328,6 +328,16 @@ waypoints stay client-local as in stock - only invites traverse the server.
 RE pin: 7dtd-research protocol-packages.md 5.7. C2S handled names 76 -> 77
 of the 98 stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
 
+GameMessage relay shipped 2026-08-21 (C2S handler row, stays PARTIAL):
+NetPackageGameMessage C2S (msgType u8 + mainEntityId + secondaryEntityId)
+re-broadcasts verbatim to every client per GameManager.FinishGameMessageServer
+(IL=69) - death announcements (EntityAlive.OnEntityDeath with
+isGameMessageOnDeath), team changes (set_TeamNumber), leaves
+(DisconnectClient LeftGame) and chat-form announcements now reach all
+players, including the sender whose client displays on receipt. RE pin:
+7dtd-research protocol-packages.md 5.8. C2S handled names 77 -> 78 of the 98
+stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

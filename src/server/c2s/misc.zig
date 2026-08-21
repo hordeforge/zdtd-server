@@ -103,6 +103,31 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageGameMessage")) {
+        // Stock NetPackageGameMessage (write IL=17): msgType u8
+        // (EnumGameMessages PlainTextLocal=0/EntityWasKilled=1/JoinedGame=2/
+        // LeftGame=3/ChangedTeam=4/Chat=5), mainEntityId i32,
+        // secondaryEntityId i32. GameManager.GameMessageServer ->
+        // FinishGameMessageServer (IL=69) re-broadcasts the Setup body to
+        // every client with an unfiltered SendPackage, and the remote
+        // client's ProcessPackage displays it (DisplayGameMessage), so the
+        // sender receives its own message back too. The verbatim relay is
+        // byte-identical to the stock rebuild; the client sends these for
+        // EntityAlive.OnEntityDeath (isGameMessageOnDeath), team changes and
+        // disconnect (LeftGame), and chat-form announcements.
+        if (body.len < 9) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null) continue;
+            self.sendGame(cl.peer.?, "NetPackageGameMessage", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send GameMessage failed: {s}\n", .{@errorName(err)});
+            };
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

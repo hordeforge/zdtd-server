@@ -3258,22 +3258,26 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  77 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  78 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
-  EntityStatChanged and Waypoint have handlers since the last count; the
-  Waypoint relay parses the full Waypoint v7 body and fans the invite to the
-  inviter's allies or all players per GameManager.WaypointInviteServer).
+  EntityStatChanged, Waypoint and GameMessage have handlers since the last
+  count; the Waypoint relay parses the full Waypoint v7 body and fans the
+  invite to the inviter's allies or all players per
+  GameManager.WaypointInviteServer, and the GameMessage relay re-broadcasts
+  the 9-byte announcement body to every client per
+  FinishGameMessageServer - death/team/leave/chat announcements now reach
+  other players).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 25 have no handler: Debug,
+  yields 98 names the stock client actually sends; 24 have no handler: Debug,
   DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
   EncryptionPublicKey, EntityAwardKillServer, EntityPhysics, EntityRagdoll,
-  EntityStealth, GameMessage, KeyExchangeComplete, ModifyCVar, ParticleEffect,
+  EntityStealth, KeyExchangeComplete, ModifyCVar, ParticleEffect,
   PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
   SetProp, SimpleRPC, SoundAtPosition, TwitchAccess, TwitchVoteScheduling,
   WorldFolder.
   Player-visible: vending machines are inert, buried-supplies and goto quest
   markers never register, ragdolls/particles/positional sound are not
-  relayed, and a clean Quit-to-menu is not noticed. (Local map waypoints stay
+  relayed. (Local map waypoints stay
   client-local as in stock; only the party waypoint invite traverses the
   server, and it now relays.)
   *Anchors:* `src/server/game.zig:3771-5480`, `src/server/c2s/quest.zig`

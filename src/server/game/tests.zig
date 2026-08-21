@@ -1678,3 +1678,51 @@ test "waypoint invites relay to allies (Friends) and all (Everyone)" {
     }
     try std.testing.expect(c_got);
 }
+
+test "game message relays verbatim to all clients including sender" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    // EntityWasKilled(1) | mainEntityId | secondaryEntityId.
+    var body: [9]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeByte(1);
+    try w.writeI32(ca.entity_id);
+    try w.writeI32(-1);
+    var frame_buf: [128]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageGameMessage", &body);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, framed);
+
+    const pkg_id = packages.idOf("NetPackageGameMessage").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var a_got = false;
+    var b_got = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id and std.mem.eql(u8, p.body, &body)) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id and std.mem.eql(u8, p.body, &body)) b_got = true;
+        }
+    }
+    try std.testing.expect(a_got);
+    try std.testing.expect(b_got);
+}
