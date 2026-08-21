@@ -217,6 +217,9 @@ pub const BanEntry = struct {
     /// Absolute wall-clock expiry so a restart neither resurrects an expired ban
     /// nor silently extends a live one.
     expires_unix: i64 = 0,
+    /// Set by the serveradmin.xml loader so a hot-reload can replace the
+    /// XML-sourced entries without touching runtime (.zsv) ones.
+    from_xml: bool = false,
 };
 
 pub const BanList = struct {
@@ -282,6 +285,23 @@ pub const BanList = struct {
         return true;
     }
 
+    /// Mark the matching entry as XML-sourced (serveradmin.xml), so a
+    /// hot-reload can replace it. No-op when absent (already replaced).
+    pub fn markXmlId(self: *BanList, platform: []const u8, id: []const u8) void {
+        if (self.findId(platform, id)) |i| self.entries[i].from_xml = true;
+    }
+
+    /// Drop every XML-sourced entry before re-applying the file.
+    pub fn clearXml(self: *BanList) void {
+        var i: usize = 0;
+        while (i < self.n) {
+            if (self.entries[i].from_xml) {
+                self.entries[i] = self.entries[self.n - 1];
+                self.n -= 1;
+            } else i += 1;
+        }
+    }
+
     pub fn remove(self: *BanList, id: []const u8) bool {
         const i = self.find(id) orelse return false;
         self.entries[i] = self.entries[self.n - 1];
@@ -334,6 +354,8 @@ pub fn writeBanList(w: *std.Io.Writer, list: *const BanList) !void {
 pub const PermissionEntry = struct {
     id: Bounded(max_id) = .{},
     level: u8 = 0,
+    /// serveradmin.xml-sourced (hot-reload replaces these only).
+    from_xml: bool = false,
 };
 
 pub const PermissionList = struct {
@@ -351,6 +373,22 @@ pub const PermissionList = struct {
         self.entries[self.n] = e;
         self.n += 1;
         return true;
+    }
+
+    /// Mark the matching entry as XML-sourced (serveradmin.xml).
+    pub fn markXml(self: *PermissionList, id: []const u8) void {
+        if (self.find(id)) |i| self.entries[i].from_xml = true;
+    }
+
+    /// Drop every XML-sourced entry before re-applying the file.
+    pub fn clearXml(self: *PermissionList) void {
+        var i: usize = 0;
+        while (i < self.n) {
+            if (self.entries[i].from_xml) {
+                self.entries[i] = self.entries[self.n - 1];
+                self.n -= 1;
+            } else i += 1;
+        }
     }
 
     pub fn find(self: *const PermissionList, id: []const u8) ?usize {

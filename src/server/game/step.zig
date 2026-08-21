@@ -132,6 +132,8 @@ pub fn step(self: *Game) !void {
         // Player list (RE ConnectionManager.updateClientInfo): broadcast
         // ClientInfo every 5 s.
         self.tickClientInfo();
+        // serveradmin.xml hot-reload poll (stock InitFileWatcher).
+        self.tickServerAdminReload();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

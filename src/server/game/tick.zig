@@ -14,6 +14,8 @@ const assets_buffs = @import("../../assets/buffs.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
+const admin_xml = @import("../admin_xml.zig");
+const io_fs = @import("../../util/io_fs.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time. Base drain is engine-driven
@@ -448,6 +450,34 @@ pub fn tickEntityLookAt(self: *Game) void {
 /// the player list UI and admin crowns. Ping is 0 (zdtd has no RTT
 /// measurement; documented residual), admin = the name is in the permission
 /// list.
+/// Stock serveradmin.xml hot-reload (AdminTools.InitFileWatcher ->
+/// OnFileChanged -> Load, IL=33/5): poll the file's mtime every 5 s and
+/// re-apply the XML on change. The .zsv list files stay the runtime-persisted
+/// form, so an operator editing serveradmin.xml while the server runs sees
+/// the change without a restart (bans, whitelist and admin levels).
+pub fn tickServerAdminReload(self: *Game) void {
+    if (self.serveradmin_reload_timer > 0) {
+        self.serveradmin_reload_timer -= 1;
+        return;
+    }
+    self.serveradmin_reload_timer = 100; // 5 s at 20 TPS
+    const path = self.serveradmin_path orelse return;
+    const mtime = io_fs.fileMtimeNanos(path) orelse return;
+    if (mtime == self.serveradmin_mtime) return;
+    self.serveradmin_mtime = mtime;
+    // Replace the XML-sourced portion (entries removed from the file must
+    // disappear); runtime (.zsv) entries are untouched.
+    self.admin_list.clearXml();
+    self.whitelist.clearXml();
+    self.ban_list.clearXml();
+    admin_xml.load(self.allocator, path, &self.admin_list, &self.whitelist, &self.ban_list) catch |err| {
+        var ts: [19]u8 = undefined;
+        std.debug.print("zdtd: {s} warning: serveradmin.xml reload failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+        return;
+    };
+    std.debug.print("zdtd: serveradmin.xml reloaded (mtime {d})\n", .{mtime});
+}
+
 pub fn tickClientInfo(self: *Game) void {
     if (self.client_info_timer > 0) {
         self.client_info_timer -= 1;

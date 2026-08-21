@@ -150,6 +150,19 @@ pub fn fileExists(path: []const u8) bool {
     return true;
 }
 
+/// Last-modification time in nanos, or null when the path is missing or not
+/// statable. Used for change-polling (serveradmin.xml hot-reload); the tick
+/// compares this to the value seen at the last apply.
+pub fn fileMtimeNanos(path: []const u8) ?i64 {
+    var threaded = ioThreaded();
+    defer threaded.deinit();
+    const io = threaded.io();
+    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+    defer file.close(io);
+    const st = file.stat(io) catch return null;
+    return @intCast(st.mtime.nanoseconds);
+}
+
 /// True if path is an existing directory (or can be opened as one).
 pub fn dirExists(path: []const u8) bool {
     var threaded = ioThreaded();

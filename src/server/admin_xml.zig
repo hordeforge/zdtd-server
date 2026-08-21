@@ -194,6 +194,7 @@ pub fn load(
                 warnEntry("admin entry", "list full");
                 continue;
             }
+            admin_list.markXml(key);
         }
     }
 
@@ -214,6 +215,7 @@ pub fn load(
                     warnEntry("whitelist entry", "list full");
                     continue;
                 }
+                whitelist.markXml(key);
             }
         }
     }
@@ -248,6 +250,7 @@ pub fn load(
                     warnEntry("blacklist entry", "list full");
                     continue;
                 }
+                ban_list.markXmlId(pid.platform, pid.id);
             }
         }
     }

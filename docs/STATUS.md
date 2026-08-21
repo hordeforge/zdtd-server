@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 182 `WORKS`,
-107 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 183 `WORKS`,
+106 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -388,10 +388,15 @@ IL=174) - ServerReservedSlots/ServerReservedSlotsPermission admit
 privileged players through the reserved slots (occupied < max - reserved)
 and ServerAdminSlots/ServerAdminSlotsPermission add admin headroom
 (total < max + adminSlots); 0 disables each tier, so the default gate is
-the plain cap. RE pin: 7dtd-research dedicated-misc-systems.md. Remaining
-open item: serveradmin.xml is applied
-at startup, not hot-reloaded on edit (stock InitFileWatcher). Net and ops
-stays 43/8/5, total **182/107/44**.
+the plain cap. RE pin: 7dtd-research dedicated-misc-systems.md.
+serveradmin.xml hot-reload shipped 2026-08-21 (bans row -> WORKS): the
+tick polls the file's mtime every 5 s (stock InitFileWatcher ->
+OnFileChanged) and re-applies the admins/whitelist/blacklist, replacing
+only the XML-sourced entries so runtime .zsv edits survive. Every open
+item on the bans row is now closed (serveradmin.xml read + hot-reloaded,
+platform-id-keyed bans, whitelist enforcement, reserved/admin slots), so
+the row flips to WORKS: Net and ops 43/8/5 -> **44/7/5**, total
+182/107/44 -> **183/106/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (182/107/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (183/106/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 43 | 8 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **182** | **107** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 44 | 7 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
+| **Total** | **183** | **106** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**43 WORKS · 8 PARTIAL · 5 MISSING**
+**44 WORKS · 7 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3517,7 +3517,7 @@ persists so little that a restart visibly damages a built base.
   `src/wire/packages.zig` `KickReason` + `buildPlayerDeniedBody`,
   `asm.il:1921854-1921883`
 
-- **Bans and whitelist** `PARTIAL` `(2026-08-21 recount)`
+- **Bans and whitelist** `WORKS` `(2026-08-21)`
   Identity bans (`ban add`) persist to `bans.zsv` (admins.zsv/whitelist.zsv
   alongside), expire by wall clock (`BannedUntil > Now` gate, matching stock
   AdminBlacklist.IsBanned), carry reasons, and gate the join. Since
@@ -3529,11 +3529,14 @@ persists so little that a restart visibly damages a built base.
   identity (loadgen bots), serialized as a 5-field `exp \t platform \t id
   \t name \t reason` line with legacy 2/3-field rows read back.
   Whitelist + admin lists persist the same way. Since 2026-08-21 a stock
-  `serveradmin.xml` is also read at startup (admins/whitelist/blacklist
-  sections, platform+userid attributes with legacy steamID fallback,
+  `serveradmin.xml` is also read (admins/whitelist/blacklist sections,
+  platform+userid attributes with legacy steamID fallback,
   permission_level, unbandate DateTime - `src/server/admin_xml.zig`,
   AdminTools RE) and merged into the same lists, so an operator's existing
-  permission file applies on top of the zdtd list files. The IP hold table
+  permission file applies on top of the zdtd list files; the tick
+  hot-reloads it on mtime change (stock InitFileWatcher -> OnFileChanged,
+  replacing only the XML-sourced entries so runtime .zsv edits survive).
+  The IP hold table
   (`ban_ip`, 128 keys) is RAM-only by design: it covers the connection being
   dropped so a reconnect before the next join check cannot slip through
   (stock bans by platform identifier in serveradmin.xml, not by IP). The
@@ -3548,11 +3551,10 @@ persists so little that a restart visibly damages a built base.
   players (perm <= the threshold) join a full server through the reserved
   slots (occupied < max - reserved), and ServerAdminSlots /
   ServerAdminSlotsPermission add admin headroom (total < max + adminSlots);
-  0 = disabled, so the default gate degenerates to the plain cap. Still
-  open: serveradmin.xml is applied at startup, not hot-reloaded on edit
-  (stock InitFileWatcher).
+  0 = disabled, so the default gate degenerates to the plain cap.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
+  `src/server/game/tick.zig` (`tickServerAdminReload`),
   `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)
 
 - **Admin permission levels** `PARTIAL (waived: loopback-only admin)`

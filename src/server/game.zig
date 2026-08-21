@@ -435,6 +435,11 @@ pub const Game = struct {
     reserved_slots_permission: u8 = 0,
     admin_slots: u8 = 0,
     admin_slots_permission: u8 = 0,
+    /// serveradmin.xml path (owned) + the mtime seen at the last apply, for
+    /// the tick hot-reload poll (stock InitFileWatcher -> OnFileChanged).
+    serveradmin_path: ?[]u8 = null,
+    serveradmin_mtime: i64 = 0,
+    serveradmin_reload_timer: u8 = 100,
     world_name: []const u8 = "zdtd",
     /// Sandbox code echoed in the GameStats blob (GameStatsValues.sandbox_code);
     /// the client decodes TemperatureSurvival / StormFreq / blood-moon gates
@@ -1245,6 +1250,9 @@ pub const Game = struct {
 
     pub fn tickClientInfo(self: *Game) void {
         return game_tick.tickClientInfo(self);
+    }
+    pub fn tickServerAdminReload(self: *Game) void {
+        game_tick.tickServerAdminReload(self);
     }
 
     pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {

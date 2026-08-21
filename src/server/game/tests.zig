@@ -1918,3 +1918,48 @@ test "reserved and admin slots let privileged players join a full server" {
     _ = try g.attachJoinedClientAs(&cap, adm);
     try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "1004" }));
 }
+
+test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const sa_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
+    defer std.testing.allocator.free(sa_path);
+    const xml_v1 =
+        \\<adminTools>
+        \\  <blacklist>
+        \\    <blacklisted platform="Steam" userid="5001" name="A" unbandate="2030-01-01 00:00:00" reason="v1" />
+        \\  </blacklist>
+        \\</adminTools>
+    ;
+    try io_fs.writeFile(sa_path, xml_v1);
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .serveradmin_path = sa_path,
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(g.ban_list.bannedId("Steam", "5001", 1893427199)); // before 2030-01-01
+    // A runtime ban survives the reload.
+    try std.testing.expect(g.ban_list.add("Runtime", 1893427200 + 86400, "cmd"));
+
+    // Edit the file: replace the XML ban with another id (and drop an admin).
+    const xml_v2 =
+        \\<adminTools>
+        \\  <blacklist>
+        \\    <blacklisted platform="Steam" userid="5002" name="B" unbandate="2030-01-01 00:00:00" reason="v2" />
+        \\  </blacklist>
+        \\</adminTools>
+    ;
+    try io_fs.writeFile(sa_path, xml_v2);
+    // Ensure the mtime advances past the initial load's snapshot.
+    clock.sleepNs(10 * std.time.ns_per_ms);
+    g.serveradmin_reload_timer = 0;
+    g.tickServerAdminReload();
+    try std.testing.expect(!g.ban_list.bannedId("Steam", "5001", 1893427199)); // replaced
+    try std.testing.expect(g.ban_list.bannedId("Steam", "5002", 1893427199)); // new
+    try std.testing.expect(g.ban_list.banned("Runtime", 1893427199 + 86400)); // untouched
+}
