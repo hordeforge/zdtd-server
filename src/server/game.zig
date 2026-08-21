@@ -209,6 +209,14 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
     return game_stability.stabilityAfterSetBlock(self, x, y, z, old_id, new_id);
 }
 
+/// Last-sent EntityLookAt look target (world coords) for one entity slot.
+const EntityLookSent = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    sent: bool = false,
+};
+
 pub const Game = struct {
     allocator: std.mem.Allocator,
     net: ln_server.Server = .{},
@@ -382,6 +390,11 @@ pub const Game = struct {
     block_raw_key: [256]u64 = .{0} ** 256,
     block_raw: [256]u32 = .{0} ** 256,
     block_raw_n: usize = 0,
+    /// Last-sent EntityLookAt target per entity slot (RE
+    /// EntityAlive.SetLookPosition, protocol-packages.md §5.2.1): the 0.0016
+    /// sqr-delta gate skips re-sends until the look moves ~0.04 blocks, so
+    /// the per-tick look pass is quiet between meaningful target changes.
+    entity_look_sent: [ecs.max_entities]EntityLookSent = [_]EntityLookSent{.{}} ** ecs.max_entities,
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
@@ -1171,6 +1184,10 @@ pub const Game = struct {
 
     pub fn drainSleeperWakeups(self: *Game) void {
         return game_tick.drainSleeperWakeups(self);
+    }
+
+    pub fn tickEntityLookAt(self: *Game) void {
+        return game_tick.tickEntityLookAt(self);
     }
 
     /// Block id at world coords (0 = air / unloaded).

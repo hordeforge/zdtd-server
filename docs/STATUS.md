@@ -243,6 +243,14 @@ that stock never emits NetPackageSleeperPose (the pose rides EntitySpawn
 flags). SleeperPassiveChange stays unsent: zdtd's sim has no
 active-but-not-waking sleeper state (documented divergence).
 
+EntityLookAt + S2C row corrections shipped 2026-08-21 (S2C emission row,
+stays PARTIAL): awake zombies with a target broadcast the stock look-at
+package to tracking players (per-slot last-look state, SetLookPosition
+0.0016 sqr-delta gate; RE pin in protocol-packages.md). Row corrections from
+the dump: EntityAddExpClient was already emitted on kills; ShowToolbeltMessage
+is not a pickup notification (sole stock sender is the Homerun minigame via
+ShowTooltipMP unicast); NetPackageSleeperPose is stock-dead.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

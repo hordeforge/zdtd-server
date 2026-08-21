@@ -384,3 +384,53 @@ pub fn drainSleeperWakeups(self: *Game) void {
         } else |_| {}
     }
 }
+
+/// EntityAlive look-at sync (RE protocol-packages.md §5.2.1): broadcasts
+/// NetPackageEntityLookAt to tracking players when an awake zombie's look
+/// target moves past the stock 0.0016 sqr-delta gate (EntityAlive
+/// SetLookPosition, SendPacketToTrackedPlayers). Target = the AI's attack
+/// target position, else the investigate spot. Cosmetic head-aim only; no
+/// sim authority. The per-slot last-sent state skips re-sends between
+/// meaningful target changes.
+pub fn tickEntityLookAt(self: *Game) void {
+    for (self.sim.kind_groups.slice(.zombie)) |s| {
+        if (!self.sim.alive[s] or !self.sim.mask[s].network_id or !self.sim.mask[s].zombie_ai) continue;
+        if (!self.sim.mask[s].transform) continue;
+        const ai = self.sim.zombie_ai[s];
+        if (!ai.alert and !ai.has_spot) continue;
+        if (self.sim.mask[s].sleeper and !self.sim.sleeper[s].awake) continue;
+        var lx: f32 = 0;
+        var ly: f32 = 0;
+        var lz: f32 = 0;
+        var have = false;
+        if (ai.target_id >= 0) {
+            if (self.sim.slotOfNetId(ai.target_id)) |t| {
+                if (self.sim.alive[t] and self.sim.mask[t].transform) {
+                    lx = self.sim.transform[t].x;
+                    ly = self.sim.transform[t].y;
+                    lz = self.sim.transform[t].z;
+                    have = true;
+                }
+            }
+        }
+        if (!have and ai.has_spot) {
+            lx = ai.spot_x;
+            ly = self.sim.transform[s].y;
+            lz = ai.spot_z;
+            have = true;
+        }
+        if (!have) continue;
+        const st = &self.entity_look_sent[s];
+        const dx = lx - st.x;
+        const dy = ly - st.y;
+        const dz = lz - st.z;
+        if (st.sent and dx * dx + dy * dy + dz * dz < 0.0016) continue;
+        st.x = lx;
+        st.y = ly;
+        st.z = lz;
+        st.sent = true;
+        if (packages.buildEntityLookAtBody(&self.body_buf, self.sim.network_id[s].id, lx, ly, lz)) |body| {
+            self.broadcastNear("NetPackageEntityLookAt", body, self.sim.transform[s].x, self.sim.transform[s].z, self.interest_range) catch {};
+        } else |_| {}
+    }
+}

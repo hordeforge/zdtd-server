@@ -120,6 +120,9 @@ pub fn step(self: *Game) !void {
         // sim flipped sleepers to awake (proximity/noise/damage); broadcast
         // NetPackageSleeperWakeup so clients play the wake animation.
         self.drainSleeperWakeups();
+        // Cosmetic head-aim (RE EntityAlive.SetLookPosition): broadcast
+        // EntityLookAt to tracking players when a zombie's look target moves.
+        self.tickEntityLookAt();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {
