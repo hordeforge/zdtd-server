@@ -461,6 +461,13 @@ relays, response packages and auth denies); the never-sent list is
 unchanged at the seven documented non-goals (progression sync, cosmetic
 FX, EAC-scope auth). Net and ops stays 46/5/5, total **185/104/44**.
 
+In-game console admin route shipped 2026-08-22 (row, stays PARTIAL): a
+player with a permission-list entry now routes non-allowlisted console
+verbs through the full admin command surface (runAdminLine, same path as
+TCP/webui) with the reply captured into the ConsoleCmdClient response;
+players without an entry still get "permission denied". Net and ops stays
+46/5/5, total **185/104/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

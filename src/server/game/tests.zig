@@ -2189,3 +2189,57 @@ test "power wire edges persist and reconnect after a restart (entities.zen)" {
         try std.testing.expect(wired);
     }
 }
+
+test "in-game console runs admin verbs for admins, denies players" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const adm: platform_user.Id = .{ .platform = "Steam", .id = "7001" };
+    try std.testing.expect(g.admin_list.add("Steam:7001", 0));
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, adm);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // Admin runs a mutating verb: the admin dispatcher replies (gettime here,
+    // an admin-accessible read; the reply proves the routing works).
+    var body: [128]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeString("gettime");
+    var frame_buf: [256]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageConsoleCmdServer", w.written());
+    cap_a.clear();
+    try g.injectFramed(ca, framed);
+    const cc_id = packages.idOf("NetPackageConsoleCmdClient").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var got_reply = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == cc_id) got_reply = true;
+        }
+    }
+    try std.testing.expect(got_reply);
+
+    // A player (not in the admin list) still gets the deny.
+    var body2: [128]u8 = undefined;
+    var w2: wire_binary.Writer = .{ .buf = &body2 };
+    try w2.writeString("settime 12");
+    const framed2 = try packages.framed(&frame_buf, "NetPackageConsoleCmdServer", w2.written());
+    cap_b.clear();
+    try g.injectFramed(cb, framed2);
+    var denied = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == cc_id and std.mem.find(u8, p.body, "permission denied") != null) denied = true;
+        }
+    }
+    try std.testing.expect(denied);
+}

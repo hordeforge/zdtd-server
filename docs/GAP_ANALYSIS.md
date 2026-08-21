@@ -3723,12 +3723,17 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
   `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
 
-- **In-game player console (NetPackageConsoleCmdServer)** `PARTIAL`
+- **In-game player console (NetPackageConsoleCmdServer)** `PARTIAL` `(2026-08-22)`
   Handled and answered with ConsoleCmdClient, with a verb-only audit line and a
-  read-only allowlist that correctly rejects settime/giveself/spawnentity/killall/
-  kick/ban. The mutating branches inside `handleConsoleCmd` are therefore dead code
-  for every client, since no permission level can unlock them.
-  *Anchors:* `src/server/game.zig:2186-2260`, `src/server/c2s_text.zig:38-57`
+  read-only allowlist for players (settime/giveself/spawnentity/killall/kick/ban
+  rejected). Since 2026-08-22 an admin (permission list entry) routes
+  non-allowlisted verbs through the full admin command surface - the same
+  runAdminLine path as the TCP/webui consoles, with the reply captured into
+  the ConsoleCmdClient response - so stock admins can administer from the
+  in-game console. Players without a permission entry still get
+  "permission denied".
+  *Anchors:* `src/server/game.zig:2186-2260`, `src/server/c2s_text.zig:38-57`,
+  `src/server/admin_console.zig` (`handleConsoleCmd` admin route)
 
 - **Web dashboard** `PARTIAL`
   zdtd ships its own web UI with a required shared secret (min 8 chars,

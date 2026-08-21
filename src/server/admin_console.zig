@@ -254,6 +254,31 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     const verb = it.next() orelse return;
 
     if (!isPlayerConsoleCommand(verb)) {
+        // Stock runs any console command in-game, gated by the player's
+        // permission level (the in-game console is the same ConsoleCmd
+        // surface as telnet). zdtd's read-only allowlist covers players; an
+        // admin (permission list entry) routes through the full admin
+        // command surface, same path as the TCP/webui consoles.
+        if (self.permLevelOf(c) < 1000) {
+            var sink_buf: [4096]u8 = undefined;
+            self.admin_reply_len = 0;
+            self.admin_reply_sink = sink_buf[0..];
+            self.runAdminLine(cmd, "player_console");
+            self.admin_reply_sink = null;
+            var lines_buf: [64][]const u8 = undefined;
+            var line_n: usize = 0;
+            var lit = std.mem.tokenizeScalar(u8, sink_buf[0..self.admin_reply_len], '\n');
+            while (lit.next()) |ln| {
+                if (line_n >= lines_buf.len) break;
+                lines_buf[line_n] = std.mem.trimEnd(u8, ln, "\r");
+                line_n += 1;
+            }
+            if (line_n > 0) {
+                const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], lines_buf[0..line_n], false);
+                try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
+            }
+            return;
+        }
         var denied: ConsoleOut = .{};
         denied.line("permission denied");
         const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], denied.lines[0..denied.n], false);
