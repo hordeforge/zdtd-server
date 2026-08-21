@@ -3902,20 +3902,22 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
   `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
-- **Per-peer memory footprint** `PARTIAL` `(2026-08-21 recount)`
+- **Per-peer memory footprint** `PARTIAL` `(2026-08-22 recount)`
   Each Peer statically embeds (LiteNet `Peer`, exact counts): two fragment
   `Assembly` slots (399 parts × 1317 B + bitmaps ≈ 514 KiB each → ~1.0 MiB),
-  `deliver_buf` + `extra_buf` (2 × 512 KiB), `pending[64]` × 1340 B (~84 KiB)
-  and the out-of-order `hold` window (64 × 1325 B, ~83 KiB) - about **2.2 MiB
-  of address space per peer**, × `max_peers = 64` ≈ **139 MiB** of Server
-  struct reservation regardless of how many players are online. All payload
-  arrays are `undefined` (lazy pages), so resident memory tracks actual
-  traffic; a quiet peer touches only its pending/hold/deliver paths. Plus
-  Game's own send_buf 256 KiB, body_buf 512 KiB, recv_buf 64 KiB and
-  payload_hold 64 KiB (~0.9 MiB, not per-peer). Non-client-visible
-  engineering item (no stock wire/sim counterpart); a shared, traffic-sized
-  reassembly pool would cut the reservation to a fraction and is the natural
-  flip-to-WORKS change.
+  `deliver_buf` (512 KiB) + `extra_buf` (64 × 1323 B ≈ 83 KiB since
+  2026-08-22; the old 512 KiB was 6x oversized for a mailbox whose items are
+  capped at max_single_user by construction), `pending[64]` × 1340 B
+  (~84 KiB) and the out-of-order `hold` window (64 × 1325 B, ~83 KiB) -
+  about **1.8 MiB of address space per peer**, × `max_peers = 64` ≈ **114
+  MiB** of Server struct reservation regardless of how many players are
+  online. All payload arrays are `undefined` (lazy pages), so resident
+  memory tracks actual traffic; a quiet peer touches only its
+  pending/hold/deliver paths. Plus Game's own send_buf 256 KiB, body_buf
+  512 KiB, recv_buf 64 KiB and payload_hold 64 KiB (~0.9 MiB, not
+  per-peer). Non-client-visible engineering item (no stock wire/sim
+  counterpart); a shared, traffic-sized reassembly pool would cut the
+  remaining reservation and is the natural flip-to-WORKS change.
   *Anchors:* `src/litenet/peer.zig` (`asm_slots:193`, `pending:172`, `deliver_buf:199`, `hold_data:209`, `extra_buf:211`), `src/litenet/server.zig:8-13`,
   `src/server/game.zig:366-377`
 

@@ -468,6 +468,13 @@ TCP/webui) with the reply captured into the ConsoleCmdClient response;
 players without an entry still get "permission denied". Net and ops stays
 46/5/5, total **185/104/44**.
 
+Per-peer memory trimmed 2026-08-22 (row, stays PARTIAL): the Merged-mailbox
+byte budget is now the true worst case (64 slots x max_single_user = ~83
+KiB instead of 512 KiB), cutting the per-peer reservation from ~2.2 MiB to
+~1.8 MiB (~139 MiB to ~114 MiB at 64 peers). A shared traffic-sized
+reassembly pool would cut the rest. Net and ops stays 46/5/5, total
+**185/104/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

@@ -24,6 +24,10 @@ const pending_bytes: usize = packet.max_packet_size;
 /// per-peer buffer that's held for every connected peer regardless of load).
 const max_frag_parts: usize = std.math.divCeil(usize, max_payload, packet.max_fragment_user) catch unreachable;
 const assemble_cap: usize = max_payload;
+/// Merged/drain mailbox slot count (was 8; a join burst merges far more
+/// between polls). The extra_buf byte budget is this times the max single
+/// payload, which is the true worst case for the queue.
+const extra_q_len: usize = 64;
 /// Game: (windowSize-1)/8 + 2 = 9 bitmap payload bytes on Ack.
 const ack_bitmap_bytes: usize = (packet.window_size - 1) / 8 + 2;
 const resend_ns: u64 = 80_000_000; // 80ms, similar ballpark to LiteNet resend
@@ -207,13 +211,16 @@ pub const Peer = struct {
     /// a slot is busy the payload falls back to on-first-sight delivery.
     hold_len: [packet.window_size]u16 = .{0} ** packet.window_size,
     hold_data: [packet.window_size][packet.max_single_user]u8 = undefined,
-    /// Extra user payloads from LiteNet Merged packets (multiple game msgs per UDP).
-    extra_buf: [assemble_cap]u8 = undefined,
+    /// Extra user payloads from LiteNet Merged packets (multiple game msgs per
+    /// UDP). Byte budget = the full 64-slot mailbox at max payload each
+    /// (~83 KiB); the old assemble_cap (512 KiB) was 6x oversized for a queue
+    /// whose items are capped at max_single_user by construction.
+    extra_buf: [extra_q_len * packet.max_single_user]u8 = undefined,
     extra_used: usize = 0,
     /// Merged/drain mailbox slots. 8 was too small: one join burst merges far
     /// more C2S packages than that between polls, and an overflow silently lost
     /// a reliable package (see pushExtra).
-    extra_q: [64]struct { off: u32, len: u32 } = undefined,
+    extra_q: [extra_q_len]struct { off: u32, len: u32 } = undefined,
     extra_n: u8 = 0,
     /// Payloads dropped because the mailbox was full. Must stay 0 in practice.
     extra_drops: u32 = 0,
