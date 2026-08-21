@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 184 `WORKS`,
-105 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 185 `WORKS`,
+104 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -442,13 +442,17 @@ remaining members are platform/identity fields zdtd does not own
 (documentable non-goals). Net and ops 44/7/5 -> **45/6/5**, total
 183/106/44 -> **184/105/44**.
 
-Power wire-edge persistence shipped 2026-08-22 (persistence row, stays
-PARTIAL): entities.zen gains a kind-3 record writing each live power edge
+Power wire-edge persistence shipped 2026-08-22 (persistence row -> WORKS):
+entities.zen gains a kind-3 record writing each live power edge
 by endpoint positions (node ids are per-session), and the loader queues
 them as pending wires that reconnectPending drains as scanChunkPower
 rebuilds both endpoint nodes. A generator/consumer wiring survives
-restart. Remaining open: trader/NPC quest offer state. Net and ops stays
-45/6/5, total **184/105/44**.
+restart. Trader/NPC quest offers carry no separate state to save: the
+offer list derives from npc.xml quest_list plus the player's active
+journal at request time (buildTraderQuestOffers, tier filter + accept
+marker), reconstructing identically after a restart - a documented design
+difference with no client-visible impact. Net and ops 45/6/5 ->
+**46/5/5**, total 184/105/44 -> **185/104/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

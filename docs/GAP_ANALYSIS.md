@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (184/105/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (185/104/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 45 | 6 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **184** | **105** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 46 | 5 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
+| **Total** | **185** | **104** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**45 WORKS · 6 PARTIAL · 5 MISSING**
+**46 WORKS · 5 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3853,7 +3853,7 @@ persists so little that a restart visibly damages a built base.
   See World systems §11: claims persist via `claims.zlc` and survive restart.
   *Anchors:* `src/server/persist.zig:517-580`
 
-- **Vehicle, turret, power and quest-NPC persistence** `PARTIAL` `(2026-08-22)`
+- **Vehicle, turret, power and quest-NPC persistence** `WORKS` `(2026-08-22)`
   Spawned vehicles and turrets now survive restart via `entities.zen` (ZENT1,
   zdtd-owned like claims.zlc): `saveEntities` writes kind/position/yaw/fuel/
   seats for vehicles and position/range/damage/ammo for turrets on the periodic
@@ -3865,10 +3865,15 @@ persists so little that a restart visibly damages a built base.
   writes each live edge by its endpoint positions (node ids are per-session) as
   a kind-3 record, and `loadEntities` queues them as pending wires that
   `reconnectPending` (called after each chunk power scan) connects as both
-  endpoints' nodes appear. Still missing: trader/NPC quest offer state.
+  endpoints' nodes appear. Trader/NPC quest offers carry no separate state to
+  save: the offer list is derived at request time from npc.xml quest_list plus
+  the player's active journal (buildTraderQuestOffers, tier filter + accept
+  marker), so it reconstructs identically after a restart - a documented design
+  difference with no client-visible impact.
   *Anchors:* `src/server/persist.zig` `saveEntities`/`loadEntities`,
   `src/server/game/chunk_fill.zig` `scanChunkPower`, `src/ecs/electric.zig`
-  (`WirePos`, `addPendingWire`, `reconnectPending`)
+  (`WirePos`, `addPendingWire`, `reconnectPending`), `src/server/game/quest.zig`
+  (`buildTraderQuestOffers`)
 
 - **Autosave and shutdown save** `WORKS`
   Every 100 ticks (5 s at 20 Hz) the tick flushes world chunks, containers and
@@ -4722,7 +4727,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
 | AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
 | Quest journal save | HAVE (players.zsv ZPV3) |
-| Vehicle / turret persistence | PARTIAL (`entities.zen`; power wire edges persist by position since 2026-08-22, quest-offer state is not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
+| Vehicle / turret persistence | WORKS (`entities.zen`; power wire edges persist by position; trader quest offers are derived from quest_list + journal, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
