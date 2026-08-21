@@ -429,13 +429,15 @@ static float weapon_lead(int w) {
 // pacing: the host applies damage per accepted `bot shoot` and never sees a
 // magazine, so a bot "clicking empty" simply stops ordering shots.
 static int weapon_mag(int w) {
+  // magazine sizes aligned to game Data/Config/items.xml MagazineSize base_set
+  // (R13 parity audit): sniper 12, shotgun 2, pistol 15, ak 30, smg 30, auto 16
   switch (w) {
-    case 3: return 5;   // sniper
-    case 1: return 6;   // shotgun shells
-    case 0: return 12;  // pistol
+    case 3: return 12;  // sniper
+    case 1: return 2;   // shotgun shells
+    case 0: return 15;  // pistol
     case 2: return 30;  // ak
-    case 5: return 32;  // smg
-    default: return 40; // auto
+    case 5: return 30;  // smg
+    default: return 16; // auto
   }
 }
 static float weapon_reload(int w) {
