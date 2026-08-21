@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 188 `WORKS`,
-101 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 189 `WORKS`,
+100 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -497,6 +497,14 @@ client, so a shared quest advances live for the whole party
 (treasure_complete -> fetch phase, block_activated -> block_activate
 phase). RE pin: 7dtd-research protocol-packages.md. Quests 21/10/1 ->
 22/9/1, total 187/102/44 -> **188/101/44**.
+
+Per-objective CurrentValue row -> WORKS 2026-08-22: the journal writer
+emits 255 / clamped-active / 0-future per objective from the phase graph;
+boolean-ish objectives (Goto, InteractWithNPC) and
+TreasureChest/StayWithin do not consume the value client-side - exactly
+like stock, whose Reads ignore it for those types - so the wire carries
+the stock layout with stock semantics. Quests 22/9/1 -> 23/8/1, total
+188/101/44 -> **189/100/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
