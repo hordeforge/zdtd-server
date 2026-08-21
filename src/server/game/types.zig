@@ -397,6 +397,14 @@ pub const Client = struct {
     map_middle_z: i32 = 0,
     map_middle_set: bool = false,
     map_chunks_sent: [map_window_n]u8 = [_]u8{0} ** map_window_n,
+    /// Dropped-backpack marker (RE EntityBackpack / PersistentPlayerData
+    /// SetDroppedBackpackPositions): set at the death position when
+    /// DropOnDeath drops a bag, cleared when the bag is collected; the
+    /// broadcast drives the client's backpack markers.
+    backpack_x: i32 = 0,
+    backpack_y: i32 = 0,
+    backpack_z: i32 = 0,
+    has_backpack: bool = false,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),

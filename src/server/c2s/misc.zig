@@ -414,6 +414,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const t = self.sim.transform[ti];
                         if (self.sim.spawnLootBag(t.x, t.y, t.z, 1, 1)) |bag_nid| {
                             self.broadcastLootSpawn(bag_nid) catch {};
+                            // Dropped-backpack marker (RE EntityBackpack
+                            // SetDroppedBackpackPositions): the death screen
+                            // and map show the bag position.
+                            if (self.clientByEntityId(d.entity_id)) |vic| {
+                                vic.has_backpack = true;
+                                vic.backpack_x = @intFromFloat(@trunc(t.x));
+                                vic.backpack_y = @intFromFloat(@trunc(t.y));
+                                vic.backpack_z = @intFromFloat(@trunc(t.z));
+                                self.broadcastPlayerBackpack(vic) catch {};
+                            }
                         }
                     }
                 }

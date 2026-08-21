@@ -2799,6 +2799,35 @@ test "ClientInfo body is count + entityId + ping + admin per entry" {
     try std.testing.expectEqual(@as(u8, 0), b[15]); // admin false
 }
 
+/// NetPackagePlayerSetBackpackPosition (write IL=? / read IL=29): playerId
+/// i32, count u8, then Vector3i positions (3 x i32). Broadcast when a
+/// player's dropped-backpack markers change (EntityBackpack /
+/// PersistentPlayerData; RE 2026-08-21) - the client shows the markers.
+pub fn buildPlayerSetBackpackPositionBody(buf: []u8, player_id: i32, positions: []const [3]i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(player_id);
+    try w.writeByte(@intCast(positions.len));
+    for (positions) |p| {
+        try w.writeI32(p[0]);
+        try w.writeI32(p[1]);
+        try w.writeI32(p[2]);
+    }
+    return w.written();
+}
+
+test "PlayerSetBackpackPosition body is playerId + count + Vector3i list" {
+    var buf: [64]u8 = undefined;
+    const empty = try buildPlayerSetBackpackPositionBody(&buf, 100, &.{});
+    try std.testing.expectEqual(@as(usize, 5), empty.len);
+    try std.testing.expectEqual(@as(i32, 100), std.mem.readInt(i32, empty[0..4], .little));
+    try std.testing.expectEqual(@as(u8, 0), empty[4]);
+    const one = try buildPlayerSetBackpackPositionBody(&buf, 101, &.{.{ 10, 60, -20 }});
+    try std.testing.expectEqual(@as(usize, 5 + 12), one.len);
+    try std.testing.expectEqual(@as(u8, 1), one[4]);
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, one[5..9], .little));
+    try std.testing.expectEqual(@as(i32, -20), std.mem.readInt(i32, one[13..17], .little));
+}
+
 /// NetPackagePersistentPlayerPositions (write IL=38): count i32, then per
 /// online player a PlatformUserIdentifierAbs.ToStream id + Vector3i position.
 /// Broadcast every 6 s by GameManager.playerPositionsCountdownTimer; the

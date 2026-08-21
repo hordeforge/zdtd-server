@@ -293,7 +293,8 @@ zombies stream their vertical velocity (NetPackageEntityVelocity, delta-gated
 in the replicate fan-out) so the client renders falls instead of glides; the
 C2S handler row was recounted (76 of 98 stock-sent names handled). The player
 list broadcasts every 5 s (NetPackageClientInfo: entityId, ping, admin flag -
-ping 0, no RTT measurement yet).
+ping 0, no RTT measurement yet). Death bags mark the map: the dropped
+backpack marker broadcasts on drop (DropOnDeath) and clears on collect.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

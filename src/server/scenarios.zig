@@ -549,6 +549,74 @@ test "scenario replicate sends EntityVelocity for a falling zombie" {
     try std.testing.expect(found);
 }
 
+test "scenario backpack marker broadcasts on drop and clears on collect" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bp");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bp", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    // Drop: the marker broadcast carries the position.
+    g.clients[c.slot].has_backpack = true;
+    g.clients[c.slot].backpack_x = 12;
+    g.clients[c.slot].backpack_y = 60;
+    g.clients[c.slot].backpack_z = -34;
+    const n_before = cap.n;
+    try g.broadcastPlayerBackpack(&g.clients[c.slot]);
+    try std.testing.expect(cap.n > n_before);
+    const did = packages.idOf("NetPackagePlayerSetBackpackPosition").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap.n and !found) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                try std.testing.expectEqual(c.entity_id, try r.readI32());
+                try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+                try std.testing.expectEqual(@as(i32, 12), try r.readI32());
+                try std.testing.expectEqual(@as(i32, 60), try r.readI32());
+                try std.testing.expectEqual(@as(i32, -34), try r.readI32());
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+    // Collect: the cleared marker broadcasts an empty list.
+    const n_first = cap.n;
+    g.clients[c.slot].has_backpack = false;
+    try g.broadcastPlayerBackpack(&g.clients[c.slot]);
+    found = false;
+    i = n_first;
+    while (i < cap.n and !found) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                _ = try r.readI32();
+                try std.testing.expectEqual(@as(u8, 0), try r.readByte());
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+}
+
 test "scenario ClientInfo broadcasts the player list every 5 s" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ci");

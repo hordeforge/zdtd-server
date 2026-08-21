@@ -77,6 +77,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // systems.collectLootNear).
                     if (!ecs.inventory.collectBagFull(&self.sim, c.slot, bs)) return true;
                 }
+                const bx = self.sim.transform[bs].x;
+                const by = self.sim.transform[bs].y;
+                const bz = self.sim.transform[bs].z;
                 if (self.sim.alive[bs]) self.sim.destroy(bs);
                 if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {
                     try self.broadcast("NetPackageEntityCollect", cb);
@@ -84,6 +87,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildRemoveBodyReason(&self.body_buf, bag, .despawned)) |rm| {
                     try self.broadcast("NetPackageEntityRemove", rm);
                 } else |_| {}
+                // Collected the player's own death bag: clear the backpack
+                // marker and tell every client (RE EntityBackpack).
+                if (self.clients[c.slot].has_backpack and
+                    self.clients[c.slot].backpack_x == @as(i32, @intFromFloat(@trunc(bx))) and
+                    self.clients[c.slot].backpack_y == @as(i32, @intFromFloat(@trunc(by))) and
+                    self.clients[c.slot].backpack_z == @as(i32, @intFromFloat(@trunc(bz))))
+                {
+                    self.clients[c.slot].has_backpack = false;
+                    try self.broadcastPlayerBackpack(&self.clients[c.slot]);
+                }
             }
         }
         return true;

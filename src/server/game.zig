@@ -1224,6 +1224,10 @@ pub const Game = struct {
         return game_tick.tickClientInfo(self);
     }
 
+    pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
+        return game_map.broadcastPlayerBackpack(self, c);
+    }
+
     /// Block id at world coords (0 = air / unloaded).
     pub fn blockIdAtWorld(self: *Game, x: i32, y: i32, z: i32) u16 {
         const t = world_store.World.worldToChunk(x, z);

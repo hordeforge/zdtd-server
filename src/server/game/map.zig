@@ -10,6 +10,7 @@
 const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
+const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const map_atlas = @import("../../assets/map_atlas.zig");
 const world_store = @import("../../world/store.zig");
@@ -136,4 +137,21 @@ pub fn tickPlayerPositions(self: *Game) void {
     if (packages.buildPersistentPlayerPositionsBody(&self.body_buf, entries[0..n])) |body| {
         self.broadcast("NetPackagePersistentPlayerPositions", body) catch {};
     } else |_| {}
+}
+
+/// Broadcast the client's dropped-backpack marker (NetPackagePlayerSetBackpackPosition,
+/// RE EntityBackpack / PersistentPlayerData): one position when the death bag
+/// is live, empty when collected.
+pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
+    var positions: [1][3]i32 = undefined;
+    var n: usize = 0;
+    if (c.has_backpack) {
+        positions[0] = .{ c.backpack_x, c.backpack_y, c.backpack_z };
+        n = 1;
+    }
+    if (packages.buildPlayerSetBackpackPositionBody(&self.body_buf, c.entity_id, positions[0..n])) |body| {
+        try self.broadcast("NetPackagePlayerSetBackpackPosition", body);
+    } else |_| {
+        self.harness.counters.inc(.encode_errors);
+    }
 }
