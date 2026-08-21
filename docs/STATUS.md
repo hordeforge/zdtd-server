@@ -382,9 +382,15 @@ entry by the "platform:id" composite like the ban path (a rename cannot
 lose admin/whitelist standing), the ClientInfo admin flag checks both the
 composite and the name, and the row's stale TelnetFailedLoginsBlocktime
 claim was corrected - the per-source fail-limit block was already enforced
-(admin.zig:204-205). Remaining open items: serveradmin.xml is applied
-at startup, not hot-reloaded on edit (stock InitFileWatcher) and
-ServerReservedSlots / ServerAdminSlots are not implemented. Net and ops
+(admin.zig:204-205). Reserved/admin slots shipped 2026-08-21 (bans row):
+the player cap is the stock tiered gate (PlayerSlotsAuthorizer.Authorize
+IL=174) - ServerReservedSlots/ServerReservedSlotsPermission admit
+privileged players through the reserved slots (occupied < max - reserved)
+and ServerAdminSlots/ServerAdminSlotsPermission add admin headroom
+(total < max + adminSlots); 0 disables each tier, so the default gate is
+the plain cap. RE pin: 7dtd-research dedicated-misc-systems.md. Remaining
+open item: serveradmin.xml is applied
+at startup, not hot-reloaded on edit (stock InitFileWatcher). Net and ops
 stays 43/8/5, total **182/107/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)

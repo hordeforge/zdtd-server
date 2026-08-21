@@ -430,6 +430,11 @@ pub const Game = struct {
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
+    /// PlayerSlotsAuthorizer tiers (IL=174); 0 = disabled.
+    reserved_slots: u8 = 0,
+    reserved_slots_permission: u8 = 0,
+    admin_slots: u8 = 0,
+    admin_slots_permission: u8 = 0,
     world_name: []const u8 = "zdtd",
     /// Sandbox code echoed in the GameStats blob (GameStatsValues.sandbox_code);
     /// the client decodes TemperatureSurvival / StormFreq / blood-moon gates
@@ -538,6 +543,10 @@ pub const Game = struct {
             .stock_catalogs_requested = opts.game_dir != null or opts.config_dir != null,
             .view_radius = opts.view_radius,
             .max_players = max_pl,
+            .reserved_slots = opts.reserved_slots,
+            .reserved_slots_permission = opts.reserved_slots_permission,
+            .admin_slots = opts.admin_slots,
+            .admin_slots_permission = opts.admin_slots_permission,
             .wire_chunks = opts.wire_chunks,
             .deco_trees = opts.deco_trees,
             .deco_mirror = opts.deco_mirror,
@@ -2163,6 +2172,24 @@ pub const Game = struct {
             if (cl.joined) n += 1;
         }
         return n;
+    }
+
+    /// `AdminUsers.GetUserPermissionLevel` equivalent (PlayerSlotsAuthorizer
+    /// and command gates): the stored level (0 = top admin) when the identity
+    /// is in the admin list, else the 1000 default. Matches by the
+    /// "platform:id" composite first, then the login name.
+    pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
+        if (c.name_len != 0) {
+            if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
+        }
+        if (c.puid_primary.get()) |pid| {
+            var key_buf: [admin_cmds.max_id]u8 = undefined;
+            const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
+            if (key.len != 0) {
+                if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
+            }
+        }
+        return 1000;
     }
 
     pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {

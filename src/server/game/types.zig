@@ -205,6 +205,11 @@ pub const InitOptions = struct {
     world_name: ?[]const u8 = null,
     /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
     max_players: u16 = default_max_players,
+    /// PlayerSlotsAuthorizer tiers (IL=174); 0 = disabled.
+    reserved_slots: u8 = 0,
+    reserved_slots_permission: u8 = 0,
+    admin_slots: u8 = 0,
+    admin_slots_permission: u8 = 0,
     /// ServerPassword from serverconfig. Used as the LiteNet Connect key: non-empty
     /// rejects Connect requests whose key does not match.
     password: []const u8 = "",

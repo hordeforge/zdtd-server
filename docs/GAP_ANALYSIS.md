@@ -3542,10 +3542,15 @@ persists so little that a restart visibly damages a built base.
   only whitelisted players (composite "platform:id" from serveradmin.xml or
   the login name from `whitelist add`) and admins (`admin add`, the stock
   HasEntry bypass) join; everyone else is denied
-  EKickReason.NotOnWhitelist(7). Still
+  EKickReason.NotOnWhitelist(7). Since 2026-08-21 the player cap is the
+  stock tiered gate (PlayerSlotsAuthorizer.Authorize, IL=174):
+  ServerReservedSlots / ServerReservedSlotsPermission let privileged
+  players (perm <= the threshold) join a full server through the reserved
+  slots (occupied < max - reserved), and ServerAdminSlots /
+  ServerAdminSlotsPermission add admin headroom (total < max + adminSlots);
+  0 = disabled, so the default gate degenerates to the plain cap. Still
   open: serveradmin.xml is applied at startup, not hot-reloaded on edit
-  (stock InitFileWatcher) and ServerReservedSlots / ServerAdminSlots are
-  not implemented.
+  (stock InitFileWatcher).
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)

@@ -58,6 +58,14 @@ pub const Config = struct {
     telnet_failed_logins_blocktime: u16 = 10,
     /// Align with Game/InitOptions default and chunk_stream_radius_min (7).
     view_radius: i32 = 7,
+    /// PlayerSlotsAuthorizer (IL=174): ServerReservedSlots(155) - slots at the
+    /// cap reserved for players with permission <= ServerReservedSlotsPermission
+    /// (156); ServerAdminSlots(157) - extra headroom for players with
+    /// permission <= ServerAdminSlotsPermission (158). 0 = disabled.
+    reserved_slots: u8 = 0,
+    reserved_slots_permission: u8 = 0,
+    admin_slots: u8 = 0,
+    admin_slots_permission: u8 = 0,
     authority_mode: AuthorityMode = .correct,
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim in
@@ -176,6 +184,10 @@ const known_serverconfig_names = [_][]const u8{
     "TelnetFailedLoginLimit",
     "TelnetFailedLoginsBlocktime",
     "ViewRadius",
+    "ServerReservedSlots",
+    "ServerReservedSlotsPermission",
+    "ServerAdminSlots",
+    "ServerAdminSlotsPermission",
     "GameDifficulty",
     "BloodMoonFrequency",
     "BloodMoonEnemyCount",
@@ -406,6 +418,11 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "TelnetFailedLoginsBlocktime")) |v|
         cfg.telnet_failed_logins_blocktime = clampRangeNamed("TelnetFailedLoginsBlocktime", v, 0, 1440, cfg.telnet_failed_logins_blocktime);
     if (prop(raw, "ViewRadius")) |v| cfg.view_radius = @intCast(clampRangeNamed("ViewRadius", v, 1, 16, @intCast(cfg.view_radius)));
+    // PlayerSlotsAuthorizer tiers (0 = disabled).
+    if (prop(raw, "ServerReservedSlots")) |v| cfg.reserved_slots = clampU8Named("ServerReservedSlots", v, 0, 64, cfg.reserved_slots);
+    if (prop(raw, "ServerReservedSlotsPermission")) |v| cfg.reserved_slots_permission = clampU8Named("ServerReservedSlotsPermission", v, 0, 255, cfg.reserved_slots_permission);
+    if (prop(raw, "ServerAdminSlots")) |v| cfg.admin_slots = clampU8Named("ServerAdminSlots", v, 0, 64, cfg.admin_slots);
+    if (prop(raw, "ServerAdminSlotsPermission")) |v| cfg.admin_slots_permission = clampU8Named("ServerAdminSlotsPermission", v, 0, 255, cfg.admin_slots_permission);
     if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8Named("GameDifficulty", v, 0, 5, cfg.game_difficulty);
     if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8Named("BloodMoonFrequency", v, 0, 255, cfg.blood_moon_frequency);
     if (prop(raw, "BloodMoonEnemyCount")) |v| cfg.blood_moon_enemy_count = clampU8Named("BloodMoonEnemyCount", v, 0, 60, cfg.blood_moon_enemy_count);

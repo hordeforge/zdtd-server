@@ -71,11 +71,32 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     std.debug.print("zdtd: login version mismatch comp='{s}' want='{s}' slot={d}\n", .{ login.compVersion(), version_mod.stock_wire_comp, c.slot });
                     return true;
                 }
-                // Stock AuthorizationManager rejects a full server with
-                // EKickReason.PlayerLimitExceeded(5) at login time (after
-                // PackageIds), not at the transport accept, so the client
-                // shows "server full" instead of hanging.
-                if (self.countJoined() >= self.max_players) {
+                // Stock PlayerSlotsAuthorizer.Authorize (IL=174) rejects a
+                // full server with EKickReason.PlayerLimitExceeded(5) at
+                // login time (after PackageIds), so the client shows "server
+                // full" instead of hanging. The tiered gate: normal players
+                // join while total < max; reserved-tier players (perm <=
+                // ServerReservedSlotsPermission) additionally need the
+                // reserved slots free (privileged occupants < max -
+                // ServerReservedSlots); the admin tier (ServerAdminSlots > 0
+                // and perm <= ServerAdminSlotsPermission) joins while total <
+                // max + ServerAdminSlots.
+                const incoming_perm = self.permLevelOf(c);
+                var total: u16 = 0;
+                var privileged: u16 = 0;
+                for (&self.clients) |*cl| {
+                    if (!cl.joined) continue;
+                    total += 1;
+                    if (self.permLevelOf(cl) <= self.reserved_slots_permission) privileged += 1;
+                }
+                var cap_ok = total < self.max_players;
+                if (!cap_ok and incoming_perm <= self.reserved_slots_permission) {
+                    cap_ok = privileged < (self.max_players -| self.reserved_slots);
+                }
+                if (!cap_ok and self.admin_slots > 0 and incoming_perm <= self.admin_slots_permission) {
+                    cap_ok = total < self.max_players + self.admin_slots;
+                }
+                if (!cap_ok) {
                     self.harness.counters.inc(.join_fail);
                     if (c.peer) |p| {
                         var denied: [64]u8 = undefined;
@@ -84,7 +105,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                 self.harness.counters.inc(.net_send_errors);
                         } else |_| self.harness.counters.inc(.encode_errors);
                     }
-                    std.debug.print("zdtd: login server full slot={d} joined={d} max={d}\n", .{ c.slot, self.countJoined(), self.max_players });
+                    std.debug.print("zdtd: login server full slot={d} joined={d} max={d}\n", .{ c.slot, total, self.max_players });
                     return true;
                 }
             } else |_| {

@@ -1880,3 +1880,41 @@ test "admin target key uses the platform id for an online session" {
     const nk = g.adminTargetKey(.{ .name = "OfflinePlayer" }, &buf);
     try std.testing.expectEqualStrings("OfflinePlayer", nk);
 }
+
+test "reserved and admin slots let privileged players join a full server" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .max_players = 2,
+        .reserved_slots = 1,
+        .reserved_slots_permission = 0,
+        .admin_slots = 1,
+        .admin_slots_permission = 5,
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const norm_a: platform_user.Id = .{ .platform = "Steam", .id = "1001" };
+    const norm_b: platform_user.Id = .{ .platform = "Steam", .id = "1002" };
+    const norm_c: platform_user.Id = .{ .platform = "Steam", .id = "1003" };
+    const adm: platform_user.Id = .{ .platform = "Steam", .id = "1009" };
+    var cap: ln_peer.Capture = .{};
+    // Two normal players fill the server (max 2).
+    _ = try g.attachJoinedClientAs(&cap, norm_a);
+    _ = try g.attachJoinedClientAs(&cap, norm_b);
+    // A third normal player is denied at the cap (PlayerLimitExceeded).
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, norm_c));
+    // The admin slot takes a level-1 admin (perm 1 <= admin perms 5) while
+    // total < max + admin_slots (2 < 3), using the headroom.
+    try std.testing.expect(g.admin_list.add("Steam:1010", 1));
+    _ = try g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "1010" });
+    // The reserved slot then takes the level-0 admin (privileged 0 < max -
+    // reserved = 1); a fourth normal player stays denied at every tier.
+    try std.testing.expect(g.admin_list.add("Steam:1009", 0));
+    _ = try g.attachJoinedClientAs(&cap, adm);
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "1004" }));
+}
