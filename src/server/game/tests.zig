@@ -1856,3 +1856,27 @@ test "whitelist gates the join: listed and admins enter, others are denied" {
     try std.testing.expect(g.admin_list.add("Steam:1003", 0));
     _ = try g.attachJoinedClientAs(&cap, id_c);
 }
+
+test "admin target key uses the platform id for an online session" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const id: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000000" };
+    var key_cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&key_cap, id);
+    _ = ca;
+    // The online target resolves to the platform composite, so a rename
+    // cannot lose admin/whitelist standing (stock keys on the identifier).
+    var buf: [96]u8 = undefined;
+    const key = g.adminTargetKey(.{ .name = "Bot" }, &buf);
+    try std.testing.expectEqualStrings("Steam:76561198000000000", key);
+    // An offline/unknown target keeps the name key.
+    const nk = g.adminTargetKey(.{ .name = "OfflinePlayer" }, &buf);
+    try std.testing.expectEqualStrings("OfflinePlayer", nk);
+}

@@ -3680,16 +3680,19 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:4081-4113`, `src/server/game/types.zig`
   `default_peer_stale_ms`
 
-- **Admin TCP console** `PARTIAL` (2026-08-06)
+- **Admin TCP console** `PARTIAL` `(2026-08-21 recount)`
   The stock telnet protocol now ships: TelnetEnabled / TelnetPort /
   TelnetPassword / TelnetFailedLoginLimit are parsed, the greeting and password
   prompts match stock, the bind is loopback without a password and INADDR_ANY
   with one, and the reply text for listplayers, listplayerids, listents, help,
   getgamepref, chunkcache and mem matches the stock literals. admin, whitelist
-  and ban lists persist. Open: client-only verbs are deliberately absent,
-  TelnetFailedLoginsBlocktime is parsed but not enforced as a per-source block,
-  and permission entries are keyed by login name because zdtd has no stock user
-  id to key them by.
+  and ban lists persist. TelnetFailedLoginsBlocktime is enforced as a
+  per-source block (per-session fail counts plus a process-wide total armed
+  at fail_limit, `src/server/admin.zig:204-205`), and since 2026-08-21
+  `admin add` / `whitelist add` on an online target key the entry by the
+  "platform:id" composite like the ban path (a rename cannot lose admin or
+  whitelist standing); the ClientInfo admin flag checks both keys. Open:
+  client-only verbs are deliberately absent (no local player on a dedi).
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
   `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
 

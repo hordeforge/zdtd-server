@@ -376,7 +376,13 @@ non-empty whitelist the login gate now denies everyone except whitelisted
 players (composite "platform:id" or login name) and admins (the stock
 HasEntry bypass), matching BansAndWhitelistAuthorizer.Authorize (IL=71)
 with EKickReason.NotOnWhitelist(7); RE pin in 7dtd-research
-dedicated-misc-systems.md. Remaining open items: serveradmin.xml is applied
+dedicated-misc-systems.md. Admin-list keying shipped 2026-08-21 (admin TCP
+row recount): `admin add` / `whitelist add` on an online target now key the
+entry by the "platform:id" composite like the ban path (a rename cannot
+lose admin/whitelist standing), the ClientInfo admin flag checks both the
+composite and the name, and the row's stale TelnetFailedLoginsBlocktime
+claim was corrected - the per-source fail-limit block was already enforced
+(admin.zig:204-205). Remaining open items: serveradmin.xml is applied
 at startup, not hot-reloaded on edit (stock InitFileWatcher) and
 ServerReservedSlots / ServerAdminSlots are not implemented. Net and ops
 stays 43/8/5, total **182/107/44**.

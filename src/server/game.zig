@@ -1095,6 +1095,10 @@ pub const Game = struct {
         return admin_console.adminTargetId(self, t, buf);
     }
 
+    pub fn adminTargetKey(self: *const Game, t: admin_mod.Target, buf: []u8) []const u8 {
+        return admin_console.adminTargetKey(self, t, buf);
+    }
+
     pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         admin_console.runAdminLine(self, line, source);
     }

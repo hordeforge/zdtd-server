@@ -876,6 +876,24 @@ pub fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const 
     return buf[0..n];
 }
 
+/// Permission/whitelist key for an admin target: the "platform:id" composite
+/// when the target resolves to an online slot with a platform session (stock
+/// AdminUsers/AdminWhitelist key on the platform identifier, so a rename
+/// cannot lose admin/whitelist), else the login name (offline targets,
+/// no-platform sessions).
+pub fn adminTargetKey(self: *const Game, t: admin_mod.Target, buf: []u8) []const u8 {
+    switch (self.resolveAdminTarget(t)) {
+        .slot => |i| {
+            if (self.clients[i].puid_primary.get()) |pid| {
+                const key = std.fmt.bufPrint(buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return self.adminTargetId(t, buf);
+                return key;
+            }
+        },
+        else => {},
+    }
+    return self.adminTargetId(t, buf);
+}
+
 fn tryDispatchPluginAdmin(self: *Game, line: []const u8) bool {
     // Bounded reply buffer: plugin admin commands are informational, not bulk
     // dumps. 4k matches the largest single admin formatter (ban list).
@@ -1068,7 +1086,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             .list => self.adminWrite(admin_cmds.writeAdminList, .{&self.admin_list}),
             .add => |a| {
                 var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(a.target, &idb);
+                const id = self.adminTargetKey(a.target, &idb);
                 if (!self.admin_list.add(id, a.level)) {
                     self.adminReply("permissions list full\n");
                     return;
@@ -1080,7 +1098,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             },
             .remove => |t| {
                 var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(t, &idb);
+                const id = self.adminTargetKey(t, &idb);
                 const removed = self.admin_list.remove(id);
                 if (removed) self.saveAdminLists();
                 var b: [160]u8 = undefined;
@@ -1095,7 +1113,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             .list => self.adminWrite(admin_cmds.writeWhitelist, .{&self.whitelist}),
             .add => |t| {
                 var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(t, &idb);
+                const id = self.adminTargetKey(t, &idb);
                 if (!self.whitelist.add(id, 0)) {
                     self.adminReply("whitelist full\n");
                     return;
@@ -1107,7 +1125,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             },
             .remove => |t| {
                 var idb: [96]u8 = undefined;
-                const id = self.adminTargetId(t, &idb);
+                const id = self.adminTargetKey(t, &idb);
                 const removed = self.whitelist.remove(id);
                 if (removed) self.saveAdminLists();
                 var b: [160]u8 = undefined;
