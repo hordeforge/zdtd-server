@@ -178,7 +178,7 @@ fn decodeAttr(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
 
 /// Property names zdtd applies (subset of stock ServerSettings). Stock extras are
 /// ignored without warning; near-miss typos of these names get a stderr hint.
-const known_serverconfig_names = [_][]const u8{
+pub const known_serverconfig_names = [_][]const u8{
     "ServerPort",
     "ServerMaxPlayerCount",
     "GameName",
@@ -373,6 +373,12 @@ fn sandboxIntU16(v: i32) u16 {
     if (v > 65535) return 65535;
     return @intCast(v);
 }
+
+/// The last loaded effective config (single source for `getoptions` /
+/// `exportcurrentconfigs`); set by main after the parse merges. Values the
+/// admin `setgamepref` mutates live in the GameStats blob, which the option
+/// dump prefers for those names.
+pub var effective: Config = .{};
 
 /// Parse serverconfig.xml bytes (subset of stock ServerSettings).
 pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {

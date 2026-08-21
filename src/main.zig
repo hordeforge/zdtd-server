@@ -541,6 +541,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     );
     // Effective config: loaded file or struct defaults (single source in config.zig).
     const cfg: server_config.Config = cfg_owned orelse .{};
+    server_config.effective = cfg;
 
     // CLI > env ZDTD_WEBUI_SECRET (prefer env: not visible in process listings).
     if (webui_secret.len == 0) {

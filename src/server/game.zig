@@ -519,6 +519,11 @@ pub const Game = struct {
     workstation_craft_backlog: f32 = game_types.default_workstation_craft_backlog,
     /// Periodic apm snapshot dump period in ticks (zdtd.toml [apm] dump_every_s).
     apm_report_period_ticks: u64 = game_types.default_apm_report_period_ticks,
+    /// Stock ConsoleCmdCommandPermission: per-command required permission
+    /// level (0 = no extra requirement; lower = more privileged, matching the
+    /// stock 0..1000 direction). Enforced at the in-game console boundary.
+    command_levels: [32]CommandLevel = [_]CommandLevel{.{}} ** 32,
+    command_levels_n: u8 = 0,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
     pub fn create(allocator: std.mem.Allocator, world_dir: []const u8, port: u16) !*Game {
@@ -2253,6 +2258,36 @@ pub const Game = struct {
     pub fn reverseItemType(ctx: ?*anyopaque, stock_type: i32) u16 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.items.ecsIdFromStockType(stock_type);
+    }
+
+    pub const CommandLevel = struct {
+        verb: [24]u8 = [_]u8{0} ** 24,
+        level: u8 = 0,
+    };
+
+    pub fn commandLevel(self: *const Game, verb: []const u8) u8 {
+        for (self.command_levels[0..self.command_levels_n]) |cl| {
+            const v = std.mem.sliceTo(&cl.verb, 0);
+            if (std.mem.eql(u8, v, verb)) return cl.level;
+        }
+        return 0;
+    }
+
+    pub fn setCommandLevel(self: *Game, verb: []const u8, level: u8) bool {
+        for (self.command_levels[0..self.command_levels_n]) |*cl| {
+            const v = std.mem.sliceTo(&cl.verb, 0);
+            if (std.mem.eql(u8, v, verb)) {
+                cl.level = level;
+                return true;
+            }
+        }
+        if (self.command_levels_n >= self.command_levels.len or verb.len >= 24) return false;
+        const cl = &self.command_levels[self.command_levels_n];
+        self.command_levels_n += 1;
+        @memset(&cl.verb, 0);
+        @memcpy(cl.verb[0..verb.len], verb);
+        cl.level = level;
+        return true;
     }
 
     /// Workstation craft output: sim item plus the name the client derives from

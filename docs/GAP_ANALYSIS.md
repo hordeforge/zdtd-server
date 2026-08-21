@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **197** | **92** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
+| **Total** | **202** | **92** | **39** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -808,14 +808,22 @@ not a sleeper-volume clear), not completion blockers.
   `src/assets/quests.zig` buildPhaseGraph, `src/world/sleepers.zig`
   markClearedRect, scenario `all-quest-kinds`
 
-- **Starter quest granted at join** `PARTIAL → re-grant FIXED (2026-08-07)`
-  `questAcceptStarter` now scans every journal slot for the starter (active or
-  completed) and refuses to grant it again on the next login, so a completed
-  starter survives restart instead of being overwritten and re-offered. The
-  join PDF journal cap (2 of 8 slots) was already fixed by GAP 12 (all quests
-  ride the PDF, scenario `journal-pdf` proves 5).
+- **Starter quest granted at join** `WORKS` `(2026-08-21)`
+  `questAcceptStarter` grants the starter (catalog `starter_quest` id) on join
+  unless any journal slot already holds it (active, completed or failed), so a
+  completed starter survives restart instead of being overwritten and
+  re-offered, and a failed one is never re-granted. This matches the stock
+  gate (SandboxOptionManager.UpdateInGameValuesWithSandboxOptions IL ~0A26:
+  grant when `FindQuest(starter, -1) == null` and the `StarterQuest` cvar —
+  set to 1 by the starter's SetCVar action — is 0; the slot scan is the
+  journal equivalent of the FindQuest half, and the active/completed/failed
+  check covers the cvar's "already started" state). The grant is shared with
+  the post-join party (stock ShareAllQuestsWithParty), and the join PDF
+  journal cap was fixed by GAP 12 (all quests ride the PDF, scenario
+  `journal-pdf` proves 5).
   *Anchors:* `src/ecs/systems.zig` `questAcceptStarter`,
-  `src/server/game.zig` join path
+  `src/server/game.zig` join path,
+  il SandboxOptions/SandboxOptionManager IL_0A26-0A88
 
 - **Quest journal persistence (players.zsv ZPV5)** `WORKS` `(2026-08-21)`
   The players record is now ZPV5: every journal entry stores the quest **name**
@@ -3287,7 +3295,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**47 WORKS · 4 PARTIAL · 5 MISSING**
+**52 WORKS · 4 PARTIAL · 0 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -4900,8 +4908,13 @@ Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
 **MISSING (server-side, not yet done)**
 
 `admin addgroup` / `removegroup` and `whitelist addgroup` / `removegroup` (zdtd has
-no Steam group concept), `commandpermission`/`cp`, `loglevel`, `listthreads`/`lt`,
-`getoptions`, `exportcurrentconfigs`, `help <command>` detail pages. `setgamepref`
+no Steam group concept). Landed 2026-08-21: `commandpermission`/`cp` (per-command
+required permission level, enforced at the in-game console boundary; levels run
+0 = highest, matching the stock direction), `loglevel` (stock Log.Level 0..4
+gating `info`/`warn`/`err`), `listthreads`/`lt`, `getoptions` (all known
+serverconfig names with their current values, preferring the GameStats-backed
+runtime prefs), `exportcurrentconfigs` (`<world_dir>/exported_config.txt`), and
+`help <command>` detail pages. `setgamepref`
 writes the GameStats-backed prefs at runtime (GameDifficulty, BloodMoonEnemyCount,
 EnemyDifficulty, BloodMoonFrequency, DayNightLength, BlockDamagePlayer,
 XPMultiplier, PlayerKillingMode, DropOnDeath, LootRespawnDays, AirDropFrequency),

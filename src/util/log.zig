@@ -13,6 +13,10 @@ const std = @import("std");
 const clock = @import("clock.zig");
 
 var quiet: bool = false;
+/// Stock Log.Level (ConsoleCmdLoglevel): 0 = Info (everything), 1 = Warning,
+/// 2 = Error, 3 = Exception, 4 = Off. `info`/`warn`/`err` map to 0/1/2 and
+/// are suppressed when below `min_level`. Set by the `loglevel` admin verb.
+var min_level: u8 = 0;
 
 /// Set once from main after argv parsing. Not thread-safe by design: the boot
 /// banners are all emitted on the main thread before the tick loop starts.
@@ -24,31 +28,43 @@ pub fn isQuiet() bool {
     return quiet;
 }
 
-/// Informational startup line: suppressed by `--quiet`.
+/// Stock Log.Level backing the `loglevel` admin verb (0..4, 4 = off).
+pub fn level() u8 {
+    return min_level;
+}
+
+pub fn setLevel(l: u8) void {
+    min_level = @min(l, 4);
+}
+
+/// Informational startup line: suppressed by `--quiet` or `loglevel >= 1`.
 pub fn info(comptime fmt: []const u8, args: anytype) void {
     if (quiet) return;
+    if (min_level >= 1) return;
     std.debug.print(fmt, args);
 }
 
-/// Runtime warning line. Always emitted (never hidden by `--quiet`), with a
-/// wall-clock timestamp and a `WARN` severity tag so operators can correlate
-/// degraded behavior with the apm/evidence timeline. Callers keep their
-/// trailing `\n` in `fmt` to match `info`.
+/// Runtime warning line. Suppressed by `loglevel >= 2` (never hidden by
+/// `--quiet`), with a wall-clock timestamp and a `WARN` severity tag so
+/// operators can correlate degraded behavior with the apm/evidence timeline.
+/// Callers keep their trailing `\n` in `fmt` to match `info`.
 pub fn warn(comptime fmt: []const u8, args: anytype) void {
+    if (min_level >= 2) return;
     emit("WARN", fmt, args);
 }
 
-/// Runtime error line. Always emitted (never hidden by `--quiet`), with a
-/// wall-clock timestamp and an `ERROR` severity tag. Use for load/parse/send
-/// failures that must never vanish from the operator log.
+/// Runtime error line. Suppressed by `loglevel >= 3` (never hidden by
+/// `--quiet`), with a wall-clock timestamp and an `ERROR` severity tag. Use
+/// for load/parse/send failures that must never vanish from the operator log.
 pub fn err(comptime fmt: []const u8, args: anytype) void {
+    if (min_level >= 3) return;
     emit("ERROR", fmt, args);
 }
 
-fn emit(comptime level: []const u8, comptime fmt: []const u8, args: anytype) void {
+fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void {
     var ts: [19]u8 = undefined;
     const stamp = clock.wallStamp(&ts);
-    std.debug.print("zdtd: {s} [" ++ level ++ "] " ++ fmt, .{stamp} ++ args);
+    std.debug.print("zdtd: {s} [" ++ tag ++ "] " ++ fmt, .{stamp} ++ args);
 }
 
 test "quiet gates info output" {

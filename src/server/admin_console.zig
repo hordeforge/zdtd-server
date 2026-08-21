@@ -21,6 +21,8 @@ const ln_peer = @import("../litenet/peer.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const c2s_text = @import("c2s_text.zig");
 const protocol = @import("../protocol.zig");
+const config_mod = @import("config.zig");
+const util_log = @import("../util/log.zig");
 const version = @import("../version.zig");
 const systems = @import("../ecs/systems.zig");
 const max_clients = game_mod.max_clients;
@@ -260,6 +262,18 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         // admin (permission list entry) routes through the full admin
         // command surface, same path as the TCP/webui consoles.
         if (self.permLevelOf(c) < 1000) {
+            // Per-command permission (stock ConsoleCmdCommandPermission): a
+            // command whose required level is less privileged than the
+            // caller's is denied before routing (levels run 0 = highest).
+            const caller_level = self.permLevelOf(c);
+            const req = self.commandLevel(verb);
+            if (req > caller_level) {
+                var denied: ConsoleOut = .{};
+                denied.line("permission denied");
+                const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], denied.lines[0..denied.n], false);
+                try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
+                return;
+            }
             var sink_buf: [4096]u8 = undefined;
             self.admin_reply_len = 0;
             self.admin_reply_sink = sink_buf[0..];
@@ -754,6 +768,111 @@ fn boolWord(b: bool) []const u8 {
     return if (b) "True" else "False";
 }
 
+/// Stock `getoptions`: dump every known serverconfig name with its current
+/// value. Values prefer the GameStats blob (the runtime `setgamepref` surface)
+/// and fall back to the loaded config.
+fn replyOptions(self: *Game) void {
+    const v = self.gameStatsValues();
+    var line: [512]u8 = undefined;
+    for (config_mod.known_serverconfig_names) |name| {
+        const val = optionValue(self, &v, name, &line) orelse "(n/a)";
+        var lb: [640]u8 = undefined;
+        if (std.fmt.bufPrint(&lb, "{s} = {s}\n", .{ name, val })) |s| {
+            self.adminReply(s);
+        } else |_| {}
+    }
+}
+
+fn optionValue(self: *Game, v: *const packages.GameStatsValues, name: []const u8, buf: []u8) ?[]const u8 {
+    const cfg = &config_mod.effective;
+    const stats = v;
+    if (std.mem.eql(u8, name, "ServerPort")) return std.fmt.bufPrint(buf, "{d}", .{self.net.port}) catch null;
+    if (std.mem.eql(u8, name, "ServerMaxPlayerCount")) return std.fmt.bufPrint(buf, "{d}", .{self.max_players}) catch null;
+    if (std.mem.eql(u8, name, "GameName")) return cfg.world_name;
+    if (std.mem.eql(u8, name, "GameWorld")) return cfg.game_world;
+    if (std.mem.eql(u8, name, "ServerPassword")) return cfg.password;
+    if (std.mem.eql(u8, name, "AdminPort")) return std.fmt.bufPrint(buf, "{d}", .{cfg.admin_port}) catch null;
+    if (std.mem.eql(u8, name, "TelnetEnabled")) return std.fmt.bufPrint(buf, "{d}", .{@as(u8, @intFromBool(cfg.telnet_enabled))}) catch null;
+    if (std.mem.eql(u8, name, "TelnetPort")) return std.fmt.bufPrint(buf, "{d}", .{cfg.telnet_port}) catch null;
+    if (std.mem.eql(u8, name, "TelnetPassword")) return cfg.telnet_password;
+    if (std.mem.eql(u8, name, "TelnetFailedLoginLimit")) return std.fmt.bufPrint(buf, "{d}", .{cfg.telnet_failed_login_limit}) catch null;
+    if (std.mem.eql(u8, name, "TelnetFailedLoginsBlocktime")) return std.fmt.bufPrint(buf, "{d}", .{cfg.telnet_failed_logins_blocktime}) catch null;
+    if (std.mem.eql(u8, name, "ViewRadius")) return std.fmt.bufPrint(buf, "{d}", .{self.view_radius}) catch null;
+    if (std.mem.eql(u8, name, "ServerReservedSlots")) return std.fmt.bufPrint(buf, "{d}", .{self.reserved_slots}) catch null;
+    if (std.mem.eql(u8, name, "ServerReservedSlotsPermission")) return std.fmt.bufPrint(buf, "{d}", .{self.reserved_slots_permission}) catch null;
+    if (std.mem.eql(u8, name, "ServerAdminSlots")) return std.fmt.bufPrint(buf, "{d}", .{self.admin_slots}) catch null;
+    if (std.mem.eql(u8, name, "ServerAdminSlotsPermission")) return std.fmt.bufPrint(buf, "{d}", .{self.admin_slots_permission}) catch null;
+    if (std.mem.eql(u8, name, "GameDifficulty")) return std.fmt.bufPrint(buf, "{d}", .{stats.game_difficulty}) catch null;
+    if (std.mem.eql(u8, name, "BloodMoonFrequency")) return std.fmt.bufPrint(buf, "{d}", .{cfg.blood_moon_frequency}) catch null;
+    if (std.mem.eql(u8, name, "BloodMoonEnemyCount")) return std.fmt.bufPrint(buf, "{d}", .{stats.blood_moon_enemy_count}) catch null;
+    if (std.mem.eql(u8, name, "PlayerKillingMode")) return std.fmt.bufPrint(buf, "{d}", .{stats.player_killing_mode}) catch null;
+    if (std.mem.eql(u8, name, "DayNightLength")) return std.fmt.bufPrint(buf, "{d}", .{stats.day_night_length}) catch null;
+    if (std.mem.eql(u8, name, "DayLightLength")) return std.fmt.bufPrint(buf, "{d}", .{stats.day_light_length}) catch null;
+    if (std.mem.eql(u8, name, "MaxSpawnedZombies")) return std.fmt.bufPrint(buf, "{d}", .{cfg.max_spawned_zombies}) catch null;
+    if (std.mem.eql(u8, name, "BloodMoonRange")) return std.fmt.bufPrint(buf, "{d}", .{cfg.blood_moon_range}) catch null;
+    if (std.mem.eql(u8, name, "ZombieMove")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_move}) catch null;
+    if (std.mem.eql(u8, name, "ZombieMoveNight")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_move_night}) catch null;
+    if (std.mem.eql(u8, name, "ZombieFeralMove")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_feral_move}) catch null;
+    if (std.mem.eql(u8, name, "ZombieBMMove")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_bm_move}) catch null;
+    if (std.mem.eql(u8, name, "EnemyDifficulty")) return std.fmt.bufPrint(buf, "{d}", .{stats.enemy_difficulty}) catch null;
+    if (std.mem.eql(u8, name, "LootAbundance")) return std.fmt.bufPrint(buf, "{d}", .{stats.loot_abundance}) catch null;
+    if (std.mem.eql(u8, name, "XPMultiplier")) return std.fmt.bufPrint(buf, "{d}", .{stats.xp_multiplier}) catch null;
+    if (std.mem.eql(u8, name, "BlockDamagePlayer")) return std.fmt.bufPrint(buf, "{d}", .{stats.block_damage_player}) catch null;
+    if (std.mem.eql(u8, name, "BlockDamageAI")) return std.fmt.bufPrint(buf, "{d}", .{cfg.block_damage_ai}) catch null;
+    if (std.mem.eql(u8, name, "BlockDamageAIBM")) return std.fmt.bufPrint(buf, "{d}", .{cfg.block_damage_ai_bm}) catch null;
+    if (std.mem.eql(u8, name, "MaxSpawnedAnimals")) return std.fmt.bufPrint(buf, "{d}", .{cfg.max_spawned_animals}) catch null;
+    if (std.mem.eql(u8, name, "AirDropFrequency")) return std.fmt.bufPrint(buf, "{d}", .{cfg.air_drop_frequency}) catch null;
+    if (std.mem.eql(u8, name, "DropOnDeath")) return std.fmt.bufPrint(buf, "{d}", .{stats.drop_on_death}) catch null;
+    if (std.mem.eql(u8, name, "LandClaimSize")) return std.fmt.bufPrint(buf, "{d}", .{stats.land_claim_size}) catch null;
+    if (std.mem.eql(u8, name, "LandClaimOnlineDurabilityModifier")) return std.fmt.bufPrint(buf, "{d}", .{stats.land_claim_online_dur}) catch null;
+    if (std.mem.eql(u8, name, "LandClaimOfflineDurabilityModifier")) return std.fmt.bufPrint(buf, "{d}", .{stats.land_claim_offline_dur}) catch null;
+    if (std.mem.eql(u8, name, "LandClaimExpiryDays")) return std.fmt.bufPrint(buf, "{d}", .{cfg.land_claim_expiry_days}) catch null;
+    if (std.mem.eql(u8, name, "LootRespawnDays")) return std.fmt.bufPrint(buf, "{d}", .{stats.loot_respawn_days}) catch null;
+    if (std.mem.eql(u8, name, "SandboxPreset")) return cfg.sandbox_preset;
+    if (std.mem.eql(u8, name, "ServerDescription")) return cfg.server_description;
+    if (std.mem.eql(u8, name, "ServerWebsiteURL")) return cfg.server_website_url;
+    if (std.mem.eql(u8, name, "Region")) return cfg.region;
+    if (std.mem.eql(u8, name, "Language")) return cfg.language;
+    if (std.mem.eql(u8, name, "ServerMatchmakingGroup")) return cfg.play_group;
+    if (std.mem.eql(u8, name, "SandboxCode")) return cfg.sandbox_code;
+    if (std.mem.eql(u8, name, "ZdtdAuthorityMode")) return @tagName(cfg.authority_mode);
+    return null;
+}
+
+/// Stock `exportcurrentconfigs`: write the effective options to
+/// `<world_dir>/exported_config.txt` (stock writes an ExportConfigs folder;
+/// zdtd uses one file so the reply is a single path).
+fn replyExportConfigs(self: *Game) void {
+    var file: std.ArrayList(u8) = .empty;
+    defer file.deinit(self.allocator);
+    const v = self.gameStatsValues();
+    var line: [512]u8 = undefined;
+    for (config_mod.known_serverconfig_names) |name| {
+        const val = optionValue(self, &v, name, &line) orelse "(n/a)";
+        const s = std.fmt.bufPrint(&line, "{s} = {s}\n", .{ name, val }) catch continue;
+        file.appendSlice(self.allocator, s) catch return;
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/exported_config.txt", .{self.world.world_dir}) catch return;
+    io_fs.writeFile(path, file.items) catch {
+        self.adminReply("export failed; see server log\n");
+        return;
+    };
+    var rb: [640]u8 = undefined;
+    self.adminReply(std.fmt.bufPrint(&rb, "Configs exported to {s}\n", .{path}) catch "Configs exported.\n");
+}
+
+/// Stock `listthreads` / `lt`: summary of the server's logical threads.
+fn replyThreads(self: *Game) void {
+    var tb: [512]u8 = undefined;
+    const s = std.fmt.bufPrint(
+        &tb,
+        "main (current, id {d})\nnet (poll/recv/send)\nsave (world store writer)\nparallel (util/parallel pool)\n",
+        .{@as(u64, @intCast(std.Thread.getCurrentId()))},
+    ) catch return;
+    self.adminReply(s);
+}
+
 /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
 /// clamp to this function's own range (independent of config.zig's startup
 /// ranges — they are not guaranteed to match), and write the sim/Game field
@@ -1076,6 +1195,42 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         .save => {
             // Same honesty as saveworld: never claim success when disk I/O failed.
             self.adminReply(if (self.saveAllStores()) "saved\n" else "save failed; see server log\n");
+        },
+        .getoptions => replyOptions(self),
+        .exportcurrentconfigs => replyExportConfigs(self),
+        .loglevel => |arg| {
+            if (arg) |a| {
+                const lvl = std.fmt.parseInt(u8, a, 10) catch {
+                    var eb: [96]u8 = undefined;
+                    self.adminReply(std.fmt.bufPrint(&eb, "\"{s}\" is not a valid integer.\n", .{a}) catch "invalid log level\n");
+                    return;
+                };
+                if (lvl > 4) {
+                    var eb: [96]u8 = undefined;
+                    self.adminReply(std.fmt.bufPrint(&eb, "\"{s}\" is not a valid integer.\n", .{a}) catch "invalid log level\n");
+                    return;
+                }
+                util_log.setLevel(lvl);
+                var lb: [64]u8 = undefined;
+                self.adminReply(std.fmt.bufPrint(&lb, "Log level set to {d}.\n", .{util_log.level()}) catch "Log level set.\n");
+            } else {
+                var lb: [64]u8 = undefined;
+                self.adminReply(std.fmt.bufPrint(&lb, "Log level is {d}.\n", .{util_log.level()}) catch "Log level unknown.\n");
+            }
+        },
+        .listthreads => replyThreads(self),
+        .commandpermission => |cp| {
+            if (cp.level) |lvl| {
+                if (self.setCommandLevel(cp.verb, lvl)) {
+                    var cb: [160]u8 = undefined;
+                    self.adminReply(std.fmt.bufPrint(&cb, "Permission level of command {s} set to {d}.\n", .{ cp.verb, lvl }) catch "Permission level set.\n");
+                } else {
+                    self.adminReply("permission table full\n");
+                }
+            } else {
+                var cb: [160]u8 = undefined;
+                self.adminReply(std.fmt.bufPrint(&cb, "Command {s} requires permission level {d}.\n", .{ cp.verb, self.commandLevel(cp.verb) }) catch "Unknown command.\n");
+            }
         },
         .plugin => |rest| self.adminPlugin(rest),
         .kick => |k| {

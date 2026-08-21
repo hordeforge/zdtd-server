@@ -27,6 +27,7 @@ const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
+const util_log = @import("../util/log.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
 const assets_traders = @import("../assets/traders.zig");
@@ -6949,4 +6950,54 @@ test "scenario dig wears the held tool (ItemValue.UseTimes)" {
     var frame_buf: [128]u8 = undefined;
     try g.onData(c.peer.?, try packages.framed(&frame_buf, "NetPackageSetBlock", body));
     try std.testing.expectEqual(@as(f32, 9), g.sim.inventory[ps].slots[hold].use_times);
+}
+
+test "scenario admin ops verbs (getoptions/exportcurrentconfigs/loglevel/listthreads/cp)" {
+    // The Net/ops MISSING admin verbs: each replies through the same
+    // runAdminLine path the TCP/webui/in-game consoles share.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_adminops");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminops", 0, .{});
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const run = struct {
+        fn call(g2: *game_mod.Game, sink_buf: []u8, cmd: []const u8) []const u8 {
+            g2.admin_reply_len = 0;
+            g2.admin_reply_sink = sink_buf;
+            g2.runAdminLine(cmd, "test");
+            g2.admin_reply_sink = null;
+            return sink_buf[0..g2.admin_reply_len];
+        }
+    }.call;
+
+    var sink: [8192]u8 = undefined;
+    const o = run(g, &sink, "getoptions");
+    try std.testing.expect(std.mem.find(u8, o, "ServerPort = ") != null);
+    try std.testing.expect(std.mem.find(u8, o, "GameDifficulty = ") != null);
+
+    const e = run(g, &sink, "exportcurrentconfigs");
+    try std.testing.expect(std.mem.find(u8, e, "exported_config.txt") != null);
+
+    const ll = run(g, &sink, "loglevel");
+    try std.testing.expect(std.mem.find(u8, ll, "Log level is ") != null);
+    _ = run(g, &sink, "loglevel 2");
+    try std.testing.expectEqual(@as(u8, 2), util_log.level());
+    _ = run(g, &sink, "loglevel 0");
+    try std.testing.expectEqual(@as(u8, 0), util_log.level());
+
+    const lt = run(g, &sink, "listthreads");
+    try std.testing.expect(std.mem.find(u8, lt, "main") != null);
+
+    _ = run(g, &sink, "cp 2 tele");
+    const cp = run(g, &sink, "cp tele");
+    try std.testing.expect(std.mem.find(u8, cp, "requires permission level 2") != null);
+    try std.testing.expectEqual(@as(u8, 2), g.commandLevel("tele"));
+    _ = run(g, &sink, "cp 0 tele");
+    try std.testing.expectEqual(@as(u8, 0), g.commandLevel("tele"));
+    std.debug.print("PASS admin-ops: getoptions/exportcurrentconfigs/loglevel/listthreads/cp\n", .{});
 }

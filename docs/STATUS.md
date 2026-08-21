@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 197 `WORKS`,
-92 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 202 `WORKS`,
+92 `PARTIAL`, 39 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -133,6 +133,14 @@ placement 12-24 m; count range parsed from the action's `count` property);
 SetCVar/ShowMessageWindow stay recorded-unfired as stock runs them on the
 owning client, and GameEvent actions have no stock quest uses. Counts
 unchanged (the action row was outside the scored set).
+Then the Net/ops MISSING admin verbs went WORKS: `getoptions` (all known
+serverconfig names with current values, GameStats-backed prefs preferred),
+`exportcurrentconfigs` (`<world_dir>/exported_config.txt`),
+`loglevel` (stock Log.Level 0..4 gating info/warn/err), `listthreads`/`lt`,
+and `commandpermission`/`cp` (per-command required level, enforced at the
+in-game console boundary; levels run 0 = highest like stock). The Steam-group
+verbs stay a documented hard gap. Net and ops 47/4/5 -> **52/4/0**; total
+**202/92/39**.
 The dashboard
 (docs/provenance.html) is synced.
 

@@ -16,6 +16,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- The admin console verb set is complete for the stock surface:
+  `getoptions` dumps every known serverconfig option with its current value,
+  `exportcurrentconfigs` writes them to `<world_dir>/exported_config.txt`,
+  `loglevel` sets the runtime log level (gating info/warn/err like stock
+  Log.Level), `listthreads`/`lt` summarizes the server's threads, and
+  `commandpermission`/`cp` sets a per-command required permission level
+  enforced at the in-game console boundary. The Steam-group verbs
+  (`admin addgroup` / `whitelist addgroup`) stay a documented gap (zdtd has
+  no Steam group concept).
 - Quest `<action>` elements are complete on the stock surface: SpawnGSEnemy
   now spawns its gamestage-scaled enemies around the player on phase entry
   (stock SpawnQuestEntity placement, 12-24 m), alongside the existing

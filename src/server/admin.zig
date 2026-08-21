@@ -456,6 +456,20 @@ pub const Command = union(enum) {
     shutdown,
     /// Stock `version`.
     version,
+    /// Stock `getoptions`: dump the known option names and current values.
+    getoptions,
+    /// Stock `exportcurrentconfigs`: write the effective options to disk.
+    exportcurrentconfigs,
+    /// Stock `loglevel [n]`: read (no arg) or set the runtime log level.
+    /// Arg is a slice of the input line.
+    loglevel: ?[]const u8,
+    /// Stock `listthreads` / `lt`: summary of the server's logical threads.
+    listthreads,
+    /// Stock `commandpermission` / `cp`: per-command required permission
+    /// level. `cp <command>` reports; `cp <level> <command>` sets (levels run
+    /// 0 = highest .. 255; the caller must be at least as privileged).
+    /// `verb` is a slice of the input line.
+    commandpermission: struct { level: ?u8, verb: []const u8 },
     /// Erase a player record from players.zsv by login name (operator right-to-erasure).
     /// Name is a slice into the original command line (must outlive the Command).
     wipeplayer: []const u8,
@@ -518,6 +532,12 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
         return "spawnentity <slot|entityId> <class>";
     if (std.mem.eql(u8, verb, "wipeplayer")) return "wipeplayer <name>";
     if (std.mem.eql(u8, verb, "gamestage")) return "gamestage [slot]";
+    if (std.mem.eql(u8, verb, "getoptions")) return "getoptions";
+    if (std.mem.eql(u8, verb, "exportcurrentconfigs")) return "exportcurrentconfigs";
+    if (std.mem.eql(u8, verb, "loglevel")) return "loglevel [0..4]";
+    if (std.mem.eql(u8, verb, "listthreads") or std.mem.eql(u8, verb, "lt")) return "listthreads";
+    if (std.mem.eql(u8, verb, "commandpermission") or std.mem.eql(u8, verb, "cp"))
+        return "commandpermission <command> | commandpermission <level> <command>";
     if (std.mem.eql(u8, verb, "guardclear") or std.mem.eql(u8, verb, "gc"))
         return "guardclear <slot>";
     if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?") or std.mem.eql(u8, verb, "commands"))
@@ -577,6 +597,26 @@ pub fn parseCommand(line: []const u8) Command {
     }
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "getoptions")) return if (it.next() == null) .getoptions else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "exportcurrentconfigs")) return if (it.next() == null) .exportcurrentconfigs else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "loglevel")) {
+        const p = it.next();
+        if (p != null and it.next() != null) return .{ .bad_args = cmd };
+        return .{ .loglevel = p };
+    }
+    if (std.mem.eql(u8, cmd, "listthreads") or std.mem.eql(u8, cmd, "lt")) return if (it.next() == null) .listthreads else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "commandpermission") or std.mem.eql(u8, cmd, "cp")) {
+        // cp <command>  |  cp <level> <command>
+        const a = it.next() orelse return .{ .wrong_args = .{ .expected = "1 or 2", .found = 0 } };
+        if (std.fmt.parseInt(u8, a, 10)) |lvl| {
+            const v = it.next() orelse return .{ .wrong_args = .{ .expected = "2", .found = 1 } };
+            if (it.next() != null) return .{ .bad_args = cmd };
+            return .{ .commandpermission = .{ .level = lvl, .verb = v } };
+        } else |_| {
+            if (it.next() != null) return .{ .bad_args = cmd };
+            return .{ .commandpermission = .{ .level = null, .verb = a } };
+        }
+    }
     if (std.mem.eql(u8, cmd, "plugin")) {
         // zdtd wasm plugin ops: `plugin list` / `plugin reload <name>`.
         return .{ .plugin = std.mem.trim(u8, it.rest(), " ") };
