@@ -14,6 +14,8 @@ const io_fs = @import("../../util/io_fs.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
+const systems = @import("../../ecs/systems.zig");
+const game_hooks = @import("../game/hooks.zig");
 const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
 const wire_frame = @import("../../wire/frame.zig");
@@ -2285,4 +2287,38 @@ test "quest objective events mirror to party members" {
         }
     }
     try std.testing.expect(b_got);
+}
+
+test "poi lockout reports bedroll and land claim homes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var lock_cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&lock_cap);
+    _ = ca;
+    // The home-lockout hook reports the bedroll / land-claim bits that
+    // questCheckPoiLockout maps to LockReason.bedroll / .land_claim.
+    g.clients[0].has_bed = true;
+    g.clients[0].bed_x = 250;
+    g.clients[0].bed_y = 70;
+    g.clients[0].bed_z = 250;
+    var bits = game_hooks.homeLockout(g, g.clients[0].entity_id, 250, 250);
+    try std.testing.expect((bits & 1) != 0);
+    // Move the bed away; a land claim at the POI center reports bit 2.
+    g.clients[0].bed_x = 10;
+    g.clients[0].bed_z = 10;
+    g.registerClaim(250, 70, 250, g.clients[0].entity_id);
+    bits = game_hooks.homeLockout(g, g.clients[0].entity_id, 250, 250);
+    try std.testing.expect((bits & 2) != 0);
+    // With neither home present, no bits fire.
+    g.removeClaimAt(250, 70, 250);
+    g.clients[0].has_bed = false;
+    bits = game_hooks.homeLockout(g, g.clients[0].entity_id, 250, 250);
+    try std.testing.expectEqual(@as(u8, 0), bits);
 }

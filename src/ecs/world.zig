@@ -377,6 +377,11 @@ pub const World = struct {
     /// party data, every other player blocks (pre-party behaviour).
     party_same_ctx: ?*anyopaque = null,
     party_same_fn: ?*const fn (?*anyopaque, i32, i32) bool = null,
+    /// Quest POI lockout home reasons (stock CheckForPOILockouts): returns a
+    /// bitmask of whether the entity's bedroll (1) or land claim (2) overlaps
+    /// the POI at (x, z). Unset -> neither reason ever fires.
+    home_ctx: ?*anyopaque = null,
+    home_fn: ?*const fn (?*anyopaque, i32, f32, f32) u8 = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

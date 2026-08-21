@@ -238,3 +238,35 @@ pub fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
     }
     return base;
 }
+
+/// Quest POI lockout home reasons (stock CheckForPOILockouts): bit 1 = the
+/// entity's respawn bedroll is inside the POI, bit 2 = a land claim overlaps
+/// the POI. The claim check uses the keystone-to-center distance (claim
+/// protects a radius of land_claim_size/2, stock LandClaimBlock).
+pub fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var bits: u8 = 0;
+    var i: usize = 0;
+    while (i < g.clients.len) : (i += 1) {
+        const cl = &g.clients[i];
+        if (!cl.joined or cl.entity_id != entity_id) continue;
+        if (cl.has_bed) {
+            const dx = @as(f32, @floatFromInt(cl.bed_x)) - px;
+            const dz = @as(f32, @floatFromInt(cl.bed_z)) - pz;
+            // A bed within 32 m of the POI center counts as inside the POI
+            // footprint (the quest cannot reset the POI you respawn in).
+            if (dx * dx + dz * dz < 32.0 * 32.0) bits |= 1;
+        }
+        break;
+    }
+    const half: f32 = @floatFromInt(@divTrunc(@as(i32, g.land_claim_size), 2));
+    var ci: usize = 0;
+    while (ci < g.land_claims_n) : (ci += 1) {
+        const c = &g.land_claims[ci];
+        if (c.owner_entity != entity_id) continue;
+        const dx = @as(f32, @floatFromInt(c.x)) - px;
+        const dz = @as(f32, @floatFromInt(c.z)) - pz;
+        if (dx * dx + dz * dz < half * half) bits |= 2;
+    }
+    return bits;
+}

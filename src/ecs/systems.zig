@@ -864,6 +864,15 @@ pub fn questCheckPoiLockout(w: *World, entity_id: i32, x: f32, z: f32) PoiLockou
             return .{ .reason = .player_inside };
         }
     }
+    // Bedroll / land-claim lockouts (stock CheckForPOILockouts): a quest
+    // cannot reset a POI that holds the player's respawn bed or a land claim.
+    // The Game wires `home_fn` (client bed + claims store); unset = neither
+    // reason ever fires (offline/test worlds).
+    if (w.home_fn) |f| {
+        const bits = f(w.home_ctx, entity_id, rect.x + rect.size_x * 0.5, rect.z + rect.size_z * 0.5);
+        if ((bits & 1) != 0) return .{ .reason = .bedroll };
+        if ((bits & 2) != 0) return .{ .reason = .land_claim };
+    }
     return .{};
 }
 

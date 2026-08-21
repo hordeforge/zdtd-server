@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 191 `WORKS`,
-98 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 192 `WORKS`,
+97 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -518,6 +518,13 @@ first `value` entries (isfixed) and grant each stack; RewardQuest entries
 chain - the turn-in grants the named quest to the journal. RE pin:
 7dtd-research quests-challenges.md. Quests 24/7/1 -> 25/6/1, total
 190/99/44 -> **191/98/44**.
+
+POI lockout row -> WORKS 2026-08-22: the home reasons now fire - a Game
+context hook reports the requesting player's respawn bed and land claims
+(land_claim_size radius around the keystone), and questCheckPoiLockout maps
+them to LockReason.bedroll / .land_claim, alongside the existing
+QuestLock, PlayerInside and the stock party-member exemption. Quests
+25/6/1 -> 26/5/1, total 191/98/44 -> **192/97/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

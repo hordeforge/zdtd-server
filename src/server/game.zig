@@ -724,6 +724,9 @@ pub const Game = struct {
         // Quest POI lockout exempts party members (stock CheckForPOILockouts).
         self.sim.party_same_ctx = self;
         self.sim.party_same_fn = &partySame;
+        // ... and reports bedroll/land-claim home lockouts.
+        self.sim.home_ctx = self;
+        self.sim.home_fn = &homeLockout;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -852,6 +855,10 @@ pub const Game = struct {
 
     fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
         return game_hooks.partySame(ctx, a, b);
+    }
+
+    fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
+        return game_hooks.homeLockout(ctx, entity_id, px, pz);
     }
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {

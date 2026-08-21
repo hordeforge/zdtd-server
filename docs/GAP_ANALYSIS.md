@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (191/98/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (192/97/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 25 | 6 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 26 | 5 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **191** | **98** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **192** | **97** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**25 WORKS · 6 PARTIAL · 1 MISSING**
+**26 WORKS · 5 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -695,11 +695,14 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/wire/stock_quest.zig:438`, `:463`, `:478`,
   `src/server/game.zig:6288`, `:6322`, `asm.il:835620-836087`, `asm.il:999755`
 
-- **POI lockout check (server half)** `PARTIAL`
-  Reports QuestLock and PlayerInside. Bedroll and LandClaim reasons never fire
-  because the server tracks neither, and stock's party-member exemption is not
-  modelled so a party mate inside the POI blocks the reset. Unit tested.
-  *Anchors:* `src/ecs/systems.zig:426`, `:2538`, `asm.il:998990-999125`
+- **POI lockout check (server half)** `WORKS` `(2026-08-22)`
+  Reports QuestLock, PlayerInside (with the stock party-member exemption: a
+  party mate inside the POI does not block), Bedroll and LandClaim. The home
+  reasons use the Game-wired context hook (the client's respawn bed and the
+  claims store, `land_claim_size` radius around the keystone): a quest cannot
+  reset a POI holding the player's bed or claim. Unit tested.
+  *Anchors:* `src/ecs/systems.zig` `questCheckPoiLockout`,
+  `src/server/game/hooks.zig` `homeLockout`, `asm.il:998990-999125`
 
 - **NetPackageSharedQuest** `WORKS`
   All four heads parsed with truncation rejected (round-trip and truncation
