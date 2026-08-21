@@ -3258,11 +3258,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  84 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  85 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
   EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
-  EntityAwardKillServer, ParticleEffect, EntityStealth, QuestGotoPoint and
-  QuestTreasurePoint have handlers
+  EntityAwardKillServer, ParticleEffect, EntityStealth, QuestGotoPoint,
+  QuestTreasurePoint and EntityPhysics have handlers
   since the last count; the Waypoint
   relay parses the full Waypoint v7 body and fans the invite to the
   inviter's allies or all players per
@@ -3278,18 +3278,21 @@ persists so little that a restart visibly damages a built base.
   particles to every client except the causing entity's owner per
   SpawnParticleEffectServer, the EntityStealth stealth report is a
   validated no-op because zdtd computes stealth server-side (crouch from
-  movement frames, smell from buffs), and the QuestGotoPoint /
+  movement frames, smell from buffs), the QuestGotoPoint /
   QuestTreasurePoint reports are validated no-ops because goto objectives
   complete by proximity (questTickGoto) and fetch/treasure phases advance
-  from the QuestObjectiveUpdate treasure_complete event).
+  from the QuestObjectiveUpdate treasure_complete event, and the
+  EntityPhysics physics-master report is a validated no-op because
+  movement/falling-block/vehicle sims are server-authoritative).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 18 have no handler: Debug,
-  DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
-  EncryptionPublicKey, EntityPhysics, EntityRagdoll,
-  KeyExchangeComplete, ModifyCVar,
-  PlayerLaserSight, PlayerTwitchStats,
-  SetProp, SimpleRPC, TwitchAccess, TwitchVoteScheduling,
-  WorldFolder.
+  yields 98 names the stock client actually sends; 17 have no handler,
+  categorized by scope (protocol-packages.md 5.14): mod API surface
+  (ModifyCVar, SetProp, SimpleRPC, Debug), EAC/encryption waivers (EAC,
+  EncryptionPublicKey, KeyExchangeComplete), creative/editor
+  (EditorUpdateVolume, WorldFolder), Twitch integration (PlayerTwitchStats,
+  TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
+  (DynamicMesh), deferred cosmetic/depth (EntityRagdoll buff-triggered
+  ragdoll relay, DroneDataSync/DroneParticleEffect junk-drone state).
   Player-visible: vending machines are inert, ragdolls are not
   relayed. (Goto/treasure quest markers register through the server's
   objective wire; the client's reach/dig reports are redundant with the

@@ -187,6 +187,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
+        // Stock NetPackageEntityPhysics (read IL=74): cFlagIsMaster u16,
+        // cFlagIsCollided u16, cFlagOnGround u16, EntityId i32, Pos 3xf32,
+        // QRot 4xf32, Velocity 3xf32, AngularVelocity 3xf32, Flags u16. The
+        // entity's physics master reports pos/rot/velocity so the server
+        // mirrors it (ProcessPackage gates on isPhysicsMaster). zdtd's
+        // movement, falling-block and vehicle sims are server-authoritative
+        // (broadcast PosAndRot / VehiclePositions / EntityVelocity), so the
+        // report is a redundant echo: validate the body and drop.
+        if (body.len < 70) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

@@ -417,6 +417,18 @@ redundant. RE pin: 7dtd-research protocol-packages.md 5.13. C2S handled
 names 82 -> 84 of the 98 stock client sends; Net and ops stays 44/7/5,
 total **183/106/44**.
 
+EntityPhysics handled + C2S tail categorized 2026-08-21 (C2S handler row,
+stays PARTIAL): the physics-master report (pos/rot/velocity + flags) is a
+validated no-op because movement, falling-block and vehicle sims are
+server-authoritative (broadcast PosAndRot / VehiclePositions /
+EntityVelocity). The remaining 17 unhandled names are categorized by scope
+(protocol-packages.md 5.14): mod API surface, EAC/encryption waivers,
+creative/editor, Twitch integration, headless mesh, and deferred
+cosmetic/depth (EntityRagdoll buff-triggered ragdoll relay,
+DroneDataSync/DroneParticleEffect junk-drone state). C2S handled names 84
+-> 85 of the 98 stock client sends; Net and ops stays 44/7/5, total
+**183/106/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

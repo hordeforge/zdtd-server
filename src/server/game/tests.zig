@@ -2062,3 +2062,24 @@ test "quest goto/treasure point reports are handled without double-completion" {
     try g.injectFramed(ca, f2);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
 }
+
+test "entity physics report is handled without touching the sim" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    var body: [80]u8 = undefined;
+    std.mem.writeInt(i32, body[8..12], ca.entity_id, .little);
+    var frame_buf: [128]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageEntityPhysics", &body);
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    try g.injectFramed(ca, framed);
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+}
