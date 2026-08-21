@@ -88,7 +88,12 @@ the join-time deco row went WORKS (decorations now stream with newly entered
 chunks - sendDecoForStreamedChunk generates + sends each new 128-block deco
 chunk once per client with tracking; the client's DecoManager.Read ADDS
 post-join updates, so the world is not bald beyond spawn), total
-**160/126/44**. The dashboard (docs/provenance.html) is synced.
+**160/126/44**. The dashboard (docs/provenance.html) is synced. Then the
+sleeper wake cascade gained the noise-triggered volume wake: a combat noise
+inside a volume's AABB (+0.9 pad, RE World.CheckSleeperVolumeNoise) now spawns
+its whole group independent of the player, so a shot inside a POI summons its
+sleepers before entry (counts unchanged - sleeper-pose respawn remains). The
+dashboard (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
@@ -114,8 +119,8 @@ light-level leg stays RE-blocked, no server light channel)
 13. Localization titles (WORKS 2026-08-21 - the server sends localization keys and the stock client resolves them from its own Localization.txt)
 
 AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + CheckToSpawn scouts + cooldowns +
-feral roll); wandering horde paths, feral sense, sleeper wake cascade and persistent director state are PARTIAL
-with documented notes in GAP_ANALYSIS 5.3.
+feral roll); wandering horde paths, feral sense, sleeper-pose respawn and persistent director state are PARTIAL
+with documented notes in GAP_ANALYSIS 5.3 (sleeper wake cascade itself: player-entry volume wake + noise-triggered volume wake, 2026-08-21).
 Vehicle definitions XML reconciled WORKS 2026-08-21 (vehicles.xml loads per-kind Defs used by the spawn path). nav_objects.xml and blade/junk turret variants documented PARTIAL (markers/turrets ship with the stock wire; the data-driven per-objective nav_object and per-variant turret tables are refinements). 2026-08-21: the remaining ops/engineering MISSING rows (Steam listing, query protocol, Docker/systemd, hot reload, multi-world, path worker pool, spatial hash, interest budgets, entityId map, TE scan job, bench harnesses, capture regression, multi-version matrix, region-file save internals) are documented non-client-visible / out of scope. **TOP REMAINING WIRE ITEM: NetPackageInventoryTransactionRequest - the stock `InventoryTransaction.Read` parse (Guid-keyed, hash-validated, InventoryOperation ops incl. SetAll WriteArray, items.md 2060-2087) now lands in `parseStockInvTx` with detection on `c2s_stock_invtx`; the transactional-inventory mapping slice (op application, ledger hash check, stock-shaped response) is next and its Guid-resolution leg is RE-blocked (no CreateInventoryServer callers in the corpus; candidate capture: container-open sequence vs stock dedi), so the mapping needs new RE evidence before it can land.**
 
 ## Wave 2026-08-20 (config + provenance pass)

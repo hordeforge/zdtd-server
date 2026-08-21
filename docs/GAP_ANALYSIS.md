@@ -4329,7 +4329,7 @@ Honest gaps:
 | Heat map / activity | WORKS (2026-08-21 reconciliation: AIDirector::NotifyActivity (asm.il 414504-415200) adds region activity with linear decay, the 5 s CheckToSpawn spawns scout parties toward hot centers, region + neighbor cooldowns and the 20% feral roll (doubled cooldown) match FindBestEventAndReset / StartCooldownOnNeighbors; workstation crafting raises activity like stock) |
 | Wandering horde paths | PARTIAL (horde spawns at ~92 m, marked horde, chases through the normal A* pathing with drift-teleport back to the party focus; stock road-following path generation is not ported) |
 | Feral sense / blood moon music sync | PARTIAL (blood moon music sync WORKS - global eligibility + join replay; entityclasses FeralSense is not parsed - night sense amplification for feral classes missing) |
-| Sleeper wake cascade | PARTIAL (sleeper volumes wake their group on player entry and combat noise wakes sleepers within radius (2026-08-20); volume-to-volume cascade and sleeper-pose respawn are not ported) |
+| Sleeper wake cascade | PARTIAL (sleeper volumes wake their group on player entry, and combat noise now wakes whole volumes - a noise inside a volume's AABB (+0.9 pad, RE entity-ai.md World.CheckSleeperVolumeNoise / SleeperVolume.CheckNoise) spawns its group independent of the player, so a shot inside a POI summons its sleepers; sleepers already spawned also wake within the noise radius (2026-08-21). Remaining: sleeper-pose respawn, volume spawn not gated on AIDirector.CanSpawn 2.1 (documented divergence) |
 | Persistent director state save | PARTIAL (world clock + blood-moon schedule persist (ZCL2, 2026-08-20); wandering-horde next time and the heat map do not survive restart) |
 
 ---

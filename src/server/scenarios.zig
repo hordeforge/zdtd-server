@@ -9,6 +9,7 @@ const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
+const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
 const invsys = @import("../ecs/inventory.zig");
@@ -931,6 +932,53 @@ test "scenario deco streams beyond the join window as chunks stream" {
     try g.streamChunksForClient(c);
     try std.testing.expectEqual(streamed_marked, c.deco_sent_n);
     std.debug.print("PASS deco-stream: {d} join deco chunks, {d} after teleport, deduped on re-stream\n", .{ join_marked, streamed_marked });
+}
+
+test "scenario combat noise wakes a sleeper volume before player entry" {
+    // RE entity-ai.md CheckSleeperVolumeNoise (IL=62) + SleeperVolume.CheckNoise
+    // (IL=69): a noise inside a volume's AABB (+0.9 pad) spawns its sleepers,
+    // independent of the player's position. The player here stays far away, so
+    // only the noise can wake the volume.
+    freshScenarioDir("worlds/zdtd_sc_sleepernoise");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_sleepernoise", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    // One volume far from the player's spawn (~256, 70, 256).
+    const vols = try gpa.alloc(sleepers_mod.Volume, 1);
+    defer gpa.free(vols);
+    vols[0] = .{
+        .x0 = 100,
+        .y0 = 70,
+        .z0 = 100,
+        .x1 = 108,
+        .y1 = 76,
+        .z1 = 108,
+        .group_n = 1,
+    };
+    vols[0].groups[0] = .{ .class_name = "GroupGenericZombie", .min_count = 2, .max_count = 4 };
+    g.sleepers.volumes = vols;
+    g.sleepers.trigger_count = 0;
+    // A combat noise inside the volume.
+    g.sim.pushNoise(104, 72, 104, 10);
+    try g.step();
+    try std.testing.expect(g.sleepers.volumes[0].triggered);
+    try std.testing.expect(g.sleepers.trigger_count > 0);
+    // The volume's sleepers spawned in/near it.
+    var near: usize = 0;
+    for (g.sim.kind_groups.slice(.zombie)) |zs| {
+        if (!g.sim.mask[zs].sleeper or !g.sim.alive[zs]) continue;
+        const t = g.sim.transform[zs];
+        if (t.x > 90 and t.x < 120 and t.z > 90 and t.z < 120) near += 1;
+    }
+    try std.testing.expect(near > 0);
+    std.debug.print("PASS sleeper-noise: volume woken by combat noise, spawned {d} sleepers\n", .{near});
 }
 
 test "scenario persist with stock map: edit survives restart under same --map" {

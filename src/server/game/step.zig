@@ -91,6 +91,10 @@ pub fn step(self: *Game) !void {
             self.harness.counters.add(.terrain_snap_chunks, covered);
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
+        // Wake sleeper volumes whose AABB contains this tick's combat noise
+        // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
+        // before systems.tickAll consumes the noise ring.
+        self.triggerSleeperVolumesByNoise();
         const r = systems.tickAll(&self.sim, dt);
         self.harness.counters.add(.path_replans, r.path_replans);
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);

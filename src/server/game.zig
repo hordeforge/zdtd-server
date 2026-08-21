@@ -2368,6 +2368,10 @@ pub const Game = struct {
         return game_sleeper.tickSleeperVolumes(self);
     }
 
+    pub fn triggerSleeperVolumesByNoise(self: *Game) void {
+        return game_sleeper.triggerSleeperVolumesByNoise(self);
+    }
+
     /// Resolve a SleeperVolumeGroup name to an entity def, stock order first
     /// (SleeperVolume::Spawn, asm.il ~1199169): the already-resolved gamestage
     /// SpawnGroup names an entitygroup, and only its class pick counts. Across
