@@ -219,7 +219,7 @@ Coverage targets, all enforced by the scan:
 | `src/version.zig` | Z | Product and compatibility versions reported to operators |
 | `src/wire/binary.zig` | R | Little-endian readers/writers matching .NET BinaryReader/Writer (7-bit strings) |
 | `src/wire/frame.zig` | R | Game channel envelope + inner packages (stock NetConnectionSimple layout) |
-| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout | parsePlayerLogin reads version/compVersion (LongStringNoBuild form) + KickReason.version_mismatch
+| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout | parsePlayerLogin reads version/compVersion (LongStringNoBuild form) + KickReason.version_mismatch channelFor picks the envelope channel by package name (stock get_Channel set)
 | `src/wire/platform_user.zig` | R | PlatformUserIdentifierAbs wire codec (stock V3.1.0 b14). |
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |

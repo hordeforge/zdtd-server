@@ -20,7 +20,7 @@ pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8,
 pub fn sendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) !bool {
     const pkg_id = packages.idOf(pkg_name) orelse return false;
     var fr: wire_frame.DeflateFramer = undefined;
-    fr.begin(&self.send_buf, &self.deflate_window, 0, pkg_id, body.len) catch return false;
+    fr.begin(&self.send_buf, &self.deflate_window, packages.channelFor(pkg_name), pkg_id, body.len) catch return false;
     const w = fr.writer();
     w.writeAll(body) catch return false;
     const framed = fr.finish() catch return false;

@@ -1335,9 +1335,21 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     return ch;
 }
 
+/// Stock `NetPackage.get_Channel` override set (asm.il 808632-808638, 826004,
+/// 833771): bulk world data rides envelope channel 1 so it does not sit in the
+/// same queue as control traffic. Everything else is channel 0.
+pub fn channelFor(name: []const u8) u8 {
+    if (std.mem.eql(u8, name, "NetPackageChunk") or
+        std.mem.eql(u8, name, "NetPackageChunkRemove") or
+        std.mem.eql(u8, name, "NetPackageDynamicMesh") or
+        std.mem.eql(u8, name, "NetPackageMapChunks") or
+        std.mem.eql(u8, name, "NetPackagePOIAround")) return 1;
+    return 0;
+}
+
 pub fn framed(buf: []u8, name: []const u8, body: []const u8) ![]u8 {
     const id = idOf(name) orelse return error.UnknownPackage;
-    return frame.framePackage(buf, 0, id, body);
+    return frame.framePackage(buf, channelFor(name), id, body);
 }
 
 test "setblock stock body roundtrip" {

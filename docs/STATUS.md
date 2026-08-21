@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 172 `WORKS`,
-117 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 173 `WORKS`,
+116 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -190,6 +190,12 @@ compressed envelope flag) alongside Chunk + SignDataResponse, matching every
 emitted member of stock's get_Compress()=true set; the ~250 KiB mapping no
 longer rides the reliable window uncompressed (one flat-world join was 6.4 MB
 out). Total 171/118/44 -> **172/117/44**.
+
+Envelope channel byte shipped 2026-08-21 (Net and ops 33/18/5 -> 34/17/5):
+packages.framed and the deflate path pick the envelope channel by package name
+(packages.channelFor), so Chunk/ChunkRemove (and DynamicMesh/MapChunks/POIAround
+once emitted) ride channel 1 like stock's get_Channel override set, keeping
+bulk world data off the control queue. Total 172/117/44 -> **173/116/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

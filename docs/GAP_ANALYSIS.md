@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (172/117/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (173/116/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 33 | 18 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **172** | **117** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 34 | 17 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **173** | **116** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**33 WORKS · 18 PARTIAL · 5 MISSING**
+**34 WORKS · 17 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3339,12 +3339,15 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:2976-3040`, `:7686-7760`,
   `src/wire/packages.zig:1320`
 
-- **Game envelope channel byte** `PARTIAL`
-  `frame.framePackage` always writes channel 0. Stock overrides `get_Channel` to 1
-  for NetPackageChunk, ChunkRemove, DynamicMesh, MapChunks and POIAround, i.e. bulk
-  world data rides a second envelope stream so it does not sit in the same queue as
-  control traffic.
-  *Anchors:* `src/wire/frame.zig:201-217`, `asm.il:808632-808638`,
+- **Game envelope channel byte** `WORKS` `(2026-08-21)`
+  Stock `get_Channel` returns 1 for NetPackageChunk, ChunkRemove, DynamicMesh,
+  MapChunks and POIAround (bulk world data rides a second envelope stream so it
+  does not sit in the same queue as control traffic); every other package is
+  channel 0. `packages.framed` and the deflate path now pick the channel by
+  package name (`packages.channelFor`), so Chunk/ChunkRemove envelopes leave on
+  channel 1 exactly like stock.
+  *Anchors:* `src/wire/packages.zig` `channelFor`/`framed`,
+  `src/server/game/send_extra.zig` `sendCompressed`, `asm.il:808632-808638`,
   `asm.il:826004`, `asm.il:833771`
 
 - **S2C compression** `WORKS` `(2026-08-21)`
