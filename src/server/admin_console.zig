@@ -1515,7 +1515,11 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 // quest credit to first joined peer if any
                 for (&self.clients, 0..) |*cl, i| {
                     if (!cl.joined) continue;
-                    systems.questOnZombieKilled(&self.sim, i);
+                    // Console kills carry no world position; poi_gated
+                    // ClearSleepers phases stay ungated (0,0 rarely falls
+                    // inside a bound POI) rather than crediting an
+                    // arbitrary POI.
+                    systems.questOnZombieKilled(&self.sim, i, 0, 0);
                     systems.questOnFetchItem(&self.sim, i, 1);
                     break;
                 }

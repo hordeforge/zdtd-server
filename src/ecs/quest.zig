@@ -249,6 +249,10 @@ pub const PhaseSpec = struct {
     /// `<property name="nav_object">`), e.g. quest / rally / sleeper_volume /
     /// treasure / go_to_trader / return_to_trader. Empty = legacy fallback.
     nav_object: []const u8 = "",
+    /// True when the driving objective is ClearSleepers (stock
+    /// QuestEvent_SleepersCleared): kills only count when they happen inside
+    /// the quest's bound POI rect, not anywhere on the map.
+    poi_gated: bool = false,
 };
 
 /// Quest catalog row defaults before quests.xml loads (stock XML wins at

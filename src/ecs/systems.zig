@@ -653,6 +653,15 @@ fn firePhaseActions(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef)
 /// Current phase objective satisfied: advance to the next actionable phase, or
 /// finish at the highest phase. Mirrors Quest.AdvancePhase (asm.il 982816).
 fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
+    // A completed ClearSleepers phase suppresses the quest POI's sleeper
+    // volumes (stock QuestEvent_SleepersCleared removes the POI's sleeper
+    // data). The Game hook marks the persistent store; unset = no
+    // suppression (test worlds without sleeper data).
+    if (currentPhaseSpec(d, s)) |done_spec| {
+        if (done_spec.kind == .kill_zombies and done_spec.poi_gated and s.poi.valid()) {
+            if (w.quest_clear_fn) |f| f(w.quest_clear_ctx, s.poi);
+        }
+    }
     if (s.phase >= d.highest_phase) {
         finishPhaseGraph(w, ps, s, d);
         return;
@@ -760,7 +769,7 @@ pub fn questAcceptStarter(w: *World, peer_slot: usize) bool {
     return questAccept(w, peer_slot, starter);
 }
 
-pub fn questOnZombieKilled(w: *World, peer_slot: usize) void {
+pub fn questOnZombieKilled(w: *World, peer_slot: usize, x: f32, z: f32) void {
     const ps = w.playerByPeer(peer_slot) orelse return;
     if (!w.mask[ps].journal) return;
     var j = &w.journal[ps];
@@ -768,6 +777,14 @@ pub fn questOnZombieKilled(w: *World, peer_slot: usize) void {
         if (!s.active or s.completed or s.ready_turn_in) continue;
         const d = w.catalog.byId(s.def_id) orelse continue;
         if (d.phases.len > 0) {
+            // ClearSleepers phases (stock QuestEvent_SleepersCleared) only
+            // count kills inside the quest's bound POI: a clear quest must be
+            // cleared in its POI, not farmed anywhere on the map. Quests
+            // without a bound rect keep the ungated behaviour (test worlds).
+            const spec = currentPhaseSpec(d, s) orelse continue;
+            if (spec.kind == .kill_zombies and spec.poi_gated and s.poi.valid()) {
+                if (!s.poi.containsXZ(x, z)) continue;
+            }
             bumpPhase(w, ps, s, d, .kill_zombies, 1);
             continue;
         }
@@ -3761,9 +3778,9 @@ test "quest kill complete on journal component" {
     _ = w.spawnPlayer(0, 70, 0, 0);
     try std.testing.expect(questAccept(&w, 0, 1));
     try std.testing.expect(questHasActive(&w, 0, 1));
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(!questHasActive(&w, 0, 1));
     try std.testing.expectEqual(@as(u32, 25), questCoins(&w, 0));
 }
@@ -3822,7 +3839,7 @@ test "quest phase graph goto then kill then turn-in at trader" {
     try std.testing.expectEqual(@as(u8, 1), s.phase);
 
     // Kills on the goto phase must not advance it.
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expectEqual(@as(u8, 1), s.phase);
 
     // Reach the goto point → advance to the kill phase.
@@ -3830,9 +3847,9 @@ test "quest phase graph goto then kill then turn-in at trader" {
     try std.testing.expectEqual(@as(u8, 2), s.phase);
 
     // Three kills complete the kill phase → trader phase, not yet ready.
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expectEqual(@as(u8, 3), s.phase);
     try std.testing.expect(!s.ready_turn_in);
     try std.testing.expect(questHasActive(&w, 0, 20));
@@ -3867,8 +3884,8 @@ test "quest phase graph auto-skips leading scaffolding on accept" {
     try std.testing.expect(questAccept(&w, 0, 21));
     // Leading auto phase auto-completes on accept: land on the kill phase.
     try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 21).?.phase);
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(!questHasActive(&w, 0, 21));
     try std.testing.expectEqual(@as(u32, 30), questCoins(&w, 0));
 }
@@ -3966,6 +3983,50 @@ test "goto/stay default radii come from catalog.policy (ADR 0021)" {
     try std.testing.expect(!questHasActive(&w, 0, 43));
 }
 
+test "ClearSleepers kills gate to the bound POI and suppress its sleepers" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 2, .poi_gated = true }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 50,
+        .kind = .kill_zombies,
+        .name = "cs",
+        .title = "CS",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 50, .source = .builtin };
+    w.poi_fn = &testPoiRect; // POI covering (0,0)..(64,64)
+    // Spy: completing the clear phase fires the sleeper-suppression hook.
+    var cleared_n: u32 = 0;
+    const spy = struct {
+        fn f(ctx: ?*anyopaque, _: c.PoiRect) void {
+            const p: *u32 = @ptrCast(@alignCast(ctx.?));
+            p.* += 1;
+        }
+    }.f;
+    w.quest_clear_ctx = &cleared_n;
+    w.quest_clear_fn = spy;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 50));
+    try std.testing.expect(questFindActive(&w, 0, 50).?.poi.valid());
+    // A kill outside the bound POI must not advance a ClearSleepers phase
+    // (stock QuestEvent_SleepersCleared only counts the POI's own sleepers).
+    questOnZombieKilled(&w, 0, 1000, 1000);
+    try std.testing.expect(questHasActive(&w, 0, 50));
+    try std.testing.expectEqual(@as(u32, 0), cleared_n);
+    // Kills inside the POI count; completing the phase suppresses sleepers.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(questHasActive(&w, 0, 50));
+    questOnZombieKilled(&w, 0, 20, 20);
+    try std.testing.expect(!questHasActive(&w, 0, 50));
+    try std.testing.expectEqual(@as(u32, 1), cleared_n);
+}
+
 test "fetch_trader goto target stays the def spot, not a covering POI center" {
     var w: World = .{};
     defer w.deinit();
@@ -4032,7 +4093,7 @@ test "rally phase blocks until the marker is activated" {
     try std.testing.expectEqual(@as(u8, 1), s.phase);
     try std.testing.expect(s.poi.valid());
     // Kills on the rally phase do not advance it.
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expectEqual(@as(u8, 1), s.phase);
     // A foreign quest code is ignored.
     try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code + 1));
@@ -4058,8 +4119,8 @@ test "rally phase stays scaffolding without a poi rect" {
     // auto-completes exactly as it did before rally objectives existed.
     try std.testing.expectEqual(@as(u8, 2), s.phase);
     try std.testing.expect(!s.poi.valid());
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(!questHasActive(&w, 0, 22));
 }
 
@@ -4131,8 +4192,8 @@ test "quest turn_in needs trader open" {
     w.catalog = .{ .defs = &defs, .starter_id = 9, .source = .builtin };
     _ = w.spawnPlayer(0, 70, 0, 0);
     try std.testing.expect(questAccept(&w, 0, 9));
-    questOnZombieKilled(&w, 0);
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(questHasActive(&w, 0, 9));
     try std.testing.expect(questFindActive(&w, 0, 9).?.ready_turn_in);
     questOnTraderOpen(&w, 0);
@@ -4558,7 +4619,7 @@ test "unlock_poi action releases the quest POI lock on phase entry" {
     // One kill advances to phase 2, firing the UnlockPOI action. The lock then
     // drops its quester and enters the stock grace window (last quester out
     // starts `unlock_grace`), so `check` still reports quest_lock briefly.
-    questOnZombieKilled(&w, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expectEqual(@as(u8, 2), s.phase);
     var idx: ?usize = null;
     for (w.poi_locks.entries[0..w.poi_locks.n], 0..) |*e, i| {

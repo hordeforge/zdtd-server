@@ -170,6 +170,9 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         radius: f32 = 0,
         /// nav_objects.xml class from the objective's nav_object property.
         nav_object: []const u8 = "",
+        /// ClearSleepers objectives gate kills to the bound POI (stock
+        /// QuestEvent_SleepersCleared).
+        poi_gated: bool = false,
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
@@ -205,7 +208,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         // catalog arena (a bare slice would dangle once the parse buffer frees).
         const nav_object_raw = xml.propertyValue(body[oi..elem_end], "nav_object") orelse "";
         const nav_object = if (nav_object_raw.len > 0) try arena.dupe(u8, nav_object_raw) else "";
-        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius, .nav_object = nav_object };
+        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius, .nav_object = nav_object, .poi_gated = std.mem.eql(u8, typ, "ClearSleepers") };
         obj_phase_bytes[n] = phase;
         // Objective Write subclass by type (stock CreateQuest). Everything not
         // listed writes the BaseObjective shape (FileVersion + CurrentValue).
@@ -231,7 +234,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             if (o.phase != p or o.kind == .auto) continue;
             if (o.score > best_score) {
                 best_score = o.score;
-                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target, .radius = o.radius, .nav_object = o.nav_object };
+                spec = .{ .kind = o.kind, .required = if (o.target == 0) 1 else o.target, .radius = o.radius, .nav_object = o.nav_object, .poi_gated = o.poi_gated };
             }
         }
         specs[p - 1] = spec;

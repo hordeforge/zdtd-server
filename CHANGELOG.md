@@ -16,6 +16,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- ClearSleepers quests are real now: kills only count inside the quest's
+  bound POI (victim position rides the kill event), and completing the phase
+  permanently suppresses the POI's sleeper volumes (persisted across restart),
+  so a cleared POI does not re-spawn its zombies on re-entry.
 - Quest journal persistence is now ZPV5: every saved quest stores its name
   (the stock Quest.Write identity) and the accepted POI rect, so a restart —
   even after a quests.xml edit — restores the same quest bound to the same

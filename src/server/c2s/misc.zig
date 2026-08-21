@@ -550,7 +550,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
             if (was_zombie) {
-                systems.questOnZombieKilled(&self.sim, c.slot);
+                // The victim position rides the kill event so ClearSleepers
+                // phases can gate kills to the quest's bound POI.
+                const vs_opt = self.sim.slotOfNetId(d.entity_id);
+                const vx: f32 = if (vs_opt) |vs| self.sim.transform[vs].x else 0;
+                const vz: f32 = if (vs_opt) |vs| self.sim.transform[vs].z else 0;
+                systems.questOnZombieKilled(&self.sim, c.slot, vx, vz);
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
                 self.killXpAward(c.slot, self.xpGainFor(d.entity_id));

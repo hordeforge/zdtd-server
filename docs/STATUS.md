@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 195 `WORKS`,
-94 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 196 `WORKS`,
+93 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -113,7 +113,13 @@ went WORKS (players.zsv ZPV5: journal entries store the quest **name** (stock
 Quest.Write identity) and the accepted POI rect; restore resolves by name so
 a quests.xml edit cannot reshuffle a saved quest, and the rect comes back
 verbatim instead of re-resolving to the nearest prefab; ZPV2/3/4 files still
-read and upgrade in place), total **195/94/44**. The dashboard
+read and upgrade in place), total **195/94/44**. Then ClearSleepers went real
+(kills gate to the quest's bound POI - the victim position rides the kill
+event, `PhaseSpec.poi_gated` from the ClearSleepers objective type - and
+completing the phase suppresses the POI's sleeper volumes in the persistent
+sleepers_cleared.zsc store, so a cleared POI does not re-arm on re-trigger or
+restart; closes the NetPackageQuestEvent row's open item), total
+**196/93/44**. The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

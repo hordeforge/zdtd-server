@@ -445,6 +445,14 @@ pub fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
     return base;
 }
 
+/// ClearSleepers completion suppression (stock QuestEvent_SleepersCleared
+/// removes the POI's sleeper data): mark the persistent store so a cleared
+/// POI's volumes never re-arm, even across a restart (sleepers_cleared.zsc).
+pub fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    g.sleepers.markClearedRect(rect.x, rect.y, rect.z, rect.size_x, rect.size_y, rect.size_z);
+}
+
 /// Quest POI lockout home reasons (stock CheckForPOILockouts): bit 1 = the
 /// entity's respawn bedroll is inside the POI, bit 2 = a land claim overlaps
 /// the POI. The claim check uses the keystone-to-center distance (claim

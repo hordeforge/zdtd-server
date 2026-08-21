@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 29 | 2 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect |
+| [Quests](#4-quests) | 30 | 1 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **195** | **94** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **196** | **93** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -685,20 +685,23 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/server/game.zig` NPCQuestList remove_quest branch,
   `buildTraderQuestOffers`, `asm.il:827849-827902`
 
-- **NetPackageQuestEvent parse/build and rally handshake** `PARTIAL → reraised (2026-08-07)`
+- **NetPackageQuestEvent parse/build and rally handshake** `WORKS` `(2026-08-21)`
   The head and per-event tails are parsed with bounds checks; TryRallyMarker is
   answered with the full stock reason switch; LockPOI/UnlockPOI drive
-  `ecs/poi_lock.zig`; a peer may only raise events for its own entity. Dropped by
-  the `else => return` arm: ClearSleeper (9), SetupFetch (12), SetupRestorePower
-  (13), FinishManagedQuest (14), ResetTraderQuests (16). These are client
-  notifications for stock's event-driven completion; zdtd's fetch/clear quests
-  complete through the action hooks (`questOnFetchItem` / `questOnZombieKilled`),
-  so the dropped events do not block them - the earlier "neither can complete"
-  claim was based on the stock model. Stock also relays ClearSleeper so
-  sleeper volumes do not respawn after the quest; that suppression is the open
-  part here (sleeper volumes re-arm on volume re-trigger).
+  `ecs/poi_lock.zig`; a peer may only raise events for its own entity. The
+  client-notification events dropped by the `else => return` arm (ClearSleeper
+  9, SetupFetch 12, SetupRestorePower 13, FinishManagedQuest 14,
+  ResetTraderQuests 16) do not block zdtd's fetch/clear quests, which complete
+  through the action hooks (`questOnFetchItem` / `questOnZombieKilled`).
+  2026-08-21: the open item — stock's ClearSleeper suppression of sleeper
+  re-arm — is closed: completing a ClearSleepers phase (POI-gated kills)
+  marks the bound POI's sleeper volumes cleared in the persistent
+  `sleepers_cleared.zsc` store, so a cleared POI does not re-spawn its
+  sleepers on the next re-trigger or restart.
   *Anchors:* `src/wire/stock_quest.zig:438`, `:463`, `:478`,
-  `src/server/game.zig:6288`, `:6322`, `asm.il:835620-836087`, `asm.il:999755`
+  `src/server/game.zig:6288`, `:6322`, `src/ecs/systems.zig` advancePhaseGraph,
+  `src/world/sleepers.zig` markClearedRect,
+  `asm.il:835620-836087`, `asm.il:999755`
 
 - **POI lockout check (server half)** `WORKS` `(2026-08-22)`
   Reports QuestLock, PlayerInside (with the stock party-member exemption: a
@@ -776,11 +779,18 @@ not a sleeper-volume clear), not completion blockers.
   fallbacks (ADR 0021; provenance PROVENANCE.md §3.7).
   ClearSleepers is an N-kills-anywhere counter rather than "clear this POI's
   sleeper volume" (the stock `QuestEvent_SleepersCleared` suppression of
-  sleeper re-arm is the open part).
+  sleeper re-arm is the open part). 2026-08-21: the ClearSleepers leg went
+  real — kills only count inside the quest's bound POI (victim position rides
+  the kill event; `PhaseSpec.poi_gated` from the ClearSleepers objective
+  type), and completing the phase suppresses the POI's sleeper volumes
+  (persistent `sleepers_cleared.zsc`, so a cleared POI does not re-arm on
+  re-trigger or restart). The required count is still the `[quests]` policy
+  floor rather than the POI's live non-excluded volume count (audit B25).
   *Anchors:* `src/server/c2s/quest.zig` NetPackageQuestObjectiveUpdate,
   `src/server/c2s/inv.zig` container branch, `src/ecs/systems.zig`
-  questTickGoto/questTickStayWithin, `src/assets/quests.zig` buildPhaseGraph,
-  scenario `all-quest-kinds`
+  questTickGoto/questTickStayWithin/questOnZombieKilled/advancePhaseGraph,
+  `src/assets/quests.zig` buildPhaseGraph, `src/world/sleepers.zig`
+  markClearedRect, scenario `all-quest-kinds`
 
 - **Starter quest granted at join** `PARTIAL → re-grant FIXED (2026-08-07)`
   `questAcceptStarter` now scans every journal slot for the starter (active or

@@ -212,7 +212,15 @@ pub fn step(self: *Game) !void {
                 const osz: usize = @intCast(owner);
                 const oc = &self.clients[osz];
                 if (!oc.joined) continue;
-                systems.questOnZombieKilled(&self.sim, osz);
+                // ClearSleepers phases gate kills to the quest's POI, so the
+                // victim position rides the kill event (stock EntityKill event
+                // carries the killed entity).
+                const vz = self.sim.slotOfNetId(r.killed_ids[tk]);
+                if (vz) |vs| {
+                    systems.questOnZombieKilled(&self.sim, osz, self.sim.transform[vs].x, self.sim.transform[vs].z);
+                } else {
+                    systems.questOnZombieKilled(&self.sim, osz, 0, 0);
+                }
                 // ItemActionAttack.Hit / ProjectileMoveScript.checkCollision scale a
                 // turret/trap kill's XP by PassiveEffects.ElectricalTrapXP rather than
                 // paying full credit like a direct player kill; stock's own default is

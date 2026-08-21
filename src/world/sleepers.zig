@@ -37,6 +37,11 @@ pub const Volume = struct {
     group_n: u8 = 0,
     /// Once players trigger, stay triggered (no re-spawn spam).
     triggered: bool = false,
+    /// A completed ClearSleepers quest suppressed this volume (stock
+    /// QuestEventManager removes the POI's sleeper data on
+    /// QuestEvent_SleepersCleared): it never re-arms, even across a restart
+    /// (persisted in sleepers_cleared.zsc).
+    quest_cleared: bool = false,
     /// Prefab decoration name (debug).
     prefab: []const u8 = "",
     /// Authored spawn points from `Class=Sleeper` marker blocks inside this AABB.
@@ -80,6 +85,79 @@ pub const Store = struct {
         const yi: i32 = @floor(y);
         const zi: i32 = @floor(z);
         return xi >= v.x0 and xi < v.x1 and yi >= v.y0 and yi < v.y1 and zi >= v.z0 and zi < v.z1;
+    }
+
+    /// Mark every volume intersecting `rect` quest-cleared (a completed
+    /// ClearSleepers quest suppresses its POI's sleeper data, stock
+    /// QuestEvent_SleepersCleared). The flag persists so a cleared POI does
+    /// not re-arm on restart. The overlap test is XZ-only (volumes span the
+    /// full height of their POI).
+    pub fn markClearedRect(self: *Store, x: f32, y: f32, z: f32, size_x: f32, size_y: f32, size_z: f32) void {
+        _ = y;
+        _ = size_y;
+        for (self.volumes) |*v| {
+            if (@as(f32, @floatFromInt(v.x1)) <= x or @as(f32, @floatFromInt(v.x0)) >= x + size_x or
+                @as(f32, @floatFromInt(v.z1)) <= z or @as(f32, @floatFromInt(v.z0)) >= z + size_z)
+                continue;
+            v.quest_cleared = true;
+            v.triggered = true;
+        }
+        self.trigger_count +|= 1;
+    }
+
+    /// Persist quest-cleared volumes (sleepers_cleared.zsc, ZSCL1): the list
+    /// of rects whose sleepers a ClearSleepers quest suppressed, so a cleared
+    /// POI stays clear across a restart.
+    pub fn saveCleared(self: *const Store, allocator: std.mem.Allocator, world_dir: []const u8) !void {
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{world_dir});
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(allocator);
+        try out.appendSlice(allocator, "ZSCL1");
+        var n: u32 = 0;
+        for (self.volumes) |*v| {
+            if (!v.quest_cleared) continue;
+            n += 1;
+        }
+        var n_buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &n_buf, n, .little);
+        try out.appendSlice(allocator, &n_buf);
+        for (self.volumes) |v| {
+            if (!v.quest_cleared) continue;
+            inline for (.{ @as(f32, @floatFromInt(v.x0)), @as(f32, @floatFromInt(v.y0)), @as(f32, @floatFromInt(v.z0)), @as(f32, @floatFromInt(v.x1 - v.x0)), @as(f32, @floatFromInt(v.y1 - v.y0)), @as(f32, @floatFromInt(v.z1 - v.z0)) }) |f| {
+                var fb: [4]u8 = undefined;
+                std.mem.writeInt(u32, &fb, @bitCast(f), .little);
+                try out.appendSlice(allocator, &fb);
+            }
+        }
+        try io_fs.writeFile(path, out.items);
+    }
+
+    /// Load quest-cleared volumes (ZSCL1) and re-mark matching volumes after
+    /// the store is rebuilt from the prefab XMLs. Best-effort: a missing or
+    /// corrupt file leaves the store as-is.
+    pub fn loadCleared(self: *Store, allocator: std.mem.Allocator, world_dir: []const u8) void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{world_dir}) catch return;
+        const raw = io_fs.readFileAll(allocator, path) catch return;
+        defer allocator.free(raw);
+        if (raw.len < 8 or !std.mem.eql(u8, raw[0..5], "ZSCL1")) return;
+        const n = std.mem.readInt(u32, raw[5..9], .little);
+        var off: usize = 9;
+        var i: u32 = 0;
+        while (i < n and off + 24 <= raw.len) : (i += 1) {
+            var x: f32 = undefined;
+            var y: f32 = undefined;
+            var z: f32 = undefined;
+            var sx: f32 = undefined;
+            var sy: f32 = undefined;
+            var sz: f32 = undefined;
+            inline for (.{ &x, &y, &z, &sx, &sy, &sz }) |f| {
+                f.* = @bitCast(std.mem.readInt(u32, raw[off..][0..4], .little));
+                off += 4;
+            }
+            self.markClearedRect(x, y, z, sx, sy, sz);
+        }
     }
 };
 
@@ -454,4 +532,36 @@ test "sleeper volume group forms: name-only vs triple" {
     try std.testing.expectEqual(@as(u8, 255), parseCount("9000"));
     try std.testing.expectEqual(@as(usize, 3), segCount("15, 0, 14#11, 0, 22#10, 0, 16"));
     try std.testing.expectEqual(@as(usize, 1), segCount("15, 0, 14"));
+}
+
+test "quest-cleared volumes persist and suppress re-arm" {
+    // A completed ClearSleepers quest marks its POI's volumes quest_cleared;
+    // the marker survives a restart (sleepers_cleared.zsc) so a cleared POI
+    // does not re-arm. worlds/ is gitignored, so the relative path is safe.
+    io_fs.mkdirPath("worlds/zdtd_sc_sleepers_clear");
+    defer io_fs.removeDirTree("worlds/zdtd_sc_sleepers_clear");
+
+    var vols = [_]Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var store: Store = .{ .volumes = &vols };
+    // Mark the first volume (inside the quest POI rect); the second is a
+    // different POI and must stay untouched.
+    store.markClearedRect(0, 60, 0, 30, 10, 30);
+    try std.testing.expect(store.volumes[0].quest_cleared);
+    try std.testing.expect(!store.volumes[1].quest_cleared);
+
+    // Save + reload into a fresh store (the restart equivalent: volumes are
+    // rebuilt from the prefab XMLs with quest_cleared=false).
+    try store.saveCleared(std.testing.allocator, "worlds/zdtd_sc_sleepers_clear");
+    var vols2 = [_]Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var store2: Store = .{ .volumes = &vols2 };
+    store2.loadCleared(std.testing.allocator, "worlds/zdtd_sc_sleepers_clear");
+    try std.testing.expect(store2.volumes[0].quest_cleared);
+    try std.testing.expect(store2.volumes[0].triggered);
+    try std.testing.expect(!store2.volumes[1].quest_cleared);
 }

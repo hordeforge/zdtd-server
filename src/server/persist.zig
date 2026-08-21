@@ -44,6 +44,7 @@ pub fn saveAllStores(self: *Game) bool {
     self.vending.save(self.world.world_dir) catch |e| note(&ok, self, "save vending", e);
     self.saveClaims() catch |e| note(&ok, self, "save claims", e);
     self.saveEntities() catch |e| note(&ok, self, "save entities", e);
+    self.sleepers.saveCleared(self.allocator, self.world.world_dir) catch |e| note(&ok, self, "save sleepers-cleared", e);
     self.allies.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save allies", e);
     self.saveBlockMeta() catch |e| note(&ok, self, "save block meta", e);
     self.saveWeather() catch |e| note(&ok, self, "save weather", e);

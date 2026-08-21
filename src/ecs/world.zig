@@ -388,6 +388,12 @@ pub const World = struct {
     /// the POI at (x, z). Unset -> neither reason ever fires.
     home_ctx: ?*anyopaque = null,
     home_fn: ?*const fn (?*anyopaque, i32, f32, f32) u8 = null,
+    /// ClearSleepers completion suppression (stock QuestEvent_SleepersCleared
+    /// removes the POI's sleeper data): the Game marks the sleeper store so a
+    /// cleared POI does not re-arm, even across a restart. Unset = no
+    /// suppression (test worlds without sleeper data).
+    quest_clear_ctx: ?*anyopaque = null,
+    quest_clear_fn: ?*const fn (?*anyopaque, c.PoiRect) void = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

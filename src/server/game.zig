@@ -730,6 +730,10 @@ pub const Game = struct {
         // ... and reports bedroll/land-claim home lockouts.
         self.sim.home_ctx = self;
         self.sim.home_fn = &homeLockout;
+        // ClearSleepers completion suppresses the POI's sleeper volumes
+        // (persistent across restart).
+        self.sim.quest_clear_ctx = self;
+        self.sim.quest_clear_fn = &questClearSleepers;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -862,6 +866,10 @@ pub const Game = struct {
 
     fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
         return game_hooks.homeLockout(ctx, entity_id, px, pz);
+    }
+
+    fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
+        return game_hooks.questClearSleepers(ctx, rect);
     }
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {

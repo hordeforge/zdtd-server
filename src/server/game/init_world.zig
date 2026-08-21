@@ -79,6 +79,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                     if (self.gamestages.sleeperEntityGroup(vol.groups[0].class_name, 1) != null) gs_ok += 1;
                 }
                 util_log.info("zdtd: sleeper volumes={d} (prefabs_near={d}) gamestage_resolved={d}\n", .{ self.sleepers.volumes.len, refs.items.len, gs_ok });
+                // Re-apply ClearSleepers suppressions from a previous session
+                // (sleepers_cleared.zsc): a cleared quest POI must not re-arm.
+                self.sleepers.loadCleared(self.allocator, self.world.world_dir);
             }
         }
     }

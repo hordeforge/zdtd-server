@@ -91,6 +91,9 @@ fn triggerVolume(self: *Game, vi: usize) void {
     if (vi >= self.sleepers.volumes.len) return;
     var vol = &self.sleepers.volumes[vi];
     if (vol.triggered) return;
+    // A completed ClearSleepers quest suppressed this volume: it never
+    // re-arms (stock removes the POI's sleeper data on SleepersCleared).
+    if (vol.quest_cleared) return;
     vol.triggered = true;
     self.sleepers.trigger_count += 1;
     // DIVERGENCE: stock SleeperVolume.UpdateSpawn gates every restore on

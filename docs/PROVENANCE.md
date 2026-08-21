@@ -249,7 +249,7 @@ Coverage targets, all enforced by the scan:
 | `src/world/prefabs.zig` | R | Stock world prefabs.xml index + footprint stamping on heightmaps. Block paint: stock `.tts` via `tts.zig` (Prefab.readBlockData raw types), |
 | `src/world/root.zig` | Z | World store layer: chunks, map data (DTM/prefabs/TTS), containers, TE state. |
 | `src/world/nav.zig` | Z | Coarse walkability grid + BFS pathfinding for bots. Borrowed in spirit from the Recast/Detour navmesh used by Unvanquished bots (see `../7dtd-clanker/docs/oss-fps-bot-survey.md`): host owns geometry, wasm guest owns decisions. |
-| `src/world/sleepers.zig` | R | Prefab sleeper volumes: parse XML + wake/spawn on player enter |
+| `src/world/sleepers.zig` | R | Prefab sleeper volumes: parse XML + wake/spawn on player enter. **ZSCL1 (2026-08-21):** quest-cleared volume rects persist in `sleepers_cleared.zsc` (a completed ClearSleepers quest suppresses its POI's volumes, stock QuestEvent_SleepersCleared removes the POI's sleeper data; the marker stops re-arm on re-trigger and restart) |
 | `src/world/stability.zig` | R | Stock block stability plane and falling-block trigger (RE: `../7dtd-research/docs/stability.md`, dumps 2026-08-06) |
 | `src/world/store.zig` | R | Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch). v3 magic ZCH3: heights + optional u32 rawData + optional texture/density |
 | `src/world/subbiome_noise.zig` | R | Stock subbiome noise for deco placement (GAP_ANALYSIS 18): a clean-room port of `PerlinNoise` + `WorldBiomeProviderFromImage::GetSubBiomeIdxAt`, so |

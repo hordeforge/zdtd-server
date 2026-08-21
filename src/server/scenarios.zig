@@ -40,6 +40,24 @@ fn freshScenarioDir(dir: []const u8) void {
     io_fs.mkdirPath(dir);
 }
 
+/// Drive one zombie kill for `c`'s active clear quest at its bound POI center
+/// (0,0 when the quest has no POI), so poi_gated ClearSleepers phases count.
+fn questKillAtPoi(g: *game_mod.Game, c: *game_mod.Client) void {
+    var x: f32 = 0;
+    var z: f32 = 0;
+    if (g.sim.playerByPeer(c.slot)) |ps| {
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (!s.active) continue;
+            if (s.poi.valid()) {
+                x = s.poi.x + s.poi.size_x * 0.5;
+                z = s.poi.z + s.poi.size_z * 0.5;
+            }
+            break;
+        }
+    }
+    systems.questOnZombieKilled(&g.sim, c.slot, x, z);
+}
+
 test "scenario pre-login world package is rejected by production dispatch" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1482,7 +1500,7 @@ test "scenario stock fixture quests.xml load" {
     // Reach the quest POI to clear phase 1; the rally scaffolding (phase 2) auto-skips.
     systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.ty, clear.tz);
     var k: u16 = 0;
-    while (k < clear.target_count) : (k += 1) systems.questOnZombieKilled(&g.sim, c.slot);
+    while (k < clear.target_count) : (k += 1) questKillAtPoi(g, c);
     // Return-to-NPC (highest phase) still pending: not complete until turned in.
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, clear.id));
     systems.questOnTraderOpen(&g.sim, c.slot);
@@ -4319,7 +4337,7 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear.id));
     systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.ty, clear.tz);
     var k: u16 = 0;
-    while (k < clear.target_count) : (k += 1) systems.questOnZombieKilled(&g.sim, c.slot);
+    while (k < clear.target_count) : (k += 1) questKillAtPoi(g, c);
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, clear.id));
     const xp_before = g.clients[peer].xp;
@@ -4599,9 +4617,9 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
 
     // kill_zombies: the required kill count completes it (and only then).
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 1));
-    systems.questOnZombieKilled(&g.sim, c.slot);
+    questKillAtPoi(g, c);
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 1));
-    systems.questOnZombieKilled(&g.sim, c.slot);
+    questKillAtPoi(g, c);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
 
     // goto_point: the parsed radius gates the arrival — outside does nothing,
@@ -4719,7 +4737,7 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
         var iter: usize = 0;
         while (iter < 400) : (iter += 1) {
             if (!systems.questHasActive(&g.sim, c.slot, d.id)) break;
-            systems.questOnZombieKilled(&g.sim, c.slot);
+            questKillAtPoi(g, c);
             systems.questOnFetchItem(&g.sim, c.slot, 1);
             systems.questOnCraft(&g.sim, c.slot, "sweep");
             systems.questOnTraderOpen(&g.sim, c.slot);
@@ -5616,7 +5634,7 @@ test "scenario block_activated objective event advances the phase" {
     try std.testing.expectEqual(@as(u8, 1), s.phase);
 
     // Without the event the block phase does not advance (no longer auto).
-    systems.questOnZombieKilled(&g.sim, c.slot);
+    questKillAtPoi(g, c);
     try std.testing.expectEqual(@as(u8, 1), s.phase);
 
     // The client's block_activated event advances it.
