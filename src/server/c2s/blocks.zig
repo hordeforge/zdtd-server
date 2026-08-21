@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
+const platform_user = packages.platform_user;
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
@@ -203,6 +204,82 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             std.mem.writeInt(u16, rb[0..2], 0, .little);
             try self.sendGame(peer, "NetPackageSetBlockResponse", rb[0..2]);
         }
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackagePickupBlock")) {
+        // Wrench pickup. RE: GameManager.PickupBlockServer IL=77 (verify type
+        // match, echo the pickup to the requesting player, replace the block
+        // with PickupSource/Air via SetBlocksRPC); the item itself is added
+        // client-side by PickupBlockClient -> Block.OnBlockPickedUp and rides
+        // the player's normal inventory sync, exactly like stock (the dedi
+        // never fabricates the item).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var plat_buf: [platform_user.max_platform_len]u8 = undefined;
+        var id_buf: [platform_user.max_id_len]u8 = undefined;
+        var sent_id: ?platform_user.Id = null;
+        const pk = packages.parsePickupBlockBody(body, &plat_buf, &id_buf, &sent_id) catch return true;
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const editor_ent = self.sim.network_id[ps].id;
+        // ValidEntityIdForSender: the pickup must claim the sender's own
+        // entity (asm.il NetPackage.ValidEntityIdForSender).
+        if (pk.player_id != editor_ent) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // ValidUserIdForSender (asm.il NetPackage IL=29): exact match against
+        // the sender's PlatformId or CrossplatformId; a null sent identity
+        // passes only when the sender registered none (EAC-off / loadgen).
+        if (sent_id) |sent| {
+            if (!c.puid_primary.matches(sent) and !c.puid_native.matches(sent)) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+        } else {
+            if (c.puid_primary.get() != null or c.puid_native.get() != null) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+        }
+        // Type match: the world block must still be what the client snapped
+        // (IL=77 IL_0031-0048; a mismatch silently drops, so a stale or
+        // spoofed pickup never removes a different block).
+        const cur_id = self.world.blockWorld(pk.x, pk.y, pk.z) catch return true;
+        if (cur_id != @as(u16, @truncate(pk.raw))) return true;
+        // zdtd trust bounds (stock checks CanPickup client-side; the server
+        // still enforces reach and claims so a spoofed pickup cannot delete
+        // distant or claimed blocks).
+        const ep = self.sim.transform[ps];
+        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(pk.x), @floatFromInt(pk.y), @floatFromInt(pk.z))) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        if (self.claimCovering(pk.x, pk.z)) |claim| {
+            if (claim.owner_entity != editor_ent) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+        }
+        // 1) Echo the pickup to the requesting player. Setup(pos, bv, playerId,
+        //    null) writes a null identity, which the client's
+        //    ValidUserIdForSender skips (it is not the server).
+        const echo = packages.buildPickupBlockBody(self.body_buf[0..32], pk.x, pk.y, pk.z, pk.raw, pk.player_id) catch return true;
+        try self.sendGame(peer, "NetPackagePickupBlock", echo);
+        // 2) Replacement block: PickupSource name resolved via AssignIds, or
+        //    Air. V3.1.0 b14 ships no PickupSource property, so stock leaves
+        //    Air behind on every pickup; a modded blocks.xml is honoured.
+        var repl_raw: u32 = 0;
+        if (self.blocks.pickupSource(cur_id)) |src_name| {
+            repl_raw = self.maxdamage.idByName(src_name) orelse 0;
+        }
+        // 3) Broadcast the replacement to observers (stock SetBlocksRPC
+        //    carries a BlockChangeInfo; the SetBlock S2C body is the same
+        //    shape the client Reads for every server block change).
+        if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], pk.x, pk.y, pk.z, repl_raw, 0, editor_ent, editor_ent)) |sb| {
+            try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
+        } else |_| {}
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageExplosionInitiate")) {

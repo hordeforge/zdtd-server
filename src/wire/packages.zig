@@ -3148,6 +3148,47 @@ pub fn parseTraderDataToServer(body: []const u8) !TraderDataToServer {
     return t;
 }
 
+/// Stock NetPackagePickupBlock (RE netpackage-bodies.md "NetPackagePickupBlock",
+/// read asm.il 20: StreamUtils.ReadVector3i | ReadUInt32 rawData | ReadInt32
+/// playerId | PlatformUserIdentifierAbs.FromStream(errorOnEmpty=false,
+/// inclCustomData=false)). The S2C echo of a pickup carries the same layout
+/// with a null identity (Setup(pos, bv, playerId, null), ToStream(null) is a
+/// lone 0 byte).
+pub const PickupBlock = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    /// Full BlockValue.rawData the client snapped; type = low 16 bits
+    /// (BlockValue.get_type, asm.il BlockValue.rawData layout).
+    raw: u32 = 0,
+    player_id: i32 = 0,
+};
+
+pub fn parsePickupBlockBody(body: []const u8, plat_buf: []u8, id_buf: []u8, sent: *?platform_user.Id) !PickupBlock {
+    if (body.len < 16) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    const p: PickupBlock = .{
+        .x = try r.readI32(),
+        .y = try r.readI32(),
+        .z = try r.readI32(),
+        .raw = try r.readU32(),
+        .player_id = try r.readI32(),
+    };
+    sent.* = try platform_user.read(&r, plat_buf, id_buf);
+    return p;
+}
+
+pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(x);
+    try w.writeI32(y);
+    try w.writeI32(z);
+    try w.writeU32(raw);
+    try w.writeI32(player_id);
+    try platform_user.write(&w, null);
+    return w.written();
+}
+
 /// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
 /// senderId i32 | vehicleId i32 | syncFlags u16 | dataLen u16 | data[dataLen].
 /// The payload is an opaque EntityVehicle::ReadSyncData blob that zdtd relays
@@ -3693,4 +3734,50 @@ test "parseTraderDataToServer reads the stock ToServer body" {
     try std.testing.expect(!td2.is_entity);
     try std.testing.expectEqual(@as(i32, 10), td2.te_x);
     try std.testing.expect(!td2.has_trader_data);
+}
+
+test "parsePickupBlockBody reads the stock wrench-pickup layout" {
+    // 3x i32 pos | u32 rawData | i32 playerId | null platform identity (1 byte).
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(10);
+    try w.writeI32(64);
+    try w.writeI32(-3);
+    try w.writeU32(0x0004_0023); // type 0x23, meta nibble in bits 22..25
+    try w.writeI32(501);
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
+    const body = w.written();
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    var sent: ?platform_user.Id = null;
+    const p = try parsePickupBlockBody(body, &plat, &id, &sent);
+    try std.testing.expect(sent != null);
+    try std.testing.expectEqual(@as(i32, 10), p.x);
+    try std.testing.expectEqual(@as(i32, 64), p.y);
+    try std.testing.expectEqual(@as(i32, -3), p.z);
+    try std.testing.expectEqual(@as(u32, 0x0004_0023), p.raw);
+    try std.testing.expectEqual(@as(i32, 501), p.player_id);
+    // Truncated before the identity is EndOfStream, never a partial read.
+    var cut: usize = 0;
+    while (cut < 16) : (cut += 1) {
+        var pb: [platform_user.max_platform_len]u8 = undefined;
+        var ib: [platform_user.max_id_len]u8 = undefined;
+        var sent3: ?platform_user.Id = null;
+        try std.testing.expectError(error.EndOfStream, parsePickupBlockBody(body[0..cut], &pb, &ib, &sent3));
+    }
+}
+
+test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
+    var buf: [64]u8 = undefined;
+    const out = try buildPickupBlockBody(&buf, 7, 8, 9, 0x1234, 42);
+    // Body is 3x4 + 4 + 4 + 1 null-identity byte.
+    try std.testing.expectEqual(@as(usize, 21), out.len);
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    var sent2: ?platform_user.Id = null;
+    const p = try parsePickupBlockBody(out, &plat, &id, &sent2);
+    try std.testing.expect(sent2 == null);
+    try std.testing.expectEqual(@as(i32, 7), p.x);
+    try std.testing.expectEqual(@as(u32, 0x1234), p.raw);
+    try std.testing.expectEqual(@as(i32, 42), p.player_id);
 }

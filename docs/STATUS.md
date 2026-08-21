@@ -5,7 +5,7 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 330 features: 162 `WORKS`,
+owns all C2S domains. `GAP_ANALYSIS.md` scores 331 features: 163 `WORKS`,
 124 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
@@ -130,6 +130,16 @@ AIDirector depth rows (2026-08-21): heat map/activity WORKS (NotifyActivity + Ch
 feral roll); wandering horde paths, feral sense, sleeper-pose respawn and persistent director state are PARTIAL
 with documented notes in GAP_ANALYSIS 5.3 (sleeper wake cascade itself: player-entry volume wake + noise-triggered volume wake, 2026-08-21).
 Vehicle definitions XML reconciled WORKS 2026-08-21 (vehicles.xml loads per-kind Defs used by the spawn path). nav_objects.xml and blade/junk turret variants documented PARTIAL (markers/turrets ship with the stock wire; the data-driven per-objective nav_object and per-variant turret tables are refinements). 2026-08-21: the remaining ops/engineering MISSING rows (Steam listing, query protocol, Docker/systemd, hot reload, multi-world, path worker pool, spatial hash, interest budgets, entityId map, TE scan job, bench harnesses, capture regression, multi-version matrix, region-file save internals) are documented non-client-visible / out of scope. **TOP REMAINING WIRE ITEM: NetPackageInventoryTransactionRequest - the stock `InventoryTransaction.Read` parse (Guid-keyed, hash-validated, InventoryOperation ops incl. SetAll WriteArray, items.md 2060-2087) now lands in `parseStockInvTx` with detection on `c2s_stock_invtx`; the transactional-inventory mapping slice (op application, ledger hash check, stock-shaped response) is next and its Guid-resolution leg is RE-blocked (no CreateInventoryServer callers in the corpus; candidate capture: container-open sequence vs stock dedi), so the mapping needs new RE evidence before it can land.**
+
+Wrench pickup shipped 2026-08-21: the C2S NetPackagePickupBlock body (pos |
+rawData | playerId | platform identity) is parsed and run through the stock
+server checks (own-entity claim, registered-identity match, world-block type
+match, plus zdtd reach + land-claim bounds); on success the pickup package is
+echoed to the requesting player (whose client adds the item via
+OnBlockPickedUp and syncs it up, exactly like stock) and the block is replaced
+with PickupSource/Air (V3.1.0 b14 ships no PickupSource property, so stock
+leaves Air on every pickup; a modded blocks.xml is honoured). Net and ops
+23/25/5 -> 24/25/5; total 162/124/44 -> **163/124/44** (331 features).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

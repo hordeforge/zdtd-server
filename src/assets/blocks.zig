@@ -51,6 +51,14 @@ pub const BlockDef = struct {
     /// Squared radius for the radius-effect distance check (radius^2, so the
     /// hot-path compare avoids a sqrt). 0 when radius_effect_buff is empty.
     radius_effect_radius_sq: f32 = 0,
+    /// PickupSource property (`<property name="PickupSource" ...>`, declared
+    /// in the game's XML.txt:908). The block left behind when a player picks
+    /// this block up: stock GameManager.PickupBlockServer resolves
+    /// PickupSource != null ? Block.GetBlockValue(PickupSource) :
+    /// BlockValue.Air (asm.il GameManager IL=77 IL_008D-00B4). V3.1.0 b14
+    /// ships no block that sets it, so every stock pickup leaves Air; a
+    /// modded blocks.xml is honoured rather than hardcoded.
+    pickup_source: []const u8 = "",
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -135,6 +143,15 @@ pub const BlockTable = struct {
         return .{ .buff = d.radius_effect_buff, .radius_sq = d.radius_effect_radius_sq };
     }
 
+    /// PickupSource replacement block name for a pickup, or null when the
+    /// pickup leaves Air behind (the V3.1.0 b14 stock state for every block;
+    /// only a modded blocks.xml sets it).
+    pub fn pickupSource(self: *const BlockTable, id: u16) ?[]const u8 {
+        const d = self.byId(id) orelse return null;
+        if (d.pickup_source.len == 0) return null;
+        return d.pickup_source;
+    }
+
     /// True when the workstation may craft recipes of `area` (the recipe's
     /// craft_area; empty = player/backpack recipe). The explicit
     /// CraftingAreaRecipes comma list wins ("player,workbench"); without a
@@ -216,6 +233,7 @@ pub fn loadFromPath(
         crafting_areas: ?[]const u8 = null,
         radius_effect_buff: ?[]const u8 = null,
         radius_effect_radius_sq: f32 = 0,
+        pickup_source: ?[]const u8 = null,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -250,6 +268,7 @@ pub fn loadFromPath(
         var crafting_areas: ?[]const u8 = null;
         var radius_effect_buff: ?[]const u8 = null;
         var radius_effect_radius_sq: f32 = 0;
+        var pickup_source: ?[]const u8 = null;
         const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -295,6 +314,8 @@ pub fn loadFromPath(
                         }
                     }
                 }
+            } else if (std.mem.eql(u8, pname, "PickupSource")) {
+                pickup_source = xml.attr(clean, pi, "value");
             }
             p = pi + 10;
         }
@@ -313,6 +334,7 @@ pub fn loadFromPath(
             .crafting_areas = if (crafting_areas) |ca| try arena.dupe(u8, ca) else "",
             .radius_effect_buff = if (radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = radius_effect_radius_sq,
+            .pickup_source = if (pickup_source) |ps| try arena.dupe(u8, ps) else "",
         });
         i = bi + 7;
     }
