@@ -3536,11 +3536,16 @@ persists so little that a restart visibly damages a built base.
   permission file applies on top of the zdtd list files. The IP hold table
   (`ban_ip`, 128 keys) is RAM-only by design: it covers the connection being
   dropped so a reconnect before the next join check cannot slip through
-  (stock bans by platform identifier in serveradmin.xml, not by IP). Still
+  (stock bans by platform identifier in serveradmin.xml, not by IP). The
+  whitelist is enforced at login since 2026-08-21, matching
+  BansAndWhitelistAuthorizer.Authorize (IL=71): with a non-empty whitelist
+  only whitelisted players (composite "platform:id" from serveradmin.xml or
+  the login name from `whitelist add`) and admins (`admin add`, the stock
+  HasEntry bypass) join; everyone else is denied
+  EKickReason.NotOnWhitelist(7). Still
   open: serveradmin.xml is applied at startup, not hot-reloaded on edit
   (stock InitFileWatcher) and ServerReservedSlots / ServerAdminSlots are
-  not implemented; whitelist entries are stored but not yet enforced at
-  join (no whitelist gate).
+  not implemented.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)

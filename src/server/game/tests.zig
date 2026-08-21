@@ -1828,3 +1828,31 @@ test "platform-id ban rejects a rejoin with the same identity" {
     try std.testing.expect(g.ban_list.add("Bot", now + 3600, "test"));
     try std.testing.expectError(error.JoinFailed, g.attachJoinedClient(&cap2));
 }
+
+test "whitelist gates the join: listed and admins enter, others are denied" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const id_a: platform_user.Id = .{ .platform = "Steam", .id = "1001" };
+    const id_c: platform_user.Id = .{ .platform = "Steam", .id = "1003" };
+    // Whitelist holds A (composite key, serveradmin.xml form) and B by name.
+    try std.testing.expect(g.whitelist.add("Steam:1001", 0));
+    try std.testing.expect(g.whitelist.add("Bob", 0));
+
+    var cap: ln_peer.Capture = .{};
+    // A is whitelisted by composite -> joins.
+    _ = try g.attachJoinedClientAs(&cap, id_a);
+    // An unlisted identity is denied (NotOnWhitelist).
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, id_c));
+    // A name-keyed whitelist entry still gates the name-only path.
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClient(&cap));
+    // Admins bypass the whitelist (AdminUsers.HasEntry, IL=71).
+    try std.testing.expect(g.admin_list.add("Steam:1003", 0));
+    _ = try g.attachJoinedClientAs(&cap, id_c);
+}

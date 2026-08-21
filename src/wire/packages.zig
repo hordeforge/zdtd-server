@@ -2362,6 +2362,9 @@ pub const KickReason = enum(i32) {
     player_limit_exceeded = 5,
     /// EKickReason.Banned: the source identity/IP is banned.
     banned = 6,
+    /// EKickReason.NotOnWhitelist: the identity is not on the (enabled)
+    /// whitelist and is not an admin (BansAndWhitelistAuthorizer, IL=71).
+    not_on_whitelist = 7,
 };
 
 /// Stock NetPackagePlayerDenied body (asm.il:827055-827090):

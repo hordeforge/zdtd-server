@@ -371,11 +371,15 @@ serverconfig.xml (or in --config-dir / --game-dir) is parsed at startup
 (admins/whitelist/blacklist sections; platform+userid attrs with the legacy
 steamID fallback, permission_level, unbandate DateTime) and merged into the
 same operator lists, so an existing stock permission file applies on top of
-the zdtd list files. Remaining open items: serveradmin.xml is applied at
-startup, not hot-reloaded on edit (stock InitFileWatcher),
-ServerReservedSlots / ServerAdminSlots are not implemented, and whitelist
-entries are stored but not yet enforced at join. Net and ops stays 43/8/5,
-total **182/107/44**.
+the zdtd list files. Whitelist enforcement shipped 2026-08-21: with a
+non-empty whitelist the login gate now denies everyone except whitelisted
+players (composite "platform:id" or login name) and admins (the stock
+HasEntry bypass), matching BansAndWhitelistAuthorizer.Authorize (IL=71)
+with EKickReason.NotOnWhitelist(7); RE pin in 7dtd-research
+dedicated-misc-systems.md. Remaining open items: serveradmin.xml is applied
+at startup, not hot-reloaded on edit (stock InitFileWatcher) and
+ServerReservedSlots / ServerAdminSlots are not implemented. Net and ops
+stays 43/8/5, total **182/107/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

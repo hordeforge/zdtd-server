@@ -18,6 +18,7 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const phase_gate = @import("../phase_gate.zig");
 const clock = @import("../../util/clock.zig");
+const admin_cmds = @import("../admin_cmds.zig");
 const version_mod = @import("../../version.zig");
 
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
@@ -132,6 +133,36 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.join_fail);
             self.dropClientSlot(c.slot, "identity-ban");
             return true;
+        }
+        // Stock BansAndWhitelistAuthorizer.Authorize (IL=71): with a
+        // non-empty whitelist only whitelisted players and admins join;
+        // everyone else is denied EKickReason.NotOnWhitelist(7) (admins
+        // bypass via AdminUsers.HasEntry). Whitelist/admin entries are
+        // matched by the "platform:id" composite (serveradmin.xml) or by
+        // the login name (zdtd `whitelist add`/`admin add`).
+        if (self.whitelist.n > 0) {
+            const nm = if (c.name_len > 0) c.name[0..c.name_len] else "";
+            var wl_hit = nm.len != 0 and self.whitelist.find(nm) != null;
+            var adm_hit = nm.len != 0 and self.admin_list.find(nm) != null;
+            if (c.puid_primary.get()) |pid| {
+                var key_buf: [admin_cmds.max_id]u8 = undefined;
+                const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return true;
+                if (!wl_hit) wl_hit = self.whitelist.find(key) != null;
+                if (!adm_hit) adm_hit = self.admin_list.find(key) != null;
+            }
+            if (!wl_hit and !adm_hit) {
+                self.harness.counters.inc(.join_fail);
+                if (c.peer) |p| {
+                    var denied: [64]u8 = undefined;
+                    if (packages.buildPlayerDeniedBody(&denied, .not_on_whitelist, 0, 0, "")) |body2| {
+                        self.sendGame(p, "NetPackagePlayerDenied", body2) catch
+                            self.harness.counters.inc(.net_send_errors);
+                    } else |_| self.harness.counters.inc(.encode_errors);
+                }
+                std.debug.print("zdtd: login not on whitelist slot={d} name_len={d}\n", .{ c.slot, c.name_len });
+                self.dropClientSlot(c.slot, "whitelist-deny");
+                return true;
+            }
         }
         const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
         try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
