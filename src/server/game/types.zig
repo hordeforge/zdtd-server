@@ -173,6 +173,9 @@ pub const InitOptions = struct {
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
     quests_path: ?[]const u8 = null,
+    /// Stock serveradmin.xml (admins/whitelist/blacklist) to merge into the
+    /// operator lists at startup; null = no file (zdtd list files only).
+    serveradmin_path: ?[]const u8 = null,
     /// `[quests]` policy (ADR 0021): objective-kind spec + kill-count / goto /
     /// stay defaults, merged from mode pack < zdtd.toml by main.zig. Loaded
     /// into the quest catalog at init; `{}` = builtin stock values.

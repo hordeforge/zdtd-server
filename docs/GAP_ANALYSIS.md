@@ -3528,12 +3528,19 @@ persists so little that a restart visibly damages a built base.
   still work for legacy bans.zsv rows and sessions without a platform
   identity (loadgen bots), serialized as a 5-field `exp \t platform \t id
   \t name \t reason` line with legacy 2/3-field rows read back.
-  Whitelist + admin lists persist the same way. The IP hold table
+  Whitelist + admin lists persist the same way. Since 2026-08-21 a stock
+  `serveradmin.xml` is also read at startup (admins/whitelist/blacklist
+  sections, platform+userid attributes with legacy steamID fallback,
+  permission_level, unbandate DateTime - `src/server/admin_xml.zig`,
+  AdminTools RE) and merged into the same lists, so an operator's existing
+  permission file applies on top of the zdtd list files. The IP hold table
   (`ban_ip`, 128 keys) is RAM-only by design: it covers the connection being
   dropped so a reconnect before the next join check cannot slip through
   (stock bans by platform identifier in serveradmin.xml, not by IP). Still
-  open: stock `serveradmin.xml` is not read (zdtd uses its own list files)
-  and ServerReservedSlots / ServerAdminSlots are not implemented.
+  open: serveradmin.xml is applied at startup, not hot-reloaded on edit
+  (stock InitFileWatcher) and ServerReservedSlots / ServerAdminSlots are
+  not implemented; whitelist entries are stored but not yet enforced at
+  join (no whitelist gate).
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)

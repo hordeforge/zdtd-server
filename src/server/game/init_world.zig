@@ -12,6 +12,7 @@ const util_sim = @import("../../util/sim.zig");
 const util_log = @import("../../util/log.zig");
 const clock = @import("../../util/clock.zig");
 const replicate_te = @import("../replicate_te.zig");
+const admin_xml = @import("../admin_xml.zig");
 
 pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: game_mod.InitOptions, had_saved_entities: bool) !void {
     // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn first
@@ -130,6 +131,15 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         };
     }
     self.loadAdminLists();
+    // Stock serveradmin.xml (admins/whitelist/blacklist) applies on top of
+    // zdtd's own list files; see admin_xml.zig for the format and the
+    // no-hot-reload divergence.
+    if (opts.serveradmin_path) |sa_path| {
+        admin_xml.load(self.allocator, sa_path, &self.admin_list, &self.whitelist, &self.ban_list) catch |err| {
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} warning: serveradmin.xml load failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+        };
+    }
     if (opts.admin_port != 0) {
         // Stock TelnetConsole::.ctor (asm.il ~270735): a password is what moves
         // the console off loopback, so `auth` must be set before `listen`.

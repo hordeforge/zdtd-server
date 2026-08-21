@@ -438,6 +438,37 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
+    // Stock serveradmin.xml sits next to serverconfig.xml (save root); fall
+    // back to the config dir or game dir so an operator drop-in applies.
+    var serveradmin_path: ?[]const u8 = null;
+    if (serverconfig_path) |scp| {
+        if (std.fs.path.dirname(scp)) |dir| {
+            var p: [std.fs.max_path_bytes]u8 = undefined;
+            const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{dir}) catch null;
+            if (cand) |c| {
+                if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
+            }
+        }
+    }
+    if (serveradmin_path == null) {
+        if (config_dir) |cd| {
+            var p: [std.fs.max_path_bytes]u8 = undefined;
+            const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{cd}) catch null;
+            if (cand) |c| {
+                if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
+            }
+        }
+    }
+    if (serveradmin_path == null) {
+        if (game_dir) |gd| {
+            var p: [std.fs.max_path_bytes]u8 = undefined;
+            const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{gd}) catch null;
+            if (cand) |c| {
+                if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
+            }
+        }
+    }
+
     if (serverconfig_path) |scp| {
         // Explicit path: fail fast (do not silently run with defaults).
         if (!io_fs.fileExists(scp)) {
@@ -564,6 +595,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .config_dir = config_dir,
         .config_overrides = config_overrides.items,
         .quests_path = quests_path,
+        .serveradmin_path = serveradmin_path,
         .admin_port = admin_port,
         .webui_port = webui_port,
         .webui_bind = webui_bind,

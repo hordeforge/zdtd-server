@@ -366,9 +366,16 @@ primary platform identity + name, and the login gate checks the platform id
 first (name as a fallback key for legacy bans.zsv rows and no-platform
 sessions), so a rename cannot evade a ban. bans.zsv serializes as
 `exp \t platform \t id \t name \t reason` with legacy 2/3-field rows read
-back. Remaining open items unchanged: serveradmin.xml is not read and
-ServerReservedSlots / ServerAdminSlots are not implemented. Net and ops
-stays 43/8/5, total **182/107/44**.
+back. Serveradmin.xml shipped 2026-08-21: a stock `serveradmin.xml` next to
+serverconfig.xml (or in --config-dir / --game-dir) is parsed at startup
+(admins/whitelist/blacklist sections; platform+userid attrs with the legacy
+steamID fallback, permission_level, unbandate DateTime) and merged into the
+same operator lists, so an existing stock permission file applies on top of
+the zdtd list files. Remaining open items: serveradmin.xml is applied at
+startup, not hot-reloaded on edit (stock InitFileWatcher),
+ServerReservedSlots / ServerAdminSlots are not implemented, and whitelist
+entries are stored but not yet enforced at join. Net and ops stays 43/8/5,
+total **182/107/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
