@@ -3853,7 +3853,7 @@ persists so little that a restart visibly damages a built base.
   See World systems §11: claims persist via `claims.zlc` and survive restart.
   *Anchors:* `src/server/persist.zig:517-580`
 
-- **Vehicle, turret, power and quest-NPC persistence** `PARTIAL` (2026-08-07)
+- **Vehicle, turret, power and quest-NPC persistence** `PARTIAL` `(2026-08-22)`
   Spawned vehicles and turrets now survive restart via `entities.zen` (ZENT1,
   zdtd-owned like claims.zlc): `saveEntities` writes kind/position/yaw/fuel/
   seats for vehicles and position/range/damage/ammo for turrets on the periodic
@@ -3861,10 +3861,14 @@ persists so little that a restart visibly damages a built base.
   power from the block grid. Power grid **nodes** rebuild from the chunk block
   grid on first chunk load (`scanChunkPower`, `power_scanned` per chunk), so a
   generator/consumer/battery layout survives restart without saving the graph.
-  Still missing: the wire **edges** between nodes (links are runtime state, not
-  saved) and trader/NPC quest offer state.
+  Since 2026-08-22 the wire **edges** between nodes persist too: `saveEntities`
+  writes each live edge by its endpoint positions (node ids are per-session) as
+  a kind-3 record, and `loadEntities` queues them as pending wires that
+  `reconnectPending` (called after each chunk power scan) connects as both
+  endpoints' nodes appear. Still missing: trader/NPC quest offer state.
   *Anchors:* `src/server/persist.zig` `saveEntities`/`loadEntities`,
-  `src/server/game/chunk_fill.zig` `scanChunkPower`
+  `src/server/game/chunk_fill.zig` `scanChunkPower`, `src/ecs/electric.zig`
+  (`WirePos`, `addPendingWire`, `reconnectPending`)
 
 - **Autosave and shutdown save** `WORKS`
   Every 100 ticks (5 s at 20 Hz) the tick flushes world chunks, containers and
@@ -4718,7 +4722,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
 | AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
 | Quest journal save | HAVE (players.zsv ZPV3) |
-| Vehicle / turret persistence | PARTIAL (`entities.zen`; wire edges between power nodes and quest-offer state are not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
+| Vehicle / turret persistence | PARTIAL (`entities.zen`; power wire edges persist by position since 2026-08-22, quest-offer state is not saved, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |

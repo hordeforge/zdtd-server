@@ -163,6 +163,8 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
         }
     }
     self.sim.power.resolve();
+    // Restored wire edges whose endpoints are now both scanned reconnect.
+    self.sim.power.reconnectPending();
 }
 
 pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {

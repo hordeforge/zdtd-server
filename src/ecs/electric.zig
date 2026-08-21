@@ -107,6 +107,18 @@ pub const Wire = struct {
     b: u16 = 0,
 };
 
+/// A wire's endpoints by world position, for persistence: node ids are
+/// reassigned per session when scanChunkPower rebuilds the grid, so saved
+/// edges ride positions and reconnect by lookup.
+pub const WirePos = struct {
+    ax: i32 = 0,
+    ay: i32 = 0,
+    az: i32 = 0,
+    bx: i32 = 0,
+    by: i32 = 0,
+    bz: i32 = 0,
+};
+
 /// Binary search a sorted (id << 16 | node_index) table for `id`.
 /// Returns the node index, or maxInt(u16) when the id is absent.
 fn findNodeIdx(sorted: []const u32, id: u16) u16 {
@@ -126,6 +138,10 @@ pub const PowerGrid = struct {
     node_n: usize = 0,
     wires: [max_wires]Wire = [_]Wire{.{}} ** max_wires,
     wire_n: usize = 0,
+    /// Saved edges waiting for both endpoint nodes to appear (chunks scan
+    /// lazily); reconnectPending drains them as the grid rebuilds.
+    pending_wires: [max_wires]WirePos = [_]WirePos{.{}} ** max_wires,
+    pending_wire_n: usize = 0,
     next_id: u16 = 1,
     total_gen: f32 = 0,
     total_load: f32 = 0,
@@ -135,9 +151,37 @@ pub const PowerGrid = struct {
     pub fn clear(self: *PowerGrid) void {
         self.node_n = 0;
         self.wire_n = 0;
+        self.pending_wire_n = 0;
         self.next_id = 1;
         self.total_gen = 0;
         self.total_load = 0;
+    }
+
+    /// Queue a saved edge by endpoint position; deduped, capped at max_wires.
+    pub fn addPendingWire(self: *PowerGrid, wp: WirePos) void {
+        var i: usize = 0;
+        while (i < self.pending_wire_n) : (i += 1) {
+            const p = &self.pending_wires[i];
+            const same = (p.ax == wp.ax and p.ay == wp.ay and p.az == wp.az and p.bx == wp.bx and p.by == wp.by and p.bz == wp.bz) or
+                (p.ax == wp.bx and p.ay == wp.by and p.az == wp.bz and p.bx == wp.ax and p.by == wp.ay and p.bz == wp.az);
+            if (same) return;
+        }
+        if (self.pending_wire_n >= max_wires) return;
+        self.pending_wires[self.pending_wire_n] = wp;
+        self.pending_wire_n += 1;
+    }
+
+    /// Try to connect every pending wire (both endpoints must have nodes);
+    /// connected ones are dropped. Called after each chunk power scan.
+    pub fn reconnectPending(self: *PowerGrid) void {
+        var i: usize = 0;
+        while (i < self.pending_wire_n) {
+            const p = self.pending_wires[i];
+            if (self.connectByPos(p.ax, p.ay, p.az, p.bx, p.by, p.bz)) {
+                self.pending_wires[i] = self.pending_wires[self.pending_wire_n - 1];
+                self.pending_wire_n -= 1;
+            } else i += 1;
+        }
     }
 
     pub fn addNode(self: *PowerGrid, kind: NodeKind, x: i32, y: i32, z: i32, watts: f32) ?u16 {

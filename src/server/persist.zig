@@ -546,7 +546,9 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
 pub fn saveEntities(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
-    var buf: [ecs.max_entities * 32 + 8]u8 = undefined;
+    // Vehicle/turret records (32 B each) plus the power-wire section
+    // (24 B per saved edge, 512 max).
+    var buf: [ecs.max_entities * 32 + ecs.electric.max_wires * 24 + 16]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
     // Overflow must propagate (callers log persistence errors): a silent
     // abort here would drop the vehicle/turret save without any signal.
@@ -577,6 +579,35 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeF32(t.range);
             try w.writeF32(t.damage);
             try w.writeU16(t.ammo);
+            count += 1;
+        }
+    }
+    // Power wire edges by endpoint position (node ids are per-session).
+    // The grid also keeps a live wire list plus any pending reconnect set;
+    // saving both would duplicate, so persist the live wires only.
+    if (self.sim.power.wire_n > 0) {
+        var edge_buf: [ecs.electric.max_wires * 24]u8 = undefined;
+        var ew = wire_binary.Writer{ .buf = &edge_buf };
+        var edges: u16 = 0;
+        var wi: usize = 0;
+        while (wi < self.sim.power.wire_n) : (wi += 1) {
+            const wire = self.sim.power.wires[wi];
+            const na = self.sim.power.indexOfId(wire.a) orelse continue;
+            const nb = self.sim.power.indexOfId(wire.b) orelse continue;
+            const pa = self.sim.power.nodes[na];
+            const pb = self.sim.power.nodes[nb];
+            try ew.writeI32(pa.x);
+            try ew.writeI32(pa.y);
+            try ew.writeI32(pa.z);
+            try ew.writeI32(pb.x);
+            try ew.writeI32(pb.y);
+            try ew.writeI32(pb.z);
+            edges += 1;
+        }
+        if (edges > 0) {
+            try w.writeByte(3);
+            try w.writeU16(edges);
+            try w.writeBytes(ew.written());
             count += 1;
         }
     }
@@ -632,6 +663,24 @@ pub fn loadEntities(self: *Game) !void {
                         self.sim.turret[ts].damage = damage;
                         self.sim.turret[ts].ammo = ammo;
                     }
+                }
+            },
+            3 => {
+                // Power wire edges by endpoint position; the nodes rebuild
+                // from the block grid as chunks scan, so edges queue as
+                // pending and reconnect when both endpoints exist.
+                const edges = r.readU16() catch return error.Truncated;
+                var ei: usize = 0;
+                while (ei < edges) : (ei += 1) {
+                    const wp = ecs.electric.WirePos{
+                        .ax = r.readI32() catch return error.Truncated,
+                        .ay = r.readI32() catch return error.Truncated,
+                        .az = r.readI32() catch return error.Truncated,
+                        .bx = r.readI32() catch return error.Truncated,
+                        .by = r.readI32() catch return error.Truncated,
+                        .bz = r.readI32() catch return error.Truncated,
+                    };
+                    self.sim.power.addPendingWire(wp);
                 }
             },
             else => return error.BadRecord,

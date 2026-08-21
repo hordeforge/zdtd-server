@@ -2139,3 +2139,53 @@ test "entity ragdoll relays to other clients, not the owner" {
     try std.testing.expect(!a_got);
     try std.testing.expect(b_got);
 }
+
+test "power wire edges persist and reconnect after a restart (entities.zen)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        const gen = g.sim.power.addNodeAt(.generator, 10, 70, 10, 1000).?;
+        const con = g.sim.power.addNodeAt(.consumer, 20, 70, 20, 100).?;
+        try std.testing.expect(g.sim.power.connect(gen, con));
+        // Game.create's demo world also wires its own grid; ours is present.
+        try std.testing.expect(g.sim.power.wire_n >= 1);
+        try g.saveEntities();
+    }
+    {
+        // Game.create restores entities.zen automatically: the wire queues as
+        // pending (the fresh grid has no nodes yet).
+        const g2 = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g2.deinit();
+            std.testing.allocator.destroy(g2);
+        }
+        // The demo world's own grid is present too; our saved edge is among
+        // the pending set by its endpoint positions.
+        var pending_mine = false;
+        for (g2.sim.power.pending_wires[0..g2.sim.power.pending_wire_n]) |wp| {
+            const mine = (wp.ax == 10 and wp.ay == 70 and wp.az == 10 and wp.bx == 20 and wp.by == 70 and wp.bz == 20) or
+                (wp.ax == 20 and wp.ay == 70 and wp.az == 20 and wp.bx == 10 and wp.by == 70 and wp.bz == 10);
+            if (mine) pending_mine = true;
+        }
+        try std.testing.expect(pending_mine);
+        // The nodes rebuild from the block grid (scanChunkPower); replay the
+        // same positions and reconnect - the edge is restored.
+        const gen2 = g2.sim.power.addNodeAt(.generator, 10, 70, 10, 1000).?;
+        _ = g2.sim.power.addNodeAt(.consumer, 20, 70, 20, 100).?;
+        g2.sim.power.reconnectPending();
+        try std.testing.expectEqual(@as(usize, 0), g2.sim.power.pending_wire_n);
+        try std.testing.expect(g2.sim.power.wire_n >= 1);
+        var wired = false;
+        for (g2.sim.power.wires[0..g2.sim.power.wire_n]) |wd| {
+            if (wd.a == gen2 or wd.b == gen2) wired = true;
+        }
+        try std.testing.expect(wired);
+    }
+}

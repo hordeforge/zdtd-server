@@ -442,6 +442,14 @@ remaining members are platform/identity fields zdtd does not own
 (documentable non-goals). Net and ops 44/7/5 -> **45/6/5**, total
 183/106/44 -> **184/105/44**.
 
+Power wire-edge persistence shipped 2026-08-22 (persistence row, stays
+PARTIAL): entities.zen gains a kind-3 record writing each live power edge
+by endpoint positions (node ids are per-session), and the loader queues
+them as pending wires that reconnectPending drains as scanChunkPower
+rebuilds both endpoint nodes. A generator/consumer wiring survives
+restart. Remaining open: trader/NPC quest offer state. Net and ops stays
+45/6/5, total **184/105/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
