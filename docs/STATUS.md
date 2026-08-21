@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 194 `WORKS`,
-95 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 195 `WORKS`,
+94 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -101,7 +101,20 @@ sleeper wake cascade gained the noise-triggered volume wake: a combat noise
 inside a volume's AABB (+0.9 pad, RE World.CheckSleeperVolumeNoise) now spawns
 its whole group independent of the player, so a shot inside a POI summons its
 sleepers before entry (counts unchanged - sleeper-pose respawn remains). The
-dashboard (docs/provenance.html) is synced.
+dashboard (docs/provenance.html) is synced. Then the quest-POI selection
+engine went WORKS (DynamicPrefabDecorator-equivalent selector: tier pool +
+50 random attempts, sleeper-volume + Test_AllSet tag match, biome filters,
+lockouts, squared center distance, trader 500/1500 bands; RandomPOIGoto/
+Goto/ClosestPOIGoto objective meta drives it; trader offers pre-positioned
+with the real QuestLocation/QuestSize/POIName instead of the fabricated
+catalog spot; rally rects bound by the selector; RE pinned in 7dtd-research
+quests-challenges.md), total **194/95/44**. Then quest journal persistence
+went WORKS (players.zsv ZPV5: journal entries store the quest **name** (stock
+Quest.Write identity) and the accepted POI rect; restore resolves by name so
+a quests.xml edit cannot reshuffle a saved quest, and the rect comes back
+verbatim instead of re-resolving to the nearest prefab; ZPV2/3/4 files still
+read and upgrade in place), total **195/94/44**. The dashboard
+(docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE

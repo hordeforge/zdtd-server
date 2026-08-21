@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV4), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV5), entities.zen
 //! (ZENT1), claims.zlc (ZCL1), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -58,8 +58,9 @@ pub const Zpv2Drop = struct {
 };
 
 /// `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll
-/// field), or 4 (ZPV4, tail's buff list followed unconditionally by a
-/// bedroll presence byte). The bedroll field is **not** detected by "more
+/// field), 4 (ZPV4, tail's buff list followed unconditionally by a
+/// bedroll presence byte), or 5 (ZPV5, journal entries additionally carry
+/// the quest name + POI rect). The bedroll field is **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
 /// misread as this record's bed_present. Only the file's own magic decides
@@ -74,7 +75,7 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
     p += 1 + inv_n * 7;
     if (p >= data.len) return error.CorruptPlayersFile;
     const jn: usize = data[p];
-    p += 1 + jn * 10;
+    p = try journalSectionEnd(data, p + 1, jn, version);
     if (p > data.len) return error.CorruptPlayersFile;
     if (version >= 3) {
         if (p >= data.len) return error.CorruptPlayersFile;
@@ -101,6 +102,32 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
     return p - off;
 }
 
+/// Max quest id length persisted in a ZPV5 journal entry (stock ids stay well
+/// under this; longer names are dropped fail-closed on write).
+pub const max_quest_name_len: usize = 64;
+
+/// End offset of the journal section, version-aware. v<=4 entries are the
+/// fixed 10-byte shape (`def_id:u16 code:i32 flags:u8 progress:u16 phase:u8`);
+/// v5 entries append `name_len:u8 | name | poi_valid:u8 | rect:24` (10 + 1 +
+/// name_len + 25). The v5 shape is what makes a restored quest resolve by
+/// name (a quests.xml edit no longer reshuffles it) and keep its POI rect.
+fn journalSectionEnd(data: []const u8, p_in: usize, jn: usize, version: u8) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    var qi: usize = 0;
+    while (qi < jn) : (qi += 1) {
+        if (version >= 5) {
+            if (p + 11 > data.len) return error.CorruptPlayersFile;
+            const qnl: usize = data[p + 10];
+            if (qnl > max_quest_name_len or p + 11 + qnl + 25 > data.len) return error.CorruptPlayersFile;
+            p += 11 + qnl + 25;
+        } else {
+            if (p + 10 > data.len) return error.CorruptPlayersFile;
+            p += 10;
+        }
+    }
+    return p;
+}
+
 /// True when `zpvRecordLen` would find `prog == 1` for this record, i.e. it
 /// has a progression tail (and therefore needs a bed_present byte appended to
 /// become v4-shaped). Callers must have already validated the record with
@@ -112,7 +139,7 @@ fn zpvRecordHasProgTail(data: []const u8, off: usize, version: u8) bool {
     const inv_n: usize = data[p];
     p += 1 + inv_n * 7;
     const jn: usize = data[p];
-    p += 1 + jn * 10;
+    p = journalSectionEnd(data, p + 1, jn, version) catch return false;
     return data[p] == 1;
 }
 
@@ -120,20 +147,27 @@ pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
 }
 
-/// Record layout (v4): magic ZPV4 | n:u32 | records…
+/// Record layout (v5): magic ZPV5 | n:u32 | records…
 /// each: name_len:u8 | name | x,y,z:f32 | coins:u32 |
 ///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16) |
-///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8)
+///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8,
+///     name_len:u8, name, poi_valid:u8, poi rect:f32×6)
 ///   prog:u8 (1 = present) | level:u16 | xp:u64 | food/max/water/max:f32×4 |
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
 ///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8) |
 ///   bed_present:u8 (1 = present) | bed_present×(bed_x,bed_y,bed_z:i32)
-/// bed_present is v4-only; it is not written or read at all under an older
+/// v5 journal entries add the quest **name** (the stock Quest.Write identity,
+/// so a quests.xml edit no longer reshuffles a saved quest into a different
+/// one) and the POI rect (stock PositionData[2/3], so a restored quest keeps
+/// the prefab it was handed, not the nearest re-resolved one).
+/// bed_present is v4+-only; it is not written or read at all under an older
 /// magic, since "more bytes remain in the file" cannot distinguish "one more
 /// field of this record" from "the next record has begun" (zpvRecordLen).
-/// ZPV2 (no progression tail) and ZPV3 (tail, no bedroll) files are still
-/// read and upgrade in place on the next save. Merge-write: offline players'
-/// existing records are carried over, not erased.
+/// ZPV2 (no progression tail), ZPV3 (tail, no bedroll) and ZPV4 (no name/rect
+/// in the journal) files are still read and upgraded in place on the next
+/// save: v<5 records are re-encoded (the journal grows), not carried
+/// byte-for-byte. Merge-write: offline players' existing records are carried
+/// over, not erased.
 /// ADR 0011 sibling stores; item_id = ECS handle (ADR 0015).
 pub fn savePlayers(self: *Game) !void {
     var path_buf: [512]u8 = undefined;
@@ -145,11 +179,11 @@ pub fn savePlayers(self: *Game) !void {
     defer self.allocator.free(old_file);
     var old_recs: []const u8 = &.{};
     var old_count: u32 = 0;
-    var old_version: u8 = 4;
+    var old_version: u8 = 5;
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5'))
             return error.CorruptPlayersFile;
         old_version = old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
@@ -164,7 +198,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '4', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '5', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -192,13 +226,48 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            try out.appendSlice(self.allocator, old_recs[rec_start..off]);
-            // Upgrade a legacy record to the current v4 layout so the file
-            // stays uniformly parseable under v4 semantics on the next pass:
-            // v2 -> v3 needs an empty prog byte (0, no tail at all); v3 (or an
-            // upgraded v2) needs a bed_present byte (0) appended only when it
-            // actually has a progression tail, since a tail-less record has
-            // nowhere for a bedroll field to attach.
+            if (old_version == 5) {
+                try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                written += 1;
+                continue;
+            }
+            // v<5 records are re-encoded into the v5 layout: the journal
+            // section grows a name + POI rect per quest, so the record cannot
+            // be carried byte-for-byte. Header + inventory copy verbatim; the
+            // journal is rewritten (names resolved from the catalog by the
+            // stored def_id; legacy entries carry no rect → poi_valid=0); the
+            // tail copies verbatim, still with the v2->v3 / v3->v4 upgrade
+            // bytes so the progression/bedroll fields parse under v5.
+            var jp: usize = rec_start + 1 + nl + 16; // inv_n byte
+            const inv_n: usize = old_recs[jp];
+            jp += 1 + inv_n * 7;
+            const jn: usize = old_recs[jp];
+            const journal_entries = old_recs[jp + 1 ..][0 .. jn * 10];
+            try out.appendSlice(self.allocator, old_recs[rec_start .. jp + 1]);
+            {
+                var qi: usize = 0;
+                while (qi < jn) : (qi += 1) {
+                    const qb = journal_entries[qi * 10 ..][0..10];
+                    const qdef = std.mem.readInt(u16, qb[0..2], .little);
+                    const qname = if (self.sim.catalog.byId(qdef)) |qd| qd.name else "";
+                    if (qname.len > max_quest_name_len) {
+                        // Fail closed: an unrepresentable name drops the quest
+                        // from the carried record rather than corrupting the walk.
+                        continue;
+                    }
+                    try out.appendSlice(self.allocator, qb[0..10]); // core (def_id, code, flags, progress, phase)
+                    try out.append(self.allocator, @intCast(qname.len));
+                    try out.appendSlice(self.allocator, qname);
+                    try out.append(self.allocator, 0); // poi_valid
+                    try out.appendNTimes(self.allocator, 0, 24); // rect
+                }
+            }
+            try out.appendSlice(self.allocator, old_recs[jp + 1 + jn * 10 .. off]);
+            // Legacy upgrade bytes, as before: v2 -> v3 needs an empty prog
+            // byte (0, no tail at all); v3 (or an upgraded v2) needs a
+            // bed_present byte (0) appended only when it actually has a
+            // progression tail, since a tail-less record has nowhere for a
+            // bedroll field to attach.
             if (old_version < 3) {
                 try out.append(self.allocator, 0);
             } else if (old_version < 4 and had_prog_tail) {
@@ -210,7 +279,7 @@ pub fn savePlayers(self: *Game) !void {
     for (&self.clients) |*cl| {
         if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-        var rec: [768]u8 = undefined;
+        var rec: [1536]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
         o += 1;
@@ -247,13 +316,32 @@ pub fn savePlayers(self: *Game) !void {
         if (self.sim.mask[ps].journal) {
             for (self.sim.journal[ps].slots) |q| {
                 if (!q.active and !q.completed) continue;
-                if (o + 10 > rec.len) break;
+                // v5 entry: fixed core + name + poi_valid + rect. The name is
+                // the stock Quest.Write identity (a quests.xml edit must not
+                // reshuffle a saved quest); the rect is stock PositionData[2/3].
+                const qname = if (self.sim.catalog.byId(q.def_id)) |qd| qd.name else "";
+                if (qname.len > max_quest_name_len or o + 10 + 1 + qname.len + 25 > rec.len) break;
                 std.mem.writeInt(u16, rec[o..][0..2], q.def_id, .little);
                 std.mem.writeInt(i32, rec[o + 2 ..][0..4], q.quest_code, .little);
                 rec[o + 6] = (@as(u8, @intFromBool(q.active))) | (@as(u8, @intFromBool(q.completed)) << 1) | (@as(u8, @intFromBool(q.ready_turn_in)) << 2) | (@as(u8, @intFromBool(q.rally_activated)) << 3);
                 std.mem.writeInt(u16, rec[o + 7 ..][0..2], q.progress, .little);
                 rec[o + 9] = q.phase;
-                o += 10;
+                rec[o + 10] = @intCast(qname.len);
+                @memcpy(rec[o + 11 ..][0..qname.len], qname);
+                var p = o + 11 + qname.len;
+                const poi_valid = q.poi.valid();
+                rec[p] = @intFromBool(poi_valid);
+                p += 1;
+                if (poi_valid) {
+                    inline for (.{ q.poi.x, q.poi.y, q.poi.z, q.poi.size_x, q.poi.size_y, q.poi.size_z }) |f| {
+                        std.mem.writeInt(u32, rec[p..][0..4], @as(u32, @bitCast(f)), .little);
+                        p += 4;
+                    }
+                } else {
+                    @memset(rec[p..][0..24], 0);
+                    p += 24;
+                }
+                o = p;
                 jn += 1;
             }
         }
@@ -354,7 +442,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
@@ -407,6 +495,15 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         var quests: [ecs.components.max_journal]ecs.components.QuestProgress = undefined;
         var qi: usize = 0;
         while (qi < jn) : (qi += 1) {
+            // v5 entries append name_len/name/poi_valid/rect after the fixed
+            // 10-byte core; v<=4 entries are core only. The name is the stock
+            // Quest.Write identity, so a quests.xml edit cannot reshuffle the
+            // restored quest into a different one (byName wins over the stored
+            // parse-order def_id); the rect keeps the POI the quest was handed.
+            if (off + 10 > data.len) {
+                std.debug.print("zdtd: restore player: truncated journal core at record {d}/{d}\n", .{ i, n });
+                return;
+            }
             const qb = data[off..][0..10];
             off += 10;
             if (qi < quests.len) quests[qi] = .{
@@ -421,6 +518,43 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 // saves read back as "marker not yet used" without a bump.
                 .rally_activated = (qb[6] & 8) != 0,
             };
+            if (version >= 5) {
+                // name_len + name + poi_valid + rect(24)
+                if (off >= data.len) {
+                    std.debug.print("zdtd: restore player: truncated journal name at record {d}/{d}\n", .{ i, n });
+                    return;
+                }
+                const qnl: usize = data[off];
+                off += 1;
+                if (qnl > max_quest_name_len or off + qnl + 25 > data.len) {
+                    std.debug.print("zdtd: restore player: truncated journal name/rect at record {d}/{d}\n", .{ i, n });
+                    return;
+                }
+                if (qi < quests.len) {
+                    const qname = data[off..][0..qnl];
+                    // Stock identity: resolve by name first; a def dropped from
+                    // quests.xml keeps its stored id fallback so the slot is
+                    // not silently rebound to a different quest.
+                    if (qnl > 0) {
+                        if (self.sim.catalog.byName(qname)) |qd| quests[qi].def_id = qd.id;
+                    }
+                    off += qnl;
+                    const poi_valid = data[off];
+                    off += 1;
+                    if (poi_valid != 0) {
+                        var rect: ecs.components.PoiRect = .{};
+                        inline for (.{ &rect.x, &rect.y, &rect.z, &rect.size_x, &rect.size_y, &rect.size_z }) |f| {
+                            f.* = @bitCast(std.mem.readInt(u32, data[off..][0..4], .little));
+                            off += 4;
+                        }
+                        if (rect.valid()) quests[qi].poi = rect;
+                    } else {
+                        off += 24;
+                    }
+                } else {
+                    off += qnl + 25;
+                }
+            }
         }
         if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) {
             // ZPV3 records carry a progression tail after the journal;
@@ -457,10 +591,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             var fq: usize = 0;
             while (fq < jn and fq < quests.len) : (fq += 1) {
                 self.sim.journal[ps].slots[fq] = quests[fq];
-                // The POI rect is derived from the world, not persisted:
-                // re-resolve it so a restored quest keeps its rally rect.
-                // Defs without a static position re-bind the nearest POI
-                // (audit B26), matching what questAccept did at hand-out.
+                // ZPV5 persists the POI rect (stock PositionData[2/3]), so a
+                // restored quest keeps the prefab it was handed; legacy files
+                // have none and re-resolve from the world (stock re-derives
+                // QuestPrefab from the position data it persisted — old zdtd
+                // saves simply lack the data, so the nearest-POI fallback is
+                // the honest equivalent, audit B26).
+                if (self.sim.journal[ps].slots[fq].poi.valid()) continue;
                 const qd = self.sim.catalog.byId(quests[fq].def_id) orelse continue;
                 if (self.sim.poiAt(qd.tx, qd.tz)) |rect| {
                     self.sim.journal[ps].slots[fq].poi = rect;
@@ -522,7 +659,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 // Bedroll tail (see savePlayers / zpvRecordLen): gated on the
                 // file's own version, not "bytes remain" (ambiguous whenever
                 // another record follows this one in the file).
-                if (version == 4 and off < data.len) {
+                if (version >= 4 and off < data.len) {
                     const bed_present = data[off];
                     off += 1;
                     if (bed_present == 1 and off + 12 <= data.len) {
@@ -758,7 +895,7 @@ pub fn loadClaims(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5'))
         return error.CorruptPlayersFile;
     const version: u8 = data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);

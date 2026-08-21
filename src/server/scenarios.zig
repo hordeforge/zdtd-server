@@ -4392,6 +4392,164 @@ test "scenario journal PDF carries max_journal quests (GAP 12)" {
     std.debug.print("PASS journal-pdf: {d} quests reach the join PDF (cap was 2)\n", .{qn});
 }
 
+test "scenario quest journal ZPV5 restores by name and keeps the POI rect" {
+    // GAP quest-journal-persistence row: a restart must restore the same quest
+    // (by its stock name identity, not the parse-order def_id) with the POI
+    // rect it was handed (stock PositionData[2/3]), not a re-resolved one.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_questpersist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const PoiRect = @import("../ecs/components.zig").PoiRect;
+    const poi_stub = struct {
+        fn f(_: ?*anyopaque, _: f32, _: f32) ?PoiRect {
+            return .{ .x = 100, .y = 60, .z = 100, .size_x = 40, .size_y = 20, .size_z = 40 };
+        }
+    }.f;
+
+    {
+        const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questpersist", 0, .{
+            .quests_path = "assets/fixtures/quests.xml",
+        });
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        g.sim.poi_fn = poi_stub;
+        g.sim.nearest_poi_fn = poi_stub;
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const d = g.sim.catalog.byName("tier1_clear") orelse return error.TestUnexpectedResult;
+        try std.testing.expect(systems.questAccept(&g.sim, c.slot, d.id));
+        const ps = g.sim.playerByPeer(c.slot).?;
+        var found = false;
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (s.active and s.def_id == d.id) {
+                try std.testing.expectEqual(@as(f32, 100), s.poi.x);
+                try std.testing.expectEqual(@as(f32, 40), s.poi.size_x);
+                found = true;
+            }
+        }
+        try std.testing.expect(found);
+        try g.savePlayers();
+    }
+
+    // Restart WITHOUT the POI hooks: the persisted rect must come back from
+    // the file (re-resolving would leave it unset) and the def must resolve.
+    {
+        const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questpersist", 0, .{
+            .quests_path = "assets/fixtures/quests.xml",
+        });
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const ps = g.sim.playerByPeer(c.slot).?;
+        const d = g.sim.catalog.byName("tier1_clear") orelse return error.TestUnexpectedResult;
+        var found = false;
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (s.active and s.def_id == d.id) {
+                try std.testing.expectEqual(@as(f32, 100), s.poi.x);
+                try std.testing.expectEqual(@as(f32, 100), s.poi.z);
+                try std.testing.expectEqual(@as(f32, 40), s.poi.size_x);
+                try std.testing.expectEqual(@as(f32, 40), s.poi.size_z);
+                found = true;
+            }
+        }
+        try std.testing.expect(found);
+        std.debug.print("PASS quest-persist: ZPV5 round-trip restores tier1_clear by name with its POI rect\n", .{});
+    }
+}
+
+test "scenario quest journal ZPV5 resolves the quest by name, not stored def_id" {
+    // Hand-crafted ZPV5 record: the journal entry stores tier1_fetch's def_id
+    // but the name "tier1_clear". Restore must follow the name (stock
+    // Quest.Write identifies quests by name; a quests.xml edit reshuffles the
+    // parse-order def_ids). Also carries a distinct POI rect that must come
+    // back verbatim.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_questname");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questname", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const fetch_def = g.sim.catalog.byName("tier1_fetch") orelse return error.TestUnexpectedResult;
+    const clear_def = g.sim.catalog.byName("tier1_clear") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(fetch_def.id != clear_def.id);
+
+    // players.zsv: ZPV5 | n=1 | record("Bot", no inv, one quest entry,
+    // prog tail absent).
+    var file: [256]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(file[o..][0..4], "ZPV5");
+    o += 4;
+    std.mem.writeInt(u32, file[o..][0..4], 1, .little);
+    o += 4;
+    file[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(file[o..][0..3], "Bot");
+    o += 3;
+    inline for (.{ @as(f32, 10), @as(f32, 70), @as(f32, 20) }) |f| {
+        std.mem.writeInt(u32, file[o..][0..4], @as(u32, @bitCast(f)), .little);
+        o += 4;
+    }
+    std.mem.writeInt(u32, file[o..][0..4], 0, .little); // coins
+    o += 4;
+    file[o] = 0; // inv_n
+    o += 1;
+    file[o] = 1; // jn
+    o += 1;
+    // Journal entry: STORED def_id = tier1_fetch, name = "tier1_clear".
+    std.mem.writeInt(u16, file[o..][0..2], fetch_def.id, .little);
+    o += 2;
+    std.mem.writeInt(i32, file[o..][0..4], 12345, .little); // quest_code
+    o += 4;
+    file[o] = 1; // flags: active
+    o += 1;
+    std.mem.writeInt(u16, file[o..][0..2], 0, .little); // progress
+    o += 2;
+    file[o] = 1; // phase
+    o += 1;
+    file[o] = @intCast(clear_def.name.len); // name_len
+    o += 1;
+    @memcpy(file[o..][0..clear_def.name.len], clear_def.name);
+    o += clear_def.name.len;
+    file[o] = 1; // poi_valid
+    o += 1;
+    inline for (.{ @as(f32, 10), @as(f32, 20), @as(f32, 30), @as(f32, 40), @as(f32, 50), @as(f32, 60) }) |f| {
+        std.mem.writeInt(u32, file[o..][0..4], @as(u32, @bitCast(f)), .little);
+        o += 4;
+    }
+    file[o] = 0; // prog: no tail
+    o += 1;
+    try io_fs.writeFile("worlds/zdtd_sc_questname/players.zsv", file[0..o]);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var found = false;
+    for (&g.sim.journal[ps].slots) |*s| {
+        if (s.active and s.def_id == clear_def.id) {
+            try std.testing.expectEqual(@as(i32, 12345), s.quest_code);
+            try std.testing.expectEqual(@as(f32, 10), s.poi.x);
+            try std.testing.expectEqual(@as(f32, 60), s.poi.size_z);
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
+    std.debug.print("PASS quest-persist-name: name identity wins over stored def_id; rect verbatim\n", .{});
+}
+
 test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/craft/stay/block/rally)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

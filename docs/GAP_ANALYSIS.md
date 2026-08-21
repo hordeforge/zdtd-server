@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 28 | 3 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks |
+| [Quests](#4-quests) | 29 | 2 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **194** | **95** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **195** | **94** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -791,14 +791,22 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/ecs/systems.zig` `questAcceptStarter`,
   `src/server/game.zig` join path
 
-- **Quest journal persistence (players.zsv ZPV3)** `PARTIAL`
-  Stores def_id, quest_code, a flags byte, progress and phase, and re-resolves
-  the POI rect on load. The identity stored is the parse-order catalog `def_id`;
-  any edit to `quests.xml`, a `--config-overrides` patch or a game update
-  reshuffles it and every saved quest silently becomes a different quest. The POI
-  rect is not persisted, so a restored quest can land in a different prefab.
-  *Anchors:* `src/server/game.zig:1845`, `:1947`, `:1991`,
-  `src/assets/quests.zig:405`
+- **Quest journal persistence (players.zsv ZPV5)** `WORKS` `(2026-08-21)`
+  The players record is now ZPV5: every journal entry stores the quest **name**
+  (the stock Quest.Write identity, `Quest.Write` IL writes `ID` as a string) and
+  the POI rect (stock PositionData[2/3] bbox origin + size) alongside the
+  def_id/quest_code/flags/progress/phase core. On restore the quest resolves by
+  name first — a quests.xml edit or `--config-overrides` patch no longer
+  reshuffles a saved quest into a different one (byName wins over the stored
+  parse-order def_id; a def dropped from the file keeps its stored id rather
+  than silently rebinding) — and the accepted POI rect comes back verbatim
+  instead of re-resolving to the nearest prefab. ZPV2/3/4 files still read and
+  upgrade in place (v<5 records are re-encoded, not carried byte-for-byte, as
+  the journal grew). Scenarios `quest-persist` (round-trip keeps def + rect
+  across a restart without POI hooks) and `quest-persist-name` (hand-crafted
+  record whose stored def_id disagrees with its name resolves to the name).
+  *Anchors:* `src/server/persist.zig` savePlayers / tryRestorePlayer /
+  journalSectionEnd, scenario `quest-persist` + `quest-persist-name`
 
 - **Quest NavObject markers** `WORKS` `(2026-08-22)`
   Emits `nav_objects.xml` class names at join for active quests with

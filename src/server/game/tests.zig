@@ -313,6 +313,96 @@ test "players zpv3 restore skips a preceding record's progression tail" {
     try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food_max);
 }
 
+test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
+    // Hand-built ZPV4 file with one 10-byte journal entry (no name/rect).
+    // savePlayers must re-encode it into the ZPV5 shape (name + rect) so the
+    // file stays uniformly parseable, then a restart restores the same quest.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [256]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV4");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    buf[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bot");
+    o += 3;
+    @memset(buf[o..][0..16], 0); // xyz + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 1; // jn
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 1, .little); // def_id (clear_the_noise)
+    o += 2;
+    std.mem.writeInt(i32, buf[o..][0..4], 99, .little); // quest_code
+    o += 4;
+    buf[o] = 1; // flags: active
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 2, .little); // progress
+    o += 2;
+    buf[o] = 1; // phase
+    o += 1;
+    buf[o] = 0; // prog: no tail (so no v4 bed byte either)
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Restored from the v4 entry (no name): def_id 1 = clear_the_noise.
+        var found = false;
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (s.active and s.def_id == 1 and s.quest_code == 99) {
+                try std.testing.expectEqual(@as(u16, 2), s.progress);
+                found = true;
+            }
+        }
+        try std.testing.expect(found);
+        // Save re-encodes to ZPV5: the journal entry gains the quest name.
+        try g.savePlayers();
+    }
+    {
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        try std.testing.expectEqualStrings("ZPV5", data[0..4]);
+        try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
+    }
+    // Restart: the re-encoded ZPV5 file round-trips the same active quest.
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        var found = false;
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (s.active and s.def_id == 1 and s.quest_code == 99) {
+                try std.testing.expectEqual(@as(u16, 2), s.progress);
+                found = true;
+            }
+        }
+        try std.testing.expect(found);
+        std.debug.print("PASS zpv4->zpv5: legacy journal upgraded in place and round-trips\n", .{});
+    }
+}
+
 test "land claim removed when keystone breaks and expires offline" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

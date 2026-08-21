@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Quest journal persistence is now ZPV5: every saved quest stores its name
+  (the stock Quest.Write identity) and the accepted POI rect, so a restart —
+  even after a quests.xml edit — restores the same quest bound to the same
+  prefab instead of a reshuffled def or a re-resolved POI. Older ZPV2/3/4
+  player saves still read and upgrade in place.
 - Quest POI placement now mirrors stock: RandomPOIGoto/Goto/ClosestPOIGoto
   objectives select the POI by prefab quest tags, difficulty tier, biome
   filter and distance (with bedroll/land-claim/quest lockouts), and trader
