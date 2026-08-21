@@ -549,6 +549,53 @@ test "scenario replicate sends EntityVelocity for a falling zombie" {
     try std.testing.expect(found);
 }
 
+test "scenario replicate sends TurretSync on target change" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_turret");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turret", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // A turret at the observer's feet acquires a target.
+    const t = g.sim.spawnTurret(g.sim.transform[ps].x, g.sim.transform[ps].y + 1, g.sim.transform[ps].z).?;
+    const ts = g.sim.slotOfNetId(t).?;
+    const z = g.sim.spawnZombie(g.sim.transform[ps].x, g.sim.transform[ps].y + 2, g.sim.transform[ps].z, 40).?;
+    g.sim.turret[ts].target_id = z;
+    try g.replicate();
+    const did = packages.idOf("NetPackageTurretSync").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap.n and !found) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                // The flat world spawns a demo turret whose TurretSync also
+                // appears; match the frame for OUR turret entity.
+                if (pkgs[j].body.len >= 9 and std.mem.readInt(i32, pkgs[j].body[0..4], .little) != t) continue;
+                var r = binary.Reader{ .data = pkgs[j].body };
+                try std.testing.expectEqual(t, try r.readI32());
+                try std.testing.expectEqual(z, try r.readI32());
+                try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // isOn
+                try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // ItemValue.None
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+}
+
 test "scenario backpack marker broadcasts on drop and clears on collect" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_bp");

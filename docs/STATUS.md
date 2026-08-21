@@ -295,6 +295,8 @@ C2S handler row was recounted (76 of 98 stock-sent names handled). The player
 list broadcasts every 5 s (NetPackageClientInfo: entityId, ping, admin flag -
 ping 0, no RTT measurement yet). Death bags mark the map: the dropped
 backpack marker broadcasts on drop (DropOnDeath) and clears on collect.
+Turrets stream their aim/on state to viewers (NetPackageTurretSync,
+change-gated in the replicate fan-out) so placed turrets turn toward targets.
 The per-channel sequence row flipped to WORKS (2026-08-21): the old
 `sendSequenced` latent channel hazard is gone - refactored away; zdtd emits
 no sequenced-channel packages and the ACK/reliable window is channel-2 only

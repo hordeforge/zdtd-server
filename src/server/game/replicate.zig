@@ -52,6 +52,7 @@ pub fn replicate(self: *Game) !void {
     var speeds_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var flags_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var vel_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    var turret_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
 
     var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
@@ -219,6 +220,7 @@ pub fn replicate(self: *Game) !void {
         var speeds_framed: ?[]const u8 = null;
         var flags_framed: ?[]const u8 = null;
         var vel_framed: ?[]const u8 = null;
+        var turret_framed: ?[]const u8 = null;
         if (self.sim.mask[i].kind and self.sim.kind[i] == .zombie) {
             var fwd: f32 = 0.2;
             var state: u8 = 1;
@@ -261,10 +263,31 @@ pub fn replicate(self: *Game) !void {
             }
         }
 
+        // Turret aim/on state (RE EntityTurret TurretSync): broadcast to
+        // viewers when the target or powered-on state changes; the client
+        // aims the turret at the target and plays the fire state.
+        if (self.sim.mask[i].kind and self.sim.kind[i] == .turret) {
+            const t = self.sim.turret[i];
+            const is_on = t.target_id >= 0;
+            const st = &self.turret_sync_sent[i];
+            if (!st.sent or st.target != t.target_id or st.on != is_on) {
+                st.target = t.target_id;
+                st.on = is_on;
+                st.sent = true;
+                if (packages.buildTurretSyncBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 32], nid, t.target_id, is_on)) |tb| {
+                    if (packages.framed(&turret_frame_buf, "NetPackageTurretSync", tb)) |tf| {
+                        turret_framed = tf;
+                        self.harness.counters.inc(.packages_encoded);
+                    } else |_| {}
+                } else |_| {}
+            }
+        }
+
         const per_viewer: u64 = 1 +
             @as(u64, @intFromBool(speeds_framed != null)) +
             @as(u64, @intFromBool(flags_framed != null)) +
-            @as(u64, @intFromBool(vel_framed != null));
+            @as(u64, @intFromBool(vel_framed != null)) +
+            @as(u64, @intFromBool(turret_framed != null));
         var m = viewers;
         while (m != 0) : (m &= m - 1) {
             const ci = @ctz(m);
@@ -273,6 +296,7 @@ pub fn replicate(self: *Game) !void {
             if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
             if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
             if (vel_framed) |vf| self.sendFramedUnreliable(peer, vf);
+            if (turret_framed) |tf| self.sendFramedReliable(peer, "NetPackageTurretSync", tf, game_mod.window_retry_budget_ns, false) catch self.harness.counters.inc(.net_send_errors);
             self.harness.counters.add(.replicate_fanouts, per_viewer);
         }
     }

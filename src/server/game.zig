@@ -226,6 +226,13 @@ const EntityLookSent = struct {
     sent: bool = false,
 };
 
+/// Last-sent TurretSync state (RE EntityTurret.lastTargetEntityId/lastIsOn).
+const TurretSyncSent = struct {
+    target: i32 = -1,
+    on: bool = false,
+    sent: bool = false,
+};
+
 pub const Game = struct {
     allocator: std.mem.Allocator,
     net: ln_server.Server = .{},
@@ -417,6 +424,9 @@ pub const Game = struct {
     /// motion updates): re-sends only when the vertical velocity moves past
     /// 0.1, so falls/jumps stream while rest stays quiet.
     entity_vel_sent_y: [ecs.max_entities]f32 = [_]f32{0} ** ecs.max_entities,
+    /// Last-sent TurretSync (target, on) per entity slot (RE EntityTurret:
+    /// re-broadcasts when the target/on state changes, so turrets aim live).
+    turret_sync_sent: [ecs.max_entities]TurretSyncSent = [_]TurretSyncSent{.{}} ** ecs.max_entities,
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,

@@ -3344,9 +3344,11 @@ persists so little that a restart visibly damages a built base.
   replicate fan-out). The player list broadcasts every 5 s
   (NetPackageClientInfo, 2026-08-21). Death bags mark the map: the dropped
   backpack marker broadcasts on drop and clears on collect
-  (NetPackagePlayerSetBackpackPosition, 2026-08-21). ToClient names never
-  sent at all include TurretSync, EntitySetSkillLevelClient, ChunkClusterInfo,
-  WallVolume, Light, TreeFade, AudioPlayInHead, WaterSimChunkUpdate, AuthState.
+  (NetPackagePlayerSetBackpackPosition, 2026-08-21). Turrets stream their
+  aim/on state to viewers (NetPackageTurretSync, 2026-08-21, change-gated in
+  the replicate fan-out). ToClient names never sent at all include
+  EntitySetSkillLevelClient, ChunkClusterInfo, WallVolume, Light, TreeFade,
+  AudioPlayInHead, WaterSimChunkUpdate, AuthState.
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
   sole stock sender is the Homerun minigame (ShowTooltipMP unicast,
