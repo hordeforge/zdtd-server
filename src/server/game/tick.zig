@@ -329,3 +329,38 @@ pub fn clearDeadKnownEntities(self: *Game) void {
     for (&self.clients) |*kc| kc.known_entities.setIntersection(self.sim.alive_bits);
     self.sim.any_freed_this_tick = false;
 }
+
+/// Drain MoveHelper dig damage requests (RE entity-ai.md DigUpdate): each
+/// request damages the sim-marked block with the chew's bite damage; a broken
+/// block ends the dig so the zombie walks on.
+pub fn drainDigRequests(self: *Game) void {
+    const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
+    if (mult == 0) return;
+    const base_bite: u32 = @trunc(@max(0, self.sim.rules.progression.block_bite_damage));
+    const n = @min(self.sim.dig_n, self.sim.dig_reqs.len);
+    self.sim.dig_n = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const d = self.sim.dig_reqs[i];
+        if (!self.sim.alive[d.slot]) continue;
+        const solid = self.world.isSolidWorld(d.x, d.y, d.z) catch continue;
+        if (!solid) {
+            self.sim.zombie_ai[d.slot].digging = false;
+            continue;
+        }
+        const id = self.blockIdAtWorld(d.x, d.y, d.z);
+        if (id == 0) continue;
+        const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
+        const max_hp = self.maxDamageForBlock(id);
+        const total = self.addBlockDamage(d.x, d.y, d.z, dmg);
+        if (total >= max_hp) {
+            self.world.setBlockWorld(d.x, d.y, d.z, 0) catch continue;
+            self.clearBlockHp(d.x, d.y, d.z);
+            self.clearBlockRaw(d.x, d.y, d.z);
+            self.sim.zombie_ai[d.slot].digging = false;
+            if (packages.buildSetBlockBody(&self.body_buf, d.x, d.y, d.z, 0)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
+            } else |_| {}
+        }
+    }
+}

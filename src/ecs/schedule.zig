@@ -70,6 +70,7 @@ pub fn run(w: *World, dt: f32) TickResult {
     // the `director` toggle is applied inside it (spawning only), not here.
     const dr = systems.systemDirector(w, dt);
     const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;
+    if (on.ai) systems.systemDigUpdate(w);
     if (on.vehicles) systems.systemVehicles(w, dt);
     // Power resolves once per tick in Game.step (power.tick with real daylight);
     // an extra resolve here doubled the grid BFS and forced daylight=true, so

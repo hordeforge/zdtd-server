@@ -113,6 +113,9 @@ pub fn step(self: *Game) !void {
         // Demolition explosions (RE entity-ai.md EntityZombieCop): the sim
         // countdowns pushed requests; apply the entity + block AoE here.
         self.drainExplosions();
+        // MoveHelper dig damage (RE entity-ai.md DigUpdate): the sim runs the
+        // cadence; the Game applies the block damage like the chase chew.
+        self.drainDigRequests();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

@@ -182,6 +182,8 @@ pub const World = struct {
     /// ring and applies entity + block AoE. Consume-owns-drain like noise.
     explode_reqs: [c.explode_cap]c.ExplodeRequest = undefined,
     explode_n: usize = 0,
+    dig_reqs: [c.dig_cap]c.DigRequest = undefined,
+    dig_n: usize = 0,
     falling: [max_entities]c.FallingBlocks = [_]c.FallingBlocks{.{}} ** max_entities,
     vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
     turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
@@ -600,6 +602,14 @@ pub const World = struct {
         const n = @atomicRmw(usize, &self.explode_n, .Add, 1, .monotonic);
         if (n >= c.explode_cap) return;
         self.explode_reqs[n] = .{ .slot = @intCast(slot) };
+    }
+
+    /// Push a MoveHelper dig damage request (RE entity-ai.md DigUpdate).
+    /// Parallel AI workers push; the Game drains in step (consume-owns-drain).
+    pub fn pushDig(self: *World, slot: Slot, x: i32, y: i32, z: i32) void {
+        const n = @atomicRmw(usize, &self.dig_n, .Add, 1, .monotonic);
+        if (n >= c.dig_cap) return;
+        self.dig_reqs[n] = .{ .slot = @intCast(slot), .x = x, .y = y, .z = z };
     }
 
     /// Resting terrain height at world (x,z) via the optional ground hook, or

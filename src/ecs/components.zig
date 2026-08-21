@@ -183,6 +183,16 @@ pub const ZombieAi = struct {
     /// snap is suppressed so the impulse is not zeroed on its own tick; the
     /// flag clears at the apex (vy < 0) and the fall lands normally.
     jumping: bool = false,
+    /// MoveHelper dig state (RE entity-ai.md DigStart/DigUpdate): a fully
+    /// blocked, grounded, non-jumping AI digs the block in its move direction.
+    /// dig_for_ticks is the remaining dig budget (DigStop at 0), dig_ticks the
+    /// windup/attack cadence (stock: 18 windup, then damage every 18 ticks).
+    digging: bool = false,
+    dig_x: i32 = 0,
+    dig_y: i32 = 0,
+    dig_z: i32 = 0,
+    dig_for_ticks: u8 = 0,
+    dig_ticks: u8 = 0,
     path_goal_x: f32 = 0,
     path_goal_z: f32 = 0,
     has_path: bool = false,
@@ -792,6 +802,18 @@ pub const explode_cap: usize = 8;
 pub const ExplodeRequest = struct {
     /// Entity slot (u16: components.zig cannot see world.zig's Slot type).
     slot: u16,
+};
+
+/// One pending MoveHelper dig (RE entity-ai.md DigStart/DigUpdate): the sim
+/// runs the windup/attack cadence and pushes a damage request per attack; the
+/// Game drains it (single thread) and damages the block like the chase chew.
+pub const dig_cap: usize = 16;
+
+pub const DigRequest = struct {
+    slot: u16,
+    x: i32,
+    y: i32,
+    z: i32,
 };
 
 /// Group cap for one falling-blocks entity. Stock `GroupBounds.IsWithinSize`

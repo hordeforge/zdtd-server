@@ -332,10 +332,11 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     var nx = t.x;
     var nz = t.z;
     const jumping = w.mask[s].zombie_ai and w.zombie_ai[s].vy > 0;
-    // While rising from a jump the body sails at the arc apex, so a hop
-    // clears obstacles up to jump_height (stock StartJumpMotion forward
-    // motion over the arc); the step-up only applies on the ground.
-    const probe_h: f32 = if (jumping) t.y + w.rules.ai.jump_height else t.y;
+    // While rising from a jump the body probes at its ACTUAL height (the arc
+    // carries it over obstacles it genuinely clears); the step-up only applies
+    // on the ground. A probe at y + jump_height would let the body clip walls
+    // up to apex + jump_height tall.
+    const probe_h: f32 = t.y;
     if (bodyClearAt(ctx, solid_fn, t.x + mx, t.z, probe_h, h, r)) {
         nx = t.x + mx;
     } else if (!jumping and step > 0 and bodyClearAt(ctx, solid_fn, t.x + mx, t.z, t.y + step, h, r)) {
@@ -356,17 +357,75 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const moved = nx != t.x or nz != t.z;
     t.x = nx;
     t.z = nz;
-    // Stock MoveHelper StartJump (entity-ai.md 2030-2034): a fully blocked,
-    // grounded AI hops over the obstacle with heightDiff ~1.3. The impulse is
-    // sized against the gravity integrator (v = sqrt(2 g h)); the rising body
-    // clears the wall on the next tick's probe, the arc lands it past it.
+    // Stock MoveHelper StartJump / DigStart (entity-ai.md 2030-2034, 2327): a
+    // fully blocked, grounded AI hops when the obstacle's full height fits
+    // under the jump apex (the impulse is sized so feet clear jump_height),
+    // otherwise it digs the first solid cell in the move direction. The dig
+    // cadence (systemDigUpdate) pushes damage requests the Game drains like
+    // the chase chew.
     if (!moved and w.mask[s].zombie_ai) {
         const ai = &w.zombie_ai[s];
-        if (ai.vy == 0 and ai.jump_cd <= 0) {
-            const g: f32 = -w.rules.ai.gravity;
-            ai.vy = @sqrt(2.0 * g * w.rules.ai.jump_height);
-            ai.jump_cd = w.rules.ai.jump_delay_s;
-            ai.jumping = true;
+        if (ai.vy != 0) return;
+        const bx: i32 = @intFromFloat(@floor(t.x + dx * inv));
+        const bz: i32 = @intFromFloat(@floor(t.z + dz * inv));
+        const by_mid: i32 = @intFromFloat(@floor(t.y + 0.5));
+        const by: i32 = if (solid_fn(w.solid_ctx, bx, by_mid, bz))
+            by_mid
+        else
+            @intFromFloat(@floor(t.y + 1));
+        const blocking = solid_fn(w.solid_ctx, bx, by, bz);
+        if (blocking) {
+            // Top of the contiguous solid run above the blocking cell: the
+            // body's feet must clear it at the jump apex, or the hop fails.
+            var top: i32 = by;
+            while (solid_fn(w.solid_ctx, bx, top + 1, bz)) top += 1;
+            const feet_at_apex = t.y + w.rules.ai.jump_height;
+            if (ai.jump_cd <= 0 and @as(f32, @floatFromInt(top + 1)) <= feet_at_apex) {
+                const g: f32 = -w.rules.ai.gravity;
+                ai.vy = @sqrt(2.0 * g * w.rules.ai.jump_height);
+                ai.jump_cd = w.rules.ai.jump_delay_s;
+                ai.jumping = true;
+            } else if (!ai.digging and w.solid_fn != null) {
+                ai.digging = true;
+                ai.dig_x = bx;
+                ai.dig_y = by;
+                ai.dig_z = bz;
+                ai.dig_for_ticks = dig_budget_ticks;
+                ai.dig_ticks = 0;
+            }
+        }
+    }
+}
+
+/// MoveHelper dig cadence (RE entity-ai.md DigUpdate IL=261): each digging AI
+/// counts windup/attack ticks and pushes a DigRequest every `dig_windup_ticks`
+/// (stock fires the attack after the 18-tick windup, then every 4+14 = 18);
+/// the budget runs down to DigStop. A dug block that is already gone ends the
+/// dig so the zombie walks on.
+const dig_windup_ticks: u8 = 18;
+const dig_budget_ticks: u8 = 90;
+
+pub fn systemDigUpdate(w: *World) void {
+    const solid_fn = w.solid_fn;
+    for (query.groupSlice(w, .zombie)) |s| {
+        if (!w.alive[s] or !w.mask[s].zombie_ai) continue;
+        const ai = &w.zombie_ai[s];
+        if (!ai.digging) continue;
+        if (ai.dig_for_ticks == 0) {
+            ai.digging = false;
+            continue;
+        }
+        if (solid_fn) |sf| {
+            if (!sf(w.solid_ctx, ai.dig_x, ai.dig_y, ai.dig_z)) {
+                ai.digging = false;
+                continue;
+            }
+        }
+        ai.dig_for_ticks -= 1;
+        ai.dig_ticks +%= 1;
+        if (ai.dig_ticks >= dig_windup_ticks) {
+            ai.dig_ticks = 0;
+            w.pushDig(s, ai.dig_x, ai.dig_y, ai.dig_z);
         }
     }
 }
@@ -4969,6 +5028,46 @@ test "move helper: a blocked grounded zombie jumps a 1-block wall" {
         if (w2.transform[s2].x >= 14.0) break;
     }
     try std.testing.expect(w2.transform[s2].x < 10.0);
+}
+
+test "move helper: a blocked grounded zombie digs the blocking block" {
+    // RE entity-ai.md DigStart/DigUpdate: after the jump fails on a 3-tall
+    // wall (the 1.3-block hop cannot clear it) and its cooldown lapses, the
+    // blocked grounded AI digs the solid cell in its move direction; the
+    // cadence pushes DigRequests the Game drains. The wall spans all z so the
+    // slide cannot route around it.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .jump_delay_s = 1.0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, _: i32) bool {
+            if (y <= 70) return true; // ground
+            if (x == 10 and (y == 71 or y == 72 or y == 73)) return true; // 3-tall wall
+            return false;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const z = w.spawnZombieClass(5, 71, 5, 500, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Walk toward x=15: the jump fires once (fails on the 2-tall wall), then
+    // during the cooldown the dig starts.
+    for (0..120) |_| {
+        stepToward(&w, s, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[s].digging);
+    try std.testing.expectEqual(@as(i32, 10), w.zombie_ai[s].dig_x);
+    try std.testing.expectEqual(@as(i32, 71), w.zombie_ai[s].dig_y);
+    // The cadence pushes a DigRequest after the windup.
+    var pushed = false;
+    for (0..@as(usize, dig_windup_ticks) + 4) |_| {
+        systemDigUpdate(&w);
+        if (w.dig_n > 0) {
+            pushed = true;
+            break;
+        }
+    }
+    try std.testing.expect(pushed);
 }
 
 test "demolition: primes at the health threshold, countdowns, then requests the explosion" {

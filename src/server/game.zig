@@ -1162,6 +1162,10 @@ pub const Game = struct {
         return game_tick.tickZombieBlockDamage(self);
     }
 
+    pub fn drainDigRequests(self: *Game) void {
+        return game_tick.drainDigRequests(self);
+    }
+
     /// Block id at world coords (0 = air / unloaded).
     pub fn blockIdAtWorld(self: *Game, x: i32, y: i32, z: i32) u16 {
         const t = world_store.World.worldToChunk(x, z);
