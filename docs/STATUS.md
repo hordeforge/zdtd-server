@@ -408,6 +408,15 @@ pins: 7dtd-research protocol-packages.md 5.11/5.12. C2S handled names 80
 -> 82 of the 98 stock client sends; Net and ops stays 44/7/5, total
 **183/106/44**.
 
+QuestGotoPoint/QuestTreasurePoint handled 2026-08-21 (C2S handler row,
+stays PARTIAL): the goto-marker report and the treasure-dig report are
+validated no-ops - goto objectives complete by proximity (questTickGoto,
+radius^2 per tick) and fetch/treasure phases advance from the client's
+QuestObjectiveUpdate treasure_complete event, so both client echoes are
+redundant. RE pin: 7dtd-research protocol-packages.md 5.13. C2S handled
+names 82 -> 84 of the 98 stock client sends; Net and ops stays 44/7/5,
+total **183/106/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

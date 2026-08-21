@@ -2034,3 +2034,31 @@ test "particle effects relay to all clients except the causing owner; stealth is
     try g.injectFramed(ca, f2);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
 }
+
+test "quest goto/treasure point reports are handled without double-completion" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    var frame_buf: [256]u8 = undefined;
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    // GotoPoint report (traderId + playerId + questCode + padding).
+    var gb: [48]u8 = undefined;
+    std.mem.writeInt(i32, gb[0..4], 1, .little);
+    std.mem.writeInt(i32, gb[4..8], ca.entity_id, .little);
+    const f1 = try packages.framed(&frame_buf, "NetPackageQuestGotoPoint", &gb);
+    try g.injectFramed(ca, f1);
+    // TreasurePoint report (playerId + padding).
+    var tb: [48]u8 = undefined;
+    std.mem.writeInt(i32, tb[0..4], ca.entity_id, .little);
+    const f2 = try packages.framed(&frame_buf, "NetPackageQuestTreasurePoint", &tb);
+    try g.injectFramed(ca, f2);
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+}

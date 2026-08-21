@@ -108,6 +108,34 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         self.harness.counters.inc(.ownership_rejects);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageQuestGotoPoint")) {
+        // Stock NetPackageQuestGotoPoint (read IL=43): traderId, playerId,
+        // questCode, questTags, position, size, difficulty, GotoType,
+        // biomeFilter - the client reports reaching the goto marker so the
+        // server completes the objective. zdtd completes goto objectives
+        // server-side by proximity (questTickGoto, radius^2 check on the
+        // player's position each tick), so the report is a redundant echo:
+        // validate and drop.
+        if (body.len < 32) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageQuestTreasurePoint")) {
+        // Stock NetPackageQuestTreasurePoint (read IL=54): playerId,
+        // distance, offset, treasureRadius, questCode, position,
+        // useNearby, treasureOffset, blocksPerReduction, ActionType - the
+        // client reports treasure-dig progress. zdtd's fetch/treasure
+        // quests complete through the client's QuestObjectiveUpdate
+        // treasure_complete event (bumpPhase fetch_item), so this parallel
+        // path is a redundant echo: validate and drop.
+        if (body.len < 32) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {
         try self.handleAllyRequest(c, body);
         return true;

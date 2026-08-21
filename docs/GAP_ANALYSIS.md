@@ -3258,10 +3258,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  82 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  84 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
   EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
-  EntityAwardKillServer, ParticleEffect and EntityStealth have handlers
+  EntityAwardKillServer, ParticleEffect, EntityStealth, QuestGotoPoint and
+  QuestTreasurePoint have handlers
   since the last count; the Waypoint
   relay parses the full Waypoint v7 body and fans the invite to the
   inviter's allies or all players per
@@ -3275,20 +3276,25 @@ persists so little that a restart visibly damages a built base.
   authoritatively at the death path - applying the client echo would
   double-credit, the ParticleEffect relay re-broadcasts client-triggered
   particles to every client except the causing entity's owner per
-  SpawnParticleEffectServer, and the EntityStealth stealth report is a
+  SpawnParticleEffectServer, the EntityStealth stealth report is a
   validated no-op because zdtd computes stealth server-side (crouch from
-  movement frames, smell from buffs)).
+  movement frames, smell from buffs), and the QuestGotoPoint /
+  QuestTreasurePoint reports are validated no-ops because goto objectives
+  complete by proximity (questTickGoto) and fetch/treasure phases advance
+  from the QuestObjectiveUpdate treasure_complete event).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 20 have no handler: Debug,
+  yields 98 names the stock client actually sends; 18 have no handler: Debug,
   DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
   EncryptionPublicKey, EntityPhysics, EntityRagdoll,
   KeyExchangeComplete, ModifyCVar,
-  PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
+  PlayerLaserSight, PlayerTwitchStats,
   SetProp, SimpleRPC, TwitchAccess, TwitchVoteScheduling,
   WorldFolder.
-  Player-visible: vending machines are inert, buried-supplies and goto quest
-  markers never register, ragdolls are not
-  relayed. (Local map waypoints stay
+  Player-visible: vending machines are inert, ragdolls are not
+  relayed. (Goto/treasure quest markers register through the server's
+  objective wire; the client's reach/dig reports are redundant with the
+  server's proximity completion and QuestObjectiveUpdate events. Local map
+  waypoints stay
   client-local as in stock; only the party waypoint invite traverses the
   server, and it now relays.)
   *Anchors:* `src/server/game.zig:3771-5480`, `src/server/c2s/quest.zig`
