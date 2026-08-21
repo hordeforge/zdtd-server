@@ -128,6 +128,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
+        // Stock NetPackageSoundAtPosition (write IL=25): pos 3xf32 | clip
+        // string | mode u8 | distance i32 | entityId i32 | volumeScale f32.
+        // GameManager.PlaySoundAtPositionServer (IL=60, dedicated branch)
+        // re-broadcasts the Setup body with allButAttachedToEntityId =
+        // entityId, so every client except the owning player hears the sound
+        // (the owner already played it locally); the distance field drives
+        // the receiving client's rolloff, not the fan-out. Verbatim relay
+        // excludes that entity's client, like stock.
+        const snd = packages.parseSoundAtPosition(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null) continue;
+            if (cl.entity_id == snd.entity_id) continue; // allButAttachedToEntityId
+            self.sendGame(cl.peer.?, "NetPackageSoundAtPosition", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send SoundAtPosition failed: {s}\n", .{@errorName(err)});
+            };
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

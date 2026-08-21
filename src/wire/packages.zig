@@ -2567,6 +2567,70 @@ pub fn parseStockChat(body: []const u8) !StockChat {
     return out;
 }
 
+/// Stock `NetPackageSoundAtPosition` (write IL=25, read IL=21): pos Vector3
+/// (3xf32) | audioClipName string | mode u8 (UnityEngine.AudioRolloffMode
+/// Logarithmic=0/Linear=1/Custom=2) | distance i32 | entityId i32 |
+/// volumeScale f32. The dedicated-server relay (GameManager
+/// PlaySoundAtPositionServer IL=60) re-broadcasts Setup(...) with
+/// allButAttachedToEntityId = entityId, so every client except the owning
+/// player hears the sound (the owner already played it locally); the
+/// `distance` field drives the receiving client's rolloff, not the fan-out.
+pub const SoundAtPosition = struct {
+    pos: [3]f32,
+    clip: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len,
+    clip_len: u8 = 0,
+    mode: u8 = 0,
+    distance: i32 = 0,
+    entity_id: i32 = 0,
+    volume_scale: f32 = 0,
+
+    pub fn clipSlice(self: *const SoundAtPosition) []const u8 {
+        return self.clip[0..self.clip_len];
+    }
+};
+
+/// Audio clip names are short asset paths; anything longer fails closed.
+pub const max_audio_clip_len: usize = 256;
+
+pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflow})!SoundAtPosition {
+    if (body.len < 26) return error.EndOfStream; // 12 pos + 1 clip-len + 1 mode + 4 + 4 + 4 vol
+    var r: binary.Reader = .{ .data = body };
+    var out: SoundAtPosition = .{
+        .pos = .{ try r.readF32(), try r.readF32(), try r.readF32() },
+    };
+    var clip_buf: [max_audio_clip_len]u8 = undefined;
+    const clip = try r.readString(&clip_buf);
+    if (clip.len > max_audio_clip_len) return error.Overflow;
+    @memcpy(out.clip[0..clip.len], clip);
+    out.clip_len = @intCast(clip.len);
+    out.mode = try r.readByte();
+    out.distance = try r.readI32();
+    out.entity_id = try r.readI32();
+    out.volume_scale = try r.readF32();
+    return out;
+}
+
+test "sound at position parses the stock body" {
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeF32(100.5);
+    try w.writeF32(0);
+    try w.writeF32(-50.25);
+    try w.writeString("Sounds/explosions/boom");
+    try w.writeByte(1); // Linear
+    try w.writeI32(30);
+    try w.writeI32(42);
+    try w.writeF32(0.8);
+    const s = try parseSoundAtPosition(w.written());
+    try std.testing.expectApproxEqAbs(@as(f32, 100.5), s.pos[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, -50.25), s.pos[2], 0.001);
+    try std.testing.expectEqualStrings("Sounds/explosions/boom", s.clipSlice());
+    try std.testing.expectEqual(@as(u8, 1), s.mode);
+    try std.testing.expectEqual(@as(i32, 30), s.distance);
+    try std.testing.expectEqual(@as(i32, 42), s.entity_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), s.volume_scale, 0.001);
+}
+
 test "stock chat round-trips channel, sender, message and recipients" {
     var buf: [128]u8 = undefined;
     const recips = [_]i32{ 20, 30 };

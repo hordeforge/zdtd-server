@@ -1726,3 +1726,55 @@ test "game message relays verbatim to all clients including sender" {
     try std.testing.expect(a_got);
     try std.testing.expect(b_got);
 }
+
+test "sound at position relays to all clients except the owning player" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    var body: [128]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeF32(10);
+    try w.writeF32(20);
+    try w.writeF32(30);
+    try w.writeString("Sounds/explosions/boom");
+    try w.writeByte(0);
+    try w.writeI32(30);
+    try w.writeI32(ca.entity_id); // the owner (sender) must NOT hear the echo
+    try w.writeF32(1);
+    var frame_buf: [256]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageSoundAtPosition", w.written());
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, framed);
+
+    const pkg_id = packages.idOf("NetPackageSoundAtPosition").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var a_got = false;
+    var b_got = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) b_got = true;
+        }
+    }
+    try std.testing.expect(!a_got);
+    try std.testing.expect(b_got);
+}

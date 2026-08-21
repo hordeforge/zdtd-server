@@ -338,6 +338,16 @@ players, including the sender whose client displays on receipt. RE pin:
 7dtd-research protocol-packages.md 5.8. C2S handled names 77 -> 78 of the 98
 stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
 
+SoundAtPosition relay shipped 2026-08-21 (C2S handler row, stays PARTIAL):
+NetPackageSoundAtPosition C2S (pos Vector3 + clip string + mode u8 +
+distance + entityId + volumeScale) re-broadcasts verbatim to every client
+except the owning player per GameManager.PlaySoundAtPositionServer (IL=60,
+allButAttachedToEntityId = entityId); the owner already played the sound
+locally and the distance field drives the receiving client's rolloff, not
+the fan-out. RE pin: 7dtd-research protocol-packages.md 5.9. C2S handled
+names 78 -> 79 of the 98 stock client sends; Net and ops stays 43/8/5,
+total **182/107/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

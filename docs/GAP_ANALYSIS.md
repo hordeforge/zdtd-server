@@ -3258,25 +3258,27 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  78 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  79 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
-  EntityStatChanged, Waypoint and GameMessage have handlers since the last
-  count; the Waypoint relay parses the full Waypoint v7 body and fans the
-  invite to the inviter's allies or all players per
-  GameManager.WaypointInviteServer, and the GameMessage relay re-broadcasts
+  EntityStatChanged, Waypoint, GameMessage and SoundAtPosition have handlers
+  since the last count; the Waypoint relay parses the full Waypoint v7 body
+  and fans the invite to the inviter's allies or all players per
+  GameManager.WaypointInviteServer, the GameMessage relay re-broadcasts
   the 9-byte announcement body to every client per
   FinishGameMessageServer - death/team/leave/chat announcements now reach
-  other players).
+  other players, and the SoundAtPosition relay re-broadcasts positional
+  audio to every client except the owning player per
+  PlaySoundAtPositionServer).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 24 have no handler: Debug,
+  yields 98 names the stock client actually sends; 23 have no handler: Debug,
   DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
   EncryptionPublicKey, EntityAwardKillServer, EntityPhysics, EntityRagdoll,
   EntityStealth, KeyExchangeComplete, ModifyCVar, ParticleEffect,
   PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
-  SetProp, SimpleRPC, SoundAtPosition, TwitchAccess, TwitchVoteScheduling,
+  SetProp, SimpleRPC, TwitchAccess, TwitchVoteScheduling,
   WorldFolder.
   Player-visible: vending machines are inert, buried-supplies and goto quest
-  markers never register, ragdolls/particles/positional sound are not
+  markers never register, ragdolls/particles are not
   relayed. (Local map waypoints stay
   client-local as in stock; only the party waypoint invite traverses the
   server, and it now relays.)
