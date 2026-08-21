@@ -258,12 +258,54 @@ pub fn buildTraderQuestOffers(
         // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
         if (tier != 0 and d.difficulty_tier != tier) continue;
         if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
+        // Stock pre-positions every offer (EntityTrader offer loop →
+        // Quest.SetupPosition; RE: 7dtd-research docs/quests-challenges.md
+        // "Quest POI selection"): the entry carries the real QuestLocation
+        // (POI center at terrain height), QuestSize (bbox size) and POIName.
+        // Selector miss (POI-less test world) keeps the catalog fallback so
+        // the list still builds.
+        var loc_x = d.tx;
+        var loc_y = d.ty;
+        var loc_z = d.tz;
+        var size_x: f32 = 50;
+        var size_y: f32 = 20;
+        var size_z: f32 = 50;
+        var poi_name = d.name;
+        if (d.poi_select != .none) {
+            // Anchor: the random path (GetRandomPOINearTrader) anchors on the
+            // trader; the closest path (ObjectiveGoto) anchors on the player.
+            const anchor_x: f32 = if (d.poi_select == .random) trader_x else if (self.sim.mask[ps].transform) self.sim.transform[ps].x else trader_x;
+            const anchor_z: f32 = if (d.poi_select == .random) trader_z else if (self.sim.mask[ps].transform) self.sim.transform[ps].z else trader_z;
+            if (self.sim.questSelectPoi(.{
+                .kind = d.poi_select,
+                .anchor_x = anchor_x,
+                .anchor_z = anchor_z,
+                .tags_mask = d.quest_tags,
+                .tier = if (tier != 0) tier else d.difficulty_tier,
+                .biome_type = d.biome_filter_type,
+                .biome_filter = d.biome_filter,
+                .allow_current_poi = d.allow_current_poi,
+                .is_trader = true,
+                .entity_id = if (self.sim.mask[ps].network_id) self.sim.network_id[ps].id else -1,
+            })) |sel| {
+                loc_x = sel.center_x;
+                loc_y = sel.center_y;
+                loc_z = sel.center_z;
+                size_x = sel.rect.size_x;
+                size_y = sel.rect.size_y;
+                size_z = sel.rect.size_z;
+                poi_name = sel.name;
+            }
+        }
         out[n] = .{
             .quest_id = d.name,
-            .loc_x = d.tx,
-            .loc_y = d.ty,
-            .loc_z = d.tz,
-            .poi_name = d.name,
+            .loc_x = loc_x,
+            .loc_y = loc_y,
+            .loc_z = loc_z,
+            .size_x = size_x,
+            .size_y = size_y,
+            .size_z = size_z,
+            .poi_name = poi_name,
             .trader_x = trader_x,
             .trader_y = trader_y,
             .trader_z = trader_z,

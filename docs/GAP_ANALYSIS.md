@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 26 | 5 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 28 | 3 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **192** | **97** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **194** | **95** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -654,21 +654,26 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/wire/stock_quest.zig:112`, `src/wire/packages.zig:2674`,
   `asm.il:827300-827326`, `asm.il:827512-827630`
 
-- **Trader quest offers** `PARTIAL`
-  The offer list now follows the trader's class: the 5 trader class hashes
+- **Trader quest offers** `WORKS` `(2026-08-21)`
+  The offer list follows the trader's class: the 5 trader class hashes
   (npcTraderJen/Bob/Hugh/Joel/Rekt, RE-computed) map to their parsed
   `trader_*_quests` lists, with jen as the fail-closed default, so each trader
   offers its own list once POI placement spawns the other classes (scenario
   `trader-lists` proves a rekt-class trader offers `trader_rekt_quests`).
   The offer list is filtered by the requested tier (stock DifficultyTier ==
   tierLevel, asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing
-  from a tier-1 list). Remaining: the 8-offer cap, the `quest_`/`tier` name
-  filter dropping `intro_buried_supplies`, and fabricated QuestLocation
-  tx/ty/tz + POIName. The location fabrication is downstream of quest-POI
-  selection (QuestPrefabManager tag/tier matching, blocked on RE per the POI
-  rect row below); prefab QuestTags + DifficultyTier are now parsed and ready
-  for the selector.
-  *Anchors:* `src/server/game.zig:6435`, `:5345`, `:5383`, `:6276`
+  from a tier-1 list). 2026-08-21: every offer is now **pre-positioned** like
+  stock — the EntityTrader offer loop runs Quest.SetupPosition per quest, so
+  each QuestPacketEntry carries the real QuestLocation (POI center at terrain
+  height), QuestSize (bbox size) and POIName, selected by the stock
+  tag/tier/biome/band engine (DynamicPrefabDecorator.GetRandomPOINearTrader;
+  RE: 7dtd-research docs/quests-challenges.md "Quest POI selection").
+  Scenario `quest-poi-select` proves a clear-tag tier-1 quest selects the
+  matching POI (not the fabricated catalog spot) and feeds the offer wire.
+  *Anchors:* `src/server/game/quest.zig` buildTraderQuestOffers,
+  `src/server/game/hooks.zig` questPoiSelectAt,
+  `src/ecs/quest.zig` QuestPoiParams + tags,
+  `src/server/scenarios.zig` scenario `quest-poi-select`
 
 - **Trader quest ACCEPT** `WORKS`
   Stock signals acceptance with `NPCQuestList eventType=RemoveQuest(1)` carrying
@@ -746,13 +751,18 @@ not a sleeper-volume clear), not completion blockers.
   saturating add. Six unit tests.
   *Anchors:* `src/ecs/systems.zig:277`, `:270`, `:187`, `:2386`, `:2564`
 
-- **Rally-point objective execution** `PARTIAL`
+- **Rally-point objective execution** `WORKS` `(2026-08-21)`
   `questOnRallyActivated` marks `RallyMarkerActivated` once and advances a rally
   phase, degrading to scaffolding when the instance has no POI rect so the quest
-  cannot deadlock. The rect comes from `poiAt(def.tx, def.tz)` and those are the
-  fabricated coordinates, so which POI a quest lands in is arbitrary rather than
-  the biome/tier-filtered choice stock makes.
-  *Anchors:* `src/ecs/systems.zig:458`, `:234`, `:298`, `src/assets/quests.zig:313`
+  cannot deadlock. 2026-08-21: the rect now comes from the stock POI selector
+  (tag/tier/biome/distance, `questAccept` → Quest.SetupPosition equivalent;
+  scenario `quest-poi-select` proves a bound POI rect), so the quest lands in
+  the biome/tier-filtered choice stock makes instead of the fabricated def
+  marker. The rally handshake (TryRallyMarker reason switch + party mirror) is
+  the NetPackageQuestEvent row; sleeper re-arm suppression is that row's open
+  item.
+  *Anchors:* `src/ecs/systems.zig:458`, `:234`, `:298`,
+  `src/assets/quests.zig` scanObjectiveMeta, `src/ecs/quest.zig` PoiSelectKind
 
 - **Kill / fetch / goto / stay-within / craft progress hooks** `PARTIAL`
   All five are wired. 2026-08-19: fetch quests now complete through **real

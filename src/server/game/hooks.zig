@@ -8,6 +8,8 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_maxdamage = @import("../../assets/maxdamage.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const rng_util = @import("../../util/rng.zig");
+const prefabs_mod = @import("../../world/prefabs.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -110,6 +112,210 @@ pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i3
     g.terrain_mu.lock();
     defer g.terrain_mu.unlock();
     return g.world.standableWorld(tx, tz, from_y) catch null;
+}
+
+/// Stock DynamicPrefabDecorator quest-POI selection
+/// (il/full-v3.1.0/_global/DynamicPrefabDecorator.il.txt; RE: 7dtd-research
+/// docs/quests-challenges.md "Quest POI selection"). `.random` mirrors
+/// GetRandomPOINearWorldPos / GetRandomPOINearTrader; `.closest` mirrors
+/// GetClosestPOIToWorldPos. No heap: fixed stack pools + a per-call XorShift
+/// seeded by world time (deterministic per tick; stock uses the shared
+/// GameRandom). The per-trader used-POI history (QuestTraderData) is not
+/// tracked yet, so the usedPOILocations filter is an empty set here.
+pub fn questPoiSelectAt(ctx: ?*anyopaque, p: ecs.quest.QuestPoiParams) ?ecs.quest.PoiSelect {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const pf = if (g.world.prefabs) |*pf| pf else return null;
+
+    // GetPrefabsByDifficultyTier: the pool is the prefabs of the quest's tier.
+    var candidates: [max_poi_candidates]usize = undefined;
+    var n: usize = 0;
+    for (pf.items, 0..) |d, i| {
+        if (n >= candidates.len) break;
+        if (prefabs_mod.isPart(d.name)) continue;
+        const qd = pf.questData(d.name) orelse continue;
+        if (qd.tier != p.tier) continue;
+        candidates[n] = i;
+        n += 1;
+    }
+    if (n == 0) return null;
+
+    if (p.kind == .random) {
+        // GetRandomPOINearWorldPos / GetRandomPOINearTrader. World-pos: up to
+        // 50 random attempts over the pool (IL_0202: `attempt < 50`). Trader:
+        // three distance bands (GetRandomPOINearTrader IL_0078: `i < 3`),
+        // starting at the preferred band and cycling; stock shuffles each
+        // tier list with GameRandom per offer, which the random picks emulate.
+        var rng = rng_util.XorShift32.initFromNetId(@bitCast(@as(u32, @truncate(g.sim.director.clock.worldTimeBits()))));
+        const start_band: u8 = @intCast(@mod(g.sim.director.clock.worldTimeBits(), 3));
+        var band_attempt: usize = 0;
+        while (band_attempt < 3) : (band_attempt += 1) {
+            const band: u8 = @intCast(@mod(@as(u32, start_band) + @as(u32, @intCast(band_attempt)), 3));
+            var attempt: usize = 0;
+            while (attempt < max_poi_attempts) : (attempt += 1) {
+                const i = candidates[rng.nextBounded(@intCast(n))];
+                if (selectQuestPoi(g, pf, p, i, false, band)) |sel| return sel;
+            }
+        }
+        return null;
+    }
+    // GetClosestPOIToWorldPos: nearest passing candidate (unbounded max
+    // search, as the caller passes -1); a no-hit retry forces SameBiome
+    // (ObjectiveGoto::GetPosition second call).
+    var best: ?ecs.quest.PoiSelect = null;
+    var best_d: f32 = std.math.inf(f32);
+    for (candidates[0..n]) |i| {
+        const sel = selectQuestPoi(g, pf, p, i, true, 0) orelse continue;
+        const dx = sel.center_x - p.anchor_x;
+        const dz = sel.center_z - p.anchor_z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < best_d) {
+            best_d = d2;
+            best = sel;
+        }
+    }
+    if (best != null) return best;
+    if (p.biome_type != ecs.quest.biome_filter_same) {
+        var retry = p;
+        retry.biome_type = ecs.quest.biome_filter_same;
+        retry.biome_filter = "";
+        for (candidates[0..n]) |i| {
+            const sel = selectQuestPoi(g, pf, retry, i, true, 0) orelse continue;
+            const dx = sel.center_x - p.anchor_x;
+            const dz = sel.center_z - p.anchor_z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < best_d) {
+                best_d = d2;
+                best = sel;
+            }
+        }
+    }
+    return best;
+}
+
+/// Stock selector constants (ObjectiveRandomPOIGoto.GetPosition IL_019C-01A1).
+const poi_min_dist_sq: f32 = 1000.0;
+const poi_max_dist_sq: f32 = 4000000.0;
+/// GetRandomPOINearWorldPos loop bound (DynamicPrefabDecorator IL_0202).
+const max_poi_attempts: usize = 50;
+/// Tier pool cap for a single selection (stack, no heap; a world has at most
+/// a few hundred POIs per tier, so truncation only affects huge maps).
+const max_poi_candidates: usize = 4096;
+
+/// Biome name at a world cell, or null (no biome map / unknown id).
+fn biomeNameAt(g: *const Game, wx: i32, wz: i32) ?[]const u8 {
+    const bm = g.world.biomes orelse return null;
+    const id = bm.atWorld(wx, wz) orelse return null;
+    return g.world.biome_layers_table.nameById(id);
+}
+
+/// One prefab candidate through the stock filter chain
+/// (DynamicPrefabDecorator.GetRandomPOINearWorldPos IL_0071-01FB /
+/// ValidPrefabForQuest IL=156 / GetClosestPOIToWorldPos). `biome_at_center`
+/// picks the biome probe point: the bbox **origin** for the random/trader
+/// paths (V_7 / V_0 in the IL), the **center** for the closest path (V_11).
+fn selectQuestPoi(
+    g: *Game,
+    pf: *prefabs_mod.Index,
+    p: ecs.quest.QuestPoiParams,
+    i: usize,
+    biome_at_center: bool,
+    trader_band: u8,
+) ?ecs.quest.PoiSelect {
+    const d = pf.items[i];
+    const qd = pf.questData(d.name) orelse return null;
+    // 1. SleeperVolumeList.AnyUsedEntry: the prefab XML must define sleeper
+    //    volumes (PrefabSleeperVolumeList.ReadFromProperties calls Volume.Use
+    //    per parsed volume).
+    if (!qd.has_sleepers) return null;
+    // 2. Prefab.GetQuestTag = questTags.Test_AllSet: every quest tag must be
+    //    on the prefab.
+    if (!ecs.quest.prefabMatches(ecs.quest.tagsMask(qd.tags), p.tags_mask)) return null;
+    const b = pf.boundsXZ(i);
+    const bbox_x: f32 = @floatFromInt(b.x0);
+    const bbox_z: f32 = @floatFromInt(b.z0);
+    // 3. tier: the pool is already tier-filtered (GetPrefabsByDifficultyTier
+    //    re-checks the same field per attempt; identical here).
+    // 4. usedPOILocations: empty set (per-trader POI history not tracked).
+    // 5. CheckForPOILockouts at the bbox origin (bedroll/claim/quest-lock/
+    //    player-inside with the party exemption).
+    if (ecs.systems.questCheckPoiLockout(&g.sim, p.entity_id, bbox_x, bbox_z).reason != .none) return null;
+    const size_x: f32 = @floatFromInt(b.x1 - b.x0);
+    const size_z: f32 = @floatFromInt(b.z1 - b.z0);
+    const cx = bbox_x + size_x * 0.5;
+    const cz = bbox_z + size_z * 0.5;
+    // 6. biome filter (stock switch IL_013D-01D9): type 1 excludes a matching
+    //    biome name, type 2 requires membership in the comma list, type 3
+    //    requires the anchor's biome.
+    if (p.biome_type != ecs.quest.biome_filter_none) {
+        const probe_x: i32 = @intFromFloat(if (biome_at_center) @floor(cx) else @floor(bbox_x));
+        const probe_z: i32 = @intFromFloat(if (biome_at_center) @floor(cz) else @floor(bbox_z));
+        const name = biomeNameAt(g, probe_x, probe_z);
+        if (p.biome_type == ecs.quest.biome_filter_exclude) {
+            if (name != null and std.mem.eql(u8, name.?, p.biome_filter)) return null;
+        } else if (p.biome_type == ecs.quest.biome_filter_only) {
+            if (name == null or !biomeInList(name.?, p.biome_filter)) return null;
+        } else if (p.biome_type == ecs.quest.biome_filter_same) {
+            const a_name = biomeNameAt(g, @intFromFloat(@floor(p.anchor_x)), @intFromFloat(@floor(p.anchor_z)));
+            if (!std.mem.eql(u8, name orelse "", a_name orelse "")) return null;
+        }
+    }
+    // GetClosestPOIToWorldPos excludes the POI the player is inside unless
+    // the objective allows the current POI (allow_current_poi).
+    if (p.kind == .closest and !p.allow_current_poi) {
+        const rect: ecs.components.PoiRect = .{
+            .x = bbox_x,
+            .y = @floatFromInt(d.y),
+            .z = bbox_z,
+            .size_x = size_x,
+            .size_y = @floatFromInt(d.size_y),
+            .size_z = size_z,
+        };
+        if (rect.containsXZ(p.anchor_x, p.anchor_z)) return null;
+    }
+    // 7. distance (GetRandomPOINearWorldPos only): the trader path skips it
+    //    (band lists), the closest path is unbounded (maxSearchDistance -1).
+    //    Squared center distance must be strictly inside (1000, 4000000).
+    if (p.kind == .random and !p.is_trader) {
+        const dx = p.anchor_x - cx;
+        const dz = p.anchor_z - cz;
+        const d2 = dx * dx + dz * dz;
+        if (!(d2 > poi_min_dist_sq and d2 < poi_max_dist_sq)) return null;
+    }
+    // Trader path band order: GetRandomPOINearTrader (random kind only) tries
+    // the trader's preferred distance band first (0 = ≤500 m, 1 = ≤1500 m,
+    // 2 = beyond). The closest path (ObjectiveGoto) never uses bands.
+    if (p.is_trader and p.kind == .random) {
+        const dx = p.anchor_x - bbox_x;
+        const dz = p.anchor_z - bbox_z;
+        const dist = @sqrt(dx * dx + dz * dz);
+        const band: u8 = if (dist <= 500) 0 else if (dist <= 1500) 1 else 2;
+        if (band != trader_band) return null;
+    }
+    const cy = g.sim.groundY(cx, cz) orelse @as(f32, @floatFromInt(d.y));
+    return .{
+        .rect = .{
+            .x = bbox_x,
+            .y = @floatFromInt(d.y),
+            .z = bbox_z,
+            .size_x = size_x,
+            .size_y = @floatFromInt(d.size_y),
+            .size_z = size_z,
+        },
+        .center_x = cx,
+        .center_y = cy,
+        .center_z = cz,
+        .name = d.name,
+    };
+}
+
+/// Whether a biome name is in the comma-separated filter list (stock
+/// biomeFilterType=OnlyBiome `Split(',')`).
+fn biomeInList(name: []const u8, list: []const u8) bool {
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |tok| {
+        if (std.mem.eql(u8, std.mem.trim(u8, tok, " "), name)) return true;
+    }
+    return false;
 }
 
 /// Zombie AI bot snap (ADR 0026): `exact >= 0` resolves one live bot by net id

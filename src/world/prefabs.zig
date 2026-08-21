@@ -20,6 +20,9 @@ pub const QuestData = struct {
     tags: []const u8 = "",
     /// Stock DifficultyTier (1..6), 0 when absent.
     tier: u8 = 0,
+    /// True when the prefab XML defines at least one sleeper volume (the
+    /// stock `SleeperVolumeList.AnyUsedEntry` gate for quest POI selection).
+    has_sleepers: bool = false,
     /// Local cell of the prefab's trader NPC (`IndexedBlockOffsets` class
     /// "Trader"), -1/0/-1 when the POI has no trader.
     trader_x: i32 = -1,
@@ -406,6 +409,12 @@ pub const Index = struct {
             if (xml_util.propertyValue(raw, "DifficultyTier")) |v| {
                 qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
             }
+            // Stock PrefabSleeperVolumeList.ReadFromProperties calls
+            // Volume.Use per parsed volume, so AnyUsedEntry (the quest POI
+            // gate) is true exactly when the XML defines sleeper volumes.
+            // The size list is the volume count (SleeperVolumeStart/Group
+            // would do; size is always present for a volume-bearing POI).
+            qd.has_sleepers = xml_util.propertyValue(raw, "SleeperVolumeSize") != null;
             // Trader POIs: the NPC's local cell lives in the
             // IndexedBlockOffsets class "Trader" entry, the class identity
             // in ThemeTags ("traderBob" → npcTraderBob).

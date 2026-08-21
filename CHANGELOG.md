@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Quest POI placement now mirrors stock: RandomPOIGoto/Goto/ClosestPOIGoto
+  objectives select the POI by prefab quest tags, difficulty tier, biome
+  filter and distance (with bedroll/land-claim/quest lockouts), and trader
+  offers carry the real QuestLocation / QuestSize / POIName instead of a
+  fabricated catalog spot (RE: 7dtd-research docs/quests-challenges.md).
 - Core stock-client play now covers join, terrain streaming, inventory, combat,
   death and respawn, loot, crafting, trading, and persistence with EAC off.
 - `--version` reports the zdtd product version and the supported stock client

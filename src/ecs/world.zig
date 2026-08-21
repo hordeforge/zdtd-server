@@ -371,6 +371,12 @@ pub const World = struct {
     /// POI data, so those quests fall back to their def marker position.
     nearest_poi_ctx: ?*anyopaque = null,
     nearest_poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
+    /// Stock quest-POI selector (DynamicPrefabDecorator.GetRandomPOI* /
+    /// GetClosestPOIToWorldPos; Game wires the prefabs index + biome map +
+    /// lockout state). Unset → no selection, callers fall back to nearestPoi /
+    /// static positions (test worlds with no POI data).
+    quest_poi_ctx: ?*anyopaque = null,
+    quest_poi_fn: ?*const fn (?*anyopaque, quest.QuestPoiParams) ?quest.PoiSelect = null,
     /// "Are two entity ids in the same party?" (Game wires the Party manager).
     /// Quest POI lockout exempts party members (stock CheckForPOILockouts:
     /// a party member inside the POI does not block the rally). Unset → no
@@ -658,6 +664,17 @@ pub const World = struct {
         const f = self.nearest_poi_fn orelse return null;
         const r = f(self.nearest_poi_ctx, x, z) orelse return null;
         return if (r.valid()) r else null;
+    }
+
+    /// Stock quest-POI selection (tag/tier/biome/distance + lockout), or null
+    /// when the hook is unset or nothing qualifies. The Game hook mirrors
+    /// DynamicPrefabDecorator.GetRandomPOINearWorldPos / GetRandomPOINearTrader
+    /// / GetClosestPOIToWorldPos; null → the caller falls back (nearestPoi /
+    /// static def position) so POI-less test worlds still complete quests.
+    pub fn questSelectPoi(self: *const World, p: quest.QuestPoiParams) ?quest.PoiSelect {
+        const f = self.quest_poi_fn orelse return null;
+        const sel = f(self.quest_poi_ctx, p) orelse return null;
+        return if (sel.valid()) sel else null;
     }
 
     /// Feet Y after one grid move, or null when blocked (optional hook).

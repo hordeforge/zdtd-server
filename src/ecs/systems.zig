@@ -699,15 +699,37 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     };
     const d = w.catalog.byId(def_id).?;
     // Place the quest in a POI so rally objectives and the client's POI marker
-    // have a real rect (stock picks the POI when the quest is handed out).
-    if (w.poiAt(d.tx, d.tz)) |rect| {
-        s.poi = rect;
-    } else if (d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft) {
-        // No static def position (stock RandomPOIGoto / ClosestPOIGoto pick the
-        // POI at hand-out): bind the nearest real POI so the goto check and
-        // NavObject marker point somewhere reachable instead of an invented
-        // FNV spot (audit B26). No POI data → poi stays unset, def marker wins.
-        if (w.nearestPoi(w.transform[ps].x, w.transform[ps].z)) |rect| s.poi = rect;
+    // have a real rect. Stock picks the POI when the quest is handed out
+    // (Quest.SetupPosition → ObjectiveRandomPOIGoto/ObjectiveGoto.GetPosition):
+    // RandomPOIGoto selects a random tier/tag/biome/distance-qualified POI
+    // near the player, Goto/ClosestPOIGoto the closest one (RE: 7dtd-research
+    // docs/quests-challenges.md "Quest POI selection"). The Game hook does the
+    // selection (prefab index + biome map + lockouts); unset (test worlds) or
+    // nothing qualified → fall back to static def position / nearest POI.
+    if (d.poi_select != .none) {
+        const sel = w.questSelectPoi(.{
+            .kind = d.poi_select,
+            .anchor_x = w.transform[ps].x,
+            .anchor_z = w.transform[ps].z,
+            .tags_mask = d.quest_tags,
+            .tier = d.difficulty_tier,
+            .biome_type = d.biome_filter_type,
+            .biome_filter = d.biome_filter,
+            .allow_current_poi = d.allow_current_poi,
+            .entity_id = if (w.mask[ps].network_id) w.network_id[ps].id else -1,
+        });
+        if (sel) |sel2| s.poi = sel2.rect;
+    }
+    if (!s.poi.valid()) {
+        if (w.poiAt(d.tx, d.tz)) |rect| {
+            s.poi = rect;
+        } else if (d.kind == .goto_point or d.kind == .stay_within or d.kind == .craft) {
+            // No selector result (POI-less test world / nothing qualified):
+            // bind the nearest real POI so the goto check and NavObject marker
+            // point somewhere reachable instead of an invented FNV spot
+            // (audit B26). No POI data → poi stays unset, def marker wins.
+            if (w.nearestPoi(w.transform[ps].x, w.transform[ps].z)) |rect| s.poi = rect;
+        }
     }
     // Phase graph: land the player on the first actionable (non-auto) phase.
     if (d.phases.len > 0) skipAutoPhases(w, ps, s, d);

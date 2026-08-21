@@ -9,9 +9,11 @@ const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
+const world_tts = @import("../world/tts.zig");
 const nav = @import("../world/nav.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
+const quest_mod_components = @import("../ecs/components.zig");
 const systems = @import("../ecs/systems.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
@@ -5282,6 +5284,150 @@ test "scenario trader quest offers follow the trader's class" {
     const count2 = std.mem.readInt(i32, body2[13..17], .little);
     try std.testing.expectEqual(@as(i32, 0), count2);
     std.debug.print("PASS trader-lists: rekt trader offers quest_rekt_errand from trader_rekt_quests; tier 2 filtered\n", .{});
+}
+
+test "scenario quest POI selection matches stock tags/tier/bands and feeds offers" {
+    // The stock QuestPrefabManager-equivalent selector (DynamicPrefabDecorator
+    // GetRandomPOI* / GetClosestPOIToWorldPos; RE: 7dtd-research
+    // docs/quests-challenges.md "Quest POI selection"). A synthetic prefab
+    // index proves the tag/tier/distance gating and that trader offers carry
+    // the real POI location instead of the fabricated catalog spot.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_poiselect");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_poiselect", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Force the trader band walk to band 0 (≤500 m): worldTimeBits % 3.
+    g.sim.director.clock.day = 1;
+    g.sim.director.clock.hours = 0;
+
+    // Synthetic prefab index: one qualifying POI per (tier, tag) so the random
+    // selector is deterministic; all within band 0 of the (0,0) trader.
+    const name_storage = try gpa.dupe(u8, "poi_clear_a\x00poi_fetch_b\x00poi_fetch_c\x00part_road");
+    const pois = [_]world_store.prefabs.Decoration{
+        .{ .name = name_storage[0..11], .x = 100, .y = 60, .z = 100, .size_x = 30, .size_y = 20, .size_z = 30 },
+        .{ .name = name_storage[12..23], .x = 400, .y = 60, .z = 100, .size_x = 30, .size_y = 20, .size_z = 30 },
+        .{ .name = name_storage[24..35], .x = 700, .y = 60, .z = 100, .size_x = 30, .size_y = 20, .size_z = 30 },
+        .{ .name = name_storage[36..45], .x = 50, .y = 60, .z = 50, .size_x = 10, .size_y = 10, .size_z = 10 },
+    };
+    const items = try gpa.dupe(world_store.prefabs.Decoration, &pois);
+    var idx: world_store.prefabs.Index = .{
+        .allocator = gpa,
+        .items = items,
+        .name_storage = name_storage,
+        .tts_cache = std.StringHashMap(world_tts.TtsBlocks).init(gpa),
+        .quest_cache = std.StringHashMap(world_store.prefabs.QuestData).init(gpa),
+    };
+    // Tags must be allocator-owned (Index.deinit frees each entry's tags),
+    // and distinct per entry — a shared pointer would be freed N times.
+    const tags_clear = try gpa.dupe(u8, "clear");
+    const tags_fetch_b = try gpa.dupe(u8, "fetch");
+    const tags_fetch_c = try gpa.dupe(u8, "fetch");
+    const tags_fetch_p = try gpa.dupe(u8, "fetch");
+    try idx.quest_cache.put("poi_clear_a", .{ .tags = tags_clear, .tier = 1, .has_sleepers = true });
+    try idx.quest_cache.put("poi_fetch_b", .{ .tags = tags_fetch_b, .tier = 1, .has_sleepers = true });
+    try idx.quest_cache.put("poi_fetch_c", .{ .tags = tags_fetch_c, .tier = 2, .has_sleepers = true });
+    try idx.quest_cache.put("part_road", .{ .tags = tags_fetch_p, .tier = 1, .has_sleepers = true });
+    g.world.prefabs = idx;
+
+    const clear_mask = @intFromEnum(quest_mod.QuestTag.clear);
+    const fetch_mask = @intFromEnum(quest_mod.QuestTag.fetch);
+    // RandomPOIGoto (world-pos path): tags + tier gate the pool, distance
+    // (1000, 4000000)² bounds it, sleeper volumes are required.
+    const clear_sel = (g.sim.questSelectPoi(.{
+        .kind = .random,
+        .anchor_x = 0,
+        .anchor_z = 0,
+        .tags_mask = clear_mask,
+        .tier = 1,
+        .entity_id = -1,
+    }) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("poi_clear_a", clear_sel.name);
+    try std.testing.expectEqual(@as(f32, 100), clear_sel.rect.x);
+    try std.testing.expectEqual(@as(f32, 30), clear_sel.rect.size_x);
+    const fetch1_sel = (g.sim.questSelectPoi(.{
+        .kind = .random,
+        .anchor_x = 0,
+        .anchor_z = 0,
+        .tags_mask = fetch_mask,
+        .tier = 1,
+        .entity_id = -1,
+    }) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("poi_fetch_b", fetch1_sel.name);
+    // Tier 2 fetch → the tier-2 POI; tier 1 has none for "crafting".
+    const fetch2_sel = (g.sim.questSelectPoi(.{
+        .kind = .random,
+        .anchor_x = 0,
+        .anchor_z = 0,
+        .tags_mask = fetch_mask,
+        .tier = 2,
+        .entity_id = -1,
+    }) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("poi_fetch_c", fetch2_sel.name);
+    try std.testing.expect(g.sim.questSelectPoi(.{
+        .kind = .random,
+        .anchor_x = 0,
+        .anchor_z = 0,
+        .tags_mask = @intFromEnum(quest_mod.QuestTag.crafting),
+        .tier = 1,
+        .entity_id = -1,
+    }) == null);
+    // ClosestPOIGoto path: nearest qualifying POI (fetch, tier 1).
+    const close_sel = (g.sim.questSelectPoi(.{
+        .kind = .closest,
+        .anchor_x = 0,
+        .anchor_z = 0,
+        .tags_mask = fetch_mask,
+        .tier = 1,
+        .entity_id = -1,
+    }) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("poi_fetch_b", close_sel.name);
+
+    // Trader offer path: tier1_clear (RandomPOIGoto + ClearSleepers → clear
+    // tag) selects poi_clear_a; the offer entry carries its real location,
+    // size and name instead of the fabricated catalog spot.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var entries: [8]packages.stock_quest.QuestPacketEntry = undefined;
+    const n = g.buildTraderQuestOffers("trader_jen_quests", c.slot, 0, 70, 0, 1, &entries);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    var clear_offer: ?*const packages.stock_quest.QuestPacketEntry = null;
+    var fetch_offer: ?*const packages.stock_quest.QuestPacketEntry = null;
+    for (entries[0..n]) |*e| {
+        if (std.mem.eql(u8, e.quest_id, "tier1_clear")) clear_offer = e;
+        if (std.mem.eql(u8, e.quest_id, "tier1_fetch")) fetch_offer = e;
+    }
+    const co = clear_offer orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 115), co.loc_x); // bbox center
+    try std.testing.expectEqual(@as(f32, 115), co.loc_z);
+    try std.testing.expectEqual(@as(f32, 30), co.size_x);
+    try std.testing.expectEqual(@as(f32, 30), co.size_z);
+    try std.testing.expectEqualStrings("poi_clear_a", co.poi_name);
+    // tier1_fetch has no goto objective → no selector → catalog fallback.
+    const fo = fetch_offer orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tier1_fetch", fo.poi_name);
+
+    // Accept path: tier1_clear binds the selected POI rect (not the nearest /
+    // fabricated def marker).
+    const clear_def = g.sim.catalog.byName("tier1_clear").?;
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear_def.id));
+    var found_slot: ?*quest_mod_components.QuestProgress = null;
+    for (&g.sim.journal[ps].slots) |*s| {
+        if (s.active and s.def_id == clear_def.id) found_slot = s;
+    }
+    const slot = found_slot orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 100), slot.poi.x);
+    try std.testing.expectEqual(@as(f32, 100), slot.poi.z);
+    std.debug.print("PASS quest-poi-select: tags/tier/band selector + real offer locations\n", .{});
 }
 
 test "scenario block_activated objective event advances the phase" {

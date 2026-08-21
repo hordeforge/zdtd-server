@@ -16,6 +16,126 @@ pub const QuestKind = enum(u8) {
     block_activate,
 };
 
+/// Stock quest tag names (QuestEventManager statics, il/full-v3.1.0/_global/
+/// QuestEventManager.il.txt IL_0024-IL_0088): manual, trader, clear, treasure,
+/// fetch, crafting, restore_power, infested, bandit; plus `hidden_cache`, which
+/// ObjectiveFetchFromContainer adds for its hidden-cache fetch mode. The bit
+/// values are a zdtd-owned transport for the stock tag strings.
+pub const QuestTag = enum(u32) {
+    manual = 1 << 0,
+    trader = 1 << 1,
+    clear = 1 << 2,
+    treasure = 1 << 3,
+    fetch = 1 << 4,
+    crafting = 1 << 5,
+    restore_power = 1 << 6,
+    infested = 1 << 7,
+    bandit = 1 << 8,
+    hidden_cache = 1 << 9,
+};
+
+/// Map a stock tag string ("clear", "fetch", ...) to its bit; null when the
+/// name is unknown (fail-closed: unknown tags contribute nothing).
+pub fn tagBit(name: []const u8) ?u32 {
+    inline for (std.meta.fields(QuestTag)) |f| {
+        if (std.mem.eql(u8, name, f.name)) return @intCast(f.value);
+    }
+    return null;
+}
+
+/// Comma-separated tag list ("clear, fetch") → OR of bits; 0 when empty.
+pub fn tagsMask(list: []const u8) u32 {
+    var mask: u32 = 0;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |tok| {
+        const t = std.mem.trim(u8, tok, " ");
+        if (t.len == 0) continue;
+        if (tagBit(t)) |b| mask |= b;
+    }
+    return mask;
+}
+
+/// Stock BaseObjective.SetupQuestTag map (il/full-v3.1.0/_global/Objective*.il.txt):
+/// which objective `type=` adds which tag to Quest.QuestTags. Unknown types add
+/// nothing (BaseObjective.SetupQuestTag is an empty IL=1 method).
+pub fn objectiveTag(obj_type: []const u8) u32 {
+    if (std.mem.eql(u8, obj_type, "ClearSleepers")) return @intFromEnum(QuestTag.clear);
+    if (std.mem.eql(u8, obj_type, "FetchFromContainer") or
+        std.mem.eql(u8, obj_type, "FetchKeep") or
+        std.mem.eql(u8, obj_type, "FetchAnyContainer") or
+        std.mem.eql(u8, obj_type, "BaseFetchContainer")) return @intFromEnum(QuestTag.fetch);
+    if (std.mem.eql(u8, obj_type, "Craft") or
+        std.mem.eql(u8, obj_type, "CraftItem") or
+        std.mem.eql(u8, obj_type, "TreasureChest")) return @intFromEnum(QuestTag.crafting);
+    if (std.mem.eql(u8, obj_type, "POIBlockActivate") or
+        std.mem.eql(u8, obj_type, "POIBlockUpgrade")) return @intFromEnum(QuestTag.restore_power);
+    return 0;
+}
+
+/// Stock BiomeFilterTypes (ObjectiveGoto field; selector switch in
+/// DynamicPrefabDecorator.GetRandomPOINearWorldPos IL_013D-IL_01D9):
+/// 0 None, 1 ExcludeBiome, 2 OnlyBiome (comma list), 3 SameBiome (anchor biome).
+pub const biome_filter_none: u8 = 0;
+pub const biome_filter_exclude: u8 = 1;
+pub const biome_filter_only: u8 = 2;
+pub const biome_filter_same: u8 = 3;
+
+/// How a quest's POI is chosen (stock objective family): `.random` =
+/// ObjectiveRandomPOIGoto (GetRandomPOI*), `.closest` =
+/// ObjectiveGoto/ClosestPOIGoto (GetClosestPOIToWorldPos), `.none` = no
+/// selection (static position or base SetupPosition).
+pub const PoiSelectKind = enum(u8) { none = 0, random, closest };
+
+/// Stock Prefab.GetQuestTag = questTags.Test_AllSet (il/full-v3.1.0/_global/
+/// Prefab.il.txt IL=5): the prefab must carry **every** tag the quest carries.
+/// An empty quest tag set matches everything (vacuous AllSet).
+pub fn prefabMatches(prefab_mask: u32, quest_mask: u32) bool {
+    if (quest_mask == 0) return true;
+    return (prefab_mask & quest_mask) == quest_mask;
+}
+
+/// Quest POI selector request (stock Quest.SetupPosition / Objective*GetPosition
+/// inputs). Filled by the sim; the Game hook performs the selection against the
+/// prefab index + biome map + lockout state.
+pub const QuestPoiParams = struct {
+    kind: PoiSelectKind = .none,
+    /// Anchor: the player's position on accept, the trader's on offers.
+    anchor_x: f32 = 0,
+    anchor_z: f32 = 0,
+    /// Quest.QuestTags mask (objective-derived, SetupTags).
+    tags_mask: u32 = 0,
+    /// Quest difficulty tier (stock ObjectiveRandomPOIGoto.get_POITier).
+    tier: u8 = 0,
+    biome_type: u8 = 0,
+    biome_filter: []const u8 = "",
+    /// Closest path: exclude the POI the anchor is inside unless the objective
+    /// sets `allow_current_poi` (stock ObjectiveGoto.allowCurrentPoi, fed to
+    /// GetClosestPOIToWorldPos as `ignoreCurrentPoi = !allowCurrentPoi`).
+    allow_current_poi: bool = false,
+    /// Trader path: stock GetRandomPOINearTrader (distance bands +
+    /// ValidPrefabForQuest) instead of GetRandomPOINearWorldPos.
+    is_trader: bool = false,
+    /// Player entity id for CheckForPOILockouts (bedroll/claim/quest-lock).
+    entity_id: i32 = -1,
+};
+
+/// Selector result: the POI rect (bbox origin + size → PositionData 2/3), the
+/// center at terrain height (Quest.Position / wire QuestLocation) and the
+/// prefab name (DataVariables["POIName"]).
+pub const PoiSelect = struct {
+    rect: c.PoiRect = .{},
+    center_x: f32 = 0,
+    center_y: f32 = 0,
+    center_z: f32 = 0,
+    /// Prefab name; a slice into the prefab index (stable for the Game's
+    /// lifetime — the caller must not retain it past the index).
+    name: []const u8 = "",
+
+    pub fn valid(self: PoiSelect) bool {
+        return self.rect.valid();
+    }
+};
+
 /// Max phases per quest (stock CurrentPhase is uint8; real quests stay well under this).
 pub const max_phases: usize = 32;
 
@@ -147,6 +267,23 @@ pub const QuestDef = struct {
     difficulty_tier: u8 = 0,
     turn_in: bool = false,
     category: []const u8 = "quest",
+    /// Objective-derived quest tags (union of BaseObjective.SetupQuestTag):
+    /// the stock `Quest.QuestTags` the POI selector matches with
+    /// Prefab.GetQuestTag (Test_AllSet).
+    quest_tags: u32 = 0,
+    /// POI selection kind from the objective family: `.random` =
+    /// ObjectiveRandomPOIGoto, `.closest` = ObjectiveGoto/ClosestPOIGoto,
+    /// `.none` = static or no POI.
+    poi_select: PoiSelectKind = .none,
+    /// First Goto-family objective's biome filter (stock ObjectiveGoto
+    /// biomeFilterType / biomeFilter, biomes.xml names; quests.xml
+    /// `biome_filter_type` = ExcludeBiome | OnlyBiome | SameBiome).
+    biome_filter_type: u8 = biome_filter_none,
+    biome_filter: []const u8 = "",
+    /// First Goto-family objective's `allow_current_poi` (stock
+    /// ObjectiveGoto.allowCurrentPoi): the closest selector may pick the POI
+    /// the player is currently inside.
+    allow_current_poi: bool = false,
     /// Stock client CreateQuest objective list length (for Quest.Write).
     objective_count: u8 = 1,
     /// Stock client CreateQuest reward list length (for Quest.Write).
@@ -364,3 +501,40 @@ pub const builtin_defs = [_]QuestDef{
         .objective_phases = &[_]u8{ 1, 2 },
     },
 };
+
+test "quest tag bit helpers mirror the stock SetupQuestTag map" {
+    // Stock objective → tag map (Objective*.il.txt SetupQuestTag overrides).
+    try std.testing.expectEqual(@intFromEnum(QuestTag.clear), objectiveTag("ClearSleepers"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.fetch), objectiveTag("FetchFromContainer"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.fetch), objectiveTag("FetchKeep"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.fetch), objectiveTag("FetchAnyContainer"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.crafting), objectiveTag("Craft"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.crafting), objectiveTag("TreasureChest"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.restore_power), objectiveTag("POIBlockActivate"));
+    try std.testing.expectEqual(@intFromEnum(QuestTag.restore_power), objectiveTag("POIBlockUpgrade"));
+    // BaseObjective.SetupQuestTag is empty: RallyPoint / Goto / RandomPOIGoto /
+    // EntityKill / POIStayWithin add nothing.
+    try std.testing.expectEqual(@as(u32, 0), objectiveTag("RallyPoint"));
+    try std.testing.expectEqual(@as(u32, 0), objectiveTag("RandomPOIGoto"));
+    try std.testing.expectEqual(@as(u32, 0), objectiveTag("EntityKill"));
+    try std.testing.expectEqual(@as(u32, 0), objectiveTag("POIStayWithin"));
+    // tagsMask splits + trims comma lists; unknown tags are fail-closed zeros.
+    try std.testing.expectEqual(@intFromEnum(QuestTag.clear), tagsMask("clear"));
+    try std.testing.expectEqual(
+        @intFromEnum(QuestTag.clear) | @intFromEnum(QuestTag.fetch),
+        tagsMask(" clear , fetch "),
+    );
+    try std.testing.expectEqual(@as(u32, 0), tagsMask("not_a_tag"));
+    try std.testing.expectEqual(@as(u32, 0), tagsMask(""));
+}
+
+test "prefabMatches is stock Test_AllSet" {
+    try std.testing.expect(prefabMatches(@intFromEnum(QuestTag.clear), @intFromEnum(QuestTag.clear)));
+    // Prefab has every quest tag → true; missing one → false.
+    const both = @intFromEnum(QuestTag.clear) | @intFromEnum(QuestTag.fetch);
+    try std.testing.expect(prefabMatches(both, @intFromEnum(QuestTag.clear)));
+    try std.testing.expect(!prefabMatches(@intFromEnum(QuestTag.clear), both));
+    // Empty quest tag set matches everything (vacuous AllSet).
+    try std.testing.expect(prefabMatches(0, 0));
+    try std.testing.expect(prefabMatches(@intFromEnum(QuestTag.clear), 0));
+}

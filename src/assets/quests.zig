@@ -271,6 +271,62 @@ fn sumCoinReward(body: []const u8) u32 {
     return total;
 }
 
+/// Objective-derived POI-selection metadata (stock Quest.SetupTags + objective
+/// family): the quest tag union, the selector kind (RandomPOIGoto = random,
+/// Goto/ClosestPOIGoto = closest) and the first Goto-family biome filter
+/// (ObjectiveGoto biomeFilterType / biomeFilter). Values stay in the catalog
+/// arena (`biome_filter` is arena-duped when non-empty).
+const ObjectiveMeta = struct {
+    tags_mask: u32 = 0,
+    poi_select: quest.PoiSelectKind = .none,
+    biome_type: u8 = quest.biome_filter_none,
+    biome_filter: []const u8 = "",
+    allow_current_poi: bool = false,
+};
+
+fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta {
+    var m: ObjectiveMeta = .{};
+    var i: usize = 0;
+    while (i < body.len) {
+        const oi = std.mem.findPos(u8, body, i, "<objective") orelse break;
+        const elem_end = objectiveElementEnd(body, oi);
+        i = oi + "<objective".len;
+        const typ = xml.attr(body, oi, "type") orelse continue;
+        m.tags_mask |= quest.objectiveTag(typ);
+        // Stock: RandomPOIGoto picks a random POI (GetRandomPOI*);
+        // Goto/ClosestPOIGoto pick the closest (GetClosestPOIToWorldPos).
+        // First family objective wins; later ones can only tighten.
+        if (m.poi_select == .none) {
+            if (std.mem.eql(u8, typ, "RandomPOIGoto")) {
+                m.poi_select = .random;
+            } else if (std.mem.eql(u8, typ, "Goto") or std.mem.eql(u8, typ, "ClosestPOIGoto")) {
+                m.poi_select = .closest;
+            }
+        }
+        const el = body[oi..elem_end];
+        if (m.biome_type == quest.biome_filter_none) {
+            if (xml.propertyValue(el, "biome_filter_type")) |bt| {
+                if (std.mem.eql(u8, bt, "ExcludeBiome")) {
+                    m.biome_type = quest.biome_filter_exclude;
+                } else if (std.mem.eql(u8, bt, "OnlyBiome")) {
+                    m.biome_type = quest.biome_filter_only;
+                } else if (std.mem.eql(u8, bt, "SameBiome")) {
+                    m.biome_type = quest.biome_filter_same;
+                }
+                if (xml.propertyValue(el, "biome_filter")) |bf| {
+                    if (bf.len > 0) m.biome_filter = try arena.dupe(u8, bf);
+                }
+            }
+        }
+        if (!m.allow_current_poi) {
+            if (xml.propertyValue(el, "allow_current_poi")) |v| {
+                m.allow_current_poi = std.mem.eql(u8, v, "true");
+            }
+        }
+    }
+    return m;
+}
+
 /// Parse one quest's effective body (template content already merged). `qid`
 /// is the quest name; open-tag name_key/category_key attrs pass through for the
 /// rare quests that use them instead of body properties.
@@ -332,6 +388,7 @@ fn parseQuestDefBody(
     const act_count = parseActions(arena, body, &action_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);
+    const meta = try scanObjectiveMeta(arena, body);
 
     return .{
         .id = numeric_id,
@@ -346,6 +403,11 @@ fn parseQuestDefBody(
         .difficulty_tier = tier,
         .turn_in = turn_in,
         .category = try dupe(arena, cat),
+        .quest_tags = meta.tags_mask,
+        .poi_select = meta.poi_select,
+        .biome_filter_type = meta.biome_type,
+        .biome_filter = meta.biome_filter,
+        .allow_current_poi = meta.allow_current_poi,
         .objective_count = if (obj_count > 0) @min(obj_count, quest.max_phases) else 1,
         .reward_count = if (rew_count > 0) rew_count else 1,
         .reward_has_item = reward_has_item,
@@ -1271,4 +1333,54 @@ test "loot group rewards parse ischosen/isfixed and quest chains carry the id" {
     // Quest-chain rewards carry the chained quest id.
     try std.testing.expectEqual(quest.RewardKind.quest, d.rewards[2].kind);
     try std.testing.expectEqualStrings("quest_tier2complete", d.rewards[2].item_name);
+}
+
+test "objective meta scan derives quest tags / POI select kind / biome filter" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Stock-shaped quest: RandomPOIGoto (tag-less) + ClearSleepers (clear) +
+    // a Goto-family objective with the stock biome filter properties.
+    const body =
+        \\<quest id="tier1_clear">
+        \\  <objective type="RandomPOIGoto" phase="1"/>
+        \\  <objective type="ClearSleepers" phase="3">
+        \\    <property name="biome_filter_type" value="OnlyBiome"/>
+        \\    <property name="biome_filter" value="pine_forest,wasteland"/>
+        \\    <property name="allow_current_poi" value="true"/>
+        \\  </objective>
+        \\  <objective type="ReturnToNPC" phase="4"/>
+        \\</quest>
+    ;
+    const m = try scanObjectiveMeta(arena, body);
+    try std.testing.expectEqual(@intFromEnum(quest.QuestTag.clear), m.tags_mask);
+    // RandomPOIGoto wins the selector kind; ClearSleepers never does.
+    try std.testing.expectEqual(quest.PoiSelectKind.random, m.poi_select);
+    try std.testing.expectEqual(quest.biome_filter_only, m.biome_type);
+    try std.testing.expectEqualStrings("pine_forest,wasteland", m.biome_filter);
+    try std.testing.expect(m.allow_current_poi);
+
+    // Goto/ClosestPOIGoto → closest; ExcludeBiome/SameBiome spellings.
+    const body2 =
+        \\<quest id="q">
+        \\  <objective type="ClosestPOIGoto">
+        \\    <property name="biome_filter_type" value="ExcludeBiome"/>
+        \\    <property name="biome_filter" value="wasteland"/>
+        \\  </objective>
+        \\</quest>
+    ;
+    const m2 = try scanObjectiveMeta(arena, body2);
+    try std.testing.expectEqual(quest.PoiSelectKind.closest, m2.poi_select);
+    try std.testing.expectEqual(quest.biome_filter_exclude, m2.biome_type);
+    try std.testing.expectEqualStrings("wasteland", m2.biome_filter);
+
+    // No Goto-family objective → no selection, no tags.
+    const body3 =
+        \\<quest id="q"><objective type="FetchFromContainer" id="1" value="1"/></quest>
+    ;
+    const m3 = try scanObjectiveMeta(arena, body3);
+    try std.testing.expectEqual(@intFromEnum(quest.QuestTag.fetch), m3.tags_mask);
+    try std.testing.expectEqual(quest.PoiSelectKind.none, m3.poi_select);
+    try std.testing.expectEqual(quest.biome_filter_none, m3.biome_type);
 }

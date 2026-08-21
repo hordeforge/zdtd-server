@@ -721,6 +721,9 @@ pub const Game = struct {
         self.sim.poi_fn = &poiRectAtWorld;
         self.sim.nearest_poi_ctx = self;
         self.sim.nearest_poi_fn = &nearestPoiAtWorld;
+        // Stock quest-POI selection (tags/tier/biome/distance + lockouts).
+        self.sim.quest_poi_ctx = self;
+        self.sim.quest_poi_fn = &questPoiSelectAt;
         // Quest POI lockout exempts party members (stock CheckForPOILockouts).
         self.sim.party_same_ctx = self;
         self.sim.party_same_fn = &partySame;
@@ -863,6 +866,10 @@ pub const Game = struct {
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
         return game_hooks.nearestPoiAtWorld(ctx, x, z);
+    }
+
+    fn questPoiSelectAt(ctx: ?*anyopaque, p: ecs.quest.QuestPoiParams) ?ecs.quest.PoiSelect {
+        return game_hooks.questPoiSelectAt(ctx, p);
     }
 
     pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
