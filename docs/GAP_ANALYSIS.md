@@ -3359,9 +3359,13 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
 
 - **S2C package emission coverage** `PARTIAL`
-  47 package names appear in the server S2C send paths (`game.zig` +
-  `game/*.zig`, harness counters excluded; EntityLookAt + MapChunks added
-  2026-08-21). The in-game minimap now fills in: the client's
+  57 package names appear in server send calls (sendGame/broadcast/
+  sendGameCritical/trySendCompressed across `game.zig` + `game/*.zig` +
+  `c2s/*.zig`; recount 2026-08-22 - the join bundle, chunk/deco/weather
+  stream, stat/vitals pushes, the map trio, the social relays (Waypoint,
+  GameMessage, SoundAtPosition, ParticleEffect, EntityRagdoll), the
+  response packages (SetBlockResponse, InventoryDataResponse, etc.) and
+  the auth denies). The in-game minimap now fills in: the client's
   NetPackageMapPosition C2S arms a 17x17 chunk window (RE
   MapChunkDatabase.GetMapChunkPackagesToSend), and the server sends
   NetPackageMapChunks (channel 1, compressed, batched) with per-chunk 256

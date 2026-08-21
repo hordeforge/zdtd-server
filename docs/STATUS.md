@@ -454,6 +454,13 @@ marker), reconstructing identically after a restart - a documented design
 difference with no client-visible impact. Net and ops 45/6/5 ->
 **46/5/5**, total 184/105/44 -> **185/104/44**.
 
+S2C emission recount 2026-08-22 (row, stays PARTIAL): 57 package names
+now appear in server send calls across game + c2s (the join bundle, the
+chunk/deco/weather stream, stat/vitals pushes, the map trio, the social
+relays, response packages and auth denies); the never-sent list is
+unchanged at the seven documented non-goals (progression sync, cosmetic
+FX, EAC-scope auth). Net and ops stays 46/5/5, total **185/104/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
