@@ -271,6 +271,17 @@ Containers: max_containers 512 with a loud insert warning and an
 allocator-backed save buffer (no silent 257th-chest loss; the fixed caps are
 documented engineering bounds).
 
+Map atlas data landed 2026-08-21 (S2C emission row, stays PARTIAL): the
+minimap color source is the block texture-atlas metadata (uvmapping XMLs),
+which lives in the operator install's meshdescriptions_assets_all.bundle as
+MeshDescription.MetaData TextAssets - not Data/Config XML. RE pinned the
+UnityFS v8 bundle layout + the CalcChunkColors -> Block.GetMapColor ->
+GetColorForSide -> uvMapping[id].color -> ToColor5 chain (7dtd-research
+docs/texture-atlas.md), and the six ta_* XMLs are extracted into
+src/assets/map_atlas.zig as a comptime RGB555 color table (231 entries).
+Next: the per-block texture/mesh resolution + CalcChunkColors + the MapChunks
+wire.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
