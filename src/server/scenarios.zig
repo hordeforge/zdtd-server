@@ -9,6 +9,7 @@ const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
+const nav = @import("../world/nav.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const systems = @import("../ecs/systems.zig");
@@ -6342,6 +6343,57 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     const cz = std.fmt.parseFloat(f32, out[sep.? + 1 .. n]) catch 0;
     // The hidden candidate is the south-west one: both coords negative.
     try std.testing.expect(cx < 0 and cz < 0);
+}
+
+test "scenario wasmQuery path: nav path across loaded chunks" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Ensure chunks (0..1, 0..1) exist with a walkable floor at ground height.
+    const h = g.groundHeight(0, 0);
+    const hh: i32 = @intFromFloat(h);
+    var x: i32 = 0;
+    while (x < 32) : (x += 1) {
+        var z: i32 = 0;
+        while (z < 32) : (z += 1) {
+            try g.world.setBlockWorld(x, hh, z, world_store.block_stone);
+        }
+    }
+
+    var out: [512]u8 = undefined;
+
+    // Plumbing: malformed path queries answer nothing.
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "path 0 0", &out));
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "path x y 10 10", &out));
+
+    // A path from block (2,2) to (30,30): cells (0,0) -> (7,7), both chunks loaded.
+    const n = game_wasm_host.wasmQuery(&g.wasm_ctx, "path 2 2 30 30", &out);
+    try std.testing.expect(n >= 5);
+    var it = std.mem.tokenizeScalar(u8, out[0..n], ' ');
+    const count = try std.fmt.parseInt(u32, it.next().?, 10);
+    try std.testing.expect(count >= 1 and count <= nav.max_waypoints);
+    // The last waypoint is the target cell center (7*4+2, 7*4+2) = (30, 30).
+    var last_x: f32 = -1;
+    var last_z: f32 = -1;
+    while (it.next()) |tok| {
+        last_x = try std.fmt.parseFloat(f32, tok);
+        last_z = try std.fmt.parseFloat(f32, it.next().?);
+    }
+    try std.testing.expect(@abs(last_x - 30) < 0.01 and @abs(last_z - 30) < 0.01);
+
+    // A target in an unloaded chunk fails closed: no path.
+    try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, "path 2 2 1000 1000", &out));
 }
 
 test "scenario zombies aggro and melee bots (revenge + proximity)" {

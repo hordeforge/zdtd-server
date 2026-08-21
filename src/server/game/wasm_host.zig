@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const plugin_mod = @import("../../plugin/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const c2s_text = @import("../c2s_text.zig");
+const nav = @import("../../world/nav.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
@@ -209,7 +210,10 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
         out[0] = '0' + k;
         return 1;
     }
-    if (!std.mem.eql(u8, verb, "cover")) return 0;
+    if (!std.mem.eql(u8, verb, "cover")) {
+        if (std.mem.eql(u8, verb, "path")) return wasmQueryPath(g, &it, out);
+        return 0;
+    }
     const sx = it.next() orelse return 0;
     const sz = it.next() orelse return 0;
     const tx = it.next() orelse return 0;
@@ -224,6 +228,37 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
     const cv = g.findCover(from, threat, 10.0) orelse return 0;
     const s = std.fmt.bufPrint(out, "{d} {d}", .{ cv[0], cv[2] }) catch return 0;
     return s.len;
+}
+
+/// `path <sx> <sz> <tx> <tz>` — nav-grid waypoints from the source to the
+/// target in world block coords. Response: `<n> <x1> <z1> ... <xn> <zn>` (cell
+/// centers), or empty when no path / a cell is unwalkable / the chunk is not
+/// loaded. The guest buffer must hold the full response (see QRY_PATH_CAP).
+fn wasmQueryPath(g: *Game, it: *std.mem.TokenIterator(u8, .scalar), out: []u8) usize {
+    const sx = it.next() orelse return 0;
+    const sz = it.next() orelse return 0;
+    const tx = it.next() orelse return 0;
+    const tz = it.next() orelse return 0;
+    if (it.next() != null) return 0;
+    const fx = std.fmt.parseFloat(f32, sx) catch return 0;
+    const fz = std.fmt.parseFloat(f32, sz) catch return 0;
+    const thx = std.fmt.parseFloat(f32, tx) catch return 0;
+    const thz = std.fmt.parseFloat(f32, tz) catch return 0;
+    const scx = @divFloor(@as(i32, @intFromFloat(fx)), nav.cell_size);
+    const scz = @divFloor(@as(i32, @intFromFloat(fz)), nav.cell_size);
+    const tcx = @divFloor(@as(i32, @intFromFloat(thx)), nav.cell_size);
+    const tcz = @divFloor(@as(i32, @intFromFloat(thz)), nav.cell_size);
+    var cells: [nav.max_waypoints]nav.Cell = undefined;
+    const n = nav.findPath(&g.world, scx, scz, tcx, tcz, &cells);
+    if (n == 0) return 0;
+    var w = std.Io.Writer.fixed(out);
+    w.print("{d}", .{n}) catch return 0;
+    for (cells[0..n]) |c| {
+        const wx = c.x * nav.cell_size + nav.cell_size / 2;
+        const wz = c.z * nav.cell_size + nav.cell_size / 2;
+        w.print(" {d} {d}", .{ wx, wz }) catch return 0;
+    }
+    return w.buffered().len;
 }
 
 /// `plugin list` / `plugin reload <name>` (paper: hot module replacement).

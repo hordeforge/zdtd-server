@@ -161,6 +161,13 @@ static float parse_f(const char *p, const char **end) {
 // ---------------------------------------------------------------------------
 
 #define QRY_CAP 64
+// Nav-grid path following (host `zdtd.query "path"`, src/world/nav.zig): the
+// host computes waypoints over the walkability grid; the guest follows them
+// while chasing out of attack range, re-requesting on a cadence so the path
+// tracks a moving target.
+#define PATH_MAX 32
+#define PATH_ARRIVAL 2.5f // arrival radius squared (blocks^2)
+#define PATH_RECAP 40     // ticks between path re-requests
 static char qry_buf[QRY_CAP];
 
 static int st(char *b, int cap, const char *s); // (forward; body below)
@@ -184,6 +191,36 @@ static int query_cover(float bx, float bz, float tx, float tz, float *cx, float 
   if (!(*e >= '0' && *e <= '9') && *e != '-') return 0;
   *cz = parse_f(e, &e);
   return 1;
+}
+
+// Ask the host for a nav-grid path from (bx,bz) to (tx,tz) in world blocks
+// (host `zdtd.query "path"` -> `src/world/nav.zig`). Returns the waypoint
+// count (<= PATH_MAX) with the waypoints in *ox/*oz, or 0 when the host has
+// no path (unwalkable start/target, unloaded chunk, or no route).
+#define QRY_PATH_CAP 512
+static char qry_path_buf[QRY_PATH_CAP];
+static int query_path(float bx, float bz, float tx, float tz, float *ox, float *oz) {
+  char req[64];
+  int rn = 0;
+  rn += st(req, 64, "path ");
+  rn += f_to(req + rn, 64 - rn, bx); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, bz); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, tx); req[rn++] = ' ';
+  rn += f_to(req + rn, 64 - rn, tz);
+  const int qn = zdtd_query((int)(long)&req[0], rn, (int)(long)&qry_path_buf[0], QRY_PATH_CAP);
+  if (qn < 3) return 0;
+  const char *p = qry_path_buf;
+  const char *e = qry_path_buf;
+  const int n = (int)parse_f(p, &e);
+  if (n < 1 || n > PATH_MAX) return 0;
+  int i;
+  for (i = 0; i < n; i++) {
+    while (*e == ' ') e++;
+    ox[i] = parse_f(e, &e);
+    while (*e == ' ') e++;
+    oz[i] = parse_f(e, &e);
+  }
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +365,11 @@ static int   bot_weapon_id[MAX_BOTS];
 static float bot_cover_x[MAX_BOTS];
 static float bot_cover_z[MAX_BOTS];
 static int   bot_cover_cd[MAX_BOTS];
+static float bot_path_x[MAX_BOTS][PATH_MAX];
+static float bot_path_z[MAX_BOTS][PATH_MAX];
+static int   bot_path_n[MAX_BOTS];
+static int   bot_path_i[MAX_BOTS];
+static int   bot_path_cd[MAX_BOTS];
 // Ammo / reload pacing (Q3 bots managed ammo). Purely guest-side: rounds left
 // in the magazine and ticks of the current reload; the host never sees ammo.
 static int   bot_ammo[MAX_BOTS];
@@ -382,6 +424,9 @@ static void bot_init(void) {
     bot_cover_x[i] = 0.f;
     bot_cover_z[i] = 0.f;
     bot_cover_cd[i] = 0;
+    bot_path_n[i] = 0;
+    bot_path_i[i] = 0;
+    bot_path_cd[i] = 0;
     bot_ammo[i] = weapon_mag(0);   // pistol until the first info record lands
     bot_reload_ticks[i] = 0;
   }
@@ -930,6 +975,9 @@ static void brain_tick(void) {
       bot_cover_x[bslot] = 0.f;  // a fresh engagement forgets the old hide point
       bot_cover_z[bslot] = 0.f;
       bot_cover_cd[bslot] = 0;
+      bot_path_n[bslot] = 0;     // and any stale nav path
+      bot_path_i[bslot] = 0;
+      bot_path_cd[bslot] = 0;
       bot_tpx[bslot] = tx; bot_tpz[bslot] = tz;
       bot_tvx[bslot] = 0.f; bot_tvz[bslot] = 0.f;
       bot_aimerr[bslot] = skill_aimerr(skill) * rng_sym(&bot_rng[bslot]);
@@ -1113,14 +1161,48 @@ static void brain_tick(void) {
         if (bot_reload_ticks[bslot] == 0) bot_ammo[bslot] = weapon_mag(w);
       }
     } else {
-      // Chase toward the target's current ground position (lead is for aim).
-      mdest_x = bx + dx * 0.4f;
-      mdest_z = bz + dz * 0.4f;
-      mspd = (skill >= 2) ? 4.2f : 3.2f;
-      if (move_dirty(bslot, mdest_x, mdest_z)) {
-        queue_move(net, mdest_x, by, mdest_z, mspd);
-        bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
-        bot_move_sent[bslot] = 1;
+      // Chase: follow the host nav-grid path when one exists (waypoints over
+      // the walkability grid, re-requested on a cadence so it tracks a moving
+      // target); direct-steer toward the target when there is no path.
+      if (bot_path_cd[bslot] > 0) bot_path_cd[bslot]--;
+      if (bot_path_n[bslot] == 0 && bot_path_cd[bslot] == 0) {
+        bot_path_n[bslot] = query_path(bx, bz, tx, tz, bot_path_x[bslot], bot_path_z[bslot]);
+        bot_path_i[bslot] = 0;
+        bot_path_cd[bslot] = PATH_RECAP;
+      }
+      if (bot_path_n[bslot] > 0) {
+        const float wx = bot_path_x[bslot][bot_path_i[bslot]];
+        const float wz = bot_path_z[bslot][bot_path_i[bslot]];
+        const float ddx = wx - bx;
+        const float ddz = wz - bz;
+        const float d2 = ddx * ddx + ddz * ddz;
+        if (d2 < PATH_ARRIVAL) {
+          bot_path_i[bslot]++;
+          if (bot_path_i[bslot] >= bot_path_n[bslot]) {
+            bot_path_n[bslot] = 0;
+            bot_path_i[bslot] = 0;
+          }
+        } else {
+          const float inv = 1.f / sqrtf_impl(d2);
+          mdest_x = bx + ddx * inv * 0.4f;
+          mdest_z = bz + ddz * inv * 0.4f;
+          mspd = (skill >= 2) ? 4.2f : 3.2f;
+          if (move_dirty(bslot, mdest_x, mdest_z)) {
+            queue_move(net, mdest_x, by, mdest_z, mspd);
+            bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
+            bot_move_sent[bslot] = 1;
+          }
+        }
+      } else {
+        // no path (unwalkable start/target or no route): direct-steer.
+        mdest_x = bx + dx * 0.4f;
+        mdest_z = bz + dz * 0.4f;
+        mspd = (skill >= 2) ? 4.2f : 3.2f;
+        if (move_dirty(bslot, mdest_x, mdest_z)) {
+          queue_move(net, mdest_x, by, mdest_z, mspd);
+          bot_last_mx[bslot] = mdest_x; bot_last_mz[bslot] = mdest_z;
+          bot_move_sent[bslot] = 1;
+        }
       }
     }
     if (bot_throttle[bslot] > 0.f) bot_throttle[bslot] -= TICK_DT;
