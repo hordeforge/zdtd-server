@@ -60,8 +60,8 @@ pub fn attachJoinedClientAs(self: *Game, capture: ?*@import("../../litenet/peer.
     try w.writeString("");
     try platform_user.write(&w, puid);
     try w.writeString("");
-    try w.writeString(version.stock_wire_announce);
-    try w.writeString(version.stock_wire_announce);
+    try w.writeString(version.stock_wire_comp);
+    try w.writeString(version.stock_wire_comp);
     try w.writeU64(0);
     var frame_buf: [512]u8 = undefined;
     const framed = try packages.framed(&frame_buf, "NetPackagePlayerLogin", w.written());

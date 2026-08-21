@@ -46,6 +46,8 @@ pub const CounterId = enum(u16) {
     c2s_throttle,
     /// Malformed decode / unexpected package body (flood signal).
     c2s_malformed,
+    /// Login rejected for a client build mismatch (EKickReason.VersionMismatch).
+    c2s_version_rejects,
     /// Stock InventoryTransaction.Write requests detected (the transactional
     /// mapping is the top remaining wire item; counted so real client
     /// container traffic is visible).

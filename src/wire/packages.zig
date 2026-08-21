@@ -2201,6 +2201,9 @@ pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
 pub const KickReason = enum(i32) {
     manual_kick = 0x0A,
     mod_decision = 0x10,
+    /// EKickReason.VersionMismatch (asm.il GameUtils_EKickReason): the
+    /// client's compatibilityVersion differs from LongStringNoBuild.
+    version_mismatch = 4,
 };
 
 /// Stock NetPackagePlayerDenied body (asm.il:827055-827090):
@@ -3388,6 +3391,22 @@ pub const PlayerLogin = struct {
     /// ClientInfo.CrossplatformId: the EOS account, absent on native-only clients.
     crossplatform: platform_user.Stored = .{},
     discord_user_id: u64 = 0,
+    /// `version` wire field (the client sends LongStringNoBuild for both).
+    version_buf: [24]u8 = undefined,
+    version_len: u8 = 0,
+    /// `compVersion` wire field; VersionAuthorizer compares this against the
+    /// server's LongStringNoBuild (ordinal-ignore-case) and kicks
+    /// VersionMismatch on a difference.
+    comp_buf: [24]u8 = undefined,
+    comp_len: u8 = 0,
+
+    pub fn version(self: *const PlayerLogin) []const u8 {
+        return self.version_buf[0..self.version_len];
+    }
+
+    pub fn compVersion(self: *const PlayerLogin) []const u8 {
+        return self.comp_buf[0..self.comp_len];
+    }
 
     /// `ClientInfo::get_InternalId` (asm.il 783909): crossplatform when present,
     /// otherwise native. This is what stock keys PersistentPlayerData on
@@ -3409,8 +3428,10 @@ pub fn parsePlayerLogin(body: []const u8, name_buf: []u8) binary.ReadError!Playe
     try r.skipString(); // native auth token
     try out.crossplatform.set(try platform_user.read(&r, &plat_buf, &id_buf));
     try r.skipString(); // crossplatform auth token
-    try r.skipString(); // version
-    try r.skipString(); // compVersion
+    const ver = try r.readString(&out.version_buf);
+    out.version_len = @intCast(ver.len);
+    const comp = try r.readString(&out.comp_buf);
+    out.comp_len = @intCast(comp.len);
     out.discord_user_id = try r.readU64();
     return out;
 }
@@ -3501,8 +3522,8 @@ test "player login body parses stock field order" {
     try w.writeString("native-ticket");
     try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
     try w.writeString("eos-jwt");
-    try w.writeString("V 3.1.0 (b14)");
-    try w.writeString("V 3.1.0");
+    try w.writeString("V 3.10");
+    try w.writeString("V 3.10");
     try w.writeU64(42);
 
     var name_buf: [32]u8 = undefined;
@@ -3512,6 +3533,9 @@ test "player login body parses stock field order" {
     try std.testing.expectEqualStrings("76561198000000001", login.native.get().?.id);
     try std.testing.expectEqualStrings("EOS", login.crossplatform.get().?.platform);
     try std.testing.expectEqual(@as(u64, 42), login.discord_user_id);
+    // LongStringNoBuild form (client sends it as both version and compVersion).
+    try std.testing.expectEqualStrings("V 3.10", login.version());
+    try std.testing.expectEqualStrings("V 3.10", login.compVersion());
     // InternalId prefers the crossplatform account.
     try std.testing.expectEqualStrings("EOS", login.internalId().get().?.platform);
 }
@@ -3525,8 +3549,8 @@ test "player login with both identities null still yields the name" {
     try w.writeString("");
     try platform_user.write(&w, null);
     try w.writeString("");
-    try w.writeString("V 3.1.0 (b14)");
-    try w.writeString("V 3.1.0 (b14)");
+    try w.writeString("V 3.10");
+    try w.writeString("V 3.10");
     try w.writeU64(0);
 
     var name_buf: [32]u8 = undefined;
@@ -3535,6 +3559,7 @@ test "player login with both identities null still yields the name" {
     try std.testing.expect(login.native.get() == null);
     try std.testing.expect(login.crossplatform.get() == null);
     try std.testing.expect(login.internalId().get() == null);
+    try std.testing.expectEqualStrings("V 3.10", login.compVersion());
 }
 
 test "player login truncated at any boundary is rejected" {

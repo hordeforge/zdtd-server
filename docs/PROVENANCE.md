@@ -143,7 +143,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/blocks.zig` | R | Block editing: SetBlock, BlockTrigger, Explosions. Extracted from the old c2s/inv.zig tail (643-991) verbatim. NetPackagePickupBlock: stock PickupBlockServer IL=77 (type-match + echo + PickupSource/Air replace) with zdtd reach/claim bounds. NetPackageSetBlockTexture: Chunk.SetBlockFaceTexture IL=48 idx-in-face-byte paint into the textureFull plane + dedi rebroadcast (SetBlockTextureServer IL=41) |
 | `src/server/c2s/dispatch.zig` | R | C2S dispatch extracted verbatim from game.zig handlePackage. Phase gate + c2s/* fanout; game.zig keeps a one-line forwarder |
 | `src/server/c2s/inv.zig` | R | C2S inventory and block editing: player inventory snapshots, holding/item drop/bag, tile-entity edits, inventory transactions, block trigger/setblock. NetPackageItemReload: entity-gated relay to every peer but the sender (ItemReloadServer IL=32) |
-| `src/server/c2s/join.zig` | R | Join state machine — extracted from game.zig handlePackage (stock SM). Owns the 7 join packages that must stay coherent: PlayerLogin → |
+| `src/server/c2s/join.zig` | R | Join state machine — extracted from game.zig handlePackage (stock SM). Owns the 7 join packages that must stay coherent: PlayerLogin → | Login VersionAuthorizer gate (LongStringNoBuild compVersion compare, EKickReason.VersionMismatch)
 | `src/server/c2s/misc.zig` | R | C2S misc domain: chat, player data / disconnect, dropped packages, game events, quest entity spawns, console commands, damage, lock requests, |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
@@ -219,7 +219,7 @@ Coverage targets, all enforced by the scan:
 | `src/version.zig` | Z | Product and compatibility versions reported to operators |
 | `src/wire/binary.zig` | R | Little-endian readers/writers matching .NET BinaryReader/Writer (7-bit strings) |
 | `src/wire/frame.zig` | R | Game channel envelope + inner packages (stock NetConnectionSimple layout) |
-| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout |
+| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout | parsePlayerLogin reads version/compVersion (LongStringNoBuild form) + KickReason.version_mismatch
 | `src/wire/platform_user.zig` | R | PlatformUserIdentifierAbs wire codec (stock V3.1.0 b14). |
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |

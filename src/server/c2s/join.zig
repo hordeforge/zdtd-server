@@ -18,6 +18,7 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const phase_gate = @import("../phase_gate.zig");
 const clock = @import("../../util/clock.zig");
+const version_mod = @import("../../version.zig");
 
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 
@@ -51,6 +52,24 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 c.name_len = sanitizePlayerName(c.name[0..], login.name);
                 c.puid_primary = login.internalId();
                 c.puid_native = login.native;
+                // VersionAuthorizer (asm.il VersionAuthorizer): the client's
+                // compatibilityVersion must equal LongStringNoBuild
+                // (`version.stock_wire_comp` = "V 3.10" for V3.1.0 b14,
+                // `{0} {1}.{2}` with the raw Minor) ordinal-ignore-case, or
+                // stock kicks EKickReason.VersionMismatch(4). A different
+                // client build must not join and desync silently.
+                if (!std.ascii.eqlIgnoreCase(login.compVersion(), version_mod.stock_wire_comp)) {
+                    self.harness.counters.inc(.c2s_version_rejects);
+                    if (c.peer) |p| {
+                        var denied: [64]u8 = undefined;
+                        if (packages.buildPlayerDeniedBody(&denied, .version_mismatch, 0, 0, "")) |body2| {
+                            self.sendGame(p, "NetPackagePlayerDenied", body2) catch
+                                self.harness.counters.inc(.net_send_errors);
+                        } else |_| self.harness.counters.inc(.encode_errors);
+                    }
+                    std.debug.print("zdtd: login version mismatch comp='{s}' want='{s}' slot={d}\n", .{ login.compVersion(), version_mod.stock_wire_comp, c.slot });
+                    return true;
+                }
             } else |_| {
                 // A login body zdtd cannot fully decode still gets its name
                 // read, because refusing the join would lock the player out

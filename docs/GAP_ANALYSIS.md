@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (168/121/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (169/120/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 29 | 22 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **168** | **121** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 30 | 21 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **169** | **120** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**29 WORKS · 22 PARTIAL · 5 MISSING**
+**30 WORKS · 21 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3417,16 +3417,22 @@ persists so little that a restart visibly damages a built base.
   `src/litenet/server.zig:47-77`, `src/litenet/packet.zig:70-72`,
   `asm.il:852995`
 
-- **NetPackagePlayerLogin body parsing** `PARTIAL`
-  zdtd reads only the leading playerName string. Stock's read order is playerName,
-  platformUser (`PlatformUserIdentifierAbs.FromStream`), platformToken,
-  crossplatformUser, crossplatformToken, version, compVersion, discordUserId. So
-  zdtd has no platform identity, no auth token, and no client-version check: there
-  is no EKickReason.VersionMismatch path, and a client of a different build joins
-  and desyncs silently. The identity gap cascades into save keying, bans and admin
-  permissions.
-  *Anchors:* `src/server/game.zig:3893-3906`, `asm.il:832130-832182`,
-  `asm.il:832185-832275`, `asm.il:31206-31248`
+- **NetPackagePlayerLogin body parsing** `WORKS` `(2026-08-21)`
+  The full stock body is parsed field for field (asm.il 832140): playerName,
+  native PlatformUserIdentifierAbs + token, crossplatform identity + token,
+  version, compVersion, u64 discordUserId. The identities wire into
+  `ClientInfo.PlatformId/CrossplatformId` (puid_primary/puid_native, keying
+  saves, bans and admin by the stock `get_InternalId` rule), and the
+  VersionAuthorizer gate is live: a client whose compVersion differs from
+  LongStringNoBuild (`V 3.10` for V3.1.0 b14, raw-Minor `{0} {1}.{2}`) is
+  rejected with NetPackagePlayerDenied EKickReason.VersionMismatch(4) instead
+  of joining and desyncing silently (ordinal-ignore-case equals, asm.il
+  VersionAuthorizer). The auth tokens are walked past (no authorizer chain,
+  EAC-off scope).
+  *Anchors:* `src/wire/packages.zig` `parsePlayerLogin`/`PlayerLogin`,
+  `src/server/c2s/join.zig` version gate,
+  `src/version.zig` `stock_wire_comp`, `asm.il:832130-832275`,
+  `asm.il:31206-31248`
 
 - **EAC enforcement** `PARTIAL (waived: EAC-off)`
   By design. NetPackageEAC and NetPackageAuthState are never sent or handled, GSI

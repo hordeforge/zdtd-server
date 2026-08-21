@@ -19,3 +19,12 @@ pub const stock_wire_announce = "V 3.1.0";
 /// trips a parse warning. The login package's versionLong stays the display
 /// form (`V 3.1.0`, protocol.md VersionLongString packing).
 pub const stock_wire_gsi_version = "V.3.10.14";
+
+/// `VersionInformation.LongStringNoBuild` for the supported wire:
+/// `String.Format("{0} {1}.{2}", ReleaseType, Major, Minor)` with the **raw**
+/// Minor (0xA=10, not the display 3.1), asm.il VersionInformation IL_00BE
+/// `ldstr {0} {1}.{2}`. V3.1.0 b14 = "V 3.10". This is what the stock client
+/// sends as both `version` and `compVersion` (ConnectionManager IL_0095-00A4)
+/// and what `VersionAuthorizer` compares the client's compatibilityVersion
+/// against (ordinal-ignore-case, else EKickReason.VersionMismatch).
+pub const stock_wire_comp = "V 3.10";

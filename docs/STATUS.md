@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 168 `WORKS`,
-121 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 169 `WORKS`,
+120 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -165,6 +165,15 @@ stock's 1 s interval reaped real-internet peers on a 3 s hiccup), and the
 Advertised ServerVersion row was stale - the GSI text already emits the strict
 `V.3.10.14` SerializableString (commit 1dfc653). Total 165/124/44 ->
 **168/121/44**.
+
+Login version gate shipped 2026-08-21 (Net and ops 29/22/5 -> 30/21/5): the
+full NetPackagePlayerLogin body was already parsed (identities wired to
+puid_primary/puid_native); the VersionAuthorizer gate is now live - a client
+whose compVersion differs from LongStringNoBuild (raw-Minor "V 3.10" for
+V3.1.0 b14, asm.il VersionAuthorizer) is rejected with
+EKickReason.VersionMismatch(4) instead of joining and desyncing silently.
+The loadgen harness now sends the stock LongStringNoBuild form
+(7dtd-loadgen b5c3069). Total 168/121/44 -> **169/120/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
