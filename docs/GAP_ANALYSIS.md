@@ -3341,10 +3341,11 @@ persists so little that a restart visibly damages a built base.
   (NetPackagePersistentPlayerPositions, 2026-08-21) and trader areas ship on
   join (NetPackageWorldAreas). Falling/jumping zombies stream their vertical
   velocity (NetPackageEntityVelocity, 2026-08-21, delta-gated in the
-  replicate fan-out). ToClient names never sent at all include TurretSync,
-  EntitySetSkillLevelClient, ChunkClusterInfo, WallVolume, Light, TreeFade,
-  AudioPlayInHead, WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo,
-  AuthState.
+  replicate fan-out). The player list broadcasts every 5 s
+  (NetPackageClientInfo, 2026-08-21). ToClient names never sent at all
+  include TurretSync, EntitySetSkillLevelClient, ChunkClusterInfo, WallVolume,
+  Light, TreeFade, AudioPlayInHead, WaterSimChunkUpdate,
+  PlayerSetBackpackPosition, AuthState.
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
   sole stock sender is the Homerun minigame (ShowTooltipMP unicast,

@@ -2761,6 +2761,44 @@ test "EntityVelocity body is entityId + bAdd + clamped motion" {
     try std.testing.expectEqual(@as(u8, 1), add[4]);
 }
 
+/// NetPackageClientInfo (write IL=41): count u16, then per online player
+/// (entityId i32, pingTime i16 via conv.i2, admin bool). Broadcast every 5 s
+/// by ConnectionManager.updateClientInfo (RE 2026-08-21); drives the player
+/// list UI + admin crowns.
+pub const ClientInfoEntry = struct {
+    entity_id: i32,
+    /// Ping in ms (zdtd has no RTT measurement yet; 0 = unmeasured).
+    ping_ms: i16,
+    admin: bool,
+};
+
+pub fn buildClientInfoBody(buf: []u8, entries: []const ClientInfoEntry) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeU16(@intCast(entries.len));
+    for (entries) |e| {
+        try w.writeI32(e.entity_id);
+        try w.writeI16(e.ping_ms);
+        try w.writeBool(e.admin);
+    }
+    return w.written();
+}
+
+test "ClientInfo body is count + entityId + ping + admin per entry" {
+    var buf: [256]u8 = undefined;
+    const entries = [_]ClientInfoEntry{
+        .{ .entity_id = 100, .ping_ms = 24, .admin = true },
+        .{ .entity_id = 101, .ping_ms = 0, .admin = false },
+    };
+    const b = try buildClientInfoBody(&buf, &entries);
+    try std.testing.expectEqual(@as(usize, 2 + 2 * 7), b.len);
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, b[0..2], .little));
+    try std.testing.expectEqual(@as(i32, 100), std.mem.readInt(i32, b[2..6], .little));
+    try std.testing.expectEqual(@as(i16, 24), std.mem.readInt(i16, b[6..8], .little));
+    try std.testing.expectEqual(@as(u8, 1), b[8]); // admin
+    try std.testing.expectEqual(@as(i32, 101), std.mem.readInt(i32, b[9..13], .little));
+    try std.testing.expectEqual(@as(u8, 0), b[15]); // admin false
+}
+
 /// NetPackagePersistentPlayerPositions (write IL=38): count i32, then per
 /// online player a PlatformUserIdentifierAbs.ToStream id + Vector3i position.
 /// Broadcast every 6 s by GameManager.playerPositionsCountdownTimer; the

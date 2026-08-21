@@ -549,6 +549,51 @@ test "scenario replicate sends EntityVelocity for a falling zombie" {
     try std.testing.expect(found);
 }
 
+test "scenario ClientInfo broadcasts the player list every 5 s" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_ci");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ci", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const n_before = cap.n;
+    g.tickClientInfo();
+    try std.testing.expect(cap.n > n_before);
+    const did = packages.idOf("NetPackageClientInfo").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap.n and !found) : (i += 1) {
+        const msg = cap.slots[i].data[0..cap.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did) {
+                var r = binary.Reader{ .data = pkgs[j].body };
+                const count = try r.readU16();
+                try std.testing.expect(count >= 1);
+                const eid = try r.readI32();
+                try std.testing.expectEqual(c.entity_id, eid);
+                _ = try r.readI16(); // ping
+                _ = try r.readBool(); // admin
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found);
+    // The timer re-arms.
+    g.tickClientInfo();
+    try std.testing.expectEqual(@as(u16, 99), g.client_info_timer);
+}
+
 test "scenario map: PersistentPlayerPositions broadcasts every 6 s" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ppp");

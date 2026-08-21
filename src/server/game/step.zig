@@ -129,6 +129,9 @@ pub fn step(self: *Game) !void {
         // Map player markers (RE GameManager.playerPositionsCountdownTimer):
         // broadcast PersistentPlayerPositions every 6 s.
         self.tickPlayerPositions();
+        // Player list (RE ConnectionManager.updateClientInfo): broadcast
+        // ClientInfo every 5 s.
+        self.tickClientInfo();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

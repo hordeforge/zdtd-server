@@ -410,6 +410,9 @@ pub const Game = struct {
     /// Ticks until the next NetPackagePersistentPlayerPositions broadcast
     /// (stock GameManager.playerPositionsCountdownTimer, 6 s cadence).
     player_positions_timer: u16 = 0,
+    /// Ticks until the next NetPackageClientInfo broadcast (stock
+    /// ConnectionManager.updateClientInfo, 5 s cadence).
+    client_info_timer: u16 = 0,
     /// Last-sent EntityVelocity vy per entity slot (RE NetEntityDistributionEntry
     /// motion updates): re-sends only when the vertical velocity moves past
     /// 0.1, so falls/jumps stream while rest stays quiet.
@@ -1215,6 +1218,10 @@ pub const Game = struct {
 
     pub fn tickPlayerPositions(self: *Game) void {
         return game_map.tickPlayerPositions(self);
+    }
+
+    pub fn tickClientInfo(self: *Game) void {
+        return game_tick.tickClientInfo(self);
     }
 
     /// Block id at world coords (0 = air / unloaded).

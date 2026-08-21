@@ -441,3 +441,29 @@ pub fn tickEntityLookAt(self: *Game) void {
         } else |_| {}
     }
 }
+
+/// NetPackageClientInfo broadcast (RE ConnectionManager.updateClientInfo:
+/// 5 s cadence): the per-player list (entityId, ping, admin flag) that drives
+/// the player list UI and admin crowns. Ping is 0 (zdtd has no RTT
+/// measurement; documented residual), admin = the name is in the permission
+/// list.
+pub fn tickClientInfo(self: *Game) void {
+    if (self.client_info_timer > 0) {
+        self.client_info_timer -= 1;
+        return;
+    }
+    self.client_info_timer = 100; // 5 s at 20 TPS (stock timer value)
+    var entries: [game_mod.max_clients]packages.ClientInfoEntry = undefined;
+    var n: usize = 0;
+    for (&self.clients) |*c| {
+        if (!c.joined or c.entity_id <= 0) continue;
+        if (n >= entries.len) break;
+        const is_admin = self.admin_list.find(c.name[0..c.name_len]) != null;
+        entries[n] = .{ .entity_id = c.entity_id, .ping_ms = 0, .admin = is_admin };
+        n += 1;
+    }
+    if (n == 0) return;
+    if (packages.buildClientInfoBody(&self.body_buf, entries[0..n])) |body| {
+        self.broadcast("NetPackageClientInfo", body) catch {};
+    } else |_| {}
+}
