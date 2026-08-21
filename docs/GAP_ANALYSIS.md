@@ -3258,10 +3258,11 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  80 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  82 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
-  EntityStatChanged, Waypoint, GameMessage, SoundAtPosition and
-  EntityAwardKillServer have handlers since the last count; the Waypoint
+  EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
+  EntityAwardKillServer, ParticleEffect and EntityStealth have handlers
+  since the last count; the Waypoint
   relay parses the full Waypoint v7 body and fans the invite to the
   inviter's allies or all players per
   GameManager.WaypointInviteServer, the GameMessage relay re-broadcasts
@@ -3269,20 +3270,24 @@ persists so little that a restart visibly damages a built base.
   FinishGameMessageServer - death/team/leave/chat announcements now reach
   other players, the SoundAtPosition relay re-broadcasts positional
   audio to every client except the owning player per
-  PlaySoundAtPositionServer, and the EntityAwardKillServer kill report is
+  PlaySoundAtPositionServer, the EntityAwardKillServer kill report is
   a validated no-op because zdtd credits kill objectives and XP
   authoritatively at the death path - applying the client echo would
-  double-credit).
+  double-credit, the ParticleEffect relay re-broadcasts client-triggered
+  particles to every client except the causing entity's owner per
+  SpawnParticleEffectServer, and the EntityStealth stealth report is a
+  validated no-op because zdtd computes stealth server-side (crouch from
+  movement frames, smell from buffs)).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 22 have no handler: Debug,
+  yields 98 names the stock client actually sends; 20 have no handler: Debug,
   DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
   EncryptionPublicKey, EntityPhysics, EntityRagdoll,
-  EntityStealth, KeyExchangeComplete, ModifyCVar, ParticleEffect,
+  KeyExchangeComplete, ModifyCVar,
   PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
   SetProp, SimpleRPC, TwitchAccess, TwitchVoteScheduling,
   WorldFolder.
   Player-visible: vending machines are inert, buried-supplies and goto quest
-  markers never register, ragdolls/particles are not
+  markers never register, ragdolls are not
   relayed. (Local map waypoints stay
   client-local as in stock; only the party waypoint invite traverses the
   server, and it now relays.)

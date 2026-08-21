@@ -151,6 +151,42 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageParticleEffect")) {
+        // Stock NetPackageParticleEffect (write IL=20): ParticleEffect.Write
+        // (ParticleId, pos, rot, color32, two sound strings, volumeScale)
+        // then entityThatCausedIt i32, forceCreation bool, worldSpawn bool.
+        // GameManager.SpawnParticleEffectServer (IL=41, dedicated branch)
+        // re-broadcasts the Setup body with allButAttachedToEntityId =
+        // entityThatCausedIt, so every client except the causing entity's
+        // owner sees the effect (the owner already spawned it locally).
+        // Verbatim relay excludes that entity's client, like stock.
+        const pe = packages.parseParticleEffectInvoke(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        for (&self.clients) |*cl| {
+            if (!cl.joined or cl.peer == null) continue;
+            if (cl.entity_id == pe.entity_caused) continue; // allButAttachedToEntityId
+            self.sendGame(cl.peer.?, "NetPackageParticleEffect", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: send ParticleEffect failed: {s}\n", .{@errorName(err)});
+            };
+        }
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
+        // Stock NetPackageEntityStealth (read IL=9): id i32, six u16 stealth
+        // flags, data u16, cSmellRadiusMin i32 - the client reports its
+        // stealth state for AI detection (crouch/smell/eating/sheltered/
+        // alert). zdtd computes stealth server-side (the crouch flag rides the
+        // movement frames and the AI senses row derives smell from buffs), so
+        // the report is a redundant echo: validate the body and drop.
+        if (body.len < 20) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

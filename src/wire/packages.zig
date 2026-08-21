@@ -2634,6 +2634,68 @@ test "sound at position parses the stock body" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.8), s.volume_scale, 0.001);
 }
 
+/// Stock `NetPackageParticleEffect` (write IL=20): a `ParticleEffect`
+/// (ParticleEffect.Write IL=47: ParticleId i32, pos Vector3 3xf32, rot
+/// Quaternion 4xf32, color Color32 4 bytes, soundName string,
+/// additionalHitSoundName string, volumeScale f32) followed by
+/// entityThatCausedIt i32, forceCreation bool, worldSpawn bool. The
+/// dedicated-server relay (GameManager.SpawnParticleEffectServer IL=41)
+/// re-broadcasts Setup(...) with allButAttachedToEntityId =
+/// entityThatCausedIt, so every client except the causing entity's owner
+/// sees the effect (the owner already spawned it locally).
+pub const ParticleEffectInvoke = struct {
+    entity_caused: i32,
+    force_creation: bool,
+    world_spawn: bool,
+};
+
+pub fn parseParticleEffectInvoke(body: []const u8) (binary.ReadError || error{Overflow})!ParticleEffectInvoke {
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readI32(); // ParticleId
+    var i: usize = 0;
+    while (i < 3) : (i += 1) _ = try r.readF32(); // pos
+    i = 0;
+    while (i < 4) : (i += 1) _ = try r.readF32(); // rot
+    i = 0;
+    while (i < 4) : (i += 1) _ = try r.readByte(); // color
+    var scratch: [128]u8 = undefined;
+    _ = try r.readString(&scratch); // soundName
+    _ = try r.readString(&scratch); // additionalHitSoundName
+    _ = try r.readF32(); // volumeScale
+    return .{
+        .entity_caused = try r.readI32(),
+        .force_creation = try r.readBool(),
+        .world_spawn = try r.readBool(),
+    };
+}
+
+test "particle effect invoke parses the stock body" {
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(7); // ParticleId
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+    try w.writeByte(255);
+    try w.writeByte(0);
+    try w.writeByte(0);
+    try w.writeByte(255);
+    try w.writeString("Sounds/blood");
+    try w.writeString("");
+    try w.writeF32(1);
+    try w.writeI32(42); // entityThatCausedIt
+    try w.writeBool(true); // forceCreation
+    try w.writeBool(false); // worldSpawn
+    const pe = try parseParticleEffectInvoke(w.written());
+    try std.testing.expectEqual(@as(i32, 42), pe.entity_caused);
+    try std.testing.expect(pe.force_creation);
+    try std.testing.expect(!pe.world_spawn);
+}
+
 test "stock chat round-trips channel, sender, message and recipients" {
     var buf: [128]u8 = undefined;
     const recips = [_]i32{ 20, 30 };

@@ -398,6 +398,16 @@ platform-id-keyed bans, whitelist enforcement, reserved/admin slots), so
 the row flips to WORKS: Net and ops 43/8/5 -> **44/7/5**, total
 182/107/44 -> **183/106/44**.
 
+ParticleEffect + EntityStealth handled 2026-08-21 (C2S handler row, stays
+PARTIAL): NetPackageParticleEffect re-broadcasts verbatim to every client
+except the causing entity's owner (SpawnParticleEffectServer IL=41,
+allButAttachedToEntityId), so client-triggered particles reach other
+players; NetPackageEntityStealth is a validated no-op because zdtd computes
+stealth server-side (crouch from movement frames, smell from buffs). RE
+pins: 7dtd-research protocol-packages.md 5.11/5.12. C2S handled names 80
+-> 82 of the 98 stock client sends; Net and ops stays 44/7/5, total
+**183/106/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

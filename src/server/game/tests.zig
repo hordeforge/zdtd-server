@@ -1963,3 +1963,74 @@ test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
     try std.testing.expect(g.ban_list.bannedId("Steam", "5002", 1893427199)); // new
     try std.testing.expect(g.ban_list.banned("Runtime", 1893427199 + 86400)); // untouched
 }
+
+test "particle effects relay to all clients except the causing owner; stealth is a no-op" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    // ParticleEffect: owner (sender) must not hear the echo.
+    var body: [256]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeI32(7);
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+    try w.writeByte(255);
+    try w.writeByte(0);
+    try w.writeByte(0);
+    try w.writeByte(255);
+    try w.writeString("Sounds/blood");
+    try w.writeString("");
+    try w.writeF32(1);
+    try w.writeI32(ca.entity_id);
+    try w.writeBool(true);
+    try w.writeBool(false);
+    var frame_buf: [512]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageParticleEffect", w.written());
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, framed);
+    const pe_id = packages.idOf("NetPackageParticleEffect").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var a_got = false;
+    var b_got = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pe_id) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pe_id) b_got = true;
+        }
+    }
+    try std.testing.expect(!a_got);
+    try std.testing.expect(b_got);
+
+    // EntityStealth: handled without falling to the unhandled counter.
+    var sb: [24]u8 = undefined;
+    std.mem.writeInt(i32, sb[0..4], ca.entity_id, .little);
+    var framed2: [128]u8 = undefined;
+    const f2 = try packages.framed(&framed2, "NetPackageEntityStealth", &sb);
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    try g.injectFramed(ca, f2);
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+}
