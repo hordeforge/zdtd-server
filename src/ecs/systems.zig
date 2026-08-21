@@ -315,8 +315,12 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const d2 = dx * dx + dz * dz;
     if (d2 < 0.04) return;
     const inv = 1.0 / @sqrt(d2);
-    const mx = dx * inv * speed * dt;
-    const mz = dz * inv * speed * dt;
+    // Swimming halves the horizontal speed (stock swimSpeed < moveSpeed).
+    const swim = w.water_fn != null and
+        w.water_fn.?(w.water_ctx, @intFromFloat(@floor(t.x)), @intFromFloat(@floor(t.y + 0.5)), @intFromFloat(@floor(t.z)));
+    const spd: f32 = if (swim) speed * w.rules.ai.swim_speed_frac else speed;
+    const mx = dx * inv * spd * dt;
+    const mz = dz * inv * spd * dt;
     t.yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
     const solid_fn = w.solid_fn orelse {
         t.x += mx;
@@ -443,6 +447,12 @@ fn applyGravity(w: *World, s: Slot, dt: f32) void {
     if (ai.jump_cd > 0) ai.jump_cd -= dt;
     const below: i32 = @intFromFloat(@floor(t.y - 0.05));
     const rising = ai.jumping and ai.vy > 0;
+    // Swim: a submerged body (mid cell is water) floats - gravity scaled by
+    // cSwimGravityPer and the 0.91 y-drag (RE entity-ai.md cctor), so it sinks
+    // slowly instead of dropping. The ground snap still applies on the bed.
+    const sub_y: i32 = @intFromFloat(@floor(t.y + 0.5));
+    const swimming = w.water_fn != null and
+        w.water_fn.?(w.water_ctx, @intFromFloat(@floor(t.x)), sub_y, @intFromFloat(@floor(t.z)));
     if (!rising and solid_fn(w.solid_ctx, @intFromFloat(@floor(t.x)), below, @intFromFloat(@floor(t.z)))) {
         t.y = @as(f32, @floatFromInt(below)) + 1.0;
         ai.vy = 0;
@@ -450,8 +460,11 @@ fn applyGravity(w: *World, s: Slot, dt: f32) void {
         if (ai.jumping and ai.vy <= 0) ai.jumping = false; // apex passed; fall lands normally
         // Stock per-tick integrator (RE entity-movement.md): the fall applies
         // World.Gravity then the 0.98 y-drag, so acceleration is ~1.6
-        // blocks/s² and the speed self-caps around -3.9 blocks/s.
-        ai.vy = (ai.vy + w.rules.ai.gravity * dt) * 0.98;
+        // blocks/s² and the speed self-caps around -3.9 blocks/s. Swimming
+        // uses gravity*0.025 and the 0.91 drag (a slow float).
+        const g_eff: f32 = if (swimming) w.rules.ai.gravity * w.rules.ai.swim_gravity_per else w.rules.ai.gravity;
+        const drag: f32 = if (swimming) w.rules.ai.swim_drag_y else 0.98;
+        ai.vy = (ai.vy + g_eff * dt) * drag;
         if (ai.vy < w.rules.ai.fall_max_vy) ai.vy = w.rules.ai.fall_max_vy;
         t.y += ai.vy * dt;
     }
@@ -5068,6 +5081,38 @@ test "move helper: a blocked grounded zombie digs the blocking block" {
         }
     }
     try std.testing.expect(pushed);
+}
+
+test "move helper: a submerged body floats instead of dropping" {
+    // RE entity-ai.md cctor: cSwimGravityPer 0.025 / cSwimDragY 0.91 - a
+    // submerged AI body sinks slowly (float) instead of falling to the bed,
+    // and horizontal moves slow to the swim speed fraction.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Pool = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70; // bed at 70
+        }
+        fn isWater(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y > 70 and y <= 78; // water column 71..78
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Pool.solid;
+    w.water_ctx = null;
+    w.water_fn = &Pool.isWater;
+    const z = w.spawnZombieClass(5, 80, 5, 200, 7, "").?; // drop into the pool
+    const s = w.slotOfNetId(z).?;
+    for (0..60) |_| applyGravity(&w, s, 0.05); // enter the water
+    try std.testing.expect(w.transform[s].y <= 78.5); // reached the surface
+    for (0..120) |_| applyGravity(&w, s, 0.05); // 6 s submerged
+    // Sank slowly: nowhere near the bed (70) - a float.
+    try std.testing.expect(w.transform[s].y > 76.0);
+    // Horizontal: the swim speed fraction halves the step.
+    const x0 = w.transform[s].x;
+    stepToward(&w, s, 20.0, 5.0, 2.2, 0.05);
+    const moved = w.transform[s].x - x0;
+    try std.testing.expect(moved > 0.02 and moved < 0.09); // ~0.055 (2.2*0.5*0.05)
 }
 
 test "demolition: primes at the health threshold, countdowns, then requests the explosion" {

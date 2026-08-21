@@ -150,6 +150,13 @@ pub const Ai = struct {
     /// (the stock 0.98 drag already self-caps around -3.9; this bounds a
     /// pathological tick so a long drop cannot outrun the per-tick probes).
     fall_max_vy: f32 = -30.0,
+    /// Swim physics (RE entity-ai.md EntityAlive cctor: cSwimGravityPer 0.025,
+    /// cSwimDragY 0.91): a submerged AI body falls with gravity*0.025 and the
+    /// 0.91 y-drag, so it sinks slowly instead of dropping - a float.
+    swim_gravity_per: f32 = 0.025,
+    swim_drag_y: f32 = 0.91,
+    /// Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed).
+    swim_speed_frac: f32 = 0.5,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
     /// Chase speed, blocks/s. **Floor**: entityclasses.xml MoveSpeedAggro wins
@@ -428,6 +435,9 @@ pub const AiOverlay = struct {
     jump_delay_s: ?f32 = null,
     gravity: ?f32 = null,
     fall_max_vy: ?f32 = null,
+    swim_gravity_per: ?f32 = null,
+    swim_drag_y: ?f32 = null,
+    swim_speed_frac: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,

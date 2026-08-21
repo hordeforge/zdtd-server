@@ -157,6 +157,9 @@ test, so a retune cannot land silently).
 | `jump_height` | 1.3 | Jump hop height, blocks: a fully blocked, grounded AI hops over the obstacle (stock MoveHelper StartJump heightDiff ~1.3, entity-ai.md 2030-2034). Policy floor |
 | `jump_delay_s` | 1.0 | Min seconds between jumps (stock EntityAlive jumpDelay default 1 x20 ticks = 1 s, entity-ai.md 3228). Prevents bunny-hop on a sealed wall |
 | `fall_max_vy` | -30.0 | Hard terminal fall velocity cap, blocks/s (safety bound; the stock 0.98 y-drag already self-caps ~ -3.9) |
+| `swim_gravity_per` | 0.025 | Swim gravity fraction (stock cSwimGravityPer): a submerged AI body falls with gravity*0.025 |
+| `swim_drag_y` | 0.91 | Swim y-drag (stock cSwimDragY): the vertical drag while submerged |
+| `swim_speed_frac` | 0.5 | Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed) |
 | `gravity` | -1.6 | Vertical acceleration, blocks/s². RE: `World::Gravity` 0.08 blocks/tick (World cctor) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) → ~1.6 blocks/s², self-capping ~ -3.9 |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |

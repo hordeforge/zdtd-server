@@ -292,6 +292,10 @@ pub const World = struct {
     /// unblocked.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
+    /// Water probe (Game wires the store): true when the cell holds water.
+    /// Lets the AI swim physics detect submersion (stock inWaterPercent).
+    water_ctx: ?*anyopaque = null,
+    water_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
     /// Optional per-player smell radius (RE PlayerStealth cSmellRadius*):
     /// (ctx, player_slot) -> effective radius, so stateful players (bleeding,
     /// dysentery) attract zombies from further through walls. Game wires the

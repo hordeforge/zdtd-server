@@ -207,6 +207,14 @@ pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     return g.world.isSolidWorld(x, y, z) catch false;
 }
 
+/// Water probe for the AI swim physics (stock inWaterPercent): true when the
+/// cell holds water.
+pub fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const id = g.world.blockWorld(x, y, z) catch return false;
+    return g.world.isWaterId(id);
+}
+
 /// Door-id oracle: true when the block id resolves to a door (name-based, per
 /// the stock door-naming set). Feeds `isSolidWorld` so open doors are
 /// passable and closed doors block.

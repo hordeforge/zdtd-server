@@ -627,6 +627,9 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        // Water probe for the AI swim physics (stock inWaterPercent).
+        self.sim.water_ctx = self;
+        self.sim.water_fn = &blockIsWaterAt;
         // Door-id oracle for the solid probe: an open door is passable.
         self.world.door_id_ctx = self;
         self.world.door_id_fn = &blockIsDoor;
@@ -760,6 +763,10 @@ pub const Game = struct {
 
     fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
         return game_hooks.blockSolidAt(ctx, x, y, z);
+    }
+
+    fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+        return game_hooks.blockIsWaterAt(ctx, x, y, z);
     }
 
     fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {

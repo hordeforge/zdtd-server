@@ -88,7 +88,10 @@ the dig-through leg shipped (a blocked grounded AI whose obstacle is too tall
 to hop digs the first solid cell in its move direction with the stock 18-tick
 windup/attack cadence, damage drained by the Game like the chase chew; the
 jump now probes at the body actual height so hops cannot clip tall walls),
-counts unchanged (swim/elevator/push remain). Then
+counts unchanged (swim/elevator/push remain). Then the swim physics leg
+shipped (a submerged AI body floats - gravity*0.025 with the 0.91 y-drag,
+stock cSwimGravityPer/cSwimDragY - and moves at the swim speed fraction,
+rules.ai swim_*), counts unchanged (elevator/push remain). Then
 the join-time deco row went WORKS (decorations now stream with newly entered
 chunks - sendDecoForStreamedChunk generates + sends each new 128-block deco
 chunk once per client with tracking; the client's DecoManager.Read ADDS
@@ -109,7 +112,7 @@ halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
 light-level leg stays RE-blocked, no server light channel)
 
-1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through shipped 2026-08-21; swim/elevator/push open; server-side only - a human client moves itself)
+1. MoveHelper physics / collision (PARTIAL - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through + swim physics shipped 2026-08-21; elevator/push open; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
 4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
