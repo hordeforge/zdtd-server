@@ -3189,6 +3189,50 @@ pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_
     return w.written();
 }
 
+/// Stock NetPackageSetBlockTexture (RE netpackage-bodies.md "NetPackageSetBlockTexture",
+/// read asm.il 24: StreamUtils.ReadVector3i | u8 face | u8 idx | i32
+/// playerIdThatChanged | u8 channel). The dedi rebroadcast sets
+/// playerIdThatChanged=-1 (GameManager.SetBlockTextureServer IL=41
+/// IL_0018-0027); the face byte stores the BlockTextureData catalog idx raw
+/// (Chunk.SetBlockFaceTexture IL=48 masks `_texture & 255` into face*8 bits).
+/// chnTextures is a 1-element array (Chunk IL_01F8-01FE: `ldc.i4.1;
+/// newarr`), so channel 0 is the only valid one.
+pub const SetBlockTexture = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    face: u8 = 0,
+    idx: u8 = 0,
+    player_id: i32 = 0,
+    channel: u8 = 0,
+};
+
+pub fn parseSetBlockTexture(body: []const u8) !SetBlockTexture {
+    if (body.len < 19) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    return .{
+        .x = try r.readI32(),
+        .y = try r.readI32(),
+        .z = try r.readI32(),
+        .face = try r.readByte(),
+        .idx = try r.readByte(),
+        .player_id = try r.readI32(),
+        .channel = try r.readByte(),
+    };
+}
+
+pub fn buildSetBlockTextureBody(buf: []u8, t: SetBlockTexture) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(t.x);
+    try w.writeI32(t.y);
+    try w.writeI32(t.z);
+    try w.writeByte(t.face);
+    try w.writeByte(t.idx);
+    try w.writeI32(t.player_id);
+    try w.writeByte(t.channel);
+    return w.written();
+}
+
 /// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
 /// senderId i32 | vehicleId i32 | syncFlags u16 | dataLen u16 | data[dataLen].
 /// The payload is an opaque EntityVehicle::ReadSyncData blob that zdtd relays
@@ -3780,4 +3824,34 @@ test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
     try std.testing.expectEqual(@as(i32, 7), p.x);
     try std.testing.expectEqual(@as(u32, 0x1234), p.raw);
     try std.testing.expectEqual(@as(i32, 42), p.player_id);
+}
+
+test "parseSetBlockTexture reads the stock paint body" {
+    var buf: [32]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(5);
+    try w.writeI32(60);
+    try w.writeI32(-8);
+    try w.writeByte(3); // face
+    try w.writeByte(17); // catalog idx
+    try w.writeI32(-1); // dedi rebroadcast playerIdThatChanged
+    try w.writeByte(0); // channel
+    const t = try parseSetBlockTexture(w.written());
+    try std.testing.expectEqual(@as(i32, 5), t.x);
+    try std.testing.expectEqual(@as(u8, 3), t.face);
+    try std.testing.expectEqual(@as(u8, 17), t.idx);
+    try std.testing.expectEqual(@as(i32, -1), t.player_id);
+    try std.testing.expectEqual(@as(u8, 0), t.channel);
+    // Round-trip: build is the same 19-byte layout.
+    var out: [32]u8 = undefined;
+    const built = try buildSetBlockTextureBody(&out, t);
+    try std.testing.expectEqual(@as(usize, 19), built.len);
+    const t2 = try parseSetBlockTexture(built);
+    try std.testing.expectEqual(@as(i32, -8), t2.z);
+    try std.testing.expectEqual(@as(u8, 17), t2.idx);
+    // Truncated at every boundary is EndOfStream.
+    var cut: usize = 0;
+    while (cut < 19) : (cut += 1) {
+        try std.testing.expectError(error.EndOfStream, parseSetBlockTexture(built[0..cut]));
+    }
 }

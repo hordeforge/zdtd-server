@@ -130,8 +130,8 @@ scorecard; the per-area headers match the row counts). On 2026-08-07 the
 scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
-Recount 2026-08-21 from the same markers: **331 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (163/124/44) and the scorecard rows below
+Recount 2026-08-21 from the same markers: **332 features** carry a
+canonical WORKS/PARTIAL/MISSING tag (164/124/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -140,7 +140,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-331 features scored across nine areas (recounted 2026-08-21 from the
+332 features scored across nine areas (recounted 2026-08-21 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 24 | 25 | 5 | 54 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **163** | **124** | **44** | **331** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 25 | 25 | 5 | 55 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **164** | **124** | **44** | **332** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3220,10 +3220,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
 **Headline.** A player can join and play today over direct IP with a correct
 189-name package map and a working reliable/fragmented LiteNet channel, but the
 server is invisible to every server browser, drops the block id mapping on every
-single join, silently ignores 34 packages the stock client actually sends, and
+single join, silently ignores 33 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**24 WORKS · 25 PARTIAL · 5 MISSING**
+**25 WORKS · 25 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3260,15 +3260,15 @@ persists so little that a restart visibly damages a built base.
 - **C2S handler coverage** `PARTIAL`
   70 package names have a handler in `Game.handlePackage`. Scanning asm.il for
   `GetPackage<X>` immediately preceding `SendToServer` yields 98 names the stock
-  client actually sends; 34 have no handler: Debug, DroneDataSync,
+  client actually sends; 33 have no handler: Debug, DroneDataSync,
   DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume, EncryptionPublicKey,
   EntityAwardKillServer, EntityPhysics, EntityRagdoll, EntityStatChanged,
   EntityStealth, GameEventResponse, GameMessage, ItemReload, KeyExchangeComplete,
   ModifyCVar, ParticleEffect, PartyQuestChange, PlayerDisconnect,
   PlayerLaserSight, PlayerTwitchStats, PlayerVendingMachine, QuestGotoPoint,
-  QuestTreasurePoint, SetBlockTexture, SetProp, SharedPartyKill, SimpleRPC,
+  QuestTreasurePoint, SetProp, SharedPartyKill, SimpleRPC,
   SoundAtPosition, TwitchAccess, TwitchVoteScheduling, Waypoint, WorldFolder.
-  Player-visible: paint never sticks, reload never syncs
+  Player-visible: reload never syncs
   ammo, map waypoints are local only, vending machines are inert, buried-supplies
   and goto quest markers never register, ragdolls/particles/positional sound are not
   relayed, and a clean Quit-to-menu is not noticed.
@@ -3292,6 +3292,22 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/c2s/blocks.zig` NetPackagePickupBlock branch,
   `src/wire/packages.zig` parse/buildPickupBlockBody,
   `src/assets/blocks.zig` `pickup_source`
+
+- **Paint (NetPackageSetBlockTexture handling)** `WORKS` `(2026-08-21)`
+  The C2S body (3x i32 pos | u8 face | u8 idx | i32 playerIdThatChanged | u8
+  channel, RE netpackage-bodies.md) is parsed and validated (own-entity claim,
+  reach + land-claim bounds; channel 0 only - `Chunk.chnTextures` is a
+  1-element array, Chunk IL_01F8-01FE - and face 0..5). The face byte stores
+  the BlockTextureData catalog idx raw (Chunk.SetBlockFaceTexture IL=48 masks
+  `_texture & 255` into face*8 bits), read-modify-write into the per-block
+  textureFull plane (`Chunk.texAt` + `setBlockTexDensWorld`, persisted by
+  ZCH3), seeding unpainted faces from the block's default texture so the other
+  five faces do not grey out. The dedi rebroadcast
+  (GameManager.SetBlockTextureServer IL=41) carries playerIdThatChanged=-1 and
+  reaches every peer but the painter, who already applied the paint locally.
+  *Anchors:* `src/server/c2s/blocks.zig` NetPackageSetBlockTexture branch,
+  `src/wire/packages.zig` parse/buildSetBlockTexture,
+  `src/world/store.zig` `textures` plane + `setBlockTexDensWorld`
 
 - **Unhandled C2S packages are dropped with no trace** `WORKS` `(2026-08-07)`
   `handlePackage` is a linear if/eql chain; the fall-through now increments

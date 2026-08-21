@@ -5,7 +5,7 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 331 features: 163 `WORKS`,
+owns all C2S domains. `GAP_ANALYSIS.md` scores 332 features: 164 `WORKS`,
 124 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
@@ -140,6 +140,16 @@ OnBlockPickedUp and syncs it up, exactly like stock) and the block is replaced
 with PickupSource/Air (V3.1.0 b14 ships no PickupSource property, so stock
 leaves Air on every pickup; a modded blocks.xml is honoured). Net and ops
 23/25/5 -> 24/25/5; total 162/124/44 -> **163/124/44** (331 features).
+
+Paint shipped 2026-08-21: the C2S NetPackageSetBlockTexture body (pos |
+face | idx | playerIdThatChanged | channel) is validated (own-entity claim,
+reach + claim bounds, channel 0 only - Chunk.chnTextures is a 1-element
+array) and the face byte stores the BlockTextureData catalog idx raw in the
+per-block textureFull plane (Chunk.SetBlockFaceTexture IL=48), seeded from
+the block's default texture so unpainted faces stay; ZCH3 persists the paint.
+The dedi rebroadcast (playerIdThatChanged=-1) reaches every peer but the
+painter. Net and ops 24/25/5 -> 25/25/5; total 163/124/44 -> **164/124/44**
+(332 features).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

@@ -282,6 +282,72 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         } else |_| {}
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSetBlockTexture")) {
+        // Paint. RE: GameManager.SetBlockTextureServer IL=41 (apply the face
+        // texture, rebroadcast to everyone but the sender with
+        // playerIdThatChanged=-1 on a dedi); Chunk.SetBlockFaceTexture IL=48
+        // stores the BlockTextureData catalog idx raw (`_texture & 255`) in
+        // the face*8 bits of the per-block textureFull.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        const st = packages.parseSetBlockTexture(body) catch return true;
+        // chnTextures is a 1-element array (Chunk IL_01F8-01FE: `ldc.i4.1;
+        // newarr`), so channel 0 is the only valid one; fail closed.
+        if (st.channel != 0) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        if (st.face > 5) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const editor_ent = self.sim.network_id[ps].id;
+        // ValidEntityIdForSender: the paint must claim the sender's own entity.
+        if (st.player_id != editor_ent) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        const ep = self.sim.transform[ps];
+        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(st.x), @floatFromInt(st.y), @floatFromInt(st.z))) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        if (self.claimCovering(st.x, st.z)) |claim| {
+            if (claim.owner_entity != editor_ent) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+        }
+        const cur_id = self.world.blockWorld(st.x, st.y, st.z) catch return true;
+        if (cur_id == 0) return true; // nothing to paint on
+        // Base textureFull: stored paint, else the block's default (what the
+        // client renders unpainted) so the other five faces do not go grey.
+        const wt = world_store.World.worldToChunk(st.x, st.z);
+        const ch = try self.world.getOrCreate(wt.pos);
+        var base = ch.texAt(wt.lx, st.y, wt.lz);
+        if (base == 0) base = self.block_textures.get(cur_id);
+        const shift: u6 = @intCast(st.face * 8);
+        const new_tex = (base & ~(@as(u64, 0xff) << shift)) | (@as(u64, st.idx) << shift);
+        try self.world.setBlockTexDensWorld(st.x, st.y, st.z, self.blockRawAt(st.x, st.y, st.z), new_tex, null);
+        // Rebroadcast to everyone but the painter (stock flags 192 excludes
+        // the sender; the painter already applied the paint locally).
+        const s2c: packages.SetBlockTexture = .{
+            .x = st.x,
+            .y = st.y,
+            .z = st.z,
+            .face = st.face,
+            .idx = st.idx,
+            .player_id = -1, // dedi (IL=41 IL_0018-0027)
+            .channel = st.channel,
+        };
+        if (packages.buildSetBlockTextureBody(self.body_buf[0..32], s2c)) |sb| {
+            try self.broadcastExcept("NetPackageSetBlockTexture", sb, c.slot);
+        } else |_| {}
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageExplosionInitiate")) {
         const ex = packages.parseExplosionInitiate(body) catch return true;
         if (self.quarantineDenies(c, .block)) return true;
