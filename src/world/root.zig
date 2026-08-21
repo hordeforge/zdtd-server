@@ -13,6 +13,7 @@ pub const workstations = @import("workstations.zig");
 pub const vending = @import("vending.zig");
 pub const dtm = @import("dtm.zig");
 pub const dem = @import("dem.zig");
+pub const nav = @import("nav.zig");
 pub const prefabs = @import("prefabs.zig");
 pub const sleepers = @import("sleepers.zig");
 pub const tts = @import("tts.zig");
@@ -34,6 +35,7 @@ test {
     _ = vending;
     _ = dtm;
     _ = dem;
+    _ = nav;
     _ = prefabs;
     _ = sleepers;
     _ = tts;

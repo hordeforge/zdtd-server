@@ -141,6 +141,7 @@ Coverage targets, all enforced by the scan:
 | `src/protocol.zig` | R | Wire constants from ../../7dtd-research/docs/protocol.md (V3.x loadgen golden; wire pin V3.1.0). Package IDs are dynamic (PackageIds map); never hard- |
 | `src/server/admin.zig` | Z | Minimal TCP admin console transport (telnet-like): one command line per connection. Listen/accept via `util/tcp_listen` (std.Io.net); no std.os.linux |
 | `src/server/admin_cmds.zig` | R | Stock telnet console output shapes and the persistent operator lists. |
+| `src/server/admin_xml.zig` | R | Stock serveradmin.xml loader (AdminTools state): admins/whitelist/blacklist sections, platform+userid attrs with legacy steamID fallback, permission_level, unbandate DateTime; merged into the operator lists at startup (no stock file-watcher hot-reload; see GAP_ANALYSIS bans row). RE: 7dtd-research dedicated-misc-systems.md. |
 | `src/server/admin_console.zig` | R | Operator console surface: admin TCP + webui command handling, the stock telnet reply shapes, persistent operator lists, and the guard/gamestage |
 | `src/server/ally.zig` | R | Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`). |
 | `src/server/c2s/blocks.zig` | R | Block editing: SetBlock, BlockTrigger, Explosions. Extracted from the old c2s/inv.zig tail (643-991) verbatim. NetPackagePickupBlock: stock PickupBlockServer IL=77 (type-match + echo + PickupSource/Air replace) with zdtd reach/claim bounds. NetPackageSetBlockTexture: Chunk.SetBlockFaceTexture IL=48 idx-in-face-byte paint into the textureFull plane + dedi rebroadcast (SetBlockTextureServer IL=41) |
@@ -247,6 +248,7 @@ Coverage targets, all enforced by the scan:
 | `src/world/noise.zig` | Z | OpenSimplex2-family gradient noise (clean-room) + fBm / ridged / domain warp. Pure functions of (seed, coords): no global RNG. Same seed+coords always |
 | `src/world/prefabs.zig` | R | Stock world prefabs.xml index + footprint stamping on heightmaps. Block paint: stock `.tts` via `tts.zig` (Prefab.readBlockData raw types), |
 | `src/world/root.zig` | Z | World store layer: chunks, map data (DTM/prefabs/TTS), containers, TE state. |
+| `src/world/nav.zig` | Z | Coarse walkability grid + BFS pathfinding for bots. Borrowed in spirit from the Recast/Detour navmesh used by Unvanquished bots (see `../7dtd-clanker/docs/oss-fps-bot-survey.md`): host owns geometry, wasm guest owns decisions. |
 | `src/world/sleepers.zig` | R | Prefab sleeper volumes: parse XML + wake/spawn on player enter |
 | `src/world/stability.zig` | R | Stock block stability plane and falling-block trigger (RE: `../7dtd-research/docs/stability.md`, dumps 2026-08-06) |
 | `src/world/store.zig` | R | Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch). v3 magic ZCH3: heights + optional u32 rawData + optional texture/density |
