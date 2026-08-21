@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 171 `WORKS`,
-118 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 172 `WORKS`,
+117 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -183,6 +183,13 @@ VersionMismatch(4)); the rate limit moved into the LiteNet ConnectRequest path
 (stock ConnectionRequestCheck, reject_rate_limit Disconnect before slot
 allocation) with a 64-entry table that evicts the oldest entry instead of
 expiring after N distinct IPs. Total 169/120/44 -> **171/118/44**.
+
+S2C compression shipped 2026-08-21 (Net and ops 32/19/5 -> 33/18/5):
+IdMapping + ConfigFile now deflate through the DeflateFramer (raw DEFLATE,
+compressed envelope flag) alongside Chunk + SignDataResponse, matching every
+emitted member of stock's get_Compress()=true set; the ~250 KiB mapping no
+longer rides the reliable window uncompressed (one flat-world join was 6.4 MB
+out). Total 171/118/44 -> **172/117/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (171/118/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (172/117/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 32 | 19 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **171** | **118** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 33 | 18 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **172** | **117** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**32 WORKS · 19 PARTIAL · 5 MISSING**
+**33 WORKS · 18 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3347,16 +3347,19 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/wire/frame.zig:201-217`, `asm.il:808632-808638`,
   `asm.il:826004`, `asm.il:833771`
 
-- **S2C compression** `PARTIAL`
-  Only the block NameIdMapping is deflated. Stock overrides `get_Compress()=true`
-  for eight packages: Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
-  IdMapping, MapChunks, POIAround, SignDataResponse. zdtd sends Chunk, ConfigFile
-  and SignDataResponse uncompressed, which is why one join costs 6.4 MB out
-  (`net_bytes_out=6388795` for a single 60 s gate run) and why the reliable window
-  saturates.
-  *Anchors:* `src/wire/frame.zig:146-198`, `src/server/game.zig:5598-5628`,
-  `:7347`, `asm.il:808641-808647`, `asm.il:809975`, `asm.il:822370`,
-  `asm.il:826004`, `asm.il:833771`, `asm.il:841321`
+- **S2C compression** `WORKS` `(2026-08-21)`
+  Every emitted package from stock's `get_Compress()=true` set is deflated:
+  Chunk, ConfigFile, IdMapping, SignDataResponse (DynamicClientArrive,
+  DynamicMesh, MapChunks, POIAround are not yet emitted - see the S2C
+  coverage row). IdMapping + ConfigFile now ride the DeflateFramer (raw
+  DEFLATE, compressed envelope flag) like Chunk, cutting the join cost (one
+  flat-world join was 6.4 MB out with an uncompressed 250 KiB mapping through
+  a shared reliable window) and relieving the window saturation the
+  "Reliable-window starvation" row logged.
+  *Anchors:* `src/server/game/net.zig` sendGameBudget compress routing,
+  `src/server/game/send_extra.zig` `sendCompressed`,
+  `asm.il:808641-808647`, `asm.il:809975`, `asm.il:822370`, `asm.il:826004`,
+  `asm.il:833771`, `asm.il:841321`
 
 - **Package batching per envelope** `PARTIAL (waived)`
   `framePackage` sends one package per LiteNet envelope; stock batches. Throughput
