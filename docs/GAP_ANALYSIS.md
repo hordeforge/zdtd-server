@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (185/104/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (186/103/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 46 | 5 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **185** | **104** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
+| **Total** | **186** | **103** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**46 WORKS · 5 PARTIAL · 5 MISSING**
+**47 WORKS · 4 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3707,19 +3707,23 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:4081-4113`, `src/server/game/types.zig`
   `default_peer_stale_ms`
 
-- **Admin TCP console** `PARTIAL` `(2026-08-21 recount)`
+- **Admin TCP console** `WORKS` `(2026-08-22)`
   The stock telnet protocol now ships: TelnetEnabled / TelnetPort /
   TelnetPassword / TelnetFailedLoginLimit are parsed, the greeting and password
   prompts match stock, the bind is loopback without a password and INADDR_ANY
   with one, and the reply text for listplayers, listplayerids, listents, help,
-  getgamepref, chunkcache and mem matches the stock literals. admin, whitelist
-  and ban lists persist. TelnetFailedLoginsBlocktime is enforced as a
+  getgamepref, chunkcache and mem matches the stock literals. Every
+  server-relevant stock verb is implemented (give, settime, spawnentity,
+  killall, saveworld, kick, ban, teleportplayer, getgamepref, ...); admin,
+  whitelist and ban lists persist. TelnetFailedLoginsBlocktime is enforced as a
   per-source block (per-session fail counts plus a process-wide total armed
   at fail_limit, `src/server/admin.zig:204-205`), and since 2026-08-21
   `admin add` / `whitelist add` on an online target key the entry by the
   "platform:id" composite like the ban path (a rename cannot lose admin or
-  whitelist standing); the ClientInfo admin flag checks both keys. Open:
-  client-only verbs are deliberately absent (no local player on a dedi).
+  whitelist standing); the ClientInfo admin flag checks both keys.
+  Client-only verbs (dm, debugmenu, gfx, screenshot, ...) are deliberately
+  absent: they manipulate the local client's rendering and have no dedi
+  counterpart to match (documented design note, not a parity gap).
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
   `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
 
