@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 178 `WORKS`,
-111 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 179 `WORKS`,
+110 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -250,6 +250,16 @@ package to tracking players (per-slot last-look state, SetLookPosition
 the dump: EntityAddExpClient was already emitted on kills; ShowToolbeltMessage
 is not a pickup notification (sole stock sender is the Homerun minigame via
 ShowTooltipMP unicast); NetPackageSleeperPose is stock-dead.
+
+Save on disconnect/kick flipped 2026-08-21 (Net and ops 39/12/5 -> 40/11/5;
+total 178/111/44 -> **179/110/44**): the stale/dead-peer reaps
+(reapStalePeers both branches + the clientFor dead-peer sweep) now persist
+the player before clearing the slot, so a hard disconnect is never lost to
+the autosave interval. The bans row was recounted: identity bans already
+persist (bans.zsv), expire by wall clock and gate the join; whitelist and
+admin lists persist the same way. The IP hold table stays RAM-only by design
+(it covers the connection being dropped), with the remaining real gaps
+documented (serveradmin.xml not read, name-keyed bans, no reserved slots).
 
 ## Wave 2026-08-20 (config + provenance pass)
 

@@ -506,6 +506,34 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     try std.testing.expect(!g.clients[c.slot].joined);
 }
 
+test "scenario hard disconnect reap saves before clearing the slot" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_reap");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reap", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.clients[c.slot].joined);
+    // Kill the transport without a NetPackagePlayerDisconnect (hard drop):
+    // the reap must persist the player before clearing the slot, so a hard
+    // disconnect is never lost to the autosave interval (GAP "Save on
+    // disconnect / kick").
+    c.peer.?.alive = false;
+    g.reapStalePeers();
+    try std.testing.expect(!g.clients[c.slot].joined);
+    var pb: [512]u8 = undefined;
+    const path = try g.playersPath(&pb);
+    const saved = io_fs.readFileAll(g.allocator, path) catch null;
+    defer if (saved) |s| g.allocator.free(s);
+    try std.testing.expect(saved != null and saved.?.len > 8);
+}
+
 test "scenario SetBlock lower damage repairs instead of adding" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_repair");

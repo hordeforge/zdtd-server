@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (178/111/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (179/110/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 39 | 12 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **178** | **111** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 40 | 11 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **179** | **110** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**39 WORKS · 12 PARTIAL · 5 MISSING**
+**40 WORKS · 11 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3468,13 +3468,20 @@ persists so little that a restart visibly damages a built base.
   `src/wire/packages.zig` `KickReason` + `buildPlayerDeniedBody`,
   `asm.il:1921854-1921883`
 
-- **Bans and whitelist** `PARTIAL`
-  `ban_ip` is 32 IPv4 host-order keys held in RAM only. No persistence across
-  restart, no expiry or ban-until, no serveradmin.xml, no ban by platform
-  identifier, no whitelist, no reserved or admin slots. IPv6 peers are folded to an
-  FNV hash so a ban is per-address, not per-prefix.
-  *Anchors:* `src/server/game.zig:458-459`, `:3574-3600`, `:3530-3550`,
-  `serverconfig.xml` (AdminFileName / ServerReservedSlots / ServerAdminSlots)
+- **Bans and whitelist** `PARTIAL` `(2026-08-21 recount)`
+  Identity bans (`ban add`) persist to `bans.zsv` (admins.zsv/whitelist.zsv
+  alongside), expire by wall clock (`BannedUntil > Now` gate, matching stock
+  AdminBlacklist.IsBanned), carry reasons, and gate the join by login name;
+  whitelist + admin lists persist the same way. The IP hold table
+  (`ban_ip`, 128 keys) is RAM-only by design: it covers the connection being
+  dropped so a reconnect before the next join check cannot slip through
+  (stock bans by platform identifier in serveradmin.xml, not by IP). Still
+  open: stock `serveradmin.xml` is not read (zdtd uses its own list files),
+  bans key on the login name because zdtd has no stock user id, and
+  ServerReservedSlots / ServerAdminSlots are not implemented.
+  *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
+  `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
+  `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)
 
 - **Admin permission levels** `PARTIAL (waived: loopback-only admin)`
   In-game console is intentionally allowlisted read-only; mutating commands stay on
@@ -3764,12 +3771,15 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:8130-8147`, `:1686-1706`, `:2551-2571`,
   `:2809-2827`
 
-- **Save on disconnect / kick** `PARTIAL`
-  `NetPackagePlayerDisconnect` now saves then drops the slot immediately; admin
-  kick/ban/wipeplayer paths go through `dropClientSlot` after their own save.
-  `reapStalePeers` (peer timeout) still clears the slot without a save, so a
-  hard disconnect can still lose up to one autosave interval.
-  *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/session_drop.zig:9-56`
+- **Save on disconnect / kick** `WORKS` `(2026-08-21)`
+  `NetPackagePlayerDisconnect` saves then drops the slot immediately; admin
+  kick/ban/wipeplayer paths go through `dropClientSlot` after their own save;
+  the stale/dead-peer reaps (`reapStalePeers` both branches + the `clientFor`
+  dead-peer sweep) now also persist the player before clearing the slot, so a
+  hard disconnect is never lost to the autosave interval. Pre-join peers
+  (no entity) skip the write.
+  *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
+  `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
 - **Per-peer memory footprint** `PARTIAL`
   Each Peer statically embeds `asm_parts[512][1317]` (674 KiB), two 512 KiB buffers

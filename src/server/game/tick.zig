@@ -12,6 +12,7 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const clock = @import("../../util/clock.zig");
+const persist = @import("../persist.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time. Base drain is engine-driven
@@ -284,6 +285,11 @@ pub fn reapStalePeers(self: *Game) void {
                 "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
                 .{ p.local_id, c.slot, c.entity_id },
             );
+            // A hard disconnect (no NetPackagePlayerDisconnect) must not lose
+            // the player's data until the next autosave: persist before the
+            // slot is cleared (GAP "Save on disconnect / kick"). Pre-join
+            // peers have no entity and nothing to save.
+            if (c.entity_id > 0) self.savePlayers() catch |e| persist.logPersistErr(self, "save players on reap", e);
             self.clearLocksForPeer(c.slot);
             c.* = .{};
             self.refreshInfoPlayers();
@@ -300,6 +306,7 @@ pub fn reapStalePeers(self: *Game) void {
             p.authenticated = false;
             for (&p.pending) |*slot| slot.used = false;
             p.local_window_start = p.local_seq;
+            if (c.entity_id > 0) self.savePlayers() catch |e| persist.logPersistErr(self, "save players on reap", e);
             self.clearLocksForPeer(c.slot);
             c.* = .{};
             self.refreshInfoPlayers();
