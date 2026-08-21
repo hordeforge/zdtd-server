@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (165/124/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (168/121/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 26 | 25 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **165** | **124** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 29 | 22 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **168** | **121** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**26 WORKS · 25 PARTIAL · 5 MISSING**
+**29 WORKS · 22 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3389,15 +3389,15 @@ persists so little that a restart visibly damages a built base.
   retransmits.
   *Anchors:* `src/litenet/packet.zig:120-140`, `src/litenet/server.zig:48-64`
 
-- **Pre-auth challenge handshake** `PARTIAL`
-  Shape is right: 17 bytes `[0xCA][16]`, matching
-  `LiteNetLibAuthWrapperServer.ChallengePackageSize = 0x11`. But zdtd derives the
-  16 bytes from a monotonic counter and a fixed multiplier, so the challenge is
-  fully predictable, where stock uses `Guid.NewGuid()`. It is echoed back over the
-  same connection so this is not an authentication break, but it removes any value
-  the echo has as a spoofed-source check.
-  *Anchors:* `src/server/game.zig:2941-2946`, `src/protocol.zig:11-12`,
-  `asm.il:852999`, `asm.il:853010-853025`
+- **Pre-auth challenge handshake** `WORKS` `(2026-08-21)`
+  The 17-byte `[0xCA][16]` shape matches
+  `LiteNetLibAuthWrapperServer.ChallengePackageSize = 0x11`, and the 16 bytes
+  now come from the Io CSPRNG (webui session-nonce idiom) instead of a
+  monotonic counter, matching stock `Guid.NewGuid()` (asm.il 852999,
+  853010-853025) so the echo keeps its spoofed-source value. Per-connection
+  init on the accept path only, never the tick.
+  *Anchors:* `src/server/game/net.zig` allocateClient,
+  `src/protocol.zig:11-12`, `asm.il:852999`, `asm.il:853010-853025`
 
 - **Auth-state timeout (half-open connection reaping)** `PARTIAL (waived)`
   `MaxDurationInAuthState` half-open sweep not wired; `peer_stale_ms` reaps on RX
@@ -3563,12 +3563,14 @@ persists so little that a restart visibly damages a built base.
   connect is the parity path.
   *Anchors:* `src/litenet/peer.zig:509-511`
 
-- **Peer timeout / stale reaping** `PARTIAL`
-  Works, but the default `peer_stale_ms` is 3000 ms measured from the last received
-  datagram of any kind. That is three missed pings on stock's 1 s ping interval,
-  which is aggressive for real internet; a 3 s hiccup reaps the client slot and
-  forces a full reconnect.
-  *Anchors:* `src/server/game.zig:4081-4113`, `src/server/zdtd_config.zig:429`
+- **Peer timeout / stale reaping** `WORKS` `(2026-08-21)`
+  RX-silence reaping works and the default `peer_stale_ms` is now 10000 ms
+  measured from the last received datagram of any kind, tolerating a full stock
+  LiteNet disconnect window (1 s ping interval, ~20 s DisconnectTimeout) instead
+  of reaping a real-internet peer on a 3 s hiccup; operator-tunable via
+  `zdtd.toml` `peer_stale_ms`.
+  *Anchors:* `src/server/game.zig:4081-4113`, `src/server/game/types.zig`
+  `default_peer_stale_ms`
 
 - **Admin TCP console** `PARTIAL` (2026-08-06)
   The stock telnet protocol now ships: TelnetEnabled / TelnetPort /
@@ -3606,22 +3608,16 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/serverinfo_tcp.zig:43-135`, `asm.il:852360-852368`,
   `output_log_client_zdtd_connect.txt:3531`
 
-- **Advertised ServerVersion string** `PARTIAL`
-  Concrete wrong value with live evidence. zdtd advertises `ServerVersion
-  "V 3.1.0"`. Stock sets `GameInfoString.ServerVersion` (key 9) to
-  `VersionInformation.SerializableString` =
-  `String.Format("{0}.{1}.{2}.{3}", ReleaseType, Major, Minor, Build)` =
-  `"V.3.10.14"` for V3.1.0 b14. The client parses it with
-  `TryParseSerializedString`, which requires exactly four dot-separated fields, so
-  it fails and logs `Server browser: Could not parse version from received data
-  (from entry: 127.0.0.1): V 3.1.0`. Not fatal because GameServerInfo's ctor seeds
-  Major=-1 and `IsCompatibleVersion` short-circuits to true for a negative Major,
-  but the browser row shows no version. zdtd's on-wire VersionInfo in
-  NetPackagePackageIds already uses the correct tuple, so only the GSI text is
-  wrong.
-  *Anchors:* `src/version.zig:12`, `src/server/serverinfo_tcp.zig:56`,
-  `output_log_client_zdtd_connect.txt:3531`, `asm.il:795818-795822`,
-  `asm.il:2009306-2009320`, `asm.il:2009539-2009570`, `asm.il:793930-793950`
+- **Advertised ServerVersion string** `WORKS` `(2026-08-21)`
+  GSI `ServerVersion` (GameInfoString key 9) emits the strict four-field
+  SerializableString `V.3.10.14` (`{ReleaseType}.{Major}.{Minor}.{Build}` for
+  V3.1.0 b14, asm.il 2009306 / 795818-795822), which the client's
+  `TryParseSerializedString` parses without the `Could not parse version`
+  warning the spaced `V 3.1.0` form produced. The login package's versionLong
+  stays the display form (`V 3.1.0`, protocol.md VersionLongString packing).
+  *Anchors:* `src/version.zig` `stock_wire_gsi_version`,
+  `src/server/game.zig:1415`, `src/server/game/init_world.zig:118`,
+  `src/server/serverinfo_tcp.zig:21`, `asm.il:795818-795822`
 
 - **GameServerInfo key coverage** `PARTIAL`
   19 keys emitted (17 fixed + SandboxPreset(18)/SandboxCode(19) when the

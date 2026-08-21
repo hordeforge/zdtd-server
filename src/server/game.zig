@@ -251,7 +251,6 @@ pub const Game = struct {
     shed_until_tick: u64 = 0,
     tick_n: u64 = 0,
     running: bool = true,
-    challenge_counter: u64 = 1,
     /// Stock PlayerLogin carries Steam/EOS tickets (multi-KiB). Truncating here
     /// drops login silently and the client hangs at "Connecting…".
     recv_buf: [65536]u8 = undefined,

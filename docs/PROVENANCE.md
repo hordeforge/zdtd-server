@@ -171,7 +171,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/locks.zig` | R | Lock helpers extracted from game.zig — pack/unpack + slot bookkeeping |
 | `src/server/game/loot.zig` | R | Loot / item-table helpers — extracted verbatim from game.zig. ecsIdFromItemName, loot bags, and loot-spawn broadcasts |
 | `src/server/game/movement_helpers.zig` | R | Movement envelope helpers extracted from game.zig. Power-grid trigger activation and horizontal speed envelope |
-| `src/server/game/net.zig` | R | Net send path for Game: reliable-window pump, framed fan-out, and the broadcast helpers |
+| `src/server/game/net.zig` | R | Net send path for Game: reliable-window pump, framed fan-out, and the broadcast helpers | Pre-auth challenge is CSPRNG-derived (stock Guid.NewGuid, asm.il 852999); per-connection accept-path init only
 | `src/server/game/net_handlers.zig` | R | Net ingress extracted from game.zig — onConnected / onData / dispatchGamePayload. Verbatim bodies; game.zig keeps one-line forwarders |
 | `src/server/game/player.zig` | R | Player progression / gamestage / XP — extracted from game.zig; helpers take *Game. **Loot stage partial (2026-08-12):** `lootStageOf` is level-driven only — the stock `EntityPlayer.GetLootStage` (loot-economy.md 8, IL=184) POI-tier and biome terms (`POITierMod` x `POITierLootStageModifier`, biome `LootStageMod/Bonus` x `BiomeLootStageModifier`, passive **159** scale, GameStats **66** clamp) are pending the loot/POI tables; `partyLootStage` = `GetHighestPartyLootStage` high-water mark (implemented, stock-shaped). |
 | `src/server/game/quest.zig` | R | Quest helpers — journal snapshots + trader offers + POI quest events. Extracted from game.zig; helpers take *Game (called as game_quest.foo(g, …)) |

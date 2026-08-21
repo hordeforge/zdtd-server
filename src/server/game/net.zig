@@ -372,9 +372,14 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
     for (&self.clients, 0..) |*c, i| {
         if (c.peer == null) {
             c.* = .{ .peer = peer, .slot = i };
-            self.challenge_counter += 1;
-            std.mem.writeInt(u64, c.challenge[0..8], self.challenge_counter, .little);
-            std.mem.writeInt(u64, c.challenge[8..16], self.challenge_counter *% 0x9E3779B97F4A7C15, .little);
+            // Pre-auth challenge: stock derives the 16 bytes from
+            // Guid.NewGuid() (asm.il 852999, 853010-853025); a monotonic
+            // counter would make the echo predictable, so use the Io CSPRNG
+            // (same idiom as the webui session nonce). Per-connection init is
+            // allowed (accept path, not the tick).
+            var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+            defer threaded.deinit();
+            threaded.io().random(&c.challenge);
             return c;
         }
     }

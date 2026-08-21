@@ -104,7 +104,12 @@ pub const default_trader_restock_refill: u16 = 10;
 /// World::StormFrequency percent (stock GamePrefs.StormFreq default 100;
 /// packages.GameStatsValues.storm_freq). 0 disables storms.
 pub const default_storm_frequency: i32 = 100;
-pub const default_peer_stale_ms: u64 = 3000;
+/// Default RX-silence reap window. Stock reaps peers on missed pings (1 s
+/// interval, LiteNet DisconnectTimeout ~ 20 s); 3000 ms measured from the last
+/// datagram of any kind was three missed pings and reaped real-internet peers
+/// on a 3 s hiccup. 10000 ms tolerates a full stock disconnect window while
+/// still reclaiming dead slots.
+pub const default_peer_stale_ms: u64 = 10000;
 
 /// Join rate-limit gap per IP (zdtd.toml [authority] join_rate_limit_ms).
 /// Stock paces connection attempts at ~500 ms/IP (asm.il ConnectionManager

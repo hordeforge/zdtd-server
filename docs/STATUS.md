@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 165 `WORKS`,
-124 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 168 `WORKS`,
+121 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -156,6 +156,15 @@ i32 entityId) is entity-gated and relayed to every peer but the sender
 (GameManager.ItemReloadServer IL=32, flags 192), so other players see the
 reload animation; ammo counts keep riding the inventory sync. Net and ops
 25/25/5 -> 26/25/5; total 164/124/44 -> **165/124/44** (333 features).
+
+Net-and-ops trivial cluster shipped 2026-08-21 (Net and ops 26/25/5 ->
+29/22/5): the pre-auth challenge is now CSPRNG-derived (stock Guid.NewGuid,
+asm.il 852999; the monotonic-counter version made the echo predictable), the
+default peer-stale window is 10000 ms instead of 3000 (three missed pings on
+stock's 1 s interval reaped real-internet peers on a 3 s hiccup), and the
+Advertised ServerVersion row was stale - the GSI text already emits the strict
+`V.3.10.14` SerializableString (commit 1dfc653). Total 165/124/44 ->
+**168/121/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
