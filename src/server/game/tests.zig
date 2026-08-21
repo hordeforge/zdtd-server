@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const Game = @import("../game.zig").Game;
+const game_mod = @import("../game.zig");
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const io_fs = @import("../../util/io_fs.zig");
@@ -392,8 +393,8 @@ test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
 
 test "block durability holds past the old 64 cap (GAP 12)" {
     // The sparse damage table was 64: the 65th damaged block silently lost its
-    // damage (FIFO eviction). Now 256; damage 100 distinct blocks and verify
-    // every one keeps its absolute value.
+    // damage (FIFO eviction). Then 256; now max_block_hp_entries (1024).
+    // Damage 300 distinct blocks and verify every one keeps its absolute value.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -404,17 +405,40 @@ test "block durability holds past the old 64 cap (GAP 12)" {
         std.testing.allocator.destroy(g);
     }
     var i: usize = 0;
-    while (i < 100) : (i += 1) {
+    while (i < 300) : (i += 1) {
         _ = g.addBlockDamage(@intCast(200 + i), 70, 300, 5);
     }
-    try std.testing.expectEqual(@as(usize, 100), g.block_hp_n);
+    try std.testing.expectEqual(@as(usize, 300), g.block_hp_n);
     var ok = true;
     i = 0;
-    while (i < 100) : (i += 1) {
+    while (i < 300) : (i += 1) {
         if (g.getBlockHp(@intCast(200 + i), 70, 300) != 5) ok = false;
     }
     try std.testing.expect(ok);
-    std.debug.print("PASS blockhp-cap: 100 damaged blocks retain damage (cap was 64)\n", .{});
+    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.block_hp_evictions));
+    std.debug.print("PASS blockhp-cap: 300 damaged blocks retain damage (cap was 64)\n", .{});
+}
+
+test "block durability eviction past the cap is loud, not silent" {
+    // At max_block_hp_entries the oldest damaged block is evicted and its
+    // damage reverts; that must be counted and warn-once, never silent.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var i: usize = 0;
+    while (i < game_mod.max_block_hp_entries + 5) : (i += 1) {
+        _ = g.addBlockDamage(@intCast(500 + i), 70, 400, 3);
+    }
+    try std.testing.expectEqual(game_mod.max_block_hp_entries, g.block_hp_n);
+    try std.testing.expect(g.block_hp_evict_warned);
+    try std.testing.expectEqual(@as(u64, 5), g.harness.counters.get(.block_hp_evictions));
+    std.debug.print("PASS blockhp-evict: cap eviction counted + warn-once\n", .{});
 }
 
 test "evidence JSONL flush writes the ring to a file (P4)" {

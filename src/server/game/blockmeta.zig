@@ -11,8 +11,8 @@ const block_raw_record_len = @sizeOf(u64) + @sizeOf(u32);
 const block_hp_count_len = @sizeOf(u16);
 const block_hp_record_len = @sizeOf(u64) + @sizeOf(u16);
 const block_meta_max_len = block_meta_header_len +
-    256 * block_raw_record_len + block_hp_count_len +
-    256 * block_hp_record_len;
+    game_mod.max_block_raw_entries * block_raw_record_len + block_hp_count_len +
+    game_mod.max_block_hp_entries * block_hp_record_len;
 
 pub fn saveBlockMeta(self: *const Game) !void {
     var path: [512]u8 = undefined;
@@ -126,5 +126,7 @@ pub fn restoreWeather(self: *Game) void {
 }
 
 test "block metadata buffer holds both stores at capacity" {
-    try std.testing.expectEqual(@as(usize, 5640), block_meta_max_len);
+    // 6 header + 256 raw records (u64 key + u32 raw) + 2 count +
+    // 1024 hp records (u64 key + u16 hp).
+    try std.testing.expectEqual(@as(usize, 13320), block_meta_max_len);
 }

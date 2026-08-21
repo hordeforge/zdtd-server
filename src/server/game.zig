@@ -159,6 +159,12 @@ pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_m
 pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
 pub const default_interest_range = game_types.default_interest_range;
+/// Sparse block-meta caps: `block_raw` mirrors the chunk raw plane (its
+/// eviction is a cache miss - the chunk is the source of truth, GAP 13);
+/// `block_hp` is the only store of partial block damage, so 1024 is a
+/// documented bound (eviction logs via the block_hp_evictions counter).
+pub const max_block_raw_entries: usize = 256;
+pub const max_block_hp_entries: usize = 1024;
 pub const max_chat_msg_len = game_types.max_chat_msg_len;
 pub const default_min_chat_gap_ns = game_types.default_min_chat_gap_ns;
 pub const default_inv_bucket_cap = game_types.default_inv_bucket_cap;
@@ -380,15 +386,18 @@ pub const Game = struct {
     ban_ip: [128]u32 = .{0} ** 128,
     ban_n: usize = 0,
     /// Sparse block durability: absolute BlockValue.damage at (x,y,z).
-    /// GAP 12: was 64, so the 65th damaged block silently lost its damage.
-    block_hp_key: [256]u64 = .{0} ** 256,
-    block_hp: [256]u16 = .{0} ** 256,
+    /// This table is the only store of partial block damage, so its cap is a
+    /// documented bound: at max_block_hp_entries the oldest damaged block is
+    /// evicted and its damage reverts (counter + warn-once, not silent).
+    block_hp_key: [max_block_hp_entries]u64 = .{0} ** max_block_hp_entries,
+    block_hp: [max_block_hp_entries]u16 = .{0} ** max_block_hp_entries,
     block_hp_n: usize = 0,
+    block_hp_evict_warned: bool = false,
     /// Sparse BlockValue.rawData (rotation/meta bits) for door/shape fidelity.
     /// The chunk plane is the source of truth (GAP 13); this cache mirrors the
     /// hot path and its eviction is a cache miss, not content loss.
-    block_raw_key: [256]u64 = .{0} ** 256,
-    block_raw: [256]u32 = .{0} ** 256,
+    block_raw_key: [max_block_raw_entries]u64 = .{0} ** max_block_raw_entries,
+    block_raw: [max_block_raw_entries]u32 = .{0} ** max_block_raw_entries,
     block_raw_n: usize = 0,
     /// Last-sent EntityLookAt target per entity slot (RE
     /// EntityAlive.SetLookPosition, protocol-packages.md §5.2.1): the 0.0016

@@ -162,6 +162,17 @@ pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
         return;
     }
     if (self.block_hp_n >= self.block_hp_key.len) {
+        // The cap is a documented bound: the oldest damaged block's damage
+        // reverts here. Loud, not silent (counter + warn-once) so an operator
+        // sees the bound was hit.
+        self.harness.counters.inc(.block_hp_evictions);
+        if (!self.block_hp_evict_warned) {
+            self.block_hp_evict_warned = true;
+            std.debug.print(
+                "zdtd: block_hp table full ({d}), evicting oldest damaged block; partial damage past the cap is not persisted\n",
+                .{self.block_hp_key.len},
+            );
+        }
         var j: usize = 1;
         while (j < self.block_hp_n) : (j += 1) {
             self.block_hp_key[j - 1] = self.block_hp_key[j];

@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (179/110/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (181/108/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 40 | 11 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **179** | **110** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 42 | 9 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **181** | **108** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**40 WORKS · 11 PARTIAL · 5 MISSING**
+**42 WORKS · 9 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3718,22 +3718,28 @@ persists so little that a restart visibly damages a built base.
   save instead of clobbering. Layout: [ADR 0011](adr/0011-custom-zch-world-overlay.md).
   *Anchors:* `src/server/game.zig` (`savePlayers` / restore), STATUS T5
 
-- **Container / loot persistence** `PARTIAL`
+- **Container / loot persistence** `WORKS` `(2026-08-21)`
   `containers.zct` (ZCT1) persists position, block id, slot count, touched and
   player-storage flags plus item slots, sorted by world position for deterministic
-  bytes. Hard cap `max_containers = 256` world-wide, and `save()` silently `break`s
-  once the fixed buffer is full. A single large POI has more lootable containers
-  than that; the 257th chest silently loses its contents.
-  *Anchors:* `src/world/containers.zig:9-11`, `:129-181`
+  bytes. `max_containers = 512` world-wide (was 256, GAP 12); the insert path
+  logs a loud warning when the table is full instead of silently dropping, and
+  `save()` encodes into an allocator-owned buffer sized for the full table (the
+  old fixed-buffer `break` is gone). The fixed cap is a documented engineering
+  bound; a long-lived world past 512 lootable containers warns rather than
+  losing contents silently.
+  *Anchors:* `src/world/containers.zig:10-13`, `:111-112`, `:147-181`
 
-- **Block rotation and damage persistence** `PARTIAL`
-  Two global fixed arrays: `block_raw` is 128 entries and `block_hp` is 64, both
-  world-wide, and `setBlockRaw` evicts the oldest with an O(n) shift when full.
-  `saveBlockMeta` writes into a 4096-byte stack buffer and `break`s when it fills.
-  The 129th rotated block a player ever places makes the first one's rotation
-  revert to 0 while the server is still running, with no log. Partial block damage
-  survives for only the last 64 damaged blocks.
-  *Anchors:* `src/server/game.zig:461-467`, `:3305-3325`, `:3350-3402`
+- **Block rotation and damage persistence** `WORKS` `(2026-08-21)`
+  Rotation/meta (`block_raw`, 256) mirrors the chunk raw plane - the chunk is
+  the source of truth (GAP 13), so the sparse cache's eviction is a cache miss,
+  never a rotation revert. Partial block damage (`block_hp`) is the only store
+  of damage: 1024 entries (was 64), and eviction at the cap is counted
+  (`block_hp_evictions` counter) and warn-once, never silent. `saveBlockMeta`
+  writes into a buffer sized for the full tables with bounds asserts (the old
+  4096-byte `break` is gone).
+  *Anchors:* `src/server/game.zig` (`max_block_hp_entries`,
+  `max_block_raw_entries`), `src/server/game/world.zig` (`setBlockHp`/`setBlockRaw`),
+  `src/server/game/blockmeta.zig:9-17`
 
 - **Block rotation in streamed chunks** `WORKS` `(2026-08-21)`
   Stale row (fixed by the chunk raw plane, GAP 13 DONE 2026-08-07): the SetBlock

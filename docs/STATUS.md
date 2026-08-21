@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 179 `WORKS`,
-110 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 181 `WORKS`,
+108 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -260,6 +260,16 @@ persist (bans.zsv), expire by wall clock and gate the join; whitelist and
 admin lists persist the same way. The IP hold table stays RAM-only by design
 (it covers the connection being dropped), with the remaining real gaps
 documented (serveradmin.xml not read, name-keyed bans, no reserved slots).
+
+Block-meta and container persistence flipped 2026-08-21 (Net and ops 40/11/5
+-> 42/9/5; total 179/110/44 -> **181/108/44**): block rotation/meta was
+already safe (the chunk raw plane is the source of truth, GAP 13; the sparse
+cache eviction is a cache miss), partial block damage is now 1024 entries
+(was 64) with a counter + warn-once on eviction instead of silent loss, and
+saveBlockMeta writes into a buffer sized for the full tables with asserts.
+Containers: max_containers 512 with a loud insert warning and an
+allocator-backed save buffer (no silent 257th-chest loss; the fixed caps are
+documented engineering bounds).
 
 ## Wave 2026-08-20 (config + provenance pass)
 
