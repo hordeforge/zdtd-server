@@ -42,6 +42,13 @@ pub const Config = struct {
     /// SandboxPreset (295): the preset NAME for server-browser display and the
     /// stock-settings check; not used to load values.
     sandbox_preset: []const u8 = "",
+    /// Browser fields (GameInfoString 3/4/12/13/17): empty = client default.
+    server_description: []const u8 = "",
+    server_website_url: []const u8 = "",
+    region: []const u8 = "",
+    language: []const u8 = "",
+    /// Stock ServerMatchmakingGroup feeds GameInfoString.PlayGroup (17).
+    play_group: []const u8 = "",
     password: []const u8 = "",
     admin_port: u16 = 0,
     /// Stock telnet console (EnumGamePrefs TelnetEnabled 0x44 / TelnetPort 0x45 /
@@ -215,6 +222,11 @@ const known_serverconfig_names = [_][]const u8{
     "LandClaimExpiryDays",
     "LootRespawnDays",
     "SandboxPreset",
+    "ServerDescription",
+    "ServerWebsiteURL",
+    "Region",
+    "Language",
+    "ServerMatchmakingGroup",
     "SandboxCode",
     "ZdtdAuthorityMode",
 };
@@ -394,6 +406,11 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "GameWorld")) |v| cfg.game_world = try decodeAttr(arena, v);
     if (prop(raw, "SandboxCode")) |v| cfg.sandbox_code = try decodeAttr(arena, v);
     if (prop(raw, "SandboxPreset")) |v| cfg.sandbox_preset = try decodeAttr(arena, v);
+    if (prop(raw, "ServerDescription")) |v| cfg.server_description = try decodeAttr(arena, v);
+    if (prop(raw, "ServerWebsiteURL")) |v| cfg.server_website_url = try decodeAttr(arena, v);
+    if (prop(raw, "Region")) |v| cfg.region = try decodeAttr(arena, v);
+    if (prop(raw, "Language")) |v| cfg.language = try decodeAttr(arena, v);
+    if (prop(raw, "ServerMatchmakingGroup")) |v| cfg.play_group = try decodeAttr(arena, v);
     if (prop(raw, "ServerPassword")) |v| cfg.password = try decodeAttr(arena, v);
     if (prop(raw, "AdminPort")) |v| {
         cfg.admin_port = xml.parseU16(v) orelse blk: {

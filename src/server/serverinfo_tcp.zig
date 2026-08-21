@@ -29,6 +29,14 @@ pub const ServerInfo = struct {
     /// keys rather than advertising a blank preset.
     sandbox_preset: []const u8 = "",
     sandbox_code: []const u8 = "",
+    /// GameInfoString 3/4/12/13/17 (RE server-browser-prefabs.md): the
+    /// operator-configurable browser fields. Empty omits the key (the client
+    /// falls back to its defaults), matching the SandboxCode pattern.
+    server_description: []const u8 = "",
+    server_website_url: []const u8 = "",
+    region: []const u8 = "",
+    language: []const u8 = "",
+    play_group: []const u8 = "",
 };
 
 /// Strip CR/LF/`;` so operator-supplied names cannot inject extra GSI key lines.
@@ -85,6 +93,35 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
     }
     if (info.sandbox_code.len > 0) {
         const s = try std.fmt.bufPrint(buf[w..], "SandboxCode:{s};\r\n", .{gsiSafe(info.sandbox_code, &sc)});
+        w += s.len;
+    }
+    // GameInfoString 3/4/12/13/17 (RE server-browser-prefabs.md): browser
+    // fields the operator sets in serverconfig.xml. Omitted when empty, so
+    // the client uses its defaults; `;`/CR/LF are stripped (gsiSafe) so an
+    // operator value cannot inject extra key lines.
+    if (info.server_description.len > 0) {
+        var sd: [256]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "ServerDescription:{s};\r\n", .{gsiSafe(info.server_description, &sd)});
+        w += s.len;
+    }
+    if (info.server_website_url.len > 0) {
+        var sw: [256]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "ServerWebsiteURL:{s};\r\n", .{gsiSafe(info.server_website_url, &sw)});
+        w += s.len;
+    }
+    if (info.region.len > 0) {
+        var rg: [64]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "Region:{s};\r\n", .{gsiSafe(info.region, &rg)});
+        w += s.len;
+    }
+    if (info.language.len > 0) {
+        var lg: [64]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "Language:{s};\r\n", .{gsiSafe(info.language, &lg)});
+        w += s.len;
+    }
+    if (info.play_group.len > 0) {
+        var pg: [64]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "PlayGroup:{s};\r\n", .{gsiSafe(info.play_group, &pg)});
         w += s.len;
     }
     if (w + 2 > buf.len) return error.NoSpaceLeft;
@@ -257,4 +294,34 @@ test "response header is 5 digit length" {
     try std.testing.expectEqual(@as(u8, '1'), out[3]);
     try std.testing.expectEqual(@as(u8, '1'), out[4]); // len 11
     try std.testing.expectEqual(@as(u8, '\r'), out[5]);
+}
+
+test "info text emits the operator browser fields when set (GameInfoString 3/4/12/13/17)" {
+    var buf: [2048]u8 = undefined;
+    const t = try buildInfoText(&buf, .{
+        .game_name = "zdtd",
+        .level_name = "Navezgane",
+        .ip = "127.0.0.1",
+        .info_port = 27015,
+        .server_description = "A test server; with a semicolon",
+        .server_website_url = "https://example.com",
+        .region = "EU",
+        .language = "English",
+        .play_group = "Default",
+    });
+    try std.testing.expect(std.mem.find(u8, t, "ServerDescription:A test server_ with a semicolon;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "ServerWebsiteURL:https://example.com;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "Region:EU;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "Language:English;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "PlayGroup:Default;") != null);
+    // Unset fields stay omitted (client default).
+    var buf2: [1024]u8 = undefined;
+    const t2 = try buildInfoText(&buf2, .{
+        .game_name = "zdtd",
+        .level_name = "Navezgane",
+        .ip = "127.0.0.1",
+        .info_port = 27015,
+    });
+    try std.testing.expect(std.mem.find(u8, t2, "ServerDescription:") == null);
+    try std.testing.expect(std.mem.find(u8, t2, "PlayGroup:") == null);
 }

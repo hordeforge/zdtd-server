@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (183/106/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (184/105/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 44 | 7 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **183** | **106** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 45 | 6 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
+| **Total** | **184** | **105** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**44 WORKS · 7 PARTIAL · 5 MISSING**
+**45 WORKS · 6 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3753,16 +3753,18 @@ persists so little that a restart visibly damages a built base.
   `src/server/game.zig:1415`, `src/server/game/init_world.zig:118`,
   `src/server/serverinfo_tcp.zig:21`, `asm.il:795818-795822`
 
-- **GameServerInfo key coverage** `PARTIAL`
-  19 keys emitted (17 fixed + SandboxPreset(18)/SandboxCode(19) when the
-  operator set them). The `GameInfoString` enum has 20 values; zdtd omits
-  ServerDescription(3), ServerWebsiteURL(4), SteamID(8), Platform(10),
-  ServerLoginConfirmationText(11), Region(12), Language(13), UniqueId(14),
-  CombinedPrimaryId(15), CombinedNativeId(16) and PlayGroup(17) - platform /
-  identity fields zdtd does not own (no authorizer chain, no Steam/EOS
-  presence). SandboxCode is where V3.1.0 keeps the difficulty/loot/XP preset;
-  it now rides the GSI text when configured (empty = client default, matching
-  GameStats).
+- **GameServerInfo key coverage** `WORKS` `(2026-08-22)`
+  All config-sourceable `GameInfoString` keys are emitted (17 fixed +
+  SandboxPreset(18)/SandboxCode(19) + the browser fields
+  ServerDescription(3), ServerWebsiteURL(4), Region(12), Language(13) and
+  PlayGroup(17, from ServerMatchmakingGroup) when the operator set them in
+  serverconfig.xml - empty omits the key so the client uses its defaults,
+  and `;`/CR/LF are stripped from operator values so a value cannot inject
+  GSI key lines). The remaining enum members - SteamID(8), Platform(10),
+  ServerLoginConfirmationText(11), UniqueId(14), CombinedPrimaryId(15),
+  CombinedNativeId(16) - are platform/identity fields zdtd does not own (no
+  authorizer chain, no Steam/EOS presence); documented non-goals, not
+  client-visible omissions for a direct-IP join.
   *Anchors:* `src/server/serverinfo_tcp.zig:49-100`, `asm.il:796457-796476`
 
 - **Steam / EOS master-server registration** `PARTIAL (waived: direct-IP parity)`

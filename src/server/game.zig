@@ -446,6 +446,11 @@ pub const Game = struct {
     /// from it (RE sandbox-options §8).
     sandbox_code: []const u8 = "",
     sandbox_preset: []const u8 = "",
+    server_description: []const u8 = "",
+    server_website_url: []const u8 = "",
+    region: []const u8 = "",
+    language: []const u8 = "",
+    play_group: []const u8 = "",
     admin: admin_mod.Server = .{},
     admin_line: [admin_mod.max_cmd]u8 = undefined,
     /// Stock operator lists (`admin`, `ban`, `whitelist`), persisted beside
@@ -624,6 +629,11 @@ pub const Game = struct {
             .deco_objects_per_join = opts.deco_objects_per_join,
             .sandbox_code = opts.sandbox_code,
             .sandbox_preset = opts.sandbox_preset,
+            .server_description = opts.server_description,
+            .server_website_url = opts.server_website_url,
+            .region = opts.region,
+            .language = opts.language,
+            .play_group = opts.play_group,
             .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
             .wasm_ctx = .{
                 .data = self,
@@ -1501,6 +1511,11 @@ pub const Game = struct {
             .password_protected = self.password.len > 0,
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,
+            .server_description = self.server_description,
+            .server_website_url = self.server_website_url,
+            .region = self.region,
+            .language = self.language,
+            .play_group = self.play_group,
         };
         return try serverinfo_tcp.buildInfoText(buf, info);
     }

@@ -126,6 +126,11 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .password_protected = self.password.len > 0,
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,
+            .server_description = self.server_description,
+            .server_website_url = self.server_website_url,
+            .region = self.region,
+            .language = self.language,
+            .play_group = self.play_group,
         }) catch |err| {
             var ts: [19]u8 = undefined;
             std.debug.print("zdtd: {s} warning: TCP server-info on {d} failed: {}\n", .{ clock.wallStamp(&ts), port, err });

@@ -203,6 +203,12 @@ pub const InitOptions = struct {
     webui_bind: []const u8 = "127.0.0.1",
     webui_secret: []const u8 = "",
     world_name: ?[]const u8 = null,
+    /// Browser fields (GameInfoString 3/4/12/13/17); empty = client default.
+    server_description: []const u8 = "",
+    server_website_url: []const u8 = "",
+    region: []const u8 = "",
+    language: []const u8 = "",
+    play_group: []const u8 = "",
     /// ServerMaxPlayerCount from serverconfig (capped at LiteNet max_peers).
     max_players: u16 = default_max_players,
     /// PlayerSlotsAuthorizer tiers (IL=174); 0 = disabled.

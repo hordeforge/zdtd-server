@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 183 `WORKS`,
-106 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 184 `WORKS`,
+105 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -432,6 +432,15 @@ verbatim to the other clients - the owner already ragdolled locally
 7dtd-research protocol-packages.md 5.15. C2S handled names 85
 -> 86 of the 98 stock client sends; Net and ops stays 44/7/5, total
 **183/106/44**.
+
+GSI browser fields shipped 2026-08-22 (GameServerInfo row -> WORKS):
+ServerDescription / ServerWebsiteURL / Region / Language / PlayGroup (from
+ServerMatchmakingGroup) ride the GSI text when set in serverconfig.xml
+(empty omits the key, client default; `;`/CR/LF stripped from operator
+values). Every config-sourceable GameInfoString key is now emitted; the six
+remaining members are platform/identity fields zdtd does not own
+(documentable non-goals). Net and ops 44/7/5 -> **45/6/5**, total
+183/106/44 -> **184/105/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
