@@ -167,7 +167,26 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerEquipment") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackageMapPosition") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
+    if (std.mem.eql(u8, name, "NetPackageMapPosition")) {
+        // In-game minimap drive (RE protocol-packages.md §3.3): the client
+        // sends its map middle (entityId + Vector2i); the server fills the
+        // 17x17 chunk window around it with NetPackageMapChunks. Accept only
+        // the sender's own entity; a moved middle resets the sent set.
+        if (body.len >= 12) {
+            const eid = std.mem.readInt(i32, body[0..4], .little);
+            if (eid != c.entity_id) return true;
+            const mx = std.mem.readInt(i32, body[4..8], .little);
+            const mz = std.mem.readInt(i32, body[8..12], .little);
+            if (!c.map_middle_set or c.map_middle_x != mx or c.map_middle_z != mz) {
+                c.map_middle_x = mx;
+                c.map_middle_z = mz;
+                c.map_middle_set = true;
+                @memset(&c.map_chunks_sent, 0);
+            }
+        }
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerEquipment") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer") or std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {

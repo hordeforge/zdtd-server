@@ -29,6 +29,33 @@ pub const atlases = [_]Atlas{
 
 const std = @import("std");
 
+/// Minimap water color (BlockLiquidv2.Color = Color32(0,105,148))
+/// packed RGB555 (RE texture-atlas.md CalcChunkColors).
+pub const water_color5: u16 = 434;
+/// Fallback when a block has no atlas color nor MapColor: stock
+/// Color.get_gray() = (0.5,0.5,0.5) -> RGB555 16,16,16.
+pub const gray_color5: u16 = 16816;
+
+/// blocks.xml Mesh property name -> atlas table name. Empty (no
+/// Mesh property) = default mesh 0 = "opaque" (RE texture-atlas.md).
+pub fn atlasForMesh(mesh: []const u8) []const u8 {
+    if (std.mem.eql(u8, mesh, "terrain")) return "terrainxml";
+    if (std.mem.eql(u8, mesh, "grass")) return "grassxml";
+    if (std.mem.eql(u8, mesh, "water")) return "waterxml";
+    if (std.mem.eql(u8, mesh, "transparent")) return "transparentxml";
+    if (std.mem.eql(u8, mesh, "decals")) return "decalsxml";
+    return "opaquexml";
+}
+
+/// A block's minimap color: the MapColor property wins (stock
+/// Block.GetMapColor bMapColorSet path); else the top-face
+/// texture's atlas color; else null (caller picks gray).
+pub fn blockColor5(mesh: []const u8, texture_top: u16, map_color: u16) ?u16 {
+    if (map_color != 0) return map_color;
+    if (texture_top == 0) return null;
+    return color5(atlasForMesh(mesh), texture_top);
+}
+
 /// Look up the minimap color for a texture id in an atlas (init-time only).
 pub fn color5(atlas_name: []const u8, texture_id: u16) ?u16 {
     for (&atlases) |*a| {
@@ -57,4 +84,11 @@ test "terrain atlas colors match the extracted XML" {
     try std.testing.expect(color5("terrainxml", 9999) == null);
     // Unknown atlas: null.
     try std.testing.expect(color5("nope", 1) == null);
+    // Resolver: MapColor property wins; else the mesh atlas.
+    try std.testing.expectEqual(@as(?u16, 2243), blockColor5("terrain", 2, 2243));
+    try std.testing.expect(blockColor5("terrain", 195, 0) != null); // terrForestGround top face
+    try std.testing.expect(blockColor5("opaque", 52, 0) != null); // wood in the opaque atlas
+    try std.testing.expect(blockColor5("terrain", 9999, 0) == null); // no atlas color
+    try std.testing.expectEqualStrings("opaquexml", atlasForMesh(""));
+    try std.testing.expectEqual(@as(u16, 434), water_color5);
 }

@@ -3327,24 +3327,31 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
 
 - **S2C package emission coverage** `PARTIAL`
-  46 package names appear in the server S2C send paths (`game.zig` +
-  `game/*.zig`, harness counters excluded; EntityLookAt added 2026-08-21 -
-  awake zombies with a target broadcast the stock look-at package to tracking
-  players, gated by the SetLookPosition 0.0016 sqr-delta). ToClient names
-  never sent at all include MapChunks, PersistentPlayerPositions, WorldAreas,
-  TurretSync, EntityVelocity, EntitySetSkillLevelClient, ChunkClusterInfo,
-  WallVolume, Light, TreeFade, AudioPlayInHead, WaterSimChunkUpdate,
-  PlayerSetBackpackPosition, ClientInfo, AuthState. Corrected (2026-08-21):
-  EntityAddExpClient IS emitted on kills (killXpAward, stock_xp builder);
-  ShowToolbeltMessage is not a pickup notification - its sole stock sender is
-  the Homerun minigame (ShowTooltipMP unicast, protocol-packages.md);
-  NetPackageSleeperPose is stock-dead (the sleep pose rides EntitySpawn
-  flags); the sleeper trio wake path is wired (SleeperWakeup on
-  proximity/noise/damage wake, passive spawn flags). The in-game map never
-  fills in or shows party members, and turrets do not animate.
-  *Anchors:* `src/server/game/*.zig` send paths, `src/wire/packages.zig:1320`,
-  `src/server/game/tick.zig` (`tickEntityLookAt`, `drainSleeperWakeups`),
-  `src/server/game/player.zig` (`killXpAward`)
+  47 package names appear in the server S2C send paths (`game.zig` +
+  `game/*.zig`, harness counters excluded; EntityLookAt + MapChunks added
+  2026-08-21). The in-game minimap now fills in: the client's
+  NetPackageMapPosition C2S arms a 17x17 chunk window (RE
+  MapChunkDatabase.GetMapChunkPackagesToSend), and the server sends
+  NetPackageMapChunks (channel 1, compressed, batched) with per-chunk 256
+  RGB555 colors computed from the top visible block (MapColor property, else
+  the texture-atlas color, else gray; water = BlockLiquidv2.Color) - the
+  atlas colors come from the meshdescriptions bundle (texture-atlas.md).
+  ToClient names never sent at all include PersistentPlayerPositions,
+  WorldAreas, TurretSync, EntityVelocity, EntitySetSkillLevelClient,
+  ChunkClusterInfo, WallVolume, Light, TreeFade, AudioPlayInHead,
+  WaterSimChunkUpdate, PlayerSetBackpackPosition, ClientInfo, AuthState.
+  Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
+  stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
+  sole stock sender is the Homerun minigame (ShowTooltipMP unicast,
+  protocol-packages.md); NetPackageSleeperPose is stock-dead (the sleep pose
+  rides EntitySpawn flags); the sleeper trio wake path is wired (SleeperWakeup
+  on proximity/noise/damage wake, passive spawn flags). Party members on the
+  map (PersistentPlayerPositions) and trader compounds (WorldAreas) stay
+  open; turrets do not animate.
+  *Anchors:* `src/server/game/map.zig` (`tickMapChunks`, `chunkMapColors`),
+  `src/server/c2s/misc.zig` (MapPosition), `src/server/game/tick.zig`
+  (`tickEntityLookAt`, `drainSleeperWakeups`),
+  `src/server/game/player.zig` (`killXpAward`), `src/assets/map_atlas.zig`
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`
   Stock `get_Channel` returns 1 for NetPackageChunk, ChunkRemove, DynamicMesh,

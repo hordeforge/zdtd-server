@@ -62,6 +62,11 @@ pub const default_chunk_adds_per_stream_tick: u32 = 8;
 /// loadedDecos HashSet dedupes, but tracking avoids regenerating + resending
 /// the same objects for each of the 64 member chunks).
 pub const max_deco_chunks_cap: usize = 256;
+/// In-game minimap: the MapChunkDatabase send window is a 17x17 chunk square
+/// around the client's map middle (RE protocol-packages.md §3.3: dx,dz in
+/// [-8..+8]).
+pub const map_window_radius: i32 = 8;
+pub const map_window_n: usize = 17 * 17;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
 
@@ -384,6 +389,14 @@ pub const Client = struct {
     /// burst + streamed chunks); full = stop tracking (the client dedupes).
     deco_sent: [max_deco_chunks_cap]i64 = undefined,
     deco_sent_n: usize = 0,
+    /// In-game minimap state (RE protocol-packages.md §3.3): the client's map
+    /// middle (world coords, from NetPackageMapPosition C2S) and which 17x17
+    /// window chunks were already sent. The sent set resets when the middle
+    /// moves so the window re-fills around the new center.
+    map_middle_x: i32 = 0,
+    map_middle_z: i32 = 0,
+    map_middle_set: bool = false,
+    map_chunks_sent: [map_window_n]u8 = [_]u8{0} ** map_window_n,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),

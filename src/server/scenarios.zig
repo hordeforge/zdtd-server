@@ -506,6 +506,73 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     try std.testing.expect(!g.clients[c.slot].joined);
 }
 
+test "scenario map: MapPosition C2S arms the window and sends MapChunks" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_map");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_map", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.clients[c.slot].joined);
+    // The harness completes the join but not the enter bundle; an entered
+    // client is what the map send pass serves.
+    g.clients[c.slot].entered = true;
+    // The client drives the map by sending its middle (RE protocol-packages
+    // NetPackageMapPosition: entityId + Vector2i, world coords).
+    var fbuf: [64]u8 = undefined;
+    var body: [12]u8 = undefined;
+    std.mem.writeInt(i32, body[0..4], c.entity_id, .little);
+    std.mem.writeInt(i32, body[4..8], 1000, .little);
+    std.mem.writeInt(i32, body[8..12], 2000, .little);
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageMapPosition", &body));
+    try std.testing.expect(g.clients[c.slot].map_middle_set);
+    try std.testing.expectEqual(@as(i32, 1000), g.clients[c.slot].map_middle_x);
+    // A foreign entity id is ignored.
+    std.mem.writeInt(i32, body[0..4], c.entity_id + 999, .little);
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageMapPosition", &body));
+    try std.testing.expectEqual(@as(i32, 1000), g.clients[c.slot].map_middle_x);
+    // The send pass fills the 17x17 window in batches. Flat generated
+    // terrain deflates to a ~60 byte frame (all cells one color), so the
+    // frame body cannot be re-inflated by the C2S parse guard (64x cap) -
+    // assert the send happened (a frame went out) and the window advanced.
+    const n_before = cap.n;
+    g.tickMapChunks();
+    try std.testing.expect(cap.n > n_before);
+    var sent_n: usize = 0;
+    for (g.clients[c.slot].map_chunks_sent) |s| {
+        if (s != 0) sent_n += 1;
+    }
+    try std.testing.expect(sent_n > 0);
+    // A second pass sends the next batch until the window is covered.
+    g.tickMapChunks();
+    var sent_n2: usize = 0;
+    for (g.clients[c.slot].map_chunks_sent) |s| {
+        if (s != 0) sent_n2 += 1;
+    }
+    try std.testing.expect(sent_n2 > sent_n);
+    var any_sent = false;
+    for (g.clients[c.slot].map_chunks_sent) |s| {
+        if (s != 0) any_sent = true;
+    }
+    try std.testing.expect(any_sent);
+    // A moved middle resets the sent set so the window re-fills.
+    std.mem.writeInt(i32, body[0..4], c.entity_id, .little);
+    std.mem.writeInt(i32, body[4..8], 1100, .little);
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageMapPosition", &body));
+    try std.testing.expectEqual(@as(i32, 1100), g.clients[c.slot].map_middle_x);
+    var all_clear = true;
+    for (g.clients[c.slot].map_chunks_sent) |s| {
+        if (s != 0) all_clear = false;
+    }
+    try std.testing.expect(all_clear);
+}
+
 test "scenario hard disconnect reap saves before clearing the slot" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_reap");

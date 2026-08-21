@@ -20,6 +20,7 @@ const protocol = @import("../protocol.zig");
 const replicate_te = @import("replicate_te.zig");
 const game_net = @import("game/net.zig");
 const game_tick = @import("game/tick.zig");
+const game_map = @import("game/map.zig");
 const game_bot = @import("game/bot.zig");
 const game_world = @import("game/world.zig");
 const game_player = @import("game/player.zig");
@@ -184,6 +185,8 @@ pub const default_deco_objects_per_join = game_types.default_deco_objects_per_jo
 pub const window_fast_attempts = game_types.window_fast_attempts;
 pub const window_retry_sleep_ns = game_types.window_retry_sleep_ns;
 pub const window_retry_budget_ns = game_types.window_retry_budget_ns;
+pub const map_window_radius = game_types.map_window_radius;
+pub const map_window_n = game_types.map_window_n;
 pub const critical_retry_budget_ns = game_types.critical_retry_budget_ns;
 pub const default_view_radius = game_types.default_view_radius;
 pub const default_max_players = game_types.default_max_players;
@@ -1197,6 +1200,10 @@ pub const Game = struct {
 
     pub fn tickEntityLookAt(self: *Game) void {
         return game_tick.tickEntityLookAt(self);
+    }
+
+    pub fn tickMapChunks(self: *Game) void {
+        return game_map.tickMapChunks(self);
     }
 
     /// Block id at world coords (0 = air / unloaded).

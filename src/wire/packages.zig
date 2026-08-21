@@ -1015,6 +1015,42 @@ test "EntityLookAt body is entityId + int-truncated look position" {
     try std.testing.expectEqual(@as(i32, -3), std.mem.readInt(i32, b[12..16], .little));
 }
 
+/// One minimap chunk piece: the map-database key (RE IMapChunkDatabase
+/// ToChunkDBKey: ((x & 0xFFFF) << 16) | (z & 0xFFFF)) + 256 RGB555 colors.
+pub const MapChunkPiece = struct {
+    key: i32,
+    colors: [256]u16,
+};
+
+/// NetPackageMapChunks (Assembly-CSharp write IL=109): entityId i32, count
+/// u16, then per piece (dbKey i32 + 256 u16 colors). Channel 1, Compress=true
+/// (the caller sends via sendCompressed); protocol-packages.md §3.3.
+pub fn buildMapChunksBody(buf: []u8, entity_id: i32, pieces: []const MapChunkPiece) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeU16(@intCast(pieces.len));
+    for (pieces) |p| {
+        try w.writeI32(p.key);
+        for (p.colors) |c| try w.writeU16(c);
+    }
+    return w.written();
+}
+
+test "MapChunks body is entityId + count + key + 256 colors per piece" {
+    var buf: [4096]u8 = undefined;
+    var colors: [256]u16 = .{0} ** 256;
+    colors[0] = 434;
+    colors[255] = 16816;
+    const pieces = [_]MapChunkPiece{.{ .key = 0x00010002, .colors = colors }};
+    const b = try buildMapChunksBody(&buf, 107, &pieces);
+    try std.testing.expectEqual(@as(usize, 4 + 2 + 4 + 512), b.len);
+    try std.testing.expectEqual(@as(i32, 107), std.mem.readInt(i32, b[0..4], .little));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b[4..6], .little));
+    try std.testing.expectEqual(@as(i32, 0x00010002), std.mem.readInt(i32, b[6..10], .little));
+    try std.testing.expectEqual(@as(u16, 434), std.mem.readInt(u16, b[10..12], .little));
+    try std.testing.expectEqual(@as(u16, 16816), std.mem.readInt(u16, b[10 + 255 * 2 ..][0..2], .little));
+}
+
 /// AIDirector/HordeEvent enum (Assembly-CSharp AIDirector/HordeEvent). Client
 /// EntityPlayerLocal.HandleHordeEvent reacts to warn2 (spawn-warning audio) and
 /// spawn (camera shake + spawn audio); none/warn1 are no-ops.

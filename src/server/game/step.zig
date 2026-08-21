@@ -123,6 +123,9 @@ pub fn step(self: *Game) !void {
         // Cosmetic head-aim (RE EntityAlive.SetLookPosition): broadcast
         // EntityLookAt to tracking players when a zombie's look target moves.
         self.tickEntityLookAt();
+        // In-game minimap (RE MapChunkDatabase.GetMapChunkPackagesToSend):
+        // fill the 17x17 window around each client's map middle, batched.
+        self.tickMapChunks();
         self.tickSurvival(dt);
         self.tickBots(dt);
         {

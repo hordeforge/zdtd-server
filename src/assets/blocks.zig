@@ -59,6 +59,19 @@ pub const BlockDef = struct {
     /// ships no block that sets it, so every stock pickup leaves Air; a
     /// modded blocks.xml is honoured rather than hardcoded.
     pickup_source: []const u8 = "",
+    /// Mesh property (blocks.xml `Mesh="terrain|opaque|grass|water|..."`):
+    /// picks the texture-atlas for the minimap color (GetColorForSide ->
+    /// MeshDescription.meshes[MeshIndex].textureAtlas). Empty = default mesh
+    /// 0 = "opaque" (RE texture-atlas.md; no block sets MeshIndex directly).
+    mesh: []const u8 = "",
+    /// Top-face texture id (first value of the Texture property, e.g.
+    /// terrDirt "2", terrForestGround "195,570,..."). Indexes the atlas
+    /// uvMapping for the minimap color. 0 = none.
+    texture_top: u16 = 0,
+    /// MapColor property packed RGB555 (0 = none). Blocks with bMapColorSet
+    /// use this directly in Block.GetMapColor, skipping the atlas (RE
+    /// texture-atlas.md; the terrain blocks all carry it).
+    map_color: u16 = 0,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -188,6 +201,26 @@ pub const builtin_defs = [_]BlockDef{
     .{ .id = assignids.water, .name = "water", .solid = false },
 };
 
+/// "r,g,b" 0-255 ints -> RGB555 (Utils.ToColor5 on the /255 color; RE
+/// texture-atlas.md). 0 on malformed input (treated as no MapColor).
+fn parseMapColor5(v: []const u8) u16 {
+    var it = std.mem.splitScalar(u8, v, ',');
+    const rs = std.mem.trim(u8, it.next() orelse return 0, " ");
+    const gs = std.mem.trim(u8, it.next() orelse return 0, " ");
+    const bs = std.mem.trim(u8, it.next() orelse return 0, " ");
+    const r = std.fmt.parseInt(u32, rs, 10) catch return 0;
+    const g = std.fmt.parseInt(u32, gs, 10) catch return 0;
+    const b = std.fmt.parseInt(u32, bs, 10) catch return 0;
+    if (r > 255 or g > 255 or b > 255) return 0;
+    // floor(v*31/255 + 0.5) == (v*31 + 127) / 255
+    const c = struct {
+        fn cc(x: u32) u16 {
+            return @intCast((x * 31 + 127) / 255);
+        }
+    };
+    return (c.cc(r) << 10) | (c.cc(g) << 5) | c.cc(b);
+}
+
 fn isSolidName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "air")) return false;
     if (std.mem.startsWith(u8, name, "water")) return false;
@@ -234,6 +267,9 @@ pub fn loadFromPath(
         radius_effect_buff: ?[]const u8 = null,
         radius_effect_radius_sq: f32 = 0,
         pickup_source: ?[]const u8 = null,
+        mesh: ?[]const u8 = null,
+        texture_top: u16 = 0,
+        map_color: u16 = 0,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -269,6 +305,9 @@ pub fn loadFromPath(
         var radius_effect_buff: ?[]const u8 = null;
         var radius_effect_radius_sq: f32 = 0;
         var pickup_source: ?[]const u8 = null;
+        var mesh: ?[]const u8 = null;
+        var texture_top: u16 = 0;
+        var map_color: u16 = 0;
         const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -316,6 +355,22 @@ pub fn loadFromPath(
                 }
             } else if (std.mem.eql(u8, pname, "PickupSource")) {
                 pickup_source = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Mesh")) {
+                mesh = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Texture")) {
+                // Top-face texture id = the first value of the comma list.
+                if (xml.attr(clean, pi, "value")) |v| {
+                    const first = if (std.mem.findScalar(u8, v, ',')) |comma|
+                        std.mem.trim(u8, v[0..comma], " ")
+                    else
+                        std.mem.trim(u8, v, " ");
+                    texture_top = std.fmt.parseInt(u16, first, 10) catch 0;
+                }
+            } else if (std.mem.eql(u8, pname, "MapColor")) {
+                // "r,g,b" 0-255 ints -> RGB555 (Utils.ToColor5 on r/255).
+                if (xml.attr(clean, pi, "value")) |v| {
+                    map_color = parseMapColor5(v);
+                }
             }
             p = pi + 10;
         }
@@ -335,6 +390,9 @@ pub fn loadFromPath(
             .radius_effect_buff = if (radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = radius_effect_radius_sq,
             .pickup_source = if (pickup_source) |ps| try arena.dupe(u8, ps) else "",
+            .mesh = if (mesh) |m| try arena.dupe(u8, m) else "",
+            .texture_top = texture_top,
+            .map_color = map_color,
         });
         i = bi + 7;
     }
@@ -356,10 +414,14 @@ pub fn loadFromPath(
         var chain_n: usize = 0;
         var own_class = pb.class;
         var own_trader = pb.trader_id;
+        var own_mesh = pb.mesh;
+        var own_texture = pb.texture_top;
+        var own_map_color = pb.map_color;
         var ext = pb.extends;
         while (ext) |e| : (depth += 1) {
             if (depth >= max_extends_depth) break;
-            if (own_class != null and own_trader >= 0) break;
+            if (own_class != null and own_trader >= 0 and own_mesh != null and
+                own_texture > 0 and own_map_color > 0) break;
             var dup = false;
             for (seen_chain[0..chain_n]) |s| {
                 if (s == idx_cur) dup = true;
@@ -371,10 +433,16 @@ pub fn loadFromPath(
             const base_p = &parsed.items[base];
             if (own_class == null) own_class = base_p.class;
             if (own_trader < 0) own_trader = base_p.trader_id;
+            if (own_mesh == null) own_mesh = base_p.mesh;
+            if (own_texture == 0) own_texture = base_p.texture_top;
+            if (own_map_color == 0) own_map_color = base_p.map_color;
             ext = base_p.extends;
         }
         pb.class = own_class;
         pb.trader_id = if (own_trader < 0) 0 else own_trader;
+        pb.mesh = own_mesh;
+        pb.texture_top = own_texture;
+        pb.map_color = own_map_color;
     }
 
     const defs = try arena.alloc(BlockDef, parsed.items.len);
@@ -392,6 +460,9 @@ pub fn loadFromPath(
             .crafting_areas = if (pb.crafting_areas) |ca| try arena.dupe(u8, ca) else "",
             .radius_effect_buff = if (pb.radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = pb.radius_effect_radius_sq,
+            .mesh = if (pb.mesh) |m| try arena.dupe(u8, m) else "",
+            .texture_top = pb.texture_top,
+            .map_color = pb.map_color,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };

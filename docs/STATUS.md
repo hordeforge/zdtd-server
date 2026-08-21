@@ -279,8 +279,14 @@ UnityFS v8 bundle layout + the CalcChunkColors -> Block.GetMapColor ->
 GetColorForSide -> uvMapping[id].color -> ToColor5 chain (7dtd-research
 docs/texture-atlas.md), and the six ta_* XMLs are extracted into
 src/assets/map_atlas.zig as a comptime RGB555 color table (231 entries).
-Next: the per-block texture/mesh resolution + CalcChunkColors + the MapChunks
-wire.
+The map wire landed 2026-08-21 (S2C emission row, stays PARTIAL): blocks.xml
+Mesh/Texture/MapColor are parsed into BlockDef (the mesh names map to the six
+atlases; default mesh 0 = opaque), NetPackageMapPosition C2S arms a per-client
+17x17 chunk window, and tickMapChunks sends NetPackageMapChunks (channel 1,
+compressed, batched) with per-chunk 256 RGB555 colors from the top visible
+block - MapColor property, else the atlas color, else gray; water takes
+BlockLiquidv2.Color. The in-game minimap now fills in. Party members on the
+map (PersistentPlayerPositions) and trader compounds (WorldAreas) stay open.
 
 ## Wave 2026-08-20 (config + provenance pass)
 
