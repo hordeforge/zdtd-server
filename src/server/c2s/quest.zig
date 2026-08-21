@@ -147,6 +147,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageEntityAwardKillServer")) {
+        // Stock body: killerEntityId i32 | killedEntityId i32; the client
+        // reports a kill its local player scored (EntityAlive.OnEntityDeath
+        // -> AwardKill) so the server can run QuestEventManager.EntityKilled.
+        // zdtd credits kill objectives and XP authoritatively at the death
+        // path instead (questOnZombieKilled for player melee/ranged kills
+        // and turret/trap kills), so this report is a redundant echo of an
+        // already-credited kill: applying it would double-credit. Validate
+        // the body and drop.
+        if (body.len < 8) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
         try self.handleAddRemoveBuff(c, body);
         return true;

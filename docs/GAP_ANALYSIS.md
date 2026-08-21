@@ -3258,21 +3258,25 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
 - **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
-  79 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
+  80 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
-  EntityStatChanged, Waypoint, GameMessage and SoundAtPosition have handlers
-  since the last count; the Waypoint relay parses the full Waypoint v7 body
-  and fans the invite to the inviter's allies or all players per
+  EntityStatChanged, Waypoint, GameMessage, SoundAtPosition and
+  EntityAwardKillServer have handlers since the last count; the Waypoint
+  relay parses the full Waypoint v7 body and fans the invite to the
+  inviter's allies or all players per
   GameManager.WaypointInviteServer, the GameMessage relay re-broadcasts
   the 9-byte announcement body to every client per
   FinishGameMessageServer - death/team/leave/chat announcements now reach
-  other players, and the SoundAtPosition relay re-broadcasts positional
+  other players, the SoundAtPosition relay re-broadcasts positional
   audio to every client except the owning player per
-  PlaySoundAtPositionServer).
+  PlaySoundAtPositionServer, and the EntityAwardKillServer kill report is
+  a validated no-op because zdtd credits kill objectives and XP
+  authoritatively at the death path - applying the client echo would
+  double-credit).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 23 have no handler: Debug,
+  yields 98 names the stock client actually sends; 22 have no handler: Debug,
   DroneDataSync, DroneParticleEffect, DynamicMesh, EAC, EditorUpdateVolume,
-  EncryptionPublicKey, EntityAwardKillServer, EntityPhysics, EntityRagdoll,
+  EncryptionPublicKey, EntityPhysics, EntityRagdoll,
   EntityStealth, KeyExchangeComplete, ModifyCVar, ParticleEffect,
   PlayerLaserSight, PlayerTwitchStats, QuestGotoPoint, QuestTreasurePoint,
   SetProp, SimpleRPC, TwitchAccess, TwitchVoteScheduling,
@@ -3516,14 +3520,20 @@ persists so little that a restart visibly damages a built base.
 - **Bans and whitelist** `PARTIAL` `(2026-08-21 recount)`
   Identity bans (`ban add`) persist to `bans.zsv` (admins.zsv/whitelist.zsv
   alongside), expire by wall clock (`BannedUntil > Now` gate, matching stock
-  AdminBlacklist.IsBanned), carry reasons, and gate the join by login name;
-  whitelist + admin lists persist the same way. The IP hold table
+  AdminBlacklist.IsBanned), carry reasons, and gate the join. Since
+  2026-08-21 the ban key is the platform id like stock
+  AdminBlacklist (BannedUser.UserIdentifier): `ban add` on an online target
+  stores its primary platform identity + name, and the login gate checks the
+  platform id first, so a rename cannot evade a ban; name-keyed entries
+  still work for legacy bans.zsv rows and sessions without a platform
+  identity (loadgen bots), serialized as a 5-field `exp \t platform \t id
+  \t name \t reason` line with legacy 2/3-field rows read back.
+  Whitelist + admin lists persist the same way. The IP hold table
   (`ban_ip`, 128 keys) is RAM-only by design: it covers the connection being
   dropped so a reconnect before the next join check cannot slip through
   (stock bans by platform identifier in serveradmin.xml, not by IP). Still
-  open: stock `serveradmin.xml` is not read (zdtd uses its own list files),
-  bans key on the login name because zdtd has no stock user id, and
-  ServerReservedSlots / ServerAdminSlots are not implemented.
+  open: stock `serveradmin.xml` is not read (zdtd uses its own list files)
+  and ServerReservedSlots / ServerAdminSlots are not implemented.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)

@@ -1778,3 +1778,53 @@ test "sound at position relays to all clients except the owning player" {
     try std.testing.expect(!a_got);
     try std.testing.expect(b_got);
 }
+
+test "entity award kill server is handled without re-crediting kills" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+
+    // killerEntityId i32 | killedEntityId i32 (a client kill report; the
+    // server already credited the kill at the death path, so the handler
+    // validates and drops instead of double-crediting).
+    var body: [8]u8 = undefined;
+    std.mem.writeInt(i32, body[0..4], ca.entity_id, .little);
+    std.mem.writeInt(i32, body[4..8], 200, .little);
+    var frame_buf: [128]u8 = undefined;
+    const framed = try packages.framed(&frame_buf, "NetPackageEntityAwardKillServer", &body);
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    try g.injectFramed(ca, framed);
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+}
+
+test "platform-id ban rejects a rejoin with the same identity" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const id: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000000" };
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClientAs(&cap, id);
+    const now = clock.wallSeconds();
+    try std.testing.expect(g.ban_list.addId("Steam", "76561198000000000", "X", now + 3600, "test"));
+    var cap2: ln_peer.Capture = .{};
+    // Same platform id is rejected at the login gate (identity-ban), even
+    // though the harness login name is the generic "Bot".
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap2, id));
+    // Name-keyed bans still gate the name-only path (no platform session).
+    try std.testing.expect(g.ban_list.add("Bot", now + 3600, "test"));
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClient(&cap2));
+}

@@ -180,6 +180,8 @@ pub fn writeHelp(w: *std.Io.Writer, entries: []const HelpEntry) !void {
 pub const max_entries: usize = 64;
 pub const max_id: usize = 64;
 pub const max_reason: usize = 96;
+/// Player names (Client.name is 32 bytes; keep one byte of slack).
+pub const max_name: usize = 32;
 
 /// A bounded, owned string. Keeps the lists allocation-free and makes an
 /// over-long operator argument a truncation, never a heap failure mid-command.
@@ -202,7 +204,15 @@ fn Bounded(comptime cap: usize) type {
 }
 
 pub const BanEntry = struct {
+    /// EPlatformIdentifier name ("Steam", "EOS", ...). Empty = name-keyed
+    /// ban (legacy bans.zsv rows and targets without a platform session).
+    platform: Bounded(16) = .{},
+    /// The ban key: the platform user id when `platform` is non-empty, else
+    /// the login name. Stock AdminBlacklist keys on the platform identifier
+    /// (BannedUser.UserIdentifier), so a rename cannot evade a ban.
     id: Bounded(max_id) = .{},
+    /// Display name at ban time (stock BannedUser.Name).
+    name: Bounded(max_name) = .{},
     reason: Bounded(max_reason) = .{},
     /// Absolute wall-clock expiry so a restart neither resurrects an expired ban
     /// nor silently extends a live one.
@@ -213,7 +223,26 @@ pub const BanList = struct {
     entries: [max_entries]BanEntry = @splat(.{}),
     n: usize = 0,
 
-    /// Adds or replaces the entry for `id`. False when the list is full.
+    /// Adds or replaces the platform-id-keyed entry. False when the list is full.
+    pub fn addId(self: *BanList, platform: []const u8, id: []const u8, name: []const u8, expires_unix: i64, reason: []const u8) bool {
+        if (self.findId(platform, id)) |i| {
+            self.entries[i].expires_unix = expires_unix;
+            self.entries[i].name.set(name);
+            self.entries[i].reason.set(reason);
+            return true;
+        }
+        if (self.n == max_entries) return false;
+        var e: BanEntry = .{ .expires_unix = expires_unix };
+        e.platform.set(platform);
+        e.id.set(id);
+        e.name.set(name);
+        e.reason.set(reason);
+        self.entries[self.n] = e;
+        self.n += 1;
+        return true;
+    }
+
+    /// Adds or replaces the name-keyed entry (no platform session / legacy).
     pub fn add(self: *BanList, id: []const u8, expires_unix: i64, reason: []const u8) bool {
         if (self.find(id)) |i| {
             self.entries[i].expires_unix = expires_unix;
@@ -223,10 +252,20 @@ pub const BanList = struct {
         if (self.n == max_entries) return false;
         var e: BanEntry = .{ .expires_unix = expires_unix };
         e.id.set(id);
+        e.name.set(id);
         e.reason.set(reason);
         self.entries[self.n] = e;
         self.n += 1;
         return true;
+    }
+
+    pub fn findId(self: *const BanList, platform: []const u8, id: []const u8) ?usize {
+        for (self.entries[0..self.n], 0..) |*e, i| {
+            if (e.platform.len == 0) continue;
+            if (!std.ascii.eqlIgnoreCase(e.platform.slice(), platform)) continue;
+            if (std.ascii.eqlIgnoreCase(e.id.slice(), id)) return i;
+        }
+        return null;
     }
 
     pub fn find(self: *const BanList, id: []const u8) ?usize {
@@ -234,6 +273,13 @@ pub const BanList = struct {
             if (std.ascii.eqlIgnoreCase(e.id.slice(), id)) return i;
         }
         return null;
+    }
+
+    pub fn removeId(self: *BanList, platform: []const u8, id: []const u8) bool {
+        const i = self.findId(platform, id) orelse return false;
+        self.entries[i] = self.entries[self.n - 1];
+        self.n -= 1;
+        return true;
     }
 
     pub fn remove(self: *BanList, id: []const u8) bool {
@@ -248,6 +294,12 @@ pub const BanList = struct {
     pub fn banned(self: *BanList, id: []const u8, now: i64) bool {
         self.expire(now);
         return self.find(id) != null;
+    }
+
+    /// True when the platform identity is banned at `now`.
+    pub fn bannedId(self: *BanList, platform: []const u8, id: []const u8, now: i64) bool {
+        self.expire(now);
+        return self.findId(platform, id) != null;
     }
 
     pub fn expire(self: *BanList, now: i64) void {
@@ -266,13 +318,14 @@ pub fn writeBanList(w: *std.Io.Writer, list: *const BanList) !void {
     try w.writeAll("Ban list entries:\n");
     // Timestamps are UTC (formatUnix applies no zone offset); say so in the
     // header, since an operator reading a bare stamp assumes local time.
-    try w.writeAll("  Banned until (UTC) - UserID (name) - Reason\n");
+    try w.writeAll("  Banned until (UTC) - UserID (platform/name) - Reason\n");
     for (list.entries[0..list.n]) |*e| {
         var tb: [24]u8 = undefined;
-        try w.print("  {s} - {s} ({s}) - {s}\n", .{
+        try w.print("  {s} - {s} ({s}/{s}) - {s}\n", .{
             formatUnix(&tb, e.expires_unix),
             e.id.slice(),
-            e.id.slice(),
+            if (e.platform.len == 0) "-" else e.platform.slice(),
+            if (e.name.len == 0) e.id.slice() else e.name.slice(),
             if (e.reason.len == 0) "-unknown-" else e.reason.slice(),
         });
     }
@@ -353,8 +406,17 @@ pub const LoadResult = struct {
 };
 
 pub fn serializeBans(w: *std.Io.Writer, list: *const BanList) !void {
+    // 5 fields: expires \t platform \t id \t name \t reason. A platform-keyed
+    // entry has a non-empty platform; name-keyed entries (legacy, no platform
+    // session) write an empty platform column and id = name.
     for (list.entries[0..list.n]) |*e| {
-        try w.print("{d}\t{s}\t{s}\n", .{ e.expires_unix, e.id.slice(), sanitize(e.reason.slice()) });
+        try w.print("{d}\t{s}\t{s}\t{s}\t{s}\n", .{
+            e.expires_unix,
+            e.platform.slice(),
+            e.id.slice(),
+            e.name.slice(),
+            sanitize(e.reason.slice()),
+        });
     }
 }
 
@@ -363,27 +425,40 @@ pub fn deserializeBans(list: *BanList, text: []const u8, now: i64) LoadResult {
     list.* = .{};
     var it = std.mem.tokenizeAny(u8, text, "\r\n");
     while (it.next()) |line| {
+        var fields: [5][]const u8 = undefined;
+        var nf: usize = 0;
         var f = std.mem.splitScalar(u8, line, '\t');
-        const exp_s = f.next() orelse {
-            res.skipped += 1;
-            continue;
-        };
-        const id = f.next() orelse {
-            res.skipped += 1;
-            continue;
-        };
-        const reason = f.next() orelse "";
-        const exp = std.fmt.parseInt(i64, exp_s, 10) catch {
-            res.skipped += 1;
-            continue;
-        };
-        if (id.len == 0) {
+        while (f.next()) |tok| {
+            if (nf >= fields.len) break;
+            fields[nf] = tok;
+            nf += 1;
+        }
+        if (nf < 2) {
             res.skipped += 1;
             continue;
         }
+        const exp = std.fmt.parseInt(i64, fields[0], 10) catch {
+            res.skipped += 1;
+            continue;
+        };
         // Expired on disk stays expired: reloading must not resurrect a ban.
         if (exp <= now) continue;
-        if (!list.add(id, exp, reason)) {
+        const ok = switch (nf) {
+            // Legacy 2-field line: expires \t id (reason absent).
+            2 => if (fields[1].len == 0) false else list.add(fields[1], exp, ""),
+            // Legacy 3-field line: expires \t name \t reason.
+            3 => if (fields[1].len == 0) false else list.add(fields[1], exp, fields[2]),
+            // New 5-field line: expires \t platform \t id \t name \t reason.
+            5 => blk: {
+                if (fields[2].len == 0) break :blk false;
+                break :blk if (fields[1].len == 0)
+                    list.add(fields[2], exp, fields[4])
+                else
+                    list.addId(fields[1], fields[2], fields[3], exp, fields[4]);
+            },
+            else => false,
+        };
+        if (!ok) {
             res.skipped += 1;
             continue;
         }
@@ -605,13 +680,64 @@ test "ban list is bounded and refuses to overflow" {
 test "ban list output matches stock header block" {
     var l: BanList = .{};
     _ = l.add("Alice", 1700000000, "griefing");
-    _ = l.add("Bob", 1700000000, "");
+    _ = l.addId("Steam", "76561198000000000", "Bob", 1700000000, "");
     var buf: [512]u8 = undefined;
     const out = try render(&buf, writeBanList, .{&l});
-    try std.testing.expect(std.mem.startsWith(u8, out, "Ban list entries:\n  Banned until (UTC) - UserID (name) - Reason\n"));
-    try std.testing.expect(std.mem.find(u8, out, "2023-11-14 22:13:20 - Alice (Alice) - griefing\n") != null);
+    try std.testing.expect(std.mem.startsWith(u8, out, "Ban list entries:\n  Banned until (UTC) - UserID (platform/name) - Reason\n"));
+    try std.testing.expect(std.mem.find(u8, out, "2023-11-14 22:13:20 - Alice (-/Alice) - griefing\n") != null);
     // Stock prints "-unknown-" where a field is missing, never an empty column.
-    try std.testing.expect(std.mem.find(u8, out, "- Bob (Bob) - -unknown-\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "- 76561198000000000 (Steam/Bob) - -unknown-\n") != null);
+}
+
+test "ban list platform-id keying survives a rename" {
+    var l: BanList = .{};
+    try std.testing.expect(l.addId("Steam", "76561198000000000", "OldName", 10_000, "griefing"));
+    try std.testing.expect(l.bannedId("Steam", "76561198000000000", 9_999));
+    // A rename cannot evade: the ban keys on the platform id, not the name.
+    try std.testing.expect(!l.banned("NewName", 9_999));
+    // Wrong platform or id does not match.
+    try std.testing.expect(!l.bannedId("EOS", "76561198000000000", 9_999));
+    try std.testing.expect(!l.bannedId("Steam", "76561198000000001", 9_999));
+    // Name-keyed entry is a separate key space.
+    try std.testing.expect(l.add("Botty", 10_000, ""));
+    try std.testing.expect(l.banned("Botty", 9_999));
+    try std.testing.expect(!l.bannedId("", "Botty", 9_999));
+    // Replacing by the same id refreshes, not duplicates.
+    try std.testing.expect(l.addId("steam", "76561198000000000", "NewName", 20_000, "still griefing"));
+    try std.testing.expectEqual(@as(usize, 2), l.n);
+    try std.testing.expectEqual(@as(i64, 20_000), l.entries[l.findId("Steam", "76561198000000000").?].expires_unix);
+    // removeId only clears the platform-keyed entry.
+    try std.testing.expect(l.removeId("Steam", "76561198000000000"));
+    try std.testing.expect(!l.bannedId("Steam", "76561198000000000", 9_999));
+}
+
+test "ban list serializes both key spaces and reads legacy rows" {
+    var l: BanList = .{};
+    _ = l.addId("Steam", "76561198000000000", "Bob", 10_000, "griefing");
+    _ = l.add("Alice", 20_000, "");
+    var buf: [1024]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try serializeBans(&w, &l);
+    const text = w.buffered();
+
+    var l2: BanList = .{};
+    const res = deserializeBans(&l2, text, 0);
+    try std.testing.expectEqual(@as(usize, 2), res.loaded);
+    try std.testing.expectEqual(@as(usize, 0), res.skipped);
+    try std.testing.expect(l2.bannedId("Steam", "76561198000000000", 9_999));
+    try std.testing.expect(l2.banned("Alice", 19_999));
+
+    // Legacy 3-field rows keep working as name-keyed bans.
+    var l3: BanList = .{};
+    const legacy = "100000\tLegacyUser\ttemp\n";
+    const res3 = deserializeBans(&l3, legacy, 0);
+    try std.testing.expectEqual(@as(usize, 1), res3.loaded);
+    try std.testing.expect(l3.banned("LegacyUser", 99_999));
+    // Expired rows are dropped, not resurrected.
+    var l4: BanList = .{};
+    const res4 = deserializeBans(&l4, "5\tOld\tgone\n", 10);
+    try std.testing.expectEqual(@as(usize, 0), res4.loaded);
+    try std.testing.expectEqual(@as(usize, 0), l4.n);
 }
 
 test "admin and whitelist listings match stock headers" {
@@ -685,7 +811,9 @@ test "reason separators cannot corrupt the stored line" {
     var buf: [256]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try serializeBans(&w, &l);
-    try std.testing.expectEqualStrings("5000\tAlice\t-unknown-\n", w.buffered());
+    // 5-field form: expires \t platform \t id \t name \t reason; a name-keyed
+    // entry has an empty platform column and id = name.
+    try std.testing.expectEqualStrings("5000\t\tAlice\tAlice\t-unknown-\n", w.buffered());
 }
 
 test "formatUnix covers epoch, a known date and a negative timestamp" {

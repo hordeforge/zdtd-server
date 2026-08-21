@@ -348,6 +348,28 @@ the fan-out. RE pin: 7dtd-research protocol-packages.md 5.9. C2S handled
 names 78 -> 79 of the 98 stock client sends; Net and ops stays 43/8/5,
 total **182/107/44**.
 
+EntityAwardKillServer handled 2026-08-21 (C2S handler row, stays PARTIAL):
+the client's kill report (killerEntityId + killedEntityId, sent from
+OnEntityDeath -> AwardKill when the local player scored the kill) is a
+validated no-op: zdtd credits kill objectives and XP authoritatively at the
+death path (questOnZombieKilled for melee/ranged/turret/trap kills), so
+applying the client echo would double-credit. RE pin: 7dtd-research
+protocol-packages.md 5.10 (documents the stock SharedKillClient -> client
+report -> QuestEventManager.EntityKilled credit flow). C2S handled names
+79 -> 80 of the 98 stock client sends; Net and ops stays 43/8/5, total
+**182/107/44**.
+
+Platform-id-keyed bans shipped 2026-08-21 (bans row, stays PARTIAL): the
+ban key is now the platform user id like stock AdminBlacklist
+(BannedUser.UserIdentifier). `ban add` on an online target stores its
+primary platform identity + name, and the login gate checks the platform id
+first (name as a fallback key for legacy bans.zsv rows and no-platform
+sessions), so a rename cannot evade a ban. bans.zsv serializes as
+`exp \t platform \t id \t name \t reason` with legacy 2/3-field rows read
+back. Remaining open items unchanged: serveradmin.xml is not read and
+ServerReservedSlots / ServerAdminSlots are not implemented. Net and ops
+stays 43/8/5, total **182/107/44**.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

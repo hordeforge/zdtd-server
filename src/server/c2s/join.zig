@@ -118,8 +118,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
         }
         // Identity ban (`ban add`) outlives the connection an IP ban catches,
-        // so it is checked once the login name is known.
-        if (c.name_len != 0 and self.ban_list.banned(c.name[0..c.name_len], clock.wallSeconds())) {
+        // so it is checked once the login identity is known. The primary key
+        // is the platform id (stock AdminBlacklist keys on the platform
+        // identifier, so a rename cannot evade); name-keyed entries cover
+        // legacy bans.zsv rows and sessions without a platform identity.
+        const wall_now = clock.wallSeconds();
+        var banned = false;
+        if (c.puid_primary.get()) |pid| {
+            banned = self.ban_list.bannedId(pid.platform, pid.id, wall_now);
+        }
+        if (!banned and c.name_len != 0) banned = self.ban_list.banned(c.name[0..c.name_len], wall_now);
+        if (banned) {
             self.harness.counters.inc(.join_fail);
             self.dropClientSlot(c.slot, "identity-ban");
             return true;

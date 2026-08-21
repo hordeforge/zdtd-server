@@ -515,7 +515,19 @@ pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
         .remove => |t| {
             var idb: [96]u8 = undefined;
             const id = self.adminTargetId(t, &idb);
-            _ = self.ban_list.remove(id);
+            // A platform id (digits beyond slot range, or an online slot with
+            // a platform session) resolves to a platform-keyed entry; names
+            // fall back to the name-keyed entries (legacy/no-session).
+            var removed = false;
+            switch (self.resolveAdminTarget(t)) {
+                .slot => |slot| {
+                    if (self.clients[slot].puid_primary.get()) |pid| {
+                        removed = self.ban_list.removeId(pid.platform, pid.id);
+                    }
+                },
+                else => {},
+            }
+            if (!removed) _ = self.ban_list.remove(id);
             self.saveAdminLists();
             var b: [160]u8 = undefined;
             const s = std.fmt.bufPrint(&b, "{s} removed from ban list.\n", .{id}) catch return;
@@ -526,7 +538,22 @@ pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {
             const id = self.adminTargetId(a.target, &idb);
             const now = clock.wallSeconds();
             const until = std.math.add(i64, now, a.seconds) catch std.math.maxInt(i64);
-            if (!self.ban_list.add(id, until, a.reason)) {
+            // Key the ban on the target's platform id when one exists (stock
+            // AdminBlacklist keys on the platform identifier), so a rename
+            // cannot evade it; targets without a platform session (offline,
+            // loadgen bots) fall back to a name-keyed entry.
+            var added = false;
+            switch (self.resolveAdminTarget(a.target)) {
+                .slot => |slot| {
+                    const cl = &self.clients[slot];
+                    if (cl.puid_primary.get()) |pid| {
+                        added = self.ban_list.addId(pid.platform, pid.id, cl.name[0..cl.name_len], until, a.reason);
+                    }
+                },
+                else => {},
+            }
+            if (!added) added = self.ban_list.add(id, until, a.reason);
+            if (!added) {
                 self.adminReply("ban list full\n");
                 return;
             }
