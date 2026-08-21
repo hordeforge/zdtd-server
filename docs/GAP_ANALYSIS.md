@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 21 | 23 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 22 | 22 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **204** | **91** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **205** | **90** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1852,7 +1852,7 @@ behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
 gamestage, no wandering hordes, and no screamers.
 
-**21 WORKS · 23 PARTIAL · 4 MISSING**
+**22 WORKS · 22 PARTIAL · 4 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -2064,11 +2064,21 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/path.zig:1-8`, `src/ecs/systems.zig:28-37`,
   `Data/Config/entityclasses.xml:559`
 
-- **Wander does not path and freezes Y** `PARTIAL`
-  `wanderUpdate` calls `stepToward`, which only writes transform.x/z/yaw: it never
-  touches `.y` and never consults the step predicate. A wandering zombie on a
-  hillside keeps its spawn height and walks straight through walls.
-  *Anchors:* `src/ecs/systems.zig:1416-1426`, `:142-151`, `:1372-1382`
+- **Wander does not path and freezes Y** `WORKS` `(2026-08-21)`
+  The row's two defects were fixed by the AI movement rewrite (stepToward now
+  slides/collides through `bodyClearAt`, steps up ledges up to step_height,
+  shoves entities, jumps or digs when fully blocked, and `applyGravity` runs
+  once per AI tick snapping Y to the ground or falling with gravity), so a
+  wandering body settles on terrain and cannot walk through walls. 2026-08-21:
+  the remaining "does not path" gap is closed — `wanderUpdate` now routes the
+  same A* chase machinery (`chaseAlongPath` + `replanPath`, step_fn-gated) as
+  the chase, so a wanderer detours around obstacles on the navmesh instead of
+  sliding straight into them (stock EAIWander walks to the spot via the
+  navmesh); without a step hook it degenerates to the direct line. Test
+  `wandering zombie paths around a wall via A*` proves the detour.
+  *Anchors:* `src/ecs/systems.zig` wanderUpdate + chaseAlongPath,
+  test `wandering zombie paths around a wall via A*`,
+  asm.il:438366 (EAIWander::Update)
 
 - **BreakBlock / DestroyArea block chewing** `WORKS`
   When a replan cannot reach the goal, `path_blocked` latches and the mutex-0 tasks

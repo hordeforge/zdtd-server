@@ -2294,11 +2294,14 @@ fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) void {
     ai.alert = false;
     ai.target_id = -1;
     ai.has_path = false;
-    ai.clearPath();
     ai.path_blocked = false;
     // EAIWander::Update (asm.il:438366): accumulate run time for the 30 s cap.
     ai.wander_time += dt;
-    stepToward(w, s, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
+    // Stock EAIWander paths to the spot on the navmesh; zdtd routes the same
+    // A* chase machinery (replan + waypoint follow, step_fn-gated), so a
+    // wanderer detours around obstacles instead of sliding straight into
+    // them. Without a step hook chaseAlongPath degenerates to the direct line.
+    chaseAlongPath(w, s, ai, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
 }
 
 /// EntityItem.tickDistraction (asm.il EntityItem:1341): dropped items carrying
@@ -3249,6 +3252,32 @@ test "system zombie paths around solid wall via A*" {
     // Should have progressed toward the player (around the wall), not stuck at x~1.
     try std.testing.expect(w.transform[zs].x > 2.0);
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+
+test "wandering zombie paths around a wall via A*" {
+    // Stock EAIWander walks to the spot on the navmesh; the straight-line
+    // stepToward slid a wanderer into the obstacle. With step_fn wired, the
+    // wander uses the same A* chase machinery and detours around the wall.
+    // (startTask(.wander) re-seeds the wander spot, so this drives
+    // wanderUpdate directly with a fixed target.)
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = testWallStep; // wall at x=2, z=-2..2
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    const ai = &w.zombie_ai[zs];
+    // Wander target beyond the wall.
+    ai.wander_tx = 6;
+    ai.wander_tz = 0;
+    var t: f32 = 0;
+    while (t < 10.0) : (t += 0.05) {
+        wanderUpdate(&w, zs, ai, 2.0, 0.05);
+        applyGravity(&w, zs, 0.05);
+    }
+    // Detoured around the z=-2..2 wall segment instead of sliding against it.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expectEqual(c.AiState.wander, ai.state);
 }
 
 test "chase reuses one solve for many steps instead of replanning per metre" {

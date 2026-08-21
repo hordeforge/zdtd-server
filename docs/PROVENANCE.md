@@ -283,6 +283,7 @@ field-by-field provenance.
 | `Ai.sense_dist_sq` | 48² | A | **Floor**: `entityclasses.xml` SightRange (stock 27/30/40 m per class) |
 | `Ai.chase_speed` | 2.2 | A | **Floor**: `entityclasses.xml` MoveSpeedAggro ×1.6 when non-zero |
 | `Ai.wander_speed` | 0.8 | A | **Floor**: `entityclasses.xml` MoveSpeed ×10 when non-zero |
+| `wanderUpdate` routing | chaseAlongPath | R | Wander paths on the A* navmesh like the chase (stock EAIWander walks to the spot via the navmesh, asm.il:438366); step_fn-gated, direct-line fallback without a step hook |
 | `Ai.full_dist_sq` / `mid_dist_sq` | 64² / 225 | R | LOD steps (RE: entity-ai.md AI LOD) |
 | `Ai.execute_delay_scale` | 0.85 | R | `EAITaskList.executeDelayScale` base (asm.il:437541) |
 | `Ai.look_turn_speed_deg` | 250.0 | A | Per-class MaxTurnSpeed, zombieTemplateMale (`entityclasses.xml`) |

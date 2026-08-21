@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 204 `WORKS`,
-91 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 205 `WORKS`,
+90 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -150,6 +150,12 @@ with world-container eviction (full table reuses a non-player-placed
 container, regenerated deterministically from the next chunk scan; player
 chests never evicted), so Navezgane's thousands of loot containers all appear
 and stay lootable. Items 14/12/7 -> **15/12/6**; total **204/91/38**.
+Then the wander row went WORKS: wanderUpdate now routes the same A* chase
+machinery (replan + waypoints, step_fn-gated), so a wanderer detours around
+obstacles instead of sliding into them (stock EAIWander paths on the
+navmesh); the row's frozen-Y/wall-clipping defects were already fixed by the
+collision + gravity rewrite. Test proves the wall detour. Entities 21/23/4
+-> **22/22/4**; total **205/90/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

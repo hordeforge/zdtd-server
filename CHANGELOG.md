@@ -16,6 +16,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Wandering zombies now path on the A* navmesh like the chase: `wanderUpdate`
+  routes the same replan + waypoint machinery as `chaseAlongPath`, so a
+  wanderer detours around obstacles instead of sliding straight into them
+  (stock EAIWander walks to its spot via the navmesh).
 - Loot-container discovery covers Navezgane-scale maps: the container store is
   now 4096 entries with world-container eviction (a full table reuses a
   non-player-placed container, which regenerates deterministically from the
