@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 176 `WORKS`,
-113 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 177 `WORKS`,
+112 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -213,6 +213,12 @@ single datagrams + fragment parts at it), so a path MTU below the old fixed
 1327 no longer drops every reliable datagram and kills the join. Outbound
 Ping / RTT-adaptive retransmit stays a documented non-client-visible residual
 (10 s RX-silence reap covers dead peers). Total 175/114/44 -> **176/113/44**.
+
+Block rotation in streamed chunks flipped 2026-08-21 (Net and ops 37/14/5 ->
+38/13/5): the row was stale - the SetBlock handler stores the full BlockValue
+raw and the chunk encoder reads the raw plane, so doors/wedges/shapes stream
+and relog in their real rotation (GAP 13 DONE 2026-08-07). Total 176/113/44
+-> **177/112/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

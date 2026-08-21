@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (176/113/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (177/112/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 37 | 14 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **176** | **113** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 38 | 13 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **177** | **112** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**37 WORKS · 14 PARTIAL · 5 MISSING**
+**38 WORKS · 13 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3711,15 +3711,16 @@ persists so little that a restart visibly damages a built base.
   survives for only the last 64 damaged blocks.
   *Anchors:* `src/server/game.zig:461-467`, `:3305-3325`, `:3350-3402`
 
-- **Block rotation in streamed chunks** `PARTIAL`
-  The SetBlock handler calls `world.setBlockWorld(x,y,z,place_id)`, which stores the
-  u16 id, so the upper 16 rotation/meta bits never reach the chunk. `blockRawAt` is
-  consulted only for the SetBlock echo, the power registry and the damage path,
-  never by the chunk encoder. A second client streaming that chunk, or the same
-  client after a relog, sees every player-placed door, wedge and shape in default
-  rotation.
-  *Anchors:* `src/world/store.zig:260-262`, `:653-658`,
-  `src/server/game.zig:5183`, `:5194-5197`, `:5213-5219`
+- **Block rotation in streamed chunks** `WORKS` `(2026-08-21)`
+  Stale row (fixed by the chunk raw plane, GAP 13 DONE 2026-08-07): the SetBlock
+  handler stores the full BlockValue raw (`setBlockRawWorld` with the client's
+  rotation/meta bits) and the chunk encoder reads the full raw plane
+  (`BlockCtx.at` -> `Chunk.rawAt`), so a second client streaming the chunk, or a
+  relog, renders player-placed doors, wedges and shapes in their real rotation;
+  ZCH3 persists the raw plane.
+  *Anchors:* `src/server/c2s/blocks.zig` SetBlock `place_raw`,
+  `src/server/game/chunk_fill.zig` `BlockCtx.at`, `src/world/store.zig`
+  `setBlockRawWorld`/`rawAt`
 
 - **Land claim persistence** `WORKS` *(duplicate of §11 entry)*
   See World systems §11: claims persist via `claims.zlc` and survive restart.
