@@ -176,6 +176,13 @@ pub const Peer = struct {
     /// even though nothing can be due until resend_ns has elapsed.
     next_resend_check_ns: u64 = 0,
     last_recv_ns: u64 = 0,
+    /// Negotiated packet size, learned from the peer's MtuCheck probes (the
+    /// client discovers the path MTU by stepping the stock PossibleMtu list
+    /// 1024..1432; the server echoes MtuOk and records the size). S2C
+    /// fragments and single datagrams are capped at it, so a low-MTU path
+    /// cannot kill the join with oversized datagrams. 0 = not yet negotiated
+    /// (sends fall back to packet.max_packet_size).
+    peer_mtu: usize = 0,
     next_frag_id: u16 = 1,
     /// Inbound fragment reassembly. Stock LiteNetLib keys assemblies by
     /// fragmentId (a dictionary); two large C2S messages (a Bag plus a
@@ -237,7 +244,8 @@ pub const Peer = struct {
     /// Fire-and-forget unreliable (LiteNet property Unreliable). No retransmit.
     /// Use for high-rate cosmetic motion; game-critical still sendReliable.
     pub fn sendUnreliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
-        if (user.len > packet.max_single_user) return error.Overflow;
+        const eff_mtu: usize = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
+        if (user.len > @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size)) return error.Overflow;
         if (self.capture) |cap| cap.push(user);
         var buf: [packet.max_packet_size]u8 = undefined;
         // Unreliable header: property byte 0 + user
@@ -254,14 +262,20 @@ pub const Peer = struct {
         }
         if (user.len > max_payload) return error.Overflow;
 
-        // Single datagram when it fits MTU (matches stock non-fragment path).
-        if (user.len <= packet.max_single_user) {
+        // Single datagram when it fits the negotiated MTU (matches stock
+        // non-fragment path). The cap follows the peer's MtuCheck so a low-MTU
+        // path is not hit with an oversized datagram.
+        const eff_mtu = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
+        const single_max = @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size);
+        if (user.len <= single_max) {
             try self.sendOneReliable(sock, user, null);
             return;
         }
 
         // Fragment large messages (PackageIds, stock PlayerLogin tickets, …).
-        const part_max = packet.max_fragment_user;
+        // Part size follows the negotiated MTU; a floor keeps pathological
+        // sizes (sub-100 MTU) from degenerating to a part per byte.
+        const part_max = @max(@as(usize, 100), @min(packet.max_fragment_user, eff_mtu -| packet.fragmented_header_total));
         const total_parts: u16 = @intCast((user.len + part_max - 1) / part_max);
         if (total_parts > max_frag_parts) return error.Overflow;
         const frag_id = self.next_frag_id;
@@ -603,8 +617,18 @@ pub const Peer = struct {
                 return null;
             },
             .mtu_check => {
-                // Echo as MtuOk so client MTU discovery completes (same size payload).
+                // Echo as MtuOk so client MTU discovery completes (same size
+                // payload), and record the probe size: the client steps the
+                // stock PossibleMtu list ascending, so the last probe is the
+                // negotiated path MTU, which S2C sends must respect.
                 if (raw.len >= 1) {
+                    // Probes step the stock PossibleMtu list ascending, so the
+                    // max seen is the negotiated size; 0 = not yet negotiated.
+                    // Clamped to packet.max_packet_size: the part/pending
+                    // buffers are sized for the conservative 1327, so the
+                    // negotiated MTU only ever lowers the S2C size (the stock
+                    // full-1432 throughput is a buffer-growth follow-up).
+                    self.peer_mtu = @min(@max(self.peer_mtu, @min(raw.len, 1500)), packet.max_packet_size);
                     var ok_buf: [1500]u8 = undefined;
                     const n = @min(raw.len, ok_buf.len);
                     @memcpy(ok_buf[0..n], raw[0..n]);

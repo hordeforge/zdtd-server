@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 175 `WORKS`,
-114 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 176 `WORKS`,
+113 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -205,6 +205,14 @@ Reliable-window-starvation residual). Combined with the IdMapping deflate
 (slice 57), the join burst no longer saturates the 64-slot window; the loadgen
 drop residual is a harness polling-loop artifact, not server behavior. Total
 173/116/44 -> **175/114/44**.
+
+MTU negotiation shipped 2026-08-21 (Net and ops 36/15/5 -> 37/14/5): the
+MtuCheck probes now drive a per-peer negotiated MTU (client steps the stock
+PossibleMtu list ascending; the server records the max probe and caps S2C
+single datagrams + fragment parts at it), so a path MTU below the old fixed
+1327 no longer drops every reliable datagram and kills the join. Outbound
+Ping / RTT-adaptive retransmit stays a documented non-client-visible residual
+(10 s RX-silence reap covers dead peers). Total 175/114/44 -> **176/113/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

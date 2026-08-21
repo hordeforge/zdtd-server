@@ -125,7 +125,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/world.zig` | R | ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers |
 | `src/fuzz.zig` | Z | Coverage-guided fuzz targets for remote wire parsing boundaries and other untrusted-input surfaces (admin lines, map XML, COG headers, |
 | `src/litenet/packet.zig` | R | LiteNetLib wire packet property helpers. Property ordinals match the **game** Managed LiteNetLib (7DTD V3.1.0 b14), |
-| `src/litenet/peer.zig` | R | Per-endpoint reliable-ordered channel (LiteNetLib-compatible subset). Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing | fragment per-part loop pumps to the outer send deadline (no outer stream restart for live peers)
+| `src/litenet/peer.zig` | R | Per-endpoint reliable-ordered channel (LiteNetLib-compatible subset). Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing | fragment per-part loop pumps to the outer send deadline (no outer stream restart for live peers) per-peer negotiated MTU from MtuCheck probes caps S2C sizes (low-MTU joins)
 | `src/litenet/root.zig` | R | LiteNetLib-compatible UDP transport (peers, packets, std.Io.net UDP). |
 | `src/litenet/server.zig` | R | UDP LiteNetLib-compatible server (accept + reliable user data) | ConnectRequest-level rate limit (stock ConnectionRequestCheck, reject_rate_limit Disconnect; 64-entry table with oldest eviction)
 | `src/litenet/udp_socket.zig` | Z | UDP socket via Zig 0.16 `std.Io.net` (no raw `std.os.linux` syscalls). Non-blocking poll: zero-duration Timeout → WouldBlock/Timeout |

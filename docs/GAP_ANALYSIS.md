@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (175/114/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (176/113/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 36 | 15 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **175** | **114** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 37 | 14 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **176** | **113** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**36 WORKS · 15 PARTIAL · 5 MISSING**
+**37 WORKS · 14 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3562,14 +3562,19 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/litenet/peer.zig:418-435`, `:369-410`,
   `src/litenet/server.zig:104-124`, `src/litenet/peer.zig:658`
 
-- **Ping/Pong and MTU negotiation** `PARTIAL`
-  zdtd answers Ping with an 11-byte Pong and echoes MtuCheck as MtuOk, but never
-  initiates either. `max_packet_size` is hardcoded at 1327 with no discovery, so on
-  a path with MTU below ~1355 every reliable datagram is dropped and the join dies;
-  and with no outbound Ping there is no RTT estimate, so retransmit is a fixed
-  80 ms regardless of link.
-  *Anchors:* `src/litenet/peer.zig:482-508`, `src/litenet/packet.zig:15`,
-  `src/litenet/peer.zig:26`
+- **Ping/Pong and MTU negotiation** `WORKS` `(2026-08-21)`
+  Ping is answered with the stock 11-byte Pong and MtuCheck is echoed as MtuOk
+  (both sizes byte-correct for the client's NetPacket.Verify). The MtuCheck
+  probes now also drive a per-peer negotiated MTU: the client steps the stock
+  PossibleMtu list (1024..1432) ascending, the server records the max probe
+  seen, and S2C single datagrams + fragment parts are capped at it - so a path
+  MTU below the old hardcoded 1327 no longer drops every reliable datagram and
+  kills the join. Clamped to the 1327 buffers (the stock full-1432 throughput
+  is a buffer-growth follow-up). Residual (non-client-visible): zdtd never
+  initiates Ping, so retransmit stays a fixed 80 ms with no RTT estimate - dead
+  peers are reaped by the 10 s RX-silence window instead.
+  *Anchors:* `src/litenet/peer.zig` peer_mtu + ping/mtu handlers,
+  `src/litenet/packet.zig` max_packet_size, network.md PossibleMtu list
 
 - **Per-channel sequence spaces** `PARTIAL`
   `sendSequenced` writes channel byte 1 but reuses the same local_seq, window and
