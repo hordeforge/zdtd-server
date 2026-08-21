@@ -1511,6 +1511,12 @@ pub const Game = struct {
         return game_join.sendWorldSpawnPoints(self, peer);
     }
 
+    /// Build and send NetPackageChunkClusterInfo (protocol.md step 11; client
+    /// gates spawn-point application on chunkClusterLoaded).
+    pub fn sendChunkClusterInfo(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendChunkClusterInfo(self, peer);
+    }
+
     /// Build and send NetPackageWorldAreas from the trader POIs on the loaded
     /// map (stock: World.TraderAreas, one TraderArea per TraderArea=True
     /// prefab). Position = the decoration origin, size = the prefab size,

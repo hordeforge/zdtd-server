@@ -1653,6 +1653,47 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     return wr.written();
 }
 
+/// Stock NetPackageChunkClusterInfo body (NetPackageChunkClusterInfo.write
+/// IL=36): name:string, cMinPos:2xi32, cMaxPos:2xi32, bInfinite:bool,
+/// pos:Vector3 (3xf32). Server fills from `Setup(ChunkCluster)`: name =
+/// GamePrefs.GameWorld, cMin/cMax = WorldChunkCache.ChunkMinPos/MaxPos,
+/// bInfinite = !IsFixedSize, pos = ChunkCluster.Position. The client
+/// (GameManager.ChunkClusterInfo -> chunkClusterInfoCo, V3.1.0 b14) stores
+/// pos/min/max on its ChunkCache, and only when bInfinite=false sets
+/// IsFixedSize and calls the (no-op in b14) border-box methods; `name` is
+/// never read client-side. Fixed maps send the ChunkProviderDisc bounds
+/// formula; infinite worlds keep the WorldChunkCache ctor defaults (0,0).
+pub fn buildChunkClusterInfoBody(buf: []u8, name: []const u8, cmin: [2]i32, cmax: [2]i32, b_infinite: bool, pos: [3]f32) ![]u8 {
+    var wr: binary.Writer = .{ .buf = buf };
+    try wr.writeString(name);
+    try wr.writeI32(cmin[0]);
+    try wr.writeI32(cmin[1]);
+    try wr.writeI32(cmax[0]);
+    try wr.writeI32(cmax[1]);
+    try wr.writeBool(b_infinite);
+    try wr.writeF32(pos[0]);
+    try wr.writeF32(pos[1]);
+    try wr.writeF32(pos[2]);
+    return wr.written();
+}
+
+test "chunk cluster info body layout" {
+    var buf: [64]u8 = undefined;
+    const body = try buildChunkClusterInfoBody(&buf, "Navezgane", .{ -195, -198 }, .{ 195, 195 }, false, .{ 0, 0, 0 });
+    var rd: binary.Reader = .{ .data = body };
+    var name_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Navezgane", try rd.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, -195), try rd.readI32());
+    try std.testing.expectEqual(@as(i32, -198), try rd.readI32());
+    try std.testing.expectEqual(@as(i32, 195), try rd.readI32());
+    try std.testing.expectEqual(@as(i32, 195), try rd.readI32());
+    try std.testing.expectEqual(false, try rd.readBool());
+    try std.testing.expectEqual(@as(f32, 0), try rd.readF32());
+    try std.testing.expectEqual(@as(f32, 0), try rd.readF32());
+    try std.testing.expectEqual(@as(f32, 0), try rd.readF32());
+    try std.testing.expectEqual(@as(usize, body.len), rd.pos);
+}
+
 test "world info body layout ends with hashCount0 and worldDataSize" {
     var buf: [256]u8 = undefined;
     const body = try buildWorldInfoBody(&buf, "Navezgane", 6144, 6144, 0, 0, 0, 0);

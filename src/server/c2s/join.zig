@@ -175,6 +175,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         try self.sendLocalConfigFiles(peer);
         const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
         try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
+        // Stock order: WorldInfo (10) then ChunkClusterInfo (11); the client
+        // sets chunkClusterLoaded and only then applies spawn points (12).
+        try self.sendChunkClusterInfo(peer);
         try self.sendWorldSpawnPoints(peer);
         // Stock sends World.TraderAreas right after SpawnPoints and before
         // GameStats (GameManager/<RequestToEnterGame>d__195 MoveNext,

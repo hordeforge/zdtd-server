@@ -302,6 +302,22 @@ The per-channel sequence row flipped to WORKS (2026-08-21): the old
 no sequenced-channel packages and the ACK/reliable window is channel-2 only
 (Net and ops 42/9/5 -> 43/8/5; total **182/107/44**).
 
+ChunkClusterInfo shipped 2026-08-21 (S2C emission row, stays PARTIAL): the
+enter bundle now sends NetPackageChunkClusterInfo right after WorldInfo -
+the client's chunkClusterInfoCo stores Position/bounds and only then lets
+setSpawnPointListCo apply the spawn list (which the death screen and the
+provider spawn points depend on; without the package that coroutine spun
+until disconnect). Fixed DTM maps send bInfinite=false with the
+ChunkProviderDisc bounds formula ((-195,-198)/(195,195) for Navezgane,
+(-259,-262)/(259,259) for Pregen08k, truncating div); proc/flat send
+bInfinite=true with (0,0)/(0,0) and pos (0,0,0), matching the WorldChunkCache
+ctor defaults and primary-cluster Position. The b14 client's border-box
+methods are no-op stubs and no client code subscribes to the fixed-size
+finished-loading delegate, so the fixed-size branch cannot wedge it. RE pin:
+7dtd-research protocol-packages.md 4.4. No scorecard change (the row's
+PARTIAL reflects the remaining never-sent names, all non-client-visible
+or RE-gated; Net and ops stays 43/8/5, total **182/107/44**).
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

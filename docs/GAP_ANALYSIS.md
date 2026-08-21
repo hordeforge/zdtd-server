@@ -3346,8 +3346,11 @@ persists so little that a restart visibly damages a built base.
   backpack marker broadcasts on drop and clears on collect
   (NetPackagePlayerSetBackpackPosition, 2026-08-21). Turrets stream their
   aim/on state to viewers (NetPackageTurretSync, 2026-08-21, change-gated in
-  the replicate fan-out). ToClient names never sent at all include
-  EntitySetSkillLevelClient, ChunkClusterInfo, WallVolume, Light, TreeFade,
+  the replicate fan-out). Join ships the primary cluster descriptor
+  (NetPackageChunkClusterInfo, 2026-08-21, right after WorldInfo per the
+  client's chunkClusterLoaded gate; ChunkProviderDisc bounds for fixed DTM
+  maps, infinite (0,0)/(0,0) for proc/flat). ToClient names never sent at all
+  include EntitySetSkillLevelClient, WallVolume, Light, TreeFade,
   AudioPlayInHead, WaterSimChunkUpdate, AuthState.
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
@@ -3356,6 +3359,21 @@ persists so little that a restart visibly damages a built base.
   rides EntitySpawn flags); the sleeper trio wake path is wired (SleeperWakeup
   on proximity/noise/damage wake, passive spawn flags). Turrets do not
   animate.
+  Never-sent non-goals (2026-08-21, all cited from the V3.1.0 b14 dump):
+  EntitySetSkillLevelClient (perk/skill progression sync - zdtd has no skill
+  system; the progression area tracks it), WallVolume (prefab wallvolume
+  data + World.AddWallVolume broadcast - zdtd does not load wallvolume
+  definitions, so there is nothing to send and the sim does not repel with
+  them), Light (LightManager/NetPackageLight Setup(entityId, level) - dynamic
+  light-flicker rendering, cosmetic), TreeFade (EntityFallingTree fade FX,
+  cosmetic), AudioPlayInHead (one-shot client SFX; stock senders are
+  EntityNPC.PlayVoiceSetEntry trader/NPC voice lines and
+  EntityDrone.BroadcastPlayVO, cosmetic audio), WaterSimChunkUpdate
+  (fine-grained water-flow voxel deltas for the client's cosmetic water sim;
+  server-authoritative water still streams as blocks), AuthState
+  (AuthorizationManager StateLocalizationKey - the "Login: ..." progress
+  text in XUiC_ProgressWindow; EAC-scope authorizer UX, no gameplay effect
+  with the stock client's default progress text).
   *Anchors:* `src/server/game/map.zig` (`tickMapChunks`, `chunkMapColors`,
   `tickPlayerPositions`), `src/server/c2s/misc.zig` (MapPosition),
   `src/server/game/join.zig` (`sendWorldAreas`),
@@ -3805,13 +3823,21 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
   `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
-- **Per-peer memory footprint** `PARTIAL`
-  Each Peer statically embeds `asm_parts[512][1317]` (674 KiB), two 512 KiB buffers
-  and `pending[64]` of 1327-byte slots, i.e. roughly 1.8 MiB per peer, times
-  `max_peers = 64` gives about 115 MiB of Server struct resident regardless of how
-  many players are online. Plus Game's own send_buf 256 KiB, body_buf 512 KiB,
-  recv_buf 64 KiB and payload_hold 64 KiB.
-  *Anchors:* `src/litenet/peer.zig:154-167`, `src/litenet/server.zig:8-13`,
+- **Per-peer memory footprint** `PARTIAL` `(2026-08-21 recount)`
+  Each Peer statically embeds (LiteNet `Peer`, exact counts): two fragment
+  `Assembly` slots (399 parts × 1317 B + bitmaps ≈ 514 KiB each → ~1.0 MiB),
+  `deliver_buf` + `extra_buf` (2 × 512 KiB), `pending[64]` × 1340 B (~84 KiB)
+  and the out-of-order `hold` window (64 × 1325 B, ~83 KiB) - about **2.2 MiB
+  of address space per peer**, × `max_peers = 64` ≈ **139 MiB** of Server
+  struct reservation regardless of how many players are online. All payload
+  arrays are `undefined` (lazy pages), so resident memory tracks actual
+  traffic; a quiet peer touches only its pending/hold/deliver paths. Plus
+  Game's own send_buf 256 KiB, body_buf 512 KiB, recv_buf 64 KiB and
+  payload_hold 64 KiB (~0.9 MiB, not per-peer). Non-client-visible
+  engineering item (no stock wire/sim counterpart); a shared, traffic-sized
+  reassembly pool would cut the reservation to a fraction and is the natural
+  flip-to-WORKS change.
+  *Anchors:* `src/litenet/peer.zig` (`asm_slots:193`, `pending:172`, `deliver_buf:199`, `hold_data:209`, `extra_buf:211`), `src/litenet/server.zig:8-13`,
   `src/server/game.zig:366-377`
 
 - **Fuzzing of the network trust boundary** `WORKS`
@@ -4008,7 +4034,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | `NetPackageChunk` **stock layout** | HAVE (`stock_chunk.zig` + upper24; DTM + TTS; CGO green) |
 | `NetPackageChunkRemove` / `ChunkRemoveAll` | PARTIAL (ChunkRemove key streaming; no RemoveAll) |
-| `NetPackageChunkClusterInfo` | P2 |
+| `NetPackageChunkClusterInfo` | HAVE (2026-08-21): sent right after WorldInfo in the enter bundle; fixed DTM maps carry the ChunkProviderDisc bounds formula ((-195,-198)/(195,195) for Navezgane), proc/flat send infinite (0,0)/(0,0) with bInfinite=true. Client b14 border-box methods are no-op stubs, so no visual risk; the chunkClusterLoaded gate the client applies before spawn points is satisfied by the stock ordering |
 | `NetPackageWorldInfo` / game mode / seed | HAVE (fixedSizeCC closes overlay gate) |
 | `NetPackageBiomeIntensity` | PARTIAL (interleaved in chunk path) |
 | `NetPackageDecoUpdate` / deco reset | PARTIAL (join-time burst around spawn. Species and density are biome-driven: biomes.xml `<decorations>` filtered by resolved `IsDistantDecoration`, sampled with stock's `decorateChunkRandom` shape (128x128 deco chunks, 1000 attempts, `prob * 0.125f * 16f`). Placed deco is mirrored into the block store (`[feature] deco_mirror`) with stock's `ischild`/parent packing for multiblocks. Client still has ONE deco window: `loadedDecos` is nulled at the end of `OnWorldLoaded`, so nothing outside the join view square is ever decorated. Residuals: deterministic PRNG instead of `GameRandom`, no `CheckOreNoiseAt`, rotation always 0, subbiome noise not evaluated. `DecoResetWorldChunk` on view unload removed (not stock). See [DECO_NRE.md](archive/DECO_NRE.md)) |

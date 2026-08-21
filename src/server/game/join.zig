@@ -340,6 +340,52 @@ pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Sl
     try self.sendGame(peer, "NetPackageTraderData", body);
 }
 
+/// Stock NetPackageChunkClusterInfo, sent right after WorldInfo in the
+/// RequestToEnterGame bundle (protocol.md step 11; the client's
+/// setSpawnPointListCo waits on chunkClusterLoaded before applying spawn
+/// points, so it must precede WorldSpawnPoints). Fixed DTM worlds carry the
+/// ChunkProviderDisc bounds (Init IL_0250/IL_028B): ChunkMinPos =
+/// ((prefabMin-1)/16 - 3, (prefabMin-1)/16 - 6), ChunkMaxPos =
+/// (prefabMax/16 + 3, prefabMax/16 + 3), truncating division, where the
+/// prefab box is the centered map (-half, -half)..(+half, +half). Infinite
+/// worlds keep the WorldChunkCache ctor defaults (0,0)/(0,0) with
+/// bInfinite = !IsFixedSize = true; pos = ChunkCluster.Position = (0,0,0).
+pub fn sendChunkClusterInfo(self: *Game, peer: *ln_peer.Peer) !void {
+    var cmin: [2]i32 = .{ 0, 0 };
+    var cmax: [2]i32 = .{ 0, 0 };
+    var b_infinite = true;
+    if (self.world.terrain_source == .baked) {
+        if (self.world.heightmap) |hm| {
+            b_infinite = false;
+            cmin = chunkClusterBoundsMin(hm.half_w, hm.half_h);
+            cmax = chunkClusterBoundsMax(hm.half_w, hm.half_h);
+        }
+    }
+    const body = try packages.buildChunkClusterInfoBody(self.body_buf[0..256], self.world_name, cmin, cmax, b_infinite, .{ 0, 0, 0 });
+    try self.sendGameCritical(peer, "NetPackageChunkClusterInfo", body);
+}
+
+/// ChunkProviderDisc::Init ChunkMinPos: ((min-1)/16 - 3, (min-1)/16 - 6)
+/// with truncating division and the centered map box min = (-half, -half).
+/// Navezgane (half=3072) → (-195, -198); max → (195, 195).
+fn chunkClusterBoundsMin(half_w: i32, half_h: i32) [2]i32 {
+    return .{ @divTrunc(-half_w - 1, world_store.chunk_size) - 3, @divTrunc(-half_h - 1, world_store.chunk_size) - 6 };
+}
+
+fn chunkClusterBoundsMax(half_w: i32, half_h: i32) [2]i32 {
+    return .{ @divTrunc(half_w, world_store.chunk_size) + 3, @divTrunc(half_h, world_store.chunk_size) + 3 };
+}
+
+test "chunk cluster bounds match ChunkProviderDisc formula" {
+    // 6144x6144 Navezgane (half = 3072): stock disc provider yields
+    // (-195, -198) / (195, 195).
+    try std.testing.expectEqual([2]i32{ -195, -198 }, chunkClusterBoundsMin(3072, 3072));
+    try std.testing.expectEqual([2]i32{ 195, 195 }, chunkClusterBoundsMax(3072, 3072));
+    // 8192 Pregen (half = 4096).
+    try std.testing.expectEqual([2]i32{ -259, -262 }, chunkClusterBoundsMin(4096, 4096));
+    try std.testing.expectEqual([2]i32{ 259, 259 }, chunkClusterBoundsMax(4096, 4096));
+}
+
 pub fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
     var pts: [32]packages.SpawnPointXYZ = undefined;
     var n: usize = 0;

@@ -8,6 +8,7 @@ const Game = @import("../game.zig").Game;
 const game_mod = @import("../game.zig");
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
+const wire_binary = @import("../../wire/binary.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
@@ -1566,4 +1567,42 @@ test "per-trader stock and hours come from trader_info + npc.xml" {
     const unk_id = g.sim.spawnTrader("Trader", 120, 70, 120, 0, 5000).?;
     const uslot = g.sim.slotOfNetId(unk_id).?;
     try std.testing.expect(g.traderIsOpen(uslot));
+}
+
+test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    _ = cl;
+    const pkg_id = packages.idOf("NetPackageChunkClusterInfo").?;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var found = false;
+    for (cap.slots[0..cap.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == pkg_id) {
+                // Flat world → infinite cluster: (0,0)/(0,0), bInfinite=true,
+                // pos (0,0,0), name = world name.
+                var rd: wire_binary.Reader = .{ .data = p.body };
+                var name_buf: [64]u8 = undefined;
+                const name = try rd.readString(&name_buf);
+                try std.testing.expectEqualStrings("zdtd", name);
+                try std.testing.expectEqual(@as(i32, 0), try rd.readI32());
+                try std.testing.expectEqual(@as(i32, 0), try rd.readI32());
+                try std.testing.expectEqual(@as(i32, 0), try rd.readI32());
+                try std.testing.expectEqual(@as(i32, 0), try rd.readI32());
+                try std.testing.expectEqual(true, try rd.readBool());
+                found = true;
+            }
+        }
+    }
+    try std.testing.expect(found);
 }
