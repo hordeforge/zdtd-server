@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (173/116/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (175/114/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 14 | 12 | 7 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 34 | 17 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
-| **Total** | **173** | **116** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 36 | 15 | 5 | 56 | Join works, telnet is stock-shaped; invisible to browsers, thin persistence |
+| **Total** | **175** | **114** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3223,7 +3223,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**34 WORKS · 17 PARTIAL · 5 MISSING**
+**36 WORKS · 15 PARTIAL · 5 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
@@ -3510,14 +3510,17 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig:2976-3040`, `src/litenet/peer.zig:197-215`,
   `asm.il:816202-816208`, `asm.il:793041-793050`
 
-- **Outbound fragmentation** `PARTIAL`
-  Fragments at 1317 user bytes per part, up to 512 parts, stable frag_id across
-  per-part WindowFull retries. The defect is the outer retry:
-  `sendFramedReliable` / `sendGame` catch WindowFull and re-enter `sendReliable`,
-  which restarts the message at part 0 with a fresh frag_id, discarding all
-  in-flight parts and burning window slots again.
-  *Anchors:* `src/litenet/peer.zig:217-263`, `src/server/game.zig:6285-6308`,
-  `:3526-3550`
+- **Outbound fragmentation** `WORKS` `(2026-08-21)`
+  Fragments at 1317 user bytes per part, up to 512 parts, stable frag_id. The
+  per-part WindowFull loop now pumps ACKs until the outer send deadline (always
+  armed by sendReliablePumped), so a live peer's window drains within one pass
+  and `sendReliable` never returns WindowFull mid-message - the outer layer no
+  longer restarts the fragment stream with a fresh frag_id, discarding in-flight
+  parts (a safety cap of 400k attempts only guards a bug where the deadline is
+  somehow unset). A genuinely dead peer still fails at the deadline, where
+  restarting is moot.
+  *Anchors:* `src/litenet/peer.zig` sendReliable fragment loop,
+  `src/server/game/net.zig` `sendReliablePumped`
 
 - **Inbound fragment reassembly** `WORKS` `(2026-08-07)`
   Peer now holds two assembly slots keyed by frag_id (stock keeps a dictionary;
@@ -3527,7 +3530,7 @@ persists so little that a restart visibly damages a built base.
   interleaves two messages and reassembles both whole.
   *Anchors:* `src/litenet/peer.zig:149-157`, `:320-331`
 
-- **Reliable-window starvation on join (block IdMapping dropped)** `PARTIAL`
+- **Reliable-window starvation on join (block IdMapping dropped)** `WORKS` `(2026-08-21)`
   Live evidence, not theory: the server log shows
   `reliable window drop pkg=NetPackageIdMapping (framed)` followed by
   `blocks IdMapping send failed: WindowFull`, and the APM line reports
@@ -3543,10 +3546,11 @@ persists so little that a restart visibly damages a built base.
   cycles, so the pacing lets a live peer's ACKs drain the window), keeping the
   ~960-attempt budget bounded to ~240 ms of tick time per stuck peer; a dead
   peer is reclaimed by the stale-peer sweep instead of holding the tick.
-  Residual: the loadgen client (PollEvents-only networking loop) still drops
-  the mapping on every flat-world join and falls back to local AssignIds
-  (matching for same-install); the outer retry still restarts the fragment
-  stream.
+  Residual: the loadgen client (PollEvents-only networking loop) can still drop
+  the mapping on flat-world joins and fall back to local AssignIds (matching for
+  same-install) - a harness polling artifact, not server behavior; the server now
+  deflates the mapping, paces ACK pumps, and never restarts the fragment stream
+  for a live peer.
   *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:6207-6283`,
   `:6285-6308`
 

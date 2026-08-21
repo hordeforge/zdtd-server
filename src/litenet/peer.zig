@@ -273,10 +273,13 @@ pub const Peer = struct {
             // Per-part WindowFull retry: this is LiteNet-level fragmentation,
             // not the Game-layer send path. No Game budget_ns/clock is
             // available here (and per AGENTS.md + ../7dtd-research policy this
-            // is liteNet native: black box, residual — by design not wire
-            // correctness). The 4000-attempt cap bounds the per-part stall;
-            // the outer Game-layer calls (sendFramedReliable / sendGameBudget)
-            // still bound the whole join burst via sendReliablePumped.
+            // is liteNet native: black box, residual - by design not wire
+            // correctness). The loop pumps until the outer send deadline
+            // (always armed by sendReliablePumped around this call), so a
+            // live peer's ACKs drain the window within one pass and the outer
+            // layer never has to restart the fragment stream with a fresh
+            // frag_id; the safety cap only guards a bug where the deadline is
+            // somehow unset.
             var attempts: u32 = 0;
             while (true) : (attempts += 1) {
                 self.sendOneReliable(sock, user[off .. off + n], .{
@@ -285,11 +288,11 @@ pub const Peer = struct {
                     .frag_total = total_parts,
                 }) catch |err| switch (err) {
                     error.WindowFull => {
-                        if (attempts >= 4000) return error.WindowFull;
+                        if (attempts >= 400_000) return error.WindowFull;
                         if (self.reliable_send_deadline_ns != 0 and clock.monoNs() >= self.reliable_send_deadline_ns) return error.WindowFull;
                         try self.resendPending(sock);
                         if (self.pump_fn) |pf| pf(self.pump_ctx);
-                        // Yield so the peer's ACK datagrams can land: 4000 spin
+                        // Yield so the peer's ACK datagrams can land: spin
                         // pumps burn out in microseconds, before the first ACK
                         // round-trip, and a full window never frees (join
                         // IdMapping repro: part 64/198 exhausts with
