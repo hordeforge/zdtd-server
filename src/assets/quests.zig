@@ -390,6 +390,10 @@ fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[ques
             // name is arena-duped: the quest body dies when parseCatalog ends.
             if (xml.attr(open, 0, "id")) |rid| spec.item_name = arena.dupe(u8, rid) catch "";
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
+            // LootItem group rewards: ischosen selects `value` prob-weighted
+            // picks from the loot group; isfixed forces the first entries.
+            spec.is_chosen = xml.attr(open, 0, "ischosen") != null;
+            spec.is_fixed = xml.attr(open, 0, "isfixed") != null;
         } else if (std.mem.eql(u8, typ, "Exp")) {
             spec.kind = .exp;
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
@@ -399,7 +403,10 @@ fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[ques
             spec.kind = .skill_points;
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
         } else if (std.mem.eql(u8, typ, "Quest")) {
+            // RewardQuest chaining: the reward grants the named quest on
+            // turn-in (stock RewardQuest / Quest.AddQuestReward).
             spec.kind = .quest;
+            if (xml.attr(open, 0, "id")) |rid| spec.item_name = arena.dupe(u8, rid) catch "";
         } else if (std.mem.eql(u8, typ, "ShowMessageWindow")) {
             spec.kind = .show_message_window;
         } else {
@@ -1236,4 +1243,32 @@ test "objective nav_object rides the phase spec for the quest marker" {
     try std.testing.expectEqualStrings("return_to_trader", d.phases[1].nav_object);
     // The slice is arena-owned (not a view into the transient XML buffer).
     try std.testing.expect(d.phases[0].nav_object.len > 0);
+}
+
+test "loot group rewards parse ischosen/isfixed and quest chains carry the id" {
+    const fixture =
+        \\<?xml version="1.0"?>
+        \\<quests starter_quest="tier1_clear">
+        \\  <quest id="tier1_clear">
+        \\    <property name="name_key" value="Clear"/>
+        \\    <objective type="ClearSleepers" phase="1"/>
+        \\    <reward type="LootItem" id="groupQuestWeapons" value="2" ischosen="true" isfixed="true"/>
+        \\    <reward type="LootItem" id="gunPistolT2" value="1"/>
+        \\    <reward type="Quest" id="quest_tier2complete"/>
+        \\  </quest>
+        \\</quests>
+    ;
+    var cat = try parseCatalog(std.testing.allocator, fixture, .{});
+    defer cat.deinit();
+    const d = cat.byName("tier1_clear").?;
+    try std.testing.expectEqual(quest.RewardKind.loot_item, d.rewards[0].kind);
+    try std.testing.expectEqualStrings("groupQuestWeapons", d.rewards[0].item_name);
+    try std.testing.expect(d.rewards[0].is_chosen);
+    try std.testing.expect(d.rewards[0].is_fixed);
+    try std.testing.expectEqual(@as(u32, 2), d.rewards[0].value);
+    try std.testing.expectEqual(quest.RewardKind.loot_item, d.rewards[1].kind);
+    try std.testing.expect(!d.rewards[1].is_chosen);
+    // Quest-chain rewards carry the chained quest id.
+    try std.testing.expectEqual(quest.RewardKind.quest, d.rewards[2].kind);
+    try std.testing.expectEqualStrings("quest_tier2complete", d.rewards[2].item_name);
 }

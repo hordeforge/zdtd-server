@@ -14,6 +14,7 @@ const systems = @import("../../ecs/systems.zig");
 const interest = @import("../../ecs/interest.zig");
 const replicate_te = @import("../replicate_te.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const assets_loot = @import("../../assets/loot.zig");
 const game_stability = @import("stability.zig");
 const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
@@ -304,11 +305,42 @@ pub fn step(self: *Game) !void {
                 const spec = d.rewards[ri];
                 const scaled: u32 = @as(u32, spec.value) * pct / 100;
                 switch (spec.kind) {
-                    .item, .loot_item => {
+                    .item => {
                         const eid = self.items.ecsIdByName(spec.item_name);
                         if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
                     },
+                    .loot_item => {
+                        // A LootItem reward id is a stock item name OR a loot
+                        // group (stock quests.xml uses groupQuest* ids with
+                        // ischosen/isfixed). Group ids roll prob-weighted
+                        // picks (or the first entries when isfixed) and grant
+                        // each rolled stack; plain items grant as before.
+                        if (self.loot.groupByName(spec.item_name)) |_| {
+                            var stacks: [8]assets_loot.Stack = undefined;
+                            const picks: u8 = @intCast(@min(spec.value, 8));
+                            const want = if (picks == 0) 1 else picks;
+                            const seed: u32 = @truncate(self.sim.director.clock.worldTimeBits() ^ @as(u64, @intCast(cq.def_id)));
+                            const n = self.loot.rollGroupPicks(spec.item_name, self.partyLootStage(), seed, want, spec.is_fixed, &stacks);
+                            var si: usize = 0;
+                            while (si < n) : (si += 1) {
+                                const eid = self.items.ecsIdByName(stacks[si].item_name);
+                                if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(stacks[si].count, 65535)));
+                            }
+                        } else {
+                            const eid = self.items.ecsIdByName(spec.item_name);
+                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
+                        }
+                    },
                     .exp => self.awardXp(peer, scaled),
+                    // RewardQuest chaining (stock Quest.AddQuestReward): the
+                    // turn-in grants the named quest to the player's journal.
+                    .quest => {
+                        if (spec.item_name.len > 0) {
+                            if (self.sim.catalog.byName(spec.item_name)) |qd| {
+                                _ = systems.questAccept(&self.sim, cq.slot, qd.id);
+                            }
+                        }
+                    },
                     else => {},
                 }
             }

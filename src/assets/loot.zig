@@ -191,6 +191,77 @@ pub const LootTable = struct {
         return null;
     }
 
+    /// Roll a LootItem reward from a group (quests.xml `<reward type="LootItem"
+    /// id="groupX" value="N" ischosen="true" isfixed="..."/>`): `picks` entries
+    /// prob-weighted (uniform when all weights equal), or the first `picks`
+    /// entries when `is_fixed` (deterministic). Stage bands still gate each
+    /// entry. Returns the stack count.
+    pub fn rollGroupPicks(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, picks: u8, is_fixed: bool, out: []Stack) usize {
+        const g = self.groupByName(name) orelse return 0;
+        if (g.entry_n == 0 or picks == 0 or out.len == 0) return 0;
+        const qt = g.quality_template;
+        var n: usize = 0;
+        var s = seed;
+        if (is_fixed) {
+            var i: u8 = 0;
+            while (i < g.entry_n and n < picks and n < out.len) : (i += 1) {
+                const e = g.entries[i];
+                if (e.is_group) {
+                    n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt);
+                } else {
+                    out[n] = .{
+                        .item_name = e.name,
+                        .count = self.scaleCount(if (e.count_min > 0) e.count_min else 1),
+                        .quality = self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
+                    };
+                    n += 1;
+                }
+            }
+            return n;
+        }
+        // Prob-weighted picks (stock ischosen reward selection): each pick
+        // sums the entry weights, rolls a weighted index and gates the band.
+        var p: u8 = 0;
+        while (p < picks and n < out.len) : (p += 1) {
+            s = s *% 1103515245 +% 12345;
+            var total: u32 = 0;
+            var e: u8 = 0;
+            while (e < g.entry_n) : (e += 1) {
+                total +|= @max(@as(u32, @intFromFloat(g.entries[e].prob * 1000)), 1);
+            }
+            if (total == 0) break;
+            const roll = s % total;
+            var chosen: u8 = 0;
+            var acc: u32 = 0;
+            while (chosen < g.entry_n) : (chosen += 1) {
+                acc +|= @max(@as(u32, @intFromFloat(g.entries[chosen].prob * 1000)), 1);
+                if (roll < acc) break;
+            }
+            if (chosen >= g.entry_n) chosen = g.entry_n - 1;
+            const picked = g.entries[chosen];
+            if (picked.force_prob) {
+                if (!self.probGate(picked, loot_stage, s)) {
+                    continue;
+                }
+            } else if (picked.prob_template != 0 and !self.probGate(picked, loot_stage, s)) continue;
+            if (picked.is_group) {
+                n += self.rollGroup(picked.name, loot_stage, s, out[n..], 1, qt);
+            } else {
+                const cmin = picked.count_min;
+                const cmax = if (picked.count_max >= cmin) picked.count_max else cmin;
+                const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
+                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                out[n] = .{
+                    .item_name = picked.name,
+                    .count = self.scaleCount(cnt),
+                    .quality = self.resolveQuality(qt, loot_stage, s),
+                };
+                n += 1;
+            }
+        }
+        return n;
+    }
+
     /// Deterministic roll into `out` at `loot_stage`. Returns stack count.
     /// Pass 1 for "no gamestage information"; the templates' first band starts
     /// at level 0 or 1, so stage 1 is the honest floor, not a magic value.
@@ -902,4 +973,35 @@ test "stock loot prob templates load and band the real items" {
         }
         try std.testing.expect(hit);
     }
+}
+
+test "reward group rolls fixed first picks or prob-weighted choices" {
+    const xml_text =
+        \\<loot>
+        \\  <lootgroup name="groupQuestWeapons">
+        \\    <item name="gunPistolT2" count="1" prob="1"/>
+        \\    <item name="gunRifleT2" count="1" prob="1"/>
+        \\    <item name="meleeClubT2" count="1" prob="1"/>
+        \\  </lootgroup>
+        \\</loot>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, xml_text);
+    defer lt.deinit();
+    var stacks: [8]Stack = undefined;
+    // isfixed: the first two entries, deterministic.
+    const nf = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 2, true, &stacks);
+    try std.testing.expectEqual(@as(usize, 2), nf);
+    try std.testing.expectEqualStrings("gunPistolT2", stacks[0].item_name);
+    try std.testing.expectEqualStrings("gunRifleT2", stacks[1].item_name);
+    // Weighted picks: each pick resolves to one of the three.
+    const nw = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 3, false, &stacks);
+    try std.testing.expectEqual(@as(usize, 3), nw);
+    var i: usize = 0;
+    while (i < nw) : (i += 1) {
+        try std.testing.expect(std.mem.eql(u8, stacks[i].item_name, "gunPistolT2") or
+            std.mem.eql(u8, stacks[i].item_name, "gunRifleT2") or
+            std.mem.eql(u8, stacks[i].item_name, "meleeClubT2"));
+    }
+    // Unknown group returns nothing (fail closed).
+    try std.testing.expectEqual(@as(usize, 0), lt.rollGroupPicks("noSuchGroup", 1, 1, 1, false, &stacks));
 }

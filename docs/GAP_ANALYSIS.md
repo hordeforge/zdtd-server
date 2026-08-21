@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (190/99/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (191/98/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 24 | 7 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 25 | 6 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **190** | **99** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **191** | **98** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**24 WORKS · 7 PARTIAL · 1 MISSING**
+**25 WORKS · 6 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -561,18 +561,23 @@ not a sleeper-volume clear), not completion blockers.
   trader tier gating and the `NPCQuestList` `tierLevel` filter remain open.
   *Anchors:* `src/assets/quests.zig:294`, `:227`, `:303`
 
-- **Rewards: counting and per-reward wire shape flags** `PARTIAL`
+- **Rewards: counting and per-reward wire shape flags** `WORKS` `(2026-08-22)`
   The count and shape are right (LootItem 498, Item 132, Exp 85, Quest 6,
   ShowMessageWindow 4, SkillPoints 1, Skill 1; only Item/LootItem carry an
   ItemStack). `reward_coin` is the sum of the actual `casinoCoin` Item rewards
-  (no invented formula). 2026-08-06: the journal now writes **real ItemStacks**
-  (stock item name resolved through the negotiated items table; unknown names
-  keep the stock Empty stack) and turning in pays the rewards out: the wallet
-  coins in the sim, Item/LootItem stacks into the player inventory and Exp into
-  the xp ledger via a tick-end drain of the completed-quest ring (scenario
-  `quest-rewards`). Still open: LootItem group weights, ischosen/isfixed
-  selection and RewardQuest chaining.
-  *Anchors:* `src/assets/quests.zig:364`, `:307`, `src/server/game.zig:6350`,
+  (no invented formula). The journal writes **real ItemStacks** (stock item
+  name resolved through the negotiated items table; unknown names keep the
+  stock Empty stack) and turning in pays the rewards out: the wallet coins in
+  the sim, Item/LootItem stacks into the player inventory and Exp into the xp
+  ledger via a tick-end drain of the completed-quest ring (scenario
+  `quest-rewards`). Since 2026-08-22 LootItem **group** rewards roll: a reward
+  id that resolves to a loot group (groupQuestWeapons etc.) rolls `value`
+  prob-weighted picks (`ischosen`, uniform when weights are equal) or the
+  first `value` entries (`isfixed`), each stack granted, and `RewardQuest`
+  entries chain: the turn-in grants the named quest to the journal. RE pin:
+  7dtd-research quests-challenges.md.
+  *Anchors:* `src/assets/quests.zig` (reward parse), `src/assets/loot.zig`
+  (`rollGroupPicks`), `src/server/game/step.zig` (payout drain)
   `:6356`
 
 - **`<quest_list>` parsing** `WORKS`

@@ -205,8 +205,14 @@ pub const RewardKind = enum(u8) {
 /// carry an item name and a count; Exp carries an amount).
 pub const RewardSpec = struct {
     kind: RewardKind = .other,
-    item_name: []const u8 = "", // Item/LootItem id attr (catalog arena slice)
+    item_name: []const u8 = "", // Item/LootItem/Quest id attr (catalog arena slice)
     value: u32 = 0, // count for items, amount for exp/skill
+    /// `<reward ischosen="true">`: the value counts prob-weighted picks from
+    /// a loot group (LootItem) instead of a plain item stack.
+    is_chosen: bool = false,
+    /// `<reward isfixed="true">`: the chosen picks are the first `value`
+    /// group entries (deterministic).
+    is_fixed: bool = false,
 };
 
 /// One `<action>` element kind (quests.xml `type` attribute). Server-side
